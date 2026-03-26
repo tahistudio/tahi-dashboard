@@ -27,6 +27,7 @@ import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badg
 import { TrackMeter } from '@/components/tahi/track-meter'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { RequestCard } from '@/components/tahi/request-card'
+import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { cn } from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -698,27 +699,34 @@ function RequestsTab({ clientId }: { clientId: string }) {
   const router = useRouter()
   const [requests, setRequests] = useState<Request[]>([])
   const [loading, setLoading] = useState(true)
+  const [dialogOpen, setDialogOpen] = useState(false)
 
-  useEffect(() => {
-    void (async () => {
-      setLoading(true)
-      try {
-        const res = await fetch(`/api/admin/requests?clientId=${clientId}&status=all`)
-        const data = await res.json() as { requests: Request[] }
-        setRequests(data.requests ?? [])
-      } finally {
-        setLoading(false)
-      }
-    })()
-  }, [clientId])
+  const load = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/admin/requests?clientId=${clientId}&status=all`)
+      const data = await res.json() as { requests: Request[] }
+      setRequests(data.requests ?? [])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { void load() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <div className="text-sm text-[var(--color-text-muted)]">Loading requests…</div>
 
   return (
+    <>
+    <NewRequestDialog
+      open={dialogOpen}
+      onClose={() => { setDialogOpen(false); void load() }}
+      isAdmin={true}
+    />
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-semibold text-[var(--color-text-primary)]">All requests</h2>
-        <TahiButton variant="primary" size="sm">
+        <TahiButton variant="primary" size="sm" onClick={() => setDialogOpen(true)}>
           <Plus className="w-3.5 h-3.5 mr-1.5" />
           New request
         </TahiButton>
@@ -746,6 +754,7 @@ function RequestsTab({ clientId }: { clientId: string }) {
         </div>
       )}
     </div>
+    </>
   )
 }
 
