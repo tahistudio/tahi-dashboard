@@ -1,0 +1,29 @@
+{
+  "name": "tahi-dashboard",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-03-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  }
+
+  // ─── Storage bindings ──────────────────────────────────────────────────────
+  // Uncomment and fill in the IDs after creating storage in Webflow Cloud:
+  // Cloud → Storage → Create D1 database (get database_id from there)
+  // Cloud → Storage → Create R2 bucket (get bucket_name from there)
+  //
+  // "d1_databases": [
+  //   {
+  //     "binding": "DB",
+  //     "database_name": "tahi-db",
+  //     "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+  //   }
+  // ],
+  // "r2_buckets": [
+  //   {
+  //     "binding": "STORAGE",
+  //     "bucket_name": "tahi-storage"
+  //   }
+  // ]
+}

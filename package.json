@@ -13,7 +13,9 @@
     "db:studio": "drizzle-kit studio",
     "db:migrate": "drizzle-kit migrate",
     "test": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && wrangler deploy"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.12.0",
@@ -51,6 +53,8 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "^1.6.5",
+    "wrangler": "^4.12.0",
     "@libsql/client": "^0.17.2",
     "@playwright/test": "^1.51.1",
     "@tailwindcss/postcss": "^4.1.3",
