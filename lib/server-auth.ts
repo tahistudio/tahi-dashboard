@@ -1,7 +1,7 @@
 /**
  * server-auth.ts
  *
- * Auth helper for API route handlers.
+ * Auth helpers for both API route handlers and Server Components.
  *
  * Webflow Cloud requires `middleware.external: true` in open-next.config.ts,
  * which means Clerk's clerkMiddleware() runs in a SEPARATE Cloudflare Worker
@@ -9,18 +9,27 @@
  * relies on request-context headers injected by clerkMiddleware — but those headers
  * are NOT reliably forwarded from the middleware worker to the server worker.
  *
- * This module provides `getRequestAuth()` which:
- *   1. Tries the standard `auth()` first (fast path; works if headers ARE forwarded)
- *   2. Falls back to @clerk/backend authenticateRequest() which validates the
- *      Clerk session JWT directly from the request cookies — no middleware signal needed.
+ * This module provides:
+ *   - `getRequestAuth(req)`  — for API route handlers (accepts NextRequest)
+ *   - `getServerAuth()`      — for Server Components (reads cookies via next/headers)
  *
- * Usage in API route handlers:
+ * Both helpers:
+ *   1. Try the standard `auth()` first (fast path; works if headers ARE forwarded)
+ *   2. Fall back to @clerk/backend authenticateRequest() which validates the
+ *      Clerk session JWT directly from cookies — no middleware signal needed.
+ *
+ * Usage in API routes:
  *   const { userId, orgId } = await getRequestAuth(req)
  *   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+ *
+ * Usage in Server Components / page.tsx:
+ *   const { userId, orgId } = await getServerAuth()
+ *   if (!userId) redirect('/sign-in')
  */
 
 import { auth } from '@clerk/nextjs/server'
 import { createClerkClient } from '@clerk/backend'
+import { cookies, headers } from 'next/headers'
 import type { NextRequest } from 'next/server'
 
 export interface RequestAuthResult {
@@ -70,6 +79,66 @@ export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResul
     ].filter(Boolean) as string[]
 
     const authState = await clerk.authenticateRequest(req, { authorizedParties })
+
+    if (!authState.isSignedIn) {
+      return { userId: null, orgId: null, sessionId: null }
+    }
+
+    const result = authState.toAuth()
+    return {
+      userId: result.userId ?? null,
+      orgId: result.orgId ?? null,
+      sessionId: result.sessionId ?? null,
+    }
+  } catch {
+    return { userId: null, orgId: null, sessionId: null }
+  }
+}
+
+/**
+ * Get auth state inside a Server Component / page.tsx.
+ * Builds a synthetic Request from next/headers cookies so @clerk/backend
+ * can validate the session JWT directly — no middleware signal needed.
+ */
+export async function getServerAuth(): Promise<RequestAuthResult> {
+  // Fast path: try the standard auth() — works when middleware headers ARE forwarded
+  try {
+    const a = await auth()
+    if (a.userId) {
+      return {
+        userId: a.userId,
+        orgId: a.orgId ?? null,
+        sessionId: a.sessionId ?? null,
+      }
+    }
+  } catch {
+    // auth() threw — fall through to direct auth
+  }
+
+  // Fallback: build a synthetic Request from next/headers and validate via @clerk/backend
+  try {
+    const cookieStore = await cookies()
+    const headerStore = await headers()
+
+    const cookieString = cookieStore.getAll().map(c => `${c.name}=${c.value}`).join('; ')
+    const host = headerStore.get('host') ?? 'localhost'
+    const proto = headerStore.get('x-forwarded-proto') ?? 'https'
+
+    const syntheticReq = new Request(`${proto}://${host}/`, {
+      headers: {
+        cookie: cookieString,
+        host,
+      },
+    })
+
+    const clerk = getClerkClient()
+    const authorizedParties = [
+      process.env.NEXT_PUBLIC_APP_URL,
+      'https://tahi-test-dashboard.webflow.io',
+      'http://localhost:3000',
+    ].filter(Boolean) as string[]
+
+    const authState = await clerk.authenticateRequest(syntheticReq, { authorizedParties })
 
     if (!authState.isSignedIn) {
       return { userId: null, orgId: null, sessionId: null }

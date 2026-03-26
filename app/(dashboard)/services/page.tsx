@@ -1,9 +1,9 @@
-import { auth } from '@clerk/nextjs/server'
+import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { ShoppingBag } from 'lucide-react'
 export const metadata = { title: 'Services' }
 export default async function ServicesPage() {
-  const { orgId } = await auth()
+  const { orgId } = await getServerAuth()
   const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
   if (isAdmin) redirect('/requests')
   return (

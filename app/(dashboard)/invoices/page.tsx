@@ -1,8 +1,8 @@
-import { auth } from '@clerk/nextjs/server'
+import { getServerAuth } from '@/lib/server-auth'
 import { FileText } from 'lucide-react'
 export const metadata = { title: 'Invoices' }
 export default async function InvoicesPage() {
-  const { orgId } = await auth()
+  const { orgId } = await getServerAuth()
   const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
   return (
     <div className="space-y-6">

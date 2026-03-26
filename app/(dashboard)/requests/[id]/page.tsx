@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { RequestDetail } from './request-detail'
 
@@ -7,7 +7,7 @@ interface Props {
 }
 
 export default async function RequestDetailPage({ params }: Props) {
-  const { userId, orgId } = await auth()
+  const { userId, orgId } = await getServerAuth()
   if (!userId) redirect('/sign-in')
 
   const { id } = await params

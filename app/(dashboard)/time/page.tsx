@@ -1,9 +1,9 @@
-import { auth } from '@clerk/nextjs/server'
+import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { Clock } from 'lucide-react'
 export const metadata = { title: 'Time' }
 export default async function TimePage() {
-  const { orgId } = await auth()
+  const { orgId } = await getServerAuth()
   if (orgId !== process.env.NEXT_PUBLIC_TAHI_ORG_ID) redirect('/requests')
   return (
     <div className="space-y-6">
