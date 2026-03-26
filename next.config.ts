@@ -17,6 +17,12 @@ const nextConfig: NextConfig = {
       process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ??
       'pk_test_ZW5qb3llZC1nbGlkZXItNTguY2xlcmsuYWNjb3VudHMuZGV2JA',
 
+    // Clerk redirect URLs — baked at build time for Webflow Cloud
+    NEXT_PUBLIC_CLERK_SIGN_IN_URL: '/sign-in',
+    NEXT_PUBLIC_CLERK_SIGN_UP_URL: '/sign-up',
+    NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: '/overview',
+    NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: '/overview',
+
     // The Tahi Studio org ID — determines who sees the admin view
     NEXT_PUBLIC_TAHI_ORG_ID:
       process.env.NEXT_PUBLIC_TAHI_ORG_ID ?? 'org_3BTHLj5IhFDy8DnaI2ytVbt4WrG',
