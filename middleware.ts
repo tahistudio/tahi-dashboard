@@ -2,39 +2,50 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 
 // Public routes — no auth needed
+// Note: basePath (/dashboard) is handled by Next.js, these are app-relative paths
 const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
-  '/portal/accept-invite(.*)',
   '/demo(.*)',
   '/api/webhooks/(.*)',
   '/api/case-study/(.*)',
 ])
 
-// Admin-only routes — requires Tahi org membership
-const isAdminRoute = createRouteMatcher([
-  '/admin(.*)',
-  '/api/admin/(.*)',
+// Admin-only routes — if a client hits these, redirect them to /requests
+const isAdminOnlyRoute = createRouteMatcher([
+  '/clients(.*)',
+  '/billing(.*)',
+  '/reports(.*)',
+  '/time(.*)',
+  '/team(.*)',
+  '/docs(.*)',
+])
+
+// Client-only routes — if admin hits these, they get redirected to /requests
+const isClientOnlyRoute = createRouteMatcher([
+  '/files(.*)',
+  '/services(.*)',
 ])
 
 export default clerkMiddleware(async (auth, req) => {
-  // Allow public routes
-  if (isPublicRoute(req)) {
-    return NextResponse.next()
-  }
+  // Allow public routes without auth
+  if (isPublicRoute(req)) return NextResponse.next()
 
-  // Protect all other routes
+  // Require auth for everything else
   await auth.protect()
 
-  // For admin routes, validate Tahi org membership
-  if (isAdminRoute(req)) {
-    const { orgId } = await auth()
-    const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
+  const { orgId } = await auth()
+  const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
+  const isAdmin = tahiOrgId && orgId === tahiOrgId
 
-    if (!tahiOrgId || orgId !== tahiOrgId) {
-      // Not Tahi team — redirect to portal
-      return NextResponse.redirect(new URL('/portal', req.url))
-    }
+  // Client hitting an admin-only route → send to /requests
+  if (isAdminOnlyRoute(req) && !isAdmin) {
+    return NextResponse.redirect(new URL('/requests', req.url))
+  }
+
+  // Admin hitting a client-only route → send to /requests
+  if (isClientOnlyRoute(req) && isAdmin) {
+    return NextResponse.redirect(new URL('/requests', req.url))
   }
 
   return NextResponse.next()
@@ -42,9 +53,7 @@ export default clerkMiddleware(async (auth, req) => {
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and static files
     '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    // Always run for API routes
     '/(api|trpc)(.*)',
   ],
 }

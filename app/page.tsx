@@ -1,20 +1,19 @@
 import { redirect } from 'next/navigation'
 import { auth } from '@clerk/nextjs/server'
 
+/**
+ * Root page = /dashboard (basePath handles the prefix)
+ * Unauthenticated → sign-in
+ * Authenticated → /requests (universal home for both admin and clients)
+ */
 export default async function RootPage() {
-  const { userId, orgId } = await auth()
+  const { userId } = await auth()
 
   if (!userId) {
     redirect('/sign-in')
   }
 
-  // Admin org ID is set via NEXT_PUBLIC_TAHI_ORG_ID env var
-  // If user belongs to Tahi org → admin dashboard
-  // Otherwise → client portal
-  const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
-  if (orgId === tahiOrgId) {
-    redirect('/admin')
-  }
-
-  redirect('/portal')
+  // Both admins and clients land on /requests as their home.
+  // The page itself detects role and renders the appropriate view.
+  redirect('/requests')
 }
