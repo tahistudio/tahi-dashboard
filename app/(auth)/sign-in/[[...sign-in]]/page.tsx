@@ -1,4 +1,4 @@
-import { SignIn } from '@clerk/nextjs'
+import { ClerkSignIn } from '@/components/tahi/clerk-mount'
 
 export default function SignInPage() {
   return (
@@ -6,7 +6,6 @@ export default function SignInPage() {
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
           <div className="inline-flex items-center gap-2 mb-4">
-            {/* Tahi leaf logo placeholder */}
             <div
               className="w-10 h-10 brand-gradient flex items-center justify-center"
               style={{ borderRadius: 'var(--radius-leaf-sm)' }}
@@ -17,7 +16,7 @@ export default function SignInPage() {
           </div>
           <p className="text-[var(--color-text-muted)] text-sm">Sign in to your dashboard</p>
         </div>
-        <SignIn
+        <ClerkSignIn
           appearance={{
             elements: {
               rootBox: 'w-full',

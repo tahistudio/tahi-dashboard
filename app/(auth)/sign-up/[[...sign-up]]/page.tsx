@@ -1,4 +1,4 @@
-import { SignUp } from '@clerk/nextjs'
+import { ClerkSignUp } from '@/components/tahi/clerk-mount'
 
 export default function SignUpPage() {
   return (
@@ -16,7 +16,7 @@ export default function SignUpPage() {
           </div>
           <p className="text-[var(--color-text-muted)] text-sm">Create your account</p>
         </div>
-        <SignUp
+        <ClerkSignUp
           appearance={{
             elements: {
               rootBox: 'w-full',

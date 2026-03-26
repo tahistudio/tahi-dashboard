@@ -21,6 +21,10 @@ const nextConfig: NextConfig = {
     // uses these as raw URL strings and is NOT aware of Next.js basePath.
     NEXT_PUBLIC_CLERK_SIGN_IN_URL: '/dashboard/sign-in',
     NEXT_PUBLIC_CLERK_SIGN_UP_URL: '/dashboard/sign-up',
+    // Use fallbackRedirectUrl (Clerk v5+ naming) to suppress deprecation warnings
+    NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: '/dashboard/overview',
+    NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: '/dashboard/overview',
+    // Keep legacy names as fallback for older Clerk SDK paths
     NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: '/dashboard/overview',
     NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: '/dashboard/overview',
 
