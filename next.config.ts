@@ -17,11 +17,12 @@ const nextConfig: NextConfig = {
       process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ??
       'pk_test_ZW5qb3llZC1nbGlkZXItNTguY2xlcmsuYWNjb3VudHMuZGV2JA',
 
-    // Clerk redirect URLs — baked at build time for Webflow Cloud
-    NEXT_PUBLIC_CLERK_SIGN_IN_URL: '/sign-in',
-    NEXT_PUBLIC_CLERK_SIGN_UP_URL: '/sign-up',
-    NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: '/overview',
-    NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: '/overview',
+    // Clerk redirect URLs — must include basePath (/dashboard) since Clerk
+    // uses these as raw URL strings and is NOT aware of Next.js basePath.
+    NEXT_PUBLIC_CLERK_SIGN_IN_URL: '/dashboard/sign-in',
+    NEXT_PUBLIC_CLERK_SIGN_UP_URL: '/dashboard/sign-up',
+    NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: '/dashboard/overview',
+    NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: '/dashboard/overview',
 
     // The Tahi Studio org ID — determines who sees the admin view
     NEXT_PUBLIC_TAHI_ORG_ID:

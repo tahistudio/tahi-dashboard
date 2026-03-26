@@ -1,8 +1,9 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 
-// Public routes — no auth needed
-// Note: basePath (/dashboard) is handled by Next.js, these are app-relative paths
+// Public routes — no auth needed.
+// Next.js strips the basePath (/dashboard) before middleware sees the path,
+// so these are app-relative paths (e.g. '/sign-in' not '/dashboard/sign-in').
 const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
@@ -39,13 +40,18 @@ export default clerkMiddleware(async (auth, req) => {
   const isAdmin = tahiOrgId && orgId === tahiOrgId
 
   // Client hitting an admin-only route → send to /requests
+  // Use req.nextUrl.clone() so Next.js adds the basePath (/dashboard) automatically
   if (isAdminOnlyRoute(req) && !isAdmin) {
-    return NextResponse.redirect(new URL('/requests', req.url))
+    const url = req.nextUrl.clone()
+    url.pathname = '/requests'
+    return NextResponse.redirect(url)
   }
 
   // Admin hitting a client-only route → send to /requests
   if (isClientOnlyRoute(req) && isAdmin) {
-    return NextResponse.redirect(new URL('/requests', req.url))
+    const url = req.nextUrl.clone()
+    url.pathname = '/requests'
+    return NextResponse.redirect(url)
   }
 
   return NextResponse.next()
