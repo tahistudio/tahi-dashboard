@@ -24,6 +24,8 @@ const nextConfig: NextConfig = {
     // Clerk v5+ fallback redirect URLs (replaces deprecated afterSignInUrl / afterSignUpUrl)
     NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: '/dashboard/overview',
     NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: '/dashboard/overview',
+    // After sign-out go to sign-in (must include basePath)
+    NEXT_PUBLIC_CLERK_SIGN_OUT_URL: '/dashboard/sign-in',
 
     // The Tahi Studio org ID — determines who sees the admin view
     NEXT_PUBLIC_TAHI_ORG_ID:
