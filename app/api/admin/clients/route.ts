@@ -85,18 +85,50 @@ export async function POST(req: NextRequest) {
       updatedAt: now,
     })
 
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
   // If a primary contact email was provided, create the contact record
   if (primaryContactEmail?.trim()) {
-    await (database as ReturnType<typeof import('drizzle-orm/d1').drizzle>)
-      .insert(schema.contacts)
-      .values({
+    await drizzle.insert(schema.contacts).values({
+      id: crypto.randomUUID(),
+      orgId: id,
+      name: primaryContactName?.trim() || primaryContactEmail.split('@')[0],
+      email: primaryContactEmail.trim().toLowerCase(),
+      isPrimary: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  // If a retainer plan was selected, create a subscription + provision tracks
+  if (planType === 'maintain' || planType === 'scale') {
+    const subscriptionId = crypto.randomUUID()
+    await drizzle.insert(schema.subscriptions).values({
+      id: subscriptionId,
+      orgId: id,
+      planType,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    // Provision tracks: maintain = 1 small, scale = 1 small + 1 large
+    const trackDefs: Array<{ type: 'small' | 'large' }> =
+      planType === 'scale'
+        ? [{ type: 'small' }, { type: 'large' }]
+        : [{ type: 'small' }]
+
+    for (const t of trackDefs) {
+      await drizzle.insert(schema.tracks).values({
         id: crypto.randomUUID(),
-        orgId: id,
-        name: primaryContactName?.trim() || primaryContactEmail.split('@')[0],
-        email: primaryContactEmail.trim().toLowerCase(),
-        isPrimary: true,
+        subscriptionId,
+        type: t.type,
+        isPriorityTrack: false,
+        currentRequestId: null,
         createdAt: now,
+        updatedAt: now,
       })
+    }
   }
 
   return NextResponse.json({ id }, { status: 201 })
