@@ -42,7 +42,7 @@ const NAV: NavGroup[] = [
   {
     group: 'Work',
     items: [
-      { label: 'Overview',  href: '/requests',  icon: LayoutDashboard },
+      { label: 'Overview',  href: '/overview',  icon: LayoutDashboard },
       { label: 'Requests',  href: '/requests',  icon: Inbox },
       { label: 'Tasks',     href: '/tasks',     icon: CheckSquare },
       { label: 'Messages',  href: '/messages',  icon: MessageSquare },
@@ -140,7 +140,7 @@ export function AppSidebar({ isAdmin }: AppSidebarProps) {
                 const Icon = item.icon
                 const isActive =
                   pathname === item.href ||
-                  (item.href !== '/requests' && pathname.startsWith(item.href))
+                  (item.href !== '/requests' && item.href !== '/overview' && pathname.startsWith(item.href))
 
                 return (
                   <li key={item.href + item.label}>

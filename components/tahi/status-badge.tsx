@@ -40,7 +40,7 @@ const INVOICE_STATUS_MAP: Record<InvoiceStatus, { label: string; className: stri
 }
 
 interface StatusBadgeProps {
-  status: RequestStatus | OrgStatus | InvoiceStatus
+  status: string
   type?: 'request' | 'org' | 'invoice'
   className?: string
 }
