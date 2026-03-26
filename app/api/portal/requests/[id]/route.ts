@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -7,8 +7,8 @@ import { eq, and, asc } from 'drizzle-orm'
 type Params = { params: Promise<{ id: string }> }
 
 // ── GET /api/portal/requests/[id] ────────────────────────────────────────────
-export async function GET(_req: NextRequest, { params }: Params) {
-  const { orgId } = await auth()
+export async function GET(req: NextRequest, { params }: Params) {
+  const { orgId } = await getRequestAuth(req)
   if (!orgId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }

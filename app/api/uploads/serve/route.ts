@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCloudflareContext } from '@opennextjs/cloudflare'
 
@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
  * Otherwise serves inline (e.g. images display in-browser).
  */
 export async function GET(req: NextRequest) {
-  const { userId } = await auth()
+  const { userId } = await getRequestAuth(req)
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
   }

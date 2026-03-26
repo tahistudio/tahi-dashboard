@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCloudflareContext } from '@opennextjs/cloudflare'
 
@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic'
  *   3. Client calls POST /api/uploads/confirm with fileId to record metadata
  */
 export async function POST(req: NextRequest) {
-  const { userId, orgId } = await auth()
+  const { userId, orgId } = await getRequestAuth(req)
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
   }

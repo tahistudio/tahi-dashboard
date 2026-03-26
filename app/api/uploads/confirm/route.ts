@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -22,7 +22,7 @@ export const dynamic = 'force-dynamic'
  * }
  */
 export async function POST(req: NextRequest) {
-  const { userId, orgId } = await auth()
+  const { userId, orgId } = await getRequestAuth(req)
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
   }

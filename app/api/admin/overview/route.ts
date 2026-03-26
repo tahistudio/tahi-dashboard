@@ -1,5 +1,5 @@
-import { auth } from '@clerk/nextjs/server'
-import { NextResponse } from 'next/server'
+import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, ne, count, and, inArray, sum } from 'drizzle-orm'
@@ -8,9 +8,9 @@ export const dynamic = 'force-dynamic'
 
 // ── GET /api/admin/overview ───────────────────────────────────────────────────
 // Returns all KPIs needed for the admin dashboard home page in one request.
-export async function GET() {
-  const { orgId } = await auth()
-  if (orgId !== process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
+export async function GET(req: NextRequest) {
+  const { orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

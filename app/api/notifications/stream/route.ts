@@ -1,4 +1,5 @@
-import { auth } from '@clerk/nextjs/server'
+import { getRequestAuth } from '@/lib/server-auth'
+import { NextRequest } from 'next/server'
 
 /**
  * Server-Sent Events (SSE) endpoint for real-time notifications.
@@ -7,8 +8,8 @@ import { auth } from '@clerk/nextjs/server'
  * Usage: const source = new EventSource('/api/notifications/stream')
  * source.onmessage = (e) => { const data = JSON.parse(e.data); ... }
  */
-export async function GET() {
-  const { userId } = await auth()
+export async function GET(req: NextRequest) {
+  const { userId } = await getRequestAuth(req)
 
   if (!userId) {
     return new Response('Unauthorised', { status: 401 })

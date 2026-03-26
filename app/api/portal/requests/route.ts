@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -7,7 +7,7 @@ import { eq, desc, and, ne } from 'drizzle-orm'
 // ── GET /api/portal/requests ─────────────────────────────────────────────────
 // Returns requests scoped to the client's own org.
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await auth()
+  const { orgId, userId } = await getRequestAuth(req)
 
   // Deny if not authenticated or if this is the Tahi admin org (admins use /api/admin/requests)
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
 
 // ── POST /api/portal/requests ────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const { orgId, userId } = await auth()
+  const { orgId, userId } = await getRequestAuth(req)
 
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

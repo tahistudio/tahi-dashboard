@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -8,9 +8,9 @@ type Params = { params: Promise<{ id: string }> }
 
 // ── GET /api/admin/requests/[id]/messages ────────────────────────────────────
 // Returns all messages for a request (admin sees internal + external).
-export async function GET(_req: NextRequest, { params }: Params) {
-  const { orgId } = await auth()
-  if (orgId !== process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
+export async function GET(req: NextRequest, { params }: Params) {
+  const { orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -47,8 +47,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
 // ── POST /api/admin/requests/[id]/messages ───────────────────────────────────
 export async function POST(req: NextRequest, { params }: Params) {
-  const { orgId, userId } = await auth()
-  if (orgId !== process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
+  const { orgId, userId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
