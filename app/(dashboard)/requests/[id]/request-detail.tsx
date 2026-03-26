@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ArrowLeft, Clock, AlertTriangle, RefreshCw,
-  User, ChevronDown, CheckCircle2, Loader2
+  User, ChevronDown, CheckCircle2, Loader2,
+  FileText, Image as ImageIcon, Download, Paperclip,
 } from 'lucide-react'
 import Link from 'next/link'
 import { RequestThread } from '@/components/tahi/request-thread'
@@ -64,6 +65,17 @@ interface Message {
   teamMemberAvatar?: string | null
 }
 
+interface RequestFile {
+  id: string
+  filename: string
+  storageKey: string
+  mimeType: string | null
+  sizeBytes: number | null
+  uploadedByType: string
+  createdAt: string
+  uploaderName?: string | null
+}
+
 interface RequestDetailProps {
   requestId: string
   isAdmin: boolean
@@ -73,12 +85,22 @@ interface RequestDetailProps {
 export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDetailProps) {
   const [request, setRequest] = useState<Request | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
+  const [files, setFiles] = useState<RequestFile[]>([])
   const [loading, setLoading] = useState(true)
   const [isInternal, setIsInternal] = useState(false)
   const [statusUpdating, setStatusUpdating] = useState(false)
   const threadBottomRef = useRef<HTMLDivElement>(null)
 
   const apiBase = isAdmin ? '/api/admin' : '/api/portal'
+
+  const loadFiles = useCallback(async () => {
+    if (!isAdmin) return // portal doesn't have files endpoint yet
+    const res = await fetch(`/api/admin/requests/${requestId}/files`)
+    if (res.ok) {
+      const data = await res.json() as { files: RequestFile[] }
+      setFiles(data.files)
+    }
+  }, [requestId, isAdmin])
 
   const loadRequest = useCallback(async () => {
     const [reqRes, msgRes] = await Promise.all([
@@ -107,7 +129,8 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
 
   useEffect(() => {
     loadRequest()
-  }, [loadRequest])
+    loadFiles()
+  }, [loadRequest, loadFiles])
 
   // Scroll thread to bottom on new messages
   useEffect(() => {
@@ -124,7 +147,7 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
       body: JSON.stringify({ body: html, isInternal }),
     })
     if (res.ok) {
-      await loadRequest()
+      await Promise.all([loadRequest(), loadFiles()])
     }
   }
 
@@ -288,6 +311,11 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
               orgId={request?.orgId}
             />
           </div>
+
+          {/* Files */}
+          {(files.length > 0 || isAdmin) && (
+            <FilesPanel files={files} onRefresh={loadFiles} />
+          )}
         </div>
 
         {/* ── Sidebar ──────────────────────────────────────────────────── */}
@@ -375,6 +403,87 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── FilesPanel ────────────────────────────────────────────────────────────────
+
+function FilesPanel({ files, onRefresh }: { files: RequestFile[]; onRefresh: () => void }) {
+  function fileIcon(mimeType: string | null) {
+    if (!mimeType) return <FileText size={14} className="text-gray-400" />
+    if (mimeType.startsWith('image/')) return <ImageIcon size={14} className="text-purple-400" />
+    if (mimeType === 'application/pdf') return <FileText size={14} className="text-red-400" />
+    return <FileText size={14} className="text-gray-400" />
+  }
+
+  function formatBytes(n: number | null) {
+    if (!n) return ''
+    if (n < 1024) return `${n} B`
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  return (
+    <div className="bg-white rounded-[var(--radius-card)] border border-gray-200 p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2">
+          <Paperclip size={14} />
+          Files
+          {files.length > 0 && (
+            <span className="ml-1 text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full font-normal">
+              {files.length}
+            </span>
+          )}
+        </h2>
+        <button
+          onClick={onRefresh}
+          className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 transition-colors"
+        >
+          <RefreshCw size={12} />
+          Refresh
+        </button>
+      </div>
+
+      {files.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-6">No files attached yet.</p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-gray-100">
+          {files.map(f => (
+            <li key={f.id} className="flex items-center gap-3 py-2.5">
+              <div className="flex-shrink-0">{fileIcon(f.mimeType)}</div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-gray-800 truncate">{f.filename}</p>
+                <p className="text-xs text-gray-400">
+                  {f.uploaderName ?? f.uploadedByType}
+                  {f.sizeBytes ? ` · ${formatBytes(f.sizeBytes)}` : ''}
+                  {' · '}{formatDate(f.createdAt)}
+                </p>
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {f.mimeType?.startsWith('image/') && (
+                  <a
+                    href={`/api/uploads/serve?key=${encodeURIComponent(f.storageKey)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                    title="View"
+                  >
+                    <ImageIcon size={14} />
+                  </a>
+                )}
+                <a
+                  href={`/api/uploads/serve?key=${encodeURIComponent(f.storageKey)}&download=1`}
+                  className="p-1.5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                  title="Download"
+                >
+                  <Download size={14} />
+                </a>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Plus, Inbox, RefreshCw, Filter, ChevronDown } from 'lucide-react'
 import { RequestCard } from '@/components/tahi/request-card'
 import { TahiButton } from '@/components/tahi/tahi-button'
+import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 
 const ADMIN_TABS = [
   { label: 'Active',       value: 'active' },
@@ -42,6 +43,7 @@ export function RequestList({ isAdmin }: RequestListProps) {
   const [requests, setRequests] = useState<Request[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('active')
+  const [dialogOpen, setDialogOpen] = useState(false)
   const tabs = isAdmin ? ADMIN_TABS : CLIENT_TABS
 
   const fetchRequests = useCallback(async () => {
@@ -63,6 +65,13 @@ export function RequestList({ isAdmin }: RequestListProps) {
   useEffect(() => { fetchRequests() }, [fetchRequests])
 
   return (
+    <>
+    <NewRequestDialog
+      open={dialogOpen}
+      onClose={() => { setDialogOpen(false); fetchRequests() }}
+      isAdmin={isAdmin}
+    />
+
     <div className="space-y-5">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
@@ -84,6 +93,7 @@ export function RequestList({ isAdmin }: RequestListProps) {
           <TahiButton
             size="md"
             iconLeft={<Plus className="w-4 h-4" />}
+            onClick={() => setDialogOpen(true)}
           >
             {isAdmin ? 'New request' : 'Submit request'}
           </TahiButton>
@@ -112,7 +122,7 @@ export function RequestList({ isAdmin }: RequestListProps) {
 
       {/* List */}
       {!loading && requests.length === 0 ? (
-        <EmptyState isAdmin={isAdmin} tab={activeTab} />
+        <EmptyState isAdmin={isAdmin} tab={activeTab} onNew={() => setDialogOpen(true)} />
       ) : (
         <div className="space-y-2">
           {requests.map(req => (
@@ -135,10 +145,11 @@ export function RequestList({ isAdmin }: RequestListProps) {
         </div>
       )}
     </div>
+    </>
   )
 }
 
-function EmptyState({ isAdmin, tab }: { isAdmin: boolean; tab: string }) {
+function EmptyState({ isAdmin, tab, onNew }: { isAdmin: boolean; tab: string; onNew: () => void }) {
   const isActiveTab = tab === 'active'
 
   return (
@@ -162,7 +173,7 @@ function EmptyState({ isAdmin, tab }: { isAdmin: boolean; tab: string }) {
           : "Nothing here yet."}
       </p>
       {!isAdmin && isActiveTab && (
-        <TahiButton className="mt-5" iconLeft={<Plus className="w-4 h-4" />}>
+        <TahiButton className="mt-5" iconLeft={<Plus className="w-4 h-4" />} onClick={onNew}>
           Submit a request
         </TahiButton>
       )}
