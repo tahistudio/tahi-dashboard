@@ -1,23 +1,26 @@
 /**
  * lib/db.ts
- * Unified DB helper for API routes.
- * In production (Cloudflare Workers), reads from the D1 binding.
- * In local dev, falls back to a local SQLite file via libsql.
+ * Unified DB helper for Next.js API routes on Webflow Cloud (Cloudflare Workers).
+ *
+ * Uses getCloudflareContext() from @opennextjs/cloudflare — the correct way to
+ * access D1 bindings in Next.js routes running on Cloudflare Workers.
+ *
+ * For local dev: run `npm run dev:wrangler` which starts wrangler dev and
+ * provides proper D1 bindings. `npm run dev` (next dev) can also be used
+ * but requires the D1 binding via wrangler.
  */
-
-import { getDB, getLocalDB } from '@/db'
+import { getCloudflareContext } from '@opennextjs/cloudflare'
+import { getDB } from '@/db/d1'
 
 export async function db() {
-  if (process.env.NODE_ENV === 'development') {
-    return getLocalDB()
-  }
-  // On Cloudflare Workers, the D1 binding is in the env global
-  const env = (globalThis as unknown as { env?: CloudflareEnv }).env
+  const { env } = await getCloudflareContext({ async: true })
   if (!env?.DB) {
     throw new Error(
-      'D1 database binding not found. ' +
-      'Ensure the DB binding is configured in wrangler.jsonc and Webflow Cloud Storage.'
+      'D1 database binding (DB) not found in Cloudflare context.\n' +
+      'Production: ensure the D1 database is created in Webflow Cloud Storage ' +
+      'and the binding is uncommented in wrangler.jsonc.\n' +
+      'Local dev: run `npm run dev:wrangler` instead of `npm run dev`.'
     )
   }
-  return getDB(env)
+  return getDB(env as CloudflareEnv)
 }

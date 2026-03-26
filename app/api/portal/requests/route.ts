@@ -1,7 +1,7 @@
 import { auth } from '@clerk/nextjs/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { schema } from '@/db'
+import { schema } from '@/db/d1'
 import { eq, desc, and, ne } from 'drizzle-orm'
 
 // ── GET /api/portal/requests ─────────────────────────────────────────────────
