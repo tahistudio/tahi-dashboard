@@ -4,7 +4,6 @@ import Stripe from 'stripe'
 // Force dynamic — prevents Next.js from trying to statically analyse this
 // route at build time (when env vars are unavailable on Webflow Cloud).
 export const dynamic = 'force-dynamic'
-export const runtime = 'nodejs'
 
 // Lazy singleton — only instantiated on first real request, not at build time.
 let _stripe: Stripe | null = null

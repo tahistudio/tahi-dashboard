@@ -1,7 +1,5 @@
 import { auth } from '@clerk/nextjs/server'
 
-export const runtime = 'edge'
-
 /**
  * Server-Sent Events (SSE) endpoint for real-time notifications.
  * Clients connect here and receive push events without polling.

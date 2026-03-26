@@ -4,8 +4,6 @@ import { db } from '@/lib/db'
 import { schema } from '@/db'
 import { eq, desc, like, or, and, ne } from 'drizzle-orm'
 
-export const runtime = 'edge'
-
 // ── GET /api/admin/clients ──────────────────────────────────────────────────
 // Query params: ?status=active&plan=maintain&search=acme&page=1
 export async function GET(req: NextRequest) {

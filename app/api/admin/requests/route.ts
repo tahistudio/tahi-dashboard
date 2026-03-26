@@ -4,8 +4,6 @@ import { db } from '@/lib/db'
 import { schema } from '@/db'
 import { eq, desc, and, ne, inArray } from 'drizzle-orm'
 
-export const runtime = 'edge'
-
 // ── GET /api/admin/requests ─────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
   const { orgId } = await auth()

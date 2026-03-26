@@ -4,8 +4,6 @@ import { db } from '@/lib/db'
 import { schema } from '@/db'
 import { eq, desc, and, ne } from 'drizzle-orm'
 
-export const runtime = 'edge'
-
 // ── GET /api/portal/requests ─────────────────────────────────────────────────
 // Returns requests scoped to the client's own org.
 export async function GET(req: NextRequest) {
