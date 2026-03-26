@@ -11,6 +11,9 @@
  */
 import { getCloudflareContext } from '@opennextjs/cloudflare'
 import { getDB } from '@/db/d1'
+import { migrate } from 'drizzle-orm/d1/migrator'
+
+let _migrated = false
 
 export async function db() {
   const { env } = await getCloudflareContext({ async: true })
@@ -22,5 +25,19 @@ export async function db() {
       'Local dev: run `npm run dev:wrangler` instead of `npm run dev`.'
     )
   }
-  return getDB(env as CloudflareEnv)
+  const database = getDB(env as CloudflareEnv)
+
+  // Run pending migrations once per cold start (no-op if already up to date)
+  if (!_migrated) {
+    try {
+      await migrate(database, { migrationsFolder: 'drizzle/migrations' })
+      _migrated = true
+    } catch (err) {
+      // Log but don't crash — table may already exist on subsequent cold starts
+      console.error('[db] Migration error (may be safe to ignore):', err)
+      _migrated = true
+    }
+  }
+
+  return database
 }

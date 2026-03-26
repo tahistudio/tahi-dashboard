@@ -6,24 +6,27 @@
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
-  }
+  },
 
-  // ─── Storage bindings ──────────────────────────────────────────────────────
-  // Uncomment and fill in the IDs after creating storage in Webflow Cloud:
-  // Cloud → Storage → Create D1 database (get database_id from there)
-  // Cloud → Storage → Create R2 bucket (get bucket_name from there)
-  //
-  // "d1_databases": [
-  //   {
-  //     "binding": "DB",
-  //     "database_name": "tahi-db",
-  //     "database_id": "REPLACE_WITH_D1_DATABASE_ID"
-  //   }
-  // ],
-  // "r2_buckets": [
-  //   {
-  //     "binding": "STORAGE",
-  //     "bucket_name": "tahi-storage"
-  //   }
-  // ]
+  // ─── D1 SQLite Database ──────────────────────────────────────────────────────
+  // Webflow Cloud assigns the real database_id on first deployment.
+  // The binding name "DB" must match CloudflareEnv in cloudflare-env.d.ts.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tahi-db",
+      "database_id": "placeholder",
+      "migrations_dir": "./drizzle/migrations"
+    }
+  ],
+
+  // ─── R2 Object Storage ───────────────────────────────────────────────────────
+  // Used for file uploads, voice notes, and video assets.
+  // The binding name "STORAGE" must match CloudflareEnv in cloudflare-env.d.ts.
+  "r2_buckets": [
+    {
+      "binding": "STORAGE",
+      "bucket_name": "tahi-storage"
+    }
+  ]
 }
