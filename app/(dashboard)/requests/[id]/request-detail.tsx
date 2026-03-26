@@ -284,6 +284,8 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
               onInternalToggle={isAdmin ? setIsInternal : undefined}
               placeholder={isAdmin ? 'Reply to client or add an internal note…' : 'Add a comment or question…'}
               isAdmin={isAdmin}
+              requestId={requestId}
+              orgId={request?.orgId}
             />
           </div>
         </div>
