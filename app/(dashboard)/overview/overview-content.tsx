@@ -8,6 +8,7 @@ import {
   ArrowRight, AlertTriangle, RefreshCw,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/tahi/status-badge'
+import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 
 // ─── Brand / palette constants ────────────────────────────────────────────────
@@ -59,7 +60,7 @@ export function AdminOverview({ userName }: { userName: string }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/admin/overview')
+    fetch(apiPath('/api/admin/overview'))
       .then(r => r.json() as Promise<{ kpis: KPIs; recentRequests: RecentRequest[] }>)
       .then(data => { setKpis(data.kpis); setRecentRequests(data.recentRequests) })
       .finally(() => setLoading(false))
@@ -148,7 +149,7 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/portal/requests?status=active&page=1')
+    fetch(apiPath('/api/portal/requests?status=active&page=1'))
       .then(r => r.json() as Promise<{ requests: RecentRequest[] }>)
       .then(data => setRequests(data.requests ?? []))
       .finally(() => setLoading(false))

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { apiPath } from '@/lib/api'
 import {
   ArrowLeft,
   Globe,
@@ -116,7 +117,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(`/api/admin/clients/${clientId}`)
+      const res = await fetch(apiPath(`/api/admin/clients/${clientId}`))
       if (!res.ok) { router.push('/clients'); return }
       setData(await res.json() as ClientData)
     } finally {
@@ -294,7 +295,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
   const save = async () => {
     setSaving(true)
     try {
-      await fetch(`/api/admin/clients/${org.id}`, {
+      await fetch(apiPath(`/api/admin/clients/${org.id}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
@@ -596,7 +597,7 @@ function InternalNotesCard({ org, onUpdated }: { org: Organisation; onUpdated: (
   const save = async () => {
     setSaving(true)
     try {
-      await fetch(`/api/admin/clients/${org.id}`, {
+      await fetch(apiPath(`/api/admin/clients/${org.id}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ internalNotes: notes }),
@@ -704,7 +705,7 @@ function RequestsTab({ clientId }: { clientId: string }) {
   const load = async () => {
     setLoading(true)
     try {
-      const res = await fetch(`/api/admin/requests?clientId=${clientId}&status=all`)
+      const res = await fetch(apiPath(`/api/admin/requests?clientId=${clientId}&status=all`))
       const data = await res.json() as { requests: Request[] }
       setRequests(data.requests ?? [])
     } finally {

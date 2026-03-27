@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { apiPath } from '@/lib/api'
 import { X, Loader2, ChevronDown, Zap, CheckCircle2 } from 'lucide-react'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -64,7 +65,7 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
   useEffect(() => {
     if (!open || !isAdmin) return
     setClientsLoading(true)
-    fetch('/api/admin/clients?status=active')
+    fetch(apiPath('/api/admin/clients?status=active'))
       .then(r => r.json() as Promise<{ organisations: OrgOption[] }>)
       .then(data => setClients(data.organisations ?? []))
       .catch(() => setClients([]))
@@ -95,7 +96,7 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
     setSubmitting(true)
 
     try {
-      const url = isAdmin ? '/api/admin/requests' : '/api/portal/requests'
+      const url = isAdmin ? apiPath('/api/admin/requests') : apiPath('/api/portal/requests')
       const body = isAdmin
         ? { clientOrgId, title: title.trim(), type, category, description, priority }
         : { title: title.trim(), type, category, description }

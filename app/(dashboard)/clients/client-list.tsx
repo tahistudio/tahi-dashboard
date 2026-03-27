@@ -5,6 +5,7 @@ import { Search, Plus, Users, RefreshCw } from 'lucide-react'
 import { ClientCard } from '@/components/tahi/client-card'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { NewClientDialog } from '@/components/tahi/dialogs/new-client-dialog'
+import { apiPath } from '@/lib/api'
 
 const STATUS_FILTERS = [
   { label: 'All',      value: 'all' },
@@ -52,7 +53,7 @@ export function ClientList() {
       } else if (statusFilter !== 'all') {
         params.set('status', statusFilter)
       }
-      const res = await fetch(`/api/admin/clients?${params}`)
+      const res = await fetch(apiPath(`/api/admin/clients?${params}`))
       if (!res.ok) throw new Error('Failed to fetch')
       const data = await res.json() as { organisations?: Organisation[] }
       setOrgs(data.organisations ?? [])

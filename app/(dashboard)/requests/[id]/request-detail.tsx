@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { apiPath } from '@/lib/api'
 import {
   ArrowLeft, Clock, AlertTriangle, RefreshCw,
   User, ChevronDown, CheckCircle2, Loader2,
@@ -91,11 +92,11 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
   const [statusUpdating, setStatusUpdating] = useState(false)
   const threadBottomRef = useRef<HTMLDivElement>(null)
 
-  const apiBase = isAdmin ? '/api/admin' : '/api/portal'
+  const apiBase = isAdmin ? apiPath('/api/admin') : apiPath('/api/portal')
 
   const loadFiles = useCallback(async () => {
     if (!isAdmin) return // portal doesn't have files endpoint yet
-    const res = await fetch(`/api/admin/requests/${requestId}/files`)
+    const res = await fetch(apiPath(`/api/admin/requests/${requestId}/files`))
     if (res.ok) {
       const data = await res.json() as { files: RequestFile[] }
       setFiles(data.files)
@@ -106,7 +107,7 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
     const [reqRes, msgRes] = await Promise.all([
       fetch(`${apiBase}/requests/${requestId}`),
       fetch(isAdmin
-        ? `/api/admin/requests/${requestId}/messages`
+        ? apiPath(`/api/admin/requests/${requestId}/messages`)
         : `${apiBase}/requests/${requestId}`
       ),
     ])
@@ -139,8 +140,8 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
 
   async function handleSendMessage(html: string) {
     const url = isAdmin
-      ? `/api/admin/requests/${requestId}/messages`
-      : `/api/portal/requests/${requestId}/messages`
+      ? apiPath(`/api/admin/requests/${requestId}/messages`)
+      : apiPath(`/api/portal/requests/${requestId}/messages`)
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -153,7 +154,7 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
 
   async function handleStatusChange(newStatus: string) {
     setStatusUpdating(true)
-    await fetch(`/api/admin/requests/${requestId}`, {
+    await fetch(apiPath(`/api/admin/requests/${requestId}`), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: newStatus }),
@@ -164,7 +165,7 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
 
   async function handleScopeFlagToggle() {
     if (!request) return
-    await fetch(`/api/admin/requests/${requestId}`, {
+    await fetch(apiPath(`/api/admin/requests/${requestId}`), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scopeFlagged: !request.scopeFlagged }),

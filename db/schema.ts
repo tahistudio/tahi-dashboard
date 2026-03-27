@@ -185,6 +185,9 @@ export const requests = sqliteTable('requests', {
   submittedById: text('submitted_by_id'),
   submittedByType: text('submitted_by_type').default('contact'),
   estimatedHours: real('estimated_hours'),
+  // ISO-8601 date strings (YYYY-MM-DD)
+  startDate: text('start_date'),
+  dueDate: text('due_date'),
   revisionCount: integer('revision_count').default(0),
   maxRevisions: integer('max_revisions').default(3),
   scopeFlagged: integer('scope_flagged', { mode: 'boolean' }).default(false),

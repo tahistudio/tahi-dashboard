@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { apiPath } from '@/lib/api'
 import { X, Building2, Globe, User, Mail, Briefcase } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 
@@ -51,7 +52,7 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
     setError(null)
 
     try {
-      const res = await fetch('/api/admin/clients', {
+      const res = await fetch(apiPath('/api/admin/clients'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
