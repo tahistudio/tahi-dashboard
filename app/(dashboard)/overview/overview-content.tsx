@@ -68,7 +68,7 @@ export function AdminOverview({ userName }: { userName: string }) {
       {/* Greeting */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[22px] font-bold tracking-tight text-gray-900">
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
             {greeting}{firstName ? `, ${firstName}` : ''} 👋
           </h1>
           <p className="text-sm text-gray-500 mt-1">Here&apos;s what&apos;s happening at Tahi today.</p>
@@ -157,7 +157,7 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
       {/* Greeting */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[22px] font-bold tracking-tight text-gray-900">
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
             {greeting}{firstName ? `, ${firstName}` : ''} 👋
           </h1>
           <p className="text-sm text-gray-500 mt-1">{orgName} — Tahi Studio workspace</p>
@@ -251,7 +251,7 @@ function StatCard({
     <Link
       href={href}
       className="block bg-white rounded-xl p-5 transition-all hover:shadow-md"
-      style={{ border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+      style={{ border: '1px solid #d1d5db', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
     >
       <div className="flex items-start justify-between mb-4">
         <div
@@ -269,10 +269,10 @@ function StatCard({
       {value === null ? (
         <div className="h-8 w-16 rounded animate-pulse mb-1" style={{ background: '#f3f4f6' }} />
       ) : (
-        <p className="text-[28px] font-bold leading-none text-gray-900 tabular-nums">{value}</p>
+        <p className="text-3xl font-bold leading-none text-gray-900 tabular-nums">{value}</p>
       )}
-      <p className="text-[13px] text-gray-500 mt-2">{label}</p>
-      {sub && <p className="text-[11px] text-gray-400 mt-0.5">{sub}</p>}
+      <p className="text-sm text-gray-500 mt-2">{label}</p>
+      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
     </Link>
   )
 }
@@ -289,7 +289,7 @@ function SectionCard({
   return (
     <div
       className="bg-white rounded-xl overflow-hidden"
-      style={{ border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+      style={{ border: '1px solid #d1d5db', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
     >
       <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid #f3f4f6' }}>
         <h2 className="text-sm font-semibold text-gray-800">{title}</h2>
@@ -407,7 +407,7 @@ function GettingStarted() {
     { n: 4, label: 'Connect Stripe for billing', href: '/settings' },
   ]
   return (
-    <div className="bg-white rounded-xl p-6" style={{ border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+    <div className="bg-white rounded-xl p-6" style={{ border: '1px solid #d1d5db', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
       <h2 className="text-sm font-semibold text-gray-800 mb-0.5">Getting started</h2>
       <p className="text-sm text-gray-500 mb-5">Complete these steps to set up your dashboard.</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">

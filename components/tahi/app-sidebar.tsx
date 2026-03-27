@@ -3,21 +3,9 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  Inbox,
-  Users,
-  CreditCard,
-  FileText,
-  Clock,
-  CheckSquare,
-  BarChart2,
-  BookOpen,
-  UserCog,
-  Settings,
-  MessageSquare,
-  FolderOpen,
-  ShoppingBag,
-  PanelLeftClose,
-  PanelLeftOpen,
+  Inbox, Users, CreditCard, FileText, Clock, CheckSquare,
+  BarChart2, BookOpen, UserCog, Settings, MessageSquare,
+  FolderOpen, ShoppingBag, PanelLeftClose, PanelLeftOpen,
   LayoutDashboard,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -79,19 +67,21 @@ const NAV: NavGroup[] = [
   },
 ]
 
-// Sidebar uses a locked dark-green color scheme regardless of page theme.
-// All colors are literal hex so CSS hover: classes work reliably.
+// All sidebar colors as hex constants — never rely on Tailwind CSS variables here
 const S = {
-  bg:          '#1e2a1b',   // sidebar background — slightly deeper than page dark
-  border:      '#2e3d2b',   // subtle divider
-  groupLabel:  '#4a6145',   // faint group headings
-  textMuted:   '#7aaa72',   // inactive nav text
-  textActive:  '#ffffff',   // active nav text
-  bgHover:     '#2a3826',   // nav item hover bg
-  bgActive:    '#2f3f2c',   // nav item active bg
-  iconMuted:   '#5f9458',   // inactive icon
-  iconActive:  '#93c98a',   // active icon
+  bg:         '#1e2a1b',
+  border:     '#2d3d2a',
+  groupLabel: '#4a6145',
+  textMuted:  '#7aaa72',
+  textActive: '#ffffff',
+  bgHover:    '#2a3826',
+  bgActive:   '#2f3f2c',
+  iconMuted:  '#5f9458',
+  iconActive: '#93c98a',
 }
+
+const EXPANDED_WIDTH  = 224  // px
+const COLLAPSED_WIDTH = 64   // px
 
 export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname()
@@ -106,18 +96,25 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
     }),
   })).filter(group => group.items.length > 0)
 
+  const w = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH
+
   return (
     <aside
-      className={cn(
-        'flex flex-col h-full transition-all duration-200 relative flex-shrink-0',
-        collapsed ? 'w-[60px]' : 'w-[220px]'
-      )}
-      style={{ background: S.bg, borderRight: `1px solid ${S.border}` }}
+      className="flex flex-col h-full flex-shrink-0 transition-all duration-200 relative"
+      style={{
+        width: `${w}px`,
+        minWidth: `${w}px`,
+        background: S.bg,
+        borderRight: `1px solid ${S.border}`,
+      }}
     >
-      {/* Logo area */}
+      {/* Logo */}
       <div
-        className="flex items-center h-14 px-4 flex-shrink-0"
-        style={{ borderBottom: `1px solid ${S.border}` }}
+        className="flex items-center h-14 flex-shrink-0"
+        style={{
+          padding: '0 16px',
+          borderBottom: `1px solid ${S.border}`,
+        }}
       >
         {collapsed
           ? <LeafLogo size="sm" />
@@ -126,18 +123,23 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-3 px-2">
+      <nav className="flex-1 overflow-y-auto" style={{ padding: '12px 8px' }}>
         {visibleNav.map((group, gi) => (
-          <div key={group.group} className={gi > 0 ? 'mt-4' : ''}>
+          <div key={group.group} style={{ marginTop: gi > 0 ? '20px' : 0 }}>
             {!collapsed && (
-              <p
-                className="text-[10px] font-semibold uppercase tracking-widest px-2 mb-1"
-                style={{ color: S.groupLabel }}
-              >
+              <p style={{
+                fontSize: '10px',
+                fontWeight: 600,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                color: S.groupLabel,
+                padding: '0 8px',
+                marginBottom: '4px',
+              }}>
                 {group.group}
               </p>
             )}
-            <ul className="space-y-0.5">
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               {group.items.map(item => {
                 const Icon = item.icon
                 const isActive =
@@ -145,28 +147,37 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
                   (item.href !== '/requests' && item.href !== '/overview' && pathname.startsWith(item.href))
 
                 return (
-                  <li key={item.href}>
+                  <li key={item.href} style={{ marginBottom: '2px' }}>
                     <Link
                       href={item.href}
                       title={collapsed ? item.label : undefined}
-                      className={cn(
-                        'flex items-center gap-2.5 px-2 py-1.5 rounded-md text-[13px] font-medium transition-all duration-150',
-                        collapsed && 'justify-center px-0',
-                        isActive
-                          ? 'text-white'
-                          : 'hover:text-white'
-                      )}
+                      className="flex items-center transition-colors"
                       style={{
+                        gap: '10px',
+                        padding: collapsed ? '8px 0' : '7px 8px',
+                        justifyContent: collapsed ? 'center' : 'flex-start',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        fontWeight: 500,
                         color: isActive ? S.textActive : S.textMuted,
-                        background: isActive ? S.bgActive : undefined,
+                        background: isActive ? S.bgActive : 'transparent',
+                        textDecoration: 'none',
                       }}
-                      // pure CSS hover via onMouse is replaced by Tailwind-compatible approach below
+                      onMouseEnter={e => {
+                        if (!isActive) {
+                          e.currentTarget.style.background = S.bgHover
+                          e.currentTarget.style.color = S.textActive
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!isActive) {
+                          e.currentTarget.style.background = 'transparent'
+                          e.currentTarget.style.color = S.textMuted
+                        }
+                      }}
                     >
-                      <span
-                        className="flex-shrink-0 flex items-center"
-                        style={{ color: isActive ? S.iconActive : S.iconMuted }}
-                      >
-                        <Icon className={cn(collapsed ? 'w-[18px] h-[18px]' : 'w-[15px] h-[15px]')} />
+                      <span style={{ color: isActive ? S.iconActive : S.iconMuted, display: 'flex', flexShrink: 0 }}>
+                        <Icon className={cn(collapsed ? 'w-5 h-5' : 'w-4 h-4')} />
                       </span>
                       {!collapsed && <span>{item.label}</span>}
                     </Link>
@@ -178,29 +189,34 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
         ))}
       </nav>
 
-      {/* Collapse toggle at bottom */}
-      <div
-        className="p-2 flex-shrink-0"
-        style={{ borderTop: `1px solid ${S.border}` }}
-      >
+      {/* Collapse toggle */}
+      <div style={{ padding: '8px', borderTop: `1px solid ${S.border}`, flexShrink: 0 }}>
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className={cn(
-            'w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-[13px] transition-colors',
-            collapsed && 'justify-center px-0'
-          )}
-          style={{ color: S.textMuted }}
-          onMouseEnter={e => { e.currentTarget.style.color = S.textActive; e.currentTarget.style.background = S.bgHover }}
-          onMouseLeave={e => { e.currentTarget.style.color = S.textMuted; e.currentTarget.style.background = 'transparent' }}
+          className="flex items-center transition-colors w-full"
+          style={{
+            gap: '10px',
+            padding: collapsed ? '8px 0' : '7px 8px',
+            justifyContent: collapsed ? 'center' : 'flex-start',
+            borderRadius: '6px',
+            fontSize: '13px',
+            fontWeight: 500,
+            color: S.textMuted,
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = S.bgHover; e.currentTarget.style.color = S.textActive }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = S.textMuted }}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          {collapsed
-            ? <span style={{ color: S.iconMuted, display: 'flex' }}><PanelLeftOpen className="w-[15px] h-[15px]" /></span>
-            : <>
-                <span style={{ color: S.iconMuted, display: 'flex' }}><PanelLeftClose className="w-[15px] h-[15px]" /></span>
-                <span>Collapse</span>
-              </>
-          }
+          <span style={{ color: S.iconMuted, display: 'flex', flexShrink: 0 }}>
+            {collapsed
+              ? <PanelLeftOpen className="w-4 h-4" />
+              : <PanelLeftClose className="w-4 h-4" />
+            }
+          </span>
+          {!collapsed && <span>Collapse</span>}
         </button>
       </div>
     </aside>
