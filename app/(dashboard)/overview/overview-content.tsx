@@ -10,14 +10,19 @@ import {
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { formatDistanceToNow } from 'date-fns'
 
-// ─── Accent colour map (hex, no Tailwind dynamic classes) ─────────────────────
+// ─── Brand / palette constants ────────────────────────────────────────────────
+
+const BRAND     = '#5A824E'
+const BRAND_DRK = '#425F39'
+
+// ─── Accent colour map (hex only — no Tailwind dynamic classes) ───────────────
 
 const ACCENTS = {
   violet:  { bg: '#ede9fe', color: '#7c3aed' },
   blue:    { bg: '#dbeafe', color: '#2563eb' },
   amber:   { bg: '#fef3c7', color: '#d97706' },
   emerald: { bg: '#d1fae5', color: '#059669' },
-  neutral: { bg: '#e5e7eb', color: '#6b7280' },  // gray-200 — visible on white
+  neutral: { bg: '#e5e7eb', color: '#6b7280' },
   teal:    { bg: '#ccfbf1', color: '#0d9488' },
   red:     { bg: '#fee2e2', color: '#dc2626' },
 } as const
@@ -65,14 +70,16 @@ export function AdminOverview({ userName }: { userName: string }) {
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
   return (
-    <div className="flex flex-col gap-7 max-w-5xl">
+    <div className="flex flex-col" style={{ gap: 32, maxWidth: 1100 }}>
       {/* Greeting */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+          <h1 className="text-2xl font-bold tracking-tight" style={{ color: '#111827' }}>
             {greeting}{firstName ? `, ${firstName}` : ''} 👋
           </h1>
-          <p className="text-sm text-gray-500 mt-1">Here&apos;s what&apos;s happening at Tahi today.</p>
+          <p className="text-sm" style={{ color: '#6b7280', marginTop: 4 }}>
+            Here&apos;s what&apos;s happening at Tahi today.
+          </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <QuickBtn href="/requests?new=1" icon={<Plus size={13} />} label="New Request" primary />
@@ -82,18 +89,18 @@ export function AdminOverview({ userName }: { userName: string }) {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard
           label="Active Clients"
           value={loading ? null : kpis?.activeClients ?? 0}
-          icon={<Users size={16} />}
+          icon={<Users size={18} />}
           href="/clients"
           accent="violet"
         />
         <StatCard
           label="Open Requests"
           value={loading ? null : kpis?.openRequests ?? 0}
-          icon={<Inbox size={16} />}
+          icon={<Inbox size={18} />}
           href="/requests"
           accent="blue"
           sub={kpis ? `${kpis.inProgress} in progress` : undefined}
@@ -101,7 +108,7 @@ export function AdminOverview({ userName }: { userName: string }) {
         <StatCard
           label="Outstanding"
           value={loading ? null : formatUsd(kpis?.outstandingInvoicesUsd ?? 0)}
-          icon={<FileText size={16} />}
+          icon={<FileText size={18} />}
           href="/invoices"
           accent={kpis && kpis.outstandingInvoicesUsd > 0 ? 'amber' : 'neutral'}
           sub="invoices"
@@ -109,7 +116,7 @@ export function AdminOverview({ userName }: { userName: string }) {
         <StatCard
           label="MRR"
           value="—"
-          icon={<TrendingUp size={16} />}
+          icon={<TrendingUp size={18} />}
           href="/reports"
           accent="emerald"
           sub="Connect Stripe"
@@ -154,19 +161,21 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
   return (
-    <div className="flex flex-col gap-7 max-w-4xl">
+    <div className="flex flex-col" style={{ gap: 32, maxWidth: 900 }}>
       {/* Greeting */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+          <h1 className="text-2xl font-bold tracking-tight" style={{ color: '#111827' }}>
             {greeting}{firstName ? `, ${firstName}` : ''} 👋
           </h1>
-          <p className="text-sm text-gray-500 mt-1">{orgName} — Tahi Studio workspace</p>
+          <p className="text-sm" style={{ color: '#6b7280', marginTop: 4 }}>
+            {orgName} — Tahi Studio workspace
+          </p>
         </div>
         <Link
           href="/requests?new=1"
-          className="flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold text-white rounded-lg transition-opacity hover:opacity-90"
-          style={{ background: 'var(--color-brand)' }}
+          className="flex-shrink-0 flex items-center gap-1.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+          style={{ padding: '9px 16px', background: BRAND, borderRadius: 8 }}
         >
           <Plus size={14} />
           New Request
@@ -174,18 +183,18 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-5">
         <StatCard
           label="Open Requests"
           value={loading ? null : open.length}
-          icon={<Inbox size={16} />}
+          icon={<Inbox size={18} />}
           href="/requests"
           accent="blue"
         />
         <StatCard
           label="Awaiting Review"
           value={loading ? null : inReview.length}
-          icon={<RefreshCw size={16} />}
+          icon={<RefreshCw size={18} />}
           href="/requests?status=client_review"
           accent={inReview.length > 0 ? 'amber' : 'teal'}
           highlight={inReview.length > 0}
@@ -193,7 +202,7 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
         <StatCard
           label="Invoices Due"
           value="—"
-          icon={<FileText size={16} />}
+          icon={<FileText size={18} />}
           href="/invoices"
           accent="neutral"
         />
@@ -201,25 +210,31 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
 
       {/* Review alert */}
       {inReview.length > 0 && (
-        <div className="flex items-start gap-3 px-4 py-3 rounded-xl" style={{ background: '#fffbeb', border: '1px solid #fcd34d' }}>
-          <RefreshCw size={15} className="text-amber-600 mt-0.5 flex-shrink-0" />
+        <div
+          className="flex items-start gap-3 rounded-xl"
+          style={{ padding: '14px 16px', background: '#fffbeb', border: '1px solid #fcd34d' }}
+        >
+          <RefreshCw size={15} className="text-amber-500 flex-shrink-0" style={{ marginTop: 1 }} />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-amber-800">
+            <p className="text-sm font-semibold" style={{ color: '#92400e' }}>
               {inReview.length} request{inReview.length > 1 ? 's' : ''} waiting for your review
             </p>
-            <p className="text-xs text-amber-600 mt-0.5">Please approve or request changes.</p>
+            <p className="text-xs" style={{ color: '#b45309', marginTop: 2 }}>
+              Please approve or request changes.
+            </p>
           </div>
-          <Link href="/requests?status=client_review" className="text-xs font-semibold text-amber-700 hover:underline whitespace-nowrap flex items-center gap-1">
+          <Link
+            href="/requests?status=client_review"
+            className="text-xs font-semibold flex items-center gap-1 whitespace-nowrap hover:underline"
+            style={{ color: '#92400e' }}
+          >
             Review now <ArrowRight size={11} />
           </Link>
         </div>
       )}
 
       {/* Recent requests */}
-      <SectionCard
-        title="Your Requests"
-        action={{ label: 'View all', href: '/requests' }}
-      >
+      <SectionCard title="Your Requests" action={{ label: 'View all', href: '/requests' }}>
         {loading ? <LoadingRows /> : requests.length === 0 ? (
           <EmptyRows
             title="No requests yet"
@@ -251,29 +266,46 @@ function StatCard({
   return (
     <Link
       href={href}
-      className="block bg-white rounded-xl p-5 transition-all hover:shadow-md"
-      style={{ border: '1px solid #d1d5db', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+      className="block bg-white rounded-xl transition-all hover:shadow-md"
+      style={{
+        padding: 24,
+        border: '1px solid #e5e7eb',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+        textDecoration: 'none',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)' }}
+      onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.06)' }}
     >
-      <div className="flex items-start justify-between mb-4">
+      {/* Icon row */}
+      <div className="flex items-start justify-between" style={{ marginBottom: 20 }}>
         <div
-          className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-          style={{ background: a.bg, color: a.color }}
+          className="flex items-center justify-center rounded-xl flex-shrink-0"
+          style={{ width: 44, height: 44, background: a.bg, color: a.color }}
         >
           {icon}
         </div>
         {highlight && (
-          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: '#fef3c7', color: '#b45309' }}>
+          <span
+            className="text-xs font-semibold rounded-full"
+            style={{ padding: '3px 10px', background: '#fef3c7', color: '#b45309' }}
+          >
             Action needed
           </span>
         )}
       </div>
+
+      {/* Value */}
       {value === null ? (
-        <div className="h-8 w-16 rounded animate-pulse mb-1" style={{ background: '#f3f4f6' }} />
+        <div className="rounded animate-pulse" style={{ height: 36, width: 64, background: '#f3f4f6', marginBottom: 8 }} />
       ) : (
-        <p className="text-3xl font-bold leading-none text-gray-900 tabular-nums">{value}</p>
+        <p className="font-bold leading-none tabular-nums" style={{ fontSize: 32, color: '#111827', marginBottom: 8 }}>
+          {value}
+        </p>
       )}
-      <p className="text-sm text-gray-500 mt-2">{label}</p>
-      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+
+      {/* Label */}
+      <p className="text-sm font-medium" style={{ color: '#6b7280' }}>{label}</p>
+      {sub && <p className="text-xs" style={{ color: '#9ca3af', marginTop: 3 }}>{sub}</p>}
     </Link>
   )
 }
@@ -290,12 +322,19 @@ function SectionCard({
   return (
     <div
       className="bg-white rounded-xl overflow-hidden"
-      style={{ border: '1px solid #d1d5db', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+      style={{ border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
     >
-      <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid #f3f4f6' }}>
-        <h2 className="text-sm font-semibold text-gray-800">{title}</h2>
+      <div
+        className="flex items-center justify-between"
+        style={{ padding: '16px 20px', borderBottom: '1px solid #f3f4f6' }}
+      >
+        <h2 className="text-sm font-semibold" style={{ color: '#374151' }}>{title}</h2>
         {action && (
-          <Link href={action.href} className="text-xs flex items-center gap-1 hover:underline" style={{ color: 'var(--color-brand)' }}>
+          <Link
+            href={action.href}
+            className="text-xs flex items-center gap-1 font-medium hover:underline"
+            style={{ color: BRAND }}
+          >
             {action.label} <ArrowRight size={11} />
           </Link>
         )}
@@ -311,29 +350,43 @@ function RequestRow({ req, isLast, showOrg }: { req: RecentRequest; isLast: bool
   return (
     <Link
       href={`/requests/${req.id}`}
-      className="flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors group"
-      style={{ borderBottom: isLast ? 'none' : '1px solid #f9fafb' }}
+      className="flex items-center gap-4 group transition-colors"
+      style={{
+        padding: '14px 20px',
+        borderBottom: isLast ? 'none' : '1px solid #f9fafb',
+        textDecoration: 'none',
+        background: 'white',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = '#fafafa' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'white' }}
     >
       <StatusBadge status={req.status} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <p className="text-sm font-medium text-gray-800 truncate group-hover:text-gray-900">
+          <p className="text-sm font-medium truncate" style={{ color: '#1f2937' }}>
             {req.title}
           </p>
-          {req.scopeFlagged && <AlertTriangle size={11} className="text-red-400 flex-shrink-0" />}
+          {req.scopeFlagged && (
+            <AlertTriangle size={11} style={{ color: '#f87171', flexShrink: 0 }} />
+          )}
           {req.priority === 'high' && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: '#fef3c7', color: '#92400e' }}>
+            <span
+              className="text-xs rounded-full flex-shrink-0"
+              style={{ padding: '1px 7px', background: '#fef3c7', color: '#92400e', fontSize: 10, fontWeight: 600 }}
+            >
               High
             </span>
           )}
         </div>
-        <p className="text-xs text-gray-400 mt-0.5 truncate">
+        <p className="text-xs truncate" style={{ color: '#9ca3af', marginTop: 2 }}>
           {showOrg && req.orgName ? `${req.orgName} · ` : ''}
           {req.type.replace(/_/g, ' ')}
         </p>
       </div>
-      <span className="text-xs text-gray-400 flex-shrink-0 tabular-nums">{timeAgo(req.updatedAt)}</span>
-      <ArrowRight size={13} className="text-gray-300 group-hover:text-gray-400 flex-shrink-0 transition-colors" />
+      <span className="text-xs tabular-nums flex-shrink-0" style={{ color: '#9ca3af' }}>
+        {timeAgo(req.updatedAt)}
+      </span>
+      <ArrowRight size={13} style={{ color: '#d1d5db', flexShrink: 0 }} />
     </Link>
   )
 }
@@ -346,15 +399,15 @@ function LoadingRows() {
       {[...Array(4)].map((_, i) => (
         <div
           key={i}
-          className="flex items-center gap-4 px-5 py-4 animate-pulse"
-          style={{ borderBottom: i < 3 ? '1px solid #f9fafb' : 'none' }}
+          className="flex items-center gap-4 animate-pulse"
+          style={{ padding: '16px 20px', borderBottom: i < 3 ? '1px solid #f9fafb' : 'none' }}
         >
-          <div className="w-20 h-5 rounded-full" style={{ background: '#f3f4f6' }} />
-          <div className="flex-1 space-y-1.5">
-            <div className="h-3.5 rounded w-2/3" style={{ background: '#f3f4f6' }} />
-            <div className="h-3 rounded w-1/3" style={{ background: '#f3f4f6' }} />
+          <div className="rounded-full" style={{ width: 80, height: 22, background: '#f3f4f6' }} />
+          <div className="flex-1" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div className="rounded" style={{ height: 13, width: '60%', background: '#f3f4f6' }} />
+            <div className="rounded" style={{ height: 11, width: '35%', background: '#f3f4f6' }} />
           </div>
-          <div className="h-3 w-12 rounded" style={{ background: '#f3f4f6' }} />
+          <div className="rounded" style={{ height: 11, width: 48, background: '#f3f4f6' }} />
         </div>
       ))}
     </div>
@@ -363,16 +416,29 @@ function LoadingRows() {
 
 // ─── Empty rows ───────────────────────────────────────────────────────────────
 
-function EmptyRows({ title, message, action }: { title: string; message: string; action?: { label: string; href: string } }) {
+function EmptyRows({
+  title, message, action,
+}: {
+  title: string
+  message: string
+  action?: { label: string; href: string }
+}) {
   return (
-    <div className="flex flex-col items-center justify-center py-14 gap-2">
-      <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-1" style={{ background: '#f9fafb' }}>
-        <Inbox size={20} className="text-gray-300" />
+    <div className="flex flex-col items-center justify-center text-center" style={{ padding: '48px 24px', gap: 8 }}>
+      <div
+        className="flex items-center justify-center rounded-xl"
+        style={{ width: 44, height: 44, background: '#f9fafb', marginBottom: 4 }}
+      >
+        <Inbox size={20} style={{ color: '#d1d5db' }} />
       </div>
-      <p className="text-sm font-medium text-gray-600">{title}</p>
-      <p className="text-xs text-gray-400 text-center max-w-xs">{message}</p>
+      <p className="text-sm font-medium" style={{ color: '#374151' }}>{title}</p>
+      <p className="text-xs" style={{ color: '#9ca3af', maxWidth: 280 }}>{message}</p>
       {action && (
-        <Link href={action.href} className="text-xs flex items-center gap-1 mt-1 hover:underline" style={{ color: 'var(--color-brand)' }}>
+        <Link
+          href={action.href}
+          className="text-xs flex items-center gap-1 font-medium hover:underline"
+          style={{ color: BRAND, marginTop: 4 }}
+        >
           {action.label} <ArrowRight size={11} />
         </Link>
       )}
@@ -382,14 +448,21 @@ function EmptyRows({ title, message, action }: { title: string; message: string;
 
 // ─── Quick action buttons ─────────────────────────────────────────────────────
 
-function QuickBtn({ href, icon, label, primary }: { href: string; icon: React.ReactNode; label: string; primary?: boolean }) {
+function QuickBtn({
+  href, icon, label, primary,
+}: {
+  href: string
+  icon: React.ReactNode
+  label: string
+  primary?: boolean
+}) {
   return (
     <Link
       href={href}
-      className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors font-medium"
+      className="flex items-center gap-1.5 text-sm font-medium rounded-lg transition-opacity hover:opacity-90"
       style={primary
-        ? { background: 'var(--color-brand)', color: 'white', border: '1px solid var(--color-brand)' }
-        : { background: 'white', color: '#374151', border: '1px solid #e5e7eb' }
+        ? { padding: '8px 14px', background: BRAND, color: 'white', border: `1px solid ${BRAND}`, textDecoration: 'none' }
+        : { padding: '8px 14px', background: 'white', color: '#374151', border: '1px solid #e5e7eb', textDecoration: 'none' }
       }
     >
       {icon}
@@ -402,33 +475,40 @@ function QuickBtn({ href, icon, label, primary }: { href: string; icon: React.Re
 
 function GettingStarted() {
   const steps = [
-    { n: 1, label: 'Add your first client', href: '/clients?new=1' },
-    { n: 2, label: 'Create a subscription or project', href: '/billing' },
-    { n: 3, label: 'Submit a request on their behalf', href: '/requests?new=1' },
-    { n: 4, label: 'Connect Stripe for billing', href: '/settings' },
+    { n: 1, label: 'Add your first client',           href: '/clients?new=1' },
+    { n: 2, label: 'Create a subscription or project', href: '/billing'       },
+    { n: 3, label: 'Submit a request on their behalf', href: '/requests?new=1'},
+    { n: 4, label: 'Connect Stripe for billing',       href: '/settings'      },
   ]
   return (
-    <div className="bg-white rounded-xl p-6" style={{ border: '1px solid #d1d5db', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
-      <h2 className="text-sm font-semibold text-gray-800 mb-0.5">Getting started</h2>
-      <p className="text-sm text-gray-500 mb-5">Complete these steps to set up your dashboard.</p>
+    <div
+      className="bg-white rounded-xl"
+      style={{ padding: 24, border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+    >
+      <h2 className="text-sm font-semibold" style={{ color: '#374151', marginBottom: 4 }}>
+        Getting started
+      </h2>
+      <p className="text-sm" style={{ color: '#6b7280', marginBottom: 20 }}>
+        Complete these steps to set up your dashboard.
+      </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         {steps.map(s => (
           <Link
             key={s.n}
             href={s.href}
-            className="flex items-center gap-3 p-3 rounded-lg transition-colors group"
-            style={{ border: '1px solid #f3f4f6' }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-brand-200)'; e.currentTarget.style.background = '#f0f7ee' }}
+            className="flex items-center gap-3 rounded-lg transition-colors"
+            style={{ padding: '12px 14px', border: '1px solid #f3f4f6', textDecoration: 'none' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = '#c6dbc0'; e.currentTarget.style.background = '#f4faf2' }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = '#f3f4f6'; e.currentTarget.style.background = 'white' }}
           >
             <span
-              className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold text-white flex-shrink-0"
-              style={{ background: 'var(--color-brand)' }}
+              className="flex items-center justify-center rounded-full text-xs font-semibold text-white flex-shrink-0"
+              style={{ width: 24, height: 24, background: BRAND }}
             >
               {s.n}
             </span>
-            <span className="text-sm text-gray-700">{s.label}</span>
-            <ArrowRight size={13} className="ml-auto text-gray-300" />
+            <span className="text-sm" style={{ color: '#374151', flex: 1 }}>{s.label}</span>
+            <ArrowRight size={13} style={{ color: '#d1d5db' }} />
           </Link>
         ))}
       </div>

@@ -2,8 +2,12 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { X, Loader2, ChevronDown } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { X, Loader2, ChevronDown, Zap, CheckCircle2 } from 'lucide-react'
+
+// ── Constants ──────────────────────────────────────────────────────────────────
+
+const BRAND     = '#5A824E'
+const BRAND_DRK = '#425F39'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -19,22 +23,22 @@ interface NewRequestDialogProps {
 }
 
 const REQUEST_TYPES = [
-  { value: 'small_task',     label: 'Small task' },
-  { value: 'large_task',     label: 'Large task' },
-  { value: 'bug_fix',        label: 'Bug fix' },
-  { value: 'content_update', label: 'Content update' },
-  { value: 'new_feature',    label: 'New feature' },
-  { value: 'consultation',   label: 'Consultation' },
-  { value: 'custom',         label: 'Custom' },
+  { value: 'small_task',     label: 'Small task',     desc: '≤ 1 day'       },
+  { value: 'large_task',     label: 'Large task',     desc: 'Multi-day'     },
+  { value: 'bug_fix',        label: 'Bug fix',        desc: 'Fix only'      },
+  { value: 'content_update', label: 'Content update', desc: 'Copy / images' },
+  { value: 'new_feature',    label: 'New feature',    desc: 'New section'   },
+  { value: 'consultation',   label: 'Consultation',   desc: 'Strategy'      },
+  { value: 'custom',         label: 'Custom',         desc: 'Free-form'     },
 ]
 
 const CATEGORIES = [
   { value: 'development', label: 'Development' },
-  { value: 'design',      label: 'Design' },
-  { value: 'content',     label: 'Content' },
-  { value: 'strategy',    label: 'Strategy' },
-  { value: 'admin',       label: 'Admin' },
-  { value: 'bug',         label: 'Bug' },
+  { value: 'design',      label: 'Design'      },
+  { value: 'content',     label: 'Content'     },
+  { value: 'strategy',    label: 'Strategy'    },
+  { value: 'admin',       label: 'Admin'       },
+  { value: 'bug',         label: 'Bug'         },
 ]
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -124,143 +128,276 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40"
+        style={{
+          position: 'fixed', inset: 0,
+          background: 'rgba(0,0,0,0.4)',
+          backdropFilter: 'blur(2px)',
+          zIndex: 40,
+        }}
         onClick={onClose}
       />
 
-      {/* Panel */}
-      <div className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-white shadow-2xl flex flex-col overflow-hidden">
+      {/* Slide-over panel */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0, right: 0, bottom: 0,
+          width: '100%',
+          maxWidth: 520,
+          background: 'white',
+          boxShadow: '-8px 0 40px rgba(0,0,0,0.15)',
+          zIndex: 50,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-gray-200">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            padding: '20px 24px',
+            borderBottom: '1px solid #f3f4f6',
+            flexShrink: 0,
+          }}
+        >
           <div>
-            <h2 className="text-base font-semibold text-gray-900">
+            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#111827', margin: 0 }}>
               {isAdmin ? 'Create a request' : 'Submit a request'}
             </h2>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
               {isAdmin
                 ? 'Create a request on behalf of a client.'
-                : 'Tell us what you need and we\'ll get started.'}
+                : "Tell us what you need and we'll get started."}
             </p>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+            style={{
+              padding: 6,
+              borderRadius: 8,
+              border: 'none',
+              background: 'transparent',
+              color: '#9ca3af',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              marginLeft: 12,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#f3f4f6'; e.currentTarget.style.color = '#374151' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#9ca3af' }}
+            aria-label="Close"
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
-          <div className="flex flex-col gap-5 p-6">
+        {/* Scrollable form body */}
+        <form
+          onSubmit={handleSubmit}
+          style={{ flex: 1, overflowY: 'auto', padding: '24px' }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
             {/* Client selector (admin only) */}
             {isAdmin && (
-              <Field label="Client" required>
+              <FieldGroup label="Client" required>
                 {clientsLoading ? (
-                  <div className="flex items-center gap-2 h-10 px-3 border border-gray-200 rounded-lg text-sm text-gray-400">
-                    <Loader2 size={14} className="animate-spin" />
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    height: 42, padding: '0 12px',
+                    border: '1px solid #e5e7eb', borderRadius: 8,
+                    fontSize: 13, color: '#9ca3af',
+                  }}>
+                    <Loader2 size={13} className="animate-spin" />
                     Loading clients…
                   </div>
                 ) : (
-                  <SelectInput
+                  <StyledSelect
                     value={clientOrgId}
                     onChange={setClientOrgId}
                     required
                   >
-                    <option value="" disabled>Select a client</option>
+                    <option value="" disabled>Select a client…</option>
                     {clients.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
-                  </SelectInput>
+                  </StyledSelect>
                 )}
-              </Field>
+              </FieldGroup>
             )}
 
             {/* Title */}
-            <Field label="Request title" required>
-              <input
+            <FieldGroup label="Request title" required>
+              <StyledInput
                 type="text"
                 value={title}
                 onChange={e => setTitle(e.target.value)}
                 required
                 maxLength={200}
                 placeholder="e.g. Update homepage hero section"
-                className="w-full h-10 px-3 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent transition"
               />
-            </Field>
+            </FieldGroup>
 
-            {/* Type + Category row */}
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Type">
-                <SelectInput value={type} onChange={setType}>
-                  {REQUEST_TYPES.map(t => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
-                  ))}
-                </SelectInput>
-              </Field>
-              <Field label="Category">
-                <SelectInput value={category} onChange={setCategory}>
+            {/* Type tiles */}
+            <FieldGroup label="Type">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                {REQUEST_TYPES.map(t => (
+                  <button
+                    key={t.value}
+                    type="button"
+                    onClick={() => setType(t.value)}
+                    style={{
+                      padding: '10px 8px',
+                      borderRadius: 8,
+                      border: type === t.value ? `2px solid ${BRAND}` : '1px solid #e5e7eb',
+                      background: type === t.value ? '#f0f7ee' : 'white',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'all 0.1s',
+                      position: 'relative',
+                    }}
+                    onMouseEnter={e => {
+                      if (type !== t.value) {
+                        e.currentTarget.style.borderColor = '#c6dbc0'
+                        e.currentTarget.style.background = '#fafafa'
+                      }
+                    }}
+                    onMouseLeave={e => {
+                      if (type !== t.value) {
+                        e.currentTarget.style.borderColor = '#e5e7eb'
+                        e.currentTarget.style.background = 'white'
+                      }
+                    }}
+                  >
+                    {type === t.value && (
+                      <CheckCircle2
+                        size={13}
+                        style={{
+                          position: 'absolute', top: 6, right: 6,
+                          color: BRAND,
+                        }}
+                      />
+                    )}
+                    <p style={{ fontSize: 12, fontWeight: 600, color: type === t.value ? BRAND_DRK : '#374151', marginBottom: 1 }}>
+                      {t.label}
+                    </p>
+                    <p style={{ fontSize: 11, color: '#9ca3af' }}>{t.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </FieldGroup>
+
+            {/* Category + Priority row */}
+            <div style={{ display: 'grid', gridTemplateColumns: isAdmin ? '1fr 1fr' : '1fr', gap: 16 }}>
+              <FieldGroup label="Category">
+                <StyledSelect value={category} onChange={setCategory}>
                   {CATEGORIES.map(c => (
                     <option key={c.value} value={c.value}>{c.label}</option>
                   ))}
-                </SelectInput>
-              </Field>
+                </StyledSelect>
+              </FieldGroup>
+
+              {isAdmin && (
+                <FieldGroup label="Priority">
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {(['standard', 'high'] as const).map(p => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setPriority(p)}
+                        style={{
+                          flex: 1,
+                          height: 42,
+                          borderRadius: 8,
+                          border: priority === p
+                            ? p === 'high' ? '2px solid #f59e0b' : `2px solid ${BRAND}`
+                            : '1px solid #e5e7eb',
+                          background: priority === p
+                            ? p === 'high' ? '#fffbeb' : '#f0f7ee'
+                            : 'white',
+                          color: priority === p
+                            ? p === 'high' ? '#b45309' : BRAND_DRK
+                            : '#6b7280',
+                          fontSize: 13,
+                          fontWeight: 500,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 5,
+                          transition: 'all 0.1s',
+                        }}
+                      >
+                        {p === 'high' && <Zap size={13} />}
+                        {p === 'high' ? 'High' : 'Standard'}
+                      </button>
+                    ))}
+                  </div>
+                </FieldGroup>
+              )}
             </div>
 
-            {/* Priority (admin only) */}
-            {isAdmin && (
-              <Field label="Priority">
-                <div className="flex gap-2">
-                  {(['standard', 'high'] as const).map(p => (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => setPriority(p)}
-                      className={cn(
-                        'flex-1 h-9 rounded-lg border text-sm font-medium transition-colors',
-                        priority === p
-                          ? p === 'high'
-                            ? 'border-amber-400 bg-amber-50 text-amber-700'
-                            : 'border-[var(--color-brand)] bg-green-50 text-[var(--color-brand)]'
-                          : 'border-gray-200 text-gray-500 hover:border-gray-300',
-                      )}
-                    >
-                      {p === 'high' ? '🔥 High' : 'Standard'}
-                    </button>
-                  ))}
-                </div>
-              </Field>
-            )}
-
             {/* Description */}
-            <Field label="Description">
-              <textarea
+            <FieldGroup label="Description">
+              <StyledTextarea
                 value={description}
                 onChange={e => setDescription(e.target.value)}
                 rows={5}
                 placeholder="Describe what you need in as much detail as possible…"
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent transition resize-none"
               />
-              <p className="text-xs text-gray-400 mt-1">
-                You can add files and further details after submitting.
+              <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>
+                You can add files and further detail after submitting.
               </p>
-            </Field>
+            </FieldGroup>
 
+            {/* Error */}
             {error && (
-              <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2.5">
+              <div style={{
+                fontSize: 13,
+                color: '#dc2626',
+                background: '#fef2f2',
+                border: '1px solid #fee2e2',
+                borderRadius: 8,
+                padding: '10px 14px',
+              }}>
                 {error}
-              </p>
+              </div>
             )}
           </div>
         </form>
 
         {/* Footer */}
-        <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50/50">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '16px 24px',
+            borderTop: '1px solid #f3f4f6',
+            background: '#fafafa',
+            flexShrink: 0,
+          }}
+        >
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+            style={{
+              padding: '8px 16px',
+              fontSize: 14,
+              fontWeight: 500,
+              color: '#6b7280',
+              background: 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = '#374151' }}
+            onMouseLeave={e => { e.currentTarget.style.color = '#6b7280' }}
           >
             Cancel
           </button>
@@ -269,11 +406,26 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
             form="new-request-form"
             disabled={submitting || !title.trim()}
             onClick={handleSubmit}
-            className={cn(
-              'flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-colors',
-              'bg-[var(--color-brand)] text-white hover:bg-[var(--color-brand-dark)]',
-              'disabled:opacity-40 disabled:cursor-not-allowed',
-            )}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '9px 20px',
+              fontSize: 14,
+              fontWeight: 600,
+              color: 'white',
+              background: submitting || !title.trim() ? '#9cb89a' : BRAND,
+              border: 'none',
+              borderRadius: 8,
+              cursor: submitting || !title.trim() ? 'not-allowed' : 'pointer',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={e => {
+              if (!submitting && title.trim()) e.currentTarget.style.background = BRAND_DRK
+            }}
+            onMouseLeave={e => {
+              if (!submitting && title.trim()) e.currentTarget.style.background = BRAND
+            }}
           >
             {submitting && <Loader2 size={14} className="animate-spin" />}
             {isAdmin ? 'Create request' : 'Submit request'}
@@ -284,9 +436,9 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
   )
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+// ── Field group ────────────────────────────────────────────────────────────────
 
-function Field({
+function FieldGroup({
   label, required, children,
 }: {
   label: string
@@ -294,17 +446,70 @@ function Field({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-sm font-medium text-gray-700">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
         {label}
-        {required && <span className="text-red-500 ml-0.5">*</span>}
+        {required && <span style={{ color: '#ef4444', marginLeft: 2 }}>*</span>}
       </label>
       {children}
     </div>
   )
 }
 
-function SelectInput({
+// ── Styled input ───────────────────────────────────────────────────────────────
+
+function StyledInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      style={{
+        width: '100%',
+        height: 42,
+        padding: '0 12px',
+        fontSize: 14,
+        color: '#111827',
+        background: 'white',
+        border: '1px solid #e5e7eb',
+        borderRadius: 8,
+        outline: 'none',
+        boxSizing: 'border-box',
+        ...props.style,
+      }}
+      onFocus={e => { e.currentTarget.style.borderColor = BRAND; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(90,130,78,0.12)` }}
+      onBlur={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none' }}
+    />
+  )
+}
+
+// ── Styled textarea ────────────────────────────────────────────────────────────
+
+function StyledTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      {...props}
+      style={{
+        width: '100%',
+        padding: '10px 12px',
+        fontSize: 14,
+        color: '#111827',
+        background: 'white',
+        border: '1px solid #e5e7eb',
+        borderRadius: 8,
+        outline: 'none',
+        resize: 'none',
+        boxSizing: 'border-box',
+        lineHeight: 1.5,
+        ...props.style,
+      }}
+      onFocus={e => { e.currentTarget.style.borderColor = BRAND; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(90,130,78,0.12)` }}
+      onBlur={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none' }}
+    />
+  )
+}
+
+// ── Styled select ──────────────────────────────────────────────────────────────
+
+function StyledSelect({
   value, onChange, required, children,
 }: {
   value: string
@@ -313,16 +518,42 @@ function SelectInput({
   children: React.ReactNode
 }) {
   return (
-    <div className="relative">
+    <div style={{ position: 'relative' }}>
       <select
         value={value}
         onChange={e => onChange(e.target.value)}
         required={required}
-        className="w-full h-10 pl-3 pr-8 border border-gray-200 rounded-lg text-sm appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent transition"
+        style={{
+          width: '100%',
+          height: 42,
+          paddingLeft: 12,
+          paddingRight: 32,
+          fontSize: 14,
+          color: '#111827',
+          background: 'white',
+          border: '1px solid #e5e7eb',
+          borderRadius: 8,
+          appearance: 'none',
+          outline: 'none',
+          cursor: 'pointer',
+          boxSizing: 'border-box',
+        }}
+        onFocus={e => { e.currentTarget.style.borderColor = BRAND; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(90,130,78,0.12)` }}
+        onBlur={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none' }}
       >
         {children}
       </select>
-      <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+      <ChevronDown
+        size={14}
+        style={{
+          position: 'absolute',
+          right: 10,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          color: '#9ca3af',
+          pointerEvents: 'none',
+        }}
+      />
     </div>
   )
 }
