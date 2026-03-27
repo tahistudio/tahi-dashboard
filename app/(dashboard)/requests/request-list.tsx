@@ -4,12 +4,12 @@ import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import {
   Plus, Search, Filter, LayoutList, Columns3,
-  AlertTriangle, ChevronDown, Inbox, MoreHorizontal,
-  Calendar, Zap, RefreshCw,
+  AlertTriangle, ChevronDown, Inbox, RefreshCw,
+  Calendar, Zap,
 } from 'lucide-react'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Request {
   id: string
@@ -27,54 +27,49 @@ interface Request {
 
 type ViewMode = 'list' | 'board'
 
-// ─── Config ───────────────────────────────────────────────────────────────────
+// ─── Config — all hex, no dynamic Tailwind classes ────────────────────────────
 
-const STATUS_CONFIG: Record<string, { label: string; dot: string; badge: string }> = {
-  draft:         { label: 'Draft',         dot: 'bg-gray-400',    badge: 'bg-gray-100 text-gray-600 border border-gray-200' },
-  submitted:     { label: 'Submitted',     dot: 'bg-blue-400',    badge: 'bg-blue-50 text-blue-700 border border-blue-100' },
-  in_review:     { label: 'In Review',     dot: 'bg-amber-400',   badge: 'bg-amber-50 text-amber-700 border border-amber-100' },
-  in_progress:   { label: 'In Progress',   dot: 'bg-green-500',   badge: 'bg-green-50 text-green-700 border border-green-100' },
-  client_review: { label: 'Client Review', dot: 'bg-purple-400',  badge: 'bg-purple-50 text-purple-700 border border-purple-100' },
-  delivered:     { label: 'Delivered',     dot: 'bg-emerald-500', badge: 'bg-emerald-50 text-emerald-700 border border-emerald-100' },
-  archived:      { label: 'Archived',      dot: 'bg-gray-300',    badge: 'bg-gray-50 text-gray-500 border border-gray-200' },
+const STATUS_CFG: Record<string, { label: string; dot: string; bg: string; text: string; border: string }> = {
+  draft:         { label: 'Draft',         dot: '#9ca3af', bg: '#f3f4f6', text: '#4b5563', border: '#e5e7eb' },
+  submitted:     { label: 'Submitted',     dot: '#60a5fa', bg: '#eff6ff', text: '#1d4ed8', border: '#dbeafe' },
+  in_review:     { label: 'In Review',     dot: '#fbbf24', bg: '#fffbeb', text: '#b45309', border: '#fde68a' },
+  in_progress:   { label: 'In Progress',   dot: '#22c55e', bg: '#f0fdf4', text: '#15803d', border: '#bbf7d0' },
+  client_review: { label: 'Client Review', dot: '#a78bfa', bg: '#f5f3ff', text: '#7c3aed', border: '#ede9fe' },
+  delivered:     { label: 'Delivered',     dot: '#10b981', bg: '#ecfdf5', text: '#065f46', border: '#a7f3d0' },
+  archived:      { label: 'Archived',      dot: '#d1d5db', bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' },
 }
 
-const PRIORITY_CONFIG: Record<string, { label: string; className: string }> = {
-  high:     { label: 'High',     className: 'bg-red-50 text-red-600 border border-red-100' },
-  standard: { label: 'Standard', className: 'bg-gray-50 text-gray-500 border border-gray-200' },
+const CAT_CFG: Record<string, { bg: string; color: string }> = {
+  design:      { bg: '#fce7f3', color: '#be185d' },
+  development: { bg: '#dbeafe', color: '#1d4ed8' },
+  content:     { bg: '#fef3c7', color: '#b45309' },
+  strategy:    { bg: '#f3e8ff', color: '#7e22ce' },
+  admin:       { bg: '#f3f4f6', color: '#4b5563' },
+  bug:         { bg: '#fee2e2', color: '#dc2626' },
 }
 
-const BOARD_COLUMNS = [
-  { status: 'submitted',     colorClass: 'border-t-blue-400' },
-  { status: 'in_review',     colorClass: 'border-t-amber-400' },
-  { status: 'in_progress',   colorClass: 'border-t-green-400' },
-  { status: 'client_review', colorClass: 'border-t-purple-400' },
-  { status: 'delivered',     colorClass: 'border-t-emerald-400' },
+const BOARD_COLS = [
+  { status: 'submitted',     topColor: '#60a5fa' },
+  { status: 'in_review',     topColor: '#fbbf24' },
+  { status: 'in_progress',   topColor: '#22c55e' },
+  { status: 'client_review', topColor: '#a78bfa' },
+  { status: 'delivered',     topColor: '#10b981' },
 ]
 
 const ADMIN_TABS = [
-  { label: 'Open',           value: 'active' },
-  { label: 'All',            value: 'all' },
-  { label: 'Unassigned',     value: 'unassigned' },
-  { label: 'Completed',      value: 'delivered' },
+  { label: 'Open',       value: 'active'     },
+  { label: 'All',        value: 'all'        },
+  { label: 'Unassigned', value: 'unassigned' },
+  { label: 'Completed',  value: 'delivered'  },
 ]
 
 const CLIENT_TABS = [
-  { label: 'Active',    value: 'active' },
-  { label: 'Completed', value: 'delivered' },
-  { label: 'All',       value: 'all' },
+  { label: 'Active',    value: 'active'   },
+  { label: 'Completed', value: 'delivered'},
+  { label: 'All',       value: 'all'      },
 ]
 
-const CATEGORY_COLOURS: Record<string, string> = {
-  design:      'bg-pink-100 text-pink-700',
-  development: 'bg-blue-100 text-blue-700',
-  content:     'bg-amber-100 text-amber-700',
-  strategy:    'bg-purple-100 text-purple-700',
-  admin:       'bg-gray-100 text-gray-600',
-  bug:         'bg-red-100 text-red-700',
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatRelative(dateStr: string | null): string {
   if (!dateStr) return '—'
@@ -92,9 +87,7 @@ function formatRelative(dateStr: string | null): string {
     if (diffDays < 7) return `${diffDays}d ago`
     if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`
     return date.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })
-  } catch {
-    return '—'
-  }
+  } catch { return '—' }
 }
 
 function formatType(type: string) {
@@ -105,40 +98,44 @@ function getInitials(name: string): string {
   return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
-// ─── Status Badge ─────────────────────────────────────────────────────────────
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function StatusPill({ status }: { status: string }) {
-  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.submitted
+  const c = STATUS_CFG[status] ?? STATUS_CFG.submitted
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${cfg.badge}`}>
-      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
-      {cfg.label}
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full text-xs font-medium whitespace-nowrap"
+      style={{ padding: '2px 8px', background: c.bg, color: c.text, border: `1px solid ${c.border}` }}
+    >
+      <span
+        className="rounded-full flex-shrink-0"
+        style={{ width: 6, height: 6, background: c.dot, display: 'inline-block' }}
+      />
+      {c.label}
     </span>
   )
 }
-
-// ─── Priority Badge ───────────────────────────────────────────────────────────
 
 function PriorityBadge({ priority }: { priority: string | null }) {
   if (!priority || priority === 'standard') {
-    return <span className="text-xs text-gray-400">—</span>
+    return <span className="text-xs" style={{ color: '#9ca3af' }}>—</span>
   }
-  const cfg = PRIORITY_CONFIG[priority] ?? PRIORITY_CONFIG.standard
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.className}`}>
-      {priority === 'high' && <Zap className="w-2.5 h-2.5" />}
-      {cfg.label}
+    <span
+      className="inline-flex items-center gap-1 rounded-full text-xs font-medium"
+      style={{ padding: '2px 8px', background: '#fef2f2', color: '#dc2626', border: '1px solid #fee2e2' }}
+    >
+      <Zap className="w-2.5 h-2.5" />
+      High
     </span>
   )
 }
 
-// ─── Avatar ───────────────────────────────────────────────────────────────────
-
-function Avatar({ name, size = 'sm' }: { name: string; size?: 'sm' | 'md' }) {
-  const dim = size === 'sm' ? 'w-6 h-6 text-[10px]' : 'w-8 h-8 text-xs'
+function OrgAvatar({ name }: { name: string }) {
   return (
     <div
-      className={`${dim} rounded-full bg-[var(--color-brand)] text-white flex items-center justify-center font-semibold flex-shrink-0`}
+      className="rounded-full flex items-center justify-center font-semibold flex-shrink-0"
+      style={{ width: 22, height: 22, fontSize: 9, background: '#5A824E', color: 'white' }}
     >
       {getInitials(name)}
     </div>
@@ -190,74 +187,95 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
         isAdmin={isAdmin}
       />
 
-      {/* Full-bleed layout: break out of the p-6 from layout */}
-      <div className="-mx-6 -mt-6">
+      {/* Page header */}
+      <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
+        <h1 className="text-xl font-bold" style={{ color: '#111827' }}>Requests</h1>
+        <button
+          onClick={() => setDialogOpen(true)}
+          className="flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+          style={{ padding: '8px 16px', background: '#5A824E', borderRadius: 6 }}
+        >
+          <Plus className="w-4 h-4" />
+          Create Request
+        </button>
+      </div>
 
-        {/* Page header */}
-        <div className="px-6 pt-6 pb-4 flex items-center justify-between bg-[var(--color-bg)]">
-          <h1 className="text-xl font-bold text-[var(--color-text)]">Requests</h1>
-          <button
-            onClick={() => setDialogOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-lg transition-colors hover:opacity-90"
-            style={{ background: 'var(--color-brand)', borderRadius: 'var(--radius-button)' }}
-          >
-            <Plus className="w-4 h-4" />
-            Create Request
-          </button>
-        </div>
+      {/* Main card */}
+      <div
+        className="overflow-hidden"
+        style={{
+          background: 'white',
+          border: '1px solid #e5e7eb',
+          borderRadius: 12,
+          boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+        }}
+      >
 
         {/* Toolbar */}
-        <div className="px-6 pb-3 flex items-center gap-2 bg-[var(--color-bg)]">
+        <div
+          className="flex items-center gap-2"
+          style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6', background: 'white' }}
+        >
           {/* Search */}
-          <div className="relative max-w-xs w-full">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-subtle)] pointer-events-none" />
+          <div className="relative flex-shrink-0" style={{ width: 260 }}>
+            <Search
+              className="absolute top-1/2 pointer-events-none"
+              style={{ left: 10, transform: 'translateY(-50%)', width: 14, height: 14, color: '#9ca3af' }}
+            />
             <input
               type="text"
               placeholder="Search requests..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg focus:outline-none focus:border-[var(--color-brand)] placeholder:text-[var(--color-text-subtle)]"
+              className="w-full text-sm focus:outline-none"
               style={{
-                background: 'var(--color-bg-secondary)',
-                border: '1px solid var(--color-border)',
-                color: 'var(--color-text)',
-                borderRadius: 'var(--radius-input)',
+                paddingTop: 7,
+                paddingBottom: 7,
+                paddingLeft: 32,
+                paddingRight: 12,
+                border: '1px solid #e5e7eb',
+                borderRadius: 8,
+                background: '#f9fafb',
+                color: '#111827',
               }}
             />
           </div>
 
-          {/* Filters */}
+          {/* Filter */}
           <button
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors hover:border-[var(--color-brand)] hover:text-[var(--color-text)]"
+            className="flex items-center gap-1.5 text-sm font-medium flex-shrink-0 transition-colors"
             style={{
-              border: '1px solid var(--color-border)',
-              color: 'var(--color-text-muted)',
-              background: 'var(--color-bg)',
-              borderRadius: 'var(--radius-button)',
+              padding: '7px 12px',
+              border: '1px solid #e5e7eb',
+              borderRadius: 8,
+              color: '#6b7280',
+              background: 'white',
+              cursor: 'pointer',
             }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = '#5A824E'; e.currentTarget.style.color = '#374151' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.color = '#6b7280' }}
           >
             <Filter className="w-3.5 h-3.5" />
             Filters
             <ChevronDown className="w-3 h-3 opacity-50" />
           </button>
 
-          {/* Spacer */}
           <div className="flex-1" />
 
           {/* View toggle */}
           <div
-            className="flex items-center overflow-hidden"
-            style={{
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-button)',
-            }}
+            className="flex items-center overflow-hidden flex-shrink-0"
+            style={{ border: '1px solid #e5e7eb', borderRadius: 8 }}
           >
             <button
               onClick={() => setView('list')}
-              className="p-2 transition-colors"
+              className="flex items-center justify-center transition-colors"
               style={{
-                background: view === 'list' ? 'var(--color-brand)' : 'var(--color-bg)',
-                color: view === 'list' ? 'white' : 'var(--color-text-muted)',
+                padding: 8,
+                background: view === 'list' ? '#5A824E' : 'white',
+                color: view === 'list' ? 'white' : '#6b7280',
+                cursor: 'pointer',
+                border: 'none',
               }}
               title="List view"
             >
@@ -265,10 +283,15 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
             </button>
             <button
               onClick={() => setView('board')}
-              className="p-2 transition-colors"
+              className="flex items-center justify-center transition-colors"
               style={{
-                background: view === 'board' ? 'var(--color-brand)' : 'var(--color-bg)',
-                color: view === 'board' ? 'white' : 'var(--color-text-muted)',
+                padding: 8,
+                background: view === 'board' ? '#5A824E' : 'white',
+                color: view === 'board' ? 'white' : '#6b7280',
+                borderLeft: '1px solid #e5e7eb',
+                cursor: 'pointer',
+                border: 'none',
+                borderLeft: '1px solid #e5e7eb',
               }}
               title="Board view"
             >
@@ -279,30 +302,37 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
 
         {/* Tabs */}
         <div
-          className="flex items-end gap-0 overflow-x-auto px-6 bg-[var(--color-bg)]"
-          style={{ borderBottom: '1px solid var(--color-border)' }}
+          className="flex items-end overflow-x-auto"
+          style={{ borderBottom: '1px solid #e5e7eb', paddingLeft: 4, paddingRight: 16, background: 'white' }}
         >
           {tabs.map(tab => (
             <button
               key={tab.value}
               onClick={() => setActiveTab(tab.value)}
-              className="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors flex-shrink-0"
-              style={
-                activeTab === tab.value
-                  ? { borderColor: 'var(--color-brand)', color: 'var(--color-brand-dark)' }
-                  : { borderColor: 'transparent', color: 'var(--color-text-muted)' }
-              }
+              className="text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors"
+              style={{
+                padding: '10px 16px',
+                border: 0,
+                borderBottom: activeTab === tab.value ? '2px solid #5A824E' : '2px solid transparent',
+                marginBottom: -1,
+                color: activeTab === tab.value ? '#425F39' : '#6b7280',
+                background: 'transparent',
+                cursor: 'pointer',
+              }}
             >
               {tab.label}
             </button>
           ))}
           {loading && (
-            <RefreshCw className="w-3.5 h-3.5 text-[var(--color-text-subtle)] animate-spin ml-2 mb-3 flex-shrink-0" />
+            <RefreshCw
+              className="animate-spin flex-shrink-0"
+              style={{ width: 14, height: 14, color: '#9ca3af', marginLeft: 8, marginBottom: 12 }}
+            />
           )}
         </div>
 
-        {/* Content */}
-        <div className="px-6 pt-4 pb-8 bg-[var(--color-bg-secondary)] min-h-[60vh]">
+        {/* Content area */}
+        <div style={{ background: view === 'board' ? '#f9fafb' : 'white' }}>
           {loading ? (
             <LoadingSkeleton />
           ) : filtered.length === 0 ? (
@@ -321,42 +351,39 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
 // ─── List View ────────────────────────────────────────────────────────────────
 
 function ListView({ requests, isAdmin }: { requests: Request[]; isAdmin: boolean }) {
+  const cols = isAdmin
+    ? '1fr 120px 140px 130px 80px 90px'
+    : '1fr 140px 130px 80px 90px'
+
   return (
-    <div
-      className="overflow-hidden"
-      style={{
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-card)',
-      }}
-    >
+    <div>
       {/* Table header */}
       <div
-        className="grid text-xs font-semibold uppercase tracking-wide px-4 py-3"
+        className="grid text-xs font-semibold uppercase tracking-wide"
         style={{
-          gridTemplateColumns: isAdmin
-            ? '1fr 110px 130px 120px 80px 90px'
-            : '1fr 130px 120px 80px 90px',
-          borderBottom: '1px solid var(--color-border)',
-          color: 'var(--color-text-subtle)',
-          background: 'var(--color-bg-secondary)',
+          gridTemplateColumns: cols,
+          padding: '10px 16px',
+          borderBottom: '1px solid #f3f4f6',
+          color: '#9ca3af',
+          background: '#f9fafb',
         }}
       >
         <span>Title</span>
         {isAdmin && <span>Client</span>}
-        <span>Category</span>
+        <span>Type</span>
         <span>Status</span>
         <span>Priority</span>
         <span>Updated</span>
       </div>
 
       {/* Rows */}
-      <div style={{ borderRadius: '0 0 var(--radius-card) var(--radius-card)' }}>
+      <div>
         {requests.map((req, i) => (
           <ListRow
             key={req.id}
             req={req}
             isAdmin={isAdmin}
+            cols={cols}
             isLast={i === requests.length - 1}
           />
         ))}
@@ -368,35 +395,38 @@ function ListView({ requests, isAdmin }: { requests: Request[]; isAdmin: boolean
 function ListRow({
   req,
   isAdmin,
+  cols,
   isLast,
 }: {
   req: Request
   isAdmin: boolean
+  cols: string
   isLast: boolean
 }) {
-  const catColour = CATEGORY_COLOURS[req.category ?? ''] ?? 'bg-gray-100 text-gray-600'
+  const cat = CAT_CFG[req.category ?? ''] ?? { bg: '#f3f4f6', color: '#4b5563' }
 
   return (
     <Link
       href={`/requests/${req.id}`}
-      className="grid items-center px-4 py-3 transition-colors group"
+      className="grid items-center"
       style={{
-        gridTemplateColumns: isAdmin
-          ? '1fr 110px 130px 120px 80px 90px'
-          : '1fr 130px 120px 80px 90px',
-        borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
+        gridTemplateColumns: cols,
+        padding: '12px 16px',
+        borderBottom: isLast ? 'none' : '1px solid #f9fafb',
+        textDecoration: 'none',
+        background: 'white',
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+      onMouseEnter={e => { e.currentTarget.style.background = '#fafafa' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'white' }}
     >
       {/* Title */}
-      <div className="flex items-center gap-2 min-w-0 pr-3">
+      <div className="flex items-center gap-2 min-w-0" style={{ paddingRight: 12 }}>
         {req.scopeFlagged && (
-          <AlertTriangle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" aria-label="Scope flagged" />
+          <AlertTriangle style={{ width: 14, height: 14, color: '#f87171', flexShrink: 0 }} aria-label="Scope flagged" />
         )}
         <span
-          className="text-sm font-medium truncate transition-colors"
-          style={{ color: 'var(--color-text)' }}
+          className="text-sm font-medium truncate"
+          style={{ color: '#111827' }}
         >
           {req.title}
         </span>
@@ -404,30 +434,36 @@ function ListRow({
 
       {/* Client (admin only) */}
       {isAdmin && (
-        <span className="text-sm truncate pr-3" style={{ color: 'var(--color-text-muted)' }}>
-          {req.orgName ?? '—'}
-        </span>
+        <div className="flex items-center gap-1.5 min-w-0" style={{ paddingRight: 12 }}>
+          {req.orgName && <OrgAvatar name={req.orgName} />}
+          <span className="text-sm truncate" style={{ color: '#6b7280', fontSize: 13 }}>
+            {req.orgName ?? '—'}
+          </span>
+        </div>
       )}
 
-      {/* Category */}
-      <div className="pr-3">
-        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${catColour}`}>
+      {/* Type */}
+      <div style={{ paddingRight: 12 }}>
+        <span
+          className="inline-flex items-center rounded text-xs font-medium"
+          style={{ padding: '2px 8px', background: cat.bg, color: cat.color }}
+        >
           {formatType(req.type)}
         </span>
       </div>
 
       {/* Status */}
-      <div className="pr-3">
+      <div style={{ paddingRight: 12 }}>
         <StatusPill status={req.status} />
       </div>
 
       {/* Priority */}
-      <div className="pr-3">
+      <div style={{ paddingRight: 12 }}>
         <PriorityBadge priority={req.priority} />
       </div>
 
       {/* Updated */}
-      <span className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+      <span className="text-xs" style={{ color: '#9ca3af' }}>
         {formatRelative(req.updatedAt ?? req.createdAt)}
       </span>
     </Link>
@@ -440,57 +476,73 @@ function BoardView({ requests }: { requests: Request[] }) {
   const byStatus = (status: string) => requests.filter(r => r.status === status)
 
   return (
-    <div className="flex gap-4 overflow-x-auto pb-4 -mx-6 px-6">
-      {BOARD_COLUMNS.map(col => {
+    <div
+      className="flex gap-3 overflow-x-auto"
+      style={{ padding: 16, paddingBottom: 20, background: '#f9fafb' }}
+    >
+      {BOARD_COLS.map(col => {
         const cards = byStatus(col.status)
-        const cfg = STATUS_CONFIG[col.status]
+        const cfg = STATUS_CFG[col.status]
         return (
           <div
             key={col.status}
-            className="flex-shrink-0 w-72 flex flex-col"
-            style={{ minWidth: '17rem' }}
+            className="flex flex-col flex-shrink-0"
+            style={{ width: 272 }}
           >
             {/* Column header */}
             <div
-              className={`px-3 py-2.5 rounded-t-xl border-t-2 ${col.colorClass} flex items-center justify-between`}
+              className="flex items-center justify-between"
               style={{
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
-                borderTopWidth: '2px',
+                padding: '10px 12px',
+                background: 'white',
+                border: '1px solid #e5e7eb',
+                borderBottom: 'none',
+                borderRadius: '8px 8px 0 0',
+                borderTop: `3px solid ${col.topColor}`,
               }}
             >
               <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg.dot}`} />
-                <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-muted)' }}>
+                <span
+                  className="rounded-full flex-shrink-0"
+                  style={{ width: 8, height: 8, background: cfg.dot, display: 'inline-block' }}
+                />
+                <span
+                  className="text-xs font-semibold uppercase tracking-wide"
+                  style={{ color: '#6b7280' }}
+                >
                   {cfg.label}
                 </span>
               </div>
               <span
-                className="text-xs font-semibold px-1.5 py-0.5 rounded-full"
-                style={{
-                  background: 'var(--color-bg-secondary)',
-                  color: 'var(--color-text-subtle)',
-                }}
+                className="text-xs font-semibold rounded-full"
+                style={{ padding: '2px 7px', background: '#f3f4f6', color: '#9ca3af' }}
               >
                 {cards.length}
               </span>
             </div>
 
-            {/* Cards */}
+            {/* Cards area */}
             <div
-              className="flex flex-col gap-2 p-2 flex-1 rounded-b-xl overflow-y-auto"
+              className="flex flex-col gap-2 overflow-y-auto"
               style={{
-                background: 'var(--color-bg-secondary)',
-                border: '1px solid var(--color-border)',
+                padding: 8,
+                background: '#f3f4f6',
+                border: '1px solid #e5e7eb',
                 borderTop: 'none',
-                minHeight: '12rem',
-                maxHeight: '70vh',
+                borderRadius: '0 0 8px 8px',
+                minHeight: 160,
+                maxHeight: '68vh',
               }}
             >
               {cards.length === 0 ? (
                 <div
-                  className="flex items-center justify-center py-8 text-xs rounded-lg"
-                  style={{ color: 'var(--color-text-subtle)', border: '1px dashed var(--color-border)' }}
+                  className="flex items-center justify-center rounded-lg text-xs"
+                  style={{
+                    padding: '28px 0',
+                    color: '#9ca3af',
+                    border: '1px dashed #d1d5db',
+                    background: 'transparent',
+                  }}
                 >
                   No requests
                 </div>
@@ -506,35 +558,40 @@ function BoardView({ requests }: { requests: Request[] }) {
 }
 
 function KanbanCard({ req }: { req: Request }) {
-  const catColour = CATEGORY_COLOURS[req.category ?? ''] ?? 'bg-gray-100 text-gray-600'
+  const cat = CAT_CFG[req.category ?? ''] ?? { bg: '#f3f4f6', color: '#4b5563' }
 
   return (
     <Link
       href={`/requests/${req.id}`}
-      className="block p-3 rounded-lg transition-all group"
+      className="block rounded-lg transition-all"
       style={{
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border)',
-        boxShadow: 'var(--shadow-sm)',
+        padding: 12,
+        background: 'white',
+        border: '1px solid #e5e7eb',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        textDecoration: 'none',
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
-      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = '#5A824E'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)' }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)' }}
     >
-      {/* Category pill */}
-      <div className="mb-2">
-        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${catColour}`}>
+      {/* Type pill */}
+      <div style={{ marginBottom: 8 }}>
+        <span
+          className="inline-flex items-center rounded text-xs font-medium"
+          style={{ padding: '2px 7px', background: cat.bg, color: cat.color }}
+        >
           {formatType(req.type)}
         </span>
       </div>
 
       {/* Title */}
-      <div className="flex items-start gap-1.5 mb-3">
+      <div className="flex items-start gap-1.5" style={{ marginBottom: 10 }}>
         {req.scopeFlagged && (
-          <AlertTriangle className="w-3 h-3 text-red-400 flex-shrink-0 mt-0.5" />
+          <AlertTriangle style={{ width: 12, height: 12, color: '#f87171', flexShrink: 0, marginTop: 2 }} />
         )}
         <p
           className="text-sm font-medium leading-snug line-clamp-2"
-          style={{ color: 'var(--color-text)' }}
+          style={{ color: '#111827' }}
         >
           {req.title}
         </p>
@@ -542,54 +599,47 @@ function KanbanCard({ req }: { req: Request }) {
 
       {/* Footer */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
           {req.orgName && (
-            <span className="text-xs truncate max-w-[100px]" style={{ color: 'var(--color-text-subtle)' }}>
-              {req.orgName}
-            </span>
+            <>
+              <OrgAvatar name={req.orgName} />
+              <span className="text-xs truncate" style={{ color: '#9ca3af', maxWidth: 90 }}>
+                {req.orgName}
+              </span>
+            </>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 flex-shrink-0">
           <PriorityBadge priority={req.priority} />
-          <div className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-subtle)' }}>
-            <Calendar className="w-3 h-3" />
-            <span>{formatRelative(req.updatedAt ?? req.createdAt)}</span>
-          </div>
+          <span className="text-xs flex items-center gap-1" style={{ color: '#9ca3af' }}>
+            <Calendar style={{ width: 11, height: 11 }} />
+            {formatRelative(req.updatedAt ?? req.createdAt)}
+          </span>
         </div>
       </div>
     </Link>
   )
 }
 
-// ─── Loading skeleton ────────────────────────────────────────────────────────
+// ─── Loading skeleton ─────────────────────────────────────────────────────────
 
 function LoadingSkeleton() {
   return (
-    <div
-      className="overflow-hidden"
-      style={{
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-card)',
-      }}
-    >
-      <div
-        className="h-10"
-        style={{
-          background: 'var(--color-bg-secondary)',
-          borderBottom: '1px solid var(--color-border)',
-        }}
-      />
+    <div>
+      <div style={{ height: 40, background: '#f9fafb', borderBottom: '1px solid #f3f4f6' }} />
       {[...Array(5)].map((_, i) => (
         <div
           key={i}
-          className="px-4 py-3.5 flex items-center gap-4 animate-pulse"
-          style={{ borderBottom: i < 4 ? '1px solid var(--color-border-subtle)' : 'none' }}
+          className="flex items-center gap-4 animate-pulse"
+          style={{
+            padding: '14px 16px',
+            borderBottom: i < 4 ? '1px solid #f9fafb' : 'none',
+          }}
         >
-          <div className="h-4 rounded flex-1" style={{ background: 'var(--color-bg-tertiary)' }} />
-          <div className="h-4 rounded w-24" style={{ background: 'var(--color-bg-tertiary)' }} />
-          <div className="h-5 rounded-full w-20" style={{ background: 'var(--color-bg-tertiary)' }} />
-          <div className="h-4 rounded w-16" style={{ background: 'var(--color-bg-tertiary)' }} />
+          <div className="h-4 rounded flex-1" style={{ background: '#f3f4f6' }} />
+          <div className="h-4 rounded" style={{ background: '#f3f4f6', width: 96 }} />
+          <div className="h-5 rounded-full" style={{ background: '#f3f4f6', width: 80 }} />
+          <div className="h-4 rounded" style={{ background: '#f3f4f6', width: 64 }} />
         </div>
       ))}
     </div>
@@ -601,32 +651,34 @@ function LoadingSkeleton() {
 function EmptyState({ isAdmin, onNew }: { isAdmin: boolean; onNew: () => void }) {
   return (
     <div
-      className="flex flex-col items-center justify-center py-20 text-center"
-      style={{
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-card)',
-      }}
+      className="flex flex-col items-center justify-center text-center"
+      style={{ padding: '64px 24px', background: 'white' }}
     >
       <div
-        className="w-14 h-14 brand-gradient flex items-center justify-center mb-4"
-        style={{ borderRadius: 'var(--radius-leaf)' }}
+        className="flex items-center justify-center"
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: '0 12px 0 12px',
+          background: 'linear-gradient(135deg, #5A824E, #425F39)',
+          marginBottom: 16,
+        }}
       >
-        <Inbox className="w-7 h-7 text-white" />
+        <Inbox style={{ width: 28, height: 28, color: 'white' }} />
       </div>
-      <h3 className="text-base font-semibold mb-2" style={{ color: 'var(--color-text)' }}>
+      <h3 className="text-base font-semibold" style={{ color: '#111827', marginBottom: 8 }}>
         No requests found
       </h3>
-      <p className="text-sm max-w-sm mb-5" style={{ color: 'var(--color-text-muted)' }}>
+      <p className="text-sm" style={{ color: '#6b7280', maxWidth: 320, marginBottom: 20 }}>
         {isAdmin
           ? 'Requests will appear here once clients start submitting work.'
-          : "Submit your first request and the Tahi team will get started."}
+          : 'Submit your first request and the Tahi team will get started.'}
       </p>
       {!isAdmin && (
         <button
           onClick={onNew}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-lg transition-opacity hover:opacity-90"
-          style={{ background: 'var(--color-brand)', borderRadius: 'var(--radius-button)' }}
+          className="flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+          style={{ padding: '8px 16px', background: '#5A824E', borderRadius: 6, border: 'none', cursor: 'pointer' }}
         >
           <Plus className="w-4 h-4" />
           Submit a request
