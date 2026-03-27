@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { X, Loader2, ChevronDown, Zap, CheckCircle2 } from 'lucide-react'
+import { apiPath } from '@/lib/api'
+import { X, Loader2, Zap, CheckCircle2, Lock, Layers, AlignLeft } from 'lucide-react'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const BRAND     = '#5A824E'
-const BRAND_DRK = '#425F39'
+const BRAND     = 'var(--color-brand)'
+const BRAND_HEX = '#5A824E'   // keep one hex only for box-shadow alpha
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -20,16 +21,26 @@ interface NewRequestDialogProps {
   open: boolean
   onClose: () => void
   isAdmin: boolean
+  /** Portal only: does the client's plan allow large_task requests? */
+  canUseLargeTrack?: boolean
 }
 
 const REQUEST_TYPES = [
-  { value: 'small_task',     label: 'Small task',     desc: '≤ 1 day'       },
-  { value: 'large_task',     label: 'Large task',     desc: 'Multi-day'     },
-  { value: 'bug_fix',        label: 'Bug fix',        desc: 'Fix only'      },
-  { value: 'content_update', label: 'Content update', desc: 'Copy / images' },
-  { value: 'new_feature',    label: 'New feature',    desc: 'New section'   },
-  { value: 'consultation',   label: 'Consultation',   desc: 'Strategy'      },
-  { value: 'custom',         label: 'Custom',         desc: 'Free-form'     },
+  {
+    value: 'small_task',
+    label: 'Small task',
+    desc: '≤ 1 day',
+    icon: AlignLeft,
+    hint: 'Content updates, bug fixes, quick changes',
+  },
+  {
+    value: 'large_task',
+    label: 'Large task',
+    desc: 'Multi-day',
+    icon: Layers,
+    hint: 'New features, redesigns, complex builds',
+    requiresScale: true,
+  },
 ]
 
 const CATEGORIES = [
@@ -38,12 +49,14 @@ const CATEGORIES = [
   { value: 'content',     label: 'Content'     },
   { value: 'strategy',    label: 'Strategy'    },
   { value: 'admin',       label: 'Admin'       },
-  { value: 'bug',         label: 'Bug'         },
+  { value: 'bug',         label: 'Bug fix'     },
 ]
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogProps) {
+export function NewRequestDialog({
+  open, onClose, isAdmin, canUseLargeTrack = true,
+}: NewRequestDialogProps) {
   const router = useRouter()
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -59,12 +72,15 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
   const [category, setCategory] = useState('development')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState('standard')
+  const [startDate, setStartDate] = useState('')
+  const [dueDate, setDueDate] = useState('')
+  const [estimatedHours, setEstimatedHours] = useState('')
 
   // Load client list for admin
   useEffect(() => {
     if (!open || !isAdmin) return
     setClientsLoading(true)
-    fetch('/api/admin/clients?status=active')
+    fetch(apiPath('/api/admin/clients?status=active'))
       .then(r => r.json() as Promise<{ organisations: OrgOption[] }>)
       .then(data => setClients(data.organisations ?? []))
       .catch(() => setClients([]))
@@ -79,6 +95,9 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
       setCategory('development')
       setDescription('')
       setPriority('standard')
+      setStartDate('')
+      setDueDate('')
+      setEstimatedHours('')
       setClientOrgId('')
       setError(null)
     }
@@ -95,9 +114,14 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
     setSubmitting(true)
 
     try {
-      const url = isAdmin ? '/api/admin/requests' : '/api/portal/requests'
+      const url = isAdmin ? apiPath('/api/admin/requests') : apiPath('/api/portal/requests')
       const body = isAdmin
-        ? { clientOrgId, title: title.trim(), type, category, description, priority }
+        ? {
+            clientOrgId, title: title.trim(), type, category, description, priority,
+            startDate: startDate || null,
+            dueDate: dueDate || null,
+            estimatedHours: estimatedHours ? Number(estimatedHours) : null,
+          }
         : { title: title.trim(), type, category, description }
 
       const res = await fetch(url, {
@@ -143,9 +167,9 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
           position: 'fixed',
           top: 0, right: 0, bottom: 0,
           width: '100%',
-          maxWidth: 520,
-          background: 'white',
-          boxShadow: '-8px 0 40px rgba(0,0,0,0.15)',
+          maxWidth: '32.5rem',
+          background: 'var(--color-bg)',
+          boxShadow: 'var(--shadow-lg)',
           zIndex: 50,
           display: 'flex',
           flexDirection: 'column',
@@ -158,16 +182,16 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'space-between',
-            padding: '20px 24px',
-            borderBottom: '1px solid #f3f4f6',
+            padding: '1.25rem 1.5rem',
+            borderBottom: '1px solid var(--color-border-subtle)',
             flexShrink: 0,
           }}
         >
           <div>
-            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#111827', margin: 0 }}>
+            <h2 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
               {isAdmin ? 'Create a request' : 'Submit a request'}
             </h2>
-            <p style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
               {isAdmin
                 ? 'Create a request on behalf of a client.'
                 : "Tell us what you need and we'll get started."}
@@ -176,20 +200,20 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
           <button
             onClick={onClose}
             style={{
-              padding: 6,
-              borderRadius: 8,
+              padding: '0.375rem',
+              borderRadius: 'var(--radius-button)',
               border: 'none',
               background: 'transparent',
-              color: '#9ca3af',
+              color: 'var(--color-text-subtle)',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               flexShrink: 0,
-              marginLeft: 12,
+              marginLeft: '0.75rem',
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#f3f4f6'; e.currentTarget.style.color = '#374151' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#9ca3af' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)'; e.currentTarget.style.color = 'var(--color-text)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
             aria-label="Close"
           >
             <X size={18} />
@@ -198,30 +222,27 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
 
         {/* Scrollable form body */}
         <form
+          id="new-request-form"
           onSubmit={handleSubmit}
-          style={{ flex: 1, overflowY: 'auto', padding: '24px' }}
+          style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
             {/* Client selector (admin only) */}
             {isAdmin && (
               <FieldGroup label="Client" required>
                 {clientsLoading ? (
                   <div style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    height: 42, padding: '0 12px',
-                    border: '1px solid #e5e7eb', borderRadius: 8,
-                    fontSize: 13, color: '#9ca3af',
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    height: '2.625rem', padding: '0 0.75rem',
+                    border: '1px solid var(--color-border)', borderRadius: 'var(--radius-input)',
+                    fontSize: '0.8125rem', color: 'var(--color-text-subtle)',
                   }}>
                     <Loader2 size={13} className="animate-spin" />
                     Loading clients…
                   </div>
                 ) : (
-                  <StyledSelect
-                    value={clientOrgId}
-                    onChange={setClientOrgId}
-                    required
-                  >
+                  <StyledSelect value={clientOrgId} onChange={setClientOrgId} required>
                     <option value="" disabled>Select a client…</option>
                     {clients.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
@@ -243,57 +264,93 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
               />
             </FieldGroup>
 
-            {/* Type tiles */}
-            <FieldGroup label="Type">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                {REQUEST_TYPES.map(t => (
-                  <button
-                    key={t.value}
-                    type="button"
-                    onClick={() => setType(t.value)}
-                    style={{
-                      padding: '10px 8px',
-                      borderRadius: 8,
-                      border: type === t.value ? `2px solid ${BRAND}` : '1px solid #e5e7eb',
-                      background: type === t.value ? '#f0f7ee' : 'white',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      transition: 'all 0.1s',
-                      position: 'relative',
-                    }}
-                    onMouseEnter={e => {
-                      if (type !== t.value) {
-                        e.currentTarget.style.borderColor = '#c6dbc0'
-                        e.currentTarget.style.background = '#fafafa'
-                      }
-                    }}
-                    onMouseLeave={e => {
-                      if (type !== t.value) {
-                        e.currentTarget.style.borderColor = '#e5e7eb'
-                        e.currentTarget.style.background = 'white'
-                      }
-                    }}
-                  >
-                    {type === t.value && (
-                      <CheckCircle2
-                        size={13}
-                        style={{
-                          position: 'absolute', top: 6, right: 6,
-                          color: BRAND,
-                        }}
-                      />
-                    )}
-                    <p style={{ fontSize: 12, fontWeight: 600, color: type === t.value ? BRAND_DRK : '#374151', marginBottom: 1 }}>
-                      {t.label}
-                    </p>
-                    <p style={{ fontSize: 11, color: '#9ca3af' }}>{t.desc}</p>
-                  </button>
-                ))}
+            {/* Type tiles — 2 options only */}
+            <FieldGroup label="Task size">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.625rem' }}>
+                {REQUEST_TYPES.map(t => {
+                  const locked = !isAdmin && t.requiresScale && !canUseLargeTrack
+                  const active = type === t.value
+                  const Icon = t.icon
+                  return (
+                    <button
+                      key={t.value}
+                      type="button"
+                      disabled={locked}
+                      onClick={() => !locked && setType(t.value)}
+                      style={{
+                        padding: '0.875rem 0.75rem',
+                        borderRadius: 'var(--radius-card)',
+                        border: active
+                          ? `2px solid var(--color-brand)`
+                          : locked
+                            ? `2px solid var(--color-border-subtle)`
+                            : `2px solid var(--color-border)`,
+                        background: active
+                          ? 'var(--color-brand-50)'
+                          : locked
+                            ? 'var(--color-bg-secondary)'
+                            : 'var(--color-bg)',
+                        cursor: locked ? 'not-allowed' : 'pointer',
+                        textAlign: 'left',
+                        opacity: locked ? 0.6 : 1,
+                        transition: 'border-color 0.1s, background 0.1s',
+                        position: 'relative',
+                      }}
+                      onMouseEnter={e => {
+                        if (!active && !locked) {
+                          e.currentTarget.style.borderColor = 'var(--color-brand-200)'
+                          e.currentTarget.style.background = 'var(--color-bg-secondary)'
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!active && !locked) {
+                          e.currentTarget.style.borderColor = 'var(--color-border)'
+                          e.currentTarget.style.background = 'var(--color-bg)'
+                        }
+                      }}
+                    >
+                      {active && (
+                        <CheckCircle2
+                          size={13}
+                          style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', color: BRAND_HEX }}
+                        />
+                      )}
+                      {locked && (
+                        <Lock
+                          size={12}
+                          style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', color: 'var(--color-text-subtle)' }}
+                        />
+                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.3125rem' }}>
+                        <Icon size={14} style={{ color: active ? BRAND_HEX : 'var(--color-text-muted)', flexShrink: 0 }} />
+                        <p style={{
+                          fontSize: '0.8125rem', fontWeight: 600,
+                          color: active ? 'var(--color-brand-dark)' : 'var(--color-text)',
+                          margin: 0,
+                        }}>
+                          {t.label}
+                        </p>
+                        <span style={{
+                          fontSize: '0.6875rem', fontWeight: 500,
+                          color: active ? 'var(--color-brand)' : 'var(--color-text-subtle)',
+                          background: active ? 'var(--color-brand-100)' : 'var(--color-bg-tertiary)',
+                          padding: '0.0625rem 0.375rem',
+                          borderRadius: 'var(--radius-full)',
+                        }}>
+                          {t.desc}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', margin: 0, lineHeight: 1.4 }}>
+                        {locked ? 'Scale plan required' : t.hint}
+                      </p>
+                    </button>
+                  )
+                })}
               </div>
             </FieldGroup>
 
             {/* Category + Priority row */}
-            <div style={{ display: 'grid', gridTemplateColumns: isAdmin ? '1fr 1fr' : '1fr', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isAdmin ? '1fr 1fr' : '1fr', gap: '1rem' }}>
               <FieldGroup label="Category">
                 <StyledSelect value={category} onChange={setCategory}>
                   {CATEGORIES.map(c => (
@@ -304,7 +361,7 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
 
               {isAdmin && (
                 <FieldGroup label="Priority">
-                  <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
                     {(['standard', 'high'] as const).map(p => (
                       <button
                         key={p}
@@ -312,24 +369,24 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
                         onClick={() => setPriority(p)}
                         style={{
                           flex: 1,
-                          height: 42,
-                          borderRadius: 8,
+                          height: '2.625rem',
+                          borderRadius: 'var(--radius-button)',
                           border: priority === p
-                            ? p === 'high' ? '2px solid #f59e0b' : `2px solid ${BRAND}`
-                            : '1px solid #e5e7eb',
+                            ? p === 'high' ? '2px solid var(--status-in-review-dot)' : '2px solid var(--color-brand)'
+                            : '2px solid var(--color-border)',
                           background: priority === p
-                            ? p === 'high' ? '#fffbeb' : '#f0f7ee'
-                            : 'white',
+                            ? p === 'high' ? 'var(--status-in-review-bg)' : 'var(--color-brand-50)'
+                            : 'var(--color-bg)',
                           color: priority === p
-                            ? p === 'high' ? '#b45309' : BRAND_DRK
-                            : '#6b7280',
-                          fontSize: 13,
+                            ? p === 'high' ? 'var(--status-in-review-text)' : 'var(--color-brand-dark)'
+                            : 'var(--color-text-muted)',
+                          fontSize: '0.8125rem',
                           fontWeight: 500,
                           cursor: 'pointer',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          gap: 5,
+                          gap: '0.3125rem',
                           transition: 'all 0.1s',
                         }}
                       >
@@ -342,28 +399,48 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
               )}
             </div>
 
+            {/* Dates + hours (admin only) */}
+            {isAdmin && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+                <FieldGroup label="Start date">
+                  <StyledInput type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+                </FieldGroup>
+                <FieldGroup label="Due date">
+                  <StyledInput type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+                </FieldGroup>
+                <FieldGroup label="Est. hours">
+                  <StyledInput
+                    type="number" min="0.5" max="999" step="0.5"
+                    value={estimatedHours}
+                    onChange={e => setEstimatedHours(e.target.value)}
+                    placeholder="e.g. 4"
+                  />
+                </FieldGroup>
+              </div>
+            )}
+
             {/* Description */}
             <FieldGroup label="Description">
               <StyledTextarea
                 value={description}
                 onChange={e => setDescription(e.target.value)}
                 rows={5}
-                placeholder="Describe what you need in as much detail as possible…"
+                placeholder="Describe what you need — include links, context, and any steps you have in mind…"
               />
-              <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>
-                You can add files and further detail after submitting.
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginTop: '0.375rem' }}>
+                You can add files, images, and voice notes after submitting.
               </p>
             </FieldGroup>
 
             {/* Error */}
             {error && (
               <div style={{
-                fontSize: 13,
-                color: '#dc2626',
-                background: '#fef2f2',
-                border: '1px solid #fee2e2',
-                borderRadius: 8,
-                padding: '10px 14px',
+                fontSize: '0.8125rem',
+                color: 'var(--color-danger)',
+                background: 'var(--color-danger-bg)',
+                border: '1px solid var(--color-danger)',
+                borderRadius: 'var(--radius-button)',
+                padding: '0.625rem 0.875rem',
               }}>
                 {error}
               </div>
@@ -377,9 +454,9 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '16px 24px',
-            borderTop: '1px solid #f3f4f6',
-            background: '#fafafa',
+            padding: '1rem 1.5rem',
+            borderTop: '1px solid var(--color-border-subtle)',
+            background: 'var(--color-bg-secondary)',
             flexShrink: 0,
           }}
         >
@@ -387,17 +464,17 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
             type="button"
             onClick={onClose}
             style={{
-              padding: '8px 16px',
-              fontSize: 14,
+              padding: '0.5rem 1rem',
+              fontSize: '0.875rem',
               fontWeight: 500,
-              color: '#6b7280',
+              color: 'var(--color-text-muted)',
               background: 'transparent',
               border: 'none',
-              borderRadius: 8,
+              borderRadius: 'var(--radius-button)',
               cursor: 'pointer',
             }}
-            onMouseEnter={e => { e.currentTarget.style.color = '#374151' }}
-            onMouseLeave={e => { e.currentTarget.style.color = '#6b7280' }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
           >
             Cancel
           </button>
@@ -409,22 +486,22 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 8,
-              padding: '9px 20px',
-              fontSize: 14,
+              gap: '0.5rem',
+              padding: '0.5625rem 1.25rem',
+              fontSize: '0.875rem',
               fontWeight: 600,
               color: 'white',
-              background: submitting || !title.trim() ? '#9cb89a' : BRAND,
+              background: submitting || !title.trim() ? 'var(--color-brand-200)' : BRAND_HEX,
               border: 'none',
-              borderRadius: 8,
+              borderRadius: 'var(--radius-button)',
               cursor: submitting || !title.trim() ? 'not-allowed' : 'pointer',
               transition: 'background 0.15s',
             }}
             onMouseEnter={e => {
-              if (!submitting && title.trim()) e.currentTarget.style.background = BRAND_DRK
+              if (!submitting && title.trim()) e.currentTarget.style.background = 'var(--color-brand-dark)'
             }}
             onMouseLeave={e => {
-              if (!submitting && title.trim()) e.currentTarget.style.background = BRAND
+              if (!submitting && title.trim()) e.currentTarget.style.background = BRAND_HEX
             }}
           >
             {submitting && <Loader2 size={14} className="animate-spin" />}
@@ -446,10 +523,10 @@ function FieldGroup({
   children: React.ReactNode
 }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+      <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>
         {label}
-        {required && <span style={{ color: '#ef4444', marginLeft: 2 }}>*</span>}
+        {required && <span style={{ color: 'var(--color-danger)', marginLeft: '0.125rem' }}>*</span>}
       </label>
       {children}
     </div>
@@ -464,19 +541,25 @@ function StyledInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
       {...props}
       style={{
         width: '100%',
-        height: 42,
-        padding: '0 12px',
-        fontSize: 14,
-        color: '#111827',
-        background: 'white',
-        border: '1px solid #e5e7eb',
-        borderRadius: 8,
+        height: '2.625rem',
+        padding: '0 0.75rem',
+        fontSize: '0.875rem',
+        color: 'var(--color-text)',
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-input)',
         outline: 'none',
         boxSizing: 'border-box',
         ...props.style,
       }}
-      onFocus={e => { e.currentTarget.style.borderColor = BRAND; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(90,130,78,0.12)` }}
-      onBlur={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none' }}
+      onFocus={e => {
+        e.currentTarget.style.borderColor = BRAND_HEX
+        e.currentTarget.style.boxShadow = `0 0 0 3px rgba(90,130,78,0.12)`
+      }}
+      onBlur={e => {
+        e.currentTarget.style.borderColor = 'var(--color-border)'
+        e.currentTarget.style.boxShadow = 'none'
+      }}
     />
   )
 }
@@ -489,20 +572,26 @@ function StyledTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>
       {...props}
       style={{
         width: '100%',
-        padding: '10px 12px',
-        fontSize: 14,
-        color: '#111827',
-        background: 'white',
-        border: '1px solid #e5e7eb',
-        borderRadius: 8,
+        padding: '0.625rem 0.75rem',
+        fontSize: '0.875rem',
+        color: 'var(--color-text)',
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-input)',
         outline: 'none',
         resize: 'none',
         boxSizing: 'border-box',
         lineHeight: 1.5,
         ...props.style,
       }}
-      onFocus={e => { e.currentTarget.style.borderColor = BRAND; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(90,130,78,0.12)` }}
-      onBlur={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none' }}
+      onFocus={e => {
+        e.currentTarget.style.borderColor = BRAND_HEX
+        e.currentTarget.style.boxShadow = `0 0 0 3px rgba(90,130,78,0.12)`
+      }}
+      onBlur={e => {
+        e.currentTarget.style.borderColor = 'var(--color-border)'
+        e.currentTarget.style.boxShadow = 'none'
+      }}
     />
   )
 }
@@ -521,39 +610,39 @@ function StyledSelect({
     <div style={{ position: 'relative' }}>
       <select
         value={value}
-        onChange={e => onChange(e.target.value)}
         required={required}
+        onChange={e => onChange(e.target.value)}
         style={{
           width: '100%',
-          height: 42,
-          paddingLeft: 12,
-          paddingRight: 32,
-          fontSize: 14,
-          color: '#111827',
-          background: 'white',
-          border: '1px solid #e5e7eb',
-          borderRadius: 8,
-          appearance: 'none',
+          height: '2.625rem',
+          padding: '0 2.25rem 0 0.75rem',
+          fontSize: '0.875rem',
+          color: 'var(--color-text)',
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-input)',
           outline: 'none',
+          appearance: 'none',
           cursor: 'pointer',
-          boxSizing: 'border-box',
         }}
-        onFocus={e => { e.currentTarget.style.borderColor = BRAND; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(90,130,78,0.12)` }}
-        onBlur={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none' }}
+        onFocus={e => {
+          e.currentTarget.style.borderColor = BRAND_HEX
+          e.currentTarget.style.boxShadow = `0 0 0 3px rgba(90,130,78,0.12)`
+        }}
+        onBlur={e => {
+          e.currentTarget.style.borderColor = 'var(--color-border)'
+          e.currentTarget.style.boxShadow = 'none'
+        }}
       >
         {children}
       </select>
-      <ChevronDown
-        size={14}
-        style={{
-          position: 'absolute',
-          right: 10,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          color: '#9ca3af',
-          pointerEvents: 'none',
-        }}
-      />
+      <div style={{
+        position: 'absolute', right: '0.625rem', top: '50%',
+        transform: 'translateY(-50%)',
+        pointerEvents: 'none',
+        color: 'var(--color-text-subtle)',
+        fontSize: '0.625rem',
+      }}>▼</div>
     </div>
   )
 }

@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useRef, useState } from 'react'
+import { apiPath } from '@/lib/api'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -42,7 +43,7 @@ async function uploadFile(
   orgId?: string,
 ): Promise<AttachedFile> {
   // Step 1: Presign
-  const presignRes = await fetch('/api/uploads/presign', {
+  const presignRes = await fetch(apiPath('/api/uploads/presign'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ filename: file.name, mimeType: file.type, requestId }),
@@ -61,7 +62,7 @@ async function uploadFile(
   if (!uploadRes.ok) throw new Error('Upload failed')
 
   // Step 3: Confirm
-  const confirmRes = await fetch('/api/uploads/confirm', {
+  const confirmRes = await fetch(apiPath('/api/uploads/confirm'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

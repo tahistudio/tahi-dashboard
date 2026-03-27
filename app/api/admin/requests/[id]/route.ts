@@ -31,6 +31,8 @@ export async function GET(req: NextRequest, { params }: Params) {
       assigneeId: schema.requests.assigneeId,
       assigneeName: schema.teamMembers.name,
       estimatedHours: schema.requests.estimatedHours,
+      startDate: schema.requests.startDate,
+      dueDate: schema.requests.dueDate,
       revisionCount: schema.requests.revisionCount,
       maxRevisions: schema.requests.maxRevisions,
       scopeFlagged: schema.requests.scopeFlagged,
@@ -66,6 +68,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     priority?: string
     assigneeId?: string | null
     estimatedHours?: number | null
+    startDate?: string | null
+    dueDate?: string | null
     scopeFlagged?: boolean
     trackId?: string | null
   }
@@ -80,6 +84,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (body.priority !== undefined) patch.priority = body.priority
   if ('assigneeId' in body) patch.assigneeId = body.assigneeId ?? null
   if ('estimatedHours' in body) patch.estimatedHours = body.estimatedHours ?? null
+  if ('startDate' in body) patch.startDate = body.startDate ?? null
+  if ('dueDate' in body) patch.dueDate = body.dueDate ?? null
   if (body.scopeFlagged !== undefined) patch.scopeFlagged = body.scopeFlagged
   if ('trackId' in body) patch.trackId = body.trackId ?? null
 

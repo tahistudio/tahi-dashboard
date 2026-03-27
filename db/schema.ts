@@ -185,6 +185,11 @@ export const requests = sqliteTable('requests', {
   submittedById: text('submitted_by_id'),
   submittedByType: text('submitted_by_type').default('contact'),
   estimatedHours: real('estimated_hours'),
+  // ISO-8601 date strings (YYYY-MM-DD)
+  startDate: text('start_date'),
+  dueDate: text('due_date'),
+  // Position in the queue for its track type (lower = sooner)
+  queueOrder: integer('queue_order').default(0),
   revisionCount: integer('revision_count').default(0),
   maxRevisions: integer('max_revisions').default(3),
   scopeFlagged: integer('scope_flagged', { mode: 'boolean' }).default(false),
@@ -201,6 +206,32 @@ export const requests = sqliteTable('requests', {
   index('idx_requests_status').on(table.status),
   index('idx_requests_assignee').on(table.assigneeId),
   index('idx_requests_track').on(table.trackId),
+])
+
+// ============================================================
+// REQUEST STEPS (Nested tasks, ClickUp-style)
+// ============================================================
+
+export const requestSteps = sqliteTable('request_steps', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  requestId: text('request_id').notNull().references(() => requests.id, { onDelete: 'cascade' }),
+  // Self-referencing for infinite nesting (null = top-level step)
+  parentStepId: text('parent_step_id'),
+  title: text('title').notNull(),
+  // Tiptap JSON — optional richer description per step
+  description: text('description'),
+  completed: integer('completed', { mode: 'boolean' }).default(false),
+  completedAt: text('completed_at'),
+  // Order within the same parent (0-based)
+  orderIndex: integer('order_index').default(0),
+  assigneeId: text('assignee_id').references(() => teamMembers.id),
+  createdById: text('created_by_id'),
+  // 'contact' | 'team_member'
+  createdByType: text('created_by_type'),
+  ...timestamps,
+}, (table) => [
+  index('idx_steps_request').on(table.requestId),
+  index('idx_steps_parent').on(table.parentStepId),
 ])
 
 // ============================================================
@@ -623,6 +654,8 @@ export type TimeEntry = typeof timeEntries.$inferSelect
 export type NewTimeEntry = typeof timeEntries.$inferInsert
 export type Task = typeof tasks.$inferSelect
 export type NewTask = typeof tasks.$inferInsert
+export type RequestStep = typeof requestSteps.$inferSelect
+export type NewRequestStep = typeof requestSteps.$inferInsert
 export type Tag = typeof tags.$inferSelect
 export type Notification = typeof notifications.$inferSelect
 export type DocPage = typeof docPages.$inferSelect

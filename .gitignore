@@ -25,6 +25,9 @@ yarn-error.log*
 # Vercel / Webflow Cloud
 .vercel
 
+# OpenNext / Cloudflare build output
+.open-next/
+
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts

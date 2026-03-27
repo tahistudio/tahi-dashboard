@@ -14,11 +14,11 @@ export default async function DashboardLayout({
   const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: '#f5f7f5' }}>
+    <div className="flex h-screen overflow-hidden" style={{ background: 'var(--color-bg-secondary)' }}>
       <AppSidebar isAdmin={isAdmin} />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <AppTopNav isAdmin={isAdmin} />
-        <main className="flex-1 overflow-y-auto" style={{ padding: '32px 40px' }}>
+        <main className="flex-1 overflow-y-auto" style={{ padding: '2rem 2.5rem' }}>
           {children}
         </main>
       </div>
