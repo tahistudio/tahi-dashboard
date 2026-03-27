@@ -44,6 +44,8 @@ interface Request {
   assigneeId: string | null
   assigneeName: string | null
   estimatedHours: number | null
+  startDate: string | null
+  dueDate: string | null
   revisionCount: number
   maxRevisions: number
   scopeFlagged: boolean

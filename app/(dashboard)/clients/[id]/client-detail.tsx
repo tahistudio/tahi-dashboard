@@ -8,7 +8,6 @@ import {
   Globe,
   Building2,
   Mail,
-  Phone,
   User,
   Edit2,
   Check,
@@ -697,7 +696,6 @@ function RecentRequestsCard({ requests, orgId }: { requests: Request[]; orgId: s
 // ── Requests tab (full list) ───────────────────────────────────────────────────
 
 function RequestsTab({ clientId }: { clientId: string }) {
-  const router = useRouter()
   const [requests, setRequests] = useState<Request[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)

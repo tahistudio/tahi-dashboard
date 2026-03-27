@@ -13,8 +13,7 @@ import { formatDistanceToNow } from 'date-fns'
 
 // ─── Brand / palette constants ────────────────────────────────────────────────
 
-const BRAND     = '#5A824E'
-const BRAND_DRK = '#425F39'
+const BRAND = '#5A824E'
 
 // ─── Accent colour map (hex only — no Tailwind dynamic classes) ───────────────
 

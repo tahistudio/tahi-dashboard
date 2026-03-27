@@ -60,6 +60,9 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
   const [category, setCategory] = useState('development')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState('standard')
+  const [startDate, setStartDate] = useState('')
+  const [dueDate, setDueDate] = useState('')
+  const [estimatedHours, setEstimatedHours] = useState('')
 
   // Load client list for admin
   useEffect(() => {
@@ -80,6 +83,9 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
       setCategory('development')
       setDescription('')
       setPriority('standard')
+      setStartDate('')
+      setDueDate('')
+      setEstimatedHours('')
       setClientOrgId('')
       setError(null)
     }
@@ -98,7 +104,12 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
     try {
       const url = isAdmin ? apiPath('/api/admin/requests') : apiPath('/api/portal/requests')
       const body = isAdmin
-        ? { clientOrgId, title: title.trim(), type, category, description, priority }
+        ? {
+            clientOrgId, title: title.trim(), type, category, description, priority,
+            startDate: startDate || null,
+            dueDate: dueDate || null,
+            estimatedHours: estimatedHours ? Number(estimatedHours) : null,
+          }
         : { title: title.trim(), type, category, description }
 
       const res = await fetch(url, {
@@ -199,6 +210,7 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
 
         {/* Scrollable form body */}
         <form
+          id="new-request-form"
           onSubmit={handleSubmit}
           style={{ flex: 1, overflowY: 'auto', padding: '24px' }}
         >
@@ -342,6 +354,37 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
                 </FieldGroup>
               )}
             </div>
+
+            {/* Dates + hours (admin only) */}
+            {isAdmin && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                <FieldGroup label="Start date">
+                  <StyledInput
+                    type="date"
+                    value={startDate}
+                    onChange={e => setStartDate(e.target.value)}
+                  />
+                </FieldGroup>
+                <FieldGroup label="Due date">
+                  <StyledInput
+                    type="date"
+                    value={dueDate}
+                    onChange={e => setDueDate(e.target.value)}
+                  />
+                </FieldGroup>
+                <FieldGroup label="Est. hours">
+                  <StyledInput
+                    type="number"
+                    min="0.5"
+                    max="999"
+                    step="0.5"
+                    value={estimatedHours}
+                    onChange={e => setEstimatedHours(e.target.value)}
+                    placeholder="e.g. 4"
+                  />
+                </FieldGroup>
+              </div>
+            )}
 
             {/* Description */}
             <FieldGroup label="Description">
