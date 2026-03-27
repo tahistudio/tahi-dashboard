@@ -31,13 +31,13 @@ const TYPE_ICONS: Record<string, React.ElementType> = {
   custom:        Wrench,
 }
 
-const CATEGORY_COLOURS: Record<string, string> = {
-  design:      'bg-pink-50 text-pink-600',
-  development: 'bg-blue-50 text-blue-600',
-  content:     'bg-amber-50 text-amber-600',
-  strategy:    'bg-purple-50 text-purple-600',
-  admin:       'bg-gray-100 text-gray-600',
-  bug:         'bg-red-50 text-red-600',
+const CATEGORY_STYLES: Record<string, { background: string; color: string }> = {
+  design:      { background: 'var(--cat-design-bg)',      color: 'var(--cat-design-text)' },
+  development: { background: 'var(--cat-development-bg)', color: 'var(--cat-development-text)' },
+  content:     { background: 'var(--cat-content-bg)',     color: 'var(--cat-content-text)' },
+  strategy:    { background: 'var(--cat-strategy-bg)',    color: 'var(--cat-strategy-text)' },
+  admin:       { background: 'var(--cat-admin-bg)',       color: 'var(--cat-admin-text)' },
+  bug:         { background: 'var(--cat-bug-bg)',         color: 'var(--cat-bug-text)' },
 }
 
 function formatType(type: string) {
@@ -80,7 +80,7 @@ export function RequestCard({
   isAdmin,
 }: RequestCardProps) {
   const TypeIcon = TYPE_ICONS[type] ?? FileText
-  const catColour = CATEGORY_COLOURS[category ?? ''] ?? 'bg-gray-100 text-gray-600'
+  const catStyle = CATEGORY_STYLES[category ?? ''] ?? { background: 'var(--cat-admin-bg)', color: 'var(--cat-admin-text)' }
   const isHighPriority = priority === 'high'
   const dateStr = updatedAt ?? createdAt
 
@@ -90,7 +90,7 @@ export function RequestCard({
       className="group flex items-start gap-3 px-4 py-3.5 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl hover:border-[var(--color-brand)] hover:shadow-sm transition-all"
     >
       {/* Type icon */}
-      <div className={`mt-0.5 w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg ${catColour}`}>
+      <div className="mt-0.5 w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg" style={catStyle}>
         <TypeIcon className="w-3.5 h-3.5" />
       </div>
 
@@ -112,7 +112,7 @@ export function RequestCard({
           {isAdmin && orgName && (
             <span className="text-xs text-[var(--color-text-subtle)] font-medium">{orgName}</span>
           )}
-          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${catColour}`}>
+          <span className="text-xs px-1.5 py-0.5 rounded font-medium" style={catStyle}>
             {formatType(type)}
           </span>
           {(revisionCount ?? 0) > 0 && (

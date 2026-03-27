@@ -128,7 +128,7 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
           <div key={group.group} style={{ marginTop: gi > 0 ? '20px' : 0 }}>
             {!collapsed && (
               <p style={{
-                fontSize: '10px',
+                fontSize: '0.625rem',
                 fontWeight: 600,
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase',
@@ -157,7 +157,7 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
                         padding: collapsed ? '8px 0' : '7px 8px',
                         justifyContent: collapsed ? 'center' : 'flex-start',
                         borderRadius: '6px',
-                        fontSize: '13px',
+                        fontSize: '0.8125rem',
                         fontWeight: 500,
                         color: isActive ? S.textActive : S.textMuted,
                         background: isActive ? S.bgActive : 'transparent',
@@ -199,7 +199,7 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
             padding: collapsed ? '8px 0' : '7px 8px',
             justifyContent: collapsed ? 'center' : 'flex-start',
             borderRadius: '6px',
-            fontSize: '13px',
+            fontSize: '0.8125rem',
             fontWeight: 500,
             color: S.textMuted,
             background: 'transparent',
