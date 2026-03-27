@@ -267,8 +267,8 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
                     style={{
                       padding: '10px 8px',
                       borderRadius: 8,
-                      border: type === t.value ? `2px solid ${BRAND}` : '1px solid #e5e7eb',
-                      background: type === t.value ? '#f0f7ee' : 'white',
+                      border: type === t.value ? `2px solid ${BRAND}` : '2px solid #e5e7eb',
+                      background: type === t.value ? 'var(--color-brand-50)' : 'var(--color-bg)',
                       cursor: 'pointer',
                       textAlign: 'left',
                       transition: 'all 0.1s',
@@ -276,13 +276,14 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
                     }}
                     onMouseEnter={e => {
                       if (type !== t.value) {
-                        e.currentTarget.style.borderColor = '#c6dbc0'
+                        e.currentTarget.style.borderColor = 'var(--color-brand-200)'
                         e.currentTarget.style.background = '#fafafa'
                       }
                     }}
                     onMouseLeave={e => {
                       if (type !== t.value) {
                         e.currentTarget.style.borderColor = '#e5e7eb'
+                        e.currentTarget.style.background = 'var(--color-bg)'
                         e.currentTarget.style.background = 'white'
                       }
                     }}
