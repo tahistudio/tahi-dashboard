@@ -103,26 +103,38 @@ export function AppSidebar({ isAdmin }: AppSidebarProps) {
   return (
     <aside
       className={cn(
-        'flex flex-col h-full bg-[var(--color-bg)] border-r border-[var(--color-border)] transition-all duration-200 relative flex-shrink-0',
+        'flex flex-col h-full transition-all duration-200 relative flex-shrink-0',
         collapsed ? 'w-16' : 'w-60'
       )}
+      style={{ background: 'var(--color-bg-dark)', borderRight: '1px solid var(--color-border-dark)' }}
     >
       {/* Logo */}
-      <div className="flex items-center h-16 px-4 border-b border-[var(--color-border)] flex-shrink-0">
-        {collapsed ? <LeafLogo size="sm" /> : <TahiWordmark size="sm" />}
+      <div
+        className="flex items-center h-16 px-4 flex-shrink-0"
+        style={{ borderBottom: '1px solid var(--color-border-dark)' }}
+      >
+        {collapsed
+          ? <LeafLogo size="sm" />
+          : <TahiWordmark size="sm" light />
+        }
       </div>
 
       {/* Collapse toggle */}
       <button
         onClick={() => setCollapsed(!collapsed)}
-        className="absolute -right-3 top-[72px] w-6 h-6 rounded-full bg-[var(--color-bg)] border border-[var(--color-border)] flex items-center justify-center hover:bg-[var(--color-bg-secondary)] transition-colors z-10 shadow-sm"
+        className="absolute -right-3 top-[72px] w-6 h-6 rounded-full flex items-center justify-center z-10 shadow-md transition-colors hover:opacity-90"
+        style={{
+          background: 'var(--color-bg-dark)',
+          border: '1px solid var(--color-border-dark)',
+        }}
         aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       >
         <ChevronLeft
           className={cn(
-            'w-3 h-3 text-[var(--color-text-muted)] transition-transform duration-200',
+            'w-3 h-3 transition-transform duration-200',
             collapsed && 'rotate-180'
           )}
+          style={{ color: 'var(--color-text-dark-muted)' }}
         />
       </button>
 
@@ -131,7 +143,10 @@ export function AppSidebar({ isAdmin }: AppSidebarProps) {
         {visibleNav.map((group) => (
           <div key={group.group}>
             {!collapsed && (
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--color-text-subtle)] px-2 mb-1.5">
+              <p
+                className="text-[10px] font-semibold uppercase tracking-widest px-2 mb-1.5"
+                style={{ color: 'rgba(168, 196, 160, 0.5)' }}
+              >
                 {group.group}
               </p>
             )}
@@ -148,20 +163,37 @@ export function AppSidebar({ isAdmin }: AppSidebarProps) {
                       href={item.href}
                       className={cn(
                         'flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors group',
-                        isActive
-                          ? 'bg-[var(--color-brand-50)] text-[var(--color-brand-dark)]'
-                          : 'text-[var(--color-text-muted)] hover:bg-[var(--color-bg-secondary)] hover:text-[var(--color-text)]',
                         collapsed && 'justify-center'
                       )}
+                      style={
+                        isActive
+                          ? {
+                              background: 'var(--color-bg-dark-tertiary)',
+                              color: 'white',
+                            }
+                          : {
+                              color: 'var(--color-text-dark-muted)',
+                            }
+                      }
+                      onMouseEnter={(e) => {
+                        if (!isActive) {
+                          e.currentTarget.style.background = 'var(--color-bg-dark-tertiary)'
+                          e.currentTarget.style.color = 'white'
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isActive) {
+                          e.currentTarget.style.background = 'transparent'
+                          e.currentTarget.style.color = 'var(--color-text-dark-muted)'
+                        }
+                      }}
                       title={collapsed ? item.label : undefined}
                     >
                       <Icon
                         className={cn(
-                          'flex-shrink-0 transition-colors',
+                          'flex-shrink-0',
                           collapsed ? 'w-5 h-5' : 'w-4 h-4',
-                          isActive
-                            ? 'text-[var(--color-brand)]'
-                            : 'text-[var(--color-text-subtle)] group-hover:text-[var(--color-text-muted)]'
+                          isActive ? 'text-[var(--color-brand-light)]' : 'text-[var(--color-text-dark-muted)]'
                         )}
                       />
                       {!collapsed && <span>{item.label}</span>}
@@ -176,19 +208,21 @@ export function AppSidebar({ isAdmin }: AppSidebarProps) {
 
       {/* Bottom identity badge */}
       {!collapsed && (
-        <div className="p-3 border-t border-[var(--color-border)] flex-shrink-0">
+        <div
+          className="p-3 flex-shrink-0"
+          style={{ borderTop: '1px solid var(--color-border-dark)' }}
+        >
           <div
-            className="px-3 py-2 text-xs"
+            className="px-3 py-2 text-xs rounded-lg"
             style={{
-              borderRadius: 'var(--radius-leaf-sm)',
-              background: 'var(--color-brand-50)',
-              border: '1px solid var(--color-brand-200)',
+              background: 'rgba(90, 130, 78, 0.15)',
+              border: '1px solid rgba(90, 130, 78, 0.25)',
             }}
           >
-            <p className="font-semibold text-[var(--color-brand-dark)]">
+            <p className="font-semibold" style={{ color: 'var(--color-brand-light)' }}>
               {isAdmin ? 'Tahi Studio' : 'Client Portal'}
             </p>
-            <p className="text-[var(--color-text-subtle)] mt-0.5">
+            <p className="mt-0.5" style={{ color: 'rgba(168, 196, 160, 0.6)' }}>
               {isAdmin ? 'Admin workspace' : 'Powered by Tahi Studio'}
             </p>
           </div>

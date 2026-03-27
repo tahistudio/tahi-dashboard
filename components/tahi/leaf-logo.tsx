@@ -48,9 +48,10 @@ export function LeafLogo({ size = 'md', className }: LeafLogoProps) {
 interface TahiWordmarkProps {
   size?: 'sm' | 'md' | 'lg'
   className?: string
+  light?: boolean
 }
 
-export function TahiWordmark({ size = 'md', className }: TahiWordmarkProps) {
+export function TahiWordmark({ size = 'md', className, light }: TahiWordmarkProps) {
   const textSize = {
     sm: 'text-sm',
     md: 'text-base',
@@ -61,10 +62,18 @@ export function TahiWordmark({ size = 'md', className }: TahiWordmarkProps) {
     <div className={cn('flex items-center gap-2.5', className)}>
       <LeafLogo size={size} />
       <div>
-        <p className={cn('font-bold leading-none text-[var(--color-text)]', textSize)}>
+        <p
+          className={cn('font-bold leading-none', textSize)}
+          style={{ color: light ? 'white' : 'var(--color-text)' }}
+        >
           Tahi Studio
         </p>
-        <p className="text-xs text-[var(--color-text-muted)] leading-none mt-0.5">Dashboard</p>
+        <p
+          className="text-xs leading-none mt-0.5"
+          style={{ color: light ? 'rgba(168, 196, 160, 0.7)' : 'var(--color-text-muted)' }}
+        >
+          Dashboard
+        </p>
       </div>
     </div>
   )
