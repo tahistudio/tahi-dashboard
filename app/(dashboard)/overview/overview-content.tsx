@@ -17,7 +17,8 @@ const ACCENTS = {
   blue:    { bg: '#dbeafe', color: '#2563eb' },
   amber:   { bg: '#fef3c7', color: '#d97706' },
   emerald: { bg: '#d1fae5', color: '#059669' },
-  neutral: { bg: '#f3f4f6', color: '#6b7280' },
+  neutral: { bg: '#e5e7eb', color: '#6b7280' },  // gray-200 — visible on white
+  teal:    { bg: '#ccfbf1', color: '#0d9488' },
   red:     { bg: '#fee2e2', color: '#dc2626' },
 } as const
 
@@ -186,7 +187,7 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
           value={loading ? null : inReview.length}
           icon={<RefreshCw size={16} />}
           href="/requests?status=client_review"
-          accent={inReview.length > 0 ? 'amber' : 'neutral'}
+          accent={inReview.length > 0 ? 'amber' : 'teal'}
           highlight={inReview.length > 0}
         />
         <StatCard
