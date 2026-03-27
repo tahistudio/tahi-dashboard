@@ -1,8 +1,7 @@
 'use client'
 
 import { UserButton, OrganizationSwitcher } from '@clerk/nextjs'
-import { Bell, Plus, Search } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { Bell, Search } from 'lucide-react'
 
 interface AppTopNavProps {
   isAdmin: boolean
@@ -10,68 +9,49 @@ interface AppTopNavProps {
 
 export function AppTopNav({ isAdmin }: AppTopNavProps) {
   return (
-    <header className="h-16 flex items-center justify-between px-6 bg-[var(--color-bg)] border-b border-[var(--color-border)] flex-shrink-0">
-      {/* Left: search or org switcher */}
+    <header className="h-14 flex items-center justify-between px-8 bg-white border-b border-gray-100 flex-shrink-0">
+      {/* Left */}
       <div className="flex items-center gap-3">
         {isAdmin ? (
-          /* Admin: global search */
           <button
-            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] hover:border-[var(--color-brand)] transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-gray-50 border border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600 transition-colors"
             aria-label="Search"
           >
-            <Search className="w-4 h-4" />
-            <span className="hidden sm:inline text-xs">Search everything...</span>
-            <kbd className="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-bg-tertiary)] font-mono border border-[var(--color-border)]">
+            <Search className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline text-xs">Search...</span>
+            <kbd className="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded bg-white font-mono border border-gray-200 text-gray-400">
               ⌘K
             </kbd>
           </button>
         ) : (
-          /* Client: org switcher for multi-brand */
           <OrganizationSwitcher
             hidePersonal
             appearance={{
               elements: {
                 organizationSwitcherTrigger:
-                  'text-sm font-medium text-[var(--color-text)] hover:bg-[var(--color-bg-secondary)] rounded-lg px-2 py-1.5 transition-colors',
+                  'text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg px-2 py-1.5 transition-colors',
               },
             }}
           />
         )}
       </div>
 
-      {/* Right: actions */}
-      <div className="flex items-center gap-2">
-        {isAdmin && (
-          <button
-            className={cn(
-              'hidden sm:flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90'
-            )}
-            style={{
-              background: 'var(--color-brand)',
-              borderRadius: 'var(--radius-leaf-sm)',
-            }}
-          >
-            <Plus className="w-4 h-4" />
-            New
-          </button>
-        )}
-
-        {/* Notifications bell */}
+      {/* Right */}
+      <div className="flex items-center gap-1.5">
         <button
-          className="relative p-2 rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-bg-secondary)] hover:text-[var(--color-text)] transition-colors"
+          className="relative p-2 rounded-lg text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors"
           aria-label="Notifications"
         >
-          <Bell className="w-5 h-5" />
-          {/* Unread dot — wired up to SSE in a later phase */}
+          <Bell className="w-4 h-4" />
           <span
-            className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[var(--color-brand)]"
+            className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-[var(--color-brand)]"
             aria-hidden="true"
           />
         </button>
 
         <UserButton
           appearance={{
-            elements: { avatarBox: 'w-8 h-8' },
+            elements: { avatarBox: 'w-7 h-7' },
           }}
         />
       </div>

@@ -16,14 +16,13 @@ import {
   MessageSquare,
   FolderOpen,
   ShoppingBag,
-  ChevronLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
   LayoutDashboard,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { TahiWordmark, LeafLogo } from './leaf-logo'
 import { useState } from 'react'
-
-// ─── Nav configs ────────────────────────────────────────────
 
 type NavItem = {
   label: string
@@ -52,7 +51,7 @@ const NAV: NavGroup[] = [
     group: 'Finance',
     items: [
       { label: 'Invoices',  href: '/invoices',  icon: FileText },
-      { label: 'Billing',   href: '/billing',   icon: CreditCard,  adminOnly: true },
+      { label: 'Billing',   href: '/billing',   icon: CreditCard, adminOnly: true },
     ],
   },
   {
@@ -66,52 +65,59 @@ const NAV: NavGroup[] = [
   {
     group: 'Insights',
     items: [
-      { label: 'Reports',   href: '/reports',   icon: BarChart2,   adminOnly: true },
-      { label: 'Time',      href: '/time',      icon: Clock,       adminOnly: true },
+      { label: 'Reports',   href: '/reports',   icon: BarChart2,  adminOnly: true },
+      { label: 'Time',      href: '/time',      icon: Clock,      adminOnly: true },
     ],
   },
   {
     group: 'Studio',
     items: [
-      { label: 'Team',      href: '/team',      icon: UserCog,     adminOnly: true },
-      { label: 'Docs Hub',  href: '/docs',      icon: BookOpen,    adminOnly: true },
+      { label: 'Team',      href: '/team',      icon: UserCog,    adminOnly: true },
+      { label: 'Docs Hub',  href: '/docs',      icon: BookOpen,   adminOnly: true },
       { label: 'Settings',  href: '/settings',  icon: Settings },
     ],
   },
 ]
 
-// ─── Component ──────────────────────────────────────────────
-
-interface AppSidebarProps {
-  isAdmin: boolean
+// Sidebar uses a locked dark-green color scheme regardless of page theme.
+// All colors are literal hex so CSS hover: classes work reliably.
+const S = {
+  bg:          '#1e2a1b',   // sidebar background — slightly deeper than page dark
+  border:      '#2e3d2b',   // subtle divider
+  groupLabel:  '#4a6145',   // faint group headings
+  textMuted:   '#7aaa72',   // inactive nav text
+  textActive:  '#ffffff',   // active nav text
+  bgHover:     '#2a3826',   // nav item hover bg
+  bgActive:    '#2f3f2c',   // nav item active bg
+  iconMuted:   '#5f9458',   // inactive icon
+  iconActive:  '#93c98a',   // active icon
 }
 
-export function AppSidebar({ isAdmin }: AppSidebarProps) {
+export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
 
-  // Filter nav items based on role
-  const visibleNav = NAV.map((group) => ({
+  const visibleNav = NAV.map(group => ({
     ...group,
-    items: group.items.filter((item) => {
+    items: group.items.filter(item => {
       if (item.adminOnly && !isAdmin) return false
       if (item.clientOnly && isAdmin) return false
       return true
     }),
-  })).filter((group) => group.items.length > 0)
+  })).filter(group => group.items.length > 0)
 
   return (
     <aside
       className={cn(
         'flex flex-col h-full transition-all duration-200 relative flex-shrink-0',
-        collapsed ? 'w-16' : 'w-60'
+        collapsed ? 'w-[60px]' : 'w-[220px]'
       )}
-      style={{ background: 'var(--color-bg-dark)', borderRight: '1px solid var(--color-border-dark)' }}
+      style={{ background: S.bg, borderRight: `1px solid ${S.border}` }}
     >
-      {/* Logo */}
+      {/* Logo area */}
       <div
-        className="flex items-center h-16 px-4 flex-shrink-0"
-        style={{ borderBottom: '1px solid var(--color-border-dark)' }}
+        className="flex items-center h-14 px-4 flex-shrink-0"
+        style={{ borderBottom: `1px solid ${S.border}` }}
       >
         {collapsed
           ? <LeafLogo size="sm" />
@@ -119,83 +125,49 @@ export function AppSidebar({ isAdmin }: AppSidebarProps) {
         }
       </div>
 
-      {/* Collapse toggle */}
-      <button
-        onClick={() => setCollapsed(!collapsed)}
-        className="absolute -right-3 top-[72px] w-6 h-6 rounded-full flex items-center justify-center z-10 shadow-md transition-colors hover:opacity-90"
-        style={{
-          background: 'var(--color-bg-dark)',
-          border: '1px solid var(--color-border-dark)',
-        }}
-        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      >
-        <ChevronLeft
-          className={cn(
-            'w-3 h-3 transition-transform duration-200',
-            collapsed && 'rotate-180'
-          )}
-          style={{ color: 'var(--color-text-dark-muted)' }}
-        />
-      </button>
-
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-5">
-        {visibleNav.map((group) => (
-          <div key={group.group}>
+      <nav className="flex-1 overflow-y-auto py-3 px-2">
+        {visibleNav.map((group, gi) => (
+          <div key={group.group} className={gi > 0 ? 'mt-4' : ''}>
             {!collapsed && (
               <p
-                className="text-[10px] font-semibold uppercase tracking-widest px-2 mb-1.5"
-                style={{ color: 'rgba(168, 196, 160, 0.5)' }}
+                className="text-[10px] font-semibold uppercase tracking-widest px-2 mb-1"
+                style={{ color: S.groupLabel }}
               >
                 {group.group}
               </p>
             )}
             <ul className="space-y-0.5">
-              {group.items.map((item) => {
+              {group.items.map(item => {
                 const Icon = item.icon
                 const isActive =
                   pathname === item.href ||
                   (item.href !== '/requests' && item.href !== '/overview' && pathname.startsWith(item.href))
 
                 return (
-                  <li key={item.href + item.label}>
+                  <li key={item.href}>
                     <Link
                       href={item.href}
-                      className={cn(
-                        'flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors group',
-                        collapsed && 'justify-center'
-                      )}
-                      style={
-                        isActive
-                          ? {
-                              background: 'var(--color-bg-dark-tertiary)',
-                              color: 'white',
-                            }
-                          : {
-                              color: 'var(--color-text-dark-muted)',
-                            }
-                      }
-                      onMouseEnter={(e) => {
-                        if (!isActive) {
-                          e.currentTarget.style.background = 'var(--color-bg-dark-tertiary)'
-                          e.currentTarget.style.color = 'white'
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!isActive) {
-                          e.currentTarget.style.background = 'transparent'
-                          e.currentTarget.style.color = 'var(--color-text-dark-muted)'
-                        }
-                      }}
                       title={collapsed ? item.label : undefined}
+                      className={cn(
+                        'flex items-center gap-2.5 px-2 py-1.5 rounded-md text-[13px] font-medium transition-all duration-150',
+                        collapsed && 'justify-center px-0',
+                        isActive
+                          ? 'text-white'
+                          : 'hover:text-white'
+                      )}
+                      style={{
+                        color: isActive ? S.textActive : S.textMuted,
+                        background: isActive ? S.bgActive : undefined,
+                      }}
+                      // pure CSS hover via onMouse is replaced by Tailwind-compatible approach below
                     >
-                      <Icon
-                        className={cn(
-                          'flex-shrink-0',
-                          collapsed ? 'w-5 h-5' : 'w-4 h-4',
-                          isActive ? 'text-[var(--color-brand-light)]' : 'text-[var(--color-text-dark-muted)]'
-                        )}
-                      />
+                      <span
+                        className="flex-shrink-0 flex items-center"
+                        style={{ color: isActive ? S.iconActive : S.iconMuted }}
+                      >
+                        <Icon className={cn(collapsed ? 'w-[18px] h-[18px]' : 'w-[15px] h-[15px]')} />
+                      </span>
                       {!collapsed && <span>{item.label}</span>}
                     </Link>
                   </li>
@@ -206,28 +178,31 @@ export function AppSidebar({ isAdmin }: AppSidebarProps) {
         ))}
       </nav>
 
-      {/* Bottom identity badge */}
-      {!collapsed && (
-        <div
-          className="p-3 flex-shrink-0"
-          style={{ borderTop: '1px solid var(--color-border-dark)' }}
+      {/* Collapse toggle at bottom */}
+      <div
+        className="p-2 flex-shrink-0"
+        style={{ borderTop: `1px solid ${S.border}` }}
+      >
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className={cn(
+            'w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-[13px] transition-colors',
+            collapsed && 'justify-center px-0'
+          )}
+          style={{ color: S.textMuted }}
+          onMouseEnter={e => { e.currentTarget.style.color = S.textActive; e.currentTarget.style.background = S.bgHover }}
+          onMouseLeave={e => { e.currentTarget.style.color = S.textMuted; e.currentTarget.style.background = 'transparent' }}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          <div
-            className="px-3 py-2 text-xs rounded-lg"
-            style={{
-              background: 'rgba(90, 130, 78, 0.15)',
-              border: '1px solid rgba(90, 130, 78, 0.25)',
-            }}
-          >
-            <p className="font-semibold" style={{ color: 'var(--color-brand-light)' }}>
-              {isAdmin ? 'Tahi Studio' : 'Client Portal'}
-            </p>
-            <p className="mt-0.5" style={{ color: 'rgba(168, 196, 160, 0.6)' }}>
-              {isAdmin ? 'Admin workspace' : 'Powered by Tahi Studio'}
-            </p>
-          </div>
-        </div>
-      )}
+          {collapsed
+            ? <span style={{ color: S.iconMuted, display: 'flex' }}><PanelLeftOpen className="w-[15px] h-[15px]" /></span>
+            : <>
+                <span style={{ color: S.iconMuted, display: 'flex' }}><PanelLeftClose className="w-[15px] h-[15px]" /></span>
+                <span>Collapse</span>
+              </>
+          }
+        </button>
+      </div>
     </aside>
   )
 }
