@@ -288,10 +288,9 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
                 padding: 8,
                 background: view === 'board' ? '#5A824E' : 'white',
                 color: view === 'board' ? 'white' : '#6b7280',
-                borderLeft: '1px solid #e5e7eb',
-                cursor: 'pointer',
                 border: 'none',
                 borderLeft: '1px solid #e5e7eb',
+                cursor: 'pointer',
               }}
               title="Board view"
             >
