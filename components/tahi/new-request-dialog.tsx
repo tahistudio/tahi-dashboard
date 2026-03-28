@@ -15,6 +15,7 @@ const BRAND_HEX = '#5A824E'   // keep one hex only for box-shadow alpha
 interface OrgOption {
   id: string
   name: string
+  planType?: string | null
 }
 
 interface NewRequestDialogProps {
@@ -68,6 +69,13 @@ export function NewRequestDialog({
   const [clientsLoading, setClientsLoading] = useState(false)
   const [clientOrgId, setClientOrgId] = useState('')
 
+  // Derived: does the selected client use tracks (maintain/scale)?
+  const selectedClient = clients.find(c => c.id === clientOrgId)
+  const clientUsesTracks = isAdmin
+    ? selectedClient?.planType === 'maintain' || selectedClient?.planType === 'scale'
+    : canUseLargeTrack // portal: parent component controls this
+  const showTrackSelector = isAdmin ? clientUsesTracks : true
+
   // Form fields
   const [title, setTitle] = useState('')
   const [type, setType] = useState('small_task')
@@ -83,8 +91,8 @@ export function NewRequestDialog({
     if (!open || !isAdmin) return
     setClientsLoading(true)
     fetch(apiPath('/api/admin/clients?status=active'))
-      .then(r => r.json() as Promise<{ organisations: OrgOption[] }>)
-      .then(data => setClients(data.organisations ?? []))
+      .then(r => r.json() as Promise<{ organisations: Array<{ id: string; name: string; planType?: string | null }> }>)
+      .then(data => setClients((data.organisations ?? []).map(o => ({ id: o.id, name: o.name, planType: o.planType }))))
       .catch(() => setClients([]))
       .finally(() => setClientsLoading(false))
   }, [open, isAdmin])
@@ -286,7 +294,8 @@ export function NewRequestDialog({
               />
             </FieldGroup>
 
-            {/* Type tiles: 2 options only */}
+            {/* Type tiles: only visible for retainer plans (maintain/scale) */}
+            {showTrackSelector && (
             <FieldGroup label="Task size">
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.625rem' }}>
                 {REQUEST_TYPES.map(t => {
@@ -370,6 +379,7 @@ export function NewRequestDialog({
                 })}
               </div>
             </FieldGroup>
+            )}
 
             {/* Category + Priority row */}
             <div style={{ display: 'grid', gridTemplateColumns: isAdmin ? '1fr 1fr' : '1fr', gap: '1rem' }}>

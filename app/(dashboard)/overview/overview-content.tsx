@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import {
   Users, Inbox, FileText, TrendingUp,
   Plus, Clock, UserPlus,
   ArrowRight, AlertTriangle, RefreshCw, Video, ExternalLink,
+  CheckCircle2, Circle, Play,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { apiPath } from '@/lib/api'
@@ -252,6 +253,9 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
         </div>
       )}
 
+      {/* Onboarding Checklist */}
+      <OnboardingChecklist />
+
       {/* Recent requests */}
       <SectionCard title="Your Requests" action={{ label: 'View all', href: '/requests' }}>
         {loading ? <LoadingRows /> : requests.length === 0 ? (
@@ -264,6 +268,165 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
           <RequestRow key={req.id} req={req} isLast={i === Math.min(requests.length, 6) - 1} />
         ))}
       </SectionCard>
+    </div>
+  )
+}
+
+// ─── Onboarding Checklist ─────────────────────────────────────────────────────
+
+const ONBOARDING_STEPS = [
+  { key: 'complete_profile', label: 'Complete your profile', href: '/settings' },
+  { key: 'first_request', label: 'Submit your first request', href: '/requests?new=1' },
+  { key: 'upload_assets', label: 'Upload brand assets', href: '/files' },
+  { key: 'schedule_call', label: 'Schedule a kickoff call', href: '/calls' },
+]
+
+function OnboardingChecklist() {
+  const [state, setState] = useState<Record<string, boolean> | null>(null)
+  const [loomUrl, setLoomUrl] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const fetchOnboarding = useCallback(async () => {
+    try {
+      const res = await fetch(apiPath('/api/portal/onboarding'))
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as {
+        onboardingState: Record<string, boolean>
+        onboardingLoomUrl: string | null
+      }
+      setState(data.onboardingState)
+      setLoomUrl(data.onboardingLoomUrl)
+    } catch {
+      setState(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchOnboarding() }, [fetchOnboarding])
+
+  async function toggleStep(key: string) {
+    if (!state) return
+    const completed = !state[key]
+    setState(prev => prev ? { ...prev, [key]: completed } : prev)
+    try {
+      await fetch(apiPath('/api/portal/onboarding'), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ step: key, completed }),
+      })
+    } catch {
+      // Revert on error
+      setState(prev => prev ? { ...prev, [key]: !completed } : prev)
+    }
+  }
+
+  if (loading) return null
+
+  // Don't show if all steps are complete
+  const allComplete = state && ONBOARDING_STEPS.every(s => state[s.key])
+  if (allComplete) return null
+
+  const completedCount = state ? ONBOARDING_STEPS.filter(s => state[s.key]).length : 0
+
+  return (
+    <div
+      className="bg-white rounded-xl"
+      style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', overflow: 'hidden' }}
+    >
+      <div
+        className="flex items-center justify-between"
+        style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}
+      >
+        <div>
+          <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+            Getting Started
+          </h2>
+          <p className="text-xs" style={{ color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
+            {completedCount} of {ONBOARDING_STEPS.length} steps complete
+          </p>
+        </div>
+        {/* Progress bar */}
+        <div style={{ width: 100, height: 6, background: 'var(--color-bg-tertiary)', borderRadius: 3 }}>
+          <div
+            style={{
+              width: `${(completedCount / ONBOARDING_STEPS.length) * 100}%`,
+              height: '100%',
+              background: BRAND,
+              borderRadius: 3,
+              transition: 'width 0.3s',
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Loom embed */}
+      {loomUrl && (
+        <div style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}>
+          <a
+            href={loomUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-sm font-medium hover:underline"
+            style={{ color: BRAND }}
+          >
+            <Play size={14} />
+            Watch your onboarding video
+            <ExternalLink size={11} />
+          </a>
+        </div>
+      )}
+
+      {/* Steps */}
+      <div>
+        {ONBOARDING_STEPS.map((step, i) => {
+          const isComplete = state?.[step.key] ?? false
+          return (
+            <div
+              key={step.key}
+              className="flex items-center gap-3"
+              style={{
+                padding: '0.75rem 1.25rem',
+                borderBottom: i < ONBOARDING_STEPS.length - 1 ? '1px solid var(--color-row-border)' : 'none',
+              }}
+            >
+              <button
+                onClick={() => toggleStep(step.key)}
+                className="flex-shrink-0 transition-colors"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: isComplete ? BRAND : 'var(--color-text-subtle)',
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+                aria-label={isComplete ? `Mark ${step.label} as incomplete` : `Mark ${step.label} as complete`}
+              >
+                {isComplete ? (
+                  <CheckCircle2 size={18} />
+                ) : (
+                  <Circle size={18} />
+                )}
+              </button>
+              <Link
+                href={step.href}
+                className="text-sm flex-1 hover:underline"
+                style={{
+                  color: isComplete ? 'var(--color-text-subtle)' : 'var(--color-text)',
+                  textDecoration: isComplete ? 'line-through' : 'none',
+                }}
+              >
+                {step.label}
+              </Link>
+              {!isComplete && (
+                <ArrowRight size={12} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
+              )}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

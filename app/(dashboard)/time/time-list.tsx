@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Plus, Clock, RefreshCw, DollarSign, Timer, Download } from 'lucide-react'
+import { Plus, Clock, RefreshCw, DollarSign, Timer, Download, ChevronDown, ChevronUp, Users } from 'lucide-react'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { apiPath } from '@/lib/api'
@@ -39,6 +39,11 @@ const BILLABLE_TABS = [
   { label: 'All', value: 'all' },
   { label: 'Billable', value: '1' },
   { label: 'Non-billable', value: '0' },
+]
+
+const VIEW_TABS = [
+  { label: 'Entries', value: 'entries' },
+  { label: 'By Client', value: 'by_client' },
 ]
 
 // ---- Helpers ----
@@ -253,6 +258,239 @@ function SummaryCard({ icon, label, value }: { icon: React.ReactNode; label: str
   )
 }
 
+// ---- By Client View ----
+
+interface ClientGroup {
+  orgId: string
+  orgName: string
+  totalHours: number
+  billableHours: number
+  entries: TimeEntry[]
+}
+
+function ByClientView({
+  entries,
+  loading,
+  error,
+  onRetry,
+}: {
+  entries: TimeEntry[]
+  loading: boolean
+  error: boolean
+  onRetry: () => void
+}) {
+  const [expandedOrg, setExpandedOrg] = useState<string | null>(null)
+
+  // Group entries by client
+  const groups: ClientGroup[] = []
+  const groupMap = new Map<string, ClientGroup>()
+
+  for (const entry of entries) {
+    const existing = groupMap.get(entry.orgId)
+    if (existing) {
+      existing.totalHours += entry.hours
+      if (entry.billable) existing.billableHours += entry.hours
+      existing.entries.push(entry)
+    } else {
+      const group: ClientGroup = {
+        orgId: entry.orgId,
+        orgName: entry.orgName ?? 'Unknown',
+        totalHours: entry.hours,
+        billableHours: entry.billable ? entry.hours : 0,
+        entries: [entry],
+      }
+      groupMap.set(entry.orgId, group)
+      groups.push(group)
+    }
+  }
+
+  // Sort by total hours descending
+  groups.sort((a, b) => b.totalHours - a.totalHours)
+
+  if (loading) {
+    return <LoadingSkeleton rows={5} height={56} />
+  }
+
+  if (error) {
+    return (
+      <div
+        style={{ padding: '3rem 1.5rem', textAlign: 'center', color: 'var(--color-text-muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}
+      >
+        <p className="text-sm">Failed to load time entries.</p>
+        <button
+          onClick={onRetry}
+          className="flex items-center gap-2 text-sm font-medium hover:opacity-80 transition-opacity"
+          style={{ color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer' }}
+        >
+          <RefreshCw style={{ width: 14, height: 14 }} aria-hidden="true" />
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  if (groups.length === 0) {
+    return (
+      <EmptyState
+        icon={<Users style={{ width: 28, height: 28, color: 'white' }} aria-hidden="true" />}
+        title="No time entries yet"
+        description="Log your first time entry to start tracking hours by client."
+      />
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      {groups.map(group => {
+        const isExpanded = expandedOrg === group.orgId
+        return (
+          <div
+            key={group.orgId}
+            style={{
+              background: 'white',
+              borderRadius: 12,
+              border: '1px solid var(--color-border)',
+              overflow: 'hidden',
+            }}
+          >
+            <button
+              onClick={() => setExpandedOrg(isExpanded ? null : group.orgId)}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '1rem 1.25rem',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: '0 8px 0 8px',
+                    background: 'linear-gradient(135deg, #5A824E, #425F39)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Users style={{ width: 16, height: 16, color: 'white' }} aria-hidden="true" />
+                </div>
+                <div>
+                  <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
+                    {group.orgName}
+                  </p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                    {group.entries.length} {group.entries.length === 1 ? 'entry' : 'entries'}
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                <div style={{ textAlign: 'right' }}>
+                  <p style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--color-text)' }}>
+                    {formatHours(group.totalHours)}
+                  </p>
+                  <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>total</p>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#16a34a' }}>
+                    {formatHours(group.billableHours)}
+                  </p>
+                  <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>billable</p>
+                </div>
+                {isExpanded ? (
+                  <ChevronUp style={{ width: 16, height: 16, color: 'var(--color-text-subtle)' }} />
+                ) : (
+                  <ChevronDown style={{ width: 16, height: 16, color: 'var(--color-text-subtle)' }} />
+                )}
+              </div>
+            </button>
+
+            {isExpanded && (
+              <div style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 500 }}>
+                    <thead>
+                      <tr style={{ background: 'var(--color-bg-secondary)' }}>
+                        {['Date', 'Team Member', 'Request', 'Hours', 'Billable', 'Notes'].map(h => (
+                          <th
+                            key={h}
+                            style={{
+                              padding: '0.5rem 1rem', textAlign: 'left', fontSize: '0.6875rem',
+                              fontWeight: 600, color: 'var(--color-text-muted)',
+                              textTransform: 'uppercase', letterSpacing: '0.04em',
+                            }}
+                          >
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.entries.map((entry, i) => (
+                        <tr
+                          key={entry.id}
+                          style={{
+                            borderBottom: i < group.entries.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
+                          }}
+                        >
+                          <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+                            {formatDate(entry.date)}
+                          </td>
+                          <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
+                            {entry.teamMemberName ?? 'Unknown'}
+                          </td>
+                          <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+                            {entry.requestId && entry.requestTitle ? (
+                              <Link href={`/requests/${entry.requestId}`} style={{ color: 'var(--color-brand)', textDecoration: 'none' }}>
+                                {entry.requestTitle}
+                              </Link>
+                            ) : (
+                              '--'
+                            )}
+                          </td>
+                          <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>
+                            {formatHours(entry.hours)}
+                          </td>
+                          <td style={{ padding: '0.625rem 1rem' }}>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                padding: '0.125rem 0.5rem',
+                                borderRadius: 99,
+                                fontSize: '0.75rem',
+                                fontWeight: 500,
+                                background: entry.billable ? '#f0fdf4' : '#f3f4f6',
+                                color: entry.billable ? '#16a34a' : '#6b7280',
+                              }}
+                            >
+                              {entry.billable ? 'Yes' : 'No'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {entry.notes ?? '--'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ---- Main Component ----
 
 export function TimeList() {
@@ -261,6 +499,7 @@ export function TimeList() {
   const [error, setError] = useState(false)
   const [billableTab, setBillableTab] = useState('all')
   const [showModal, setShowModal] = useState(false)
+  const [viewTab, setViewTab] = useState('entries')
   const [totalHours, setTotalHours] = useState(0)
   const [billableHours, setBillableHours] = useState(0)
   const [entryCount, setEntryCount] = useState(0)
@@ -366,6 +605,32 @@ export function TimeList() {
         />
       </div>
 
+      {/* View Tabs */}
+      <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '0.25rem' }}>
+          {VIEW_TABS.map(tab => (
+            <button
+              key={tab.value}
+              onClick={() => setViewTab(tab.value)}
+              style={{
+                padding: '0.5rem 0.875rem',
+                fontSize: '0.8125rem',
+                fontWeight: viewTab === tab.value ? 600 : 400,
+                color: viewTab === tab.value ? 'white' : 'var(--color-text-muted)',
+                background: viewTab === tab.value ? 'var(--color-brand)' : 'var(--color-bg-secondary)',
+                border: viewTab === tab.value ? '1px solid var(--color-brand)' : '1px solid var(--color-border)',
+                borderRadius: '0.5rem',
+                cursor: 'pointer',
+                minHeight: 36,
+                transition: 'all 0.15s',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Filter Tabs */}
       <div style={{ display: 'flex', gap: '0.25rem', borderBottom: '1px solid var(--color-border)', paddingBottom: 0 }}>
         {BILLABLE_TABS.map(tab => (
@@ -391,7 +656,13 @@ export function TimeList() {
         ))}
       </div>
 
+      {/* By Client View */}
+      {viewTab === 'by_client' && (
+        <ByClientView entries={entries} loading={loading} error={error} onRetry={() => fetchEntries(billableTab).catch(() => {})} />
+      )}
+
       {/* Table */}
+      {viewTab === 'entries' && (
       <div
         style={{
           background: 'white',
@@ -501,6 +772,8 @@ export function TimeList() {
           </div>
         )}
       </div>
+
+      )}
 
       {/* Log Time Modal */}
       {showModal && (

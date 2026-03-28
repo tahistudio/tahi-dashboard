@@ -109,9 +109,11 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
   const apiBase = isAdmin ? apiPath('/api/admin') : apiPath('/api/portal')
 
   const loadFiles = useCallback(async () => {
-    if (!isAdmin) return // portal doesn't have files endpoint yet
     try {
-      const res = await fetch(apiPath(`/api/admin/requests/${requestId}/files`))
+      const url = isAdmin
+        ? apiPath(`/api/admin/requests/${requestId}/files`)
+        : apiPath(`/api/portal/requests/${requestId}/files`)
+      const res = await fetch(url)
       if (res.ok) {
         const data = await res.json() as { items: RequestFile[] }
         setFiles(data.items ?? [])
@@ -389,15 +391,13 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
           </div>
 
           {/* Files */}
-          {(files.length > 0 || isAdmin) && (
-            <FilesPanel
-              files={files}
-              onRefresh={loadFiles}
-              requestId={requestId}
-              orgId={request.orgId}
-              isAdmin={isAdmin}
-            />
-          )}
+          <FilesPanel
+            files={files}
+            onRefresh={loadFiles}
+            requestId={requestId}
+            orgId={request.orgId}
+            isAdmin={isAdmin}
+          />
         </div>
 
         {/* ── Sidebar ──────────────────────────────────────────────────── */}
