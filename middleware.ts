@@ -1,7 +1,7 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 
-// Public routes — no auth needed.
+// Public routes : no auth needed.
 // Next.js strips the basePath (/dashboard) before middleware sees the path,
 // so these are app-relative paths (e.g. '/sign-in' not '/dashboard/sign-in').
 const isPublicRoute = createRouteMatcher([
@@ -12,7 +12,7 @@ const isPublicRoute = createRouteMatcher([
   '/api/case-study/(.*)',
 ])
 
-// Admin-only routes — if a client hits these, redirect them to /requests
+// Admin-only routes : if a client hits these, redirect them to /requests
 const isAdminOnlyRoute = createRouteMatcher([
   '/clients(.*)',
   '/billing(.*)',
@@ -22,7 +22,7 @@ const isAdminOnlyRoute = createRouteMatcher([
   '/docs(.*)',
 ])
 
-// Client-only routes — if admin hits these, they get redirected to /requests
+// Client-only routes : if admin hits these, they get redirected to /requests
 const isClientOnlyRoute = createRouteMatcher([
   '/files(.*)',
   '/services(.*)',

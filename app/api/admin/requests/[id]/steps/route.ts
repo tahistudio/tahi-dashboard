@@ -6,7 +6,7 @@ import { eq, asc } from 'drizzle-orm'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-// GET /api/admin/requests/[id]/steps — list all steps as a nested tree
+// GET /api/admin/requests/[id]/steps : list all steps as a nested tree
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -26,7 +26,7 @@ export async function GET(
   return NextResponse.json({ steps: buildTree(steps) })
 }
 
-// POST /api/admin/requests/[id]/steps — create a step
+// POST /api/admin/requests/[id]/steps : create a step
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },

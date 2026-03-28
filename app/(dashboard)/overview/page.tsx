@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { getServerAuth } from '@/lib/server-auth'
 import { AdminOverview, ClientOverview } from './overview-content'
 
-export const metadata = { title: 'Overview — Tahi Dashboard' }
+export const metadata = { title: 'Overview - Tahi Dashboard' }
 
 export default async function OverviewPage() {
   const { userId, orgId } = await getServerAuth()
@@ -16,7 +16,7 @@ export default async function OverviewPage() {
     const user = await clerk.users.getUser(userId)
     userName = `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim()
   } catch {
-    // non-fatal — just show no name
+    // non-fatal: just show no name
   }
 
   const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID

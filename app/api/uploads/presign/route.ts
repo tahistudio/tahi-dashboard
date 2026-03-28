@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
  * POST /api/uploads/presign
  *
  * Generates an R2 presigned URL for direct browser upload.
- * The browser uploads directly to R2 — the file never passes through this server.
+ * The browser uploads directly to R2 : the file never passes through this server.
  *
  * Body: { filename: string, mimeType: string, requestId?: string }
  * Returns: { uploadUrl: string, storageKey: string, fileId: string }

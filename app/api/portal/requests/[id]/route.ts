@@ -32,7 +32,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
-  // Messages — client only sees non-internal
+  // Messages : client only sees non-internal
   const msgs = await drizzle
     .select({
       id: schema.messages.id,
@@ -62,4 +62,4 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 
 // ── POST messages via portal (reuse admin route pattern) ─────────────────────
-// Clients post to /api/portal/requests/[id]/messages — kept separate file
+// Clients post to /api/portal/requests/[id]/messages : kept separate file

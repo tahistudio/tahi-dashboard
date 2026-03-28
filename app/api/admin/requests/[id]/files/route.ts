@@ -29,7 +29,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       sizeBytes: schema.files.sizeBytes,
       uploadedByType: schema.files.uploadedByType,
       createdAt: schema.files.createdAt,
-      // Uploader name — join team_members if uploaded by team
+      // Uploader name : join team_members if uploaded by team
       uploaderName: schema.teamMembers.name,
     })
     .from(schema.files)

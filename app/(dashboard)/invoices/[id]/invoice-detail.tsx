@@ -138,7 +138,7 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
         <div style={{ height: 32, width: 120, borderRadius: 8, background: '#f3f4f6' }} className="animate-pulse" />
         <div style={{ background: 'white', borderRadius: 12, border: '1px solid var(--color-border)', padding: 28 }}>
           <div style={{ height: 40, width: 200, borderRadius: 8, background: '#f3f4f6', marginBottom: 16 }} className="animate-pulse" />
@@ -150,14 +150,14 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
 
   if (error || !invoice) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'flex-start' }}>
-        <Link href="/invoices" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, color: 'var(--color-text-muted)', textDecoration: 'none' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'flex-start' }}>
+        <Link href="/invoices" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem', color: 'var(--color-text-muted)', textDecoration: 'none' }}>
           <ArrowLeft style={{ width: 14, height: 14 }} aria-hidden="true" />
           Back to Invoices
         </Link>
         <div style={{ background: 'white', borderRadius: 12, border: '1px solid var(--color-border)', padding: '48px 24px', textAlign: 'center', width: '100%' }}>
           <FileText style={{ width: 32, height: 32, color: '#9ca3af', margin: '0 auto 12px' }} aria-hidden="true" />
-          <p style={{ fontSize: 14, color: 'var(--color-text-muted)', marginBottom: 12 }}>
+          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginBottom: 12 }}>
             {error ? 'Failed to load invoice.' : 'Invoice not found.'}
           </p>
           {error && (
@@ -181,7 +181,7 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
   const subtotal = items.reduce((s, it) => s + it.totalUsd, 0)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       {/* Back link */}
       <Link
         href="/invoices"
@@ -198,7 +198,7 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
           background: 'white',
           borderRadius: 12,
           border: '1px solid var(--color-border)',
-          padding: '28px 28px 24px',
+          padding: '1.75rem 1.75rem 1.5rem',
         }}
       >
         <div
@@ -207,17 +207,17 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
             alignItems: 'flex-start',
             justifyContent: 'space-between',
             flexWrap: 'wrap',
-            gap: 16,
-            marginBottom: 24,
+            gap: '1rem',
+            marginBottom: '1.5rem',
           }}
         >
           <div>
-            <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 4 }}>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
               {invoice.orgName ?? 'Unknown Client'}
             </p>
             <p
               style={{
-                fontSize: 36,
+                fontSize: '2.25rem',
                 fontWeight: 700,
                 color: 'var(--color-text)',
                 lineHeight: 1.1,
@@ -231,9 +231,9 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              padding: '4px 12px',
+              padding: '0.25rem 0.75rem',
               borderRadius: 99,
-              fontSize: 13,
+              fontSize: '0.8125rem',
               fontWeight: 600,
               background: statusCfg.bg,
               color: statusCfg.text,
@@ -248,9 +248,9 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-            gap: '16px 24px',
+            gap: '1rem 1.5rem',
             borderTop: '1px solid var(--color-border-subtle)',
-            paddingTop: 20,
+            paddingTop: '1.25rem',
           }}
         >
           <MetaField label="Invoice ID" value={invoice.id.slice(0, 8).toUpperCase()} />
@@ -266,10 +266,10 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
           <div
             style={{
               display: 'flex',
-              gap: 12,
+              gap: '0.75rem',
               flexWrap: 'wrap',
-              marginTop: 24,
-              paddingTop: 20,
+              marginTop: '1.5rem',
+              paddingTop: '1.25rem',
               borderTop: '1px solid var(--color-border-subtle)',
             }}
           >
@@ -308,13 +308,13 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
             background: 'var(--color-bg-secondary)',
             borderRadius: 8,
             border: '1px solid var(--color-border-subtle)',
-            padding: '14px 16px',
+            padding: '0.875rem 1rem',
           }}
         >
-          <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+          <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
             Notes
           </p>
-          <p style={{ fontSize: 14, color: 'var(--color-text)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+          <p style={{ fontSize: '0.875rem', color: 'var(--color-text)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
             {invoice.notes}
           </p>
         </div>
@@ -329,8 +329,8 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
           overflow: 'hidden',
         }}
       >
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
-          <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>Line Items</h2>
+        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
+          <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>Line Items</h2>
         </div>
 
         {items.length === 0 ? (
@@ -342,16 +342,16 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 500 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                  <th style={{ padding: '10px 20px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <th style={{ padding: '0.625rem 1.25rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                     Description
                   </th>
-                  <th style={{ padding: '10px 20px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', width: 100 }}>
+                  <th style={{ padding: '0.625rem 1.25rem', textAlign: 'right', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', width: 100 }}>
                     Qty
                   </th>
-                  <th style={{ padding: '10px 20px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', width: 120 }}>
+                  <th style={{ padding: '0.625rem 1.25rem', textAlign: 'right', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', width: 120 }}>
                     Unit Price
                   </th>
-                  <th style={{ padding: '10px 20px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', width: 120 }}>
+                  <th style={{ padding: '0.625rem 1.25rem', textAlign: 'right', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', width: 120 }}>
                     Total
                   </th>
                 </tr>
@@ -359,16 +359,16 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
               <tbody>
                 {items.map((item, i) => (
                   <tr key={item.id} style={{ borderBottom: i < items.length - 1 ? '1px solid var(--color-border-subtle)' : 'none' }}>
-                    <td style={{ padding: '14px 20px', fontSize: 14, color: 'var(--color-text)' }}>
+                    <td style={{ padding: '0.875rem 1.25rem', fontSize: '0.875rem', color: 'var(--color-text)' }}>
                       {item.description}
                     </td>
-                    <td style={{ padding: '14px 20px', textAlign: 'right', fontSize: 14, color: 'var(--color-text-muted)' }}>
+                    <td style={{ padding: '0.875rem 1.25rem', textAlign: 'right', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
                       {item.quantity ?? 1}
                     </td>
-                    <td style={{ padding: '14px 20px', textAlign: 'right', fontSize: 14, color: 'var(--color-text-muted)' }}>
+                    <td style={{ padding: '0.875rem 1.25rem', textAlign: 'right', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
                       {formatCurrency(item.unitPriceUsd, invoice.currency)}
                     </td>
-                    <td style={{ padding: '14px 20px', textAlign: 'right', fontSize: 14, fontWeight: 600, color: 'var(--color-text)' }}>
+                    <td style={{ padding: '0.875rem 1.25rem', textAlign: 'right', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
                       {formatCurrency(item.totalUsd, invoice.currency)}
                     </td>
                   </tr>
@@ -382,7 +382,7 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
         <div
           style={{
             borderTop: '1px solid var(--color-border)',
-            padding: '16px 20px',
+            padding: '1rem 1.25rem',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'flex-end',
@@ -390,19 +390,19 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', width: 240 }}>
-            <span style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>Subtotal</span>
-            <span style={{ fontSize: 13, color: 'var(--color-text)' }}>{formatCurrency(subtotal, invoice.currency)}</span>
+            <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>Subtotal</span>
+            <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{formatCurrency(subtotal, invoice.currency)}</span>
           </div>
           {(invoice.taxAmountUsd ?? 0) > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', width: 240 }}>
-              <span style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>Tax</span>
-              <span style={{ fontSize: 13, color: 'var(--color-text)' }}>{formatCurrency(invoice.taxAmountUsd ?? 0, invoice.currency)}</span>
+              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>Tax</span>
+              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{formatCurrency(invoice.taxAmountUsd ?? 0, invoice.currency)}</span>
             </div>
           )}
           {(invoice.discountAmountUsd ?? 0) > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', width: 240 }}>
-              <span style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>Discount</span>
-              <span style={{ fontSize: 13, color: '#dc2626' }}>-{formatCurrency(invoice.discountAmountUsd ?? 0, invoice.currency)}</span>
+              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>Discount</span>
+              <span style={{ fontSize: '0.8125rem', color: '#dc2626' }}>-{formatCurrency(invoice.discountAmountUsd ?? 0, invoice.currency)}</span>
             </div>
           )}
           <div
@@ -414,8 +414,8 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
               borderTop: '1px solid var(--color-border)',
             }}
           >
-            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--color-text)' }}>Total</span>
-            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--color-text)' }}>{formatCurrency(invoice.totalUsd, invoice.currency)}</span>
+            <span style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-text)' }}>Total</span>
+            <span style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-text)' }}>{formatCurrency(invoice.totalUsd, invoice.currency)}</span>
           </div>
         </div>
       </div>
@@ -428,10 +428,10 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
 function MetaField({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
     <div>
-      <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
+      <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.125rem' }}>
         {label}
       </p>
-      <p style={{ fontSize: 13, fontWeight: 500, color: highlight ? '#dc2626' : 'var(--color-text)' }}>
+      <p style={{ fontSize: '0.8125rem', fontWeight: 500, color: highlight ? '#dc2626' : 'var(--color-text)' }}>
         {value}
       </p>
     </div>
@@ -450,7 +450,7 @@ function ActionButton({
   variant: 'primary' | 'success' | 'ghost'
 }) {
   const styles: Record<string, React.CSSProperties> = {
-    primary: { background: '#5A824E', color: 'white', border: 'none' },
+    primary: { background: 'var(--color-brand)', color: 'white', border: 'none' },
     success: { background: '#16a34a', color: 'white', border: 'none' },
     ghost:   { background: 'white', color: 'var(--color-text)', border: '1px solid var(--color-border)' },
   }
@@ -459,9 +459,9 @@ function ActionButton({
       onClick={onClick}
       disabled={disabled}
       style={{
-        padding: '9px 18px',
+        padding: '0.5625rem 1.125rem',
         borderRadius: 8,
-        fontSize: 14,
+        fontSize: '0.875rem',
         fontWeight: 600,
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.6 : 1,

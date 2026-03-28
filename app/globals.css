@@ -2,7 +2,7 @@
 @import "tailwindcss";
 
 /* ============================================================
-   TAHI STUDIO — DESIGN SYSTEM
+   TAHI STUDIO : DESIGN SYSTEM
    All brand tokens as CSS custom properties.
    Tailwind v4 reads these via @theme.
    ============================================================ */
@@ -20,7 +20,7 @@
   --color-brand-200: #b9deb1;
   --color-brand-900: #1e3019;
 
-  /* Surface — Light mode */
+  /* Surface : Light mode */
   --color-bg: #ffffff;
   --color-bg-secondary: #f7f9f6;
   --color-bg-tertiary: #eef3ec;
@@ -30,7 +30,7 @@
   --color-border: #d4e0d0;
   --color-border-subtle: #e8f0e6;
 
-  /* Surface — Dark mode */
+  /* Surface : Dark mode */
   --color-bg-dark: #2A3626;
   --color-bg-dark-secondary: #1f2a1c;
   --color-bg-dark-tertiary: #354230;
@@ -135,7 +135,7 @@
   /* Spacing */
   --spacing-px: 1px;
 
-  /* Border radius — the Tahi "leaf" shape */
+  /* Border radius : the Tahi "leaf" shape */
   /* top-left sharp | top-right round | bottom-right sharp | bottom-left round */
   --radius-leaf: 0 16px 0 16px;
   --radius-leaf-sm: 0 10px 0 10px;
@@ -179,7 +179,7 @@ body {
    TAHI COMPONENT UTILITIES
    ============================================================ */
 
-/* Leaf shape — the Tahi signature border radius */
+/* Leaf shape : the Tahi signature border radius */
 .leaf {
   border-radius: var(--radius-leaf);
 }
@@ -190,7 +190,7 @@ body {
   border-radius: var(--radius-leaf-lg);
 }
 
-/* Glass panel — used in dark sections */
+/* Glass panel : used in dark sections */
 .glass {
   background: var(--color-glass);
   border: 1px solid var(--color-glass-border);
@@ -198,12 +198,12 @@ body {
   -webkit-backdrop-filter: blur(12px);
 }
 
-/* Brand gradient — used for icons and accents */
+/* Brand gradient : used for icons and accents */
 .brand-gradient {
   background: linear-gradient(135deg, var(--color-brand-light), var(--color-brand-dark));
 }
 
-/* Focus ring — consistent across all interactive elements */
+/* Focus ring : consistent across all interactive elements */
 .focus-ring {
   outline: 2px solid var(--color-brand);
   outline-offset: 2px;

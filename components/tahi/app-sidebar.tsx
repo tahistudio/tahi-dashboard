@@ -67,7 +67,7 @@ const NAV: NavGroup[] = [
   },
 ]
 
-// All sidebar colors as hex constants — never rely on Tailwind CSS variables here
+// All sidebar colors as hex constants; never rely on Tailwind CSS variables here
 const S = {
   bg:         '#1e2a1b',
   border:     '#2d3d2a',
@@ -112,7 +112,7 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
       <div
         className="flex items-center h-14 flex-shrink-0"
         style={{
-          padding: '0 16px',
+          padding: '0 1rem',
           borderBottom: `1px solid ${S.border}`,
         }}
       >
@@ -123,9 +123,9 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto" style={{ padding: '12px 8px' }}>
+      <nav className="flex-1 overflow-y-auto" style={{ padding: '0.75rem 0.5rem' }}>
         {visibleNav.map((group, gi) => (
-          <div key={group.group} style={{ marginTop: gi > 0 ? '20px' : 0 }}>
+          <div key={group.group} style={{ marginTop: gi > 0 ? '1.25rem' : 0 }}>
             {!collapsed && (
               <p style={{
                 fontSize: '0.625rem',
@@ -133,8 +133,8 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase',
                 color: S.groupLabel,
-                padding: '0 8px',
-                marginBottom: '4px',
+                padding: '0 0.5rem',
+                marginBottom: '0.25rem',
               }}>
                 {group.group}
               </p>

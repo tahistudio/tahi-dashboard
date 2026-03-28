@@ -117,7 +117,7 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
         setFiles(data.items ?? [])
       }
     } catch {
-      // non-fatal — files panel will stay empty
+      // non-fatal: files panel will stay empty
     }
   }, [requestId, isAdmin])
 

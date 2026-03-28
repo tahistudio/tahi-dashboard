@@ -16,7 +16,7 @@ export function EmptyState({ icon, title, description, ctaLabel, onCtaClick }: E
   return (
     <div
       className="flex flex-col items-center justify-center text-center"
-      style={{ padding: '64px 24px', background: 'white' }}
+      style={{ padding: '4rem 1.5rem', background: 'white' }}
     >
       <div
         className="flex items-center justify-center"
@@ -24,23 +24,23 @@ export function EmptyState({ icon, title, description, ctaLabel, onCtaClick }: E
           width: 56,
           height: 56,
           borderRadius: '0 12px 0 12px',
-          background: 'linear-gradient(135deg, #5A824E, #425F39)',
-          marginBottom: 16,
+          background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
+          marginBottom: '1rem',
         }}
       >
         {icon}
       </div>
-      <h3 className="text-base font-semibold" style={{ color: '#111827', marginBottom: 8 }}>
+      <h3 className="text-base font-semibold" style={{ color: 'var(--color-text)', marginBottom: '0.5rem' }}>
         {title}
       </h3>
-      <p className="text-sm" style={{ color: '#6b7280', maxWidth: 320, marginBottom: ctaLabel ? 20 : 0 }}>
+      <p className="text-sm" style={{ color: 'var(--color-text-muted)', maxWidth: '20rem', marginBottom: ctaLabel ? '1.25rem' : 0 }}>
         {description}
       </p>
       {ctaLabel && onCtaClick && (
         <button
           onClick={onCtaClick}
           className="flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-          style={{ padding: '8px 16px', background: '#5A824E', borderRadius: 6, border: 'none', cursor: 'pointer' }}
+          style={{ padding: '0.5rem 1rem', background: 'var(--color-brand)', borderRadius: 6, border: 'none', cursor: 'pointer' }}
         >
           {ctaLabel}
         </button>

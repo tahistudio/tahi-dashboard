@@ -16,7 +16,7 @@ interface ClerkMountProps {
 }
 
 // ── ClerkSignIn ────────────────────────────────────────────────────────────────
-// Explicit mount wrapper — avoids relying on @clerk/nextjs server component
+// Explicit mount wrapper; avoids relying on @clerk/nextjs server component
 // auto-detection, which can fail in Webflow Cloud / edge-runtime environments.
 
 export function ClerkSignIn({ appearance }: ClerkMountProps) {

@@ -13,10 +13,10 @@ interface NewClientDialogProps {
 
 const PLAN_OPTIONS = [
   { value: '', label: 'No plan yet' },
-  { value: 'maintain', label: 'Maintain — $1,500/mo' },
-  { value: 'scale',    label: 'Scale — $4,000/mo' },
-  { value: 'tune',     label: 'Tune — $750 one-off' },
-  { value: 'launch',   label: 'Launch — $2,500 one-off' },
+  { value: 'maintain', label: 'Maintain ($1,500/mo)' },
+  { value: 'scale',    label: 'Scale ($4,000/mo)' },
+  { value: 'tune',     label: 'Tune ($750 one-off)' },
+  { value: 'launch',   label: 'Launch ($2,500 one-off)' },
   { value: 'hourly',   label: 'Hourly' },
   { value: 'custom',   label: 'Custom project' },
 ]
@@ -165,7 +165,7 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
                 className="w-full px-3 py-2.5 text-sm bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg focus:outline-none focus:border-[var(--color-brand)] transition-colors text-[var(--color-text)]"
               >
                 {INDUSTRY_OPTIONS.map(opt => (
-                  <option key={opt} value={opt}>{opt || '— Select —'}</option>
+                  <option key={opt} value={opt}>{opt || 'Select...'}</option>
                 ))}
               </select>
             </div>
@@ -192,7 +192,7 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
           {/* Divider */}
           <div className="border-t border-[var(--color-border)] pt-4">
             <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-3">
-              Primary contact (optional — invite sent on save)
+              Primary contact (optional, invite sent on save)
             </p>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">

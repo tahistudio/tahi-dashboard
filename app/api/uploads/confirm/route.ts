@@ -12,13 +12,13 @@ export const dynamic = 'force-dynamic'
  * Records the file metadata in the `files` table.
  *
  * Body: {
- *   fileId: string       — from presign response
- *   storageKey: string   — from presign response
+ *   fileId: string       : from presign response
+ *   storageKey: string   : from presign response
  *   filename: string
  *   mimeType: string
  *   sizeBytes: number
- *   requestId?: string   — link file to a specific request
- *   orgId?: string       — required if admin uploading on behalf of a client
+ *   requestId?: string   : link file to a specific request
+ *   orgId?: string       : required if admin uploading on behalf of a client
  * }
  */
 export async function POST(req: NextRequest) {

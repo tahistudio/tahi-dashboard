@@ -3,7 +3,7 @@ import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { ClientList } from './client-list'
 
-export const metadata = { title: 'Clients — Tahi Dashboard' }
+export const metadata = { title: 'Clients - Tahi Dashboard' }
 
 export default async function ClientsPage() {
   const { orgId } = await getServerAuth()

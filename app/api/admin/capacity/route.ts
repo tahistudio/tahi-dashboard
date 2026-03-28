@@ -87,7 +87,7 @@ export async function GET(req: NextRequest) {
   })
 }
 
-// PATCH — reorder a request in the queue
+// PATCH : reorder a request in the queue
 export async function PATCH(req: NextRequest) {
   const { orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

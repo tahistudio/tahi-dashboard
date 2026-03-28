@@ -15,7 +15,7 @@ import { formatDistanceToNow } from 'date-fns'
 
 const BRAND = '#5A824E'
 
-// ─── Accent colour map (hex only — no Tailwind dynamic classes) ───────────────
+// ─── Accent colour map (hex only, no Tailwind dynamic classes) ───────────────
 
 const ACCENTS = {
   violet:  { bg: '#ede9fe', color: '#7c3aed' },
@@ -71,8 +71,6 @@ export function AdminOverview({ userName }: { userName: string }) {
   }, [])
 
   const firstName = userName.split(' ')[0]
-  const hour = new Date().getHours()
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
   return (
     <div className="flex flex-col" style={{ gap: '2rem', maxWidth: '68.75rem' }}>
@@ -85,9 +83,9 @@ export function AdminOverview({ userName }: { userName: string }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--color-text)' }}>
-            {greeting}{firstName ? `, ${firstName}` : ''} 👋
+            Welcome back{firstName ? `, ${firstName}` : ''}
           </h1>
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginTop: 4 }}>
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
             Here&apos;s what&apos;s happening at Tahi today.
           </p>
         </div>
@@ -125,7 +123,7 @@ export function AdminOverview({ userName }: { userName: string }) {
         />
         <StatCard
           label="MRR"
-          value="—"
+          value="--"
           icon={<TrendingUp size={18} />}
           href="/reports"
           accent="emerald"
@@ -172,8 +170,6 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
   const open = requests.filter(r => !['delivered', 'archived'].includes(r.status))
   const inReview = requests.filter(r => r.status === 'client_review')
   const firstName = userName.split(' ')[0]
-  const hour = new Date().getHours()
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
   return (
     <div className="flex flex-col" style={{ gap: '2rem', maxWidth: '56.25rem' }}>
@@ -186,16 +182,16 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--color-text)' }}>
-            {greeting}{firstName ? `, ${firstName}` : ''} 👋
+            Welcome back{firstName ? `, ${firstName}` : ''}
           </h1>
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginTop: 4 }}>
-            {orgName} — Tahi Studio workspace
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
+            {orgName} (Tahi Studio workspace)
           </p>
         </div>
         <Link
           href="/requests?new=1"
           className="flex-shrink-0 flex items-center gap-1.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-          style={{ padding: '9px 16px', background: BRAND, borderRadius: 8 }}
+          style={{ padding: '0.5625rem 1rem', background: BRAND, borderRadius: 8 }}
         >
           <Plus size={14} />
           New Request
@@ -221,7 +217,7 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
         />
         <StatCard
           label="Invoices Due"
-          value="—"
+          value="--"
           icon={<FileText size={18} />}
           href="/invoices"
           accent="neutral"
@@ -239,7 +235,7 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
             <p className="text-sm font-semibold" style={{ color: 'var(--status-in-review-text)' }}>
               {inReview.length} request{inReview.length > 1 ? 's' : ''} waiting for your review
             </p>
-            <p className="text-xs" style={{ color: 'var(--status-in-review-text)', marginTop: 2 }}>
+            <p className="text-xs" style={{ color: 'var(--status-in-review-text)', marginTop: '0.125rem' }}>
               Please approve or request changes.
             </p>
           </div>
@@ -316,7 +312,7 @@ function StatCard({
 
       {/* Value */}
       {value === null ? (
-        <div className="rounded animate-pulse" style={{ height: 36, width: 64, background: 'var(--color-bg-tertiary)', marginBottom: 8 }} />
+        <div className="rounded animate-pulse" style={{ height: 36, width: 64, background: 'var(--color-bg-tertiary)', marginBottom: '0.5rem' }} />
       ) : (
         <p className="font-bold leading-none tabular-nums" style={{ fontSize: '2rem', color: 'var(--color-text)', marginBottom: '0.5rem' }}>
           {value}
@@ -325,7 +321,7 @@ function StatCard({
 
       {/* Label */}
       <p className="text-sm font-medium" style={{ color: 'var(--color-text-muted)' }}>{label}</p>
-      {sub && <p className="text-xs" style={{ color: 'var(--color-text-subtle)', marginTop: 3 }}>{sub}</p>}
+      {sub && <p className="text-xs" style={{ color: 'var(--color-text-subtle)', marginTop: '0.1875rem' }}>{sub}</p>}
     </Link>
   )
 }
@@ -346,7 +342,7 @@ function SectionCard({
     >
       <div
         className="flex items-center justify-between"
-        style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-row-border)' }}
+        style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}
       >
         <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{title}</h2>
         {action && (
@@ -372,7 +368,7 @@ function RequestRow({ req, isLast, showOrg }: { req: RecentRequest; isLast: bool
       href={`/requests/${req.id}`}
       className="flex items-center gap-4 group transition-colors"
       style={{
-        padding: '14px 20px',
+        padding: '0.875rem 1.25rem',
         borderBottom: isLast ? 'none' : '1px solid var(--color-row-border)',
         textDecoration: 'none',
         background: 'var(--color-bg)',
@@ -398,7 +394,7 @@ function RequestRow({ req, isLast, showOrg }: { req: RecentRequest; isLast: bool
             </span>
           )}
         </div>
-        <p className="text-xs truncate" style={{ color: 'var(--color-text-subtle)', marginTop: 2 }}>
+        <p className="text-xs truncate" style={{ color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
           {showOrg && req.orgName ? `${req.orgName} · ` : ''}
           {req.type.replace(/_/g, ' ')}
         </p>
@@ -420,10 +416,10 @@ function LoadingRows() {
         <div
           key={i}
           className="flex items-center gap-4 animate-pulse"
-          style={{ padding: '16px 20px', borderBottom: i < 3 ? '1px solid var(--color-row-border)' : 'none' }}
+          style={{ padding: '1rem 1.25rem', borderBottom: i < 3 ? '1px solid var(--color-row-border)' : 'none' }}
         >
           <div className="rounded-full" style={{ width: 80, height: 22, background: 'var(--color-bg-tertiary)' }} />
-          <div className="flex-1" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div className="flex-1" style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
             <div className="rounded" style={{ height: 13, width: '60%', background: 'var(--color-bg-tertiary)' }} />
             <div className="rounded" style={{ height: 11, width: '35%', background: 'var(--color-bg-tertiary)' }} />
           </div>
@@ -444,10 +440,10 @@ function EmptyRows({
   action?: { label: string; href: string }
 }) {
   return (
-    <div className="flex flex-col items-center justify-center text-center" style={{ padding: '48px 24px', gap: 8 }}>
+    <div className="flex flex-col items-center justify-center text-center" style={{ padding: '3rem 1.5rem', gap: '0.5rem' }}>
       <div
         className="flex items-center justify-center rounded-xl"
-        style={{ width: 44, height: 44, background: 'var(--color-bg-secondary)', marginBottom: 4 }}
+        style={{ width: 44, height: 44, background: 'var(--color-bg-secondary)', marginBottom: '0.25rem' }}
       >
         <Inbox size={20} style={{ color: '#d1d5db' }} />
       </div>
@@ -457,7 +453,7 @@ function EmptyRows({
         <Link
           href={action.href}
           className="text-xs flex items-center gap-1 font-medium hover:underline"
-          style={{ color: BRAND, marginTop: 4 }}
+          style={{ color: BRAND, marginTop: '0.25rem' }}
         >
           {action.label} <ArrowRight size={11} />
         </Link>
@@ -481,8 +477,8 @@ function QuickBtn({
       href={href}
       className="flex items-center gap-1.5 text-sm font-medium rounded-lg transition-opacity hover:opacity-90"
       style={primary
-        ? { padding: '8px 14px', background: BRAND, color: 'white', border: `1px solid ${BRAND}`, textDecoration: 'none' }
-        : { padding: '8px 14px', background: 'var(--color-bg)', color: 'var(--color-text)', border: '1px solid var(--color-border)', textDecoration: 'none' }
+        ? { padding: '0.5rem 0.875rem', background: BRAND, color: 'white', border: `1px solid ${BRAND}`, textDecoration: 'none' }
+        : { padding: '0.5rem 0.875rem', background: 'var(--color-bg)', color: 'var(--color-text)', border: '1px solid var(--color-border)', textDecoration: 'none' }
       }
     >
       {icon}
@@ -503,12 +499,12 @@ function GettingStarted() {
   return (
     <div
       className="bg-white rounded-xl"
-      style={{ padding: 24, border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+      style={{ padding: '1.5rem', border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
     >
-      <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)', marginBottom: 4 }}>
+      <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)', marginBottom: '0.25rem' }}>
         Getting started
       </h2>
-      <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginBottom: 20 }}>
+      <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginBottom: '1.25rem' }}>
         Complete these steps to set up your dashboard.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -517,7 +513,7 @@ function GettingStarted() {
             key={s.n}
             href={s.href}
             className="flex items-center gap-3 rounded-lg transition-colors"
-            style={{ padding: '12px 14px', border: '1px solid var(--color-row-border)', textDecoration: 'none' }}
+            style={{ padding: '0.75rem 0.875rem', border: '1px solid var(--color-row-border)', textDecoration: 'none' }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-brand-200)'; e.currentTarget.style.background = 'var(--color-brand-50)' }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-row-border)'; e.currentTarget.style.background = 'var(--color-bg)' }}
           >

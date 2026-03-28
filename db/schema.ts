@@ -218,7 +218,7 @@ export const requestSteps = sqliteTable('request_steps', {
   // Self-referencing for infinite nesting (null = top-level step)
   parentStepId: text('parent_step_id'),
   title: text('title').notNull(),
-  // Tiptap JSON — optional richer description per step
+  // Tiptap JSON : optional richer description per step
   description: text('description'),
   completed: integer('completed', { mode: 'boolean' }).default(false),
   completedAt: text('completed_at'),

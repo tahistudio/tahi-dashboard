@@ -1,11 +1,11 @@
 import { headers } from 'next/headers'
 import Stripe from 'stripe'
 
-// Force dynamic — prevents Next.js from trying to statically analyse this
+// Force dynamic : prevents Next.js from trying to statically analyse this
 // route at build time (when env vars are unavailable on Webflow Cloud).
 export const dynamic = 'force-dynamic'
 
-// Lazy singleton — only instantiated on first real request, not at build time.
+// Lazy singleton : only instantiated on first real request, not at build time.
 let _stripe: Stripe | null = null
 function getStripe(): Stripe {
   if (!_stripe) {

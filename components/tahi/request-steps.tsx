@@ -195,7 +195,7 @@ function StepItem({
           </span>
         )}
 
-        {/* Actions — only on hover */}
+        {/* Actions: only on hover */}
         <div style={{ display: 'flex', gap: '0.125rem', opacity: 0, transition: 'opacity 0.1s' }}
           className="group-hover:opacity-100">
           <button

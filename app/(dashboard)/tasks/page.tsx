@@ -9,7 +9,7 @@ export default async function TasksPage() {
       <div>
         <h1 className="text-2xl font-bold text-[var(--color-text)]">Tasks</h1>
         <p className="text-sm text-[var(--color-text-muted)] mt-1">
-          {isAdmin ? 'All tasks — client-facing, internal, and Tahi Studio.' : 'Tasks assigned to you by the Tahi team.'}
+          {isAdmin ? 'All tasks: client-facing, internal, and Tahi Studio.' : 'Tasks assigned to you by the Tahi team.'}
         </p>
       </div>
       <div className="flex flex-col items-center justify-center py-20 text-center">

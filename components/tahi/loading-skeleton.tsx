@@ -11,21 +11,21 @@ interface LoadingSkeletonProps {
 export function LoadingSkeleton({ rows = 5, height = 48 }: LoadingSkeletonProps) {
   return (
     <div>
-      <div style={{ height: 40, background: '#f9fafb', borderBottom: '1px solid #f3f4f6' }} />
+      <div style={{ height: 40, background: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border-subtle)' }} />
       {[...Array(rows)].map((_, i) => (
         <div
           key={i}
           className="flex items-center gap-4 animate-pulse"
           style={{
-            padding: '14px 16px',
+            padding: '0.875rem 1rem',
             height,
-            borderBottom: i < rows - 1 ? '1px solid #f9fafb' : 'none',
+            borderBottom: i < rows - 1 ? '1px solid var(--color-bg-secondary)' : 'none',
           }}
         >
-          <div className="h-4 rounded flex-1" style={{ background: '#f3f4f6' }} />
-          <div className="h-4 rounded" style={{ background: '#f3f4f6', width: 96 }} />
-          <div className="h-5 rounded-full" style={{ background: '#f3f4f6', width: 80 }} />
-          <div className="h-4 rounded" style={{ background: '#f3f4f6', width: 64 }} />
+          <div className="h-4 rounded flex-1" style={{ background: 'var(--color-bg-tertiary)' }} />
+          <div className="h-4 rounded" style={{ background: 'var(--color-bg-tertiary)', width: 96 }} />
+          <div className="h-5 rounded-full" style={{ background: 'var(--color-bg-tertiary)', width: 80 }} />
+          <div className="h-4 rounded" style={{ background: 'var(--color-bg-tertiary)', width: 64 }} />
         </div>
       ))}
     </div>

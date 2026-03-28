@@ -109,9 +109,9 @@ function LogTimeModal({
   }, [orgId, teamMemberId, requestId, hours, notes, date, billable, onCreated])
 
   const inputStyle = {
-    padding: '8px 12px',
+    padding: '0.5rem 0.75rem',
     borderRadius: 8,
-    fontSize: 14,
+    fontSize: '0.875rem',
     border: '1px solid var(--color-border)',
     outline: 'none',
     color: 'var(--color-text)',
@@ -132,42 +132,42 @@ function LogTimeModal({
     >
       <div
         style={{
-          background: 'white', borderRadius: 12, padding: 28,
-          width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto',
+          background: 'white', borderRadius: 12, padding: '1.75rem',
+          width: '100%', maxWidth: '30rem', maxHeight: '90vh', overflowY: 'auto',
           boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
         }}
       >
-        <h2 id="log-time-title" className="text-lg font-bold" style={{ color: 'var(--color-text)', marginBottom: 20 }}>
+        <h2 id="log-time-title" className="text-lg font-bold" style={{ color: 'var(--color-text)', marginBottom: '1.25rem' }}>
           Log Time
         </h2>
         {error && (
           <div
             aria-live="polite"
-            style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', marginBottom: 16, color: '#dc2626', fontSize: 13 }}
+            style={{ background: 'var(--color-danger-bg)', border: '1px solid #fecaca', borderRadius: 8, padding: '0.625rem 0.875rem', marginBottom: '1rem', color: 'var(--color-danger)', fontSize: '0.8125rem' }}
           >
             {error}
           </div>
         )}
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label htmlFor="lt-org-id" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>Client ID</label>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+            <label htmlFor="lt-org-id" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Client ID</label>
             <input id="lt-org-id" type="text" placeholder="Organisation ID" value={orgId} onChange={e => setOrgId(e.target.value)} required style={inputStyle} />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label htmlFor="lt-member-id" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>Team Member ID</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+            <label htmlFor="lt-member-id" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Team Member ID</label>
             <input id="lt-member-id" type="text" placeholder="Team member ID" value={teamMemberId} onChange={e => setTeamMemberId(e.target.value)} required style={inputStyle} />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label htmlFor="lt-request-id" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>Request ID (optional)</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+            <label htmlFor="lt-request-id" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Request ID (optional)</label>
             <input id="lt-request-id" type="text" placeholder="Link to a request" value={requestId} onChange={e => setRequestId(e.target.value)} style={inputStyle} />
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
-              <label htmlFor="lt-hours" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>Hours</label>
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: 1 }}>
+              <label htmlFor="lt-hours" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Hours</label>
               <input id="lt-hours" type="number" min="0.1" step="0.1" placeholder="0.0" value={hours} onChange={e => setHours(e.target.value)} required style={inputStyle} />
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
-              <label htmlFor="lt-date" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>Date</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: 1 }}>
+              <label htmlFor="lt-date" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Date</label>
               <input id="lt-date" type="date" value={date} onChange={e => setDate(e.target.value)} required style={inputStyle} />
             </div>
           </div>
@@ -177,20 +177,20 @@ function LogTimeModal({
               type="checkbox"
               checked={billable}
               onChange={e => setBillable(e.target.checked)}
-              style={{ width: 16, height: 16, accentColor: '#5A824E' }}
+              style={{ width: 16, height: 16, accentColor: 'var(--color-brand)' }}
             />
-            <label htmlFor="lt-billable" style={{ fontSize: 14, color: 'var(--color-text)' }}>Billable</label>
+            <label htmlFor="lt-billable" style={{ fontSize: '0.875rem', color: 'var(--color-text)' }}>Billable</label>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label htmlFor="lt-notes" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>Notes</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+            <label htmlFor="lt-notes" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Notes</label>
             <textarea id="lt-notes" rows={3} placeholder="What did you work on?" value={notes} onChange={e => setNotes(e.target.value)} style={{ ...inputStyle, resize: 'vertical' as const }} />
           </div>
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 4 }}>
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '0.25rem' }}>
             <button
               type="button"
               onClick={onClose}
               style={{
-                padding: '8px 16px', borderRadius: 8, fontSize: 14, fontWeight: 500,
+                padding: '0.5rem 1rem', borderRadius: 8, fontSize: '0.875rem', fontWeight: 500,
                 border: '1px solid var(--color-border)', background: 'white',
                 color: 'var(--color-text)', cursor: 'pointer',
               }}
@@ -201,8 +201,8 @@ function LogTimeModal({
               type="submit"
               disabled={saving}
               style={{
-                padding: '8px 20px', borderRadius: 8, fontSize: 14, fontWeight: 600,
-                border: 'none', background: saving ? '#9ca3af' : '#5A824E',
+                padding: '0.5rem 1.25rem', borderRadius: 8, fontSize: '0.875rem', fontWeight: 600,
+                border: 'none', background: saving ? '#9ca3af' : 'var(--color-brand)',
                 color: 'white', cursor: saving ? 'not-allowed' : 'pointer',
               }}
             >
@@ -224,10 +224,10 @@ function SummaryCard({ icon, label, value }: { icon: React.ReactNode; label: str
         background: 'white',
         border: '1px solid var(--color-border)',
         borderRadius: 12,
-        padding: '20px 24px',
+        padding: '1.25rem 1.5rem',
         display: 'flex',
         alignItems: 'center',
-        gap: 16,
+        gap: '1rem',
         flex: '1 1 200px',
       }}
     >
@@ -246,8 +246,8 @@ function SummaryCard({ icon, label, value }: { icon: React.ReactNode; label: str
         {icon}
       </div>
       <div>
-        <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 2 }}>{label}</p>
-        <p style={{ fontSize: 20, fontWeight: 700, color: 'var(--color-text)' }}>{value}</p>
+        <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.125rem' }}>{label}</p>
+        <p style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text)' }}>{value}</p>
       </div>
     </div>
   )
@@ -297,12 +297,12 @@ export function TimeList() {
   }, [billableTab, fetchEntries])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text)', margin: 0 }}>Time Tracking</h1>
-          <p style={{ fontSize: 14, color: 'var(--color-text-muted)', marginTop: 4 }}>
+          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
             Log and review hours across all clients and requests.
           </p>
         </div>
@@ -310,8 +310,8 @@ export function TimeList() {
           onClick={() => setShowModal(true)}
           className="flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2"
           style={{
-            padding: '10px 18px',
-            background: '#5A824E',
+            padding: '0.625rem 1.125rem',
+            background: 'var(--color-brand)',
             border: 'none',
             borderRadius: '0 10px 0 10px',
             cursor: 'pointer',
@@ -325,7 +325,7 @@ export function TimeList() {
       </div>
 
       {/* Summary Cards */}
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
         <SummaryCard
           icon={<Timer style={{ width: 22, height: 22, color: 'white' }} />}
           label="Total Hours"
@@ -344,19 +344,19 @@ export function TimeList() {
       </div>
 
       {/* Filter Tabs */}
-      <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--color-border)', paddingBottom: 0 }}>
+      <div style={{ display: 'flex', gap: '0.25rem', borderBottom: '1px solid var(--color-border)', paddingBottom: 0 }}>
         {BILLABLE_TABS.map(tab => (
           <button
             key={tab.value}
             onClick={() => setBillableTab(tab.value)}
             style={{
-              padding: '8px 16px',
-              fontSize: 13,
+              padding: '0.5rem 1rem',
+              fontSize: '0.8125rem',
               fontWeight: billableTab === tab.value ? 600 : 400,
-              color: billableTab === tab.value ? '#5A824E' : 'var(--color-text-muted)',
+              color: billableTab === tab.value ? 'var(--color-brand)' : 'var(--color-text-muted)',
               background: 'none',
               border: 'none',
-              borderBottom: billableTab === tab.value ? '2px solid #5A824E' : '2px solid transparent',
+              borderBottom: billableTab === tab.value ? '2px solid var(--color-brand)' : '2px solid transparent',
               cursor: 'pointer',
               marginBottom: -1,
               minHeight: 44,
@@ -381,13 +381,13 @@ export function TimeList() {
           <LoadingSkeleton rows={5} height={56} />
         ) : error ? (
           <div
-            style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--color-text-muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}
+            style={{ padding: '3rem 1.5rem', textAlign: 'center', color: 'var(--color-text-muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}
           >
             <p className="text-sm">Failed to load time entries.</p>
             <button
               onClick={() => fetchEntries(billableTab).catch(() => {})}
               className="flex items-center gap-2 text-sm font-medium hover:opacity-80 transition-opacity"
-              style={{ color: '#5A824E', background: 'none', border: 'none', cursor: 'pointer' }}
+              style={{ color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer' }}
             >
               <RefreshCw style={{ width: 14, height: 14 }} aria-hidden="true" />
               Retry
@@ -410,7 +410,7 @@ export function TimeList() {
                     <th
                       key={h}
                       style={{
-                        padding: '12px 16px', textAlign: 'left', fontSize: 12,
+                        padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem',
                         fontWeight: 600, color: 'var(--color-text-muted)',
                         textTransform: 'uppercase', letterSpacing: '0.04em',
                       }}
@@ -431,35 +431,35 @@ export function TimeList() {
                     onMouseEnter={e => { (e.currentTarget as HTMLTableRowElement).style.background = 'var(--color-bg-secondary)' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLTableRowElement).style.background = '' }}
                   >
-                    <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--color-text-muted)' }}>
+                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
                       {formatDate(entry.date)}
                     </td>
-                    <td style={{ padding: '14px 16px', fontSize: 14, fontWeight: 500, color: 'var(--color-text)' }}>
+                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-text)' }}>
                       {entry.teamMemberName ?? 'Unknown'}
                     </td>
-                    <td style={{ padding: '14px 16px', fontSize: 14, color: 'var(--color-text)' }}>
+                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', color: 'var(--color-text)' }}>
                       {entry.orgName ?? 'Unknown'}
                     </td>
-                    <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--color-text-muted)' }}>
+                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
                       {entry.requestId && entry.requestTitle ? (
-                        <Link href={`/requests/${entry.requestId}`} style={{ color: '#5A824E', textDecoration: 'none' }}>
+                        <Link href={`/requests/${entry.requestId}`} style={{ color: 'var(--color-brand)', textDecoration: 'none' }}>
                           {entry.requestTitle}
                         </Link>
                       ) : (
                         '--'
                       )}
                     </td>
-                    <td style={{ padding: '14px 16px', fontSize: 14, fontWeight: 600, color: 'var(--color-text)' }}>
+                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
                       {formatHours(entry.hours)}
                     </td>
-                    <td style={{ padding: '14px 16px' }}>
+                    <td style={{ padding: '0.875rem 1rem' }}>
                       <span
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
-                          padding: '2px 8px',
+                          padding: '0.125rem 0.5rem',
                           borderRadius: 99,
-                          fontSize: 12,
+                          fontSize: '0.75rem',
                           fontWeight: 500,
                           background: entry.billable ? '#f0fdf4' : '#f3f4f6',
                           color: entry.billable ? '#16a34a' : '#6b7280',
@@ -468,7 +468,7 @@ export function TimeList() {
                         {entry.billable ? 'Billable' : 'Non-billable'}
                       </span>
                     </td>
-                    <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--color-text-muted)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {entry.notes ?? '--'}
                     </td>
                   </tr>

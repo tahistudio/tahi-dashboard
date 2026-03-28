@@ -7,7 +7,7 @@ import { eq, and } from 'drizzle-orm'
 type Params = { params: Promise<{ id: string }> }
 
 // ── POST /api/portal/requests/[id]/messages ──────────────────────────────────
-// Clients post messages to a request thread (always external — isInternal: false).
+// Clients post messages to a request thread (always external : isInternal: false).
 export async function POST(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
 

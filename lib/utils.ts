@@ -64,7 +64,7 @@ export function formatDate(date: string | Date, format: 'short' | 'long' | 'rela
   })
 }
 
-/** Generate a random ID (not for security — use crypto.randomUUID() for that) */
+/** Generate a random ID (not for security : use crypto.randomUUID() for that) */
 export function generateId(): string {
   return crypto.randomUUID()
 }

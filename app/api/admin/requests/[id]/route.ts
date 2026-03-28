@@ -98,7 +98,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .where(eq(schema.requests.id, id))
 
   // If moving to in_progress, increment revision count if coming back from client_review
-  // (handled client-side for now — the status change message is enough)
+  // (handled client-side for now : the status change message is enough)
 
   return NextResponse.json({ success: true })
 }

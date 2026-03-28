@@ -15,7 +15,7 @@ interface TrackMeterProps {
 }
 
 /**
- * TrackMeter — shows visual fill bars for small and large tracks.
+ * TrackMeter: shows visual fill bars for small and large tracks.
  *
  * Small tracks: shown as a row of pill slots (used = brand green, free = gray)
  * Large tracks: shown as a wider slot with "In use" / "Available" label

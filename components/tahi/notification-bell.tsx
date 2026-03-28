@@ -153,19 +153,19 @@ export function NotificationBell() {
           <span
             style={{
               position: 'absolute',
-              top: 6,
-              right: 6,
+              top: '0.375rem',
+              right: '0.375rem',
               minWidth: 16,
               height: 16,
               borderRadius: 99,
-              background: '#5A824E',
+              background: 'var(--color-brand)',
               color: 'white',
               fontSize: 10,
               fontWeight: 700,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '0 4px',
+              padding: '0 0.25rem',
               lineHeight: 1,
             }}
             aria-hidden="true"
@@ -200,21 +200,21 @@ export function NotificationBell() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              padding: '14px 16px 12px',
+              padding: '0.875rem 1rem 0.75rem',
               borderBottom: '1px solid var(--color-border-subtle)',
             }}
           >
-            <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
+            <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
               Notifications
               {unreadCount > 0 && (
                 <span
                   style={{
-                    marginLeft: 8,
-                    fontSize: 12,
+                    marginLeft: '0.5rem',
+                    fontSize: '0.75rem',
                     fontWeight: 500,
-                    color: '#5A824E',
-                    background: '#f0f7ee',
-                    padding: '1px 7px',
+                    color: 'var(--color-brand)',
+                    background: 'var(--color-brand-50)',
+                    padding: '0.0625rem 0.4375rem',
                     borderRadius: 99,
                   }}
                 >
@@ -227,7 +227,7 @@ export function NotificationBell() {
                 onClick={markAllRead}
                 disabled={markingAll}
                 className="flex items-center gap-1 text-xs font-medium hover:opacity-70 transition-opacity"
-                style={{ color: '#5A824E', background: 'none', border: 'none', cursor: markingAll ? 'not-allowed' : 'pointer', padding: '4px 8px' }}
+                style={{ color: 'var(--color-brand)', background: 'none', border: 'none', cursor: markingAll ? 'not-allowed' : 'pointer', padding: '0.25rem 0.5rem' }}
               >
                 <CheckCheck style={{ width: 13, height: 13 }} aria-hidden="true" />
                 {markingAll ? 'Marking...' : 'Mark all read'}
@@ -238,18 +238,18 @@ export function NotificationBell() {
           {/* List */}
           <div style={{ maxHeight: 400, overflowY: 'auto' }}>
             {loading && notifications.length === 0 ? (
-              <div style={{ padding: '24px 16px' }}>
+              <div style={{ padding: '1.5rem 1rem' }}>
                 {[1, 2, 3].map(i => (
-                  <div key={i} className="animate-pulse" style={{ marginBottom: 16 }}>
+                  <div key={i} className="animate-pulse" style={{ marginBottom: '1rem' }}>
                     <div style={{ height: 14, background: '#f3f4f6', borderRadius: 6, marginBottom: 6, width: '70%' }} />
                     <div style={{ height: 12, background: '#f9fafb', borderRadius: 6, width: '50%' }} />
                   </div>
                 ))}
               </div>
             ) : notifications.length === 0 ? (
-              <div style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-                <Bell style={{ width: 24, height: 24, margin: '0 auto 10px', opacity: 0.4 }} aria-hidden="true" />
-                <p style={{ fontSize: 13 }}>No notifications yet</p>
+              <div style={{ padding: '2.5rem 1rem', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                <Bell style={{ width: 24, height: 24, margin: '0 auto 0.625rem', opacity: 0.4 }} aria-hidden="true" />
+                <p style={{ fontSize: '0.8125rem' }}>No notifications yet</p>
               </div>
             ) : (
               notifications.map((n, i) => (
@@ -257,22 +257,22 @@ export function NotificationBell() {
                   key={n.id}
                   onClick={() => { if (!n.read) markOneRead(n.id).catch(() => {}) }}
                   style={{
-                    padding: '12px 16px',
+                    padding: '0.75rem 1rem',
                     borderBottom: i < notifications.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
                     background: n.read ? 'white' : '#f0f7ee',
                     cursor: n.read ? 'default' : 'pointer',
                     transition: 'background 0.1s',
                   }}
                 >
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                  <div style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start' }}>
                     {!n.read && (
                       <span
                         style={{
-                          width: 6,
-                          height: 6,
+                          width: '0.375rem',
+                          height: '0.375rem',
                           borderRadius: '50%',
-                          background: '#5A824E',
-                          marginTop: 5,
+                          background: 'var(--color-brand)',
+                          marginTop: '0.3125rem',
                           flexShrink: 0,
                         }}
                         aria-hidden="true"
@@ -281,7 +281,7 @@ export function NotificationBell() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p
                         style={{
-                          fontSize: 13,
+                          fontSize: '0.8125rem',
                           fontWeight: n.read ? 400 : 600,
                           color: 'var(--color-text)',
                           margin: 0,
@@ -293,9 +293,9 @@ export function NotificationBell() {
                       {n.body && (
                         <p
                           style={{
-                            fontSize: 12,
+                            fontSize: '0.75rem',
                             color: 'var(--color-text-muted)',
-                            margin: '2px 0 0',
+                            margin: '0.125rem 0 0',
                             lineHeight: 1.4,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -305,7 +305,7 @@ export function NotificationBell() {
                           {n.body}
                         </p>
                       )}
-                      <p style={{ fontSize: 11, color: 'var(--color-text-subtle)', margin: '4px 0 0' }}>
+                      <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', margin: '0.25rem 0 0' }}>
                         {formatRelative(n.createdAt)}
                       </p>
                     </div>

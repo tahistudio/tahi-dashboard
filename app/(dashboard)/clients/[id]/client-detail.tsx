@@ -257,13 +257,13 @@ function OverviewTab({
 }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* Left column — wide */}
+      {/* Left column (wide) */}
       <div className="lg:col-span-2 flex flex-col gap-6">
         <OrgDetailsCard org={org} onUpdated={onUpdated} />
         <RecentRequestsCard requests={recentRequests} orgId={org.id} />
       </div>
 
-      {/* Right column — narrow */}
+      {/* Right column (narrow) */}
       <div className="flex flex-col gap-6">
         <ContactsCard contacts={contacts} />
         {subscription && (
@@ -307,9 +307,9 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
   }
 
   const HEALTH_OPTIONS = [
-    { value: 'green', label: 'Green — healthy', colour: 'bg-emerald-400' },
-    { value: 'amber', label: 'Amber — watch', colour: 'bg-amber-400' },
-    { value: 'red',   label: 'Red — at risk',  colour: 'bg-red-400' },
+    { value: 'green', label: 'Green (healthy)', colour: 'bg-emerald-400' },
+    { value: 'amber', label: 'Amber (watch)', colour: 'bg-amber-400' },
+    { value: 'red',   label: 'Red (at risk)',  colour: 'bg-red-400' },
   ]
 
   const STATUS_OPTIONS = ['prospect', 'active', 'paused', 'churned', 'archived']
@@ -421,13 +421,13 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
                   {org.website.replace(/^https?:\/\//, '')}
                 </a>
               ) : (
-                <span className="text-[var(--color-text-muted)]">—</span>
+                <span className="text-[var(--color-text-muted)]">--</span>
               )}
             </dd>
           </div>
           <div>
             <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Industry</dt>
-            <dd className="text-[var(--color-text)]">{org.industry ?? '—'}</dd>
+            <dd className="text-[var(--color-text)]">{org.industry ?? '--'}</dd>
           </div>
           <div>
             <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Status</dt>

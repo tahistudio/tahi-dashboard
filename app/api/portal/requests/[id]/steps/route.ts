@@ -6,7 +6,7 @@ import { eq, and, asc } from 'drizzle-orm'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-// GET /api/portal/requests/[id]/steps — client reads steps on their request
+// GET /api/portal/requests/[id]/steps : client reads steps on their request
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -37,7 +37,7 @@ export async function GET(
   return NextResponse.json({ steps: buildTree(steps) })
 }
 
-// POST /api/portal/requests/[id]/steps — client adds a step
+// POST /api/portal/requests/[id]/steps : client adds a step
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },

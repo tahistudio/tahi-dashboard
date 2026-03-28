@@ -27,7 +27,7 @@ export async function getLocalDB() {
     const { createClient } = await import('@libsql/client')
     const { drizzle: drizzleLibsql } = await import('drizzle-orm/libsql')
     const client = createClient({ url: 'file:./dev.db' })
-    // Cast to compatible type — same schema, different driver
+    // Cast to compatible type : same schema, different driver
     _localDB = drizzleLibsql(client, { schema }) as unknown as ReturnType<typeof drizzle>
   }
   return _localDB

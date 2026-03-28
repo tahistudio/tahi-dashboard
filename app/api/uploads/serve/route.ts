@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
  * GET /api/uploads/serve?key=<storageKey>&download=1
  *
  * Serves a file from R2 Object Storage.
- * Validates auth before serving — files are never publicly accessible.
+ * Validates auth before serving : files are never publicly accessible.
  *
  * ?download=1 forces Content-Disposition: attachment (browser download)
  * Otherwise serves inline (e.g. images display in-browser).

@@ -34,7 +34,7 @@ type ViewMode = 'list' | 'board'
 type SortKey = 'updatedAt' | 'dueDate' | 'priority' | 'status'
 
 // ─── Config using CSS variables ────────────────────────────────────────────────
-// Colors live in globals.css @theme — change once, updates everywhere.
+// Colors live in globals.css @theme; change once, updates everywhere.
 
 const STATUS_CFG: Record<string, { label: string; dot: string; bg: string; text: string; border: string }> = {
   draft:         { label: 'Draft',         dot: 'var(--status-draft-dot)',          bg: 'var(--status-draft-bg)',          text: 'var(--status-draft-text)',         border: 'var(--status-draft-border)'         },
@@ -81,11 +81,11 @@ const CLIENT_TABS = [
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatDate(dateStr: string | null): string {
-  if (!dateStr) return '—'
+  if (!dateStr) return '--'
   try {
     const d = new Date(dateStr + 'T00:00:00')
     return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })
-  } catch { return '—' }
+  } catch { return '--' }
 }
 
 function getDueDateState(dueDate: string | null, status: string): 'overdue' | 'due-soon' | 'on-track' | null {
@@ -145,7 +145,7 @@ function StatusPill({ status }: { status: string }) {
 
 function PriorityBadge({ priority }: { priority: string | null }) {
   if (!priority || priority === 'standard') {
-    return <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.75rem' }}>—</span>
+    return <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.75rem' }}>--</span>
   }
   if (priority === 'urgent') {
     return (
@@ -171,7 +171,7 @@ function PriorityBadge({ priority }: { priority: string | null }) {
 
 function DueDateChip({ dueDate, status }: { dueDate: string | null; status: string }) {
   const state = getDueDateState(dueDate, status)
-  if (!dueDate) return <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.75rem' }}>—</span>
+  if (!dueDate) return <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.75rem' }}>--</span>
 
   const bgMap = {
     overdue: 'var(--color-overdue-bg)',
@@ -477,7 +477,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
 function ListView({ requests, isAdmin }: { requests: Request[]; isAdmin: boolean }) {
   return (
     <div>
-      {/* Table header — hidden on mobile, visible md+ */}
+      {/* Table header: hidden on mobile, visible md+ */}
       <div
         className="hidden md:grid text-xs font-semibold uppercase tracking-wide"
         style={{
@@ -586,7 +586,7 @@ function ListRow({ req, isAdmin, isLast }: { req: Request; isAdmin: boolean; isL
           <div className="flex items-center gap-1.5 min-w-0" style={{ paddingRight: '0.75rem' }}>
             {req.orgName && <OrgAvatar name={req.orgName} />}
             <span className="truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-              {req.orgName ?? '—'}
+              {req.orgName ?? '--'}
             </span>
           </div>
         )}

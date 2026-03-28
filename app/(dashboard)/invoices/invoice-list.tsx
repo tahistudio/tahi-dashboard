@@ -74,9 +74,9 @@ function StatusBadge({ status, dueDate }: { status: string; dueDate: string | nu
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        padding: '2px 8px',
+        padding: '0.125rem 0.5rem',
         borderRadius: 99,
-        fontSize: 12,
+        fontSize: '0.75rem',
         fontWeight: 500,
         background: cfg.bg,
         color: cfg.text,
@@ -152,25 +152,25 @@ function CreateInvoiceModal({
     >
       <div
         style={{
-          background: 'white', borderRadius: 12, padding: 28,
-          width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto',
+          background: 'white', borderRadius: 12, padding: '1.75rem',
+          width: '100%', maxWidth: '30rem', maxHeight: '90vh', overflowY: 'auto',
           boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
         }}
       >
-        <h2 id="create-invoice-title" className="text-lg font-bold" style={{ color: 'var(--color-text)', marginBottom: 20 }}>
+        <h2 id="create-invoice-title" className="text-lg font-bold" style={{ color: 'var(--color-text)', marginBottom: '1.25rem' }}>
           Create Invoice
         </h2>
         {error && (
           <div
             aria-live="polite"
-            style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', marginBottom: 16, color: '#dc2626', fontSize: 13 }}
+            style={{ background: 'var(--color-danger-bg)', border: '1px solid #fecaca', borderRadius: 8, padding: '0.625rem 0.875rem', marginBottom: '1rem', color: 'var(--color-danger)', fontSize: '0.8125rem' }}
           >
             {error}
           </div>
         )}
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label htmlFor="ci-org-id" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+            <label htmlFor="ci-org-id" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
               Client ID
             </label>
             <input
@@ -181,14 +181,14 @@ function CreateInvoiceModal({
               onChange={e => setOrgId(e.target.value)}
               required
               style={{
-                padding: '8px 12px', borderRadius: 8, fontSize: 14,
+                padding: '0.5rem 0.75rem', borderRadius: 8, fontSize: '0.875rem',
                 border: '1px solid var(--color-border)', outline: 'none',
                 color: 'var(--color-text)', background: 'var(--color-bg)',
               }}
             />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label htmlFor="ci-description" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+            <label htmlFor="ci-description" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
               Description
             </label>
             <input
@@ -199,15 +199,15 @@ function CreateInvoiceModal({
               onChange={e => setDescription(e.target.value)}
               required
               style={{
-                padding: '8px 12px', borderRadius: 8, fontSize: 14,
+                padding: '0.5rem 0.75rem', borderRadius: 8, fontSize: '0.875rem',
                 border: '1px solid var(--color-border)', outline: 'none',
                 color: 'var(--color-text)', background: 'var(--color-bg)',
               }}
             />
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
-              <label htmlFor="ci-quantity" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: 1 }}>
+              <label htmlFor="ci-quantity" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
                 Quantity
               </label>
               <input
@@ -218,14 +218,14 @@ function CreateInvoiceModal({
                 value={quantity}
                 onChange={e => setQuantity(e.target.value)}
                 style={{
-                  padding: '8px 12px', borderRadius: 8, fontSize: 14,
+                  padding: '0.5rem 0.75rem', borderRadius: 8, fontSize: '0.875rem',
                   border: '1px solid var(--color-border)', outline: 'none',
                   color: 'var(--color-text)', background: 'var(--color-bg)',
                 }}
               />
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
-              <label htmlFor="ci-amount" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: 1 }}>
+              <label htmlFor="ci-amount" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
                 Unit Amount (NZD)
               </label>
               <input
@@ -238,15 +238,15 @@ function CreateInvoiceModal({
                 onChange={e => setUnitAmount(e.target.value)}
                 required
                 style={{
-                  padding: '8px 12px', borderRadius: 8, fontSize: 14,
+                  padding: '0.5rem 0.75rem', borderRadius: 8, fontSize: '0.875rem',
                   border: '1px solid var(--color-border)', outline: 'none',
                   color: 'var(--color-text)', background: 'var(--color-bg)',
                 }}
               />
             </div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label htmlFor="ci-due-date" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+            <label htmlFor="ci-due-date" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
               Due Date
             </label>
             <input
@@ -255,14 +255,14 @@ function CreateInvoiceModal({
               value={dueDate}
               onChange={e => setDueDate(e.target.value)}
               style={{
-                padding: '8px 12px', borderRadius: 8, fontSize: 14,
+                padding: '0.5rem 0.75rem', borderRadius: 8, fontSize: '0.875rem',
                 border: '1px solid var(--color-border)', outline: 'none',
                 color: 'var(--color-text)', background: 'var(--color-bg)',
               }}
             />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label htmlFor="ci-notes" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+            <label htmlFor="ci-notes" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
               Notes
             </label>
             <textarea
@@ -272,19 +272,19 @@ function CreateInvoiceModal({
               value={notes}
               onChange={e => setNotes(e.target.value)}
               style={{
-                padding: '8px 12px', borderRadius: 8, fontSize: 14,
+                padding: '0.5rem 0.75rem', borderRadius: 8, fontSize: '0.875rem',
                 border: '1px solid var(--color-border)', outline: 'none',
                 color: 'var(--color-text)', background: 'var(--color-bg)',
                 resize: 'vertical',
               }}
             />
           </div>
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 4 }}>
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '0.25rem' }}>
             <button
               type="button"
               onClick={onClose}
               style={{
-                padding: '8px 16px', borderRadius: 8, fontSize: 14, fontWeight: 500,
+                padding: '0.5rem 1rem', borderRadius: 8, fontSize: '0.875rem', fontWeight: 500,
                 border: '1px solid var(--color-border)', background: 'white',
                 color: 'var(--color-text)', cursor: 'pointer',
               }}
@@ -295,8 +295,8 @@ function CreateInvoiceModal({
               type="submit"
               disabled={saving}
               style={{
-                padding: '8px 20px', borderRadius: 8, fontSize: 14, fontWeight: 600,
-                border: 'none', background: saving ? '#9ca3af' : '#5A824E',
+                padding: '0.5rem 1.25rem', borderRadius: 8, fontSize: '0.875rem', fontWeight: 600,
+                border: 'none', background: saving ? '#9ca3af' : 'var(--color-brand)',
                 color: 'white', cursor: saving ? 'not-allowed' : 'pointer',
               }}
             >
@@ -351,12 +351,12 @@ export function InvoiceList({ isAdmin }: InvoiceListProps) {
   }, [activeTab, fetchInvoices])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text)', margin: 0 }}>Invoices</h1>
-          <p style={{ fontSize: 14, color: 'var(--color-text-muted)', marginTop: 4 }}>
+          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
             {isAdmin ? 'All invoices across every client.' : 'Your invoice history and outstanding payments.'}
           </p>
         </div>
@@ -365,8 +365,8 @@ export function InvoiceList({ isAdmin }: InvoiceListProps) {
             onClick={() => setShowCreateModal(true)}
             className="flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2"
             style={{
-              padding: '10px 18px',
-              background: '#5A824E',
+              padding: '0.625rem 1.125rem',
+              background: 'var(--color-brand)',
               border: 'none',
               borderRadius: '0 10px 0 10px',
               cursor: 'pointer',
@@ -382,19 +382,19 @@ export function InvoiceList({ isAdmin }: InvoiceListProps) {
 
       {/* Filter Tabs */}
       {isAdmin && (
-        <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--color-border)', paddingBottom: 0 }}>
+        <div style={{ display: 'flex', gap: '0.25rem', borderBottom: '1px solid var(--color-border)', paddingBottom: 0 }}>
           {FILTER_TABS.map(tab => (
             <button
               key={tab.value}
               onClick={() => setActiveTab(tab.value)}
               style={{
-                padding: '8px 16px',
-                fontSize: 13,
+                padding: '0.5rem 1rem',
+                fontSize: '0.8125rem',
                 fontWeight: activeTab === tab.value ? 600 : 400,
-                color: activeTab === tab.value ? '#5A824E' : 'var(--color-text-muted)',
+                color: activeTab === tab.value ? 'var(--color-brand)' : 'var(--color-text-muted)',
                 background: 'none',
                 border: 'none',
-                borderBottom: activeTab === tab.value ? '2px solid #5A824E' : '2px solid transparent',
+                borderBottom: activeTab === tab.value ? '2px solid var(--color-brand)' : '2px solid transparent',
                 cursor: 'pointer',
                 marginBottom: -1,
                 minHeight: 44,
@@ -420,13 +420,13 @@ export function InvoiceList({ isAdmin }: InvoiceListProps) {
           <LoadingSkeleton rows={5} height={56} />
         ) : error ? (
           <div
-            style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--color-text-muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}
+            style={{ padding: '3rem 1.5rem', textAlign: 'center', color: 'var(--color-text-muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}
           >
             <p className="text-sm">Failed to load invoices.</p>
             <button
               onClick={() => fetchInvoices(activeTab).catch(() => {})}
               className="flex items-center gap-2 text-sm font-medium hover:opacity-80 transition-opacity"
-              style={{ color: '#5A824E', background: 'none', border: 'none', cursor: 'pointer' }}
+              style={{ color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer' }}
             >
               <RefreshCw style={{ width: 14, height: 14 }} aria-hidden="true" />
               Retry
@@ -446,23 +446,23 @@ export function InvoiceList({ isAdmin }: InvoiceListProps) {
               <thead>
                 <tr style={{ background: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
                   {isAdmin && (
-                    <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                       Client
                     </th>
                   )}
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                     Amount
                   </th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                     Status
                   </th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                     Due Date
                   </th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                     Created
                   </th>
-                  <th style={{ padding: '12px 16px', width: 80 }} />
+                  <th style={{ padding: '0.75rem 1rem', width: '5rem' }} />
                 </tr>
               </thead>
               <tbody>
@@ -477,29 +477,29 @@ export function InvoiceList({ isAdmin }: InvoiceListProps) {
                     onMouseLeave={e => { (e.currentTarget as HTMLTableRowElement).style.background = '' }}
                   >
                     {isAdmin && (
-                      <td style={{ padding: '14px 16px', fontSize: 14, fontWeight: 500, color: 'var(--color-text)' }}>
+                      <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-text)' }}>
                         {inv.orgName ?? 'Unknown'}
                       </td>
                     )}
-                    <td style={{ padding: '14px 16px', fontSize: 14, fontWeight: 600, color: 'var(--color-text)' }}>
+                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
                       {formatCurrency(inv.totalAmount, inv.currency)}
                     </td>
-                    <td style={{ padding: '14px 16px' }}>
+                    <td style={{ padding: '0.875rem 1rem' }}>
                       <StatusBadge status={inv.status} dueDate={inv.dueDate} />
                     </td>
-                    <td style={{ padding: '14px 16px', fontSize: 13, color: isOverdue(inv.dueDate, inv.status) ? '#dc2626' : 'var(--color-text-muted)' }}>
+                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: isOverdue(inv.dueDate, inv.status) ? '#dc2626' : 'var(--color-text-muted)' }}>
                       {formatDate(inv.dueDate)}
                     </td>
-                    <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--color-text-muted)' }}>
+                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
                       {formatDate(inv.createdAt)}
                     </td>
-                    <td style={{ padding: '14px 16px', textAlign: 'right' }}>
+                    <td style={{ padding: '0.875rem 1rem', textAlign: 'right' }}>
                       <Link
                         href={`/invoices/${inv.id}`}
                         style={{
-                          fontSize: 13,
+                          fontSize: '0.8125rem',
                           fontWeight: 500,
-                          color: '#5A824E',
+                          color: 'var(--color-brand)',
                           textDecoration: 'none',
                         }}
                       >

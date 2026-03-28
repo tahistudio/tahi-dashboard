@@ -2,7 +2,7 @@
  * lib/db.ts
  * Unified DB helper for Next.js API routes on Webflow Cloud (Cloudflare Workers).
  *
- * Uses getCloudflareContext() from @opennextjs/cloudflare — the correct way to
+ * Uses getCloudflareContext() from @opennextjs/cloudflare : the correct way to
  * access D1 bindings in Next.js routes running on Cloudflare Workers.
  *
  * For local dev: run `npm run dev:wrangler` which starts wrangler dev and
@@ -33,7 +33,7 @@ export async function db() {
       await migrate(database, { migrationsFolder: 'drizzle/migrations' })
       _migrated = true
     } catch (err) {
-      // Log but don't crash — table may already exist on subsequent cold starts
+      // Log but don't crash : table may already exist on subsequent cold starts
       console.error('[db] Migration error (may be safe to ignore):', err)
       _migrated = true
     }
