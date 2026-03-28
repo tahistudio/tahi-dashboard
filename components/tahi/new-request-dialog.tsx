@@ -60,6 +60,8 @@ export function NewRequestDialog({
   const router = useRouter()
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [createAnother, setCreateAnother] = useState(false)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   // Admin: client picker
   const [clients, setClients] = useState<OrgOption[]>([])
@@ -100,10 +102,12 @@ export function NewRequestDialog({
       setEstimatedHours('')
       setClientOrgId('')
       setError(null)
+      setSuccessMessage(null)
+      setCreateAnother(false)
     }
   }, [open])
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent, saveAndCreateAnother = false) {
     e.preventDefault()
     if (!title.trim()) return
     if (isAdmin && !clientOrgId) {
@@ -111,11 +115,12 @@ export function NewRequestDialog({
       return
     }
     setError(null)
+    setSuccessMessage(null)
     setSubmitting(true)
 
     try {
       const url = isAdmin ? apiPath('/api/admin/requests') : apiPath('/api/portal/requests')
-      const body = isAdmin
+      const reqBody = isAdmin
         ? {
             clientOrgId, title: title.trim(), type, category, description, priority,
             startDate: startDate || null,
@@ -127,7 +132,7 @@ export function NewRequestDialog({
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(reqBody),
       })
 
       if (!res.ok) {
@@ -137,8 +142,21 @@ export function NewRequestDialog({
       }
 
       const data = await res.json() as { id: string }
-      onClose()
-      router.push(`/requests/${data.id}`)
+
+      if (saveAndCreateAnother) {
+        // Reset form but keep client and category pre-selected
+        setTitle('')
+        setDescription('')
+        setPriority('standard')
+        setStartDate('')
+        setDueDate('')
+        setEstimatedHours('')
+        setSuccessMessage('Request created successfully. Create another one below.')
+        setCreateAnother(true)
+      } else {
+        onClose()
+        router.push(`/requests/${data.id}`)
+      }
     } catch {
       setError('Network error. Please try again.')
     } finally {
@@ -437,6 +455,22 @@ export function NewRequestDialog({
               </p>
             </FieldGroup>
 
+            {/* Success message */}
+            <div aria-live="polite">
+              {successMessage && (
+                <div style={{
+                  fontSize: '0.8125rem',
+                  color: 'var(--color-success, #16a34a)',
+                  background: 'var(--color-success-bg, #f0fdf4)',
+                  border: '1px solid var(--color-success, #4ade80)',
+                  borderRadius: 'var(--radius-button)',
+                  padding: '0.625rem 0.875rem',
+                }}>
+                  {successMessage}
+                </div>
+              )}
+            </div>
+
             {/* Error */}
             <div aria-live="polite">
               {error && (
@@ -485,35 +519,70 @@ export function NewRequestDialog({
           >
             Cancel
           </button>
-          <button
-            type="submit"
-            form="new-request-form"
-            disabled={submitting || !title.trim()}
-            onClick={handleSubmit}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.5625rem 1.25rem',
-              fontSize: '0.875rem',
-              fontWeight: 600,
-              color: 'white',
-              background: submitting || !title.trim() ? 'var(--color-brand-200)' : BRAND_HEX,
-              border: 'none',
-              borderRadius: 'var(--radius-button)',
-              cursor: submitting || !title.trim() ? 'not-allowed' : 'pointer',
-              transition: 'background 0.15s',
-            }}
-            onMouseEnter={e => {
-              if (!submitting && title.trim()) e.currentTarget.style.background = 'var(--color-brand-dark)'
-            }}
-            onMouseLeave={e => {
-              if (!submitting && title.trim()) e.currentTarget.style.background = BRAND_HEX
-            }}
-          >
-            {submitting && <Loader2 size={14} className="animate-spin" />}
-            {isAdmin ? 'Create request' : 'Submit request'}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <button
+              type="button"
+              disabled={submitting || !title.trim()}
+              onClick={e => handleSubmit(e, true)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.375rem',
+                padding: '0.5625rem 0.875rem',
+                fontSize: '0.8125rem',
+                fontWeight: 500,
+                color: submitting || !title.trim() ? 'var(--color-text-subtle)' : 'var(--color-brand)',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-button)',
+                cursor: submitting || !title.trim() ? 'not-allowed' : 'pointer',
+                transition: 'all 0.15s',
+                whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={e => {
+                if (!submitting && title.trim()) {
+                  e.currentTarget.style.borderColor = 'var(--color-brand)'
+                  e.currentTarget.style.background = 'var(--color-brand-50)'
+                }
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = 'var(--color-border)'
+                e.currentTarget.style.background = 'var(--color-bg)'
+              }}
+            >
+              {submitting && createAnother && <Loader2 size={13} className="animate-spin" />}
+              Save + another
+            </button>
+            <button
+              type="submit"
+              form="new-request-form"
+              disabled={submitting || !title.trim()}
+              onClick={handleSubmit}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.5625rem 1.25rem',
+                fontSize: '0.875rem',
+                fontWeight: 600,
+                color: 'white',
+                background: submitting || !title.trim() ? 'var(--color-brand-200)' : BRAND_HEX,
+                border: 'none',
+                borderRadius: 'var(--radius-button)',
+                cursor: submitting || !title.trim() ? 'not-allowed' : 'pointer',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={e => {
+                if (!submitting && title.trim()) e.currentTarget.style.background = 'var(--color-brand-dark)'
+              }}
+              onMouseLeave={e => {
+                if (!submitting && title.trim()) e.currentTarget.style.background = BRAND_HEX
+              }}
+            >
+              {submitting && !createAnother && <Loader2 size={14} className="animate-spin" />}
+              {isAdmin ? 'Create request' : 'Submit request'}
+            </button>
+          </div>
         </div>
       </div>
     </>

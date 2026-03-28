@@ -24,6 +24,9 @@ import {
   Users,
   Loader2,
   DollarSign,
+  Download,
+  File,
+  ScrollText,
 } from 'lucide-react'
 import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badge'
 import { TrackMeter } from '@/components/tahi/track-meter'
@@ -97,13 +100,15 @@ interface ClientData {
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'overview',  label: 'Overview',  icon: Building2 },
-  { id: 'requests',  label: 'Requests',  icon: Layers },
-  { id: 'invoices',  label: 'Invoices',  icon: DollarSign },
-  { id: 'contacts',  label: 'Contacts',  icon: Users },
-  { id: 'messages',  label: 'Messages',  icon: MessageSquare },
-  { id: 'time',      label: 'Time',      icon: Clock },
-  { id: 'activity',  label: 'Activity',  icon: Activity },
+  { id: 'overview',   label: 'Overview',   icon: Building2 },
+  { id: 'requests',   label: 'Requests',   icon: Layers },
+  { id: 'files',      label: 'Files',      icon: File },
+  { id: 'invoices',   label: 'Invoices',   icon: DollarSign },
+  { id: 'contracts',  label: 'Contracts',  icon: ScrollText },
+  { id: 'contacts',   label: 'Contacts',   icon: Users },
+  { id: 'messages',   label: 'Messages',   icon: MessageSquare },
+  { id: 'time',       label: 'Time',       icon: Clock },
+  { id: 'activity',   label: 'Activity',   icon: Activity },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -224,8 +229,14 @@ export function ClientDetail({ clientId }: { clientId: string }) {
         {activeTab === 'requests' && (
           <RequestsTab clientId={clientId} />
         )}
+        {activeTab === 'files' && (
+          <FilesTab clientId={clientId} />
+        )}
         {activeTab === 'invoices' && (
           <InvoicesTab clientId={clientId} />
+        )}
+        {activeTab === 'contracts' && (
+          <ContractsTab clientId={clientId} />
         )}
         {activeTab === 'contacts' && (
           <ContactsTab clientId={clientId} contacts={contacts} onUpdated={load} />
@@ -273,7 +284,7 @@ function OverviewTab({
       <div className="flex flex-col gap-6">
         <ContactsCard contacts={contacts} />
         {subscription && (
-          <SubscriptionCard subscription={subscription} tracks={tracks} />
+          <SubscriptionCard subscription={subscription} tracks={tracks} orgId={org.id} onUpdated={onUpdated} />
         )}
         {!subscription && <NoSubscriptionCard planType={org.planType} />}
         {org.healthNote && <HealthNoteCard note={org.healthNote} health={org.healthStatus} />}
@@ -520,15 +531,76 @@ function ContactsCard({ contacts }: { contacts: Contact[] }) {
 
 // ── Subscription card ──────────────────────────────────────────────────────────
 
-function SubscriptionCard({ subscription, tracks }: { subscription: Subscription; tracks: Track[] }) {
+function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { subscription: Subscription; tracks: Track[]; orgId: string; onUpdated: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [planType, setPlanType] = useState(subscription.planType)
+
+  const PLAN_OPTIONS = ['maintain', 'scale', 'tune', 'launch', 'hourly', 'custom']
+
+  const savePlan = async () => {
+    setSaving(true)
+    try {
+      await fetch(apiPath(`/api/admin/clients/${orgId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planType }),
+      })
+      onUpdated()
+      setEditing(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
-      <h3 className="font-semibold text-sm text-[var(--color-text)] mb-3">Subscription</h3>
-
-      <div className="flex items-center gap-2 mb-3">
-        <PlanBadge plan={subscription.planType} />
-        <StatusBadge status={subscription.status} type="org" />
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold text-sm text-[var(--color-text)]">Subscription</h3>
+        {!editing ? (
+          <button
+            onClick={() => setEditing(true)}
+            className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors flex items-center gap-1"
+          >
+            <Edit2 className="w-3 h-3" />
+            Edit
+          </button>
+        ) : (
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setEditing(false); setPlanType(subscription.planType) }}
+              className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={savePlan}
+              disabled={saving}
+              className="text-xs text-[var(--color-brand)] font-medium disabled:opacity-50"
+            >
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        )}
       </div>
+
+      {editing ? (
+        <div className="mb-3">
+          <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Plan type</label>
+          <select
+            value={planType}
+            onChange={e => setPlanType(e.target.value)}
+            className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+          >
+            {PLAN_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 mb-3">
+          <PlanBadge plan={subscription.planType} />
+          <StatusBadge status={subscription.status} type="org" />
+        </div>
+      )}
 
       <div className="flex flex-col gap-1.5 text-xs text-[var(--color-text-muted)] mb-3">
         {subscription.currentPeriodEnd && (
@@ -554,8 +626,22 @@ function SubscriptionCard({ subscription, tracks }: { subscription: Subscription
       </div>
 
       <div className="pt-3 border-t border-[var(--color-border)]">
-        <p className="text-xs font-medium text-[var(--color-text-muted)] mb-2">Tracks</p>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-medium text-[var(--color-text-muted)]">Tracks ({tracks.length})</p>
+        </div>
         <TrackMeter tracks={tracks} />
+        {tracks.length > 0 && (
+          <div className="mt-2 flex flex-col gap-1">
+            {tracks.map(track => (
+              <div key={track.id} className="flex items-center justify-between text-xs">
+                <span className="text-[var(--color-text-muted)] capitalize">{track.type} track</span>
+                <span className={track.currentRequestId ? 'text-amber-600' : 'text-emerald-600'}>
+                  {track.currentRequestId ? 'Occupied' : 'Available'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1074,6 +1160,269 @@ function ContactsTab({
               </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Files tab ─────────────────────────────────────────────────────────────────
+
+interface FileRow {
+  id: string
+  filename: string
+  mimeType: string | null
+  sizeBytes: number | null
+  requestId: string | null
+  requestTitle?: string | null
+  storageKey: string
+  createdAt: string
+}
+
+function FilesTab({ clientId }: { clientId: string }) {
+  const [files, setFiles] = useState<FileRow[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    // Fetch requests for this client, then fetch files for each
+    fetch(apiPath(`/api/admin/requests?clientId=${clientId}&status=all`))
+      .then(r => r.json() as Promise<{ requests: { id: string; title: string }[] }>)
+      .then(async data => {
+        const reqs = data.requests ?? []
+        const allFiles: FileRow[] = []
+        // Fetch files for each request in parallel (batched)
+        const results = await Promise.all(
+          reqs.map(async req => {
+            try {
+              const res = await fetch(apiPath(`/api/admin/requests/${req.id}/files`))
+              if (!res.ok) return []
+              const json = await res.json() as { items: FileRow[] }
+              return (json.items ?? []).map(f => ({ ...f, requestTitle: req.title }))
+            } catch {
+              return []
+            }
+          })
+        )
+        for (const batch of results) allFiles.push(...batch)
+        allFiles.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        setFiles(allFiles)
+      })
+      .catch(() => setFiles([]))
+      .finally(() => setLoading(false))
+  }, [clientId])
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading files...
+      </div>
+    )
+  }
+
+  function formatSize(bytes: number | null): string {
+    if (!bytes) return '--'
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-semibold text-[var(--color-text)]">Files ({files.length})</h2>
+      </div>
+
+      {files.length === 0 ? (
+        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
+          <File className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
+          <p className="text-sm text-[var(--color-text-muted)]">No files uploaded for this client yet</p>
+        </div>
+      ) : (
+        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Name</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Type</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Size</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Request</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Uploaded</th>
+                <th className="text-right px-4 py-3 font-medium text-[var(--color-text-muted)]"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {files.map(file => (
+                <tr key={file.id} className="border-b border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-secondary)] transition-colors">
+                  <td className="px-4 py-3 text-[var(--color-text)] font-medium">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-[var(--color-text-muted)] flex-shrink-0" />
+                      <span className="truncate max-w-[12.5rem]">{file.filename}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-[var(--color-text-muted)]">
+                    {file.mimeType?.split('/').pop() ?? '--'}
+                  </td>
+                  <td className="px-4 py-3 text-[var(--color-text-muted)]">
+                    {formatSize(file.sizeBytes)}
+                  </td>
+                  <td className="px-4 py-3 text-[var(--color-text-muted)]">
+                    {file.requestTitle ? (
+                      <span className="truncate max-w-[10rem] inline-block">{file.requestTitle}</span>
+                    ) : '--'}
+                  </td>
+                  <td className="px-4 py-3 text-[var(--color-text-muted)]">
+                    {new Date(file.createdAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <a
+                      href={apiPath(`/api/uploads/serve/${file.storageKey}`)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] font-medium"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Download
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Contracts tab ─────────────────────────────────────────────────────────────
+
+interface ContractRow {
+  id: string
+  type: string
+  name: string
+  status: string
+  storageKey: string
+  startDate: string | null
+  expiryDate: string | null
+  createdAt: string
+}
+
+const CONTRACT_TYPE_LABELS: Record<string, string> = {
+  nda: 'NDA',
+  sla: 'SLA',
+  msa: 'MSA',
+  sow: 'SOW',
+  other: 'Other',
+}
+
+const CONTRACT_STATUS_STYLES: Record<string, { bg: string; text: string }> = {
+  draft:     { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)' },
+  sent:      { bg: 'var(--color-info-bg, #eff6ff)', text: 'var(--color-info, #60a5fa)' },
+  signed:    { bg: 'var(--color-success-bg, #f0fdf4)', text: 'var(--color-success, #4ade80)' },
+  expired:   { bg: 'var(--color-danger-bg, #fef2f2)', text: 'var(--color-danger, #f87171)' },
+  cancelled: { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-subtle)' },
+}
+
+function ContractsTab({ clientId }: { clientId: string }) {
+  const [contracts, setContracts] = useState<ContractRow[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/contracts?orgId=${clientId}`))
+      if (!res.ok) throw new Error('Failed')
+      const json = await res.json() as { items: ContractRow[] }
+      setContracts(json.items ?? [])
+    } catch {
+      setContracts([])
+    } finally {
+      setLoading(false)
+    }
+  }, [clientId])
+
+  useEffect(() => { void load() }, [load])
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading contracts...
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-semibold text-[var(--color-text)]">Contracts ({contracts.length})</h2>
+      </div>
+
+      {contracts.length === 0 ? (
+        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
+          <ScrollText className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
+          <p className="text-sm text-[var(--color-text-muted)]">No contracts for this client yet</p>
+          <p className="text-xs text-[var(--color-text-subtle)] mt-1">Upload contracts from the contracts page.</p>
+        </div>
+      ) : (
+        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Name</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Type</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Status</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Expiry</th>
+                <th className="text-right px-4 py-3 font-medium text-[var(--color-text-muted)]"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {contracts.map(contract => {
+                const statusStyle = CONTRACT_STATUS_STYLES[contract.status] ?? CONTRACT_STATUS_STYLES.draft
+                return (
+                  <tr key={contract.id} className="border-b border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-secondary)] transition-colors">
+                    <td className="px-4 py-3 text-[var(--color-text)] font-medium">
+                      <div className="flex items-center gap-2">
+                        <ScrollText className="w-4 h-4 text-[var(--color-text-muted)] flex-shrink-0" />
+                        {contract.name}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]">
+                        {CONTRACT_TYPE_LABELS[contract.type] ?? contract.type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full capitalize"
+                        style={{ background: statusStyle.bg, color: statusStyle.text }}
+                      >
+                        {contract.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-[var(--color-text-muted)]">
+                      {contract.expiryDate
+                        ? new Date(contract.expiryDate).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
+                        : '--'}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <a
+                        href={apiPath(`/api/uploads/serve/${contract.storageKey}`)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] font-medium"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Download
+                      </a>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
