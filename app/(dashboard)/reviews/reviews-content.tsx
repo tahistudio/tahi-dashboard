@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Star, Search, ChevronDown, Loader2, Copy,
   Send, CheckCircle2,
-  MessageSquare, ThumbsUp,
+  MessageSquare, ThumbsUp, Sparkles,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 
@@ -74,6 +74,8 @@ export function ReviewsContent() {
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [copiedToken, setCopiedToken] = useState<string | null>(null)
+  const [generatingDraft, setGeneratingDraft] = useState<string | null>(null)
+  const [draftContent, setDraftContent] = useState<Record<string, string>>({})
 
   const fetchReviews = useCallback(async () => {
     setLoading(true)
@@ -102,6 +104,26 @@ export function ReviewsContent() {
       await fetchReviews()
     } finally {
       setUpdatingId(null)
+    }
+  }
+
+  const generateDraft = async (submissionId: string) => {
+    setGeneratingDraft(submissionId)
+    try {
+      const res = await fetch(apiPath('/api/admin/case-studies/draft'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ submissionId }),
+      })
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as { draft?: string }
+      if (data.draft) {
+        setDraftContent(prev => ({ ...prev, [submissionId]: data.draft as string }))
+      }
+    } catch {
+      // Silent failure
+    } finally {
+      setGeneratingDraft(null)
     }
   }
 
@@ -379,6 +401,51 @@ export function ReviewsContent() {
                           )}
                         </div>
                       </div>
+
+                      {/* Case study draft */}
+                      {review.outreachStatus === 'completed' && review.submissionId && (
+                        <div className="mt-4 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]">
+                              Case Study Draft
+                            </h4>
+                            <button
+                              onClick={() => generateDraft(review.submissionId as string)}
+                              disabled={generatingDraft === review.submissionId}
+                              className="flex items-center gap-1.5 text-xs font-medium transition-colors hover:opacity-80"
+                              style={{
+                                padding: '0.25rem 0.75rem',
+                                background: 'var(--color-brand)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '0 0.5rem 0 0.5rem',
+                                cursor: generatingDraft === review.submissionId ? 'not-allowed' : 'pointer',
+                              }}
+                            >
+                              {generatingDraft === review.submissionId
+                                ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                                : <Sparkles className="w-3 h-3" aria-hidden="true" />}
+                              {generatingDraft === review.submissionId ? 'Generating...' : 'Generate Draft'}
+                            </button>
+                          </div>
+                          {draftContent[review.submissionId as string] && (
+                            <pre
+                              className="text-xs whitespace-pre-wrap"
+                              style={{
+                                padding: '0.75rem',
+                                background: 'var(--color-bg)',
+                                borderRadius: '0.5rem',
+                                border: '1px solid var(--color-border)',
+                                color: 'var(--color-text)',
+                                maxHeight: '20rem',
+                                overflowY: 'auto',
+                              }}
+                            >
+                              {draftContent[review.submissionId as string]}
+                            </pre>
+                          )}
+                        </div>
+                      )}
 
                       {/* Status change buttons */}
                       <div className="flex flex-wrap gap-2 mt-4 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
