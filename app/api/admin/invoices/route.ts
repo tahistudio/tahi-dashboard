@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, and } from 'drizzle-orm'
 
 // ── GET /api/admin/invoices ───────────────────────────────────────────────────
 // Returns paginated invoices with org name joined.
@@ -15,12 +15,22 @@ export async function GET(req: NextRequest) {
 
   const url = new URL(req.url)
   const statusParam = url.searchParams.get('status') ?? 'all'
+  const orgIdFilter = url.searchParams.get('orgId')
   const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10))
   const limit = 50
   const offset = (page - 1) * limit
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Build conditions
+  const conditions = []
+  if (statusParam !== 'all') {
+    conditions.push(eq(schema.invoices.status, statusParam))
+  }
+  if (orgIdFilter) {
+    conditions.push(eq(schema.invoices.orgId, orgIdFilter))
+  }
 
   const query = drizzle
     .select({
@@ -40,12 +50,9 @@ export async function GET(req: NextRequest) {
     .limit(limit)
     .offset(offset)
 
-  let items
-  if (statusParam !== 'all') {
-    items = await query.where(eq(schema.invoices.status, statusParam))
-  } else {
-    items = await query
-  }
+  const items = conditions.length > 0
+    ? await query.where(and(...conditions))
+    : await query
 
   return NextResponse.json({ items, page, limit })
 }

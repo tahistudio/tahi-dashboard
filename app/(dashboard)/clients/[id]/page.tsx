@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { ClientDetail } from './client-detail'
 
 export const dynamic = 'force-dynamic'
+export const metadata = { title: 'Client Detail - Tahi Dashboard' }
 
 type Props = { params: Promise<{ id: string }> }
 

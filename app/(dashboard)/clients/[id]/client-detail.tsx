@@ -14,7 +14,6 @@ import {
   X,
   Plus,
   Layers,
-  CreditCard,
   MessageSquare,
   Clock,
   Activity,
@@ -22,6 +21,9 @@ import {
   ChevronRight,
   AlertTriangle,
   RefreshCw,
+  Users,
+  Loader2,
+  DollarSign,
 } from 'lucide-react'
 import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badge'
 import { TrackMeter } from '@/components/tahi/track-meter'
@@ -97,7 +99,8 @@ interface ClientData {
 const TABS = [
   { id: 'overview',  label: 'Overview',  icon: Building2 },
   { id: 'requests',  label: 'Requests',  icon: Layers },
-  { id: 'billing',   label: 'Billing',   icon: CreditCard },
+  { id: 'invoices',  label: 'Invoices',  icon: DollarSign },
+  { id: 'contacts',  label: 'Contacts',  icon: Users },
   { id: 'messages',  label: 'Messages',  icon: MessageSquare },
   { id: 'time',      label: 'Time',      icon: Clock },
   { id: 'activity',  label: 'Activity',  icon: Activity },
@@ -221,17 +224,20 @@ export function ClientDetail({ clientId }: { clientId: string }) {
         {activeTab === 'requests' && (
           <RequestsTab clientId={clientId} />
         )}
-        {activeTab === 'billing' && (
-          <BillingTab org={org} subscription={subscription} tracks={tracks} />
+        {activeTab === 'invoices' && (
+          <InvoicesTab clientId={clientId} />
+        )}
+        {activeTab === 'contacts' && (
+          <ContactsTab clientId={clientId} contacts={contacts} onUpdated={load} />
         )}
         {activeTab === 'messages' && (
-          <PlaceholderTab label="Messages" description="Org-level messaging coming in Phase 4." />
+          <PlaceholderTab label="Messages" description="Org-level messaging coming in Phase 2." />
         )}
         {activeTab === 'time' && (
-          <PlaceholderTab label="Time" description="Time tracking coming in Phase 5." />
+          <PlaceholderTab label="Time" description="Time tracking coming soon." />
         )}
         {activeTab === 'activity' && (
-          <PlaceholderTab label="Activity" description="Audit log coming in Phase 7." />
+          <PlaceholderTab label="Activity" description="Audit log coming in Phase 4." />
         )}
       </div>
     </div>
@@ -757,70 +763,319 @@ function RequestsTab({ clientId }: { clientId: string }) {
   )
 }
 
-// ── Billing tab ────────────────────────────────────────────────────────────────
+// ── Invoices tab ───────────────────────────────────────────────────────────────
 
-function BillingTab({ org, subscription, tracks }: { org: Organisation; subscription: Subscription | null; tracks: Track[] }) {
-  const PLAN_PRICES: Record<string, string> = {
-    maintain: 'USD $1,500 / month',
-    scale: 'USD $4,000 / month',
+interface InvoiceRow {
+  id: string
+  orgId: string
+  orgName: string | null
+  status: string
+  totalAmount: number
+  currency: string | null
+  dueDate: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+const INVOICE_STATUS_STYLES: Record<string, { bg: string; text: string; dot: string }> = {
+  draft:       { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)', dot: 'var(--color-text-subtle)' },
+  sent:        { bg: 'var(--color-info-bg, #eff6ff)', text: 'var(--color-info, #60a5fa)', dot: 'var(--color-info, #60a5fa)' },
+  viewed:      { bg: 'var(--color-info-bg, #eff6ff)', text: 'var(--color-info, #60a5fa)', dot: 'var(--color-info, #60a5fa)' },
+  overdue:     { bg: 'var(--color-danger-bg, #fef2f2)', text: 'var(--color-danger, #f87171)', dot: 'var(--color-danger, #f87171)' },
+  paid:        { bg: 'var(--color-success-bg, #f0fdf4)', text: 'var(--color-success, #4ade80)', dot: 'var(--color-success, #4ade80)' },
+  written_off: { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)', dot: 'var(--color-text-subtle)' },
+}
+
+function InvoicesTab({ clientId }: { clientId: string }) {
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const router = useRouter()
+
+  useEffect(() => {
+    setLoading(true)
+    fetch(apiPath(`/api/admin/invoices?orgId=${clientId}`))
+      .then(r => r.json() as Promise<{ items: InvoiceRow[] }>)
+      .then(data => setInvoices(data.items ?? []))
+      .catch(() => setInvoices([]))
+      .finally(() => setLoading(false))
+  }, [clientId])
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading invoices...
+      </div>
+    )
   }
 
   return (
-    <div className="max-w-2xl flex flex-col gap-6">
-      <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
-        <h2 className="font-semibold text-[var(--color-text)] mb-4">Current plan</h2>
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-semibold text-[var(--color-text)]">Invoices</h2>
+        <TahiButton variant="primary" size="sm" onClick={() => router.push('/invoices')}>
+          <Plus className="w-3.5 h-3.5 mr-1.5" />
+          New invoice
+        </TahiButton>
+      </div>
 
-        {subscription ? (
-          <>
-            <div className="flex items-center gap-3 mb-4">
-              <PlanBadge plan={subscription.planType} />
-              <StatusBadge status={subscription.status} type="org" />
-              <span className="text-sm text-[var(--color-text-muted)]">
-                {PLAN_PRICES[subscription.planType] ?? 'Custom pricing'}
-              </span>
-            </div>
+      {invoices.length === 0 ? (
+        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
+          <DollarSign className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
+          <p className="text-sm text-[var(--color-text-muted)]">No invoices for this client yet</p>
+        </div>
+      ) : (
+        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Status</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Amount</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Currency</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Due date</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map(inv => {
+                const styles = INVOICE_STATUS_STYLES[inv.status] ?? INVOICE_STATUS_STYLES.draft
+                return (
+                  <tr
+                    key={inv.id}
+                    className="border-b border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-secondary)] cursor-pointer transition-colors"
+                    onClick={() => router.push(`/invoices/${inv.id}`)}
+                  >
+                    <td className="px-4 py-3">
+                      <span
+                        className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full"
+                        style={{ background: styles.bg, color: styles.text }}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: styles.dot }} />
+                        {inv.status.replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-[var(--color-text)] font-medium">
+                      ${(inv.totalAmount ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-4 py-3 text-[var(--color-text-muted)]">
+                      {inv.currency ?? 'USD'}
+                    </td>
+                    <td className="px-4 py-3 text-[var(--color-text-muted)]">
+                      {inv.dueDate
+                        ? new Date(inv.dueDate).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
+                        : '--'}
+                    </td>
+                    <td className="px-4 py-3 text-[var(--color-text-muted)]">
+                      {new Date(inv.createdAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
 
-            <div className="grid grid-cols-2 gap-4 text-sm mb-4">
-              {subscription.currentPeriodStart && (
-                <div>
-                  <p className="text-xs text-[var(--color-text-muted)]">Period start</p>
-                  <p>{new Date(subscription.currentPeriodStart).toLocaleDateString('en-NZ')}</p>
-                </div>
-              )}
-              {subscription.currentPeriodEnd && (
-                <div>
-                  <p className="text-xs text-[var(--color-text-muted)]">Renewal date</p>
-                  <p>{new Date(subscription.currentPeriodEnd).toLocaleDateString('en-NZ')}</p>
-                </div>
-              )}
-              <div>
-                <p className="text-xs text-[var(--color-text-muted)]">Priority support</p>
-                <p>{subscription.hasPrioritySupport ? 'Yes (+USD $1,000/mo)' : 'Not included'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-[var(--color-text-muted)]">SEO &amp; AEO Dashboard</p>
-                <p>{subscription.hasSeoAddon ? 'Yes (+USD $150/mo)' : 'Not included'}</p>
-              </div>
-            </div>
+// ── Contacts tab ───────────────────────────────────────────────────────────────
 
-            <div className="pt-4 border-t border-[var(--color-border)]">
-              <p className="text-xs font-medium text-[var(--color-text-muted)] mb-2">Track configuration</p>
-              <TrackMeter tracks={tracks} />
+function ContactsTab({
+  clientId,
+  contacts,
+  onUpdated,
+}: {
+  clientId: string
+  contacts: Contact[]
+  onUpdated: () => void
+}) {
+  const [showForm, setShowForm] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [form, setForm] = useState({ name: '', email: '', role: '', isPrimary: false })
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.name.trim() || !form.email.trim()) return
+    setSaving(true)
+    setFormError(null)
+
+    try {
+      const res = await fetch(apiPath(`/api/admin/clients/${clientId}/contacts`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+
+      if (!res.ok) {
+        const data = await res.json() as { error?: string }
+        setFormError(data.error ?? 'Failed to add contact')
+        return
+      }
+
+      setForm({ name: '', email: '', role: '', isPrimary: false })
+      setShowForm(false)
+      onUpdated()
+    } catch {
+      setFormError('Network error. Please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-semibold text-[var(--color-text)]">
+          Contacts ({contacts.length})
+        </h2>
+        <TahiButton variant="primary" size="sm" onClick={() => setShowForm(s => !s)}>
+          <Plus className="w-3.5 h-3.5 mr-1.5" />
+          Add contact
+        </TahiButton>
+      </div>
+
+      {/* Add contact form */}
+      {showForm && (
+        <form
+          onSubmit={handleAdd}
+          className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5 mb-4"
+        >
+          <h3 className="font-medium text-sm text-[var(--color-text)] mb-3">New contact</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+            <div>
+              <label htmlFor="contact-name" className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">
+                Name <span className="text-[var(--color-danger)]">*</span>
+              </label>
+              <input
+                id="contact-name"
+                value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                required
+                placeholder="Jane Smith"
+                className="w-full px-3 py-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
+              />
             </div>
-          </>
-        ) : (
-          <div className="py-4">
-            <p className="text-sm text-[var(--color-text-muted)]">
-              No active subscription. Plan type: <PlanBadge plan={org.planType} />
-            </p>
+            <div>
+              <label htmlFor="contact-email" className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">
+                Email <span className="text-[var(--color-danger)]">*</span>
+              </label>
+              <input
+                id="contact-email"
+                type="email"
+                value={form.email}
+                onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                required
+                placeholder="jane@example.com"
+                className="w-full px-3 py-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label htmlFor="contact-role" className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">
+                Role
+              </label>
+              <input
+                id="contact-role"
+                value={form.role}
+                onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
+                placeholder="e.g. Marketing Manager"
+                className="w-full px-3 py-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
+              />
+            </div>
+            <div className="flex items-end pb-1">
+              <label className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.isPrimary}
+                  onChange={e => setForm(f => ({ ...f, isPrimary: e.target.checked }))}
+                  className="rounded border-[var(--color-border)] text-[var(--color-brand)] focus:ring-[var(--color-brand)]"
+                />
+                Primary contact
+              </label>
+            </div>
           </div>
-        )}
-      </div>
 
-      <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
-        <h2 className="font-semibold text-[var(--color-text)] mb-3">Invoices</h2>
-        <p className="text-sm text-[var(--color-text-muted)]">Invoice management coming in Phase 3.</p>
-      </div>
+          {formError && (
+            <div aria-live="polite" className="text-sm text-[var(--color-danger)] bg-[var(--color-danger-bg,#fef2f2)] border border-[var(--color-danger)] rounded-lg px-3 py-2 mb-3">
+              {formError}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <TahiButton variant="secondary" size="sm" onClick={() => { setShowForm(false); setFormError(null) }}>
+              Cancel
+            </TahiButton>
+            <TahiButton variant="primary" size="sm" disabled={saving || !form.name.trim() || !form.email.trim()}>
+              {saving ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Add contact'
+              )}
+            </TahiButton>
+          </div>
+        </form>
+      )}
+
+      {/* Contact list */}
+      {contacts.length === 0 ? (
+        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
+          <Users className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
+          <p className="text-sm text-[var(--color-text-muted)]">No contacts for this client yet</p>
+          <p className="text-xs text-[var(--color-text-subtle)] mt-1">Add a contact to get started.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {contacts.map(contact => (
+            <div
+              key={contact.id}
+              className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-4 hover:border-[var(--color-brand)] transition-colors"
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-full bg-[var(--color-brand-50)] flex items-center justify-center text-[var(--color-brand)] text-sm font-bold flex-shrink-0">
+                  {contact.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-sm font-medium text-[var(--color-text)] truncate">
+                      {contact.name}
+                    </span>
+                    {contact.isPrimary && (
+                      <span className="text-xs text-[var(--color-brand)] bg-[var(--color-brand-50)] px-1.5 py-0.5 rounded-full">
+                        Primary
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] mt-1">
+                    <Mail className="w-3 h-3 flex-shrink-0" />
+                    <span className="truncate">{contact.email}</span>
+                  </div>
+                  {contact.role && (
+                    <div className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] mt-0.5">
+                      <User className="w-3 h-3 flex-shrink-0" />
+                      {contact.role}
+                    </div>
+                  )}
+                  <div className="mt-1.5">
+                    <span className={cn(
+                      'inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full',
+                      contact.clerkUserId
+                        ? 'bg-[var(--color-success-bg,#f0fdf4)] text-[var(--color-success,#4ade80)]'
+                        : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-subtle)]'
+                    )}>
+                      <span className={cn('w-1.5 h-1.5 rounded-full', contact.clerkUserId ? 'bg-emerald-400' : 'bg-[var(--color-border)]')} />
+                      {contact.clerkUserId ? 'Portal access' : 'No portal access'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
