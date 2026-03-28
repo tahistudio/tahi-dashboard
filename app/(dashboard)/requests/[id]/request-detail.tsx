@@ -260,7 +260,7 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
         <div className="animate-pulse rounded" style={{ height: 16, width: 120, background: 'var(--color-bg-tertiary)' }} />
         {/* Header skeleton */}
         <div
-          className="bg-white rounded-xl"
+          className="bg-[var(--color-bg)] rounded-xl"
           style={{ padding: '1.5rem', border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
         >
           <div className="flex items-center gap-3 animate-pulse" style={{ marginBottom: '1rem' }}>
@@ -270,9 +270,9 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
           <div className="animate-pulse rounded" style={{ height: 28, width: '60%', background: 'var(--color-bg-tertiary)', marginBottom: '0.5rem' }} />
           <div className="animate-pulse rounded" style={{ height: 14, width: '30%', background: 'var(--color-bg-tertiary)' }} />
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-6">
-          <div className="bg-white rounded-xl animate-pulse" style={{ height: 300, border: '1px solid var(--color-border)' }} />
-          <div className="bg-white rounded-xl animate-pulse" style={{ height: 300, border: '1px solid var(--color-border)' }} />
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_16rem] lg:grid-cols-[1fr_20rem] gap-6">
+          <div className="bg-[var(--color-bg)] rounded-xl animate-pulse" style={{ height: 300, border: '1px solid var(--color-border)' }} />
+          <div className="bg-[var(--color-bg)] rounded-xl animate-pulse" style={{ height: 300, border: '1px solid var(--color-border)' }} />
         </div>
       </div>
     )
@@ -339,7 +339,7 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
 
       {/* Header card */}
       <div
-        className="bg-white rounded-xl"
+        className="bg-[var(--color-bg)] rounded-xl"
         style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
       >
         <div style={{ padding: '1.5rem' }}>
@@ -474,13 +474,13 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
       </div>
 
       {/* Two-column layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_16rem] lg:grid-cols-[1fr_20rem] gap-6">
         {/* Left column */}
         <div className="flex flex-col gap-6">
           {/* Description */}
           {request.description && (
             <div
-              className="bg-white rounded-xl"
+              className="bg-[var(--color-bg)] rounded-xl"
               style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
             >
               <div
@@ -503,7 +503,7 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
 
           {/* Thread */}
           <div
-            className="bg-white rounded-xl"
+            className="bg-[var(--color-bg)] rounded-xl"
             style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
           >
             <div
@@ -829,7 +829,7 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
 function SidebarCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div
-      className="bg-white rounded-xl overflow-hidden"
+      className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
       style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
     >
       <div
@@ -950,7 +950,7 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
 
   return (
     <div
-      className="bg-white rounded-xl overflow-hidden"
+      className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
       style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
     >
       <div

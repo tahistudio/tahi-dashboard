@@ -199,7 +199,7 @@ export function TiptapEditor({
   return (
     <div
       className={cn(
-        'rounded-[0_12px_0_12px] border bg-white overflow-hidden',
+        'rounded-[0_12px_0_12px] border bg-[var(--color-bg)] overflow-hidden',
         isInternal ? 'border-amber-300 bg-amber-50/30' : 'border-gray-200',
       )}
       onKeyDown={handleKeyDown}

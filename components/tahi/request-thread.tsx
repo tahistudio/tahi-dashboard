@@ -102,7 +102,7 @@ function MessageBubble({ msg, isOwn }: { msg: Message; isOwn: boolean }) {
               ? 'bg-[var(--color-brand)] text-white prose-invert rounded-[12px_0_12px_0]'
               : msg.isInternal
                 ? 'bg-amber-50 border border-amber-200 text-amber-900'
-                : 'bg-white border border-gray-200 text-gray-800',
+                : 'bg-[var(--color-bg)] border border-[var(--color-border)] text-[var(--color-text)]',
           )}
           // HTML from Tiptap is sanitised server-side before storage
           dangerouslySetInnerHTML={{ __html: msg.body }}

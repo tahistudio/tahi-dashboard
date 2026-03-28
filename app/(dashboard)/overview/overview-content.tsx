@@ -90,7 +90,7 @@ export function AdminOverview({ userName }: { userName: string }) {
             Here&apos;s what&apos;s happening at Tahi today.
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
           <QuickBtn href="/requests?new=1" icon={<Plus size={13} />} label="New Request" primary />
           <QuickBtn href="/clients?new=1" icon={<UserPlus size={13} />} label="Add Client" />
           <QuickBtn href="/time?new=1" icon={<Clock size={13} />} label="Log Time" />
@@ -203,7 +203,7 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
         <StatCard
           label="Open Requests"
           value={loading ? null : open.length}
@@ -331,8 +331,8 @@ function OnboardingChecklist() {
 
   return (
     <div
-      className="bg-white rounded-xl"
-      style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', overflow: 'hidden' }}
+      className="rounded-xl"
+      style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', overflow: 'hidden' }}
     >
       <div
         className="flex items-center justify-between"
@@ -448,9 +448,10 @@ function StatCard({
   return (
     <Link
       href={href}
-      className="block bg-white rounded-xl transition-all hover:shadow-md"
+      className="block rounded-xl transition-all hover:shadow-md"
       style={{
         padding: '1.5rem',
+        background: 'var(--color-bg)',
         border: '1px solid var(--color-border)',
         boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
         textDecoration: 'none',
@@ -503,8 +504,8 @@ function SectionCard({
 }) {
   return (
     <div
-      className="bg-white rounded-xl overflow-hidden"
-      style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+      className="rounded-xl overflow-hidden"
+      style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
     >
       <div
         className="flex items-center justify-between"
@@ -741,8 +742,8 @@ function GettingStarted() {
   ]
   return (
     <div
-      className="bg-white rounded-xl"
-      style={{ padding: '1.5rem', border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+      className="rounded-xl"
+      style={{ padding: '1.5rem', background: 'var(--color-bg)', border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
     >
       <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)', marginBottom: '0.25rem' }}>
         Getting started

@@ -145,7 +145,7 @@ export function NotificationBell() {
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
         aria-expanded={open}
         aria-haspopup="true"
-        className="relative p-2 rounded-lg text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5A824E]"
+        className="relative p-2 rounded-lg text-[var(--color-text-subtle)] hover:bg-[var(--color-bg-secondary)] hover:text-[var(--color-text)] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
         style={{ minHeight: 44, minWidth: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       >
         <Bell style={{ width: 16, height: 16 }} aria-hidden="true" />
@@ -186,7 +186,7 @@ export function NotificationBell() {
             right: 0,
             width: 360,
             maxWidth: 'calc(100vw - 32px)',
-            background: 'white',
+            background: 'var(--color-bg)',
             borderRadius: 12,
             border: '1px solid var(--color-border)',
             boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
@@ -241,8 +241,8 @@ export function NotificationBell() {
               <div style={{ padding: '1.5rem 1rem' }}>
                 {[1, 2, 3].map(i => (
                   <div key={i} className="animate-pulse" style={{ marginBottom: '1rem' }}>
-                    <div style={{ height: 14, background: '#f3f4f6', borderRadius: 6, marginBottom: 6, width: '70%' }} />
-                    <div style={{ height: 12, background: '#f9fafb', borderRadius: 6, width: '50%' }} />
+                    <div style={{ height: 14, background: 'var(--color-bg-tertiary)', borderRadius: 6, marginBottom: 6, width: '70%' }} />
+                    <div style={{ height: 12, background: 'var(--color-bg-secondary)', borderRadius: 6, width: '50%' }} />
                   </div>
                 ))}
               </div>
@@ -259,7 +259,7 @@ export function NotificationBell() {
                   style={{
                     padding: '0.75rem 1rem',
                     borderBottom: i < notifications.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
-                    background: n.read ? 'white' : '#f0f7ee',
+                    background: n.read ? 'var(--color-bg)' : 'var(--color-brand-50)',
                     cursor: n.read ? 'default' : 'pointer',
                     transition: 'background 0.1s',
                   }}

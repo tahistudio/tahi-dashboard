@@ -41,6 +41,11 @@ export default function RootLayout({
               __html: `try{if(localStorage.getItem('tahi-theme')==='dark'){document.documentElement.classList.add('dark')}}catch(e){}`,
             }}
           />
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js')})}`,
+            }}
+          />
         </head>
         <body className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)] antialiased">
           {children}
