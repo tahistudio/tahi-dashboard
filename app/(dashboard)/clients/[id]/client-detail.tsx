@@ -30,6 +30,7 @@ import {
   Phone,
   Video,
   ExternalLink,
+  Eye,
 } from 'lucide-react'
 import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badge'
 import { TrackMeter } from '@/components/tahi/track-meter'
@@ -180,10 +181,23 @@ export function ClientDetail({ clientId }: { clientId: string }) {
               )}
             </div>
 
-            <TahiButton variant="secondary" size="sm" onClick={load}>
-              <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-              Refresh
-            </TahiButton>
+            <div className="flex items-center gap-2">
+              <TahiButton
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  sessionStorage.setItem('tahi-impersonate', JSON.stringify({ orgId: org.id, orgName: org.name }))
+                  router.push('/overview')
+                }}
+              >
+                <Eye className="w-3.5 h-3.5 mr-1.5" />
+                View as Client
+              </TahiButton>
+              <TahiButton variant="secondary" size="sm" onClick={load}>
+                <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                Refresh
+              </TahiButton>
+            </div>
           </div>
 
           {/* Track meter in header for quick glance */}

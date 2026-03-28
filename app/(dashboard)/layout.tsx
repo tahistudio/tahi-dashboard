@@ -2,6 +2,7 @@ import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { AppSidebar } from '@/components/tahi/app-sidebar'
 import { AppTopNav } from '@/components/tahi/app-top-nav'
+import { ImpersonationBanner } from '@/components/tahi/impersonation-banner'
 
 export default async function DashboardLayout({
   children,
@@ -17,6 +18,7 @@ export default async function DashboardLayout({
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--color-bg-secondary)' }}>
       <AppSidebar isAdmin={isAdmin} />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        {isAdmin && <ImpersonationBanner />}
         <AppTopNav isAdmin={isAdmin} />
         <main className="flex-1 overflow-y-auto" style={{ padding: '2rem 2.5rem' }}>
           <div className="max-w-7xl mx-auto w-full">
