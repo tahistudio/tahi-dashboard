@@ -5,7 +5,7 @@ import {
   RefreshCw, Sun, Moon,
   CreditCard, Link2, Bell, Building2,
   FileText, Plus, Trash2, GripVertical, ChevronDown, ChevronUp,
-  Webhook, Loader2,
+  Webhook, Loader2, User,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -169,6 +169,9 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
         <LoadingSkeleton rows={6} />
       ) : (
         <div className="space-y-8">
+          {/* Profile (client only) */}
+          {!isAdmin && <ProfileSection />}
+
           {/* Dark Mode */}
           <section>
             <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -362,6 +365,144 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
         </div>
       )}
     </div>
+  )
+}
+
+// -- Profile Section (client portal) --
+
+interface ContactProfile {
+  id: string
+  name: string
+  email: string
+  role: string | null
+  isPrimary: boolean | null
+}
+
+function ProfileSection() {
+  const [profile, setProfile] = useState<ContactProfile | null>(null)
+  const [loadingProfile, setLoadingProfile] = useState(true)
+  const [editName, setEditName] = useState('')
+  const [editRole, setEditRole] = useState('')
+  const [savingProfile, setSavingProfile] = useState(false)
+  const [profileSaved, setProfileSaved] = useState(false)
+
+  const fetchProfile = useCallback(async () => {
+    setLoadingProfile(true)
+    try {
+      const res = await fetch(apiPath('/api/portal/profile'))
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as { contact: ContactProfile | null }
+      if (data.contact) {
+        setProfile(data.contact)
+        setEditName(data.contact.name)
+        setEditRole(data.contact.role ?? '')
+      }
+    } catch {
+      setProfile(null)
+    } finally {
+      setLoadingProfile(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchProfile() }, [fetchProfile])
+
+  async function handleSaveProfile() {
+    if (!editName.trim()) return
+    setSavingProfile(true)
+    setProfileSaved(false)
+    try {
+      const res = await fetch(apiPath('/api/portal/profile'), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editName.trim(), role: editRole.trim() }),
+      })
+      if (res.ok) {
+        setProfileSaved(true)
+        await fetchProfile()
+        setTimeout(() => setProfileSaved(false), 3000)
+      }
+    } catch {
+      // Failed
+    } finally {
+      setSavingProfile(false)
+    }
+  }
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <User className="w-5 h-5" />
+        Profile
+      </h2>
+      {loadingProfile ? (
+        <LoadingSkeleton rows={3} />
+      ) : !profile ? (
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+          <p className="text-sm text-[var(--color-text-muted)]">
+            No profile record found. Please contact the Tahi team if you need help setting up your account.
+          </p>
+        </div>
+      ) : (
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="profile-name" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                Name
+              </label>
+              <input
+                id="profile-name"
+                type="text"
+                value={editName}
+                onChange={e => setEditName(e.target.value)}
+                className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              />
+            </div>
+            <div>
+              <label htmlFor="profile-email" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                Email
+              </label>
+              <input
+                id="profile-email"
+                type="email"
+                value={profile.email}
+                disabled
+                className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] px-3 py-2 text-[var(--color-text-muted)] cursor-not-allowed"
+              />
+              <p className="text-xs text-[var(--color-text-subtle)] mt-1">
+                Email is managed through your login provider.
+              </p>
+            </div>
+          </div>
+          <div>
+            <label htmlFor="profile-role" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+              Role / Title
+            </label>
+            <input
+              id="profile-role"
+              type="text"
+              value={editRole}
+              onChange={e => setEditRole(e.target.value)}
+              placeholder="e.g. Marketing Manager"
+              className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <TahiButton
+              size="sm"
+              onClick={handleSaveProfile}
+              disabled={savingProfile || !editName.trim()}
+            >
+              {savingProfile ? 'Saving...' : 'Save Profile'}
+            </TahiButton>
+            {profileSaved && (
+              <span className="text-xs text-[var(--color-brand)] font-medium">
+                Profile updated
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
   )
 }
 
