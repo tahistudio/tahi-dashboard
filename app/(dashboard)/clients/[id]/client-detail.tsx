@@ -27,6 +27,9 @@ import {
   Download,
   File,
   ScrollText,
+  Phone,
+  Video,
+  ExternalLink,
 } from 'lucide-react'
 import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badge'
 import { TrackMeter } from '@/components/tahi/track-meter'
@@ -106,6 +109,7 @@ const TABS = [
   { id: 'invoices',   label: 'Invoices',   icon: DollarSign },
   { id: 'contracts',  label: 'Contracts',  icon: ScrollText },
   { id: 'contacts',   label: 'Contacts',   icon: Users },
+  { id: 'calls',      label: 'Calls',      icon: Phone },
   { id: 'messages',   label: 'Messages',   icon: MessageSquare },
   { id: 'time',       label: 'Time',       icon: Clock },
   { id: 'activity',   label: 'Activity',   icon: Activity },
@@ -240,6 +244,9 @@ export function ClientDetail({ clientId }: { clientId: string }) {
         )}
         {activeTab === 'contacts' && (
           <ContactsTab clientId={clientId} contacts={contacts} onUpdated={load} />
+        )}
+        {activeTab === 'calls' && (
+          <CallsTab clientId={clientId} orgName={org.name} />
         )}
         {activeTab === 'messages' && (
           <PlaceholderTab label="Messages" description="Org-level messaging coming in Phase 2." />
@@ -1423,6 +1430,281 @@ function ContractsTab({ clientId }: { clientId: string }) {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Calls tab ─────────────────────────────────────────────────────────────────
+
+interface ScheduledCallRow {
+  id: string
+  title: string
+  scheduledAt: string
+  durationMinutes: number
+  meetingUrl: string | null
+  status: string
+  notes: string | null
+}
+
+const CALL_STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
+  scheduled:  { bg: 'var(--color-info-bg, #eff6ff)',    color: 'var(--color-info, #60a5fa)',    label: 'Scheduled' },
+  completed:  { bg: 'var(--color-success-bg, #f0fdf4)', color: 'var(--color-success, #4ade80)', label: 'Completed' },
+  cancelled:  { bg: 'var(--color-bg-tertiary)',          color: 'var(--color-text-muted)',        label: 'Cancelled' },
+  no_show:    { bg: 'var(--color-danger-bg, #fef2f2)',   color: 'var(--color-danger, #f87171)',   label: 'No Show' },
+}
+
+function CallsTab({ clientId, orgName }: { clientId: string; orgName: string }) {
+  const [calls, setCalls] = useState<ScheduledCallRow[]>([])
+  const [loadingCalls, setLoadingCalls] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [formTitle, setFormTitle] = useState('')
+  const [formDate, setFormDate] = useState('')
+  const [formTime, setFormTime] = useState('10:00')
+  const [formDuration, setFormDuration] = useState(30)
+  const [formUrl, setFormUrl] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const fetchCalls = useCallback(async () => {
+    setLoadingCalls(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/calls?orgId=${clientId}`))
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as { calls: ScheduledCallRow[] }
+      setCalls(data.calls ?? [])
+    } catch {
+      setCalls([])
+    } finally {
+      setLoadingCalls(false)
+    }
+  }, [clientId])
+
+  useEffect(() => { void fetchCalls() }, [fetchCalls])
+
+  async function handleCreate() {
+    if (!formTitle.trim() || !formDate) return
+    setSubmitting(true)
+    try {
+      const scheduledAt = `${formDate}T${formTime}:00Z`
+      await fetch(apiPath('/api/admin/calls'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orgId: clientId,
+          title: formTitle.trim(),
+          scheduledAt,
+          durationMinutes: formDuration,
+          meetingUrl: formUrl.trim() || undefined,
+        }),
+      })
+      setShowForm(false)
+      setFormTitle('')
+      setFormDate('')
+      setFormTime('10:00')
+      setFormDuration(30)
+      setFormUrl('')
+      await fetchCalls()
+    } catch {
+      // Create failed
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function updateCallStatus(callId: string, status: string) {
+    try {
+      await fetch(apiPath(`/api/admin/calls/${callId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      await fetchCalls()
+    } catch {
+      // Update failed
+    }
+  }
+
+  const upcoming = calls.filter(c => c.status === 'scheduled')
+  const past = calls.filter(c => c.status !== 'scheduled')
+
+  if (loadingCalls) return (
+    <div className="animate-pulse space-y-3 py-4">
+      {[1, 2, 3].map(i => (
+        <div key={i} className="h-16 bg-[var(--color-bg-tertiary)] rounded-xl" />
+      ))}
+    </div>
+  )
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h3 className="text-base font-semibold text-[var(--color-text)]">Scheduled Calls</h3>
+        <TahiButton size="sm" onClick={() => setShowForm(!showForm)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+          Schedule Call
+        </TahiButton>
+      </div>
+
+      {/* New call form */}
+      {showForm && (
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="call-title" className="block text-sm font-medium text-[var(--color-text)] mb-1">Title</label>
+              <input
+                id="call-title"
+                type="text"
+                value={formTitle}
+                onChange={e => setFormTitle(e.target.value)}
+                placeholder="Monthly check-in"
+                className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              />
+            </div>
+            <div>
+              <label htmlFor="call-url" className="block text-sm font-medium text-[var(--color-text)] mb-1">Meeting URL</label>
+              <input
+                id="call-url"
+                type="url"
+                value={formUrl}
+                onChange={e => setFormUrl(e.target.value)}
+                placeholder="https://meet.google.com/..."
+                className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              />
+            </div>
+            <div>
+              <label htmlFor="call-date" className="block text-sm font-medium text-[var(--color-text)] mb-1">Date</label>
+              <input
+                id="call-date"
+                type="date"
+                value={formDate}
+                onChange={e => setFormDate(e.target.value)}
+                className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              />
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label htmlFor="call-time" className="block text-sm font-medium text-[var(--color-text)] mb-1">Time</label>
+                <input
+                  id="call-time"
+                  type="time"
+                  value={formTime}
+                  onChange={e => setFormTime(e.target.value)}
+                  className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                />
+              </div>
+              <div className="w-24">
+                <label htmlFor="call-duration" className="block text-sm font-medium text-[var(--color-text)] mb-1">Mins</label>
+                <input
+                  id="call-duration"
+                  type="number"
+                  value={formDuration}
+                  onChange={e => setFormDuration(parseInt(e.target.value) || 30)}
+                  min={15}
+                  step={15}
+                  className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                />
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <TahiButton variant="secondary" size="sm" onClick={() => setShowForm(false)}>Cancel</TahiButton>
+            <TahiButton size="sm" onClick={handleCreate} disabled={submitting || !formTitle.trim() || !formDate}>
+              {submitting ? 'Scheduling...' : 'Schedule'}
+            </TahiButton>
+          </div>
+        </div>
+      )}
+
+      {/* Upcoming calls */}
+      {upcoming.length > 0 && (
+        <div>
+          <h4 className="text-sm font-medium text-[var(--color-text-muted)] mb-2">Upcoming</h4>
+          <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-hidden divide-y divide-[var(--color-border-subtle)]">
+            {upcoming.map(call => (
+              <CallRow key={call.id} call={call} onStatusChange={updateCallStatus} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Past calls */}
+      {past.length > 0 && (
+        <div>
+          <h4 className="text-sm font-medium text-[var(--color-text-muted)] mb-2">Past</h4>
+          <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-hidden divide-y divide-[var(--color-border-subtle)]">
+            {past.map(call => (
+              <CallRow key={call.id} call={call} onStatusChange={updateCallStatus} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {calls.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <Video className="w-10 h-10 text-[var(--color-text-subtle)] mb-3" />
+          <h3 className="text-sm font-semibold text-[var(--color-text)] mb-1">No calls scheduled</h3>
+          <p className="text-xs text-[var(--color-text-muted)]">Schedule a call with {orgName} to get started.</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CallRow({ call, onStatusChange }: { call: ScheduledCallRow; onStatusChange: (id: string, status: string) => void }) {
+  const style = CALL_STATUS_STYLES[call.status] ?? CALL_STATUS_STYLES.scheduled
+  const callDate = new Date(call.scheduledAt)
+  const isUpcoming = call.status === 'scheduled'
+
+  return (
+    <div className="flex items-center gap-4 px-4 py-3">
+      <div className="flex-shrink-0">
+        <div
+          className="w-10 h-10 rounded-lg flex items-center justify-center"
+          style={{ background: style.bg, color: style.color }}
+        >
+          <Video style={{ width: '1.125rem', height: '1.125rem' }} />
+        </div>
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-[var(--color-text)] truncate">{call.title}</p>
+        <p className="text-xs text-[var(--color-text-muted)]">
+          {callDate.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
+          {' at '}
+          {callDate.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}
+          {' '}
+          ({call.durationMinutes}min)
+        </p>
+      </div>
+      <span
+        className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0"
+        style={{ background: style.bg, color: style.color }}
+      >
+        {style.label}
+      </span>
+      {call.meetingUrl && (
+        <a
+          href={call.meetingUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex-shrink-0 p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-brand)] transition-colors"
+          aria-label="Open meeting link"
+        >
+          <ExternalLink className="w-4 h-4" />
+        </a>
+      )}
+      {isUpcoming && (
+        <div className="flex-shrink-0 relative">
+          <select
+            onChange={e => { if (e.target.value) { onStatusChange(call.id, e.target.value); e.target.value = '' } }}
+            defaultValue=""
+            className="text-xs rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            aria-label="Change call status"
+          >
+            <option value="" disabled>Mark as...</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="no_show">No Show</option>
+          </select>
         </div>
       )}
     </div>

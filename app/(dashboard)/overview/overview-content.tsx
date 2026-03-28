@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   Users, Inbox, FileText, TrendingUp,
   Plus, Clock, UserPlus,
-  ArrowRight, AlertTriangle, RefreshCw,
+  ArrowRight, AlertTriangle, RefreshCw, Video, ExternalLink,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { apiPath } from '@/lib/api'
@@ -143,6 +143,9 @@ export function AdminOverview({ userName }: { userName: string }) {
           <RequestRow key={req.id} req={req} isLast={i === recentRequests.length - 1} showOrg />
         ))}
       </SectionCard>
+
+      {/* Upcoming Calls */}
+      <UpcomingCallsWidget />
 
       {!loading && (kpis?.activeClients ?? 0) === 0 && <GettingStarted />}
     </div>
@@ -484,6 +487,83 @@ function QuickBtn({
       {icon}
       {label}
     </Link>
+  )
+}
+
+// ─── Upcoming Calls Widget ───────────────────────────────────────────────────
+
+interface UpcomingCall {
+  id: string
+  orgName: string | null
+  title: string
+  scheduledAt: string
+  durationMinutes: number
+  meetingUrl: string | null
+}
+
+function UpcomingCallsWidget() {
+  const [calls, setCalls] = useState<UpcomingCall[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/calls?status=scheduled&limit=5'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<{ calls: UpcomingCall[] }>
+      })
+      .then(data => setCalls(data.calls ?? []))
+      .catch(() => setCalls([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (!loading && calls.length === 0) return null
+
+  return (
+    <SectionCard title="Upcoming Calls" action={{ label: 'View all', href: '/calls' }}>
+      {loading ? <LoadingRows /> : calls.map((call, i) => {
+        const d = new Date(call.scheduledAt)
+        return (
+          <div
+            key={call.id}
+            className="flex items-center gap-3"
+            style={{
+              padding: '0.75rem 1.25rem',
+              borderBottom: i < calls.length - 1 ? '1px solid var(--color-row-border)' : 'none',
+            }}
+          >
+            <div
+              className="flex items-center justify-center rounded-lg flex-shrink-0"
+              style={{ width: '2.25rem', height: '2.25rem', background: '#eff6ff', color: '#2563eb' }}
+            >
+              <Video size={16} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>
+                {call.title}
+              </p>
+              <p className="text-xs truncate" style={{ color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
+                {call.orgName ? `${call.orgName} · ` : ''}
+                {d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}
+                {' at '}
+                {d.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}
+                {' '}({call.durationMinutes}min)
+              </p>
+            </div>
+            {call.meetingUrl && (
+              <a
+                href={call.meetingUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs font-medium hover:underline flex-shrink-0"
+                style={{ color: BRAND }}
+              >
+                Join <ExternalLink size={11} />
+              </a>
+            )}
+          </div>
+        )
+      })}
+    </SectionCard>
   )
 }
 
