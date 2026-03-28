@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-28
 Total tasks: 250 (S1-S11 schema + T1-T250 feature + audit findings)
-Completed: S1-S11, T1-T13, T15-T17, T18, T20-T22, T29, T32-T37, T39, T41-T42, T44, T47-T48, T50-T51, T53, T55-T57, T58-T60, T61-T63, T64-T65, T66-T72, T74-T77, T80, T82-T88, T89-T91, T92-T94, T95-T100, T101-T104, T105-T106, T108-T114, T115-T116, T117-T118, T131-T132, T135-T139, T141-T144, T145-T148, T149-T154, T167-T171, T172-T180, T175, T181, T185-T186, T189-T192, T194-T196, T198-T203, T205-T206, T207-T210, T216-T220, T222-T223, T252, T254-T255, T259-T262, T264, T266
+Completed: S1-S11, T1-T13, T15-T17, T18, T20-T22, T29, T32-T42, T44, T47-T57, T58-T60, T61-T63, T64-T65, T66-T79, T80-T88, T89-T91, T92-T94, T95-T100, T101-T107, T108-T114, T115-T116, T117-T134, T135-T140, T141-T144, T145-T148, T149-T156, T167-T171, T172-T188, T189-T192, T194-T196, T198-T210, T216-T226, T251-T252, T254-T258, T259-T262, T264-T266
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -72,7 +72,7 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T35 — API route: GET /api/admin/invoices/[id] — BE — [PM] 2026-03-28
 - [x] T36 — Time entries page: list all time entries across clients, filter by billable/date/client — FE + BE — [PM] 2026-03-28
 - [x] T37 — API route: GET /api/admin/time-entries — BE — [PM] 2026-03-28
-- [ ] T38 — Notifications: SSE endpoint for real-time in-app notifications — BE
+- [x] T38 — Notifications: SSE endpoint for real-time in-app notifications — BE — [PM] 2026-03-28
 - [x] T39 — Notifications: bell icon in header with unread count, dropdown list — FE — [PM] 2026-03-28
 - [x] T40 — Notifications: mark as read (single + all) — FE + BE — [PM] 2026-03-28
 - [x] T41 — API route: GET + PATCH /api/notifications — BE — [PM] 2026-03-28
@@ -91,12 +91,12 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 
 - [x] T47 — Messaging: conversations list page (inbox) showing all conversations with unread counts — FE + BE — [PM] 2026-03-28
 - [x] T48 — Messaging: conversation detail page with message thread, send box, file attach — FE + BE — [PM] 2026-03-28
-- [ ] T49 — Messaging: create new direct (1:1) conversation from client detail or contacts page — FE + BE
+- [x] T49 — Messaging: create new direct (1:1) conversation from client detail or contacts page — FE + BE — [PM] 2026-03-28
 - [x] T50 — Messaging: create group conversation with multiple participants — FE + BE — [PM] 2026-03-28
 - [x] T51 — Client onboarding checklist on portal overview with step tracking — FE + BE — [PM] 2026-03-28
-- [ ] T52 — Messaging: request-thread conversations linked to a specific request — FE + BE
+- [x] T52 — Messaging: request-thread conversations linked to a specific request — FE + BE — [PM] 2026-03-28
 - [x] T53 — Messaging: internal vs external visibility toggle per conversation — FE + BE — [PM] 2026-03-28
-- [ ] T54 — Messaging: voice note recording and playback within conversations — FE + BE
+- [x] T54 — Messaging: voice note recording and playback within conversations — FE + BE — [PM] 2026-03-28
 - [x] T55 — API route: GET + POST /api/admin/conversations — BE — [PM] 2026-03-28
 - [x] T56 — API route: GET + POST /api/admin/conversations/[id]/messages — BE — [PM] 2026-03-28
 - [x] T57 — API route: GET + POST /api/portal/conversations (client-scoped, external only) — BE — [PM] 2026-03-28
@@ -124,17 +124,17 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 
 ### Team Members and Access Scoping
 - [x] T72 — Team members page: list all team members with roles and access summary — FE + BE — [PM] 2026-03-28
-- [ ] T73 — Invite team member: email invite via Clerk + create teamMembers row — FE + BE
+- [x] T73 — Invite team member: email invite via Clerk + create teamMembers row — FE + BE — [PM] 2026-03-28
 - [x] T74 — Team member detail: access scoping UI (all clients / by plan / by specific client list) — FE + BE — [PM] 2026-03-28
 - [x] T75 — Team member detail: track type scoping (all tracks / maintain only / scale only) — FE + BE — [PM] 2026-03-28
 - [x] T76 — API route: GET + POST /api/admin/team-members — BE — [PM] 2026-03-28
 - [x] T77 — API route: GET + PATCH /api/admin/team-members/[id]/access — BE — [PM] 2026-03-28
-- [ ] T78 — Enforce team member access scoping in all admin API routes that return client data — BE
-- [ ] T79 — Team member: assign as PM for specific clients (shows as PM in client detail header) — FE + BE
+- [x] T78 — Enforce team member access scoping in all admin API routes that return client data — BE — [PM] 2026-03-28
+- [x] T79 — Team member: assign as PM for specific clients (shows as PM in client detail header) — FE + BE — [PM] 2026-03-28
 
 ### Request Intake Forms
 - [x] T80 — Intake form builder: create/edit form fields per category, per service, per client — FE + BE — [PM] 2026-03-28
-- [ ] T81 — Intake form: client portal request submission uses the resolved form for that category/service/client — FE + BE
+- [x] T81 — Intake form: client portal request submission uses the resolved form for that category/service/client — FE + BE — [PM] 2026-03-28
 - [x] T82 — API route: GET + POST + PATCH /api/admin/request-forms — BE — [PM] 2026-03-28
 - [x] T83 — API route: GET /api/portal/request-forms?category=X (returns resolved form for org) — BE — [PM] 2026-03-28
 
@@ -173,7 +173,7 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 ### Review and Testimonial Pipeline
 - [x] T105 — Review outreach: automation trigger (X days after client onboarded) fires outreach — BE — [PM] 2026-03-28
 - [x] T106 — Review outreach email: sends via Resend with Yes / No / Not Right Now links (token URLs) — BE — [PM] 2026-03-28
-- [ ] T107 — Review outreach: in-app banner on client portal with same three options — FE + BE
+- [x] T107 — Review outreach: in-app banner on client portal with same three options — FE + BE — [PM] 2026-03-28
 - [x] T108 — Review state machine: "No" = never ask again. "Deferred" = set deferredUntil +7 days. "Yes" = start funnel — BE — [PM] 2026-03-28
 - [x] T109 — Review funnel step 1: NPS score (token-auth public page, no login) — FE + BE — [PM] 2026-03-28
 - [x] T110 — Review funnel step 2: written testimonial (token-auth public page) — FE + BE — [PM] 2026-03-28
@@ -192,28 +192,28 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 ## Phase 4 — Integrations, CSV Exports, Automations, Audit, Zapier
 
 ### HubSpot Integration
-- [ ] T119 — HubSpot: OAuth connect flow in admin integrations settings — FE + BE
-- [ ] T120 — HubSpot: sync new client org to HubSpot as a Company on provisioning — BE
-- [ ] T121 — HubSpot: sync contacts to HubSpot as Contacts linked to Company — BE
-- [ ] T122 — HubSpot: sync deal/subscription data to HubSpot deal record — BE
-- [ ] T123 — HubSpot: webhook receiver for HubSpot contact updates — BE
+- [x] T119 — HubSpot: OAuth connect flow in admin integrations settings — FE + BE — [PM] 2026-03-28
+- [x] T120 — HubSpot: sync new client org to HubSpot as a Company on provisioning — BE — [PM] 2026-03-28
+- [x] T121 — HubSpot: sync contacts to HubSpot as Contacts linked to Company — BE — [PM] 2026-03-28
+- [x] T122 — HubSpot: sync deal/subscription data to HubSpot deal record — BE — [PM] 2026-03-28
+- [x] T123 — HubSpot: webhook receiver for HubSpot contact updates — BE — [PM] 2026-03-28
 
 ### Slack Integration
-- [ ] T124 — Slack: OAuth connect flow in admin integrations settings — FE + BE
-- [ ] T125 — Slack: post notification to configured channel when new request is submitted — BE
-- [ ] T126 — Slack: post notification when a request status changes to completed — BE
-- [ ] T127 — Slack: configurable channel per event type in admin settings — FE + BE
+- [x] T124 — Slack: OAuth connect flow in admin integrations settings — FE + BE — [PM] 2026-03-28
+- [x] T125 — Slack: post notification to configured channel when new request is submitted — BE — [PM] 2026-03-28
+- [x] T126 — Slack: post notification when a request status changes to completed — BE — [PM] 2026-03-28
+- [x] T127 — Slack: configurable channel per event type in admin settings — FE + BE — [PM] 2026-03-28
 
 ### Mailerlite Integration
-- [ ] T128 — Mailerlite: API key config in admin integrations settings — FE + BE
-- [ ] T129 — Mailerlite: add new client contact to configured Mailerlite group on provisioning — BE
-- [ ] T130 — Mailerlite: remove/unsubscribe on client offboarding — BE
+- [x] T128 — Mailerlite: API key config in admin integrations settings — FE + BE — [PM] 2026-03-28
+- [x] T129 — Mailerlite: add new client contact to configured Mailerlite group on provisioning — BE — [PM] 2026-03-28
+- [x] T130 — Mailerlite: remove/unsubscribe on client offboarding — BE — [PM] 2026-03-28
 
 ### Stripe Integration (Retainer Auto-Invoicing)
 - [x] T131 — Stripe: webhook receiver for subscription events (created, updated, invoice.paid, invoice.payment_failed) — BE — [PM] 2026-03-28
 - [x] T132 — Stripe: sync invoice.paid events to local `invoices` table — BE — [PM] 2026-03-28
-- [ ] T133 — Stripe: auto-create Stripe subscription when client is provisioned with a paid plan — BE
-- [ ] T134 — Stripe: client portal pay-now link using Stripe hosted invoice URL — FE + BE
+- [x] T133 — Stripe: auto-create Stripe subscription when client is provisioned with a paid plan — BE — [PM] 2026-03-28
+- [x] T134 — Stripe: client portal pay-now link using Stripe hosted invoice URL — FE + BE — [PM] 2026-03-28
 
 ### Rewardful Integration
 - [x] T135 — Rewardful: API key config in admin integrations settings — FE + BE — [PM] 2026-03-28
@@ -221,7 +221,7 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T137 — Rewardful: sync referrals per affiliate (who was referred, conversion date, status) — BE — [PM] 2026-03-28 (stub)
 - [x] T138 — Rewardful: sync commissions earned and payout history — BE — [PM] 2026-03-28 (stub)
 - [x] T139 — Rewardful: affiliates dashboard page (top affiliates by revenue, referrals over time chart, commissions table) — FE + BE — [PM] 2026-03-28
-- [ ] T140 — Rewardful: scheduled background sync (daily refresh of affiliate/referral data) — BE
+- [x] T140 — Rewardful: scheduled background sync (daily refresh of affiliate/referral data) — BE — [PM] 2026-03-28
 
 
 ### CSV Exports
@@ -245,8 +245,8 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 ### Zapier and Webhooks (nice-to-have)
 - [x] T153 — Outgoing webhooks: admin can register a webhook URL for selected events — FE + BE — [PM] 2026-03-28
 - [x] T154 — Outgoing webhooks: delivery with retry logic and signature verification — BE — [PM] 2026-03-28
-- [ ] T155 — Zapier: Zap triggers for request created, request completed, new client — BE
-- [ ] T156 — Zapier: Zap actions for create request, update request status — BE
+- [x] T155 — Zapier: Zap triggers for request created, request completed, new client — BE — [PM] 2026-03-28
+- [x] T156 — Zapier: Zap actions for create request, update request status — BE — [PM] 2026-03-28
 
 ---
 
@@ -296,14 +296,14 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 ### Design System and Color
 
 - [x] T180 — Centralize duplicate BRAND/color constants: overview-content.tsx, app-sidebar.tsx, and request-list.tsx each define their own BRAND color values. Per CLAUDE.md, per-file hex consts are fine; verified all use #5A824E consistently — [UIUX]
-- [ ] T181 — Replace 50+ hardcoded hex colors in overview-content.tsx, request-list.tsx, and status-badge.tsx with CSS custom property references (var(--color-*)) so dark mode works correctly when implemented — [UIUX]
-- [ ] T182 — Merge duplicate status and category color configs: STATUS_CFG in request-list.tsx and the color map in status-badge.tsx define the same data. Consolidate into one shared config — [UIUX]
-- [ ] T183 — Replace hardcoded border-radius integers (8, 12) with CSS variable references (var(--radius-button), var(--radius-card)) throughout components — [UIUX]
-- [ ] T184 — Fix spacing values that break the 4px grid: values like 3px, 7px, and 20px found in overview-content.tsx and new-request-dialog.tsx. Replace with nearest 4px-grid value — [UIUX]
+- [x] T181 — Replace 50+ hardcoded hex colors in overview-content.tsx, request-list.tsx, and status-badge.tsx with CSS custom property references (var(--color-*)) so dark mode works correctly when implemented — [UIUX] — [PM] 2026-03-28
+- [x] T182 — Merge duplicate status and category color configs: STATUS_CFG in request-list.tsx and the color map in status-badge.tsx define the same data. Consolidate into one shared config — [UIUX] — [PM] 2026-03-28
+- [x] T183 — Replace hardcoded border-radius integers (8, 12) with CSS variable references (var(--radius-button), var(--radius-card)) throughout components — [UIUX] — [PM] 2026-03-28
+- [x] T184 — Fix spacing values that break the 4px grid: values like 3px, 7px, and 20px found in overview-content.tsx and new-request-dialog.tsx. Replace with nearest 4px-grid value — [UIUX] — [PM] 2026-03-28
 - [x] T185 — Standardize page heading sizes: overview uses text-2xl, requests uses text-xl. Use text-2xl consistently across all pages for h1 — [UIUX]
 - [x] T186 — Fix incorrect CSS variable: client-detail.tsx uses bg-[var(--color-bg-primary)] which does not exist. Replace with bg-[var(--color-bg)] — [FE]
-- [ ] T187 — Standardize heading font weight: request-detail uses font-semibold where other pages use font-bold for h1. Align to font-bold — [UIUX]
-- [ ] T188 — Replace inline hover handlers (onMouseEnter/onMouseLeave) with Tailwind hover: utility classes throughout all components for consistency — [FE]
+- [x] T187 — Standardize heading font weight: request-detail uses font-semibold where other pages use font-bold for h1. Align to font-bold — [UIUX] — [PM] 2026-03-28
+- [x] T188 — Replace inline hover handlers (onMouseEnter/onMouseLeave) with Tailwind hover: utility classes throughout all components for consistency — [FE] — [PM] 2026-03-28
 
 ### Code Quality and Standards
 
@@ -325,7 +325,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T201 — Add aria-modal="true", role="dialog", and aria-labelledby to the root div of new-request-dialog.tsx and new-client-dialog.tsx — [ACCESSIBILITY]
 - [x] T202 — Associate all form labels with inputs via htmlFor/id pairs in new-request-dialog.tsx and new-client-dialog.tsx (FieldGroup label elements are currently not associated) — [ACCESSIBILITY]
 - [x] T203 — Add focus-visible rings to search input in request-list.tsx (line 230), filter buttons, and view toggle buttons. The current focus:outline-none removes the outline with no replacement — [ACCESSIBILITY]
-- [ ] T204 — Pair all onMouseEnter/onMouseLeave interactive state handlers with matching onFocus/onBlur handlers so keyboard users get equivalent visual feedback — [ACCESSIBILITY]
+- [x] T204 — Pair all onMouseEnter/onMouseLeave interactive state handlers with matching onFocus/onBlur handlers so keyboard users get equivalent visual feedback — [ACCESSIBILITY] — [PM] 2026-03-28
 - [x] T205 — Replace title attribute on Tiptap toolbar buttons and request-list view toggle buttons with aria-label (title is not reliably announced by screen readers) — [ACCESSIBILITY]
 - [x] T206 — Add aria-hidden="true" to all decorative SVG icons throughout the app so screen readers do not announce them — [ACCESSIBILITY] — [PM] 2026-03-28
 - [x] T207 — Wrap decorative emojis in aria-hidden="true": wave emoji in overview-content.tsx line 78, lock emoji in new-request-dialog.tsx line 290 — [ACCESSIBILITY]
@@ -356,15 +356,15 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T218 — Request dialog: fetch the client's active subscription planType when the org is selected. Hide the track selector (large/small) entirely if planType is not 'maintain' or 'scale'. Show it only for retainer plans. -- [FE] -- [PM] 2026-03-28
 - [x] T219 — POST /api/admin/requests: make trackId optional and skip track slot validation when the org's plan does not use tracks. Return a clear error only when trackId is required (retainer plan) and missing. -- [BE] -- [PM] 2026-03-28
 - [x] T220 — Schema check: verify timeEntries table has hourlyRate column (decimal/real) and billable column (integer 0/1). Add both via migration if missing. -- [BE] -- [PM] 2026-03-28
-- [ ] T221 — UIUX review: update request creation dialog to clearly separate the retainer flow (track selector visible) from the project/hourly flow (no track selector, just title + description + category). -- [UIUX]
+- [x] T221 — UIUX review: update request creation dialog to clearly separate the retainer flow (track selector visible) from the project/hourly flow (no track selector, just title + description + category). -- [UIUX] -- [PM] 2026-03-28
 
 ### Hourly billing tracker (Decision #021)
 
 - [x] T222 — Time entries page: per-client hourly summary view. Show total hours logged this month per client, split by billable/non-billable. Filter by month and client. -- [FE] -- [PM] 2026-03-28
 - [x] T223 — GET /api/admin/reports/billing-summary?month=YYYY-MM: return per-org breakdown of billable hours, hourly rate, and total amount due. -- [BE] -- [PM] 2026-03-28
-- [ ] T224 — Monthly billing email: Cloudflare Cron Trigger on the 1st of each month sends Liam a Resend email with a per-client table of billable hours and amounts for the prior month. -- [BE]
-- [ ] T225 — Time entry form: add hourly rate field per entry (pre-fill from org's default rate if set). Add a default hourly rate field to the client detail page (stored on the org row or a settings key). -- [FE + BE]
-- [ ] T226 — Xero hourly billing export (Phase 4): at end of month, auto-create draft invoices in Xero for each client with billable hours. One line item per client: "Design and development services - [Month] - [X] hours at $[rate]/hr". -- [BE]
+- [x] T224 — Monthly billing email: Cloudflare Cron Trigger on the 1st of each month sends Liam a Resend email with a per-client table of billable hours and amounts for the prior month. -- [BE] -- [PM] 2026-03-28
+- [x] T225 — Time entry form: add hourly rate field per entry (pre-fill from org's default rate if set). Add a default hourly rate field to the client detail page (stored on the org row or a settings key). -- [FE + BE] -- [PM] 2026-03-28
+- [x] T226 — Xero hourly billing export (Phase 4): at end of month, auto-create draft invoices in Xero for each client with billable hours. One line item per client: "Design and development services - [Month] - [X] hours at $[rate]/hr". -- [BE] -- [PM] 2026-03-28
 
 ---
 
