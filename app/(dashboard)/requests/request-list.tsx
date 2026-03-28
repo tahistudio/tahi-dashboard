@@ -8,6 +8,8 @@ import {
   Calendar, Zap,
 } from 'lucide-react'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
+import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
+import { EmptyState } from '@/components/tahi/empty-state'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -189,7 +191,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
 
       {/* Page header */}
       <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
-        <h1 className="text-xl font-bold" style={{ color: '#111827' }}>Requests</h1>
+        <h1 className="text-2xl font-bold" style={{ color: '#111827' }}>Requests</h1>
         <button
           onClick={() => setDialogOpen(true)}
           className="flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
@@ -217,7 +219,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
           style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6', background: 'white' }}
         >
           {/* Search */}
-          <div className="relative flex-shrink-0" style={{ width: 260 }}>
+          <div className="relative flex-shrink-0" style={{ width: '100%', maxWidth: 260 }}>
             <Search
               className="absolute top-1/2 pointer-events-none"
               style={{ left: 10, transform: 'translateY(-50%)', width: 14, height: 14, color: '#9ca3af' }}
@@ -227,7 +229,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
               placeholder="Search requests..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full text-sm focus:outline-none"
+              className="w-full text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[#5A824E] focus-visible:ring-offset-1"
               style={{
                 paddingTop: 7,
                 paddingBottom: 7,
@@ -245,7 +247,8 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
           <button
             className="flex items-center gap-1.5 text-sm font-medium flex-shrink-0 transition-colors"
             style={{
-              padding: '7px 12px',
+              padding: '10px 12px',
+              minHeight: 44,
               border: '1px solid #e5e7eb',
               borderRadius: 8,
               color: '#6b7280',
@@ -271,13 +274,15 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
               onClick={() => setView('list')}
               className="flex items-center justify-center transition-colors"
               style={{
-                padding: 8,
+                padding: 10,
+                minWidth: 44,
+                minHeight: 44,
                 background: view === 'list' ? '#5A824E' : 'white',
                 color: view === 'list' ? 'white' : '#6b7280',
                 cursor: 'pointer',
                 border: 'none',
               }}
-              title="List view"
+              aria-label="List view"
             >
               <LayoutList className="w-4 h-4" />
             </button>
@@ -285,14 +290,16 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
               onClick={() => setView('board')}
               className="flex items-center justify-center transition-colors"
               style={{
-                padding: 8,
+                padding: 10,
+                minWidth: 44,
+                minHeight: 44,
                 background: view === 'board' ? '#5A824E' : 'white',
                 color: view === 'board' ? 'white' : '#6b7280',
                 border: 'none',
                 borderLeft: '1px solid #e5e7eb',
                 cursor: 'pointer',
               }}
-              title="Board view"
+              aria-label="Board view"
             >
               <Columns3 className="w-4 h-4" />
             </button>
@@ -310,7 +317,8 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
               onClick={() => setActiveTab(tab.value)}
               className="text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors"
               style={{
-                padding: '10px 16px',
+                padding: '12px 16px',
+                minHeight: 44,
                 border: 0,
                 borderBottom: activeTab === tab.value ? '2px solid #5A824E' : '2px solid transparent',
                 marginBottom: -1,
@@ -333,9 +341,17 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
         {/* Content area */}
         <div style={{ background: view === 'board' ? '#f9fafb' : 'white' }}>
           {loading ? (
-            <LoadingSkeleton />
+            <LoadingSkeleton rows={5} />
           ) : filtered.length === 0 ? (
-            <EmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />
+            <EmptyState
+              icon={<Inbox style={{ width: 28, height: 28, color: 'white' }} />}
+              title="No requests found"
+              description={isAdmin
+                ? 'Requests will appear here once clients start submitting work.'
+                : 'Submit your first request and the Tahi team will get started.'}
+              ctaLabel={isAdmin ? undefined : 'Submit a request'}
+              onCtaClick={isAdmin ? undefined : () => setDialogOpen(true)}
+            />
           ) : view === 'list' ? (
             <ListView requests={filtered} isAdmin={isAdmin} />
           ) : (
@@ -350,17 +366,19 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
 // ─── List View ────────────────────────────────────────────────────────────────
 
 function ListView({ requests, isAdmin }: { requests: Request[]; isAdmin: boolean }) {
-  const cols = isAdmin
+  // Desktop: full columns. Mobile: title + status + updated only
+  const colsMd = isAdmin
     ? '1fr 120px 140px 130px 80px 90px'
     : '1fr 140px 130px 80px 90px'
+  const colsSm = '1fr 130px 90px'
 
   return (
     <div>
-      {/* Table header */}
+      {/* Table header — desktop */}
       <div
-        className="grid text-xs font-semibold uppercase tracking-wide"
+        className="hidden md:grid text-xs font-semibold uppercase tracking-wide"
         style={{
-          gridTemplateColumns: cols,
+          gridTemplateColumns: colsMd,
           padding: '10px 16px',
           borderBottom: '1px solid #f3f4f6',
           color: '#9ca3af',
@@ -375,6 +393,22 @@ function ListView({ requests, isAdmin }: { requests: Request[]; isAdmin: boolean
         <span>Updated</span>
       </div>
 
+      {/* Table header — mobile */}
+      <div
+        className="grid md:hidden text-xs font-semibold uppercase tracking-wide"
+        style={{
+          gridTemplateColumns: colsSm,
+          padding: '10px 16px',
+          borderBottom: '1px solid #f3f4f6',
+          color: '#9ca3af',
+          background: '#f9fafb',
+        }}
+      >
+        <span>Title</span>
+        <span>Status</span>
+        <span>Updated</span>
+      </div>
+
       {/* Rows */}
       <div>
         {requests.map((req, i) => (
@@ -382,7 +416,8 @@ function ListView({ requests, isAdmin }: { requests: Request[]; isAdmin: boolean
             key={req.id}
             req={req}
             isAdmin={isAdmin}
-            cols={cols}
+            colsMd={colsMd}
+            colsSm={colsSm}
             isLast={i === requests.length - 1}
           />
         ))}
@@ -394,78 +429,74 @@ function ListView({ requests, isAdmin }: { requests: Request[]; isAdmin: boolean
 function ListRow({
   req,
   isAdmin,
-  cols,
+  colsMd,
+  colsSm,
   isLast,
 }: {
   req: Request
   isAdmin: boolean
-  cols: string
+  colsMd: string
+  colsSm: string
   isLast: boolean
 }) {
   const cat = CAT_CFG[req.category ?? ''] ?? { bg: '#f3f4f6', color: '#4b5563' }
+  const rowBase = {
+    padding: '12px 16px',
+    borderBottom: isLast ? 'none' : '1px solid #f9fafb',
+    textDecoration: 'none',
+    background: 'white',
+  }
 
   return (
-    <Link
-      href={`/requests/${req.id}`}
-      className="grid items-center"
-      style={{
-        gridTemplateColumns: cols,
-        padding: '12px 16px',
-        borderBottom: isLast ? 'none' : '1px solid #f9fafb',
-        textDecoration: 'none',
-        background: 'white',
-      }}
-      onMouseEnter={e => { e.currentTarget.style.background = '#fafafa' }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'white' }}
-    >
-      {/* Title */}
-      <div className="flex items-center gap-2 min-w-0" style={{ paddingRight: 12 }}>
-        {req.scopeFlagged && (
-          <AlertTriangle style={{ width: 14, height: 14, color: '#f87171', flexShrink: 0 }} aria-label="Scope flagged" />
+    <>
+      {/* Desktop row */}
+      <Link
+        href={`/requests/${req.id}`}
+        className="hidden md:grid items-center"
+        style={{ ...rowBase, gridTemplateColumns: colsMd }}
+        onMouseEnter={e => { e.currentTarget.style.background = '#fafafa' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'white' }}
+      >
+        <div className="flex items-center gap-2 min-w-0" style={{ paddingRight: 12 }}>
+          {req.scopeFlagged && (
+            <AlertTriangle style={{ width: 14, height: 14, color: '#f87171', flexShrink: 0 }} aria-label="Scope flagged" />
+          )}
+          <span className="text-sm font-medium truncate" style={{ color: '#111827' }}>{req.title}</span>
+        </div>
+        {isAdmin && (
+          <div className="flex items-center gap-1.5 min-w-0" style={{ paddingRight: 12 }}>
+            {req.orgName && <OrgAvatar name={req.orgName} />}
+            <span className="text-sm truncate" style={{ color: '#6b7280', fontSize: 13 }}>{req.orgName ?? '—'}</span>
+          </div>
         )}
-        <span
-          className="text-sm font-medium truncate"
-          style={{ color: '#111827' }}
-        >
-          {req.title}
-        </span>
-      </div>
-
-      {/* Client (admin only) */}
-      {isAdmin && (
-        <div className="flex items-center gap-1.5 min-w-0" style={{ paddingRight: 12 }}>
-          {req.orgName && <OrgAvatar name={req.orgName} />}
-          <span className="text-sm truncate" style={{ color: '#6b7280', fontSize: 13 }}>
-            {req.orgName ?? '—'}
+        <div style={{ paddingRight: 12 }}>
+          <span className="inline-flex items-center rounded text-xs font-medium" style={{ padding: '2px 8px', background: cat.bg, color: cat.color }}>
+            {formatType(req.type)}
           </span>
         </div>
-      )}
+        <div style={{ paddingRight: 12 }}><StatusPill status={req.status} /></div>
+        <div style={{ paddingRight: 12 }}><PriorityBadge priority={req.priority} /></div>
+        <span className="text-xs" style={{ color: '#9ca3af' }}>{formatRelative(req.updatedAt ?? req.createdAt)}</span>
+      </Link>
 
-      {/* Type */}
-      <div style={{ paddingRight: 12 }}>
-        <span
-          className="inline-flex items-center rounded text-xs font-medium"
-          style={{ padding: '2px 8px', background: cat.bg, color: cat.color }}
-        >
-          {formatType(req.type)}
-        </span>
-      </div>
-
-      {/* Status */}
-      <div style={{ paddingRight: 12 }}>
-        <StatusPill status={req.status} />
-      </div>
-
-      {/* Priority */}
-      <div style={{ paddingRight: 12 }}>
-        <PriorityBadge priority={req.priority} />
-      </div>
-
-      {/* Updated */}
-      <span className="text-xs" style={{ color: '#9ca3af' }}>
-        {formatRelative(req.updatedAt ?? req.createdAt)}
-      </span>
-    </Link>
+      {/* Mobile row — title, status, updated only */}
+      <Link
+        href={`/requests/${req.id}`}
+        className="grid md:hidden items-center"
+        style={{ ...rowBase, gridTemplateColumns: colsSm }}
+        onMouseEnter={e => { e.currentTarget.style.background = '#fafafa' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'white' }}
+      >
+        <div className="flex items-center gap-2 min-w-0" style={{ paddingRight: 12 }}>
+          {req.scopeFlagged && (
+            <AlertTriangle style={{ width: 12, height: 12, color: '#f87171', flexShrink: 0 }} aria-label="Scope flagged" />
+          )}
+          <span className="text-sm font-medium truncate" style={{ color: '#111827' }}>{req.title}</span>
+        </div>
+        <div><StatusPill status={req.status} /></div>
+        <span className="text-xs" style={{ color: '#9ca3af' }}>{formatRelative(req.updatedAt ?? req.createdAt)}</span>
+      </Link>
+    </>
   )
 }
 
@@ -486,7 +517,7 @@ function BoardView({ requests }: { requests: Request[] }) {
           <div
             key={col.status}
             className="flex flex-col flex-shrink-0"
-            style={{ width: 272 }}
+            style={{ minWidth: 272, width: 272 }}
           >
             {/* Column header */}
             <div
@@ -620,69 +651,3 @@ function KanbanCard({ req }: { req: Request }) {
   )
 }
 
-// ─── Loading skeleton ─────────────────────────────────────────────────────────
-
-function LoadingSkeleton() {
-  return (
-    <div>
-      <div style={{ height: 40, background: '#f9fafb', borderBottom: '1px solid #f3f4f6' }} />
-      {[...Array(5)].map((_, i) => (
-        <div
-          key={i}
-          className="flex items-center gap-4 animate-pulse"
-          style={{
-            padding: '14px 16px',
-            borderBottom: i < 4 ? '1px solid #f9fafb' : 'none',
-          }}
-        >
-          <div className="h-4 rounded flex-1" style={{ background: '#f3f4f6' }} />
-          <div className="h-4 rounded" style={{ background: '#f3f4f6', width: 96 }} />
-          <div className="h-5 rounded-full" style={{ background: '#f3f4f6', width: 80 }} />
-          <div className="h-4 rounded" style={{ background: '#f3f4f6', width: 64 }} />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ─── Empty state ──────────────────────────────────────────────────────────────
-
-function EmptyState({ isAdmin, onNew }: { isAdmin: boolean; onNew: () => void }) {
-  return (
-    <div
-      className="flex flex-col items-center justify-center text-center"
-      style={{ padding: '64px 24px', background: 'white' }}
-    >
-      <div
-        className="flex items-center justify-center"
-        style={{
-          width: 56,
-          height: 56,
-          borderRadius: '0 12px 0 12px',
-          background: 'linear-gradient(135deg, #5A824E, #425F39)',
-          marginBottom: 16,
-        }}
-      >
-        <Inbox style={{ width: 28, height: 28, color: 'white' }} />
-      </div>
-      <h3 className="text-base font-semibold" style={{ color: '#111827', marginBottom: 8 }}>
-        No requests found
-      </h3>
-      <p className="text-sm" style={{ color: '#6b7280', maxWidth: 320, marginBottom: 20 }}>
-        {isAdmin
-          ? 'Requests will appear here once clients start submitting work.'
-          : 'Submit your first request and the Tahi team will get started.'}
-      </p>
-      {!isAdmin && (
-        <button
-          onClick={onNew}
-          className="flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-          style={{ padding: '8px 16px', background: '#5A824E', borderRadius: 6, border: 'none', cursor: 'pointer' }}
-        >
-          <Plus className="w-4 h-4" />
-          Submit a request
-        </button>
-      )}
-    </div>
-  )
-}

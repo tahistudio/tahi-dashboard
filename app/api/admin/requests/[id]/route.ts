@@ -94,7 +94,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   // If moving to in_progress, increment revision count if coming back from client_review
   // (handled client-side for now — the status change message is enough)
 
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ success: true })
 }
 
 // ── DELETE /api/admin/requests/[id] ──────────────────────────────────────────
@@ -114,5 +114,5 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     .set({ status: 'archived', updatedAt: new Date().toISOString() })
     .where(and(eq(schema.requests.id, id)))
 
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ success: true })
 }

@@ -42,7 +42,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     .where(eq(schema.messages.requestId, id))
     .orderBy(asc(schema.messages.createdAt))
 
-  return NextResponse.json({ messages: msgs })
+  return NextResponse.json({ items: msgs, page: 1, limit: msgs.length })
 }
 
 // ── POST /api/admin/requests/[id]/messages ───────────────────────────────────

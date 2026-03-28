@@ -134,7 +134,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
   return (
     <div className="flex flex-col h-full">
       {/* ── Header ── */}
-      <div className="border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
+      <div className="border-b border-[var(--color-border)] bg-[var(--color-bg)]">
         <div className="px-6 pt-5 pb-0">
           {/* Back + title row */}
           <div className="flex items-start gap-3 mb-4">
@@ -315,7 +315,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
   const STATUS_OPTIONS = ['prospect', 'active', 'paused', 'churned', 'archived']
 
   return (
-    <div className="bg-[var(--color-bg-primary)] rounded-xl border border-[var(--color-border)] p-5">
+    <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-semibold text-[var(--color-text-primary)]">Organisation details</h2>
         {!editing ? (
@@ -353,7 +353,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
             <input
               value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
+              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
             />
           </div>
           <div>
@@ -362,7 +362,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
               value={form.website}
               onChange={e => setForm(f => ({ ...f, website: e.target.value }))}
               placeholder="https://example.com"
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
+              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
             />
           </div>
           <div>
@@ -371,7 +371,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
               value={form.industry}
               onChange={e => setForm(f => ({ ...f, industry: e.target.value }))}
               placeholder="e.g. SaaS, eCommerce"
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
+              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
             />
           </div>
           <div>
@@ -379,7 +379,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
             <select
               value={form.status}
               onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
             >
               {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -389,7 +389,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
             <select
               value={form.healthStatus}
               onChange={e => setForm(f => ({ ...f, healthStatus: e.target.value }))}
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
             >
               {HEALTH_OPTIONS.map(h => <option key={h.value} value={h.value}>{h.label}</option>)}
             </select>
@@ -401,7 +401,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
               onChange={e => setForm(f => ({ ...f, healthNote: e.target.value }))}
               rows={2}
               placeholder="Brief note about client health..."
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] resize-none"
+              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] resize-none"
             />
           </div>
         </div>
@@ -464,7 +464,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
 
 function ContactsCard({ contacts }: { contacts: Contact[] }) {
   return (
-    <div className="bg-[var(--color-bg-primary)] rounded-xl border border-[var(--color-border)] p-5">
+    <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-semibold text-sm text-[var(--color-text-primary)]">Contacts</h3>
         <button className="p-1 rounded hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)]">
@@ -516,7 +516,7 @@ function ContactsCard({ contacts }: { contacts: Contact[] }) {
 
 function SubscriptionCard({ subscription, tracks }: { subscription: Subscription; tracks: Track[] }) {
   return (
-    <div className="bg-[var(--color-bg-primary)] rounded-xl border border-[var(--color-border)] p-5">
+    <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
       <h3 className="font-semibold text-sm text-[var(--color-text-primary)] mb-3">Subscription</h3>
 
       <div className="flex items-center gap-2 mb-3">
@@ -609,7 +609,7 @@ function InternalNotesCard({ org, onUpdated }: { org: Organisation; onUpdated: (
   }
 
   return (
-    <div className="bg-[var(--color-bg-primary)] rounded-xl border border-[var(--color-border)] p-5">
+    <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
       <div className="flex items-center justify-between mb-2">
         <h3 className="font-semibold text-sm text-[var(--color-text-primary)]">Internal notes</h3>
         {!editing ? (
@@ -637,7 +637,7 @@ function InternalNotesCard({ org, onUpdated }: { org: Organisation; onUpdated: (
           onChange={e => setNotes(e.target.value)}
           rows={4}
           placeholder="Private notes about this client..."
-          className="w-full px-3 py-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] resize-none"
+          className="w-full px-3 py-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] resize-none"
           autoFocus
         />
       ) : (
@@ -655,7 +655,7 @@ function RecentRequestsCard({ requests, orgId }: { requests: Request[]; orgId: s
   const router = useRouter()
 
   return (
-    <div className="bg-[var(--color-bg-primary)] rounded-xl border border-[var(--color-border)] p-5">
+    <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-semibold text-[var(--color-text-primary)]">Recent requests</h2>
         <TahiButton
@@ -768,7 +768,7 @@ function BillingTab({ org, subscription, tracks }: { org: Organisation; subscrip
 
   return (
     <div className="max-w-2xl flex flex-col gap-6">
-      <div className="bg-[var(--color-bg-primary)] rounded-xl border border-[var(--color-border)] p-5">
+      <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
         <h2 className="font-semibold text-[var(--color-text-primary)] mb-4">Current plan</h2>
 
         {subscription ? (
@@ -818,7 +818,7 @@ function BillingTab({ org, subscription, tracks }: { org: Organisation; subscrip
         )}
       </div>
 
-      <div className="bg-[var(--color-bg-primary)] rounded-xl border border-[var(--color-border)] p-5">
+      <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
         <h2 className="font-semibold text-[var(--color-text-primary)] mb-3">Invoices</h2>
         <p className="text-sm text-[var(--color-text-muted)]">Invoice management coming in Phase 3.</p>
       </div>

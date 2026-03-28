@@ -45,42 +45,32 @@ export async function POST(req: Request) {
 
   switch (event.type) {
     case 'invoice.paid': {
-      const invoice = event.data.object as Stripe.Invoice
       // TODO: Update invoice status in DB, notify admin
-      console.log('Invoice paid:', invoice.id)
       break
     }
 
     case 'invoice.payment_failed': {
-      const invoice = event.data.object as Stripe.Invoice
       // TODO: Update invoice status, notify admin via Slack
-      console.log('Invoice payment failed:', invoice.id)
       break
     }
 
     case 'customer.subscription.updated': {
-      const subscription = event.data.object as Stripe.Subscription
       // TODO: Update subscription status in DB
-      console.log('Subscription updated:', subscription.id)
       break
     }
 
     case 'customer.subscription.deleted': {
-      const subscription = event.data.object as Stripe.Subscription
       // TODO: Mark subscription as cancelled in DB
-      console.log('Subscription deleted:', subscription.id)
       break
     }
 
     case 'customer.subscription.created': {
-      const subscription = event.data.object as Stripe.Subscription
       // TODO: Create subscription record in DB
-      console.log('Subscription created:', subscription.id)
       break
     }
 
     default:
-      console.log(`Unhandled Stripe event type: ${event.type}`)
+      break
   }
 
   return new Response(JSON.stringify({ received: true }), {

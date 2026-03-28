@@ -82,6 +82,9 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
 
       {/* Dialog */}
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-client-dialog-title"
         className="relative w-full max-w-lg bg-[var(--color-bg)] shadow-2xl overflow-hidden"
         style={{ borderRadius: 'var(--radius-card)' }}
       >
@@ -95,7 +98,7 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
               <Building2 className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h2 className="text-base font-semibold text-[var(--color-text)]">Add new client</h2>
+              <h2 id="new-client-dialog-title" className="text-base font-semibold text-[var(--color-text)]">Add new client</h2>
               <p className="text-xs text-[var(--color-text-muted)]">Creates their portal and sends an invite email</p>
             </div>
           </div>
@@ -109,20 +112,23 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-          {error && (
-            <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-100 text-sm text-red-700">
-              {error}
-            </div>
-          )}
+          <div aria-live="polite">
+            {error && (
+              <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-100 text-sm text-red-700">
+                {error}
+              </div>
+            )}
+          </div>
 
           {/* Name */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">
+            <label htmlFor="client-name" className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">
               Client / company name <span className="text-red-500">*</span>
             </label>
             <div className="relative">
               <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-subtle)]" />
               <input
+                id="client-name"
                 type="text"
                 placeholder="Acme Corp"
                 value={form.name}
@@ -136,10 +142,11 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
           {/* Website + Industry side by side */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Website</label>
+              <label htmlFor="client-website" className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Website</label>
               <div className="relative">
                 <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-subtle)]" />
                 <input
+                  id="client-website"
                   type="url"
                   placeholder="https://..."
                   value={form.website}
@@ -149,8 +156,9 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
               </div>
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Industry</label>
+              <label htmlFor="client-industry" className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Industry</label>
               <select
+                id="client-industry"
                 value={form.industry}
                 onChange={e => set('industry', e.target.value)}
                 className="w-full px-3 py-2.5 text-sm bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg focus:outline-none focus:border-[var(--color-brand)] transition-colors text-[var(--color-text)]"
@@ -164,10 +172,11 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
 
           {/* Plan */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Plan</label>
+            <label htmlFor="client-plan" className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Plan</label>
             <div className="relative">
               <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-subtle)]" />
               <select
+                id="client-plan"
                 value={form.planType}
                 onChange={e => set('planType', e.target.value)}
                 className="w-full pl-9 pr-3 py-2.5 text-sm bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg focus:outline-none focus:border-[var(--color-brand)] transition-colors text-[var(--color-text)]"

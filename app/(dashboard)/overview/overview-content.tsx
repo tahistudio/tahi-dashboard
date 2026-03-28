@@ -57,11 +57,16 @@ export function AdminOverview({ userName }: { userName: string }) {
   const [kpis, setKpis] = useState<KPIs | null>(null)
   const [recentRequests, setRecentRequests] = useState<RecentRequest[]>([])
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState(false)
 
   useEffect(() => {
     fetch('/api/admin/overview')
-      .then(r => r.json() as Promise<{ kpis: KPIs; recentRequests: RecentRequest[] }>)
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to fetch overview')
+        return r.json() as Promise<{ kpis: KPIs; recentRequests: RecentRequest[] }>
+      })
       .then(data => { setKpis(data.kpis); setRecentRequests(data.recentRequests) })
+      .catch(() => setFetchError(true))
       .finally(() => setLoading(false))
   }, [])
 
@@ -69,13 +74,21 @@ export function AdminOverview({ userName }: { userName: string }) {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
+  if (fetchError) {
+    return (
+      <div style={{ padding: '32px 0', textAlign: 'center', color: '#6b7280', fontSize: 14 }}>
+        Failed to load overview data. Please refresh the page.
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col" style={{ gap: 32, maxWidth: 1100 }}>
       {/* Greeting */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight" style={{ color: '#111827' }}>
-            {greeting}{firstName ? `, ${firstName}` : ''} 👋
+            {greeting}{firstName ? `, ${firstName}` : ''} <span aria-hidden="true">👋</span>
           </h1>
           <p className="text-sm" style={{ color: '#6b7280', marginTop: 4 }}>
             Here&apos;s what&apos;s happening at Tahi today.
@@ -146,11 +159,16 @@ export function AdminOverview({ userName }: { userName: string }) {
 export function ClientOverview({ userName, orgName }: { userName: string; orgName: string }) {
   const [requests, setRequests] = useState<RecentRequest[]>([])
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState(false)
 
   useEffect(() => {
     fetch('/api/portal/requests?status=active&page=1')
-      .then(r => r.json() as Promise<{ requests: RecentRequest[] }>)
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to fetch requests')
+        return r.json() as Promise<{ requests: RecentRequest[] }>
+      })
       .then(data => setRequests(data.requests ?? []))
+      .catch(() => setFetchError(true))
       .finally(() => setLoading(false))
   }, [])
 
@@ -160,13 +178,21 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
+  if (fetchError) {
+    return (
+      <div style={{ padding: '32px 0', textAlign: 'center', color: '#6b7280', fontSize: 14 }}>
+        Failed to load your dashboard. Please refresh the page.
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col" style={{ gap: 32, maxWidth: 900 }}>
       {/* Greeting */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight" style={{ color: '#111827' }}>
-            {greeting}{firstName ? `, ${firstName}` : ''} 👋
+            {greeting}{firstName ? `, ${firstName}` : ''} <span aria-hidden="true">👋</span>
           </h1>
           <p className="text-sm" style={{ color: '#6b7280', marginTop: 4 }}>
             {orgName} — Tahi Studio workspace

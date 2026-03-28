@@ -87,6 +87,7 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
   const [messages, setMessages] = useState<Message[]>([])
   const [files, setFiles] = useState<RequestFile[]>([])
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState(false)
   const [isInternal, setIsInternal] = useState(false)
   const [statusUpdating, setStatusUpdating] = useState(false)
   const threadBottomRef = useRef<HTMLDivElement>(null)
@@ -95,36 +96,45 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
 
   const loadFiles = useCallback(async () => {
     if (!isAdmin) return // portal doesn't have files endpoint yet
-    const res = await fetch(`/api/admin/requests/${requestId}/files`)
-    if (res.ok) {
-      const data = await res.json() as { files: RequestFile[] }
-      setFiles(data.files)
+    try {
+      const res = await fetch(`/api/admin/requests/${requestId}/files`)
+      if (res.ok) {
+        const data = await res.json() as { items: RequestFile[] }
+        setFiles(data.items)
+      }
+    } catch {
+      // non-fatal: files panel will remain empty
     }
   }, [requestId, isAdmin])
 
   const loadRequest = useCallback(async () => {
-    const [reqRes, msgRes] = await Promise.all([
-      fetch(`${apiBase}/requests/${requestId}`),
-      fetch(isAdmin
-        ? `/api/admin/requests/${requestId}/messages`
-        : `${apiBase}/requests/${requestId}`
-      ),
-    ])
-    if (reqRes.ok) {
-      const data = await reqRes.json() as { request: Request }
-      setRequest(data.request)
-    }
-    if (msgRes.ok) {
-      if (isAdmin) {
-        const data = await msgRes.json() as { messages: Message[] }
-        setMessages(data.messages)
-      } else {
-        const data = await msgRes.json() as { request: Request; messages: Message[] }
+    try {
+      const [reqRes, msgRes] = await Promise.all([
+        fetch(`${apiBase}/requests/${requestId}`),
+        fetch(isAdmin
+          ? `/api/admin/requests/${requestId}/messages`
+          : `${apiBase}/requests/${requestId}`
+        ),
+      ])
+      if (reqRes.ok) {
+        const data = await reqRes.json() as { request: Request }
         setRequest(data.request)
-        setMessages(data.messages)
       }
+      if (msgRes.ok) {
+        if (isAdmin) {
+          const data = await msgRes.json() as { items: Message[] }
+          setMessages(data.items)
+        } else {
+          const data = await msgRes.json() as { request: Request; messages: Message[] }
+          setRequest(data.request)
+          setMessages(data.messages)
+        }
+      }
+    } catch {
+      setFetchError(true)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }, [requestId, apiBase, isAdmin])
 
   useEffect(() => {
@@ -176,6 +186,14 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="animate-spin text-[var(--color-brand)]" size={28} />
+      </div>
+    )
+  }
+
+  if (fetchError) {
+    return (
+      <div className="text-center py-16" style={{ color: '#6b7280', fontSize: 14 }}>
+        Failed to load this request. Please refresh the page.
       </div>
     )
   }

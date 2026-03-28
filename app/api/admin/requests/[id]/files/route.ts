@@ -43,5 +43,5 @@ export async function GET(req: NextRequest, { params }: Params) {
     .where(eq(schema.files.requestId, id))
     .orderBy(desc(schema.files.createdAt))
 
-  return NextResponse.json({ files })
+  return NextResponse.json({ items: files, page: 1, limit: files.length })
 }

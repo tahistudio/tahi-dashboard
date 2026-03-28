@@ -19,7 +19,9 @@ export default async function DashboardLayout({
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <AppTopNav isAdmin={isAdmin} />
         <main className="flex-1 overflow-y-auto" style={{ padding: '32px 40px' }}>
-          {children}
+          <div className="max-w-7xl mx-auto">
+            {children}
+          </div>
         </main>
       </div>
     </div>

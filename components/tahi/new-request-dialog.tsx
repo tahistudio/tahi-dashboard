@@ -139,6 +139,9 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
 
       {/* Slide-over panel */}
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-request-dialog-title"
         style={{
           position: 'fixed',
           top: 0, right: 0, bottom: 0,
@@ -164,7 +167,7 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
           }}
         >
           <div>
-            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#111827', margin: 0 }}>
+            <h2 id="new-request-dialog-title" style={{ fontSize: 16, fontWeight: 600, color: '#111827', margin: 0 }}>
               {isAdmin ? 'Create a request' : 'Submit a request'}
             </h2>
             <p style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
@@ -205,7 +208,7 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
 
             {/* Client selector (admin only) */}
             {isAdmin && (
-              <FieldGroup label="Client" required>
+              <FieldGroup label="Client" required htmlFor="req-client">
                 {clientsLoading ? (
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 8,
@@ -214,15 +217,16 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
                     fontSize: 13, color: '#9ca3af',
                   }}>
                     <Loader2 size={13} className="animate-spin" />
-                    Loading clients…
+                    Loading clients...
                   </div>
                 ) : (
                   <StyledSelect
+                    id="req-client"
                     value={clientOrgId}
                     onChange={setClientOrgId}
                     required
                   >
-                    <option value="" disabled>Select a client…</option>
+                    <option value="" disabled>Select a client...</option>
                     {clients.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
@@ -232,8 +236,9 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
             )}
 
             {/* Title */}
-            <FieldGroup label="Request title" required>
+            <FieldGroup label="Request title" required htmlFor="req-title">
               <StyledInput
+                id="req-title"
                 type="text"
                 value={title}
                 onChange={e => setTitle(e.target.value)}
@@ -294,8 +299,8 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
 
             {/* Category + Priority row */}
             <div style={{ display: 'grid', gridTemplateColumns: isAdmin ? '1fr 1fr' : '1fr', gap: 16 }}>
-              <FieldGroup label="Category">
-                <StyledSelect value={category} onChange={setCategory}>
+              <FieldGroup label="Category" htmlFor="req-category">
+                <StyledSelect id="req-category" value={category} onChange={setCategory}>
                   {CATEGORIES.map(c => (
                     <option key={c.value} value={c.value}>{c.label}</option>
                   ))}
@@ -343,12 +348,13 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
             </div>
 
             {/* Description */}
-            <FieldGroup label="Description">
+            <FieldGroup label="Description" htmlFor="req-description">
               <StyledTextarea
+                id="req-description"
                 value={description}
                 onChange={e => setDescription(e.target.value)}
                 rows={5}
-                placeholder="Describe what you need in as much detail as possible…"
+                placeholder="Describe what you need in as much detail as possible..."
               />
               <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>
                 You can add files and further detail after submitting.
@@ -356,18 +362,20 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
             </FieldGroup>
 
             {/* Error */}
-            {error && (
-              <div style={{
-                fontSize: 13,
-                color: '#dc2626',
-                background: '#fef2f2',
-                border: '1px solid #fee2e2',
-                borderRadius: 8,
-                padding: '10px 14px',
-              }}>
-                {error}
-              </div>
-            )}
+            <div aria-live="polite">
+              {error && (
+                <div style={{
+                  fontSize: 13,
+                  color: '#dc2626',
+                  background: '#fef2f2',
+                  border: '1px solid #fee2e2',
+                  borderRadius: 8,
+                  padding: '10px 14px',
+                }}>
+                  {error}
+                </div>
+              )}
+            </div>
           </div>
         </form>
 
@@ -439,15 +447,16 @@ export function NewRequestDialog({ open, onClose, isAdmin }: NewRequestDialogPro
 // ── Field group ────────────────────────────────────────────────────────────────
 
 function FieldGroup({
-  label, required, children,
+  label, required, htmlFor, children,
 }: {
   label: string
   required?: boolean
+  htmlFor?: string
   children: React.ReactNode
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
+      <label htmlFor={htmlFor} style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
         {label}
         {required && <span style={{ color: '#ef4444', marginLeft: 2 }}>*</span>}
       </label>
@@ -510,8 +519,9 @@ function StyledTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>
 // ── Styled select ──────────────────────────────────────────────────────────────
 
 function StyledSelect({
-  value, onChange, required, children,
+  id, value, onChange, required, children,
 }: {
+  id?: string
   value: string
   onChange: (v: string) => void
   required?: boolean
@@ -520,6 +530,7 @@ function StyledSelect({
   return (
     <div style={{ position: 'relative' }}>
       <select
+        id={id}
         value={value}
         onChange={e => onChange(e.target.value)}
         required={required}

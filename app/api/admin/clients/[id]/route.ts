@@ -113,5 +113,5 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .set(patch)
     .where(eq(schema.organisations.id, id))
 
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ success: true })
 }
