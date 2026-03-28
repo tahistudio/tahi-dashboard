@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-28
 Total tasks: 228 (S1-S11 schema + T1-T171 feature + T172-T217 audit findings)
-Completed: S1-S11, T1-T13, T18, T29, T32-T37, T39, T41-T42, T44, T47-T48, T55-T57, T58-T59, T61-T62, T64-T65, T67-T68, T70, T72, T74-T77, T80, T82, T84, T86, T89-T90, T95-T96, T115, T117-T118, T141-T144, T167-T168, T170, T172-T180, T185-T186, T189-T192, T194-T196, T200-T203, T205, T207-T208, T210, T216-T217
+Completed: S1-S11, T1-T13, T18, T29, T32-T37, T39, T41-T42, T44, T47-T48, T55-T57, T58-T59, T61-T62, T64-T65, T67-T68, T70, T72, T74-T77, T80, T82, T84, T86, T89-T90, T95-T96, T115, T117-T118, T141-T144, T145, T149-T152, T167-T168, T170, T172-T180, T185-T186, T189-T192, T194-T196, T200-T203, T205, T207-T208, T210, T216-T217
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -231,16 +231,16 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T144 — Export buttons on time entries page, invoices page, and requests list — FE — [PM] 2026-03-28
 
 ### Automations
-- [ ] T145 — Automation rules UI: create rule (trigger + condition + action) — FE + BE
+- [x] T145 — Automation rules UI: create rule (trigger + condition + action) — FE + BE — [PM] 2026-03-28
 - [ ] T146 — Automation triggers: request created, request status changed, request overdue, client onboarded — BE
 - [ ] T147 — Automation actions: send email notification, send Slack message, create internal task, update request status — BE
 - [ ] T148 — Automation log: view history of fired automations per client — FE + BE
-- [ ] T149 — API route: GET + POST + PATCH + DELETE /api/admin/automations — BE
+- [x] T149 — API route: GET + POST + PATCH + DELETE /api/admin/automations — BE — [PM] 2026-03-28
 
 ### Audit Log
-- [ ] T150 — Audit log page: table of all admin actions (who, what, when, affected entity) — FE + BE
-- [ ] T151 — Audit log: write entries on all create/update/delete actions across the app — BE
-- [ ] T152 — API route: GET /api/admin/audit-log with filters — BE
+- [x] T150 — Audit log page: table of all admin actions (who, what, when, affected entity) — FE + BE — [PM] 2026-03-28
+- [x] T151 — Audit log: write entries on all create/update/delete actions across the app — BE — [PM] 2026-03-28
+- [x] T152 — API route: GET /api/admin/audit-log with filters — BE — [PM] 2026-03-28
 
 ### Zapier and Webhooks (nice-to-have)
 - [ ] T153 — Outgoing webhooks: admin can register a webhook URL for selected events — FE + BE
