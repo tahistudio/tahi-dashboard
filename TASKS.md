@@ -381,3 +381,39 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] Bug: missing NEXT_PUBLIC_TAHI_ORG_ID in production env - fixed
 - [x] Bug: React hydration error on greeting - fixed
 - [x] Visual polish: px to rem conversion, em dash cleanup, color consistency
+
+---
+
+## Phase 5 - MCP Server (Decision #022)
+
+### MCP Server Core
+- [ ] T227 - Scaffold MCP server package: package.json, tsconfig, entry point using @anthropic-ai/sdk or @modelcontextprotocol/sdk -- [BE]
+- [ ] T228 - MCP auth: service token validation or shared Clerk session for authenticating MCP requests -- [BE]
+- [ ] T229 - MCP resource: dashboard://overview (KPI summary: active clients, open requests, outstanding invoices, MRR) -- [BE]
+- [ ] T230 - MCP resource: dashboard://clients (client list with health scores, plan types, request counts) -- [BE]
+- [ ] T231 - MCP resource: dashboard://client/{id} (full client detail: org, contacts, subscription, tracks, recent requests, invoices) -- [BE]
+- [ ] T232 - MCP resource: dashboard://requests (request list with status, priority, assignee, client filters) -- [BE]
+- [ ] T233 - MCP resource: dashboard://request/{id} (request detail with thread, files, steps, time entries) -- [BE]
+- [ ] T234 - MCP resource: dashboard://invoices (invoice list with status, amount, client) -- [BE]
+- [ ] T235 - MCP resource: dashboard://time-entries (time log with client, request, billable, hours) -- [BE]
+- [ ] T236 - MCP resource: dashboard://reports (aggregate stats: delivery time, request volume, revenue) -- [BE]
+
+### MCP Tools (actions)
+- [ ] T237 - MCP tool: create_request (title, description, category, orgId, priority, type) -- [BE]
+- [ ] T238 - MCP tool: update_request_status (requestId, newStatus) -- [BE]
+- [ ] T239 - MCP tool: assign_request (requestId, teamMemberId) -- [BE]
+- [ ] T240 - MCP tool: create_client (name, website, planType, contactName, contactEmail) -- [BE]
+- [ ] T241 - MCP tool: create_invoice (orgId, lineItems, dueDate, notes) -- [BE]
+- [ ] T242 - MCP tool: log_time (requestId, orgId, hours, description, billable, rate) -- [BE]
+- [ ] T243 - MCP tool: send_message (conversationId, content, isInternal) -- [BE]
+- [ ] T244 - MCP tool: create_announcement (title, content, targetType, targetIds, expiresAt) -- [BE]
+
+### Docs Hub as MCP Knowledge Base
+- [ ] T245 - MCP resource: dashboard://docs (list all doc pages with titles and categories) -- [BE]
+- [ ] T246 - MCP resource: dashboard://docs/{id} (full doc page content for AI context) -- [BE]
+- [ ] T247 - Docs Hub: ensure doc pages are structured for AI consumption (clear headings, process descriptions, client-specific notes) -- [PM]
+
+### MCP Testing and Integration
+- [ ] T248 - MCP server: local testing with Claude Code (add to .claude/settings as MCP server) -- [QA]
+- [ ] T249 - MCP server: documentation (README with setup, available tools/resources, example prompts) -- [PM]
+- [ ] T250 - MCP server: deploy alongside dashboard (Cloudflare Worker or separate process) -- [BE]

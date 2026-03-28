@@ -381,3 +381,41 @@ The Rewardful API key is stored in environment variables as
 - Phase 4: the same trigger creates draft invoices in Xero via POST to the Xero Invoices API.
 
 **Escalated to Liam:** No. Architecture is clear.
+
+---
+
+## #022 - Tahi Dashboard MCP Server
+
+**Decision:** Build a Model Context Protocol (MCP) server that exposes the Tahi Dashboard as a set of tools and resources for AI assistants. This allows Claude Code, Claude Desktop, or any MCP-compatible client to read and manage dashboard data programmatically.
+
+**Rationale:** Liam already uses Claude Code for development. An MCP server means he (or his team) can ask Claude to "create a request for Acme Corp", "show me overdue invoices", "log 3 hours against this request", or "summarize this client's health" without opening the browser. It also enables AI-powered automation: Claude can monitor client health, draft responses, generate reports, and take action on the dashboard through natural language.
+
+**Architecture:**
+- Separate package at `packages/tahi-mcp/` (or `mcp-server/`) in the monorepo
+- Connects to the same D1 database via Drizzle (shared schema)
+- OR calls the existing API routes over HTTP with a service token
+- Exposes MCP tools (actions) and resources (data reads)
+
+**MCP Tools (actions):**
+- `create_request` - create a request for a client
+- `update_request_status` - change request status
+- `assign_request` - assign a team member
+- `create_client` - add a new client org
+- `create_invoice` - create an invoice with line items
+- `log_time` - log a time entry against a request
+- `send_message` - send a message in a conversation
+- `create_announcement` - publish an announcement
+
+**MCP Resources (reads):**
+- `dashboard://overview` - KPI summary
+- `dashboard://clients` - client list with health scores
+- `dashboard://client/{id}` - client detail with subscription, requests, invoices
+- `dashboard://requests` - request list with filters
+- `dashboard://request/{id}` - request detail with thread
+- `dashboard://invoices` - invoice list
+- `dashboard://time-entries` - time log
+- `dashboard://reports` - aggregate stats
+
+**Docs Hub connection:** The Docs Hub (T155-T158) serves as the knowledge base that the MCP server can reference. When Claude answers questions about Tahi processes, it reads from the docs hub. When it takes actions, it uses the MCP tools.
+
+**Escalated to Liam:** No. Architecture is clear and non-destructive.
