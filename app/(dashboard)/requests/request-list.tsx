@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import {
   Plus, Search, Filter, LayoutList, Columns3,
@@ -74,7 +75,7 @@ const CLIENT_TABS = [
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatRelative(dateStr: string | null): string {
-  if (!dateStr) return '—'
+  if (!dateStr) return '-'
   try {
     const date = new Date(dateStr)
     const now = new Date()
@@ -89,7 +90,7 @@ function formatRelative(dateStr: string | null): string {
     if (diffDays < 7) return `${diffDays}d ago`
     if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`
     return date.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })
-  } catch { return '—' }
+  } catch { return '-' }
 }
 
 function formatType(type: string) {
@@ -120,7 +121,7 @@ function StatusPill({ status }: { status: string }) {
 
 function PriorityBadge({ priority }: { priority: string | null }) {
   if (!priority || priority === 'standard') {
-    return <span className="text-xs" style={{ color: '#9ca3af' }}>—</span>
+    return <span className="text-xs" style={{ color: '#9ca3af' }}>-</span>
   }
   return (
     <span
@@ -147,14 +148,54 @@ function OrgAvatar({ name }: { name: string }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function RequestList({ isAdmin }: { isAdmin: boolean }) {
-  const [view, setView] = useState<ViewMode>('list')
-  const [activeTab, setActiveTab] = useState('active')
-  const [search, setSearch] = useState('')
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+
+  const view = (searchParams.get('view') as ViewMode) ?? 'list'
+  const activeTab = searchParams.get('tab') ?? 'active'
+  const search = searchParams.get('q') ?? ''
+
   const [requests, setRequests] = useState<Request[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
 
+  // Local search input state for debouncing
+  const [searchInput, setSearchInput] = useState(search)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const tabs = isAdmin ? ADMIN_TABS : CLIENT_TABS
+
+  function setView(v: ViewMode) {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('view', v)
+    router.replace(`${pathname}?${params.toString()}`)
+  }
+
+  function setActiveTab(tab: string) {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('tab', tab)
+    router.replace(`${pathname}?${params.toString()}`)
+  }
+
+  function handleSearchChange(value: string) {
+    setSearchInput(value)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (value.trim()) {
+        params.set('q', value.trim())
+      } else {
+        params.delete('q')
+      }
+      router.replace(`${pathname}?${params.toString()}`)
+    }, 300)
+  }
+
+  // Sync searchInput if URL changes externally
+  useEffect(() => {
+    setSearchInput(search)
+  }, [search])
 
   const fetchRequests = useCallback(async () => {
     setLoading(true)
@@ -227,8 +268,8 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
             <input
               type="text"
               placeholder="Search requests..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
+              value={searchInput}
+              onChange={e => handleSearchChange(e.target.value)}
               className="w-full text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[#5A824E] focus-visible:ring-offset-1"
               style={{
                 paddingTop: 7,
@@ -466,7 +507,7 @@ function ListRow({
         {isAdmin && (
           <div className="flex items-center gap-1.5 min-w-0" style={{ paddingRight: 12 }}>
             {req.orgName && <OrgAvatar name={req.orgName} />}
-            <span className="text-sm truncate" style={{ color: '#6b7280', fontSize: 13 }}>{req.orgName ?? '—'}</span>
+            <span className="text-sm truncate" style={{ color: '#6b7280', fontSize: 13 }}>{req.orgName ?? '-'}</span>
           </div>
         )}
         <div style={{ paddingRight: 12 }}>
@@ -650,4 +691,3 @@ function KanbanCard({ req }: { req: Request }) {
     </Link>
   )
 }
-

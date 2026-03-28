@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { Search, Plus, Users, RefreshCw } from 'lucide-react'
 import { ClientCard } from '@/components/tahi/client-card'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -28,24 +29,55 @@ interface Organisation {
 }
 
 export function ClientList() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+
+  const search = searchParams.get('q') ?? ''
+  const statusFilter = searchParams.get('status') ?? 'all'
+
   const [orgs, setOrgs] = useState<Organisation[]>([])
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
   const [dialogOpen, setDialogOpen] = useState(false)
 
-  // Debounce search
+  // Local input state for debouncing
+  const [searchInput, setSearchInput] = useState(search)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Sync input if URL changes externally
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), 300)
-    return () => clearTimeout(t)
+    setSearchInput(search)
   }, [search])
+
+  function setStatusFilter(value: string) {
+    const params = new URLSearchParams(searchParams.toString())
+    if (value === 'all') {
+      params.delete('status')
+    } else {
+      params.set('status', value)
+    }
+    router.replace(`${pathname}?${params.toString()}`)
+  }
+
+  function handleSearchChange(value: string) {
+    setSearchInput(value)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (value.trim()) {
+        params.set('q', value.trim())
+      } else {
+        params.delete('q')
+      }
+      router.replace(`${pathname}?${params.toString()}`)
+    }, 300)
+  }
 
   const fetchClients = useCallback(async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
-      if (debouncedSearch) params.set('search', debouncedSearch)
+      if (search) params.set('search', search)
       // Plan filters come through as status-adjacent in our filter UI
       if (['maintain', 'scale'].includes(statusFilter)) {
         params.set('plan', statusFilter)
@@ -61,7 +93,7 @@ export function ClientList() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, statusFilter])
+  }, [search, statusFilter])
 
   useEffect(() => { fetchClients() }, [fetchClients])
 
@@ -92,8 +124,8 @@ export function ClientList() {
         <input
           type="text"
           placeholder="Search clients by name or website..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
+          value={searchInput}
+          onChange={e => handleSearchChange(e.target.value)}
           className="w-full pl-9 pr-4 py-2.5 text-sm bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg focus:outline-none focus:border-[var(--color-brand)] transition-colors placeholder:text-[var(--color-text-subtle)]"
         />
       </div>
