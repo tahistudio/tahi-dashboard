@@ -1,0 +1,321 @@
+'use client'
+
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { Bell, CheckCheck } from 'lucide-react'
+import { apiPath } from '@/lib/api'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface Notification {
+  id: string
+  userId: string
+  userType: string
+  eventType: string
+  title: string
+  body: string | null
+  entityType: string | null
+  entityId: string | null
+  read: boolean
+  createdAt: string
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatRelative(dateStr: string): string {
+  try {
+    const diff = Date.now() - new Date(dateStr).getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1) return 'Just now'
+    if (mins < 60) return `${mins}m ago`
+    const hours = Math.floor(mins / 60)
+    if (hours < 24) return `${hours}h ago`
+    const days = Math.floor(hours / 24)
+    return `${days}d ago`
+  } catch { return '' }
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export function NotificationBell() {
+  const [open, setOpen] = useState(false)
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [markingAll, setMarkingAll] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+
+  const fetchNotifications = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath('/api/notifications'))
+      if (!res.ok) return
+      const json = await res.json() as { items?: Notification[]; unreadCount?: number }
+      setNotifications(json.items ?? [])
+      setUnreadCount(json.unreadCount ?? 0)
+    } catch {
+      // silent
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  // Poll every 60 seconds for new notifications
+  useEffect(() => {
+    fetchNotifications().catch(() => {})
+    const interval = setInterval(() => {
+      fetchNotifications().catch(() => {})
+    }, 60000)
+    return () => clearInterval(interval)
+  }, [fetchNotifications])
+
+  // Close panel on outside click
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent) {
+      if (
+        panelRef.current &&
+        !panelRef.current.contains(e.target as Node) &&
+        buttonRef.current &&
+        !buttonRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  // Close panel on Escape
+  useEffect(() => {
+    if (!open) return
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setOpen(false)
+        buttonRef.current?.focus()
+      }
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [open])
+
+  const markAllRead = useCallback(async () => {
+    setMarkingAll(true)
+    try {
+      await fetch(apiPath('/api/notifications'), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      })
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+      setUnreadCount(0)
+    } catch {
+      // silent
+    } finally {
+      setMarkingAll(false)
+    }
+  }, [])
+
+  const markOneRead = useCallback(async (id: string) => {
+    try {
+      await fetch(apiPath('/api/notifications'), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
+      setUnreadCount(prev => Math.max(0, prev - 1))
+    } catch {
+      // silent
+    }
+  }, [])
+
+  const handleToggle = useCallback(() => {
+    setOpen(prev => !prev)
+    if (!open) {
+      fetchNotifications().catch(() => {})
+    }
+  }, [open, fetchNotifications])
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        ref={buttonRef}
+        onClick={handleToggle}
+        aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
+        aria-expanded={open}
+        aria-haspopup="true"
+        className="relative p-2 rounded-lg text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5A824E]"
+        style={{ minHeight: 44, minWidth: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      >
+        <Bell style={{ width: 16, height: 16 }} aria-hidden="true" />
+        {unreadCount > 0 && (
+          <span
+            style={{
+              position: 'absolute',
+              top: 6,
+              right: 6,
+              minWidth: 16,
+              height: 16,
+              borderRadius: 99,
+              background: '#5A824E',
+              color: 'white',
+              fontSize: 10,
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0 4px',
+              lineHeight: 1,
+            }}
+            aria-hidden="true"
+          >
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-label="Notifications"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 8px)',
+            right: 0,
+            width: 360,
+            maxWidth: 'calc(100vw - 32px)',
+            background: 'white',
+            borderRadius: 12,
+            border: '1px solid var(--color-border)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+            zIndex: 100,
+            overflow: 'hidden',
+          }}
+        >
+          {/* Header */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '14px 16px 12px',
+              borderBottom: '1px solid var(--color-border-subtle)',
+            }}
+          >
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
+              Notifications
+              {unreadCount > 0 && (
+                <span
+                  style={{
+                    marginLeft: 8,
+                    fontSize: 12,
+                    fontWeight: 500,
+                    color: '#5A824E',
+                    background: '#f0f7ee',
+                    padding: '1px 7px',
+                    borderRadius: 99,
+                  }}
+                >
+                  {unreadCount} new
+                </span>
+              )}
+            </h3>
+            {unreadCount > 0 && (
+              <button
+                onClick={markAllRead}
+                disabled={markingAll}
+                className="flex items-center gap-1 text-xs font-medium hover:opacity-70 transition-opacity"
+                style={{ color: '#5A824E', background: 'none', border: 'none', cursor: markingAll ? 'not-allowed' : 'pointer', padding: '4px 8px' }}
+              >
+                <CheckCheck style={{ width: 13, height: 13 }} aria-hidden="true" />
+                {markingAll ? 'Marking...' : 'Mark all read'}
+              </button>
+            )}
+          </div>
+
+          {/* List */}
+          <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+            {loading && notifications.length === 0 ? (
+              <div style={{ padding: '24px 16px' }}>
+                {[1, 2, 3].map(i => (
+                  <div key={i} className="animate-pulse" style={{ marginBottom: 16 }}>
+                    <div style={{ height: 14, background: '#f3f4f6', borderRadius: 6, marginBottom: 6, width: '70%' }} />
+                    <div style={{ height: 12, background: '#f9fafb', borderRadius: 6, width: '50%' }} />
+                  </div>
+                ))}
+              </div>
+            ) : notifications.length === 0 ? (
+              <div style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                <Bell style={{ width: 24, height: 24, margin: '0 auto 10px', opacity: 0.4 }} aria-hidden="true" />
+                <p style={{ fontSize: 13 }}>No notifications yet</p>
+              </div>
+            ) : (
+              notifications.map((n, i) => (
+                <div
+                  key={n.id}
+                  onClick={() => { if (!n.read) markOneRead(n.id).catch(() => {}) }}
+                  style={{
+                    padding: '12px 16px',
+                    borderBottom: i < notifications.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
+                    background: n.read ? 'white' : '#f0f7ee',
+                    cursor: n.read ? 'default' : 'pointer',
+                    transition: 'background 0.1s',
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    {!n.read && (
+                      <span
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          background: '#5A824E',
+                          marginTop: 5,
+                          flexShrink: 0,
+                        }}
+                        aria-hidden="true"
+                      />
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p
+                        style={{
+                          fontSize: 13,
+                          fontWeight: n.read ? 400 : 600,
+                          color: 'var(--color-text)',
+                          margin: 0,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {n.title}
+                      </p>
+                      {n.body && (
+                        <p
+                          style={{
+                            fontSize: 12,
+                            color: 'var(--color-text-muted)',
+                            margin: '2px 0 0',
+                            lineHeight: 1.4,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {n.body}
+                        </p>
+                      )}
+                      <p style={{ fontSize: 11, color: 'var(--color-text-subtle)', margin: '4px 0 0' }}>
+                        {formatRelative(n.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

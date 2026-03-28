@@ -66,8 +66,8 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [ ] T29 — Admin impersonation: "View as client" button switches portal context to selected org — FE + BE
 - [ ] T30 — Subscription management: edit plan type, slot count, billing cycle from client detail — FE + BE
 - [ ] T31 — Track management: view active tracks, add/archive tracks per client — FE + BE
-- [ ] T32 — Invoice list page: table with filters (status, client, date range), totals — FE + BE
-- [ ] T33 — Invoice detail page: line items, status, payment link, Stripe sync indicator — FE + BE
+- [x] T32 — Invoice list page: table with filters (status, client, date range), totals — FE + BE
+- [x] T33 — Invoice detail page: line items, status, payment link, Stripe sync indicator — FE + BE
 - [ ] T34 — API route: GET /api/admin/invoices with Stripe sync — BE
 - [ ] T35 — API route: GET /api/admin/invoices/[id] — BE
 - [ ] T36 — Time entries page: list all time entries across clients, filter by billable/date/client — FE + BE
