@@ -57,11 +57,16 @@ export function AdminOverview({ userName }: { userName: string }) {
   const [kpis, setKpis] = useState<KPIs | null>(null)
   const [recentRequests, setRecentRequests] = useState<RecentRequest[]>([])
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState(false)
 
   useEffect(() => {
     fetch(apiPath('/api/admin/overview'))
-      .then(r => r.json() as Promise<{ kpis: KPIs; recentRequests: RecentRequest[] }>)
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to fetch overview')
+        return r.json() as Promise<{ kpis: KPIs; recentRequests: RecentRequest[] }>
+      })
       .then(data => { setKpis(data.kpis); setRecentRequests(data.recentRequests) })
+      .catch(() => setFetchError(true))
       .finally(() => setLoading(false))
   }, [])
 
@@ -71,6 +76,11 @@ export function AdminOverview({ userName }: { userName: string }) {
 
   return (
     <div className="flex flex-col" style={{ gap: '2rem', maxWidth: '68.75rem' }}>
+      {fetchError && (
+        <div style={{ padding: '0.75rem 1rem', background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger)', borderRadius: 8, fontSize: '0.875rem', color: 'var(--color-danger)' }}>
+          Failed to load overview data. Please refresh the page.
+        </div>
+      )}
       {/* Greeting */}
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -146,11 +156,16 @@ export function AdminOverview({ userName }: { userName: string }) {
 export function ClientOverview({ userName, orgName }: { userName: string; orgName: string }) {
   const [requests, setRequests] = useState<RecentRequest[]>([])
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState(false)
 
   useEffect(() => {
     fetch(apiPath('/api/portal/requests?status=active&page=1'))
-      .then(r => r.json() as Promise<{ requests: RecentRequest[] }>)
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to fetch requests')
+        return r.json() as Promise<{ requests: RecentRequest[] }>
+      })
       .then(data => setRequests(data.requests ?? []))
+      .catch(() => setFetchError(true))
       .finally(() => setLoading(false))
   }, [])
 
@@ -162,6 +177,11 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
 
   return (
     <div className="flex flex-col" style={{ gap: '2rem', maxWidth: '56.25rem' }}>
+      {fetchError && (
+        <div style={{ padding: '0.75rem 1rem', background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger)', borderRadius: 8, fontSize: '0.875rem', color: 'var(--color-danger)' }}>
+          Failed to load your requests. Please refresh the page.
+        </div>
+      )}
       {/* Greeting */}
       <div className="flex items-start justify-between gap-4">
         <div>

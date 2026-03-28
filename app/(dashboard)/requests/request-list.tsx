@@ -322,7 +322,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
               placeholder="Search requests…"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full focus:outline-none"
+              className="w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[#5A824E] focus-visible:ring-offset-1"
               style={{
                 paddingTop: '0.4375rem',
                 paddingBottom: '0.4375rem',
@@ -401,7 +401,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
                 cursor: 'pointer',
                 border: 'none',
               }}
-              title="List view"
+              aria-label="List view"
             >
               <LayoutList className="w-4 h-4" />
             </button>
@@ -416,7 +416,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
                 borderLeft: '1px solid var(--color-border)',
                 cursor: 'pointer',
               }}
-              title="Board view"
+              aria-label="Board view"
             >
               <Columns3 className="w-4 h-4" />
             </button>
