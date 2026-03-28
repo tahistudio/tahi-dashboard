@@ -319,9 +319,48 @@ function OverviewTab({
 
 // ── Org details card (editable) ────────────────────────────────────────────────
 
+interface TeamMemberPm {
+  id: string
+  name: string
+}
+
 function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () => void }) {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [teamMembers, setTeamMembers] = useState<TeamMemberPm[]>([])
+  const [assignedPm, setAssignedPm] = useState<string | null>(null)
+  const [pmLoading, setPmLoading] = useState(false)
+
+  useEffect(() => {
+    // Load team members for PM selector
+    fetch(apiPath('/api/admin/team-members'))
+      .then(r => r.json() as Promise<{ items: TeamMemberPm[] }>)
+      .then(d => setTeamMembers(d.items ?? []))
+      .catch(() => {})
+
+    // Load current PM assignment
+    fetch(apiPath(`/api/admin/clients/${org.id}/pm`))
+      .then(r => r.json() as Promise<{ pmId: string | null; pmName: string | null }>)
+      .then(d => setAssignedPm(d.pmId))
+      .catch(() => {})
+  }, [org.id])
+
+  const handlePmChange = async (pmId: string | null) => {
+    setPmLoading(true)
+    try {
+      await fetch(apiPath(`/api/admin/clients/${org.id}/pm`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pmId }),
+      })
+      setAssignedPm(pmId)
+    } catch {
+      // silent
+    } finally {
+      setPmLoading(false)
+    }
+  }
+
   const [form, setForm] = useState({
     name: org.name,
     website: org.website ?? '',
@@ -492,6 +531,22 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
             <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Last updated</dt>
             <dd className="text-[var(--color-text)]">
               {new Date(org.updatedAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
+            </dd>
+          </div>
+          <div className="col-span-2">
+            <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Project Manager</dt>
+            <dd>
+              <select
+                value={assignedPm ?? ''}
+                onChange={e => handlePmChange(e.target.value || null)}
+                disabled={pmLoading}
+                className="px-2 py-1 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              >
+                <option value="">No PM assigned</option>
+                {teamMembers.map(tm => (
+                  <option key={tm.id} value={tm.id}>{tm.name}</option>
+                ))}
+              </select>
             </dd>
           </div>
         </dl>

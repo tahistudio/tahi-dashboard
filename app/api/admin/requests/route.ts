@@ -3,10 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, ne, inArray, isNull } from 'drizzle-orm'
+import { resolveAccessScoping } from '@/lib/access-scoping'
 
 // ── GET /api/admin/requests ─────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -20,7 +21,18 @@ export async function GET(req: NextRequest) {
 
   const database = await db()
 
+  // Apply team member access scoping
+  const scopedOrgIds = await resolveAccessScoping(database, userId)
+
   const conditions = []
+
+  // If scoping returned a specific set of org IDs, filter to those
+  if (scopedOrgIds !== null) {
+    if (scopedOrgIds.length === 0) {
+      return NextResponse.json({ requests: [], page, limit })
+    }
+    conditions.push(inArray(schema.requests.orgId, scopedOrgIds))
+  }
   if (clientId) conditions.push(eq(schema.requests.orgId, clientId))
 
   if (status === 'active') {

@@ -32,9 +32,12 @@ export async function POST(req: NextRequest) {
   const body = await req.json() as {
     name?: string
     email?: string
+    title?: string
     role?: string
     skills?: string[]
     avatarUrl?: string
+    weeklyCapacityHours?: number
+    isContractor?: boolean
   }
 
   if (!body.name?.trim()) {
@@ -53,9 +56,12 @@ export async function POST(req: NextRequest) {
     id,
     name: body.name.trim(),
     email: body.email.trim(),
+    title: body.title?.trim() ?? null,
     role: body.role ?? 'member',
     skills: body.skills ? JSON.stringify(body.skills) : '[]',
     avatarUrl: body.avatarUrl ?? null,
+    weeklyCapacityHours: body.weeklyCapacityHours ?? 40,
+    isContractor: body.isContractor ?? false,
     createdAt: now,
     updatedAt: now,
   })
