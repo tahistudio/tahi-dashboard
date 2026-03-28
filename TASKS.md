@@ -424,7 +424,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 ### Critical UX (these make the product feel broken)
 
-- [ ] T251 - Request detail page: full UI/UX overhaul to match overview/requests list quality. Proper card layout, spacing, typography, sidebar panel styling, status stepper polish, thread section design -- [FE + UIUX]
+- [x] T251 - Request detail page: full UI/UX overhaul to match overview/requests list quality. Proper card layout, spacing, typography, sidebar panel styling, status stepper polish, thread section design -- [FE + UIUX] -- [PM] 2026-03-28
 - [x] T252 - Client detail page: same level of UI/UX polish as request detail. Clean tab navigation, card layouts, consistent spacing -- [FE + UIUX] — [PM] 2026-03-28
 - [ ] T253 - Kanban board: implement actual drag and drop (use @dnd-kit/core or similar). Cards must be draggable between columns to change status -- [FE]
 - [x] T254 - Time logging: replace raw ID text inputs with searchable autocomplete dropdowns for client, team member, and request selection. Allow "no client" for internal/non-billable time -- [FE] — [PM] 2026-03-28
@@ -432,9 +432,9 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 ### High Priority UX
 
-- [ ] T256 - Request creation dialog: add date picker for due date field -- [FE]
-- [ ] T257 - Top nav: polish search bar styling and notification bell dropdown to match premium design -- [UIUX]
-- [ ] T258 - Sidebar: save collapse/expand preference to localStorage, restore on page load -- [FE]
+- [x] T256 - Request creation dialog: add date picker for due date field -- [FE] -- [PM] 2026-03-28
+- [x] T257 - Top nav: polish search bar styling and notification bell dropdown to match premium design -- [UIUX] -- [PM] 2026-03-28
+- [x] T258 - Sidebar: save collapse/expand preference to localStorage, restore on page load -- [FE] -- [PM] 2026-03-28
 - [x] T259 - Messaging: voice note recording/playback, better group management (add/remove participants, edit group name), improved Tiptap composer -- [FE + BE] — [PM] 2026-03-28
 - [x] T260 - Docs Hub: replace textarea with Tiptap rich text editor for doc page content -- [FE] — [PM] 2026-03-28
 - [x] T261 - Settings page: make all toggles/inputs saveable (persist to settings API on change), improve visual layout and card design -- [FE + UIUX] — [PM] 2026-03-28
@@ -444,5 +444,5 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 ### Nice to Have UX
 
 - [x] T264 - Persist view preferences: save preferred request view (list/board), active filters, sort order to localStorage per user -- [FE] — [PM] 2026-03-28
-- [ ] T265 - Searchable dropdown component: create a reusable components/tahi/searchable-select.tsx for all entity pickers (clients, team members, requests) -- [FE + UIUX]
+- [x] T265 - Searchable dropdown component: create a reusable components/tahi/searchable-select.tsx for all entity pickers (clients, team members, requests) -- [FE + UIUX] -- [PM] 2026-03-28
 - [x] T266 - Autocomplete in all forms: wire searchable-select into request creation, time logging, invoice creation, assignment dropdowns -- [FE] — [PM] 2026-03-28

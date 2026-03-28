@@ -999,10 +999,36 @@ function ContactsTab({
   contacts: Contact[]
   onUpdated: () => void
 }) {
+  const router = useRouter()
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [form, setForm] = useState({ name: '', email: '', role: '', isPrimary: false })
+  const [startingDm, setStartingDm] = useState<string | null>(null)
+
+  const handleStartDm = async (contact: Contact) => {
+    setStartingDm(contact.id)
+    try {
+      const res = await fetch(apiPath('/api/admin/conversations'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'direct',
+          name: contact.name,
+          orgId: clientId,
+          visibility: 'external',
+          participantIds: [{ id: contact.id, type: 'contact' }],
+        }),
+      })
+      if (res.ok) {
+        router.push('/messages')
+      }
+    } catch {
+      // silent
+    } finally {
+      setStartingDm(null)
+    }
+  }
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1168,7 +1194,7 @@ function ContactsTab({
                       {contact.role}
                     </div>
                   )}
-                  <div className="mt-1.5">
+                  <div className="mt-1.5 flex items-center gap-2">
                     <span className={cn(
                       'inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full',
                       contact.clerkUserId
@@ -1178,6 +1204,16 @@ function ContactsTab({
                       <span className={cn('w-1.5 h-1.5 rounded-full', contact.clerkUserId ? 'bg-emerald-400' : 'bg-[var(--color-border)]')} />
                       {contact.clerkUserId ? 'Portal access' : 'No portal access'}
                     </span>
+                    <button
+                      onClick={() => handleStartDm(contact)}
+                      disabled={startingDm === contact.id}
+                      className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full bg-[var(--color-brand-50)] text-[var(--color-brand)] hover:bg-[var(--color-brand-100)] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
+                      aria-label={`Message ${contact.name}`}
+                      style={{ minHeight: '1.375rem' }}
+                    >
+                      <MessageSquare className="w-3 h-3" aria-hidden="true" />
+                      {startingDm === contact.id ? 'Opening...' : 'Message'}
+                    </button>
                   </div>
                 </div>
               </div>

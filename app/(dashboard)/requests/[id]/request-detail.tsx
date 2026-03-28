@@ -115,6 +115,7 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
   const [statusUpdating, setStatusUpdating] = useState(false)
   const [editingDueDate, setEditingDueDate] = useState(false)
   const [dueDateInput, setDueDateInput] = useState('')
+  const [conversationId, setConversationId] = useState<string | null>(null)
   const threadBottomRef = useRef<HTMLDivElement>(null)
 
   const apiBase = isAdmin ? apiPath('/api/admin') : apiPath('/api/portal')
@@ -188,13 +189,43 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
   }, [messages.length])
 
   async function handleSendMessage(html: string) {
+    // Create a request_thread conversation on first message if none exists
+    let convId = conversationId
+    if (!convId && isAdmin && request) {
+      try {
+        const convRes = await fetch(apiPath('/api/admin/conversations'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'request_thread',
+            name: request.title,
+            orgId: request.orgId,
+            requestId,
+            visibility: isInternal ? 'internal' : 'external',
+            participantIds: [],
+          }),
+        })
+        if (convRes.ok) {
+          const convData = await convRes.json() as { id: string }
+          convId = convData.id
+          setConversationId(convId)
+        }
+      } catch {
+        // Continue sending even if conversation creation fails
+      }
+    }
+
     const url = isAdmin
       ? apiPath(`/api/admin/requests/${requestId}/messages`)
       : apiPath(`/api/portal/requests/${requestId}/messages`)
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body: html, isInternal }),
+      body: JSON.stringify({
+        body: html,
+        isInternal,
+        conversationId: convId ?? undefined,
+      }),
     })
     if (res.ok) {
       await Promise.all([loadRequest(), loadFiles()])

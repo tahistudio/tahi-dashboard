@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   MessageSquare, Search, Plus, Send, Users, Hash, AtSign,
-  Loader2, Lock, Eye, EyeOff,
+  Loader2, Lock, Eye, EyeOff, Mic, Square, Trash2,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
@@ -124,6 +124,11 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
   const [composerText, setComposerText] = useState('')
   const [sending, setSending] = useState(false)
   const [showNewDialog, setShowNewDialog] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null)
+  const [recordingDuration, setRecordingDuration] = useState(0)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // ── Fetch conversations ───────────────────────────────────────────────────
@@ -198,6 +203,114 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
       await fetchConversations()
     } catch {
       // Error sending message
+    } finally {
+      setSending(false)
+    }
+  }
+
+  // ── Voice recording ───────────────────────────────────────────────────────
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+      const chunks: Blob[] = []
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data)
+      }
+
+      recorder.onstop = () => {
+        stream.getTracks().forEach(t => t.stop())
+        const blob = new Blob(chunks, { type: 'audio/webm' })
+        setRecordedBlob(blob)
+        setIsRecording(false)
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current)
+          recordingTimerRef.current = null
+        }
+      }
+
+      mediaRecorderRef.current = recorder
+      recorder.start()
+      setIsRecording(true)
+      setRecordingDuration(0)
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration(prev => prev + 1)
+      }, 1000)
+    } catch {
+      // Microphone access denied or unavailable
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
+  }
+
+  const discardRecording = () => {
+    setRecordedBlob(null)
+    setRecordingDuration(0)
+  }
+
+  const sendVoiceNote = async () => {
+    if (!recordedBlob || !activeConvId) return
+    setSending(true)
+    try {
+      // 1. Get presigned URL
+      const presignRes = await fetch(apiPath('/api/uploads/presign'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: `voice-note-${Date.now()}.webm`,
+          mimeType: 'audio/webm',
+        }),
+      })
+      if (!presignRes.ok) throw new Error('Failed to get upload URL')
+      const { uploadUrl, storageKey, fileId } = await presignRes.json() as {
+        uploadUrl: string
+        storageKey: string
+        fileId: string
+      }
+
+      // 2. Upload to R2
+      await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'audio/webm' },
+        body: recordedBlob,
+      })
+
+      // 3. Confirm upload
+      await fetch(apiPath('/api/uploads/confirm'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId }),
+      })
+
+      // 4. Send a message with voice note reference
+      const endpoint = isAdmin
+        ? `/api/admin/conversations/${activeConvId}/messages`
+        : `/api/portal/conversations/${activeConvId}/messages`
+      await fetch(apiPath(endpoint), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: `[Voice note: ${recordingDuration}s]`,
+          voiceNote: {
+            storageKey,
+            durationSeconds: recordingDuration,
+            mimeType: 'audio/webm',
+          },
+        }),
+      })
+
+      setRecordedBlob(null)
+      setRecordingDuration(0)
+      await fetchMessages(activeConvId)
+      await fetchConversations()
+    } catch {
+      // Error uploading voice note
     } finally {
       setSending(false)
     }
@@ -596,6 +709,86 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
                     className="flex-1 text-sm bg-transparent border-none outline-none text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] resize-none"
                     style={{ minHeight: '1.5rem', maxHeight: '6rem' }}
                   />
+                  {/* Voice note controls */}
+                  {isRecording ? (
+                    <button
+                      onClick={stopRecording}
+                      className="flex items-center justify-center flex-shrink-0 transition-colors"
+                      style={{
+                        width: '2rem',
+                        height: '2rem',
+                        borderRadius: 'var(--radius-button)',
+                        background: 'var(--color-danger)',
+                        color: '#ffffff',
+                        border: 'none',
+                        cursor: 'pointer',
+                      }}
+                      aria-label="Stop recording"
+                    >
+                      <Square className="w-3.5 h-3.5" />
+                    </button>
+                  ) : recordedBlob ? (
+                    <>
+                      <span className="text-xs text-[var(--color-text-muted)] flex-shrink-0">
+                        {recordingDuration}s recorded
+                      </span>
+                      <button
+                        onClick={discardRecording}
+                        className="flex items-center justify-center flex-shrink-0 transition-colors"
+                        style={{
+                          width: '2rem',
+                          height: '2rem',
+                          borderRadius: 'var(--radius-button)',
+                          background: 'var(--color-bg-tertiary)',
+                          color: 'var(--color-danger)',
+                          border: 'none',
+                          cursor: 'pointer',
+                        }}
+                        aria-label="Discard recording"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={sendVoiceNote}
+                        disabled={sending}
+                        className="flex items-center justify-center flex-shrink-0 transition-colors"
+                        style={{
+                          width: '2rem',
+                          height: '2rem',
+                          borderRadius: 'var(--radius-button)',
+                          background: 'var(--color-brand)',
+                          color: '#ffffff',
+                          border: 'none',
+                          cursor: 'pointer',
+                        }}
+                        aria-label="Send voice note"
+                      >
+                        {sending ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Send className="w-4 h-4" />
+                        )}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={startRecording}
+                      className="flex items-center justify-center flex-shrink-0 transition-colors hover:opacity-80"
+                      style={{
+                        width: '2rem',
+                        height: '2rem',
+                        borderRadius: 'var(--radius-button)',
+                        background: 'var(--color-bg-tertiary)',
+                        color: 'var(--color-text-muted)',
+                        border: 'none',
+                        cursor: 'pointer',
+                      }}
+                      aria-label="Record voice note"
+                    >
+                      <Mic className="w-4 h-4" />
+                    </button>
+                  )}
+
                   <button
                     onClick={handleSend}
                     disabled={!composerText.trim() || sending}

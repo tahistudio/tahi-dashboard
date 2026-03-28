@@ -1,5 +1,8 @@
 import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest } from 'next/server'
+import { db } from '@/lib/db'
+import { schema } from '@/db/d1'
+import { eq, and, desc } from 'drizzle-orm'
 
 /**
  * Server-Sent Events (SSE) endpoint for real-time notifications.
@@ -16,6 +19,7 @@ export async function GET(req: NextRequest) {
   }
 
   const encoder = new TextEncoder()
+  let lastCheckedAt = new Date().toISOString()
 
   const stream = new ReadableStream({
     start(controller) {
@@ -25,18 +29,53 @@ export async function GET(req: NextRequest) {
       )
       controller.enqueue(heartbeat)
 
-      // Keep-alive ping every 30 seconds
-      const interval = setInterval(() => {
+      // Poll for new notifications every 5 seconds and push them
+      const interval = setInterval(async () => {
         try {
+          const database = await db()
+          const newNotifications = await database
+            .select()
+            .from(schema.notifications)
+            .where(
+              and(
+                eq(schema.notifications.userId, userId),
+                eq(schema.notifications.read, false)
+              )
+            )
+            .orderBy(desc(schema.notifications.createdAt))
+            .limit(10)
+
+          // Filter to only truly new ones since last check
+          const fresh = newNotifications.filter(
+            n => n.createdAt > lastCheckedAt
+          )
+
+          if (fresh.length > 0) {
+            lastCheckedAt = new Date().toISOString()
+            for (const notification of fresh) {
+              const event = encoder.encode(
+                `data: ${JSON.stringify({ type: 'notification', notification })}\n\n`
+              )
+              controller.enqueue(event)
+            }
+          }
+
+          // Send keep-alive ping
           controller.enqueue(encoder.encode(': ping\n\n'))
         } catch {
           clearInterval(interval)
         }
-      }, 30000)
+      }, 5000)
 
-      // TODO: Subscribe to notification events for this user
-      // When a notification is created for userId, push it here:
-      // controller.enqueue(encoder.encode(`data: ${JSON.stringify(notification)}\n\n`))
+      // Keep-alive ping every 30 seconds (backup)
+      const keepAlive = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(': ping\n\n'))
+        } catch {
+          clearInterval(keepAlive)
+          clearInterval(interval)
+        }
+      }, 30000)
     },
   })
 

@@ -60,13 +60,53 @@ export function NotificationBell() {
     }
   }, [])
 
-  // Poll every 60 seconds for new notifications
+  // Initial fetch + SSE for real-time updates
   useEffect(() => {
     fetchNotifications().catch(() => {})
+
+    // Connect to SSE stream for real-time notifications
+    let eventSource: EventSource | null = null
+    try {
+      eventSource = new EventSource(apiPath('/api/notifications/stream'))
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data) as {
+            type: string
+            notification?: Notification
+          }
+          if (data.type === 'notification' && data.notification) {
+            const n = data.notification
+            setNotifications(prev => {
+              // Avoid duplicates
+              if (prev.some(existing => existing.id === n.id)) return prev
+              return [n, ...prev]
+            })
+            setUnreadCount(prev => prev + 1)
+          }
+        } catch {
+          // Ignore parse errors from pings
+        }
+      }
+
+      eventSource.onerror = () => {
+        // On error, fall back to polling
+        eventSource?.close()
+        eventSource = null
+      }
+    } catch {
+      // EventSource not supported or failed, fall back to polling
+    }
+
+    // Fallback poll every 60 seconds
     const interval = setInterval(() => {
       fetchNotifications().catch(() => {})
     }, 60000)
-    return () => clearInterval(interval)
+
+    return () => {
+      clearInterval(interval)
+      eventSource?.close()
+    }
   }, [fetchNotifications])
 
   // Close panel on outside click
