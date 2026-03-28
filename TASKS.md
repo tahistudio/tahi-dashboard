@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-28
 Total tasks: 228 (S1-S11 schema + T1-T171 feature + T172-T217 audit findings)
-Completed: S1-S11, T1-T13, T18, T32-T37, T39, T41, T47-T48, T55-T56, T58-T59, T62, T64-T65, T67-T68, T70, T72, T74-T77, T95-T96, T141-T144, T167-T168, T170, T172-T180, T185-T186, T189-T192, T194-T196, T200-T203, T205, T207-T208, T210, T216-T217
+Completed: S1-S11, T1-T13, T18, T32-T37, T39, T41, T47-T48, T55-T56, T58-T59, T62, T64-T65, T67-T68, T70, T72, T74-T77, T80, T82, T84, T86, T89-T90, T95-T96, T141-T144, T167-T168, T170, T172-T180, T185-T186, T189-T192, T194-T196, T200-T203, T205, T207-T208, T210, T216-T217
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -133,21 +133,21 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [ ] T79 — Team member: assign as PM for specific clients (shows as PM in client detail header) — FE + BE
 
 ### Request Intake Forms
-- [ ] T80 — Intake form builder: create/edit form fields per category, per service, per client — FE + BE
+- [x] T80 — Intake form builder: create/edit form fields per category, per service, per client — FE + BE — [PM] 2026-03-28
 - [ ] T81 — Intake form: client portal request submission uses the resolved form for that category/service/client — FE + BE
-- [ ] T82 — API route: GET + POST + PATCH /api/admin/request-forms — BE
+- [x] T82 — API route: GET + POST + PATCH /api/admin/request-forms — BE — [PM] 2026-03-28
 - [ ] T83 — API route: GET /api/portal/request-forms/[category] (returns resolved form for org) — BE
 
 ### Custom Kanban
-- [ ] T84 — Kanban column editor: per-client custom columns (add, rename, reorder, colour, delete) — FE + BE
+- [x] T84 — Kanban column editor: per-client custom columns (add, rename, reorder, colour, delete) — FE + BE — [PM] 2026-03-28
 - [ ] T85 — Seed default kanban columns when provisioning a new client — BE
-- [ ] T86 — API route: GET + POST + PATCH + DELETE /api/admin/clients/[id]/kanban-columns — BE
+- [x] T86 — API route: GET + POST + PATCH + DELETE /api/admin/kanban-columns — BE — [PM] 2026-03-28
 
 ### Call Scheduling
 - [ ] T87 — Admin settings: store Google Calendar booking link (config value) — FE + BE
 - [ ] T88 — Client portal: "Schedule a call" button/section that opens the stored Google Cal booking link — FE
-- [ ] T89 — Scheduled calls log: admin can manually log a call that was booked (date, notes, outcome) — FE + BE
-- [ ] T90 — API route: GET + POST /api/admin/clients/[id]/scheduled-calls — BE
+- [x] T89 — Scheduled calls log: admin can manually log a call that was booked (date, notes, outcome) — FE + BE — [PM] 2026-03-28
+- [x] T90 — API route: GET + POST /api/admin/calls — BE — [PM] 2026-03-28
 
 ### Charts and Reporting
 - [ ] T91 — Capacity chart: visualise active request slots used vs available per client, and across all clients — FE + BE
