@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-28
 Total tasks: 228 (S1-S11 schema + T1-T171 feature + T172-T217 audit findings)
-Completed: S1-S11, T1-T13, T18, T32-T37, T39, T41, T47-T48, T55-T56, T58-T59, T62, T68, T70, T95-T96, T172-T180, T185-T186, T189-T192, T194-T196, T200-T203, T205, T207-T208, T210, T216-T217
+Completed: S1-S11, T1-T13, T18, T32-T37, T39, T41, T47-T48, T55-T56, T58-T59, T62, T64-T65, T67-T68, T70, T72, T74-T77, T95-T96, T141-T144, T167-T168, T170, T172-T180, T185-T186, T189-T192, T194-T196, T200-T203, T205, T207-T208, T210, T216-T217
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -106,10 +106,10 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [ ] T61 — Client portal: messages page (external conversations only) — FE
 - [x] T62 — Client portal: invoices page (view invoices, pay via Stripe link) — FE + BE — [PM] 2026-03-28
 - [ ] T63 — Client portal: profile/settings page (update contact info, notification prefs) — FE + BE
-- [ ] T64 — Announcements: create announcement form (title, body, target type/ids, email toggle) — FE + BE
-- [ ] T65 — Announcements: in-app banner display on client portal dashboard (dismissible) — FE + BE
+- [x] T64 — Announcements: create announcement form (title, body, target type/ids, email toggle) — FE + BE — [PM] 2026-03-28
+- [x] T65 — Announcements: in-app banner display on client portal dashboard (dismissible) — FE + BE — [PM] 2026-03-28
 - [ ] T66 — Announcements: email delivery via Resend when email toggle is on — BE
-- [ ] T67 — Announcements: admin list view with sent/draft status, recipient count — FE + BE
+- [x] T67 — Announcements: admin list view with sent/draft status, recipient count — FE + BE — [PM] 2026-03-28
 - [x] T68 — API route: GET + POST /api/admin/announcements — BE — [PM] 2026-03-28
 - [ ] T69 — API route: POST /api/admin/announcements/[id]/send — BE
 - [x] T70 — API route: GET /api/portal/announcements (client-scoped) — BE — [PM] 2026-03-28
@@ -123,12 +123,12 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 > Requires S4-S11 schema additions. Schema S4+S5 before team tasks. S11 before review pipeline.
 
 ### Team Members and Access Scoping
-- [ ] T72 — Team members page: list all team members with roles and access summary — FE + BE
+- [x] T72 — Team members page: list all team members with roles and access summary — FE + BE — [PM] 2026-03-28
 - [ ] T73 — Invite team member: email invite via Clerk + create teamMembers row — FE + BE
-- [ ] T74 — Team member detail: access scoping UI (all clients / by plan / by specific client list) — FE + BE
-- [ ] T75 — Team member detail: track type scoping (all tracks / maintain only / scale only) — FE + BE
-- [ ] T76 — API route: GET + POST /api/admin/team-members — BE
-- [ ] T77 — API route: GET + PATCH /api/admin/team-members/[id]/access — BE
+- [x] T74 — Team member detail: access scoping UI (all clients / by plan / by specific client list) — FE + BE — [PM] 2026-03-28
+- [x] T75 — Team member detail: track type scoping (all tracks / maintain only / scale only) — FE + BE — [PM] 2026-03-28
+- [x] T76 — API route: GET + POST /api/admin/team-members — BE — [PM] 2026-03-28
+- [x] T77 — API route: GET + PATCH /api/admin/team-members/[id]/access — BE — [PM] 2026-03-28
 - [ ] T78 — Enforce team member access scoping in all admin API routes that return client data — BE
 - [ ] T79 — Team member: assign as PM for specific clients (shows as PM in client detail header) — FE + BE
 
@@ -225,10 +225,10 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 
 
 ### CSV Exports
-- [ ] T141 — CSV export: time entries (filter by client, date range, billable) — BE
-- [ ] T142 — CSV export: invoices (filter by client, date range, status) — BE
-- [ ] T143 — CSV export: requests (filter by client, status, date range) — BE
-- [ ] T144 — Export buttons on time entries page, invoices page, and requests list — FE
+- [x] T141 — CSV export: time entries (filter by client, date range, billable) — BE — [PM] 2026-03-28
+- [x] T142 — CSV export: invoices (filter by client, date range, status) — BE — [PM] 2026-03-28
+- [x] T143 — CSV export: requests (filter by client, status, date range) — BE — [PM] 2026-03-28
+- [x] T144 — Export buttons on time entries page, invoices page, and requests list — FE — [PM] 2026-03-28
 
 ### Automations
 - [ ] T145 — Automation rules UI: create rule (trigger + condition + action) — FE + BE
@@ -267,10 +267,10 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 
 ## Admin and Settings Pages
 
-- [ ] T167 — Admin settings page: general (workspace name, logo, Google Cal booking link) — FE + BE
-- [ ] T168 — Admin settings page: integrations tab (HubSpot, Slack, Mailerlite, Stripe, Rewardful connect/disconnect) — FE + BE
+- [x] T167 — Admin settings page: general (workspace name, logo, Google Cal booking link) — FE + BE — [PM] 2026-03-28
+- [x] T168 — Admin settings page: integrations tab (HubSpot, Slack, Mailerlite, Stripe, Rewardful connect/disconnect) — FE + BE — [PM] 2026-03-28
 - [ ] T169 — Admin settings page: team tab (invite, manage roles, access scoping shortcuts) — FE
-- [ ] T170 — Admin settings page: notifications tab (which events trigger email/Slack/in-app) — FE + BE
+- [x] T170 — Admin settings page: notifications tab (which events trigger email/Slack/in-app) — FE + BE — [PM] 2026-03-28
 - [ ] T171 — Admin settings page: billing tab (current Stripe plan, invoices for Tahi's own subscription) — FE + BE
 
 ---
