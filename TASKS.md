@@ -58,14 +58,14 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [ ] T22 — Client list page: table with search, filter by plan, sort by name/created — FE
 - [x] T23 — Client detail page: overview tab (health score, active requests, contacts, subscription) — FE + BE — [PM] 2026-03-28
 - [x] T24 — Client detail page: requests tab with inline create — FE — [PM] 2026-03-28
-- [ ] T25 — Client detail page: files tab — FE
+- [x] T25 — Client detail page: files tab — FE — [PM] 2026-03-28
 - [x] T26 — Client detail page: invoices tab — FE + BE — [PM] 2026-03-28
-- [ ] T27 — Client detail page: contracts tab (upload NDA/SLA, track signed/expiry dates) — FE + BE
+- [x] T27 — Client detail page: contracts tab (upload NDA/SLA, track signed/expiry dates) — FE + BE — [PM] 2026-03-28
 
 - [x] T28 — Client detail page: contacts tab (add/edit/remove contacts for the org) — FE + BE — [PM] 2026-03-28
 - [ ] T29 — Admin impersonation: "View as client" button switches portal context to selected org — FE + BE
-- [ ] T30 — Subscription management: edit plan type, slot count, billing cycle from client detail — FE + BE
-- [ ] T31 — Track management: view active tracks, add/archive tracks per client — FE + BE
+- [x] T30 — Subscription management: edit plan type, slot count, billing cycle from client detail — FE + BE — [PM] 2026-03-28
+- [x] T31 — Track management: view active tracks, add/archive tracks per client — FE + BE — [PM] 2026-03-28
 - [x] T32 — Invoice list page: table with filters (status, client, date range), totals — FE + BE
 - [x] T33 — Invoice detail page: line items, status, payment link, Stripe sync indicator — FE + BE
 - [x] T34 — API route: GET /api/admin/invoices with Stripe sync — BE — [PM] 2026-03-28
@@ -77,10 +77,10 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T40 — Notifications: mark as read (single + all) — FE + BE — [PM] 2026-03-28
 - [x] T41 — API route: GET + PATCH /api/notifications — BE — [PM] 2026-03-28
 - [ ] T42 — Bulk request creation: create a request across all clients / selected plan / selected list — FE + BE
-- [ ] T43 — "Save and create another" flow on request creation form (pre-fills category/service) — FE
+- [x] T43 — "Save and create another" flow on request creation form (pre-fills category/service) — FE — [PM] 2026-03-28
 - [ ] T44 — Bulk actions on request list: bulk status change, bulk assign, bulk delete — FE + BE
-- [ ] T45 — Health score: automated calculation per client (response time, open requests, overdue, NPS) stored on org row, recalculated on relevant events — BE
-- [ ] T46 — Health score: display as coloured indicator on client list and client detail — FE + UIUX
+- [x] T45 — Health score: automated calculation per client (response time, open requests, overdue, NPS) stored on org row, recalculated on relevant events — BE — [PM] 2026-03-28
+- [x] T46 — Health score: display as coloured indicator on client list and client detail — FE + UIUX — [PM] 2026-03-28
 
 
 ---
@@ -100,11 +100,11 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [ ] T55 — API route: GET + POST /api/admin/conversations — BE
 - [ ] T56 — API route: GET + POST /api/admin/conversations/[id]/messages — BE
 - [ ] T57 — API route: GET + POST /api/portal/conversations (client-scoped, external only) — BE
-- [ ] T58 — Client portal: dashboard page (active requests summary, recent messages, announcements) — FE + BE
-- [ ] T59 — Client portal: requests page (list + board, submit new request via intake form) — FE
+- [x] T58 — Client portal: dashboard page (active requests summary, recent messages, announcements) — FE + BE — [PM] 2026-03-28
+- [x] T59 — Client portal: requests page (list + board, submit new request via intake form) — FE — [PM] 2026-03-28
 - [ ] T60 — Client portal: request detail page (external comments only, file upload, status view) — FE
 - [ ] T61 — Client portal: messages page (external conversations only) — FE
-- [ ] T62 — Client portal: invoices page (view invoices, pay via Stripe link) — FE + BE
+- [x] T62 — Client portal: invoices page (view invoices, pay via Stripe link) — FE + BE — [PM] 2026-03-28
 - [ ] T63 — Client portal: profile/settings page (update contact info, notification prefs) — FE + BE
 - [ ] T64 — Announcements: create announcement form (title, body, target type/ids, email toggle) — FE + BE
 - [ ] T65 — Announcements: in-app banner display on client portal dashboard (dismissible) — FE + BE
