@@ -26,7 +26,7 @@ export function TrackMeter({ tracks, className, compact = false }: TrackMeterPro
 
   if (tracks.length === 0) {
     return (
-      <div className={cn('text-xs text-gray-400', className)}>
+      <div className={cn('text-xs text-[var(--color-text-subtle)]', className)}>
         No tracks configured
       </div>
     )
@@ -69,14 +69,14 @@ function TrackRow({
   const total = tracks.length
 
   const colours = {
-    brand:  { used: 'bg-[var(--color-brand)]',   free: 'bg-gray-200', text: 'text-[var(--color-brand-dark)]' },
-    indigo: { used: 'bg-indigo-500',              free: 'bg-gray-200', text: 'text-indigo-700' },
+    brand:  { used: 'bg-[var(--color-brand)]',   free: 'bg-[var(--color-border)]', text: 'text-[var(--color-brand-dark)]' },
+    indigo: { used: 'bg-indigo-500',              free: 'bg-[var(--color-border)]', text: 'text-indigo-700' },
   }[colour]
 
   return (
     <div className="flex items-center gap-2">
       {!compact && (
-        <span className="text-xs text-gray-500 w-10 flex-shrink-0">{label}</span>
+        <span className="text-xs text-[var(--color-text-muted)] w-10 flex-shrink-0">{label}</span>
       )}
 
       {/* Slot pills */}

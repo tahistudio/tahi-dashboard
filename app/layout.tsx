@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     template: '%s | Tahi Dashboard',
   },
   description: 'Tahi Studio client portal and operations dashboard.',
-  manifest: '/manifest.json',
+  manifest: '/dashboard/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
@@ -36,6 +36,10 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="en" suppressHydrationWarning>
         <head>
+          <meta name="apple-mobile-web-app-capable" content="yes" />
+          <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+          <meta name="apple-mobile-web-app-title" content="Tahi Dashboard" />
+          <link rel="apple-touch-icon" href="/dashboard/icons/icon-192.svg" />
           <script
             dangerouslySetInnerHTML={{
               __html: `try{if(localStorage.getItem('tahi-theme')==='dark'){document.documentElement.classList.add('dark')}}catch(e){}`,
@@ -43,7 +47,7 @@ export default function RootLayout({
           />
           <script
             dangerouslySetInnerHTML={{
-              __html: `if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js')})}`,
+              __html: `if('serviceWorker' in navigator){navigator.serviceWorker.register('/dashboard/sw.js').catch(function(){})}`,
             }}
           />
         </head>

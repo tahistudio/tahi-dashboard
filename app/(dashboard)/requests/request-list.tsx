@@ -494,7 +494,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
               className="flex items-center justify-center transition-colors"
               style={{
                 padding: '0.5rem',
-                background: view === 'list' ? 'var(--color-brand)' : 'white',
+                background: view === 'list' ? 'var(--color-brand)' : 'var(--color-bg)',
                 color: view === 'list' ? 'white' : 'var(--color-text-muted)',
                 cursor: 'pointer',
                 border: 'none',
@@ -508,7 +508,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
               className="flex items-center justify-center transition-colors"
               style={{
                 padding: '0.5rem',
-                background: view === 'board' ? 'var(--color-brand)' : 'white',
+                background: view === 'board' ? 'var(--color-brand)' : 'var(--color-bg)',
                 color: view === 'board' ? 'white' : 'var(--color-text-muted)',
                 border: 'none',
                 borderLeft: '1px solid var(--color-border)',
@@ -564,7 +564,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
         )}
 
         {/* Content area */}
-        <div style={{ background: view === 'board' ? 'var(--color-bg-secondary)' : 'white' }}>
+        <div style={{ background: view === 'board' ? 'var(--color-bg-secondary)' : 'var(--color-bg)' }}>
           {loading ? (
             <LoadingSkeleton />
           ) : sorted.length === 0 ? (
@@ -578,7 +578,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
               onToggleAll={isAdmin ? toggleSelectAll : undefined}
             />
           ) : (
-            <BoardView requests={sorted} columns={boardColumns} />
+            <BoardView requests={sorted} columns={boardColumns} isAdmin={isAdmin} onStatusChange={fetchRequests} />
           )}
         </div>
       </div>
@@ -808,8 +808,28 @@ function ListRow({
 
 // ─── Board View ───────────────────────────────────────────────────────────────
 
-function BoardView({ requests, columns }: { requests: Request[]; columns: BoardColumn[] }) {
+function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: Request[]; columns: BoardColumn[]; isAdmin: boolean; onStatusChange: () => void }) {
   const byStatus = (status: string) => requests.filter(r => r.status === status)
+
+  const handleDrop = async (e: React.DragEvent, newStatus: string) => {
+    e.preventDefault()
+    const el = e.currentTarget as HTMLElement
+    el.style.borderColor = 'var(--color-border)'
+    const requestId = e.dataTransfer.getData('requestId')
+    const fromStatus = e.dataTransfer.getData('fromStatus')
+    if (!requestId || fromStatus === newStatus) return
+    if (!isAdmin) return
+    try {
+      await fetch(apiPath(`/api/admin/requests/${requestId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      onStatusChange()
+    } catch {
+      // silent
+    }
+  }
 
   return (
     <div
@@ -830,7 +850,7 @@ function BoardView({ requests, columns }: { requests: Request[]; columns: BoardC
               className="flex items-center justify-between"
               style={{
                 padding: '0.625rem 0.75rem',
-                background: 'white',
+                background: 'var(--color-bg)',
                 border: '1px solid var(--color-border)',
                 borderBottom: 'none',
                 borderRadius: '0.5rem 0.5rem 0 0',
@@ -857,7 +877,7 @@ function BoardView({ requests, columns }: { requests: Request[]; columns: BoardC
               </span>
             </div>
 
-            {/* Cards area */}
+            {/* Cards area - drop target */}
             <div
               className="flex flex-col gap-2 overflow-y-auto"
               style={{
@@ -868,7 +888,16 @@ function BoardView({ requests, columns }: { requests: Request[]; columns: BoardC
                 borderRadius: '0 0 0.5rem 0.5rem',
                 minHeight: '10rem',
                 maxHeight: '68vh',
+                transition: 'border-color 0.15s',
               }}
+              onDragOver={(e) => {
+                e.preventDefault()
+                e.currentTarget.style.borderColor = '#5A824E'
+              }}
+              onDragLeave={(e) => {
+                e.currentTarget.style.borderColor = 'var(--color-border)'
+              }}
+              onDrop={(e) => { handleDrop(e, col.status) }}
             >
               {cards.length === 0 ? (
                 <div
@@ -901,12 +930,23 @@ function KanbanCard({ req }: { req: Request }) {
     <Link
       href={`/requests/${req.id}`}
       className="block rounded-lg transition-all"
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('requestId', req.id)
+        e.dataTransfer.setData('fromStatus', req.status)
+        e.dataTransfer.effectAllowed = 'move'
+        ;(e.currentTarget as HTMLElement).style.opacity = '0.5'
+      }}
+      onDragEnd={(e) => {
+        ;(e.currentTarget as HTMLElement).style.opacity = '1'
+      }}
       style={{
         padding: '0.75rem',
-        background: 'white',
+        background: 'var(--color-bg)',
         border: '1px solid var(--color-border)',
         boxShadow: 'var(--shadow-sm)',
         textDecoration: 'none',
+        cursor: 'grab',
       }}
       onMouseEnter={e => {
         e.currentTarget.style.borderColor = 'var(--color-brand)'

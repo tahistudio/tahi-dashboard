@@ -1,8 +1,8 @@
-const CACHE_NAME = 'tahi-v1'
-const OFFLINE_URL = '/offline'
+const CACHE_NAME = 'tahi-v2'
+const OFFLINE_URL = '/dashboard/offline'
 
 const PRECACHE_URLS = [
-  '/offline',
+  '/dashboard/offline',
 ]
 
 self.addEventListener('install', (event) => {

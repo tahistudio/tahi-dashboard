@@ -22,6 +22,8 @@ interface ReportData {
   outstandingInvoiceAmount: number
   requestsByStatus: Record<string, number>
   monthlyTrend: Record<string, number>
+  deliveryTimeTrend?: Record<string, number>
+  revenueByPlan?: Record<string, number>
 }
 
 // ── Status labels ─────────────────────────────────────────────────────────────
@@ -99,7 +101,7 @@ export function ReportsContent() {
             Revenue, request throughput, and client overview.
           </p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {[1, 2, 3, 4].map(i => (
             <div
               key={i}
@@ -186,7 +188,7 @@ export function ReportsContent() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <SummaryCard
           icon={Users}
           label="Total Clients"
@@ -288,7 +290,7 @@ export function ReportsContent() {
       </div>
 
       {/* Extra stats row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         <StatCard
           label="Total Requests"
           value={String(data.totalRequests)}
@@ -308,6 +310,106 @@ export function ReportsContent() {
           }
           icon={TrendingUp}
         />
+      </div>
+
+      {/* Delivery time trend + Revenue by plan type */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Delivery time trend */}
+        <div
+          style={{
+            background: 'var(--color-bg)',
+            borderRadius: 'var(--radius-card)',
+            border: '1px solid var(--color-border)',
+            padding: '1.25rem',
+          }}
+        >
+          <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+            <Clock className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+            Delivery Time Trend (avg days per month)
+          </h3>
+          {data.deliveryTimeTrend && Object.keys(data.deliveryTimeTrend).length > 0 ? (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th
+                      className="text-left text-xs font-medium text-[var(--color-text-muted)]"
+                      style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                    >
+                      Month
+                    </th>
+                    <th
+                      className="text-right text-xs font-medium text-[var(--color-text-muted)]"
+                      style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                    >
+                      Avg Days
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(data.deliveryTimeTrend)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([month, days]) => (
+                      <tr key={month}>
+                        <td
+                          className="text-sm text-[var(--color-text)]"
+                          style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                        >
+                          {formatMonthLabel(month)}
+                        </td>
+                        <td
+                          className="text-sm text-[var(--color-text)] text-right font-medium"
+                          style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                        >
+                          {days > 0 ? `${days}d` : 'N/A'}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm text-[var(--color-text-muted)]">No delivery data yet.</p>
+          )}
+        </div>
+
+        {/* Revenue by plan type */}
+        <div
+          style={{
+            background: 'var(--color-bg)',
+            borderRadius: 'var(--radius-card)',
+            border: '1px solid var(--color-border)',
+            padding: '1.25rem',
+          }}
+        >
+          <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+            <CreditCard className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+            Subscriptions by Plan Type
+          </h3>
+          {data.revenueByPlan && Object.keys(data.revenueByPlan).length > 0 ? (
+            <div className="space-y-3">
+              {Object.entries(data.revenueByPlan)
+                .sort(([, a], [, b]) => b - a)
+                .map(([plan, count]) => (
+                  <div key={plan} className="flex items-center justify-between">
+                    <span className="text-sm text-[var(--color-text)] capitalize">{plan.replace(/_/g, ' ')}</span>
+                    <span
+                      className="text-sm font-semibold text-[var(--color-text)]"
+                      style={{
+                        background: 'var(--color-bg-secondary)',
+                        padding: '0.125rem 0.5rem',
+                        borderRadius: 'var(--radius-button)',
+                      }}
+                    >
+                      {count}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <p className="text-sm text-[var(--color-text-muted)]">No subscription data yet.</p>
+          )}
+        </div>
       </div>
     </div>
   )

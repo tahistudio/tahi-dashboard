@@ -23,13 +23,13 @@ export default async function DashboardLayout({
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         {isAdmin && <ImpersonationBanner />}
         <AppTopNav isAdmin={isAdmin} />
-        <main className="flex-1 overflow-y-auto px-4 py-4 md:px-10 md:py-8 pb-16 md:pb-8">
+        <main className="flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-8 pb-20 md:pb-8">
           <div className="max-w-7xl mx-auto w-full">
             {children}
           </div>
         </main>
       </div>
-      <MobileBottomNav />
+      <MobileBottomNav isAdmin={isAdmin} />
     </div>
   )
 }

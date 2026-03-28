@@ -2,17 +2,30 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Inbox, MessageSquare, FileText } from 'lucide-react'
+import { LayoutDashboard, Inbox, MessageSquare, FileText, Users, FolderOpen } from 'lucide-react'
 
-const NAV_ITEMS = [
+const ADMIN_NAV = [
   { label: 'Overview', href: '/overview', icon: LayoutDashboard },
   { label: 'Requests', href: '/requests', icon: Inbox },
   { label: 'Messages', href: '/messages', icon: MessageSquare },
+  { label: 'Clients', href: '/clients', icon: Users },
+] as const
+
+const CLIENT_NAV = [
+  { label: 'Overview', href: '/overview', icon: LayoutDashboard },
+  { label: 'Requests', href: '/requests', icon: Inbox },
+  { label: 'Messages', href: '/messages', icon: MessageSquare },
+  { label: 'Files', href: '/files', icon: FolderOpen },
   { label: 'Invoices', href: '/invoices', icon: FileText },
 ] as const
 
-export function MobileBottomNav() {
+interface MobileBottomNavProps {
+  isAdmin?: boolean
+}
+
+export function MobileBottomNav({ isAdmin = false }: MobileBottomNavProps) {
   const pathname = usePathname()
+  const items = isAdmin ? ADMIN_NAV : CLIENT_NAV
 
   return (
     <nav
@@ -24,7 +37,7 @@ export function MobileBottomNav() {
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       }}
     >
-      {NAV_ITEMS.map(item => {
+      {items.map(item => {
         const Icon = item.icon
         const isActive =
           pathname === item.href ||

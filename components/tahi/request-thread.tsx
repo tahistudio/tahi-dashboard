@@ -24,7 +24,7 @@ interface RequestThreadProps {
 export function RequestThread({ messages, currentUserId }: RequestThreadProps) {
   if (messages.length === 0) {
     return (
-      <div className="text-center py-12 text-gray-400 text-sm">
+      <div className="text-center py-12 text-[var(--color-text-subtle)] text-sm">
         No messages yet. Start the conversation below.
       </div>
     )
@@ -69,7 +69,7 @@ function MessageBubble({ msg, isOwn }: { msg: Message; isOwn: boolean }) {
         'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold',
         isTeam
           ? 'bg-[var(--color-brand)] text-white'
-          : 'bg-gray-200 text-gray-600',
+          : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]',
       )}>
         {msg.teamMemberAvatar ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -82,8 +82,8 @@ function MessageBubble({ msg, isOwn }: { msg: Message; isOwn: boolean }) {
       {/* Bubble */}
       <div className={cn('flex flex-col gap-1 max-w-[75%]', isOwn ? 'items-end' : 'items-start')}>
         {/* Meta */}
-        <div className={cn('flex items-center gap-2 text-xs text-gray-400', isOwn && 'flex-row-reverse')}>
-          <span className="font-medium text-gray-600">{authorName}</span>
+        <div className={cn('flex items-center gap-2 text-xs text-[var(--color-text-subtle)]', isOwn && 'flex-row-reverse')}>
+          <span className="font-medium text-[var(--color-text-muted)]">{authorName}</span>
           <span>{timeAgo}</span>
           {msg.editedAt && <span className="italic">(edited)</span>}
           {msg.isInternal && (

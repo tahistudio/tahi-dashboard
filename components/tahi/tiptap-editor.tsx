@@ -200,12 +200,12 @@ export function TiptapEditor({
     <div
       className={cn(
         'rounded-[0_12px_0_12px] border bg-[var(--color-bg)] overflow-hidden',
-        isInternal ? 'border-amber-300 bg-amber-50/30' : 'border-gray-200',
+        isInternal ? 'border-amber-300 bg-amber-50/30 dark:bg-amber-950/30' : 'border-[var(--color-border)]',
       )}
       onKeyDown={handleKeyDown}
     >
       {/* Toolbar */}
-      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-gray-100">
+      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-[var(--color-border-subtle)]">
         <ToolbarBtn
           onClick={() => editor.chain().focus().toggleBold().run()}
           active={editor.isActive('bold')}
@@ -227,7 +227,7 @@ export function TiptapEditor({
         >
           <Code size={14} />
         </ToolbarBtn>
-        <div className="w-px h-4 bg-gray-200 mx-1" />
+        <div className="w-px h-4 bg-[var(--color-border-subtle)] mx-1" />
         <ToolbarBtn
           onClick={() => editor.chain().focus().toggleBulletList().run()}
           active={editor.isActive('bulletList')}
@@ -242,7 +242,7 @@ export function TiptapEditor({
         >
           <ListOrdered size={14} />
         </ToolbarBtn>
-        <div className="w-px h-4 bg-gray-200 mx-1" />
+        <div className="w-px h-4 bg-[var(--color-border-subtle)] mx-1" />
         <ToolbarBtn
           onClick={() => {
             const url = window.prompt('URL:')
@@ -256,7 +256,7 @@ export function TiptapEditor({
 
         {canAttach && (
           <>
-            <div className="w-px h-4 bg-gray-200 mx-1" />
+            <div className="w-px h-4 bg-[var(--color-border-subtle)] mx-1" />
             <ToolbarBtn
               onClick={() => fileInputRef.current?.click()}
               active={false}
@@ -285,7 +285,7 @@ export function TiptapEditor({
               'text-xs px-2 py-0.5 rounded-full border transition-colors',
               isInternal
                 ? 'border-amber-400 bg-amber-100 text-amber-700'
-                : 'border-gray-200 text-gray-400 hover:border-gray-300'
+                : 'border-[var(--color-border)] text-[var(--color-text-subtle)] hover:border-[var(--color-border)]'
             )}
           >
             🔒 Internal
@@ -298,7 +298,7 @@ export function TiptapEditor({
 
       {/* Attached files chips */}
       {attachedFiles.length > 0 && (
-        <div className="flex flex-wrap gap-2 px-3 py-2 border-t border-gray-100">
+        <div className="flex flex-wrap gap-2 px-3 py-2 border-t border-[var(--color-border-subtle)]">
           {attachedFiles.map(f => (
             <div
               key={f.fileId}
@@ -307,7 +307,7 @@ export function TiptapEditor({
                 f.status === 'error'
                   ? 'bg-red-50 border-red-200 text-red-700'
                   : f.status === 'uploading'
-                    ? 'bg-gray-50 border-gray-200 text-gray-500'
+                    ? 'bg-[var(--color-bg-secondary)] border-[var(--color-border)] text-[var(--color-text-muted)]'
                     : 'bg-[var(--color-brand-50)] border-[var(--color-brand-100)] text-[var(--color-brand-dark)]'
               )}
             >
@@ -336,8 +336,8 @@ export function TiptapEditor({
       )}
 
       {/* Footer */}
-      <div className="flex items-center justify-between px-3 py-2 border-t border-gray-100 bg-gray-50/50">
-        <span className="text-xs text-gray-400">
+      <div className="flex items-center justify-between px-3 py-2 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-secondary)]">
+        <span className="text-xs text-[var(--color-text-subtle)]">
           {isUploading ? 'Uploading…' : '⌘↵ to send'}
         </span>
         <button
@@ -380,7 +380,7 @@ function ToolbarBtn({
         'p-1.5 rounded transition-colors',
         active
           ? 'bg-[var(--color-brand)] text-white'
-          : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800',
+          : 'text-[var(--color-text-muted)] hover:bg-[var(--color-bg-secondary)] hover:text-[var(--color-text)]',
       )}
     >
       {children}
