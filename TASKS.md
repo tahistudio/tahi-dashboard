@@ -56,13 +56,13 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [ ] T20 — API route: GET + POST /api/admin/requests/[id]/voice-notes — BE
 - [ ] T21 — API route: GET + POST /api/admin/requests/[id]/time-entries — BE
 - [ ] T22 — Client list page: table with search, filter by plan, sort by name/created — FE
-- [ ] T23 — Client detail page: overview tab (health score, active requests, contacts, subscription) — FE + BE
-- [ ] T24 — Client detail page: requests tab with inline create — FE
+- [x] T23 — Client detail page: overview tab (health score, active requests, contacts, subscription) — FE + BE — [PM] 2026-03-28
+- [x] T24 — Client detail page: requests tab with inline create — FE — [PM] 2026-03-28
 - [ ] T25 — Client detail page: files tab — FE
-- [ ] T26 — Client detail page: invoices tab — FE + BE
+- [x] T26 — Client detail page: invoices tab — FE + BE — [PM] 2026-03-28
 - [ ] T27 — Client detail page: contracts tab (upload NDA/SLA, track signed/expiry dates) — FE + BE
 
-- [ ] T28 — Client detail page: contacts tab (add/edit/remove contacts for the org) — FE + BE
+- [x] T28 — Client detail page: contacts tab (add/edit/remove contacts for the org) — FE + BE — [PM] 2026-03-28
 - [ ] T29 — Admin impersonation: "View as client" button switches portal context to selected org — FE + BE
 - [ ] T30 — Subscription management: edit plan type, slot count, billing cycle from client detail — FE + BE
 - [ ] T31 — Track management: view active tracks, add/archive tracks per client — FE + BE
