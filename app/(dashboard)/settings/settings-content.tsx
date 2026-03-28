@@ -5,6 +5,7 @@ import {
   RefreshCw, Sun, Moon,
   CreditCard, Link2, Bell, Building2,
   FileText, Plus, Trash2, GripVertical, ChevronDown, ChevronUp,
+  Webhook, Loader2,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -325,6 +326,9 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
 
           {/* Request Forms (admin only) */}
           {isAdmin && <FormsSection />}
+
+          {/* Webhooks (admin only) */}
+          {isAdmin && <WebhooksSection />}
 
           {/* Kanban Columns (admin only) */}
           {isAdmin && <KanbanColumnsSection />}
@@ -875,6 +879,216 @@ function KanbanColumnsSection() {
           ) : (
             <TahiButton variant="secondary" size="sm" onClick={() => setShowAdd(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
               Add Column
+            </TahiButton>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// -- Webhooks Section --
+
+const WEBHOOK_EVENTS = [
+  { value: 'request.created', label: 'Request Created' },
+  { value: 'request.updated', label: 'Request Updated' },
+  { value: 'request.completed', label: 'Request Completed' },
+  { value: 'client.created', label: 'Client Created' },
+  { value: 'invoice.created', label: 'Invoice Created' },
+  { value: 'invoice.paid', label: 'Invoice Paid' },
+  { value: 'message.sent', label: 'Message Sent' },
+]
+
+interface WebhookEndpoint {
+  id: string
+  url: string
+  secret: string
+  events: string[]
+  createdAt: string
+}
+
+function WebhooksSection() {
+  const [endpoints, setEndpoints] = useState<WebhookEndpoint[]>([])
+  const [loadingWebhooks, setLoadingWebhooks] = useState(true)
+  const [showAdd, setShowAdd] = useState(false)
+  const [newUrl, setNewUrl] = useState('')
+  const [newSecret, setNewSecret] = useState('')
+  const [selectedEvents, setSelectedEvents] = useState<string[]>([])
+  const [saving, setSaving] = useState(false)
+  const [deleteLoading, setDeleteLoading] = useState<string | null>(null)
+
+  const fetchWebhooks = useCallback(async () => {
+    setLoadingWebhooks(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/webhooks'))
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as { endpoints: WebhookEndpoint[] }
+      setEndpoints(data.endpoints ?? [])
+    } catch {
+      setEndpoints([])
+    } finally {
+      setLoadingWebhooks(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchWebhooks() }, [fetchWebhooks])
+
+  async function handleAdd() {
+    if (!newUrl.trim() || !newSecret.trim() || selectedEvents.length === 0) return
+    setSaving(true)
+    try {
+      await fetch(apiPath('/api/admin/webhooks'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: newUrl.trim(),
+          secret: newSecret.trim(),
+          events: selectedEvents,
+        }),
+      })
+      setShowAdd(false)
+      setNewUrl('')
+      setNewSecret('')
+      setSelectedEvents([])
+      await fetchWebhooks()
+    } catch {
+      // Failed
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete(id: string) {
+    setDeleteLoading(id)
+    try {
+      await fetch(apiPath(`/api/admin/webhooks?id=${id}`), { method: 'DELETE' })
+      await fetchWebhooks()
+    } catch {
+      // Failed
+    } finally {
+      setDeleteLoading(null)
+    }
+  }
+
+  function toggleEvent(event: string) {
+    setSelectedEvents(prev =>
+      prev.includes(event) ? prev.filter(e => e !== event) : [...prev, event],
+    )
+  }
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <Webhook className="w-5 h-5" />
+        Webhooks
+      </h2>
+
+      {loadingWebhooks ? (
+        <LoadingSkeleton rows={2} />
+      ) : (
+        <div className="space-y-3">
+          {endpoints.length === 0 && !showAdd && (
+            <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 text-center">
+              <p className="text-sm text-[var(--color-text-muted)]">
+                No webhook endpoints configured. Add one to receive event notifications.
+              </p>
+            </div>
+          )}
+
+          {endpoints.map(ep => (
+            <div key={ep.id} className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl px-5 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-[var(--color-text)] truncate">{ep.url}</p>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {ep.events.map(ev => (
+                      <span
+                        key={ev}
+                        className="text-xs px-2 py-0.5 rounded-full font-medium"
+                        style={{
+                          background: 'var(--color-bg-tertiary)',
+                          color: 'var(--color-text-muted)',
+                        }}
+                      >
+                        {ev}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-xs text-[var(--color-text-subtle)] mt-1">
+                    Created {ep.createdAt ? new Date(ep.createdAt).toLocaleDateString('en-NZ') : 'unknown'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleDelete(ep.id)}
+                  disabled={deleteLoading === ep.id}
+                  className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-bg-secondary)] transition-colors flex-shrink-0"
+                  aria-label="Delete webhook"
+                >
+                  {deleteLoading === ep.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {showAdd ? (
+            <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="webhook-url" className="block text-sm font-medium text-[var(--color-text)] mb-1">URL</label>
+                  <input
+                    id="webhook-url"
+                    type="url"
+                    value={newUrl}
+                    onChange={e => setNewUrl(e.target.value)}
+                    placeholder="https://example.com/webhook"
+                    className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="webhook-secret" className="block text-sm font-medium text-[var(--color-text)] mb-1">Secret</label>
+                  <input
+                    id="webhook-secret"
+                    type="text"
+                    value={newSecret}
+                    onChange={e => setNewSecret(e.target.value)}
+                    placeholder="whsec_..."
+                    className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                  />
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-[var(--color-text)] mb-2">Events</p>
+                <div className="flex flex-wrap gap-2">
+                  {WEBHOOK_EVENTS.map(ev => (
+                    <label
+                      key={ev.value}
+                      className="flex items-center gap-1.5 text-sm cursor-pointer select-none"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedEvents.includes(ev.value)}
+                        onChange={() => toggleEvent(ev.value)}
+                        className="rounded border-[var(--color-border)] accent-[var(--color-brand)]"
+                      />
+                      <span className="text-[var(--color-text-muted)]">{ev.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <TahiButton variant="secondary" size="sm" onClick={() => { setShowAdd(false); setSelectedEvents([]) }}>Cancel</TahiButton>
+                <TahiButton size="sm" onClick={handleAdd} disabled={saving || !newUrl.trim() || !newSecret.trim() || selectedEvents.length === 0}>
+                  {saving ? 'Adding...' : 'Add Webhook'}
+                </TahiButton>
+              </div>
+            </div>
+          ) : (
+            <TahiButton variant="secondary" size="sm" onClick={() => setShowAdd(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+              Add Webhook Endpoint
             </TahiButton>
           )}
         </div>
