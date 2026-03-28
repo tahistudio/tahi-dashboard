@@ -47,12 +47,12 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 
 ### To Build
 - [x] T13 — Request detail page: full view with status editor, priority, assignee, due date, description (Tiptap), activity log — FE + BE — [PM] 2026-03-28
-- [ ] T14 — Request detail: file attachments panel (upload to R2, list, download, delete) — FE + BE
+- [x] T14 — Request detail: file attachments panel (upload to R2, list, download, delete) — FE + BE — [PM] 2026-03-28
 - [ ] T15 — Request detail: voice note recording and playback panel — FE + BE
 - [ ] T16 — Request detail: internal vs external comment toggle on each message — FE
 - [ ] T17 — Request detail: time entry logging (hours, description, billable toggle) — FE + BE
 - [x] T18 — API route: GET + POST + PATCH /api/admin/requests/[id] — BE — [PM] 2026-03-28
-- [ ] T19 — API route: GET + POST /api/admin/requests/[id]/files — BE
+- [x] T19 — API route: GET + POST /api/admin/requests/[id]/files — BE — [PM] 2026-03-28
 - [ ] T20 — API route: GET + POST /api/admin/requests/[id]/voice-notes — BE
 - [ ] T21 — API route: GET + POST /api/admin/requests/[id]/time-entries — BE
 - [ ] T22 — Client list page: table with search, filter by plan, sort by name/created — FE
@@ -74,7 +74,7 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T37 — API route: GET /api/admin/time-entries — BE — [PM] 2026-03-28
 - [ ] T38 — Notifications: SSE endpoint for real-time in-app notifications — BE
 - [x] T39 — Notifications: bell icon in header with unread count, dropdown list — FE — [PM] 2026-03-28
-- [ ] T40 — Notifications: mark as read (single + all) — FE + BE
+- [x] T40 — Notifications: mark as read (single + all) — FE + BE — [PM] 2026-03-28
 - [x] T41 — API route: GET + PATCH /api/notifications — BE — [PM] 2026-03-28
 - [ ] T42 — Bulk request creation: create a request across all clients / selected plan / selected list — FE + BE
 - [ ] T43 — "Save and create another" flow on request creation form (pre-fills category/service) — FE
@@ -311,7 +311,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T190 — Remove 7 console.log calls from app/api/webhooks/stripe/route.ts (lines 42, 50, 57, 64, 71, 78, 83). Replace with console.error only where genuine error logging is needed, remove the rest — [BE]
 - [x] T191 — Standardize API response shapes: PATCH /api/admin/requests/[id], PATCH /api/admin/clients/[id], and DELETE /api/admin/requests/[id] return { ok: true }. Change to { success: true } — [BE]
 - [x] T192 — Standardize paginated response shapes: GET /api/admin/requests/[id]/messages and GET /api/admin/requests/[id]/files return flat arrays. Change to { items, page, limit } — [BE]
-- [ ] T193 — Implement POST /api/admin/requests/[id]/files (GET exists but POST is missing) — [BE]
+- [x] T193 — Implement POST /api/admin/requests/[id]/files (GET exists but POST is missing) — [BE] — [PM] 2026-03-28
 - [x] T194 — Add error state handling to AdminOverview, ClientOverview, and RequestDetail: currently only loading and data states exist. A failed fetch silently shows empty data — [FE]
 - [x] T195 — Add .catch() handlers to AdminOverview fetch (overview-content.tsx lines 61-66) and ClientOverview fetch (lines 150-155) — [FE]
 - [x] T196 — Add .catch() to Promise.all in RequestDetail (request-detail.tsx lines 105-128) — [FE]
