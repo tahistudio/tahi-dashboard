@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   RefreshCw, Sun, Moon,
   CreditCard, Link2, Bell, Building2,
+  FileText, Plus, Trash2, GripVertical, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -322,6 +323,12 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
             </div>
           </section>
 
+          {/* Request Forms (admin only) */}
+          {isAdmin && <FormsSection />}
+
+          {/* Kanban Columns (admin only) */}
+          {isAdmin && <KanbanColumnsSection />}
+
           {/* Account (admin only) */}
           {isAdmin && (
             <section>
@@ -351,5 +358,571 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
         </div>
       )}
     </div>
+  )
+}
+
+// -- Types for Forms --
+
+interface FormQuestion {
+  id: string
+  type: string
+  label: string
+  required: boolean
+  options?: string[]
+}
+
+interface FormTemplate {
+  id: string
+  name: string
+  category: string | null
+  orgId: string | null
+  questions: FormQuestion[]
+  isDefault: number
+  createdAt: string
+  updatedAt: string
+}
+
+const QUESTION_TYPES = [
+  { value: 'text', label: 'Short Text' },
+  { value: 'textarea', label: 'Long Text' },
+  { value: 'url', label: 'URL' },
+  { value: 'select', label: 'Dropdown' },
+  { value: 'multiselect', label: 'Multi-Select' },
+  { value: 'checkbox', label: 'Checkbox' },
+  { value: 'file', label: 'File Upload' },
+]
+
+const FORM_CATEGORIES = [
+  { value: '', label: 'All (global)' },
+  { value: 'design', label: 'Design' },
+  { value: 'development', label: 'Development' },
+  { value: 'content', label: 'Content' },
+  { value: 'strategy', label: 'Strategy' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'bug', label: 'Bug' },
+]
+
+// -- Forms Section --
+
+function FormsSection() {
+  const [forms, setForms] = useState<FormTemplate[]>([])
+  const [loadingForms, setLoadingForms] = useState(true)
+  const [editingForm, setEditingForm] = useState<FormTemplate | null>(null)
+  const [showNewForm, setShowNewForm] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newCategory, setNewCategory] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const fetchForms = useCallback(async () => {
+    setLoadingForms(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/forms'))
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as { forms: FormTemplate[] }
+      setForms(data.forms ?? [])
+    } catch {
+      setForms([])
+    } finally {
+      setLoadingForms(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchForms() }, [fetchForms])
+
+  async function handleCreate() {
+    if (!newName.trim()) return
+    setSaving(true)
+    try {
+      await fetch(apiPath('/api/admin/forms'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newName.trim(),
+          category: newCategory || undefined,
+          questions: [],
+        }),
+      })
+      setShowNewForm(false)
+      setNewName('')
+      setNewCategory('')
+      await fetchForms()
+    } catch {
+      // Failed
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDeleteForm(id: string) {
+    try {
+      await fetch(apiPath(`/api/admin/forms/${id}`), { method: 'DELETE' })
+      if (editingForm?.id === id) setEditingForm(null)
+      await fetchForms()
+    } catch {
+      // Failed
+    }
+  }
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <FileText className="w-5 h-5" />
+        Request Forms
+      </h2>
+
+      {loadingForms ? (
+        <LoadingSkeleton rows={3} />
+      ) : (
+        <div className="space-y-3">
+          {/* Form list */}
+          {forms.map(form => (
+            <div key={form.id} className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-3">
+                <div className="flex-1 min-w-0">
+                  <button
+                    onClick={() => setEditingForm(editingForm?.id === form.id ? null : form)}
+                    className="text-sm font-medium text-[var(--color-text)] hover:text-[var(--color-brand)] transition-colors text-left"
+                  >
+                    {form.name}
+                  </button>
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    {form.category || 'Global'} - {(form.questions as FormQuestion[]).length} question{(form.questions as FormQuestion[]).length !== 1 ? 's' : ''}
+                    {form.isDefault ? ' (Default)' : ''}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setEditingForm(editingForm?.id === form.id ? null : form)}
+                    className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-bg-secondary)] transition-colors"
+                    aria-label="Toggle form editor"
+                  >
+                    {editingForm?.id === form.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteForm(form.id)}
+                    className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-bg-secondary)] transition-colors"
+                    aria-label="Delete form"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Inline editor */}
+              {editingForm?.id === form.id && (
+                <FormEditor
+                  form={form}
+                  onSaved={async () => {
+                    setEditingForm(null)
+                    await fetchForms()
+                  }}
+                />
+              )}
+            </div>
+          ))}
+
+          {/* New form */}
+          {showNewForm ? (
+            <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="new-form-name" className="block text-sm font-medium text-[var(--color-text)] mb-1">Name</label>
+                  <input
+                    id="new-form-name"
+                    type="text"
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    placeholder="Design Request Form"
+                    className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="new-form-category" className="block text-sm font-medium text-[var(--color-text)] mb-1">Category</label>
+                  <select
+                    id="new-form-category"
+                    value={newCategory}
+                    onChange={e => setNewCategory(e.target.value)}
+                    className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                  >
+                    {FORM_CATEGORIES.map(c => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <TahiButton variant="secondary" size="sm" onClick={() => setShowNewForm(false)}>Cancel</TahiButton>
+                <TahiButton size="sm" onClick={handleCreate} disabled={saving || !newName.trim()}>
+                  {saving ? 'Creating...' : 'Create Form'}
+                </TahiButton>
+              </div>
+            </div>
+          ) : (
+            <TahiButton variant="secondary" size="sm" onClick={() => setShowNewForm(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+              Add Form Template
+            </TahiButton>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// -- Form Editor --
+
+function FormEditor({ form, onSaved }: { form: FormTemplate; onSaved: () => void }) {
+  const [questions, setQuestions] = useState<FormQuestion[]>(
+    Array.isArray(form.questions) ? form.questions as FormQuestion[] : []
+  )
+  const [saving, setSaving] = useState(false)
+
+  function addQuestion() {
+    setQuestions([
+      ...questions,
+      { id: crypto.randomUUID(), type: 'text', label: '', required: false },
+    ])
+  }
+
+  function updateQuestion(idx: number, updates: Partial<FormQuestion>) {
+    setQuestions(questions.map((q, i) => i === idx ? { ...q, ...updates } : q))
+  }
+
+  function removeQuestion(idx: number) {
+    setQuestions(questions.filter((_, i) => i !== idx))
+  }
+
+  async function save() {
+    setSaving(true)
+    try {
+      await fetch(apiPath(`/api/admin/forms/${form.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questions }),
+      })
+      onSaved()
+    } catch {
+      // Failed
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="border-t border-[var(--color-border-subtle)] px-5 py-4 space-y-3">
+      {questions.map((q, i) => (
+        <div key={q.id} className="flex items-start gap-2 bg-[var(--color-bg-secondary)] rounded-lg p-3">
+          <GripVertical className="w-4 h-4 text-[var(--color-text-subtle)] mt-2 flex-shrink-0" />
+          <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <input
+              type="text"
+              value={q.label}
+              onChange={e => updateQuestion(i, { label: e.target.value })}
+              placeholder="Question label"
+              className="text-sm rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand)] sm:col-span-1"
+            />
+            <select
+              value={q.type}
+              onChange={e => updateQuestion(i, { type: e.target.value })}
+              className="text-sm rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-[var(--color-text)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand)]"
+            >
+              {QUESTION_TYPES.map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+                <input
+                  type="checkbox"
+                  checked={q.required}
+                  onChange={e => updateQuestion(i, { required: e.target.checked })}
+                  className="rounded border-[var(--color-border)] accent-[var(--color-brand)]"
+                />
+                Required
+              </label>
+              {(q.type === 'select' || q.type === 'multiselect') && (
+                <input
+                  type="text"
+                  value={(q.options ?? []).join(', ')}
+                  onChange={e => updateQuestion(i, { options: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                  placeholder="Options (comma-separated)"
+                  className="flex-1 text-xs rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand)]"
+                />
+              )}
+            </div>
+          </div>
+          <button
+            onClick={() => removeQuestion(i)}
+            className="p-1 rounded text-[var(--color-text-subtle)] hover:text-[var(--color-danger)] transition-colors mt-1.5"
+            aria-label="Remove question"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      ))}
+
+      <div className="flex items-center justify-between pt-1">
+        <button
+          onClick={addQuestion}
+          className="flex items-center gap-1 text-xs font-medium text-[var(--color-brand)] hover:underline"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add Question
+        </button>
+        <TahiButton size="sm" onClick={save} disabled={saving}>
+          {saving ? 'Saving...' : 'Save Questions'}
+        </TahiButton>
+      </div>
+    </div>
+  )
+}
+
+// -- Kanban Columns Section --
+
+interface KanbanColumnData {
+  id: string
+  label: string
+  statusValue: string
+  colour: string | null
+  position: number
+  isDefault: number
+}
+
+function KanbanColumnsSection() {
+  const [columns, setColumns] = useState<KanbanColumnData[]>([])
+  const [loadingCols, setLoadingCols] = useState(true)
+  const [showAdd, setShowAdd] = useState(false)
+  const [newLabel, setNewLabel] = useState('')
+  const [newStatus, setNewStatus] = useState('')
+  const [newColour, setNewColour] = useState('#5A824E')
+  const [saving, setSaving] = useState(false)
+
+  const fetchColumns = useCallback(async () => {
+    setLoadingCols(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/kanban-columns'))
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as { columns: KanbanColumnData[] }
+      setColumns((data.columns ?? []).sort((a, b) => a.position - b.position))
+    } catch {
+      setColumns([])
+    } finally {
+      setLoadingCols(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchColumns() }, [fetchColumns])
+
+  async function handleAdd() {
+    if (!newLabel.trim() || !newStatus.trim()) return
+    setSaving(true)
+    try {
+      await fetch(apiPath('/api/admin/kanban-columns'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: newLabel.trim(),
+          statusValue: newStatus.trim(),
+          colour: newColour,
+          position: columns.length,
+        }),
+      })
+      setShowAdd(false)
+      setNewLabel('')
+      setNewStatus('')
+      setNewColour('#5A824E')
+      await fetchColumns()
+    } catch {
+      // Failed
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDeleteColumn(id: string) {
+    try {
+      await fetch(apiPath(`/api/admin/kanban-columns/${id}`), { method: 'DELETE' })
+      await fetchColumns()
+    } catch {
+      // Failed
+    }
+  }
+
+  async function handleUpdateColumn(id: string, updates: Partial<KanbanColumnData>) {
+    try {
+      await fetch(apiPath(`/api/admin/kanban-columns/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+      await fetchColumns()
+    } catch {
+      // Failed
+    }
+  }
+
+  async function moveColumn(idx: number, direction: -1 | 1) {
+    const targetIdx = idx + direction
+    if (targetIdx < 0 || targetIdx >= columns.length) return
+    const current = columns[idx]
+    const target = columns[targetIdx]
+    await Promise.all([
+      handleUpdateColumn(current.id, { position: target.position }),
+      handleUpdateColumn(target.id, { position: current.position }),
+    ])
+  }
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <GripVertical className="w-5 h-5" />
+        Kanban Columns
+      </h2>
+
+      {loadingCols ? (
+        <LoadingSkeleton rows={3} />
+      ) : (
+        <div className="space-y-2">
+          {columns.map((col, idx) => (
+            <div key={col.id} className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl px-4 py-3 flex items-center gap-3">
+              <div
+                className="w-3 h-3 rounded-full flex-shrink-0"
+                style={{ background: col.colour ?? 'var(--color-text-subtle)' }}
+              />
+              <InlineEditText
+                value={col.label}
+                onSave={label => handleUpdateColumn(col.id, { label })}
+                className="flex-1 text-sm font-medium text-[var(--color-text)]"
+              />
+              <span className="text-xs text-[var(--color-text-subtle)] flex-shrink-0">{col.statusValue}</span>
+              <input
+                type="color"
+                value={col.colour ?? '#5A824E'}
+                onChange={e => handleUpdateColumn(col.id, { colour: e.target.value })}
+                className="w-6 h-6 rounded border border-[var(--color-border)] cursor-pointer flex-shrink-0"
+                aria-label={`Change color for ${col.label}`}
+              />
+              <div className="flex items-center gap-0.5 flex-shrink-0">
+                <button
+                  onClick={() => moveColumn(idx, -1)}
+                  disabled={idx === 0}
+                  className="p-1 rounded text-[var(--color-text-subtle)] hover:bg-[var(--color-bg-secondary)] disabled:opacity-30 transition-colors"
+                  aria-label="Move up"
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => moveColumn(idx, 1)}
+                  disabled={idx === columns.length - 1}
+                  className="p-1 rounded text-[var(--color-text-subtle)] hover:bg-[var(--color-bg-secondary)] disabled:opacity-30 transition-colors"
+                  aria-label="Move down"
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <button
+                onClick={() => handleDeleteColumn(col.id)}
+                className="p-1 rounded text-[var(--color-text-subtle)] hover:text-[var(--color-danger)] hover:bg-[var(--color-bg-secondary)] transition-colors flex-shrink-0"
+                aria-label="Delete column"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+
+          {showAdd ? (
+            <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-4 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label htmlFor="new-col-label" className="block text-xs font-medium text-[var(--color-text)] mb-1">Label</label>
+                  <input
+                    id="new-col-label"
+                    type="text"
+                    value={newLabel}
+                    onChange={e => setNewLabel(e.target.value)}
+                    placeholder="In Progress"
+                    className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-1.5 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="new-col-status" className="block text-xs font-medium text-[var(--color-text)] mb-1">Status Value</label>
+                  <input
+                    id="new-col-status"
+                    type="text"
+                    value={newStatus}
+                    onChange={e => setNewStatus(e.target.value)}
+                    placeholder="in_progress"
+                    className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-1.5 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="new-col-colour" className="block text-xs font-medium text-[var(--color-text)] mb-1">Colour</label>
+                  <input
+                    id="new-col-colour"
+                    type="color"
+                    value={newColour}
+                    onChange={e => setNewColour(e.target.value)}
+                    className="w-full h-8 rounded-lg border border-[var(--color-border)] cursor-pointer"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <TahiButton variant="secondary" size="sm" onClick={() => setShowAdd(false)}>Cancel</TahiButton>
+                <TahiButton size="sm" onClick={handleAdd} disabled={saving || !newLabel.trim() || !newStatus.trim()}>
+                  {saving ? 'Adding...' : 'Add Column'}
+                </TahiButton>
+              </div>
+            </div>
+          ) : (
+            <TahiButton variant="secondary" size="sm" onClick={() => setShowAdd(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+              Add Column
+            </TahiButton>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// -- Inline Edit Text --
+
+function InlineEditText({
+  value, onSave, className,
+}: {
+  value: string
+  onSave: (v: string) => void
+  className?: string
+}) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(value)
+
+  function commit() {
+    if (text.trim() && text.trim() !== value) {
+      onSave(text.trim())
+    }
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <input
+        type="text"
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+        autoFocus
+        className="text-sm rounded border border-[var(--color-brand)] bg-[var(--color-bg)] px-1.5 py-0.5 text-[var(--color-text)] focus:outline-none"
+        style={{ width: `${Math.max(text.length, 8)}ch` }}
+      />
+    )
+  }
+
+  return (
+    <button
+      onClick={() => { setText(value); setEditing(true) }}
+      className={`${className ?? ''} hover:underline cursor-text text-left`}
+    >
+      {value}
+    </button>
   )
 }
