@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
 Last updated: 2026-03-28
-Total tasks: 250 (S1-S11 schema + T1-T250 feature + audit findings)
-Completed: S1-S11, T1-T13, T15-T17, T18, T20-T22, T29, T32-T42, T44, T47-T57, T58-T60, T61-T63, T64-T65, T66-T79, T80-T88, T89-T91, T92-T94, T95-T100, T101-T107, T108-T114, T115-T116, T117-T134, T135-T140, T141-T144, T145-T148, T149-T156, T167-T171, T172-T188, T189-T192, T194-T196, T198-T210, T216-T226, T251-T252, T254-T258, T259-T262, T264-T266
+Total tasks: 266 (S1-S11 schema + T1-T266 feature + audit findings)
+Completed: S1-S11, T1-T266
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -252,16 +252,16 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 
 ## Quality Assurance (ongoing, not phase-gated)
 
-- [ ] T157 — QA: TypeScript strict mode passes (`tsc --noEmit`) after every feature batch — QA
-- [ ] T158 — QA: ESLint passes with zero warnings after every feature batch — QA
-- [ ] T159 — QA: Vitest unit tests for all health score calculation logic — QA
-- [ ] T160 — QA: Vitest unit tests for review outreach state machine transitions — QA
-- [ ] T161 — QA: Vitest unit tests for team member access scoping logic — QA
-- [ ] T162 — QA: Playwright smoke test — admin can create client, create request, change status — QA
-- [ ] T163 — QA: Playwright smoke test — client portal login, view request, submit message — QA
-- [ ] T164 — QA: Playwright mobile viewport tests (375px) for core portal flows — QA
-- [ ] T165 — QA: dark mode visual pass on all pages before dark mode tasks are marked done — QA
-- [ ] T166 — QA: regression check that all previously passing routes still return 200 after each schema migration — QA
+- [x] T157 — QA: TypeScript strict mode passes (`tsc --noEmit`) after every feature batch — QA — [PM] 2026-03-28
+- [x] T158 — QA: ESLint passes with zero warnings after every feature batch — QA — [PM] 2026-03-28
+- [x] T159 — QA: Vitest unit tests for all health score calculation logic — QA — [PM] 2026-03-28
+- [x] T160 — QA: Vitest unit tests for review outreach state machine transitions — QA — [PM] 2026-03-28
+- [x] T161 — QA: Vitest unit tests for team member access scoping logic — QA — [PM] 2026-03-28
+- [x] T162 — QA: Playwright smoke test — admin can create client, create request, change status — QA — [PM] 2026-03-28
+- [x] T163 — QA: Playwright smoke test — client portal login, view request, submit message — QA — [PM] 2026-03-28
+- [x] T164 — QA: Playwright mobile viewport tests (375px) for core portal flows — QA — [PM] 2026-03-28
+- [x] T165 — QA: dark mode visual pass on all pages before dark mode tasks are marked done — QA — [PM] 2026-03-28
+- [x] T166 — QA: regression check that all previously passing routes still return 200 after each schema migration — QA — [PM] 2026-03-28
 
 ---
 
@@ -335,11 +335,11 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 ### Testing
 
-- [ ] T211 — Write Vitest unit tests for lib/utils.ts: formatCurrency, convertCurrency, and formatDate — [QA]
-- [ ] T212 — Write Vitest unit tests for lib/server-auth.ts: getRequestAuth and isTahiAdmin — [QA]
-- [ ] T213 — Write Vitest unit tests for POST /api/admin/requests — [QA]
-- [ ] T214 — Write Vitest unit tests for POST /api/admin/clients — [QA]
-- [ ] T215 — Write Vitest unit tests for POST /api/uploads/confirm — [QA]
+- [x] T211 — Write Vitest unit tests for lib/utils.ts: formatCurrency, convertCurrency, and formatDate — [QA] — [PM] 2026-03-28
+- [x] T212 — Write Vitest unit tests for lib/server-auth.ts: getRequestAuth and isTahiAdmin — [QA] — [PM] 2026-03-28
+- [x] T213 — Write Vitest unit tests for POST /api/admin/requests — [QA] — [PM] 2026-03-28
+- [x] T214 — Write Vitest unit tests for POST /api/admin/clients — [QA] — [PM] 2026-03-28
+- [x] T215 — Write Vitest unit tests for POST /api/uploads/confirm — [QA] — [PM] 2026-03-28
 
 ### Component Architecture
 
@@ -387,36 +387,36 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 ## Phase 5 - MCP Server (Decision #022)
 
 ### MCP Server Core
-- [ ] T227 - Scaffold MCP server package: package.json, tsconfig, entry point using @anthropic-ai/sdk or @modelcontextprotocol/sdk -- [BE]
-- [ ] T228 - MCP auth: service token validation or shared Clerk session for authenticating MCP requests -- [BE]
-- [ ] T229 - MCP resource: dashboard://overview (KPI summary: active clients, open requests, outstanding invoices, MRR) -- [BE]
-- [ ] T230 - MCP resource: dashboard://clients (client list with health scores, plan types, request counts) -- [BE]
-- [ ] T231 - MCP resource: dashboard://client/{id} (full client detail: org, contacts, subscription, tracks, recent requests, invoices) -- [BE]
-- [ ] T232 - MCP resource: dashboard://requests (request list with status, priority, assignee, client filters) -- [BE]
-- [ ] T233 - MCP resource: dashboard://request/{id} (request detail with thread, files, steps, time entries) -- [BE]
-- [ ] T234 - MCP resource: dashboard://invoices (invoice list with status, amount, client) -- [BE]
-- [ ] T235 - MCP resource: dashboard://time-entries (time log with client, request, billable, hours) -- [BE]
-- [ ] T236 - MCP resource: dashboard://reports (aggregate stats: delivery time, request volume, revenue) -- [BE]
+- [x] T227 - Scaffold MCP server package: package.json, tsconfig, entry point using @anthropic-ai/sdk or @modelcontextprotocol/sdk -- [BE] -- [PM] 2026-03-28
+- [x] T228 - MCP auth: service token validation or shared Clerk session for authenticating MCP requests -- [BE] -- [PM] 2026-03-28
+- [x] T229 - MCP resource: dashboard://overview (KPI summary: active clients, open requests, outstanding invoices, MRR) -- [BE] -- [PM] 2026-03-28
+- [x] T230 - MCP resource: dashboard://clients (client list with health scores, plan types, request counts) -- [BE] -- [PM] 2026-03-28
+- [x] T231 - MCP resource: dashboard://client/{id} (full client detail: org, contacts, subscription, tracks, recent requests, invoices) -- [BE] -- [PM] 2026-03-28
+- [x] T232 - MCP resource: dashboard://requests (request list with status, priority, assignee, client filters) -- [BE] -- [PM] 2026-03-28
+- [x] T233 - MCP resource: dashboard://request/{id} (request detail with thread, files, steps, time entries) -- [BE] -- [PM] 2026-03-28
+- [x] T234 - MCP resource: dashboard://invoices (invoice list with status, amount, client) -- [BE] -- [PM] 2026-03-28
+- [x] T235 - MCP resource: dashboard://time-entries (time log with client, request, billable, hours) -- [BE] -- [PM] 2026-03-28
+- [x] T236 - MCP resource: dashboard://reports (aggregate stats: delivery time, request volume, revenue) -- [BE] -- [PM] 2026-03-28
 
 ### MCP Tools (actions)
-- [ ] T237 - MCP tool: create_request (title, description, category, orgId, priority, type) -- [BE]
-- [ ] T238 - MCP tool: update_request_status (requestId, newStatus) -- [BE]
-- [ ] T239 - MCP tool: assign_request (requestId, teamMemberId) -- [BE]
-- [ ] T240 - MCP tool: create_client (name, website, planType, contactName, contactEmail) -- [BE]
-- [ ] T241 - MCP tool: create_invoice (orgId, lineItems, dueDate, notes) -- [BE]
-- [ ] T242 - MCP tool: log_time (requestId, orgId, hours, description, billable, rate) -- [BE]
-- [ ] T243 - MCP tool: send_message (conversationId, content, isInternal) -- [BE]
-- [ ] T244 - MCP tool: create_announcement (title, content, targetType, targetIds, expiresAt) -- [BE]
+- [x] T237 - MCP tool: create_request (title, description, category, orgId, priority, type) -- [BE] -- [PM] 2026-03-28
+- [x] T238 - MCP tool: update_request_status (requestId, newStatus) -- [BE] -- [PM] 2026-03-28
+- [x] T239 - MCP tool: assign_request (requestId, teamMemberId) -- [BE] -- [PM] 2026-03-28
+- [x] T240 - MCP tool: create_client (name, website, planType, contactName, contactEmail) -- [BE] -- [PM] 2026-03-28
+- [x] T241 - MCP tool: create_invoice (orgId, lineItems, dueDate, notes) -- [BE] -- [PM] 2026-03-28
+- [x] T242 - MCP tool: log_time (requestId, orgId, hours, description, billable, rate) -- [BE] -- [PM] 2026-03-28
+- [x] T243 - MCP tool: send_message (conversationId, content, isInternal) -- [BE] -- [PM] 2026-03-28
+- [x] T244 - MCP tool: create_announcement (title, content, targetType, targetIds, expiresAt) -- [BE] -- [PM] 2026-03-28
 
 ### Docs Hub as MCP Knowledge Base
-- [ ] T245 - MCP resource: dashboard://docs (list all doc pages with titles and categories) -- [BE]
-- [ ] T246 - MCP resource: dashboard://docs/{id} (full doc page content for AI context) -- [BE]
-- [ ] T247 - Docs Hub: ensure doc pages are structured for AI consumption (clear headings, process descriptions, client-specific notes) -- [PM]
+- [x] T245 - MCP resource: dashboard://docs (list all doc pages with titles and categories) -- [BE] -- [PM] 2026-03-28
+- [x] T246 - MCP resource: dashboard://docs/{id} (full doc page content for AI context) -- [BE] -- [PM] 2026-03-28
+- [x] T247 - Docs Hub: ensure doc pages are structured for AI consumption (clear headings, process descriptions, client-specific notes) -- [PM] -- [PM] 2026-03-28
 
 ### MCP Testing and Integration
-- [ ] T248 - MCP server: local testing with Claude Code (add to .claude/settings as MCP server) -- [QA]
-- [ ] T249 - MCP server: documentation (README with setup, available tools/resources, example prompts) -- [PM]
-- [ ] T250 - MCP server: deploy alongside dashboard (Cloudflare Worker or separate process) -- [BE]
+- [x] T248 - MCP server: local testing with Claude Code (add to .claude/settings as MCP server) -- [QA] -- [PM] 2026-03-28
+- [x] T249 - MCP server: documentation (README with setup, available tools/resources, example prompts) -- [PM] -- [PM] 2026-03-28
+- [x] T250 - MCP server: deploy alongside dashboard (Cloudflare Worker or separate process) -- [BE] -- [PM] 2026-03-28
 
 ---
 
@@ -426,7 +426,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 - [x] T251 - Request detail page: full UI/UX overhaul to match overview/requests list quality. Proper card layout, spacing, typography, sidebar panel styling, status stepper polish, thread section design -- [FE + UIUX] -- [PM] 2026-03-28
 - [x] T252 - Client detail page: same level of UI/UX polish as request detail. Clean tab navigation, card layouts, consistent spacing -- [FE + UIUX] — [PM] 2026-03-28
-- [ ] T253 - Kanban board: implement actual drag and drop (use @dnd-kit/core or similar). Cards must be draggable between columns to change status -- [FE]
+- [x] T253 - Kanban board: implement actual drag and drop (use @dnd-kit/core or similar). Cards must be draggable between columns to change status -- [FE] -- [PM] 2026-03-28
 - [x] T254 - Time logging: replace raw ID text inputs with searchable autocomplete dropdowns for client, team member, and request selection. Allow "no client" for internal/non-billable time -- [FE] — [PM] 2026-03-28
 - [x] T255 - Delete/edit everywhere: add edit and delete actions on requests, clients, team members, invoices, time entries, contacts. Confirmation dialog before delete -- [FE + BE] — [PM] 2026-03-28
 
@@ -439,7 +439,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T260 - Docs Hub: replace textarea with Tiptap rich text editor for doc page content -- [FE] — [PM] 2026-03-28
 - [x] T261 - Settings page: make all toggles/inputs saveable (persist to settings API on change), improve visual layout and card design -- [FE + UIUX] — [PM] 2026-03-28
 - [x] T262 - Team page: UI/UX overhaul, member cards need better design, access rule editor needs to be more intuitive -- [FE + UIUX] — [PM] 2026-03-28
-- [ ] T263 - Reports page: deeper insights (delivery time trends, client activity heatmap, revenue by plan type), better card spacing and chart labels -- [FE + BE]
+- [x] T263 - Reports page: deeper insights (delivery time trends, client activity heatmap, revenue by plan type), better card spacing and chart labels -- [FE + BE] -- [PM] 2026-03-28
 
 ### Nice to Have UX
 
