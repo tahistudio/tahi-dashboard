@@ -3,9 +3,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   MessageSquare, Search, Plus, Send, Users, Hash, AtSign,
-  ChevronRight, Loader2, Lock,
+  Loader2, Lock, Eye, EyeOff,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { SearchableSelect } from '@/components/tahi/searchable-select'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -641,6 +642,12 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
 
 // ── New Conversation Dialog ─────────────────────────────────────────────────
 
+interface ParticipantSelectOption {
+  value: string
+  label: string
+  subtitle?: string
+}
+
 function NewConversationDialog({
   isAdmin,
   onClose,
@@ -656,6 +663,57 @@ function NewConversationDialog({
   const [initialMessage, setInitialMessage] = useState('')
   const [creating, setCreating] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+  const [participantOptions, setParticipantOptions] = useState<ParticipantSelectOption[]>([])
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([])
+  const [participantSearch, setParticipantSearch] = useState<string | null>(null)
+
+  // Load team members + contacts as participant options
+  useEffect(() => {
+    if (!isAdmin) return
+
+    async function load() {
+      try {
+        const [teamRes, clientsRes] = await Promise.all([
+          fetch(apiPath('/api/admin/team')),
+          fetch(apiPath('/api/admin/clients')),
+        ])
+
+        const opts: ParticipantSelectOption[] = []
+
+        if (teamRes.ok) {
+          const data = await teamRes.json() as { items: Array<{ id: string; name: string; email: string }> }
+          for (const m of (data.items ?? [])) {
+            opts.push({ value: `team:${m.id}`, label: m.name, subtitle: `Team - ${m.email}` })
+          }
+        }
+
+        if (clientsRes.ok) {
+          const data = await clientsRes.json() as { organisations: Array<{ id: string; name: string }> }
+          for (const org of (data.organisations ?? [])) {
+            opts.push({ value: `org:${org.id}`, label: org.name, subtitle: 'Client org' })
+          }
+        }
+
+        setParticipantOptions(opts)
+      } catch {
+        // Failed to load participants
+      }
+    }
+
+    load()
+  }, [isAdmin])
+
+  function addParticipant(val: string | null) {
+    if (!val) return
+    setParticipantSearch(null)
+    if (!selectedParticipantIds.includes(val)) {
+      setSelectedParticipantIds(prev => [...prev, val])
+    }
+  }
+
+  function removeParticipant(val: string) {
+    setSelectedParticipantIds(prev => prev.filter(id => id !== val))
+  }
 
   const handleCreate = async () => {
     setCreating(true)
@@ -667,7 +725,7 @@ function NewConversationDialog({
             type,
             name: name.trim() || null,
             visibility,
-            participantIds: [],
+            participantIds: selectedParticipantIds,
           }
         : {
             type: 'direct',
@@ -768,27 +826,87 @@ function NewConversationDialog({
                 </div>
               )}
 
+              {/* Participants */}
+              <div>
+                <label className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                  Participants
+                </label>
+                <SearchableSelect
+                  options={participantOptions.filter(o => !selectedParticipantIds.includes(o.value))}
+                  value={participantSearch}
+                  onChange={addParticipant}
+                  placeholder="Add a participant..."
+                  searchPlaceholder="Search team or clients..."
+                  allowClear
+                />
+                {selectedParticipantIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {selectedParticipantIds.map(pid => {
+                      const opt = participantOptions.find(o => o.value === pid)
+                      return (
+                        <span
+                          key={pid}
+                          className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full"
+                          style={{
+                            background: 'var(--color-brand-50)',
+                            color: 'var(--color-brand-dark)',
+                          }}
+                        >
+                          {opt?.label ?? pid}
+                          <button
+                            type="button"
+                            onClick={() => removeParticipant(pid)}
+                            className="ml-0.5 hover:opacity-70"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0 }}
+                            aria-label={`Remove ${opt?.label ?? pid}`}
+                          >
+                            x
+                          </button>
+                        </span>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
               {/* Visibility */}
               <div>
-                <label htmlFor="conv-visibility" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                <label className="block text-sm font-medium text-[var(--color-text)] mb-1">
                   Visibility
                 </label>
-                <select
-                  id="conv-visibility"
-                  value={visibility}
-                  onChange={e => setVisibility(e.target.value)}
-                  className="w-full text-sm text-[var(--color-text)]"
-                  style={{
-                    padding: '0.5rem 0.75rem',
-                    borderRadius: 'var(--radius-input)',
-                    border: '1px solid var(--color-border)',
-                    background: 'var(--color-bg)',
-                    minHeight: '2.75rem',
-                  }}
-                >
-                  <option value="external">External (visible to clients)</option>
-                  <option value="internal">Internal (team only)</option>
-                </select>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setVisibility('external')}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg border transition-colors"
+                    style={{
+                      background: visibility === 'external' ? 'var(--color-brand-50)' : 'var(--color-bg)',
+                      borderColor: visibility === 'external' ? 'var(--color-brand)' : 'var(--color-border)',
+                      color: visibility === 'external' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    External
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVisibility('internal')}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg border transition-colors"
+                    style={{
+                      background: visibility === 'internal' ? '#fff7ed' : 'var(--color-bg)',
+                      borderColor: visibility === 'internal' ? 'var(--color-warning)' : 'var(--color-border)',
+                      color: visibility === 'internal' ? 'var(--color-warning)' : 'var(--color-text-muted)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <EyeOff className="w-3.5 h-3.5" />
+                    Internal
+                  </button>
+                </div>
+                <p className="text-xs mt-1" style={{ color: 'var(--color-text-subtle)' }}>
+                  {visibility === 'internal' ? 'Only visible to the Tahi team.' : 'Visible to clients and team.'}
+                </p>
               </div>
             </>
           ) : (
