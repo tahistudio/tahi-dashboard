@@ -2,8 +2,9 @@ import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
   // Webflow Cloud mounts this app at /dashboard on tahi.studio
-  // basePath makes Next.js prepend /dashboard to all internal routes, links, and API calls.
-  // In code, always write href="/" or fetch('/api/...') — Next.js adds /dashboard transparently.
+  // basePath makes Next.js prepend /dashboard to internal links/router calls automatically.
+  // NOTE: native fetch() in Client Components does NOT get basePath added automatically —
+  // use the apiPath() helper from lib/api.ts for all client-side fetch calls.
   basePath: '/dashboard',
 
   // ─── NEXT_PUBLIC_* vars ─────────────────────────────────────────────────────
@@ -43,6 +44,11 @@ const nextConfig: NextConfig = {
     // App URL — points to the live dashboard
     NEXT_PUBLIC_APP_URL:
       process.env.NEXT_PUBLIC_APP_URL ?? 'https://tahi-test-dashboard.webflow.io/dashboard',
+
+    // BasePath — Next.js adds this to links/router automatically, but NOT to fetch().
+    // Client Components must prepend this manually when calling API routes.
+    // Use the apiPath() helper from lib/api.ts for all client-side fetch calls.
+    NEXT_PUBLIC_BASEPATH: '/dashboard',
   },
 
   images: {

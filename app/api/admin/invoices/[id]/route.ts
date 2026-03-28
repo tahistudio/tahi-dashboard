@@ -1,0 +1,94 @@
+import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { schema } from '@/db/d1'
+import { eq } from 'drizzle-orm'
+
+type Params = { params: Promise<{ id: string }> }
+
+// ── GET /api/admin/invoices/[id] ─────────────────────────────────────────────
+export async function GET(req: NextRequest, { params }: Params) {
+  const { orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const { id } = await params
+  const database = await db()
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const [invoiceRow] = await drizzle
+    .select({
+      id: schema.invoices.id,
+      orgId: schema.invoices.orgId,
+      orgName: schema.organisations.name,
+      projectId: schema.invoices.projectId,
+      subscriptionId: schema.invoices.subscriptionId,
+      stripeInvoiceId: schema.invoices.stripeInvoiceId,
+      xeroInvoiceId: schema.invoices.xeroInvoiceId,
+      status: schema.invoices.status,
+      amountUsd: schema.invoices.amountUsd,
+      taxAmountUsd: schema.invoices.taxAmountUsd,
+      discountAmountUsd: schema.invoices.discountAmountUsd,
+      totalUsd: schema.invoices.totalUsd,
+      currency: schema.invoices.currency,
+      notes: schema.invoices.notes,
+      dueDate: schema.invoices.dueDate,
+      sentAt: schema.invoices.sentAt,
+      viewedAt: schema.invoices.viewedAt,
+      paidAt: schema.invoices.paidAt,
+      createdAt: schema.invoices.createdAt,
+      updatedAt: schema.invoices.updatedAt,
+    })
+    .from(schema.invoices)
+    .leftJoin(schema.organisations, eq(schema.invoices.orgId, schema.organisations.id))
+    .where(eq(schema.invoices.id, id))
+    .limit(1)
+
+  if (!invoiceRow) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
+  const items = await drizzle
+    .select()
+    .from(schema.invoiceItems)
+    .where(eq(schema.invoiceItems.invoiceId, id))
+
+  return NextResponse.json({ invoice: invoiceRow, items })
+}
+
+// ── PATCH /api/admin/invoices/[id] ───────────────────────────────────────────
+export async function PATCH(req: NextRequest, { params }: Params) {
+  const { orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const { id } = await params
+  const body = await req.json() as {
+    status?: string
+    dueDate?: string | null
+    notes?: string | null
+  }
+
+  if (!('status' in body) && !('dueDate' in body) && !('notes' in body)) {
+    return NextResponse.json({ error: 'At least one field (status, dueDate, notes) is required' }, { status: 400 })
+  }
+
+  const now = new Date().toISOString()
+  const patch: Record<string, unknown> = { updatedAt: now }
+
+  if (body.status !== undefined) patch.status = body.status
+  if ('dueDate' in body) patch.dueDate = body.dueDate ?? null
+  if ('notes' in body) patch.notes = body.notes ?? null
+
+  const database = await db()
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  await drizzle
+    .update(schema.invoices)
+    .set(patch)
+    .where(eq(schema.invoices.id, id))
+
+  return NextResponse.json({ success: true })
+}

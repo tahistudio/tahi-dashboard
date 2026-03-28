@@ -2,12 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { apiPath } from '@/lib/api'
 import {
   ArrowLeft,
   Globe,
   Building2,
   Mail,
-  Phone,
   User,
   Edit2,
   Check,
@@ -116,7 +116,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(`/api/admin/clients/${clientId}`)
+      const res = await fetch(apiPath(`/api/admin/clients/${clientId}`))
       if (!res.ok) { router.push('/clients'); return }
       setData(await res.json() as ClientData)
     } finally {
@@ -140,14 +140,14 @@ export function ClientDetail({ clientId }: { clientId: string }) {
           <div className="flex items-start gap-3 mb-4">
             <button
               onClick={() => router.push('/clients')}
-              className="mt-0.5 p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+              className="mt-0.5 p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
             >
               <ArrowLeft className="w-4 h-4" />
             </button>
 
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-xl font-bold text-[var(--color-text-primary)] truncate">
+                <h1 className="text-xl font-bold text-[var(--color-text)] truncate">
                   {org.name}
                 </h1>
                 <HealthDot health={org.healthStatus} className="w-2.5 h-2.5" />
@@ -194,7 +194,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
                     'flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
                     isActive
                       ? 'border-[var(--color-brand)] text-[var(--color-brand)]'
-                      : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+                      : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border)]'
                   )}
                 >
                   <Icon className="w-3.5 h-3.5" />
@@ -294,7 +294,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
   const save = async () => {
     setSaving(true)
     try {
-      await fetch(`/api/admin/clients/${org.id}`, {
+      await fetch(apiPath(`/api/admin/clients/${org.id}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
@@ -317,11 +317,11 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
   return (
     <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="font-semibold text-[var(--color-text-primary)]">Organisation details</h2>
+        <h2 className="font-semibold text-[var(--color-text)]">Organisation details</h2>
         {!editing ? (
           <button
             onClick={() => setEditing(true)}
-            className="flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+            className="flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
           >
             <Edit2 className="w-3.5 h-3.5" />
             Edit
@@ -330,7 +330,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
           <div className="flex gap-2">
             <button
               onClick={() => { setEditing(false); setForm({ name: org.name, website: org.website ?? '', industry: org.industry ?? '', status: org.status, healthStatus: org.healthStatus ?? 'green', healthNote: org.healthNote ?? '' }) }}
-              className="flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+              className="flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
             >
               <X className="w-3.5 h-3.5" /> Cancel
             </button>
@@ -427,7 +427,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
           </div>
           <div>
             <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Industry</dt>
-            <dd className="text-[var(--color-text-primary)]">{org.industry ?? '—'}</dd>
+            <dd className="text-[var(--color-text)]">{org.industry ?? '—'}</dd>
           </div>
           <div>
             <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Status</dt>
@@ -437,20 +437,20 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
             <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Health</dt>
             <dd className="flex items-center gap-1.5">
               <HealthDot health={org.healthStatus} />
-              <span className="capitalize text-[var(--color-text-primary)]">
+              <span className="capitalize text-[var(--color-text)]">
                 {org.healthStatus ?? 'Unknown'}
               </span>
             </dd>
           </div>
           <div>
             <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Client since</dt>
-            <dd className="text-[var(--color-text-primary)]">
+            <dd className="text-[var(--color-text)]">
               {new Date(org.createdAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
             </dd>
           </div>
           <div>
             <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Last updated</dt>
-            <dd className="text-[var(--color-text-primary)]">
+            <dd className="text-[var(--color-text)]">
               {new Date(org.updatedAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
             </dd>
           </div>
@@ -466,7 +466,7 @@ function ContactsCard({ contacts }: { contacts: Contact[] }) {
   return (
     <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-sm text-[var(--color-text-primary)]">Contacts</h3>
+        <h3 className="font-semibold text-sm text-[var(--color-text)]">Contacts</h3>
         <button className="p-1 rounded hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)]">
           <Plus className="w-3.5 h-3.5" />
         </button>
@@ -483,7 +483,7 @@ function ContactsCard({ contacts }: { contacts: Contact[] }) {
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-sm font-medium text-[var(--color-text-primary)] truncate">
+                  <span className="text-sm font-medium text-[var(--color-text)] truncate">
                     {contact.name}
                   </span>
                   {contact.isPrimary && (
@@ -517,7 +517,7 @@ function ContactsCard({ contacts }: { contacts: Contact[] }) {
 function SubscriptionCard({ subscription, tracks }: { subscription: Subscription; tracks: Track[] }) {
   return (
     <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
-      <h3 className="font-semibold text-sm text-[var(--color-text-primary)] mb-3">Subscription</h3>
+      <h3 className="font-semibold text-sm text-[var(--color-text)] mb-3">Subscription</h3>
 
       <div className="flex items-center gap-2 mb-3">
         <PlanBadge plan={subscription.planType} />
@@ -528,7 +528,7 @@ function SubscriptionCard({ subscription, tracks }: { subscription: Subscription
         {subscription.currentPeriodEnd && (
           <div className="flex justify-between">
             <span>Renews</span>
-            <span className="text-[var(--color-text-primary)]">
+            <span className="text-[var(--color-text)]">
               {new Date(subscription.currentPeriodEnd).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
             </span>
           </div>
@@ -596,7 +596,7 @@ function InternalNotesCard({ org, onUpdated }: { org: Organisation; onUpdated: (
   const save = async () => {
     setSaving(true)
     try {
-      await fetch(`/api/admin/clients/${org.id}`, {
+      await fetch(apiPath(`/api/admin/clients/${org.id}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ internalNotes: notes }),
@@ -611,11 +611,11 @@ function InternalNotesCard({ org, onUpdated }: { org: Organisation; onUpdated: (
   return (
     <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="font-semibold text-sm text-[var(--color-text-primary)]">Internal notes</h3>
+        <h3 className="font-semibold text-sm text-[var(--color-text)]">Internal notes</h3>
         {!editing ? (
           <button
             onClick={() => setEditing(true)}
-            className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+            className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
           >
             Edit
           </button>
@@ -657,7 +657,7 @@ function RecentRequestsCard({ requests, orgId }: { requests: Request[]; orgId: s
   return (
     <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="font-semibold text-[var(--color-text-primary)]">Recent requests</h2>
+        <h2 className="font-semibold text-[var(--color-text)]">Recent requests</h2>
         <TahiButton
           variant="ghost"
           size="sm"
@@ -696,7 +696,6 @@ function RecentRequestsCard({ requests, orgId }: { requests: Request[]; orgId: s
 // ── Requests tab (full list) ───────────────────────────────────────────────────
 
 function RequestsTab({ clientId }: { clientId: string }) {
-  const router = useRouter()
   const [requests, setRequests] = useState<Request[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -704,7 +703,7 @@ function RequestsTab({ clientId }: { clientId: string }) {
   const load = async () => {
     setLoading(true)
     try {
-      const res = await fetch(`/api/admin/requests?clientId=${clientId}&status=all`)
+      const res = await fetch(apiPath(`/api/admin/requests?clientId=${clientId}&status=all`))
       const data = await res.json() as { requests: Request[] }
       setRequests(data.requests ?? [])
     } finally {
@@ -725,7 +724,7 @@ function RequestsTab({ clientId }: { clientId: string }) {
     />
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="font-semibold text-[var(--color-text-primary)]">All requests</h2>
+        <h2 className="font-semibold text-[var(--color-text)]">All requests</h2>
         <TahiButton variant="primary" size="sm" onClick={() => setDialogOpen(true)}>
           <Plus className="w-3.5 h-3.5 mr-1.5" />
           New request
@@ -769,7 +768,7 @@ function BillingTab({ org, subscription, tracks }: { org: Organisation; subscrip
   return (
     <div className="max-w-2xl flex flex-col gap-6">
       <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
-        <h2 className="font-semibold text-[var(--color-text-primary)] mb-4">Current plan</h2>
+        <h2 className="font-semibold text-[var(--color-text)] mb-4">Current plan</h2>
 
         {subscription ? (
           <>
@@ -819,7 +818,7 @@ function BillingTab({ org, subscription, tracks }: { org: Organisation; subscrip
       </div>
 
       <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
-        <h2 className="font-semibold text-[var(--color-text-primary)] mb-3">Invoices</h2>
+        <h2 className="font-semibold text-[var(--color-text)] mb-3">Invoices</h2>
         <p className="text-sm text-[var(--color-text-muted)]">Invoice management coming in Phase 3.</p>
       </div>
     </div>
@@ -834,7 +833,7 @@ function PlaceholderTab({ label, description }: { label: string; description: st
       <div className="w-12 h-12 rounded-xl bg-[var(--color-bg-secondary)] flex items-center justify-center mb-3">
         <span className="text-2xl">🚧</span>
       </div>
-      <h3 className="font-semibold text-[var(--color-text-primary)] mb-1">{label}</h3>
+      <h3 className="font-semibold text-[var(--color-text)] mb-1">{label}</h3>
       <p className="text-sm text-[var(--color-text-muted)] max-w-xs">{description}</p>
     </div>
   )

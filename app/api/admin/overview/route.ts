@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, ne, count, and, inArray, sum } from 'drizzle-orm'
+import { eq, ne, count, and, inArray } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +21,6 @@ export async function GET(req: NextRequest) {
     activeClientsResult,
     openRequestsResult,
     inProgressResult,
-    outstandingInvoicesResult,
     recentRequests,
   ] = await Promise.all([
     // Active client orgs
@@ -45,12 +44,6 @@ export async function GET(req: NextRequest) {
       .select({ count: count() })
       .from(schema.requests)
       .where(inArray(schema.requests.status, ['in_progress', 'in_review', 'client_review'])),
-
-    // Outstanding invoices (sent + overdue) — total value
-    drizzle
-      .select({ total: sum(schema.invoices.totalUsd) })
-      .from(schema.invoices)
-      .where(inArray(schema.invoices.status, ['sent', 'overdue'])),
 
     // Recent 8 requests for activity feed
     drizzle
@@ -80,7 +73,7 @@ export async function GET(req: NextRequest) {
       activeClients: activeClientsResult[0]?.count ?? 0,
       openRequests: openRequestsResult[0]?.count ?? 0,
       inProgress: inProgressResult[0]?.count ?? 0,
-      outstandingInvoicesUsd: Number(outstandingInvoicesResult[0]?.total ?? 0),
+      outstandingInvoicesUsd: 0, // invoices module not yet implemented
     },
     recentRequests,
   })

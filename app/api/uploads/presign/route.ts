@@ -54,20 +54,10 @@ export async function POST(req: NextRequest) {
 
   const fileId = crypto.randomUUID()
 
-  // R2 presigned URL — valid for 15 minutes
-  const uploadUrl = await (env.STORAGE as R2Bucket).createMultipartUpload(storageKey)
-    .catch(() => null)
-
-  // R2 doesn't have a native "presigned PUT" in the Workers API —
-  // instead we use a signed token approach via the workers-compatible method.
-  // For now: generate a signed URL via the binding's built-in method if available,
-  // otherwise fall back to a proxy upload endpoint.
-  //
-  // Cloudflare R2 workers binding supports: put(), get(), delete(), list()
-  // Presigned URLs require using the S3-compatible API (via wrangler or CF dashboard).
-  // In production, use the R2 S3-compatible presigned URL endpoint.
-  //
-  // For the Workers binding path: proxy the upload through a short-lived endpoint token.
+  // R2 Workers binding doesn't support presigned PUT URLs directly.
+  // We proxy the upload through a short-lived endpoint token instead:
+  // client PUTs to /api/uploads/proxy?key=storageKey&token=fileId
+  // which streams the body straight to R2.
 
   // Store a pending upload token in a KV-style approach via the file record
   // The client will upload to /api/uploads/proxy?key=storageKey&token=fileId

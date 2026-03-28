@@ -42,7 +42,7 @@
   --color-glass: rgba(53, 77, 46, 0.20);
   --color-glass-border: rgba(90, 130, 78, 0.3);
 
-  /* Status colours */
+  /* Semantic status colours */
   --color-success: #4ade80;
   --color-success-bg: #f0fdf4;
   --color-warning: #fb923c;
@@ -51,6 +51,86 @@
   --color-danger-bg: #fef2f2;
   --color-info: #60a5fa;
   --color-info-bg: #eff6ff;
+
+  /* ── Request status palette ─────────────────────────────── */
+  --status-draft-dot:          #9ca3af;
+  --status-draft-bg:           #f3f4f6;
+  --status-draft-text:         #4b5563;
+  --status-draft-border:       #e5e7eb;
+
+  --status-submitted-dot:      #60a5fa;
+  --status-submitted-bg:       #eff6ff;
+  --status-submitted-text:     #1d4ed8;
+  --status-submitted-border:   #dbeafe;
+
+  --status-in-review-dot:      #fbbf24;
+  --status-in-review-bg:       #fffbeb;
+  --status-in-review-text:     #b45309;
+  --status-in-review-border:   #fde68a;
+
+  --status-in-progress-dot:    #22c55e;
+  --status-in-progress-bg:     #f0fdf4;
+  --status-in-progress-text:   #15803d;
+  --status-in-progress-border: #bbf7d0;
+
+  --status-client-review-dot:      #a78bfa;
+  --status-client-review-bg:       #f5f3ff;
+  --status-client-review-text:     #7c3aed;
+  --status-client-review-border:   #ede9fe;
+
+  --status-delivered-dot:      #10b981;
+  --status-delivered-bg:       #ecfdf5;
+  --status-delivered-text:     #065f46;
+  --status-delivered-border:   #a7f3d0;
+
+  --status-archived-dot:       #d1d5db;
+  --status-archived-bg:        #f9fafb;
+  --status-archived-text:      #6b7280;
+  --status-archived-border:    #e5e7eb;
+
+  /* ── Category palette ───────────────────────────────────── */
+  --cat-design-bg:        #fce7f3;
+  --cat-design-text:      #be185d;
+
+  --cat-development-bg:   #dbeafe;
+  --cat-development-text: #1d4ed8;
+
+  --cat-content-bg:       #fef3c7;
+  --cat-content-text:     #b45309;
+
+  --cat-strategy-bg:      #f3e8ff;
+  --cat-strategy-text:    #7e22ce;
+
+  --cat-admin-bg:         #f3f4f6;
+  --cat-admin-text:       #4b5563;
+
+  --cat-bug-bg:           #fee2e2;
+  --cat-bug-text:         #dc2626;
+
+  /* ── Priority palette ───────────────────────────────────── */
+  --priority-high-bg:     #fef2f2;
+  --priority-high-text:   #dc2626;
+  --priority-high-border: #fee2e2;
+  --priority-high-dot:    #f87171;
+
+  --priority-urgent-bg:     #fdf2f8;
+  --priority-urgent-text:   #9d174d;
+  --priority-urgent-border: #fbcfe8;
+  --priority-urgent-dot:    #ec4899;
+
+  /* ── Due date / time ────────────────────────────────────── */
+  --color-overdue-bg:    #fef2f2;
+  --color-overdue-text:  #dc2626;
+  --color-due-soon-bg:   #fff7ed;
+  --color-due-soon-text: #b45309;
+  --color-on-track-bg:   #f0fdf4;
+  --color-on-track-text: #15803d;
+
+  /* ── Table / list chrome ────────────────────────────────── */
+  --color-row-hover:  #fafafa;
+  --color-row-border: #f9fafb;
+  --color-th-bg:      #f9fafb;
+  --color-th-text:    #9ca3af;
 
   /* Spacing */
   --spacing-px: 1px;
