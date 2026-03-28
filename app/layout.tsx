@@ -35,6 +35,13 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en" suppressHydrationWarning>
+        <head>
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `try{if(localStorage.getItem('tahi-theme')==='dark'){document.documentElement.classList.add('dark')}}catch(e){}`,
+            }}
+          />
+        </head>
         <body className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)] antialiased">
           {children}
         </body>

@@ -6,11 +6,11 @@ import {
   Inbox, Users, CreditCard, FileText, Clock, CheckSquare,
   BarChart2, BookOpen, UserCog, Settings, MessageSquare,
   FolderOpen, ShoppingBag, PanelLeftClose, PanelLeftOpen,
-  LayoutDashboard,
+  LayoutDashboard, Moon, Sun,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { TahiWordmark, LeafLogo } from './leaf-logo'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 type NavItem = {
   label: string
@@ -86,6 +86,33 @@ const COLLAPSED_WIDTH = 64   // px
 export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
+  const [darkMode, setDarkMode] = useState(false)
+
+  // Read dark mode preference from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('tahi-theme')
+      setDarkMode(stored === 'dark')
+    } catch {
+      // localStorage unavailable
+    }
+  }, [])
+
+  const toggleDarkMode = () => {
+    const next = !darkMode
+    setDarkMode(next)
+    try {
+      if (next) {
+        document.documentElement.classList.add('dark')
+        localStorage.setItem('tahi-theme', 'dark')
+      } else {
+        document.documentElement.classList.remove('dark')
+        localStorage.setItem('tahi-theme', 'light')
+      }
+    } catch {
+      // localStorage unavailable
+    }
+  }
 
   const visibleNav = NAV.map(group => ({
     ...group,
@@ -189,8 +216,39 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
         ))}
       </nav>
 
-      {/* Collapse toggle */}
+      {/* Footer: dark mode + collapse */}
       <div style={{ padding: '8px', borderTop: `1px solid ${S.border}`, flexShrink: 0 }}>
+        {/* Dark mode toggle */}
+        <button
+          onClick={toggleDarkMode}
+          className="flex items-center transition-colors w-full"
+          style={{
+            gap: '10px',
+            padding: collapsed ? '8px 0' : '7px 8px',
+            justifyContent: collapsed ? 'center' : 'flex-start',
+            borderRadius: '6px',
+            fontSize: '0.8125rem',
+            fontWeight: 500,
+            color: S.textMuted,
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            marginBottom: '2px',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = S.bgHover; e.currentTarget.style.color = S.textActive }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = S.textMuted }}
+          aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          <span style={{ color: S.iconMuted, display: 'flex', flexShrink: 0 }}>
+            {darkMode
+              ? <Sun className="w-4 h-4" />
+              : <Moon className="w-4 h-4" />
+            }
+          </span>
+          {!collapsed && <span>{darkMode ? 'Light Mode' : 'Dark Mode'}</span>}
+        </button>
+
+        {/* Collapse toggle */}
         <button
           onClick={() => setCollapsed(!collapsed)}
           className="flex items-center transition-colors w-full"
