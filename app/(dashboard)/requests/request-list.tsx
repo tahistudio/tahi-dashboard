@@ -228,6 +228,12 @@ function HoursChip({ hours }: { hours: number | null }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+interface BoardColumn {
+  status: string
+  topColor: string
+  label?: string
+}
+
 export function RequestList({ isAdmin }: { isAdmin: boolean }) {
   const [view, setView] = useState<ViewMode>('list')
   const [activeTab, setActiveTab] = useState('active')
@@ -236,8 +242,34 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
   const [requests, setRequests] = useState<Request[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [boardColumns, setBoardColumns] = useState<BoardColumn[]>(BOARD_COLS)
 
   const tabs = isAdmin ? ADMIN_TABS : CLIENT_TABS
+
+  // Fetch custom kanban columns (admin only)
+  useEffect(() => {
+    if (!isAdmin) return
+    fetch(apiPath('/api/admin/kanban-columns'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<{ columns: Array<{ statusValue: string; colour: string | null; label: string; position: number }> }>
+      })
+      .then(data => {
+        if (data.columns && data.columns.length > 0) {
+          const mapped: BoardColumn[] = data.columns
+            .sort((a, b) => a.position - b.position)
+            .map(c => ({
+              status: c.statusValue,
+              topColor: c.colour ?? `var(--status-${c.statusValue.replace(/_/g, '-')}-dot)`,
+              label: c.label,
+            }))
+          setBoardColumns(mapped)
+        }
+      })
+      .catch(() => {
+        // Keep defaults
+      })
+  }, [isAdmin])
 
   const fetchRequests = useCallback(async () => {
     setLoading(true)
@@ -487,7 +519,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
           ) : view === 'list' ? (
             <ListView requests={sorted} isAdmin={isAdmin} />
           ) : (
-            <BoardView requests={sorted} />
+            <BoardView requests={sorted} columns={boardColumns} />
           )}
         </div>
       </div>
@@ -650,7 +682,7 @@ function ListRow({ req, isAdmin, isLast }: { req: Request; isAdmin: boolean; isL
 
 // ─── Board View ───────────────────────────────────────────────────────────────
 
-function BoardView({ requests }: { requests: Request[] }) {
+function BoardView({ requests, columns }: { requests: Request[]; columns: BoardColumn[] }) {
   const byStatus = (status: string) => requests.filter(r => r.status === status)
 
   return (
@@ -658,9 +690,9 @@ function BoardView({ requests }: { requests: Request[] }) {
       className="flex gap-3 overflow-x-auto"
       style={{ padding: '1rem', paddingBottom: '1.25rem', background: 'var(--color-bg-secondary)' }}
     >
-      {BOARD_COLS.map(col => {
+      {columns.map(col => {
         const cards = byStatus(col.status)
-        const cfg = STATUS_CFG[col.status]
+        const cfg = STATUS_CFG[col.status] ?? { label: col.label ?? col.status, dot: col.topColor, bg: 'var(--color-bg-secondary)', text: 'var(--color-text-muted)', border: 'var(--color-border)' }
         return (
           <div
             key={col.status}
