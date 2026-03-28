@@ -353,6 +353,49 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
           {/* Kanban Columns (admin only) */}
           {isAdmin && <KanbanColumnsSection />}
 
+          {/* Google Calendar Booking (admin only) - T87 */}
+          {isAdmin && <BookingLinkSection settings={settings} onSave={saveSetting} savingKey={savingKey} />}
+
+          {/* Team Management (admin only) - T169 */}
+          {isAdmin && (
+            <section>
+              <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+                <User className="w-5 h-5" aria-hidden="true" />
+                Team
+              </h2>
+              <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+                <p className="text-sm text-[var(--color-text)]">
+                  Manage your team members and their access scoping rules.
+                </p>
+                <a
+                  href="/team"
+                  className="inline-flex items-center gap-2 mt-3 text-sm font-medium transition-colors hover:opacity-80"
+                  style={{ color: 'var(--color-brand)', textDecoration: 'none' }}
+                >
+                  Go to Team Management
+                </a>
+              </div>
+            </section>
+          )}
+
+          {/* Billing (admin only) - T171 */}
+          {isAdmin && (
+            <section>
+              <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+                <CreditCard className="w-5 h-5" aria-hidden="true" />
+                Billing
+              </h2>
+              <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+                <p className="text-sm text-[var(--color-text)] mb-1">
+                  Manage your Stripe subscription and billing settings.
+                </p>
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Connect Stripe in the Integrations section to enable subscription billing.
+                </p>
+              </div>
+            </section>
+          )}
+
           {/* Account (admin only) */}
           {isAdmin && (
             <section>
@@ -563,6 +606,60 @@ const FORM_CATEGORIES = [
   { value: 'admin', label: 'Admin' },
   { value: 'bug', label: 'Bug' },
 ]
+
+// -- Booking Link Section (T87) --
+
+function BookingLinkSection({
+  settings,
+  onSave,
+  savingKey,
+}: {
+  settings: Record<string, string | null>
+  onSave: (key: string, value: string) => Promise<void>
+  savingKey: string | null
+}) {
+  const [url, setUrl] = useState(settings['booking.google_cal_url'] ?? '')
+
+  useEffect(() => {
+    setUrl(settings['booking.google_cal_url'] ?? '')
+  }, [settings])
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <Link2 className="w-5 h-5" aria-hidden="true" />
+        Call Scheduling
+      </h2>
+      <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+        <div>
+          <label htmlFor="booking-url" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+            Google Calendar Booking URL
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mb-3">
+            Clients will see a &quot;Schedule a Call&quot; button linking to this URL.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              id="booking-url"
+              type="url"
+              value={url}
+              onChange={e => setUrl(e.target.value)}
+              placeholder="https://calendar.google.com/..."
+              className="flex-1 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            />
+            <TahiButton
+              size="sm"
+              onClick={() => onSave('booking.google_cal_url', url)}
+              disabled={savingKey === 'booking.google_cal_url'}
+            >
+              {savingKey === 'booking.google_cal_url' ? 'Saving...' : 'Save'}
+            </TahiButton>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
 
 // -- Forms Section --
 

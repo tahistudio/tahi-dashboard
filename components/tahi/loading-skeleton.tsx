@@ -10,7 +10,8 @@ interface LoadingSkeletonProps {
 
 export function LoadingSkeleton({ rows = 5, height = 48 }: LoadingSkeletonProps) {
   return (
-    <div>
+    <div aria-live="polite" aria-busy="true">
+      <span className="sr-only">Loading content...</span>
       <div style={{ height: 40, background: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border-subtle)' }} />
       {[...Array(rows)].map((_, i) => (
         <div

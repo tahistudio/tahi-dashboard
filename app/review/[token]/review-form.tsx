@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Star, ArrowRight, ArrowLeft, Check, Loader2 } from 'lucide-react'
+import { ArrowRight, ArrowLeft, Check, Loader2 } from 'lucide-react'
 
 const BRAND = '#5A824E'
 

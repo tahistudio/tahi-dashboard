@@ -131,5 +131,28 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Seed default kanban columns for this client (T85)
+  const defaultColumns = [
+    { label: 'Submitted',     statusValue: 'submitted',     position: 0 },
+    { label: 'In Review',     statusValue: 'in_review',     position: 1 },
+    { label: 'In Progress',   statusValue: 'in_progress',   position: 2 },
+    { label: 'Client Review', statusValue: 'client_review', position: 3 },
+    { label: 'Delivered',     statusValue: 'delivered',      position: 4 },
+    { label: 'Archived',      statusValue: 'archived',      position: 5 },
+  ]
+
+  for (const col of defaultColumns) {
+    await drizzle.insert(schema.kanbanColumns).values({
+      id: crypto.randomUUID(),
+      orgId: id,
+      label: col.label,
+      statusValue: col.statusValue,
+      position: col.position,
+      isDefault: 1,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
   return NextResponse.json({ id }, { status: 201 })
 }

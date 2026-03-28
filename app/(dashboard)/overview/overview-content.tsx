@@ -256,6 +256,9 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
       {/* Onboarding Checklist */}
       <OnboardingChecklist />
 
+      {/* Schedule a Call (T88) */}
+      <ScheduleCallWidget />
+
       {/* Recent requests */}
       <SectionCard title="Your Requests" action={{ label: 'View all', href: '/requests' }}>
         {loading ? <LoadingRows /> : requests.length === 0 ? (
@@ -772,6 +775,65 @@ function GettingStarted() {
           </Link>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ─── Schedule Call Widget (client portal, T88) ──────────────────────────────
+
+function ScheduleCallWidget() {
+  const [bookingUrl, setBookingUrl] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    fetch(apiPath('/api/portal/settings/booking'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<{ url: string | null }>
+      })
+      .then(data => setBookingUrl(data.url ?? null))
+      .catch(() => setBookingUrl(null))
+      .finally(() => setLoaded(true))
+  }, [])
+
+  if (!loaded || !bookingUrl) return null
+
+  return (
+    <div
+      className="rounded-xl flex items-center justify-between"
+      style={{
+        padding: '1rem 1.25rem',
+        background: 'var(--color-brand-50)',
+        border: '1px solid var(--color-brand-100)',
+      }}
+    >
+      <div>
+        <p className="text-sm font-semibold" style={{ color: 'var(--color-brand-dark)' }}>
+          Need to chat?
+        </p>
+        <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
+          Book a quick call with the Tahi team.
+        </p>
+      </div>
+      <a
+        href={bookingUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-1.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+        style={{
+          padding: '0.5rem 1rem',
+          background: BRAND,
+          borderRadius: '0 0.5rem 0 0.5rem',
+          textDecoration: 'none',
+          whiteSpace: 'nowrap',
+          minHeight: '2.75rem',
+          display: 'flex',
+          alignItems: 'center',
+        }}
+      >
+        <Video size={14} aria-hidden="true" />
+        Schedule a Call
+      </a>
     </div>
   )
 }

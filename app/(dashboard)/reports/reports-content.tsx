@@ -5,6 +5,10 @@ import {
   Users, Inbox, Clock, CreditCard, BarChart2,
   TrendingUp, RefreshCw, Calendar,
 } from 'lucide-react'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, PieChart, Pie, Cell, Legend,
+} from 'recharts'
 import { apiPath } from '@/lib/api'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -31,6 +35,8 @@ const STATUS_LABELS: Record<string, string> = {
   delivered: 'Delivered',
   archived: 'Archived',
 }
+
+const PIE_COLORS = ['#60a5fa', '#22c55e', '#fbbf24', '#a78bfa', '#f87171', '#10b981', '#9ca3af']
 
 const STATUS_COLORS: Record<string, string> = {
   draft: 'var(--status-draft-dot)',
@@ -156,8 +162,19 @@ export function ReportsContent() {
     )
   }
 
-  const maxStatusCount = Math.max(...Object.values(data.requestsByStatus), 1)
-  const maxMonthlyCount = Math.max(...Object.values(data.monthlyTrend), 1)
+  // Prepare chart data
+  const statusChartData = Object.entries(data.requestsByStatus)
+    .sort(([, a], [, b]) => b - a)
+    .map(([status, count]) => ({
+      name: STATUS_LABELS[status] ?? status,
+      value: count,
+      fill: STATUS_COLORS[status] ?? 'var(--color-brand)',
+    }))
+
+  const monthlyChartData = Object.entries(data.monthlyTrend).map(([month, count]) => ({
+    name: formatMonthLabel(month),
+    requests: count,
+  }))
 
   return (
     <div className="space-y-6">
@@ -196,9 +213,9 @@ export function ReportsContent() {
         />
       </div>
 
-      {/* Two-column layout for tables */}
+      {/* Two-column layout for charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Requests by status */}
+        {/* Requests by status - Pie chart */}
         <div
           style={{
             background: 'var(--color-bg)',
@@ -211,47 +228,37 @@ export function ReportsContent() {
             <BarChart2 className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
             Requests by Status
           </h3>
-          {Object.keys(data.requestsByStatus).length === 0 ? (
+          {statusChartData.length === 0 ? (
             <p className="text-sm text-[var(--color-text-muted)]">No requests yet.</p>
           ) : (
-            <div className="space-y-3">
-              {Object.entries(data.requestsByStatus)
-                .sort(([, a], [, b]) => b - a)
-                .map(([status, cnt]) => (
-                  <div key={status}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm text-[var(--color-text)]">
-                        {STATUS_LABELS[status] ?? status}
-                      </span>
-                      <span className="text-sm font-medium text-[var(--color-text)]">
-                        {cnt}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        height: '0.5rem',
-                        borderRadius: 'var(--radius-full)',
-                        background: 'var(--color-bg-tertiary)',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${(cnt / maxStatusCount) * 100}%`,
-                          height: '100%',
-                          borderRadius: 'var(--radius-full)',
-                          background: STATUS_COLORS[status] ?? 'var(--color-brand)',
-                          transition: 'width 0.3s ease',
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-            </div>
+            <ResponsiveContainer width="100%" height={240}>
+              <PieChart>
+                <Pie
+                  data={statusChartData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={80}
+                  paddingAngle={2}
+                  dataKey="value"
+                >
+                  {statusChartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+                <Legend
+                  layout="vertical"
+                  align="right"
+                  verticalAlign="middle"
+                  wrapperStyle={{ fontSize: '0.75rem' }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
           )}
         </div>
 
-        {/* Monthly trend */}
+        {/* Monthly trend - Bar chart */}
         <div
           style={{
             background: 'var(--color-bg)',
@@ -264,41 +271,18 @@ export function ReportsContent() {
             <TrendingUp className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
             Monthly Request Volume
           </h3>
-          {Object.keys(data.monthlyTrend).length === 0 ? (
+          {monthlyChartData.length === 0 ? (
             <p className="text-sm text-[var(--color-text-muted)]">No data yet.</p>
           ) : (
-            <div className="space-y-3">
-              {Object.entries(data.monthlyTrend).map(([month, cnt]) => (
-                <div key={month}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm text-[var(--color-text)]">
-                      {formatMonthLabel(month)}
-                    </span>
-                    <span className="text-sm font-medium text-[var(--color-text)]">
-                      {cnt}
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      height: '0.5rem',
-                      borderRadius: 'var(--radius-full)',
-                      background: 'var(--color-bg-tertiary)',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: `${maxMonthlyCount > 0 ? (cnt / maxMonthlyCount) * 100 : 0}%`,
-                        height: '100%',
-                        borderRadius: 'var(--radius-full)',
-                        background: 'var(--color-brand)',
-                        transition: 'width 0.3s ease',
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={monthlyChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Bar dataKey="requests" fill="#5A824E" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
           )}
         </div>
       </div>
