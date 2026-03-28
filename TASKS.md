@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
 Last updated: 2026-03-28
-Total tasks: 228 (S1-S11 schema + T1-T171 feature + T172-T217 audit findings)
-Completed: S1-S11, T1-T13, T18, T29, T32-T37, T39, T41-T42, T44, T47-T48, T55-T57, T58-T59, T61-T62, T64-T65, T67-T68, T70, T72, T74-T77, T80, T82, T84, T86, T89-T90, T95-T96, T115, T117-T118, T141-T144, T145, T149-T152, T167-T168, T170, T172-T180, T185-T186, T189-T192, T194-T196, T200-T203, T205, T207-T208, T210, T216-T217
+Total tasks: 250 (S1-S11 schema + T1-T250 feature + audit findings)
+Completed: S1-S11, T1-T13, T18, T29, T32-T37, T39, T41-T42, T44, T47-T48, T51, T55-T57, T58-T60, T61-T63, T64-T65, T67-T68, T70, T72, T74-T77, T80, T82, T84, T86, T89-T90, T95-T96, T115, T117-T118, T141-T144, T145, T149-T153, T167-T168, T170, T172-T180, T185-T186, T189-T192, T194-T196, T200-T203, T205, T207-T208, T210, T216-T219, T222
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -93,7 +93,7 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T48 — Messaging: conversation detail page with message thread, send box, file attach — FE + BE — [PM] 2026-03-28
 - [ ] T49 — Messaging: create new direct (1:1) conversation from client detail or contacts page — FE + BE
 - [ ] T50 — Messaging: create group conversation with multiple participants — FE + BE
-- [ ] T51 — Messaging: org-wide channel (1:many) — admin can post, clients read — FE + BE
+- [x] T51 — Client onboarding checklist on portal overview with step tracking — FE + BE — [PM] 2026-03-28
 - [ ] T52 — Messaging: request-thread conversations linked to a specific request — FE + BE
 - [ ] T53 — Messaging: internal vs external visibility toggle per conversation — FE + BE
 - [ ] T54 — Messaging: voice note recording and playback within conversations — FE + BE
@@ -102,10 +102,10 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T57 — API route: GET + POST /api/portal/conversations (client-scoped, external only) — BE — [PM] 2026-03-28
 - [x] T58 — Client portal: dashboard page (active requests summary, recent messages, announcements) — FE + BE — [PM] 2026-03-28
 - [x] T59 — Client portal: requests page (list + board, submit new request via intake form) — FE — [PM] 2026-03-28
-- [ ] T60 — Client portal: request detail page (external comments only, file upload, status view) — FE
+- [x] T60 — Client portal: request detail page (external comments only, file upload, status view) — FE — [PM] 2026-03-28
 - [x] T61 — Client portal: messages page (external conversations only) — FE — [PM] 2026-03-28
 - [x] T62 — Client portal: invoices page (view invoices, pay via Stripe link) — FE + BE — [PM] 2026-03-28
-- [ ] T63 — Client portal: profile/settings page (update contact info, notification prefs) — FE + BE
+- [x] T63 — Client portal: profile/settings page (update contact info, notification prefs) — FE + BE — [PM] 2026-03-28
 - [x] T64 — Announcements: create announcement form (title, body, target type/ids, email toggle) — FE + BE — [PM] 2026-03-28
 - [x] T65 — Announcements: in-app banner display on client portal dashboard (dismissible) — FE + BE — [PM] 2026-03-28
 - [ ] T66 — Announcements: email delivery via Resend when email toggle is on — BE
@@ -243,7 +243,7 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T152 — API route: GET /api/admin/audit-log with filters — BE — [PM] 2026-03-28
 
 ### Zapier and Webhooks (nice-to-have)
-- [ ] T153 — Outgoing webhooks: admin can register a webhook URL for selected events — FE + BE
+- [x] T153 — Outgoing webhooks: admin can register a webhook URL for selected events — FE + BE — [PM] 2026-03-28
 - [ ] T154 — Outgoing webhooks: delivery with retry logic and signature verification — BE
 - [ ] T155 — Zapier: Zap triggers for request created, request completed, new client — BE
 - [ ] T156 — Zapier: Zap actions for create request, update request status — BE
@@ -353,14 +353,14 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 ### Plan-conditional track selection (Decision #020)
 
-- [ ] T218 — Request dialog: fetch the client's active subscription planType when the org is selected. Hide the track selector (large/small) entirely if planType is not 'maintain' or 'scale'. Show it only for retainer plans. -- [FE]
-- [ ] T219 — POST /api/admin/requests: make trackId optional and skip track slot validation when the org's plan does not use tracks. Return a clear error only when trackId is required (retainer plan) and missing. -- [BE]
+- [x] T218 — Request dialog: fetch the client's active subscription planType when the org is selected. Hide the track selector (large/small) entirely if planType is not 'maintain' or 'scale'. Show it only for retainer plans. -- [FE] -- [PM] 2026-03-28
+- [x] T219 — POST /api/admin/requests: make trackId optional and skip track slot validation when the org's plan does not use tracks. Return a clear error only when trackId is required (retainer plan) and missing. -- [BE] -- [PM] 2026-03-28
 - [ ] T220 — Schema check: verify timeEntries table has hourlyRate column (decimal/real) and billable column (integer 0/1). Add both via migration if missing. -- [BE]
 - [ ] T221 — UIUX review: update request creation dialog to clearly separate the retainer flow (track selector visible) from the project/hourly flow (no track selector, just title + description + category). -- [UIUX]
 
 ### Hourly billing tracker (Decision #021)
 
-- [ ] T222 — Time entries page: per-client hourly summary view. Show total hours logged this month per client, split by billable/non-billable. Filter by month and client. -- [FE]
+- [x] T222 — Time entries page: per-client hourly summary view. Show total hours logged this month per client, split by billable/non-billable. Filter by month and client. -- [FE] -- [PM] 2026-03-28
 - [ ] T223 — GET /api/admin/reports/billing-summary?month=YYYY-MM: return per-org breakdown of billable hours, hourly rate, and total amount due. -- [BE]
 - [ ] T224 — Monthly billing email: Cloudflare Cron Trigger on the 1st of each month sends Liam a Resend email with a per-client table of billable hours and amounts for the prior month. -- [BE]
 - [ ] T225 — Time entry form: add hourly rate field per entry (pre-fill from org's default rate if set). Add a default hourly rate field to the client detail page (stored on the org row or a settings key). -- [FE + BE]
