@@ -89,11 +89,14 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const [collapsed, setCollapsed] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
 
-  // Read dark mode preference from localStorage on mount
+  // Read sidebar + dark mode preferences from localStorage on mount
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('tahi-theme')
-      setDarkMode(stored === 'dark')
+      const storedTheme = localStorage.getItem('tahi-theme')
+      setDarkMode(storedTheme === 'dark')
+
+      const storedSidebar = localStorage.getItem('tahi-sidebar')
+      if (storedSidebar === 'collapsed') setCollapsed(true)
     } catch {
       // localStorage unavailable
     }
@@ -251,7 +254,11 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
 
         {/* Collapse toggle */}
         <button
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={() => {
+            const next = !collapsed
+            setCollapsed(next)
+            try { localStorage.setItem('tahi-sidebar', next ? 'collapsed' : 'expanded') } catch { /* noop */ }
+          }}
           className="flex items-center transition-colors w-full"
           style={{
             gap: '10px',

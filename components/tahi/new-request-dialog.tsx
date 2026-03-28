@@ -135,7 +135,7 @@ export function NewRequestDialog({
             dueDate: dueDate || null,
             estimatedHours: estimatedHours ? Number(estimatedHours) : null,
           }
-        : { title: title.trim(), type, category, description }
+        : { title: title.trim(), type, category, description, dueDate: dueDate || null }
 
       const res = await fetch(url, {
         method: 'POST',
@@ -449,6 +449,18 @@ export function NewRequestDialog({
                   />
                 </FieldGroup>
               </div>
+            )}
+
+            {/* Due date (portal users) */}
+            {!isAdmin && (
+              <FieldGroup label="Due date (optional)" htmlFor="req-due-date-portal">
+                <StyledInput
+                  id="req-due-date-portal"
+                  type="date"
+                  value={dueDate}
+                  onChange={e => setDueDate(e.target.value)}
+                />
+              </FieldGroup>
             )}
 
             {/* Description */}

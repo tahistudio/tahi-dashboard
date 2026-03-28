@@ -4,15 +4,19 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { apiPath } from '@/lib/api'
 import {
   ArrowLeft, Clock, AlertTriangle, RefreshCw,
-  User, ChevronDown, CheckCircle2, Loader2,
+  User, CheckCircle2, Loader2,
   FileText, Image as ImageIcon, Download, Paperclip,
-  Calendar, Edit2, Upload,
+  Calendar, Upload,
 } from 'lucide-react'
 import Link from 'next/link'
 import { RequestThread } from '@/components/tahi/request-thread'
 import { TiptapEditor } from '@/components/tahi/tiptap-editor'
 import { StatusBadge } from '@/components/tahi/status-badge'
-import { cn } from '@/lib/utils'
+import { SearchableSelect } from '@/components/tahi/searchable-select'
+
+// ---- Constants ---------------------------------------------------------------
+
+const BRAND = '#5A824E'
 
 const STATUS_FLOW = [
   'submitted',
@@ -31,6 +35,13 @@ const STATUS_LABELS: Record<string, string> = {
   archived: 'Archived',
   draft: 'Draft',
 }
+
+const PRIORITY_OPTIONS = [
+  { value: 'standard', label: 'Standard' },
+  { value: 'high', label: 'High' },
+]
+
+// ---- Types -------------------------------------------------------------------
 
 interface Request {
   id: string
@@ -91,6 +102,8 @@ interface RequestDetailProps {
   currentUserId?: string
 }
 
+// ---- Main Component ----------------------------------------------------------
+
 export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDetailProps) {
   const [request, setRequest] = useState<Request | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -100,8 +113,6 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
   const [fetchError, setFetchError] = useState(false)
   const [isInternal, setIsInternal] = useState(false)
   const [statusUpdating, setStatusUpdating] = useState(false)
-  const [editingPriority, setEditingPriority] = useState(false)
-  const [editingAssignee, setEditingAssignee] = useState(false)
   const [editingDueDate, setEditingDueDate] = useState(false)
   const [dueDateInput, setDueDateInput] = useState('')
   const threadBottomRef = useRef<HTMLDivElement>(null)
@@ -119,7 +130,7 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
         setFiles(data.items ?? [])
       }
     } catch {
-      // non-fatal: files panel will stay empty
+      // non-fatal
     }
   }, [requestId, isAdmin])
 
@@ -172,7 +183,6 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
     loadTeamMembers()
   }, [loadRequest, loadFiles, loadTeamMembers])
 
-  // Scroll thread to bottom on new messages
   useEffect(() => {
     threadBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
@@ -212,13 +222,13 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
     await loadRequest()
   }
 
-  async function handlePriorityChange(priority: string) {
+  async function handlePriorityChange(priority: string | null) {
+    if (!priority) return
     await fetch(apiPath(`/api/admin/requests/${requestId}`), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ priority }),
     })
-    setEditingPriority(false)
     await loadRequest()
   }
 
@@ -228,7 +238,6 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ assigneeId }),
     })
-    setEditingAssignee(false)
     await loadRequest()
   }
 
@@ -242,152 +251,305 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
     await loadRequest()
   }
 
+  // ---- Loading / Error / Not Found ------------------------------------------
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="animate-spin text-[var(--color-brand)]" size={28} />
+      <div className="flex flex-col" style={{ gap: '2rem', maxWidth: '68.75rem' }}>
+        {/* Back link skeleton */}
+        <div className="animate-pulse rounded" style={{ height: 16, width: 120, background: 'var(--color-bg-tertiary)' }} />
+        {/* Header skeleton */}
+        <div
+          className="bg-white rounded-xl"
+          style={{ padding: '1.5rem', border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+        >
+          <div className="flex items-center gap-3 animate-pulse" style={{ marginBottom: '1rem' }}>
+            <div className="rounded-full" style={{ width: 80, height: 22, background: 'var(--color-bg-tertiary)' }} />
+            <div className="rounded-full" style={{ width: 64, height: 22, background: 'var(--color-bg-tertiary)' }} />
+          </div>
+          <div className="animate-pulse rounded" style={{ height: 28, width: '60%', background: 'var(--color-bg-tertiary)', marginBottom: '0.5rem' }} />
+          <div className="animate-pulse rounded" style={{ height: 14, width: '30%', background: 'var(--color-bg-tertiary)' }} />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-6">
+          <div className="bg-white rounded-xl animate-pulse" style={{ height: 300, border: '1px solid var(--color-border)' }} />
+          <div className="bg-white rounded-xl animate-pulse" style={{ height: 300, border: '1px solid var(--color-border)' }} />
+        </div>
       </div>
     )
   }
 
   if (fetchError) {
     return (
-      <div className="text-center py-16" style={{ color: 'var(--color-danger)' }}>
-        Failed to load request. Please refresh the page.
+      <div className="flex flex-col items-center justify-center text-center" style={{ padding: '4rem 1.5rem', gap: '0.75rem' }}>
+        <div
+          className="flex items-center justify-center rounded-xl"
+          style={{ width: 48, height: 48, background: 'var(--color-danger-bg)' }}
+        >
+          <AlertTriangle size={22} style={{ color: 'var(--color-danger)' }} />
+        </div>
+        <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>Failed to load request</p>
+        <p className="text-xs" style={{ color: 'var(--color-text-subtle)', maxWidth: 280 }}>
+          Please check your connection and refresh the page.
+        </p>
       </div>
     )
   }
 
   if (!request) {
     return (
-      <div className="text-center py-16 text-gray-500">
-        Request not found.
+      <div className="flex flex-col items-center justify-center text-center" style={{ padding: '4rem 1.5rem', gap: '0.75rem' }}>
+        <div
+          className="flex items-center justify-center rounded-xl"
+          style={{ width: 48, height: 48, background: 'var(--color-bg-secondary)' }}
+        >
+          <FileText size={22} style={{ color: 'var(--color-text-subtle)' }} />
+        </div>
+        <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>Request not found</p>
+        <Link
+          href="/requests"
+          className="text-xs font-medium hover:underline"
+          style={{ color: BRAND, marginTop: '0.25rem' }}
+        >
+          Back to requests
+        </Link>
       </div>
     )
   }
 
   const currentStatusIdx = STATUS_FLOW.indexOf(request.status as typeof STATUS_FLOW[number])
 
+  const teamMemberOptions = [
+    { value: '', label: 'Unassigned', subtitle: 'No one assigned' },
+    ...teamMembers.map(tm => ({ value: tm.id, label: tm.name })),
+  ]
+
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="flex flex-col" style={{ gap: '1.5rem', maxWidth: '68.75rem' }}>
       {/* Back nav */}
-      <div className="mb-6">
-        <Link
-          href="/requests"
-          className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 transition-colors"
-        >
-          <ArrowLeft size={16} />
-          Back to requests
-        </Link>
-      </div>
+      <Link
+        href="/requests"
+        className="inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
+        style={{ color: 'var(--color-text-muted)', textDecoration: 'none', alignSelf: 'flex-start' }}
+        onMouseEnter={e => { e.currentTarget.style.color = BRAND }}
+        onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+      >
+        <ArrowLeft size={15} />
+        Back to requests
+      </Link>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
-        {/* ── Main content ────────────────────────────────────────────── */}
-        <div className="flex flex-col gap-6">
-          {/* Header card */}
-          <div className="bg-white rounded-[var(--radius-card)] border border-gray-200 p-6">
-            <div className="flex items-start justify-between gap-4 mb-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-2 flex-wrap">
-                  <StatusBadge status={request.status} />
-                  {request.priority === 'high' && (
-                    <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-medium">
-                      High Priority
-                    </span>
-                  )}
-                  {request.scopeFlagged && (
-                    <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded-full font-medium flex items-center gap-1">
-                      <AlertTriangle size={10} />
-                      Scope flagged
-                    </span>
-                  )}
-                  {request.revisionCount > 0 && (
-                    <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full flex items-center gap-1">
-                      <RefreshCw size={10} />
-                      Revision {request.revisionCount}/{request.maxRevisions}
-                    </span>
-                  )}
-                </div>
-                <h1 className="text-xl font-semibold text-gray-900">{request.title}</h1>
-                {request.orgName && (
-                  <p className="text-sm text-gray-500 mt-1">{request.orgName}</p>
-                )}
-              </div>
-            </div>
-
-            {/* Status stepper */}
-            <div className="flex items-center gap-0 mt-6 overflow-x-auto pb-1">
-              {STATUS_FLOW.map((s, i) => {
-                const isDone = currentStatusIdx > i
-                const isCurrent = currentStatusIdx === i
-                const isLast = i === STATUS_FLOW.length - 1
-                return (
-                  <div key={s} className="flex items-center min-w-0 flex-shrink-0">
-                    <div className="flex flex-col items-center">
-                      <div className={cn(
-                        'w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium border-2 transition-colors',
-                        isDone
-                          ? 'bg-[var(--color-brand)] border-[var(--color-brand)] text-white'
-                          : isCurrent
-                            ? 'border-[var(--color-brand)] text-[var(--color-brand)] bg-white'
-                            : 'border-gray-300 text-gray-400 bg-white',
-                      )}>
-                        {isDone ? <CheckCircle2 size={14} /> : i + 1}
-                      </div>
-                      <span className={cn(
-                        'text-[10px] mt-1 whitespace-nowrap',
-                        isCurrent ? 'text-[var(--color-brand)] font-semibold' : 'text-gray-400',
-                      )}>
-                        {STATUS_LABELS[s]}
-                      </span>
-                    </div>
-                    {!isLast && (
-                      <div className={cn(
-                        'h-0.5 w-8 mx-1 flex-shrink-0',
-                        isDone ? 'bg-[var(--color-brand)]' : 'bg-gray-200',
-                      )} />
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+      {/* Header card */}
+      <div
+        className="bg-white rounded-xl"
+        style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+      >
+        <div style={{ padding: '1.5rem' }}>
+          {/* Badges row */}
+          <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: '0.75rem' }}>
+            <StatusBadge status={request.status} />
+            {request.priority === 'high' && (
+              <span
+                className="inline-flex items-center text-xs font-medium rounded-full"
+                style={{
+                  padding: '0.125rem 0.5rem',
+                  background: 'var(--status-in-review-bg)',
+                  color: 'var(--status-in-review-text)',
+                  border: '1px solid var(--status-in-review-border)',
+                }}
+              >
+                High Priority
+              </span>
+            )}
+            {request.scopeFlagged && (
+              <span
+                className="inline-flex items-center gap-1 text-xs font-medium rounded-full"
+                style={{
+                  padding: '0.125rem 0.5rem',
+                  background: 'var(--color-danger-bg)',
+                  color: 'var(--color-danger)',
+                }}
+              >
+                <AlertTriangle size={10} />
+                Scope flagged
+              </span>
+            )}
+            {request.revisionCount > 0 && (
+              <span
+                className="inline-flex items-center gap-1 text-xs rounded-full"
+                style={{
+                  padding: '0.125rem 0.5rem',
+                  background: 'var(--status-submitted-bg)',
+                  color: 'var(--status-submitted-text)',
+                  border: '1px solid var(--status-submitted-border)',
+                }}
+              >
+                <RefreshCw size={10} />
+                Revision {request.revisionCount}/{request.maxRevisions}
+              </span>
+            )}
           </div>
 
+          {/* Title */}
+          <h1
+            className="text-2xl font-bold tracking-tight"
+            style={{ color: 'var(--color-text)', margin: 0, lineHeight: 1.3 }}
+          >
+            {request.title}
+          </h1>
+
+          {/* Client name + avatar */}
+          {request.orgName && (
+            <div className="flex items-center gap-2" style={{ marginTop: '0.5rem' }}>
+              <div
+                className="flex items-center justify-center rounded-full flex-shrink-0"
+                style={{ width: 24, height: 24, background: 'var(--color-bg-tertiary)', color: 'var(--color-text-subtle)' }}
+              >
+                <User size={12} />
+              </div>
+              <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                {request.orgName}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Status stepper */}
+        <div
+          style={{
+            padding: '0 1.5rem 1.25rem',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 0,
+            overflowX: 'auto',
+          }}
+        >
+          {STATUS_FLOW.map((s, i) => {
+            const isDone = currentStatusIdx > i
+            const isCurrent = currentStatusIdx === i
+            const isLast = i === STATUS_FLOW.length - 1
+            return (
+              <div key={s} className="flex items-center flex-shrink-0">
+                <div className="flex flex-col items-center" style={{ minWidth: '3.5rem' }}>
+                  <div
+                    className="flex items-center justify-center rounded-full"
+                    style={{
+                      width: 28,
+                      height: 28,
+                      border: `2px solid ${isDone || isCurrent ? BRAND : 'var(--color-border)'}`,
+                      background: isDone ? BRAND : 'var(--color-bg)',
+                      color: isDone ? '#ffffff' : isCurrent ? BRAND : 'var(--color-text-subtle)',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    {isDone ? <CheckCircle2 size={14} /> : i + 1}
+                  </div>
+                  <span
+                    style={{
+                      fontSize: '0.625rem',
+                      marginTop: '0.3125rem',
+                      whiteSpace: 'nowrap',
+                      color: isCurrent ? BRAND : 'var(--color-text-subtle)',
+                      fontWeight: isCurrent ? 600 : 400,
+                    }}
+                  >
+                    {STATUS_LABELS[s]}
+                  </span>
+                </div>
+                {!isLast && (
+                  <div
+                    style={{
+                      width: '2rem',
+                      height: 2,
+                      background: isDone ? BRAND : 'var(--color-border)',
+                      marginTop: '-0.875rem',
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Two-column layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-6">
+        {/* Left column */}
+        <div className="flex flex-col gap-6">
           {/* Description */}
           {request.description && (
-            <div className="bg-white rounded-[var(--radius-card)] border border-gray-200 p-6">
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Description</h2>
+            <div
+              className="bg-white rounded-xl"
+              style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+            >
               <div
-                className="prose prose-sm max-w-none text-gray-700"
+                style={{
+                  padding: '0.875rem 1.25rem',
+                  borderBottom: '1px solid var(--color-row-border)',
+                }}
+              >
+                <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                  Description
+                </h2>
+              </div>
+              <div
+                className="prose prose-sm max-w-none"
+                style={{ padding: '1.25rem', color: 'var(--color-text)', fontSize: '0.875rem', lineHeight: 1.6 }}
                 dangerouslySetInnerHTML={{ __html: request.description }}
               />
             </div>
           )}
 
           {/* Thread */}
-          <div className="bg-white rounded-[var(--radius-card)] border border-gray-200 p-6 flex flex-col gap-4">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
-              Thread
-              {messages.length > 0 && (
-                <span className="ml-2 text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full font-normal">
-                  {messages.length}
-                </span>
-              )}
-            </h2>
+          <div
+            className="bg-white rounded-xl"
+            style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+          >
+            <div
+              className="flex items-center justify-between"
+              style={{ padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}
+            >
+              <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                Thread
+                {messages.length > 0 && (
+                  <span
+                    className="text-xs font-normal rounded-full"
+                    style={{
+                      padding: '0.0625rem 0.4375rem',
+                      background: 'var(--color-bg-tertiary)',
+                      color: 'var(--color-text-subtle)',
+                    }}
+                  >
+                    {messages.length}
+                  </span>
+                )}
+              </h2>
+            </div>
 
-            <RequestThread messages={messages} currentUserId={currentUserId} />
-            <div ref={threadBottomRef} />
+            <div style={{ padding: '1.25rem' }}>
+              <RequestThread messages={messages} currentUserId={currentUserId} />
+              <div ref={threadBottomRef} />
+            </div>
 
-            {/* Compose */}
-            <TiptapEditor
-              onSubmit={handleSendMessage}
-              isInternal={isInternal}
-              onInternalToggle={isAdmin ? setIsInternal : undefined}
-              placeholder={isAdmin ? 'Reply to client or add an internal note…' : 'Add a comment or question…'}
-              isAdmin={isAdmin}
-              requestId={requestId}
-              orgId={request?.orgId}
-            />
+            {/* Composer */}
+            <div
+              style={{
+                padding: '1rem 1.25rem',
+                borderTop: '1px solid var(--color-row-border)',
+                background: 'var(--color-bg-secondary)',
+              }}
+            >
+              <TiptapEditor
+                onSubmit={handleSendMessage}
+                isInternal={isInternal}
+                onInternalToggle={isAdmin ? setIsInternal : undefined}
+                placeholder={isAdmin ? 'Reply to client or add an internal note...' : 'Add a comment or question...'}
+                isAdmin={isAdmin}
+                requestId={requestId}
+                orgId={request?.orgId}
+              />
+            </div>
           </div>
 
           {/* Files */}
@@ -400,190 +562,256 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
           />
         </div>
 
-        {/* ── Sidebar ──────────────────────────────────────────────────── */}
+        {/* Right column: Metadata sidebar */}
         <div className="flex flex-col gap-4">
           {/* Status actions (admin only) */}
           {isAdmin && (
-            <div className="bg-white rounded-[var(--radius-card)] border border-gray-200 p-4">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Status</h3>
-              <div className="flex flex-col gap-1.5">
+            <SidebarCard title="Status">
+              <div className="flex flex-col" style={{ gap: '0.375rem' }}>
                 {STATUS_FLOW.filter(s => s !== request.status).map(s => (
                   <button
                     key={s}
+                    type="button"
                     onClick={() => handleStatusChange(s)}
                     disabled={statusUpdating}
-                    className={cn(
-                      'w-full text-left text-sm px-3 py-2 rounded-lg border transition-colors',
-                      'border-gray-200 hover:border-[var(--color-brand)] hover:bg-green-50/50',
-                      'disabled:opacity-50 disabled:cursor-not-allowed',
-                    )}
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.5rem 0.75rem',
+                      fontSize: '0.8125rem',
+                      fontWeight: 500,
+                      color: 'var(--color-text)',
+                      background: 'var(--color-bg)',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 'var(--radius-button)',
+                      cursor: statusUpdating ? 'not-allowed' : 'pointer',
+                      opacity: statusUpdating ? 0.5 : 1,
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => {
+                      if (!statusUpdating) {
+                        e.currentTarget.style.borderColor = BRAND
+                        e.currentTarget.style.background = 'var(--color-brand-50)'
+                        e.currentTarget.style.color = 'var(--color-brand-dark)'
+                      }
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.borderColor = 'var(--color-border)'
+                      e.currentTarget.style.background = 'var(--color-bg)'
+                      e.currentTarget.style.color = 'var(--color-text)'
+                    }}
                   >
                     {statusUpdating ? (
-                      <Loader2 size={12} className="animate-spin inline mr-2" />
+                      <Loader2 size={13} className="animate-spin" style={{ flexShrink: 0 }} />
                     ) : (
-                      <ChevronDown size={12} className="inline mr-2 text-gray-400" />
+                      <span
+                        style={{
+                          width: 6, height: 6, borderRadius: '50%',
+                          background: BRAND, flexShrink: 0,
+                        }}
+                      />
                     )}
                     Move to {STATUS_LABELS[s]}
                   </button>
                 ))}
               </div>
-            </div>
+            </SidebarCard>
           )}
 
           {/* Details card */}
-          <div className="bg-white rounded-[var(--radius-card)] border border-gray-200 p-4">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Details</h3>
-            <dl className="flex flex-col gap-3 text-sm">
-              <Row label="Type" value={request.type.replace(/_/g, ' ')} />
-              {request.category && <Row label="Category" value={request.category} />}
+          <SidebarCard title="Details">
+            <div className="flex flex-col" style={{ gap: '0.875rem' }}>
+              <DetailRow label="Type">
+                <span className="capitalize">{request.type.replace(/_/g, ' ')}</span>
+              </DetailRow>
 
-              {/* Priority (editable for admin) */}
-              <div className="flex justify-between items-start gap-2">
-                <dt className="text-gray-400 flex-shrink-0">Priority</dt>
-                <dd className="text-gray-700 text-right">
-                  {isAdmin && editingPriority ? (
-                    <select
+              {request.category && (
+                <DetailRow label="Category">
+                  <span className="capitalize">{request.category}</span>
+                </DetailRow>
+              )}
+
+              {/* Priority (editable for admin via searchable-select) */}
+              <DetailRow label="Priority">
+                {isAdmin ? (
+                  <div style={{ width: '100%', maxWidth: '10rem' }}>
+                    <SearchableSelect
+                      options={PRIORITY_OPTIONS}
                       value={request.priority}
-                      onChange={e => handlePriorityChange(e.target.value)}
-                      onBlur={() => setEditingPriority(false)}
-                      autoFocus
-                      className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-[var(--color-brand)]"
-                      style={{ minWidth: 100 }}
-                    >
-                      <option value="standard">Standard</option>
-                      <option value="high">High</option>
-                    </select>
-                  ) : (
-                    <span
-                      className={cn(
-                        'capitalize flex items-center gap-1',
-                        isAdmin && 'cursor-pointer hover:text-[var(--color-brand)]',
-                      )}
-                      onClick={() => isAdmin && setEditingPriority(true)}
-                    >
-                      {request.priority}
-                      {isAdmin && <Edit2 size={10} className="text-gray-400" />}
-                    </span>
-                  )}
-                </dd>
-              </div>
+                      onChange={handlePriorityChange}
+                      placeholder="Select priority"
+                    />
+                  </div>
+                ) : (
+                  <span className="capitalize">{request.priority}</span>
+                )}
+              </DetailRow>
 
-              {/* Assignee (editable for admin) */}
-              <div className="flex justify-between items-start gap-2">
-                <dt className="text-gray-400 flex-shrink-0">Assignee</dt>
-                <dd className="text-gray-700 text-right">
-                  {isAdmin && editingAssignee ? (
-                    <select
+              {/* Assignee (editable for admin via searchable-select) */}
+              <DetailRow label="Assignee">
+                {isAdmin ? (
+                  <div style={{ width: '100%', maxWidth: '10rem' }}>
+                    <SearchableSelect
+                      options={teamMemberOptions}
                       value={request.assigneeId ?? ''}
-                      onChange={e => handleAssigneeChange(e.target.value || null)}
-                      onBlur={() => setEditingAssignee(false)}
-                      autoFocus
-                      className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-[var(--color-brand)]"
-                      style={{ minWidth: 120 }}
-                    >
-                      <option value="">Unassigned</option>
-                      {teamMembers.map(tm => (
-                        <option key={tm.id} value={tm.id}>{tm.name}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <span
-                      className={cn(
-                        'flex items-center gap-1.5',
-                        isAdmin && 'cursor-pointer hover:text-[var(--color-brand)]',
-                      )}
-                      onClick={() => isAdmin && setEditingAssignee(true)}
-                    >
-                      <User size={12} />
-                      {request.assigneeName ?? 'Unassigned'}
-                      {isAdmin && <Edit2 size={10} className="text-gray-400" />}
-                    </span>
-                  )}
-                </dd>
-              </div>
+                      onChange={v => handleAssigneeChange(v || null)}
+                      placeholder="Unassigned"
+                      searchPlaceholder="Search team..."
+                      allowClear
+                    />
+                  </div>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <User size={12} style={{ color: 'var(--color-text-subtle)' }} />
+                    {request.assigneeName ?? 'Unassigned'}
+                  </span>
+                )}
+              </DetailRow>
 
-              {/* Due date (editable for admin) */}
-              <div className="flex justify-between items-start gap-2">
-                <dt className="text-gray-400 flex-shrink-0">Due date</dt>
-                <dd className="text-gray-700 text-right">
-                  {isAdmin && editingDueDate ? (
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="date"
-                        value={dueDateInput}
-                        onChange={e => setDueDateInput(e.target.value)}
-                        autoFocus
-                        className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-[var(--color-brand)]"
-                      />
-                      <button
-                        onClick={() => handleDueDateChange(dueDateInput || null)}
-                        className="text-xs px-2 py-1 bg-[var(--color-brand)] text-white rounded hover:opacity-90"
-                      >
-                        Save
-                      </button>
-                      <button
-                        onClick={() => setEditingDueDate(false)}
-                        className="text-xs px-2 py-1 text-gray-500 hover:text-gray-700"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <span
-                      className={cn(
-                        'flex items-center gap-1',
-                        isAdmin && 'cursor-pointer hover:text-[var(--color-brand)]',
-                      )}
-                      onClick={() => {
-                        if (isAdmin) {
-                          setDueDateInput(request.dueDate ?? '')
-                          setEditingDueDate(true)
-                        }
+              {/* Due date */}
+              <DetailRow label="Due date">
+                {isAdmin && editingDueDate ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="date"
+                      value={dueDateInput}
+                      onChange={e => setDueDateInput(e.target.value)}
+                      autoFocus
+                      style={{
+                        fontSize: '0.8125rem',
+                        padding: '0.25rem 0.5rem',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius-button)',
+                        color: 'var(--color-text)',
+                        background: 'var(--color-bg)',
+                        outline: 'none',
+                      }}
+                      onFocus={e => { e.currentTarget.style.borderColor = BRAND }}
+                      onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleDueDateChange(dueDateInput || null)}
+                      style={{
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        padding: '0.25rem 0.5rem',
+                        background: BRAND,
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: 'var(--radius-button)',
+                        cursor: 'pointer',
                       }}
                     >
-                      <Calendar size={12} />
-                      {request.dueDate ? formatDate(request.dueDate) : 'Not set'}
-                      {isAdmin && <Edit2 size={10} className="text-gray-400" />}
-                    </span>
-                  )}
-                </dd>
-              </div>
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingDueDate(false)}
+                      style={{
+                        fontSize: '0.75rem',
+                        padding: '0.25rem 0.5rem',
+                        color: 'var(--color-text-muted)',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <span
+                    className="flex items-center gap-1.5"
+                    style={{
+                      cursor: isAdmin ? 'pointer' : 'default',
+                      color: 'var(--color-text)',
+                    }}
+                    onClick={() => {
+                      if (isAdmin) {
+                        setDueDateInput(request.dueDate ?? '')
+                        setEditingDueDate(true)
+                      }
+                    }}
+                    onMouseEnter={e => { if (isAdmin) e.currentTarget.style.color = BRAND }}
+                    onMouseLeave={e => { if (isAdmin) e.currentTarget.style.color = 'var(--color-text)' }}
+                  >
+                    <Calendar size={12} style={{ color: 'var(--color-text-subtle)' }} />
+                    {request.dueDate ? formatDate(request.dueDate) : 'Not set'}
+                  </span>
+                )}
+              </DetailRow>
 
               {request.estimatedHours != null && (
-                <Row
-                  label="Estimated"
-                  value={
-                    <span className="flex items-center gap-1">
-                      <Clock size={12} />
-                      {request.estimatedHours}h
-                    </span>
-                  }
-                />
+                <DetailRow label="Estimated">
+                  <span className="flex items-center gap-1.5">
+                    <Clock size={12} style={{ color: 'var(--color-text-subtle)' }} />
+                    {request.estimatedHours}h
+                  </span>
+                </DetailRow>
               )}
-              <Row label="Created" value={formatDate(request.createdAt)} />
-              {request.deliveredAt && <Row label="Delivered" value={formatDate(request.deliveredAt)} />}
-            </dl>
-          </div>
+
+              <DetailRow label="Created">
+                {formatDate(request.createdAt)}
+              </DetailRow>
+
+              {request.deliveredAt && (
+                <DetailRow label="Delivered">
+                  {formatDate(request.deliveredAt)}
+                </DetailRow>
+              )}
+            </div>
+          </SidebarCard>
 
           {/* Admin actions */}
           {isAdmin && (
-            <div className="bg-white rounded-[var(--radius-card)] border border-gray-200 p-4">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Admin</h3>
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={handleScopeFlagToggle}
-                  className={cn(
-                    'w-full text-left text-sm px-3 py-2 rounded-lg border transition-colors flex items-center gap-2',
-                    request.scopeFlagged
-                      ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100'
-                      : 'border-gray-200 text-gray-600 hover:border-orange-300 hover:bg-orange-50',
-                  )}
-                >
-                  <AlertTriangle size={13} />
-                  {request.scopeFlagged ? 'Remove scope flag' : 'Flag as scope creep'}
-                </button>
-              </div>
-            </div>
+            <SidebarCard title="Admin">
+              <button
+                type="button"
+                onClick={handleScopeFlagToggle}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.5rem 0.75rem',
+                  fontSize: '0.8125rem',
+                  fontWeight: 500,
+                  borderRadius: 'var(--radius-button)',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                  border: request.scopeFlagged
+                    ? '1px solid var(--color-danger)'
+                    : '1px solid var(--color-border)',
+                  background: request.scopeFlagged
+                    ? 'var(--color-danger-bg)'
+                    : 'var(--color-bg)',
+                  color: request.scopeFlagged
+                    ? 'var(--color-danger)'
+                    : 'var(--color-text)',
+                }}
+                onMouseEnter={e => {
+                  if (!request.scopeFlagged) {
+                    e.currentTarget.style.borderColor = 'var(--color-warning)'
+                    e.currentTarget.style.background = '#fff7ed'
+                    e.currentTarget.style.color = 'var(--color-warning)'
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (!request.scopeFlagged) {
+                    e.currentTarget.style.borderColor = 'var(--color-border)'
+                    e.currentTarget.style.background = 'var(--color-bg)'
+                    e.currentTarget.style.color = 'var(--color-text)'
+                  }
+                }}
+              >
+                <AlertTriangle size={13} />
+                {request.scopeFlagged ? 'Remove scope flag' : 'Flag as scope creep'}
+              </button>
+            </SidebarCard>
           )}
         </div>
       </div>
@@ -591,7 +819,50 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
   )
 }
 
-// ── FilesPanel ────────────────────────────────────────────────────────────────
+// ---- Sidebar Card ------------------------------------------------------------
+
+function SidebarCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div
+      className="bg-white rounded-xl overflow-hidden"
+      style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+    >
+      <div
+        style={{
+          padding: '0.75rem 1rem',
+          borderBottom: '1px solid var(--color-row-border)',
+        }}
+      >
+        <h3
+          className="text-xs font-semibold uppercase"
+          style={{ color: 'var(--color-text-muted)', letterSpacing: '0.04em' }}
+        >
+          {title}
+        </h3>
+      </div>
+      <div style={{ padding: '1rem' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// ---- Detail Row --------------------------------------------------------------
+
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+      <dt className="text-xs font-medium flex-shrink-0" style={{ color: 'var(--color-text-subtle)', paddingTop: '0.1875rem' }}>
+        {label}
+      </dt>
+      <dd className="text-sm text-right" style={{ color: 'var(--color-text)' }}>
+        {children}
+      </dd>
+    </div>
+  )
+}
+
+// ---- Files Panel -------------------------------------------------------------
 
 interface FilesPanelProps {
   files: RequestFile[]
@@ -607,10 +878,10 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   function fileIcon(mimeType: string | null) {
-    if (!mimeType) return <FileText size={14} className="text-gray-400" />
-    if (mimeType.startsWith('image/')) return <ImageIcon size={14} className="text-purple-400" />
-    if (mimeType === 'application/pdf') return <FileText size={14} className="text-red-400" />
-    return <FileText size={14} className="text-gray-400" />
+    if (!mimeType) return <FileText size={14} style={{ color: 'var(--color-text-subtle)' }} />
+    if (mimeType.startsWith('image/')) return <ImageIcon size={14} style={{ color: '#7c3aed' }} />
+    if (mimeType === 'application/pdf') return <FileText size={14} style={{ color: 'var(--color-danger)' }} />
+    return <FileText size={14} style={{ color: 'var(--color-text-subtle)' }} />
   }
 
   function formatBytes(n: number | null) {
@@ -628,15 +899,10 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
     setUploadError(null)
 
     try {
-      // Step 1: Get presigned URL
       const presignRes = await fetch(apiPath('/api/uploads/presign'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: file.name,
-          mimeType: file.type,
-          requestId,
-        }),
+        body: JSON.stringify({ filename: file.name, mimeType: file.type, requestId }),
       })
       if (!presignRes.ok) throw new Error('Failed to get upload URL')
       const presignData = await presignRes.json() as {
@@ -645,7 +911,6 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
         fileId: string
       }
 
-      // Step 2: Upload file to R2 via proxy
       const uploadRes = await fetch(apiPath(presignData.uploadUrl), {
         method: 'PUT',
         headers: { 'Content-Type': file.type || 'application/octet-stream' },
@@ -653,7 +918,6 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
       })
       if (!uploadRes.ok) throw new Error('File upload failed')
 
-      // Step 3: Confirm upload (creates the file record)
       const confirmRes = await fetch(apiPath('/api/uploads/confirm'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -669,26 +933,37 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
       })
       if (!confirmRes.ok) throw new Error('Failed to confirm upload')
 
-      // Step 4: Refresh the files list
       onRefresh()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Upload failed'
       setUploadError(message)
     } finally {
       setUploading(false)
-      // Reset the input so the same file can be uploaded again
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
   return (
-    <div className="bg-white rounded-[var(--radius-card)] border border-gray-200 p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2">
-          <Paperclip size={14} />
+    <div
+      className="bg-white rounded-xl overflow-hidden"
+      style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+    >
+      <div
+        className="flex items-center justify-between"
+        style={{ padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}
+      >
+        <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+          <Paperclip size={14} style={{ color: 'var(--color-text-subtle)' }} />
           Files
           {files.length > 0 && (
-            <span className="ml-1 text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full font-normal">
+            <span
+              className="text-xs font-normal rounded-full"
+              style={{
+                padding: '0.0625rem 0.4375rem',
+                background: 'var(--color-bg-tertiary)',
+                color: 'var(--color-text-subtle)',
+              }}
+            >
               {files.length}
             </span>
           )}
@@ -704,50 +979,84 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
                 aria-label="Upload file"
               />
               <button
+                type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
-                className={cn(
-                  'text-xs font-medium flex items-center gap-1 px-2.5 py-1.5 rounded-lg border transition-colors',
-                  uploading
-                    ? 'border-gray-200 text-gray-400 cursor-not-allowed'
-                    : 'border-[var(--color-brand)] text-[var(--color-brand)] hover:bg-green-50/50',
-                )}
+                className="flex items-center gap-1.5 text-xs font-medium transition-colors"
+                style={{
+                  padding: '0.375rem 0.75rem',
+                  borderRadius: 'var(--radius-button)',
+                  border: `1px solid ${BRAND}`,
+                  color: BRAND,
+                  background: 'var(--color-bg)',
+                  cursor: uploading ? 'not-allowed' : 'pointer',
+                  opacity: uploading ? 0.5 : 1,
+                }}
+                onMouseEnter={e => {
+                  if (!uploading) {
+                    e.currentTarget.style.background = 'var(--color-brand-50)'
+                  }
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'var(--color-bg)'
+                }}
               >
-                {uploading ? (
-                  <Loader2 size={12} className="animate-spin" />
-                ) : (
-                  <Upload size={12} />
-                )}
-                {uploading ? 'Uploading...' : 'Upload File'}
+                {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                {uploading ? 'Uploading...' : 'Upload'}
               </button>
             </>
           )}
           <button
+            type="button"
             onClick={onRefresh}
-            className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 transition-colors"
+            className="flex items-center gap-1 text-xs transition-colors"
+            style={{ color: 'var(--color-text-subtle)', background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem' }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-subtle)' }}
           >
             <RefreshCw size={12} />
-            Refresh
           </button>
         </div>
       </div>
 
       {uploadError && (
-        <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div
+          style={{
+            margin: '0.75rem 1.25rem 0',
+            fontSize: '0.8125rem',
+            color: 'var(--color-danger)',
+            background: 'var(--color-danger-bg)',
+            border: '1px solid var(--color-danger)',
+            borderRadius: 'var(--radius-button)',
+            padding: '0.5rem 0.75rem',
+          }}
+        >
           {uploadError}
         </div>
       )}
 
       {files.length === 0 ? (
-        <p className="text-sm text-gray-400 text-center py-6">No files attached yet.</p>
+        <div className="flex flex-col items-center justify-center text-center" style={{ padding: '2.5rem 1.5rem', gap: '0.375rem' }}>
+          <Paperclip size={18} style={{ color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }} />
+          <p className="text-sm" style={{ color: 'var(--color-text-subtle)' }}>No files attached yet.</p>
+        </div>
       ) : (
-        <ul className="flex flex-col divide-y divide-gray-100">
-          {files.map(f => (
-            <li key={f.id} className="flex items-center gap-3 py-2.5">
+        <div>
+          {files.map((f, i) => (
+            <div
+              key={f.id}
+              className="flex items-center gap-3 transition-colors"
+              style={{
+                padding: '0.75rem 1.25rem',
+                borderBottom: i < files.length - 1 ? '1px solid var(--color-row-border)' : 'none',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-row-hover)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+            >
               <div className="flex-shrink-0">{fileIcon(f.mimeType)}</div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-gray-800 truncate">{f.filename}</p>
-                <p className="text-xs text-gray-400">
+                <p className="text-sm truncate" style={{ color: 'var(--color-text)' }}>{f.filename}</p>
+                <p className="text-xs" style={{ color: 'var(--color-text-subtle)', marginTop: '0.0625rem' }}>
                   {f.uploaderName ?? f.uploadedByType}
                   {f.sizeBytes ? ` / ${formatBytes(f.sizeBytes)}` : ''}
                   {' / '}{formatDate(f.createdAt)}
@@ -759,7 +1068,13 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
                     href={apiPath(`/api/uploads/serve?key=${encodeURIComponent(f.storageKey)}`)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-1.5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                    className="flex items-center justify-center transition-colors"
+                    style={{
+                      width: 28, height: 28, borderRadius: 'var(--radius-button)',
+                      color: 'var(--color-text-subtle)',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)'; e.currentTarget.style.color = 'var(--color-text)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
                     aria-label={`View ${f.filename}`}
                   >
                     <ImageIcon size={14} />
@@ -767,28 +1082,27 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
                 )}
                 <a
                   href={apiPath(`/api/uploads/serve?key=${encodeURIComponent(f.storageKey)}&download=1`)}
-                  className="p-1.5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                  className="flex items-center justify-center transition-colors"
+                  style={{
+                    width: 28, height: 28, borderRadius: 'var(--radius-button)',
+                    color: 'var(--color-text-subtle)',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)'; e.currentTarget.style.color = 'var(--color-text)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
                   aria-label={`Download ${f.filename}`}
                 >
                   <Download size={14} />
                 </a>
               </div>
-            </li>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   )
 }
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex justify-between items-start gap-2">
-      <dt className="text-gray-400 flex-shrink-0">{label}</dt>
-      <dd className="text-gray-700 text-right capitalize">{value}</dd>
-    </div>
-  )
-}
+// ---- Helpers -----------------------------------------------------------------
 
 function formatDate(iso: string) {
   try {

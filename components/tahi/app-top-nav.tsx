@@ -9,18 +9,57 @@ interface AppTopNavProps {
 
 export function AppTopNav({ isAdmin }: AppTopNavProps) {
   return (
-    <header className="h-14 flex items-center justify-between px-8 bg-white border-b border-gray-100 flex-shrink-0">
+    <header
+      className="h-14 flex items-center justify-between flex-shrink-0"
+      style={{
+        padding: '0 1.5rem',
+        background: 'var(--color-bg)',
+        borderBottom: '1px solid var(--color-border-subtle)',
+      }}
+    >
       {/* Left */}
       <div className="flex items-center gap-3">
         {isAdmin ? (
           <button
-            className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg bg-gray-50 border border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600 transition-colors"
+            className="flex items-center gap-2 transition-colors"
+            style={{
+              padding: '0.4375rem 0.875rem',
+              fontSize: '0.8125rem',
+              fontWeight: 400,
+              color: 'var(--color-text-subtle)',
+              background: 'var(--color-bg-secondary)',
+              border: '1px solid var(--color-border-subtle)',
+              borderRadius: 'var(--radius-button)',
+              cursor: 'pointer',
+              maxWidth: '28rem',
+              width: '100%',
+              minWidth: '12rem',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.borderColor = 'var(--color-border)'
+              e.currentTarget.style.color = 'var(--color-text-muted)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
+              e.currentTarget.style.color = 'var(--color-text-subtle)'
+            }}
             aria-label="Search"
           >
-            <Search className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline text-xs">Search...</span>
-            <kbd className="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded bg-white font-mono border border-gray-200 text-gray-400">
-              ⌘K
+            <Search size={14} style={{ flexShrink: 0 }} />
+            <span className="flex-1 text-left truncate">Search requests, clients...</span>
+            <kbd
+              style={{
+                fontSize: '0.625rem',
+                padding: '0.125rem 0.375rem',
+                borderRadius: 4,
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-subtle)',
+                fontFamily: 'monospace',
+                flexShrink: 0,
+              }}
+            >
+              Ctrl+K
             </kbd>
           </button>
         ) : (
@@ -37,14 +76,39 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
       </div>
 
       {/* Right */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center" style={{ gap: '0.5rem' }}>
         <button
-          className="relative p-2 rounded-lg text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors"
+          className="relative flex items-center justify-center transition-colors"
+          style={{
+            width: '2.25rem',
+            height: '2.25rem',
+            borderRadius: 'var(--radius-button)',
+            color: 'var(--color-text-subtle)',
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'var(--color-bg-secondary)'
+            e.currentTarget.style.color = 'var(--color-text)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'var(--color-text-subtle)'
+          }}
           aria-label="Notifications"
         >
-          <Bell className="w-4 h-4" />
+          <Bell size={16} />
           <span
-            className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-[var(--color-brand)]"
+            style={{
+              position: 'absolute',
+              top: 6,
+              right: 6,
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: 'var(--color-brand)',
+            }}
             aria-hidden="true"
           />
         </button>
