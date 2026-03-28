@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-28
 Total tasks: 228 (S1-S11 schema + T1-T171 feature + T172-T217 audit findings)
-Completed: S1-S11, T1-T13, T18, T32-T37, T39, T41, T47-T48, T55-T56, T58-T59, T62, T64-T65, T67-T68, T70, T72, T74-T77, T80, T82, T84, T86, T89-T90, T95-T96, T141-T144, T167-T168, T170, T172-T180, T185-T186, T189-T192, T194-T196, T200-T203, T205, T207-T208, T210, T216-T217
+Completed: S1-S11, T1-T13, T18, T29, T32-T37, T39, T41-T42, T44, T47-T48, T55-T57, T58-T59, T61-T62, T64-T65, T67-T68, T70, T72, T74-T77, T80, T82, T84, T86, T89-T90, T95-T96, T115, T117-T118, T141-T144, T167-T168, T170, T172-T180, T185-T186, T189-T192, T194-T196, T200-T203, T205, T207-T208, T210, T216-T217
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -63,7 +63,7 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T27 — Client detail page: contracts tab (upload NDA/SLA, track signed/expiry dates) — FE + BE — [PM] 2026-03-28
 
 - [x] T28 — Client detail page: contacts tab (add/edit/remove contacts for the org) — FE + BE — [PM] 2026-03-28
-- [ ] T29 — Admin impersonation: "View as client" button switches portal context to selected org — FE + BE
+- [x] T29 — Admin impersonation: "View as client" button switches portal context to selected org — FE + BE — [PM] 2026-03-28
 - [x] T30 — Subscription management: edit plan type, slot count, billing cycle from client detail — FE + BE — [PM] 2026-03-28
 - [x] T31 — Track management: view active tracks, add/archive tracks per client — FE + BE — [PM] 2026-03-28
 - [x] T32 — Invoice list page: table with filters (status, client, date range), totals — FE + BE
@@ -76,9 +76,9 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T39 — Notifications: bell icon in header with unread count, dropdown list — FE — [PM] 2026-03-28
 - [x] T40 — Notifications: mark as read (single + all) — FE + BE — [PM] 2026-03-28
 - [x] T41 — API route: GET + PATCH /api/notifications — BE — [PM] 2026-03-28
-- [ ] T42 — Bulk request creation: create a request across all clients / selected plan / selected list — FE + BE
+- [x] T42 — Bulk request creation: create a request across all clients / selected plan / selected list — FE + BE — [PM] 2026-03-28
 - [x] T43 — "Save and create another" flow on request creation form (pre-fills category/service) — FE — [PM] 2026-03-28
-- [ ] T44 — Bulk actions on request list: bulk status change, bulk assign, bulk delete — FE + BE
+- [x] T44 — Bulk actions on request list: bulk status change, bulk assign, bulk delete — FE + BE — [PM] 2026-03-28
 - [x] T45 — Health score: automated calculation per client (response time, open requests, overdue, NPS) stored on org row, recalculated on relevant events — BE — [PM] 2026-03-28
 - [x] T46 — Health score: display as coloured indicator on client list and client detail — FE + UIUX — [PM] 2026-03-28
 
@@ -99,11 +99,11 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [ ] T54 — Messaging: voice note recording and playback within conversations — FE + BE
 - [x] T55 — API route: GET + POST /api/admin/conversations — BE — [PM] 2026-03-28
 - [x] T56 — API route: GET + POST /api/admin/conversations/[id]/messages — BE — [PM] 2026-03-28
-- [ ] T57 — API route: GET + POST /api/portal/conversations (client-scoped, external only) — BE
+- [x] T57 — API route: GET + POST /api/portal/conversations (client-scoped, external only) — BE — [PM] 2026-03-28
 - [x] T58 — Client portal: dashboard page (active requests summary, recent messages, announcements) — FE + BE — [PM] 2026-03-28
 - [x] T59 — Client portal: requests page (list + board, submit new request via intake form) — FE — [PM] 2026-03-28
 - [ ] T60 — Client portal: request detail page (external comments only, file upload, status view) — FE
-- [ ] T61 — Client portal: messages page (external conversations only) — FE
+- [x] T61 — Client portal: messages page (external conversations only) — FE — [PM] 2026-03-28
 - [x] T62 — Client portal: invoices page (view invoices, pay via Stripe link) — FE + BE — [PM] 2026-03-28
 - [ ] T63 — Client portal: profile/settings page (update contact info, notification prefs) — FE + BE
 - [x] T64 — Announcements: create announcement form (title, body, target type/ids, email toggle) — FE + BE — [PM] 2026-03-28
@@ -181,10 +181,10 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [ ] T112 — Review funnel step 4: optional full case study (yes/no + details) — FE + BE
 - [ ] T113 — Review funnel step 5: logo permission and marketing permission checkboxes — FE + BE
 - [ ] T114 — AI draft: generate case study draft from submitted info using Claude API — BE
-- [ ] T115 — Admin review submissions page: list all submissions with state, NPS, testimonial, logo, approvals — FE + BE
+- [x] T115 — Admin review submissions page: list all submissions with state, NPS, testimonial, logo, approvals — FE + BE — [PM] 2026-03-28
 - [ ] T116 — Admin case study detail: view AI draft, edit, mark approved, download logo, copy formatted output — FE + BE
-- [ ] T117 — API route: GET + PATCH /api/admin/case-studies — BE
-- [ ] T118 — API route: GET + POST /api/public/review/[token] (token-auth, no Clerk) — BE
+- [x] T117 — API route: GET + PATCH /api/admin/case-studies — BE — [PM] 2026-03-28
+- [x] T118 — API route: GET + POST /api/public/review/[token] (token-auth, no Clerk) — BE — [PM] 2026-03-28
 
 
 ---
