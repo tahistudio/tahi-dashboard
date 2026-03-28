@@ -346,3 +346,22 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T216 — Extract shared loading skeleton: LoadingSkeleton in request-list.tsx and LoadingRows in overview-content.tsx are duplicates. Create components/tahi/loading-skeleton.tsx and use it everywhere — [FE]
 - [x] T217 — Extract shared empty state: empty state UI is duplicated in request-list.tsx, overview-content.tsx, and client-list.tsx. Create components/tahi/empty-state.tsx with icon, title, description, and optional CTA props — [FE]
 
+
+---
+
+## Co-founder Feature Requests (2026-03-28)
+
+### Plan-conditional track selection (Decision #020)
+
+- [ ] T218 — Request dialog: fetch the client's active subscription planType when the org is selected. Hide the track selector (large/small) entirely if planType is not 'maintain' or 'scale'. Show it only for retainer plans. -- [FE]
+- [ ] T219 — POST /api/admin/requests: make trackId optional and skip track slot validation when the org's plan does not use tracks. Return a clear error only when trackId is required (retainer plan) and missing. -- [BE]
+- [ ] T220 — Schema check: verify timeEntries table has hourlyRate column (decimal/real) and billable column (integer 0/1). Add both via migration if missing. -- [BE]
+- [ ] T221 — UIUX review: update request creation dialog to clearly separate the retainer flow (track selector visible) from the project/hourly flow (no track selector, just title + description + category). -- [UIUX]
+
+### Hourly billing tracker (Decision #021)
+
+- [ ] T222 — Time entries page: per-client hourly summary view. Show total hours logged this month per client, split by billable/non-billable. Filter by month and client. -- [FE]
+- [ ] T223 — GET /api/admin/reports/billing-summary?month=YYYY-MM: return per-org breakdown of billable hours, hourly rate, and total amount due. -- [BE]
+- [ ] T224 — Monthly billing email: Cloudflare Cron Trigger on the 1st of each month sends Liam a Resend email with a per-client table of billable hours and amounts for the prior month. -- [BE]
+- [ ] T225 — Time entry form: add hourly rate field per entry (pre-fill from org's default rate if set). Add a default hourly rate field to the client detail page (stored on the org row or a settings key). -- [FE + BE]
+- [ ] T226 — Xero hourly billing export (Phase 4): at end of month, auto-create draft invoices in Xero for each client with billable hours. One line item per client: "Design and development services - [Month] - [X] hours at $[rate]/hr". -- [BE]

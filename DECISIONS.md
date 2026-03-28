@@ -353,3 +353,31 @@ a Phase 3 or Phase 4 integration depending on the Rewardful API's
 complexity. The PM agent should confirm placement during sprint planning.
 The Rewardful API key is stored in environment variables as
 `REWARDFUL_API_KEY`.
+
+---
+
+## #020 — Track Type Selection is Plan-Conditional
+
+**Decision:** The "large task / small task" track selector in the request creation form only appears when the client's subscription plan uses the slot model (maintain, scale). Clients on launch plans or one-off custom build projects do not use tracks at all and should never see that selector.
+
+**Rationale:** Asking a custom project client "is this a large or small task?" is confusing and irrelevant. Track slots are a retainer model concept. Project clients are billed differently (hourly or fixed). Showing the selector unconditionally creates friction and erodes trust in the product's polish.
+
+**How to apply:** When the new request dialog opens for a client, fetch their active subscription planType. If planType is 'maintain' or 'scale', show the track selector. If planType is 'launch', 'project', or null, hide it entirely. This logic lives in the FE dialog and the BE POST /api/admin/requests should not require trackId when the plan does not use tracks.
+
+**Escalated to Liam:** No. Clear product rule.
+
+---
+
+## #021 — Hourly Billing Tracker with Monthly Xero Export
+
+**Decision:** Time entries (already in schema as timeEntries table) are the source for hourly billing per client. At the end of each month, the system sends Liam an email (via Resend) with a per-client breakdown of billable hours and total amount. Phase 2: auto-push draft invoices to Xero via the Xero API.
+
+**Rationale:** Liam needs to bill hourly clients accurately without manually tallying time sheets. An automated email summary is the fastest path to value. Xero sync removes the double-entry step once the integration is built.
+
+**How to apply:** 
+- Time entries already have orgId, teamMemberId, hours, billable (int), hourlyRate columns (verify in schema, add if missing).
+- A monthly summary endpoint: GET /api/admin/reports/billing-summary?month=YYYY-MM returns total billable hours and amount per org.
+- A Cloudflare Cron Trigger fires on the 1st of each month, calls Resend with the summary table.
+- Phase 4: the same trigger creates draft invoices in Xero via POST to the Xero Invoices API.
+
+**Escalated to Liam:** No. Architecture is clear.
