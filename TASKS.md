@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-28
 Total tasks: 228 (S1-S11 schema + T1-T171 feature + T172-T217 audit findings)
-Completed this session: T172-T180, T185-T186, T189-T192, T194-T196, T201-T203, T205, T207-T208, T210, T216-T217
+Completed: S1-S11, T1-T13, T18, T32-T37, T39, T41, T172-T180, T185-T186, T189-T192, T194-T196, T200-T203, T205, T207-T208, T210, T216-T217
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -315,13 +315,13 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T194 — Add error state handling to AdminOverview, ClientOverview, and RequestDetail: currently only loading and data states exist. A failed fetch silently shows empty data — [FE]
 - [x] T195 — Add .catch() handlers to AdminOverview fetch (overview-content.tsx lines 61-66) and ClientOverview fetch (lines 150-155) — [FE]
 - [x] T196 — Add .catch() to Promise.all in RequestDetail (request-detail.tsx lines 105-128) — [FE]
-- [ ] T197 — Move request list state (activeTab, view mode, search query) from useState to URL search params so refreshes and shared URLs preserve state — [FE]
+- [x] T197 — Move request list state (activeTab, view mode, search query) from useState to URL search params so refreshes and shared URLs preserve state — [FE] — [PM] 2026-03-28
 - [ ] T198 — Move client list state (search, statusFilter) from useState to URL search params — [FE]
 - [ ] T199 — Add error boundaries to overview page, request detail page, and client detail page — [FE]
 
 ### Accessibility
 
-- [ ] T200 — Add focus trap to new-request-dialog.tsx and new-client-dialog.tsx: keyboard users can currently Tab to background content when dialogs are open. Use focus-trap-react or manual focus management — [ACCESSIBILITY]
+- [x] T200 — Add focus trap to new-request-dialog.tsx and new-client-dialog.tsx: keyboard users can currently Tab to background content when dialogs are open. Use focus-trap-react or manual focus management — [ACCESSIBILITY] — [PM] 2026-03-28
 - [x] T201 — Add aria-modal="true", role="dialog", and aria-labelledby to the root div of new-request-dialog.tsx and new-client-dialog.tsx — [ACCESSIBILITY]
 - [x] T202 — Associate all form labels with inputs via htmlFor/id pairs in new-request-dialog.tsx and new-client-dialog.tsx (FieldGroup label elements are currently not associated) — [ACCESSIBILITY]
 - [x] T203 — Add focus-visible rings to search input in request-list.tsx (line 230), filter buttons, and view toggle buttons. The current focus:outline-none removes the outline with no replacement — [ACCESSIBILITY]
@@ -365,3 +365,19 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [ ] T224 — Monthly billing email: Cloudflare Cron Trigger on the 1st of each month sends Liam a Resend email with a per-client table of billable hours and amounts for the prior month. -- [BE]
 - [ ] T225 — Time entry form: add hourly rate field per entry (pre-fill from org's default rate if set). Add a default hourly rate field to the client detail page (stored on the org row or a settings key). -- [FE + BE]
 - [ ] T226 — Xero hourly billing export (Phase 4): at end of month, auto-create draft invoices in Xero for each client with billable hours. One line item per client: "Design and development services - [Month] - [X] hours at $[rate]/hr". -- [BE]
+
+---
+
+## QA Results
+
+### QA Live Testing Round 1 (2026-03-28)
+- [x] Overview page: admin KPIs load, greeting, recent requests, sidebar correct
+- [x] Requests list: admin columns, filters, search, board/list toggle
+- [x] Request detail: status stepper, thread, files panel, editable priority/assignee/due date
+- [x] Clients list: search, filter chips, client cards
+- [x] Invoices: tabs, empty state, create button
+- [x] Time tracking: summary cards, tabs, empty state, log button
+- [x] Bug: request detail crash (files API shape mismatch) - fixed
+- [x] Bug: missing NEXT_PUBLIC_TAHI_ORG_ID in production env - fixed
+- [x] Bug: React hydration error on greeting - fixed
+- [x] Visual polish: px to rem conversion, em dash cleanup, color consistency
