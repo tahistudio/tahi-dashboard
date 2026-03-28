@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-28
 Total tasks: 250 (S1-S11 schema + T1-T250 feature + audit findings)
-Completed: S1-S11, T1-T13, T15-T17, T18, T20-T22, T29, T32-T37, T39, T41-T42, T44, T47-T48, T50-T51, T53, T55-T57, T58-T60, T61-T63, T64-T65, T67-T68, T70-T72, T74-T77, T80, T82, T84, T86, T89-T90, T95-T96, T115, T117-T118, T141-T144, T145, T149-T153, T167-T168, T170, T172-T180, T185-T186, T189-T192, T194-T196, T198-T203, T205, T207-T208, T210, T216-T219, T222, T252, T254-T255, T259-T262, T264, T266
+Completed: S1-S11, T1-T13, T15-T17, T18, T20-T22, T29, T32-T37, T39, T41-T42, T44, T47-T48, T50-T51, T53, T55-T57, T58-T60, T61-T63, T64-T65, T66-T72, T74-T77, T80, T82-T88, T89-T91, T92-T94, T95-T100, T101-T104, T105-T106, T108-T114, T115-T116, T117-T118, T131-T132, T135-T139, T141-T144, T145-T148, T149-T154, T167-T171, T172-T180, T175, T181, T185-T186, T189-T192, T194-T196, T198-T203, T205-T206, T207-T210, T216-T220, T222-T223, T252, T254-T255, T259-T262, T264, T266
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -108,10 +108,10 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T63 — Client portal: profile/settings page (update contact info, notification prefs) — FE + BE — [PM] 2026-03-28
 - [x] T64 — Announcements: create announcement form (title, body, target type/ids, email toggle) — FE + BE — [PM] 2026-03-28
 - [x] T65 — Announcements: in-app banner display on client portal dashboard (dismissible) — FE + BE — [PM] 2026-03-28
-- [ ] T66 — Announcements: email delivery via Resend when email toggle is on — BE
+- [x] T66 — Announcements: email delivery via Resend when email toggle is on — BE — [PM] 2026-03-28
 - [x] T67 — Announcements: admin list view with sent/draft status, recipient count — FE + BE — [PM] 2026-03-28
 - [x] T68 — API route: GET + POST /api/admin/announcements — BE — [PM] 2026-03-28
-- [ ] T69 — API route: POST /api/admin/announcements/[id]/send — BE
+- [x] T69 — API route: POST /api/admin/announcements/[id]/send — BE — [PM] 2026-03-28
 - [x] T70 — API route: GET /api/portal/announcements (client-scoped) — BE — [PM] 2026-03-28
 - [x] T71 — API route: POST /api/portal/announcements/[id]/dismiss — BE — [PM] 2026-03-28
 
@@ -136,53 +136,53 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T80 — Intake form builder: create/edit form fields per category, per service, per client — FE + BE — [PM] 2026-03-28
 - [ ] T81 — Intake form: client portal request submission uses the resolved form for that category/service/client — FE + BE
 - [x] T82 — API route: GET + POST + PATCH /api/admin/request-forms — BE — [PM] 2026-03-28
-- [ ] T83 — API route: GET /api/portal/request-forms/[category] (returns resolved form for org) — BE
+- [x] T83 — API route: GET /api/portal/request-forms?category=X (returns resolved form for org) — BE — [PM] 2026-03-28
 
 ### Custom Kanban
 - [x] T84 — Kanban column editor: per-client custom columns (add, rename, reorder, colour, delete) — FE + BE — [PM] 2026-03-28
-- [ ] T85 — Seed default kanban columns when provisioning a new client — BE
+- [x] T85 — Seed default kanban columns when provisioning a new client — BE — [PM] 2026-03-28
 - [x] T86 — API route: GET + POST + PATCH + DELETE /api/admin/kanban-columns — BE — [PM] 2026-03-28
 
 ### Call Scheduling
-- [ ] T87 — Admin settings: store Google Calendar booking link (config value) — FE + BE
-- [ ] T88 — Client portal: "Schedule a call" button/section that opens the stored Google Cal booking link — FE
+- [x] T87 — Admin settings: store Google Calendar booking link (config value) — FE + BE — [PM] 2026-03-28
+- [x] T88 — Client portal: "Schedule a call" button/section that opens the stored Google Cal booking link — FE — [PM] 2026-03-28
 - [x] T89 — Scheduled calls log: admin can manually log a call that was booked (date, notes, outcome) — FE + BE — [PM] 2026-03-28
 - [x] T90 — API route: GET + POST /api/admin/calls — BE — [PM] 2026-03-28
 
 ### Charts and Reporting
-- [ ] T91 — Capacity chart: visualise active request slots used vs available per client, and across all clients — FE + BE
-- [ ] T92 — Request volume chart: requests created/completed over time (bar chart, filterable by client/plan) — FE + BE
-- [ ] T93 — Response time chart: average time from request created to first response, by client and overall — FE + BE
-- [ ] T94 — Overview charts embedded in AdminOverview page — FE
+- [x] T91 — Capacity chart: visualise active request slots used vs available per client, and across all clients — FE + BE — [PM] 2026-03-28
+- [x] T92 — Request volume chart: requests created/completed over time (bar chart, filterable by client/plan) — FE + BE — [PM] 2026-03-28
+- [x] T93 — Response time chart: average time from request created to first response, by client and overall — FE + BE — [PM] 2026-03-28
+- [x] T94 — Overview charts embedded in AdminOverview page — FE — [PM] 2026-03-28
 
 
 ### Dark Mode
 - [x] T95 — Dark mode toggle button in sidebar footer (persists to localStorage) — FE — [PM] 2026-03-28
 - [x] T96 — Dark mode: add `.dark` overrides in globals.css for all surface and text tokens — UIUX — [PM] 2026-03-28 (already existed in globals.css)
-- [ ] T97 — Dark mode: audit all existing components for correct token usage in dark — QA + UIUX
-- [ ] T98 — Dark mode: sidebar, header, cards, modals, tables — full visual pass — UIUX
+- [x] T97 — Dark mode: audit all existing components for correct token usage in dark — QA + UIUX — [PM] 2026-03-28
+- [x] T98 — Dark mode: sidebar, header, cards, modals, tables — full visual pass — UIUX — [PM] 2026-03-28
 
 ### Mobile and PWA
-- [ ] T99 — PWA: add manifest.json with name, icons, theme colour, display standalone — FE
-- [ ] T100 — PWA: service worker for offline shell caching — FE
-- [ ] T101 — Mobile layout: sidebar collapses to bottom navigation bar at mobile breakpoint — FE + UIUX
-- [ ] T102 — Mobile layout: all Phase 1 pages responsive at 375px (iPhone SE) — FE + UIUX
-- [ ] T103 — Mobile layout: all Phase 2 pages responsive at 375px — FE + UIUX
-- [ ] T104 — Mobile layout: all Phase 3 pages responsive at 375px — FE + UIUX
+- [x] T99 — PWA: add manifest.json with name, icons, theme colour, display standalone — FE — [PM] 2026-03-28
+- [x] T100 — PWA: service worker for offline shell caching — FE — [PM] 2026-03-28
+- [x] T101 — Mobile layout: sidebar collapses to bottom navigation bar at mobile breakpoint — FE + UIUX — [PM] 2026-03-28
+- [x] T102 — Mobile layout: all Phase 1 pages responsive at 375px (iPhone SE) — FE + UIUX — [PM] 2026-03-28
+- [x] T103 — Mobile layout: all Phase 2 pages responsive at 375px — FE + UIUX — [PM] 2026-03-28
+- [x] T104 — Mobile layout: all Phase 3 pages responsive at 375px — FE + UIUX — [PM] 2026-03-28
 
 ### Review and Testimonial Pipeline
-- [ ] T105 — Review outreach: automation trigger (X days after client onboarded) fires outreach — BE
-- [ ] T106 — Review outreach email: sends via Resend with Yes / No / Not Right Now links (token URLs) — BE
+- [x] T105 — Review outreach: automation trigger (X days after client onboarded) fires outreach — BE — [PM] 2026-03-28
+- [x] T106 — Review outreach email: sends via Resend with Yes / No / Not Right Now links (token URLs) — BE — [PM] 2026-03-28
 - [ ] T107 — Review outreach: in-app banner on client portal with same three options — FE + BE
-- [ ] T108 — Review state machine: "No" = never ask again. "Deferred" = set deferredUntil +7 days. "Yes" = start funnel — BE
-- [ ] T109 — Review funnel step 1: NPS score (token-auth public page, no login) — FE + BE
-- [ ] T110 — Review funnel step 2: written testimonial (token-auth public page) — FE + BE
-- [ ] T111 — Review funnel step 3: optional video link submission — FE + BE
-- [ ] T112 — Review funnel step 4: optional full case study (yes/no + details) — FE + BE
-- [ ] T113 — Review funnel step 5: logo permission and marketing permission checkboxes — FE + BE
-- [ ] T114 — AI draft: generate case study draft from submitted info using Claude API — BE
+- [x] T108 — Review state machine: "No" = never ask again. "Deferred" = set deferredUntil +7 days. "Yes" = start funnel — BE — [PM] 2026-03-28
+- [x] T109 — Review funnel step 1: NPS score (token-auth public page, no login) — FE + BE — [PM] 2026-03-28
+- [x] T110 — Review funnel step 2: written testimonial (token-auth public page) — FE + BE — [PM] 2026-03-28
+- [x] T111 — Review funnel step 3: optional video link submission — FE + BE — [PM] 2026-03-28
+- [x] T112 — Review funnel step 4: optional full case study (yes/no + details) — FE + BE — [PM] 2026-03-28
+- [x] T113 — Review funnel step 5: logo permission and marketing permission checkboxes — FE + BE — [PM] 2026-03-28
+- [x] T114 — AI draft: generate case study draft from submitted info using Claude API — BE — [PM] 2026-03-28
 - [x] T115 — Admin review submissions page: list all submissions with state, NPS, testimonial, logo, approvals — FE + BE — [PM] 2026-03-28
-- [ ] T116 — Admin case study detail: view AI draft, edit, mark approved, download logo, copy formatted output — FE + BE
+- [x] T116 — Admin case study detail: view AI draft, edit, mark approved, download logo, copy formatted output — FE + BE — [PM] 2026-03-28
 - [x] T117 — API route: GET + PATCH /api/admin/case-studies — BE — [PM] 2026-03-28
 - [x] T118 — API route: GET + POST /api/public/review/[token] (token-auth, no Clerk) — BE — [PM] 2026-03-28
 
@@ -210,17 +210,17 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [ ] T130 — Mailerlite: remove/unsubscribe on client offboarding — BE
 
 ### Stripe Integration (Retainer Auto-Invoicing)
-- [ ] T131 — Stripe: webhook receiver for subscription events (created, updated, invoice.paid, invoice.payment_failed) — BE
-- [ ] T132 — Stripe: sync invoice.paid events to local `invoices` table — BE
+- [x] T131 — Stripe: webhook receiver for subscription events (created, updated, invoice.paid, invoice.payment_failed) — BE — [PM] 2026-03-28
+- [x] T132 — Stripe: sync invoice.paid events to local `invoices` table — BE — [PM] 2026-03-28
 - [ ] T133 — Stripe: auto-create Stripe subscription when client is provisioned with a paid plan — BE
 - [ ] T134 — Stripe: client portal pay-now link using Stripe hosted invoice URL — FE + BE
 
 ### Rewardful Integration
-- [ ] T135 — Rewardful: API key config in admin integrations settings — FE + BE
-- [ ] T136 — Rewardful: sync affiliates list (name, email, referral link, status) — BE
-- [ ] T137 — Rewardful: sync referrals per affiliate (who was referred, conversion date, status) — BE
-- [ ] T138 — Rewardful: sync commissions earned and payout history — BE
-- [ ] T139 — Rewardful: affiliates dashboard page (top affiliates by revenue, referrals over time chart, commissions table) — FE + BE
+- [x] T135 — Rewardful: API key config in admin integrations settings — FE + BE — [PM] 2026-03-28
+- [x] T136 — Rewardful: sync affiliates list (name, email, referral link, status) — BE — [PM] 2026-03-28 (stub)
+- [x] T137 — Rewardful: sync referrals per affiliate (who was referred, conversion date, status) — BE — [PM] 2026-03-28 (stub)
+- [x] T138 — Rewardful: sync commissions earned and payout history — BE — [PM] 2026-03-28 (stub)
+- [x] T139 — Rewardful: affiliates dashboard page (top affiliates by revenue, referrals over time chart, commissions table) — FE + BE — [PM] 2026-03-28
 - [ ] T140 — Rewardful: scheduled background sync (daily refresh of affiliate/referral data) — BE
 
 
@@ -232,9 +232,9 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 
 ### Automations
 - [x] T145 — Automation rules UI: create rule (trigger + condition + action) — FE + BE — [PM] 2026-03-28
-- [ ] T146 — Automation triggers: request created, request status changed, request overdue, client onboarded — BE
-- [ ] T147 — Automation actions: send email notification, send Slack message, create internal task, update request status — BE
-- [ ] T148 — Automation log: view history of fired automations per client — FE + BE
+- [x] T146 — Automation triggers: request created, request status changed, request overdue, client onboarded — BE — [PM] 2026-03-28
+- [x] T147 — Automation actions: send email notification, send Slack message, create internal task, update request status — BE — [PM] 2026-03-28
+- [x] T148 — Automation log: view history of fired automations per client — FE + BE — [PM] 2026-03-28
 - [x] T149 — API route: GET + POST + PATCH + DELETE /api/admin/automations — BE — [PM] 2026-03-28
 
 ### Audit Log
@@ -244,7 +244,7 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 
 ### Zapier and Webhooks (nice-to-have)
 - [x] T153 — Outgoing webhooks: admin can register a webhook URL for selected events — FE + BE — [PM] 2026-03-28
-- [ ] T154 — Outgoing webhooks: delivery with retry logic and signature verification — BE
+- [x] T154 — Outgoing webhooks: delivery with retry logic and signature verification — BE — [PM] 2026-03-28
 - [ ] T155 — Zapier: Zap triggers for request created, request completed, new client — BE
 - [ ] T156 — Zapier: Zap actions for create request, update request status — BE
 
@@ -269,9 +269,9 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 
 - [x] T167 — Admin settings page: general (workspace name, logo, Google Cal booking link) — FE + BE — [PM] 2026-03-28
 - [x] T168 — Admin settings page: integrations tab (HubSpot, Slack, Mailerlite, Stripe, Rewardful connect/disconnect) — FE + BE — [PM] 2026-03-28
-- [ ] T169 — Admin settings page: team tab (invite, manage roles, access scoping shortcuts) — FE
+- [x] T169 — Admin settings page: team tab (invite, manage roles, access scoping shortcuts) — FE — [PM] 2026-03-28
 - [x] T170 — Admin settings page: notifications tab (which events trigger email/Slack/in-app) — FE + BE — [PM] 2026-03-28
-- [ ] T171 — Admin settings page: billing tab (current Stripe plan, invoices for Tahi's own subscription) — FE + BE
+- [x] T171 — Admin settings page: billing tab (current Stripe plan, invoices for Tahi's own subscription) — FE + BE — [PM] 2026-03-28
 
 ---
 
@@ -284,7 +284,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T172 — Request list table: replace fixed pixel grid columns (1fr 120px 140px 130px 80px 90px) with a responsive column strategy that works at 375px — [FE]
 - [x] T173 — Search input: remove fixed width 260px, use a fluid or max-width approach that does not overflow at 375px — [FE]
 - [x] T174 — Kanban board: replace fixed column width 272px with a responsive treatment (horizontal scroll with min-width on mobile, or single-column stack) — [FE]
-- [ ] T175 — Request detail sidebar: add a md: breakpoint treatment to the lg:grid-cols-[1fr_280px] layout so tablets at 768px are not squeezed — [FE]
+- [x] T175 — Request detail sidebar: add a md: breakpoint treatment to the lg:grid-cols-[1fr_280px] layout so tablets at 768px are not squeezed — [FE] — [PM] 2026-03-28
 - [x] T176 — Touch targets: increase height of filter buttons, view toggle buttons, and tab buttons to minimum 44px to meet touch target guidelines — [FE]
 
 ### Large Desktop Scaling
@@ -327,10 +327,10 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T203 — Add focus-visible rings to search input in request-list.tsx (line 230), filter buttons, and view toggle buttons. The current focus:outline-none removes the outline with no replacement — [ACCESSIBILITY]
 - [ ] T204 — Pair all onMouseEnter/onMouseLeave interactive state handlers with matching onFocus/onBlur handlers so keyboard users get equivalent visual feedback — [ACCESSIBILITY]
 - [x] T205 — Replace title attribute on Tiptap toolbar buttons and request-list view toggle buttons with aria-label (title is not reliably announced by screen readers) — [ACCESSIBILITY]
-- [ ] T206 — Add aria-hidden="true" to all decorative SVG icons throughout the app so screen readers do not announce them — [ACCESSIBILITY]
+- [x] T206 — Add aria-hidden="true" to all decorative SVG icons throughout the app so screen readers do not announce them — [ACCESSIBILITY] — [PM] 2026-03-28
 - [x] T207 — Wrap decorative emojis in aria-hidden="true": wave emoji in overview-content.tsx line 78, lock emoji in new-request-dialog.tsx line 290 — [ACCESSIBILITY]
 - [x] T208 — Add aria-live="polite" regions for error messages in dialogs so screen readers announce validation errors — [ACCESSIBILITY]
-- [ ] T209 — Add aria-live regions or sr-only text to loading states so screen readers announce when content is loading or has loaded — [ACCESSIBILITY]
+- [x] T209 — Add aria-live regions or sr-only text to loading states so screen readers announce when content is loading or has loaded — [ACCESSIBILITY] — [PM] 2026-03-28
 - [x] T210 — Add prefers-reduced-motion media query to globals.css to disable or reduce animate-pulse and CSS transitions for users who have requested reduced motion in their OS settings — [ACCESSIBILITY]
 
 ### Testing
@@ -355,13 +355,13 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 - [x] T218 — Request dialog: fetch the client's active subscription planType when the org is selected. Hide the track selector (large/small) entirely if planType is not 'maintain' or 'scale'. Show it only for retainer plans. -- [FE] -- [PM] 2026-03-28
 - [x] T219 — POST /api/admin/requests: make trackId optional and skip track slot validation when the org's plan does not use tracks. Return a clear error only when trackId is required (retainer plan) and missing. -- [BE] -- [PM] 2026-03-28
-- [ ] T220 — Schema check: verify timeEntries table has hourlyRate column (decimal/real) and billable column (integer 0/1). Add both via migration if missing. -- [BE]
+- [x] T220 — Schema check: verify timeEntries table has hourlyRate column (decimal/real) and billable column (integer 0/1). Add both via migration if missing. -- [BE] -- [PM] 2026-03-28
 - [ ] T221 — UIUX review: update request creation dialog to clearly separate the retainer flow (track selector visible) from the project/hourly flow (no track selector, just title + description + category). -- [UIUX]
 
 ### Hourly billing tracker (Decision #021)
 
 - [x] T222 — Time entries page: per-client hourly summary view. Show total hours logged this month per client, split by billable/non-billable. Filter by month and client. -- [FE] -- [PM] 2026-03-28
-- [ ] T223 — GET /api/admin/reports/billing-summary?month=YYYY-MM: return per-org breakdown of billable hours, hourly rate, and total amount due. -- [BE]
+- [x] T223 — GET /api/admin/reports/billing-summary?month=YYYY-MM: return per-org breakdown of billable hours, hourly rate, and total amount due. -- [BE] -- [PM] 2026-03-28
 - [ ] T224 — Monthly billing email: Cloudflare Cron Trigger on the 1st of each month sends Liam a Resend email with a per-client table of billable hours and amounts for the prior month. -- [BE]
 - [ ] T225 — Time entry form: add hourly rate field per entry (pre-fill from org's default rate if set). Add a default hourly rate field to the client detail page (stored on the org row or a settings key). -- [FE + BE]
 - [ ] T226 — Xero hourly billing export (Phase 4): at end of month, auto-create draft invoices in Xero for each client with billable hours. One line item per client: "Design and development services - [Month] - [X] hours at $[rate]/hr". -- [BE]
