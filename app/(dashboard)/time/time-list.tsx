@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Plus, Clock, RefreshCw, DollarSign, Timer } from 'lucide-react'
+import { Plus, Clock, RefreshCw, DollarSign, Timer, Download } from 'lucide-react'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { apiPath } from '@/lib/api'
@@ -306,22 +306,45 @@ export function TimeList() {
             Log and review hours across all clients and requests.
           </p>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2"
-          style={{
-            padding: '0.625rem 1.125rem',
-            background: 'var(--color-brand)',
-            border: 'none',
-            borderRadius: '0 10px 0 10px',
-            cursor: 'pointer',
-            color: 'white',
-            minHeight: 44,
-          }}
-        >
-          <Plus style={{ width: 16, height: 16 }} aria-hidden="true" />
-          Log Time
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <button
+            onClick={() => {
+              const link = document.createElement('a')
+              link.href = apiPath('/api/admin/export/time')
+              link.download = 'time-entries.csv'
+              link.click()
+            }}
+            className="flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2"
+            style={{
+              padding: '0.625rem 1.125rem',
+              background: 'var(--color-bg)',
+              border: '1px solid var(--color-border)',
+              borderRadius: '0.5rem',
+              cursor: 'pointer',
+              color: 'var(--color-text)',
+              minHeight: 44,
+            }}
+          >
+            <Download style={{ width: 16, height: 16 }} aria-hidden="true" />
+            Export CSV
+          </button>
+          <button
+            onClick={() => setShowModal(true)}
+            className="flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2"
+            style={{
+              padding: '0.625rem 1.125rem',
+              background: 'var(--color-brand)',
+              border: 'none',
+              borderRadius: '0 10px 0 10px',
+              cursor: 'pointer',
+              color: 'white',
+              minHeight: 44,
+            }}
+          >
+            <Plus style={{ width: 16, height: 16 }} aria-hidden="true" />
+            Log Time
+          </button>
+        </div>
       </div>
 
       {/* Summary Cards */}

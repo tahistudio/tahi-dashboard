@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   Plus, Search, Filter, LayoutList, Columns3,
   AlertTriangle, ChevronDown, Inbox, RefreshCw,
-  Calendar, Zap, Clock, ArrowUpDown,
+  Calendar, Zap, Clock, ArrowUpDown, Download,
 } from 'lucide-react'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { apiPath } from '@/lib/api'
@@ -284,15 +284,38 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
             </p>
           )}
         </div>
-        <button
-          onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-2 font-semibold text-white transition-opacity hover:opacity-90"
-          style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', background: 'var(--color-brand)', borderRadius: '0.375rem', border: 'none', cursor: 'pointer' }}
-        >
-          <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">Create Request</span>
-          <span className="sm:hidden">New</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const link = document.createElement('a')
+              link.href = apiPath('/api/admin/export/requests')
+              link.download = 'requests.csv'
+              link.click()
+            }}
+            className="flex items-center gap-2 font-medium transition-opacity hover:opacity-80"
+            style={{
+              padding: '0.5rem 1rem',
+              fontSize: '0.875rem',
+              background: 'var(--color-bg)',
+              border: '1px solid var(--color-border)',
+              borderRadius: '0.5rem',
+              cursor: 'pointer',
+              color: 'var(--color-text)',
+            }}
+          >
+            <Download className="w-4 h-4" />
+            <span className="hidden sm:inline">Export CSV</span>
+          </button>
+          <button
+            onClick={() => setDialogOpen(true)}
+            className="flex items-center gap-2 font-semibold text-white transition-opacity hover:opacity-90"
+            style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', background: 'var(--color-brand)', borderRadius: '0.375rem', border: 'none', cursor: 'pointer' }}
+          >
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">Create Request</span>
+            <span className="sm:hidden">New</span>
+          </button>
+        </div>
       </div>
 
       {/* Main card */}
