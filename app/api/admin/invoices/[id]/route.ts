@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -89,6 +89,39 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .update(schema.invoices)
     .set(patch)
     .where(eq(schema.invoices.id, id))
+
+  return NextResponse.json({ success: true })
+}
+
+// ── DELETE /api/admin/invoices/[id] ─────────────────────────────────────────
+// Only draft invoices can be deleted
+export async function DELETE(req: NextRequest, { params }: Params) {
+  const { orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const { id } = await params
+  const database = await db()
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Only allow deleting draft invoices
+  const [invoice] = await drizzle
+    .select({ status: schema.invoices.status })
+    .from(schema.invoices)
+    .where(eq(schema.invoices.id, id))
+    .limit(1)
+
+  if (!invoice) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
+  if (invoice.status !== 'draft') {
+    return NextResponse.json({ error: 'Only draft invoices can be deleted' }, { status: 400 })
+  }
+
+  await drizzle.delete(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, id))
+  await drizzle.delete(schema.invoices).where(and(eq(schema.invoices.id, id), eq(schema.invoices.status, 'draft')))
 
   return NextResponse.json({ success: true })
 }

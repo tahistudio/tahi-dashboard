@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, UserCog, Mail, Shield, RefreshCw, X, ChevronRight, Clock } from 'lucide-react'
+import { Plus, UserCog, Mail, Shield, RefreshCw, X, ChevronRight, Clock, Trash2 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
 
 // -- Types --
@@ -532,6 +533,7 @@ export function TeamContent() {
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
   const [accessMember, setAccessMember] = useState<TeamMember | null>(null)
+  const [deleteMember, setDeleteMember] = useState<TeamMember | null>(null)
 
   const fetchTeam = useCallback(async () => {
     setLoading(true)
@@ -546,6 +548,14 @@ export function TeamContent() {
       setLoading(false)
     }
   }, [])
+
+  const handleDeleteMember = useCallback(async () => {
+    if (!deleteMember) return
+    const res = await fetch(apiPath(`/api/admin/team/${deleteMember.id}`), { method: 'DELETE' })
+    if (!res.ok) throw new Error('Failed to remove member')
+    setDeleteMember(null)
+    fetchTeam()
+  }, [deleteMember, fetchTeam])
 
   useEffect(() => {
     fetchTeam()
@@ -690,16 +700,25 @@ export function TeamContent() {
                   )}
 
                   {/* Actions */}
-                  <button
-                    onClick={() => setAccessMember(member)}
-                    className="w-full mt-4 flex items-center justify-between px-3 py-2.5 rounded-lg border border-[var(--color-border-subtle)] hover:border-[var(--color-brand)] hover:bg-[var(--color-bg-secondary)] transition-colors text-sm text-[var(--color-text-muted)] hover:text-[var(--color-brand)]"
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <Shield className="w-3.5 h-3.5" aria-hidden="true" />
-                      Manage Access
-                    </span>
-                    <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
+                  <div className="flex items-center gap-2 mt-4">
+                    <button
+                      onClick={() => setAccessMember(member)}
+                      className="flex-1 flex items-center justify-between px-3 py-2.5 rounded-lg border border-[var(--color-border-subtle)] hover:border-[var(--color-brand)] hover:bg-[var(--color-bg-secondary)] transition-colors text-sm text-[var(--color-text-muted)] hover:text-[var(--color-brand)]"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Shield className="w-3.5 h-3.5" aria-hidden="true" />
+                        Manage Access
+                      </span>
+                      <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
+                    </button>
+                    <button
+                      onClick={() => setDeleteMember(member)}
+                      className="p-2.5 rounded-lg border border-[var(--color-border-subtle)] hover:border-red-300 hover:bg-red-50 text-[var(--color-text-subtle)] hover:text-red-500 transition-colors"
+                      aria-label={`Remove ${member.name}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                    </button>
+                  </div>
                 </div>
               </div>
             )
@@ -722,6 +741,15 @@ export function TeamContent() {
           onUpdated={fetchTeam}
         />
       )}
+
+      <ConfirmDialog
+        open={!!deleteMember}
+        title="Remove team member"
+        description={deleteMember ? `Are you sure you want to remove ${deleteMember.name}? Their access rules will also be deleted.` : ''}
+        confirmLabel="Remove"
+        onConfirm={handleDeleteMember}
+        onCancel={() => setDeleteMember(null)}
+      />
     </div>
   )
 }

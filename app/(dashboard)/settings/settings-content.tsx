@@ -61,6 +61,7 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
   const [loading, setLoading] = useState(true)
   const [darkMode, setDarkMode] = useState(false)
   const [savingKey, setSavingKey] = useState<string | null>(null)
+  const [savedToast, setSavedToast] = useState(false)
 
   // Notification toggles
   const [emailNotifications, setEmailNotifications] = useState(true)
@@ -127,6 +128,8 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, value }),
       })
+      setSavedToast(true)
+      setTimeout(() => setSavedToast(false), 2000)
     } catch {
       // Silently fail for now
     } finally {
@@ -148,6 +151,20 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <div className="space-y-6">
+      {/* Saved toast */}
+      {savedToast && (
+        <div
+          className="fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium animate-in fade-in slide-in-from-top-2"
+          style={{
+            background: 'var(--color-success-bg, #f0fdf4)',
+            color: 'var(--color-success, #4ade80)',
+            border: '1px solid var(--color-success, #4ade80)',
+          }}
+        >
+          Saved
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>

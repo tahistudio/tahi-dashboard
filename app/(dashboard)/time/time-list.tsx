@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Plus, Clock, RefreshCw, DollarSign, Timer, Download, ChevronDown, ChevronUp, Users } from 'lucide-react'
+import { Plus, Clock, RefreshCw, DollarSign, Timer, Download, ChevronDown, ChevronUp, Users, Trash2 } from 'lucide-react'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
 
 // ---- Types ----
@@ -563,6 +564,7 @@ export function TimeList() {
   const [totalHours, setTotalHours] = useState(0)
   const [billableHours, setBillableHours] = useState(0)
   const [entryCount, setEntryCount] = useState(0)
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
   const fetchEntries = useCallback(async (billable: string) => {
     setLoading(true)
@@ -585,6 +587,14 @@ export function TimeList() {
       setLoading(false)
     }
   }, [])
+
+  const handleDelete = useCallback(async () => {
+    if (!deleteTarget) return
+    const res = await fetch(apiPath(`/api/admin/time/${deleteTarget}`), { method: 'DELETE' })
+    if (!res.ok) throw new Error('Failed to delete')
+    setDeleteTarget(null)
+    fetchEntries(billableTab).catch(() => {})
+  }, [deleteTarget, billableTab, fetchEntries])
 
   useEffect(() => {
     fetchEntries(billableTab).catch(() => {})
@@ -760,7 +770,7 @@ export function TimeList() {
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
               <thead>
                 <tr style={{ background: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
-                  {['Date', 'Team Member', 'Client', 'Request', 'Hours', 'Billable', 'Notes'].map(h => (
+                  {['Date', 'Team Member', 'Client', 'Request', 'Hours', 'Billable', 'Notes', ''].map(h => (
                     <th
                       key={h}
                       style={{
@@ -825,6 +835,16 @@ export function TimeList() {
                     <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {entry.notes ?? '--'}
                     </td>
+                    <td style={{ padding: '0.875rem 0.5rem', width: '2.5rem' }}>
+                      <button
+                        onClick={() => setDeleteTarget(entry.id)}
+                        className="p-1.5 rounded-lg hover:bg-red-50 text-[var(--color-text-subtle)] hover:text-red-500 transition-colors"
+                        aria-label="Delete time entry"
+                        style={{ border: 'none', background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <Trash2 style={{ width: '0.875rem', height: '0.875rem' }} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -842,6 +862,16 @@ export function TimeList() {
           onCreated={handleCreated}
         />
       )}
+
+      {/* Delete Confirmation */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete time entry"
+        description="This time entry will be permanently removed. This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

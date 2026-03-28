@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { apiPath } from '@/lib/api'
 import { X, Loader2, Zap, CheckCircle2, Lock, Layers, AlignLeft } from 'lucide-react'
+import { SearchableSelect } from '@/components/tahi/searchable-select'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -268,15 +269,16 @@ export function NewRequestDialog({
                     fontSize: '0.8125rem', color: 'var(--color-text-subtle)',
                   }}>
                     <Loader2 size={13} className="animate-spin" />
-                    Loading clients…
+                    Loading clients...
                   </div>
                 ) : (
-                  <StyledSelect id="req-client" value={clientOrgId} onChange={setClientOrgId} required>
-                    <option value="" disabled>Select a client…</option>
-                    {clients.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </StyledSelect>
+                  <SearchableSelect
+                    options={clients.map(c => ({ value: c.id, label: c.name }))}
+                    value={clientOrgId || null}
+                    onChange={(v) => setClientOrgId(v ?? '')}
+                    placeholder="Select a client..."
+                    searchPlaceholder="Search clients..."
+                  />
                 )}
               </FieldGroup>
             )}

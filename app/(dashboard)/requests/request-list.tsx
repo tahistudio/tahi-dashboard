@@ -235,11 +235,31 @@ interface BoardColumn {
   label?: string
 }
 
+function getStoredPreference<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback
+  try {
+    const stored = localStorage.getItem(key)
+    return stored ? (stored as T) : fallback
+  } catch {
+    return fallback
+  }
+}
+
 export function RequestList({ isAdmin }: { isAdmin: boolean }) {
-  const [view, setView] = useState<ViewMode>('list')
+  const [view, setViewRaw] = useState<ViewMode>(() => getStoredPreference<ViewMode>('tahi-request-view', 'list'))
   const [activeTab, setActiveTab] = useState('active')
   const [search, setSearch] = useState('')
-  const [sortKey, setSortKey] = useState<SortKey>('updatedAt')
+  const [sortKey, setSortKeyRaw] = useState<SortKey>(() => getStoredPreference<SortKey>('tahi-request-sort', 'updatedAt'))
+
+  const setView = useCallback((v: ViewMode) => {
+    setViewRaw(v)
+    try { localStorage.setItem('tahi-request-view', v) } catch { /* noop */ }
+  }, [])
+
+  const setSortKey = useCallback((k: SortKey) => {
+    setSortKeyRaw(k)
+    try { localStorage.setItem('tahi-request-sort', k) } catch { /* noop */ }
+  }, [])
   const [requests, setRequests] = useState<Request[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
