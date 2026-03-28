@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Plus, Clock, RefreshCw, DollarSign, Timer, Download, ChevronDown, ChevronUp, Users } from 'lucide-react'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
+import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { apiPath } from '@/lib/api'
 
 // ---- Types ----
@@ -61,6 +62,12 @@ function formatHours(h: number): string {
 
 // ---- Log Time Modal ----
 
+interface SelectOption {
+  value: string
+  label: string
+  subtitle?: string
+}
+
 function LogTimeModal({
   onClose,
   onCreated,
@@ -68,9 +75,9 @@ function LogTimeModal({
   onClose: () => void
   onCreated: () => void
 }) {
-  const [orgId, setOrgId] = useState('')
-  const [teamMemberId, setTeamMemberId] = useState('')
-  const [requestId, setRequestId] = useState('')
+  const [orgId, setOrgId] = useState<string | null>(null)
+  const [teamMemberId, setTeamMemberId] = useState<string | null>(null)
+  const [requestId, setRequestId] = useState<string | null>(null)
   const [hours, setHours] = useState('')
   const [notes, setNotes] = useState('')
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
@@ -78,9 +85,42 @@ function LogTimeModal({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  const [clientOptions, setClientOptions] = useState<SelectOption[]>([])
+  const [memberOptions, setMemberOptions] = useState<SelectOption[]>([])
+  const [requestOptions, setRequestOptions] = useState<SelectOption[]>([])
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/clients'))
+      .then(r => r.json() as Promise<{ organisations: Array<{ id: string; name: string }> }>)
+      .then(data => {
+        setClientOptions(
+          (data.organisations ?? []).map(o => ({ value: o.id, label: o.name }))
+        )
+      })
+      .catch(() => setClientOptions([]))
+
+    fetch(apiPath('/api/admin/team'))
+      .then(r => r.json() as Promise<{ items: Array<{ id: string; name: string; email: string }> }>)
+      .then(data => {
+        setMemberOptions(
+          (data.items ?? []).map(m => ({ value: m.id, label: m.name, subtitle: m.email }))
+        )
+      })
+      .catch(() => setMemberOptions([]))
+
+    fetch(apiPath('/api/admin/requests?status=all'))
+      .then(r => r.json() as Promise<{ requests: Array<{ id: string; title: string; orgName?: string | null }> }>)
+      .then(data => {
+        setRequestOptions(
+          (data.requests ?? []).map(r => ({ value: r.id, label: r.title, subtitle: r.orgName ?? undefined }))
+        )
+      })
+      .catch(() => setRequestOptions([]))
+  }, [])
+
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!orgId.trim() || !teamMemberId.trim() || !hours || !date) {
+    if (!orgId || !teamMemberId || !hours || !date) {
       setError('Client, team member, hours, and date are required.')
       return
     }
@@ -91,9 +131,9 @@ function LogTimeModal({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          orgId: orgId.trim(),
-          teamMemberId: teamMemberId.trim(),
-          requestId: requestId.trim() || undefined,
+          orgId,
+          teamMemberId,
+          requestId: requestId || undefined,
           hours: parseFloat(hours),
           notes: notes.trim() || undefined,
           date,
@@ -137,7 +177,7 @@ function LogTimeModal({
     >
       <div
         style={{
-          background: 'white', borderRadius: 12, padding: '1.75rem',
+          background: 'var(--color-bg)', borderRadius: '0.75rem', padding: '1.75rem',
           width: '100%', maxWidth: '30rem', maxHeight: '90vh', overflowY: 'auto',
           boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
         }}
@@ -155,16 +195,36 @@ function LogTimeModal({
         )}
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            <label htmlFor="lt-org-id" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Client ID</label>
-            <input id="lt-org-id" type="text" placeholder="Organisation ID" value={orgId} onChange={e => setOrgId(e.target.value)} required style={inputStyle} />
+            <label style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Client</label>
+            <SearchableSelect
+              options={clientOptions}
+              value={orgId}
+              onChange={setOrgId}
+              placeholder="Select a client..."
+              searchPlaceholder="Search clients..."
+              allowClear
+            />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            <label htmlFor="lt-member-id" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Team Member ID</label>
-            <input id="lt-member-id" type="text" placeholder="Team member ID" value={teamMemberId} onChange={e => setTeamMemberId(e.target.value)} required style={inputStyle} />
+            <label style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Team Member</label>
+            <SearchableSelect
+              options={memberOptions}
+              value={teamMemberId}
+              onChange={setTeamMemberId}
+              placeholder="Select a team member..."
+              searchPlaceholder="Search team members..."
+            />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            <label htmlFor="lt-request-id" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Request ID (optional)</label>
-            <input id="lt-request-id" type="text" placeholder="Link to a request" value={requestId} onChange={e => setRequestId(e.target.value)} style={inputStyle} />
+            <label style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Request (optional)</label>
+            <SearchableSelect
+              options={requestOptions}
+              value={requestId}
+              onChange={setRequestId}
+              placeholder="None (internal time)"
+              searchPlaceholder="Search requests..."
+              allowClear
+            />
           </div>
           <div style={{ display: 'flex', gap: '0.75rem' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: 1 }}>
@@ -176,13 +236,13 @@ function LogTimeModal({
               <input id="lt-date" type="date" value={date} onChange={e => setDate(e.target.value)} required style={inputStyle} />
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <input
               id="lt-billable"
               type="checkbox"
               checked={billable}
               onChange={e => setBillable(e.target.checked)}
-              style={{ width: 16, height: 16, accentColor: 'var(--color-brand)' }}
+              style={{ width: '1rem', height: '1rem', accentColor: 'var(--color-brand)' }}
             />
             <label htmlFor="lt-billable" style={{ fontSize: '0.875rem', color: 'var(--color-text)' }}>Billable</label>
           </div>
@@ -195,8 +255,8 @@ function LogTimeModal({
               type="button"
               onClick={onClose}
               style={{
-                padding: '0.5rem 1rem', borderRadius: 8, fontSize: '0.875rem', fontWeight: 500,
-                border: '1px solid var(--color-border)', background: 'white',
+                padding: '0.5rem 1rem', borderRadius: '0.5rem', fontSize: '0.875rem', fontWeight: 500,
+                border: '1px solid var(--color-border)', background: 'var(--color-bg)',
                 color: 'var(--color-text)', cursor: 'pointer',
               }}
             >
@@ -206,7 +266,7 @@ function LogTimeModal({
               type="submit"
               disabled={saving}
               style={{
-                padding: '0.5rem 1.25rem', borderRadius: 8, fontSize: '0.875rem', fontWeight: 600,
+                padding: '0.5rem 1.25rem', borderRadius: '0.5rem', fontSize: '0.875rem', fontWeight: 600,
                 border: 'none', background: saving ? '#9ca3af' : 'var(--color-brand)',
                 color: 'white', cursor: saving ? 'not-allowed' : 'pointer',
               }}

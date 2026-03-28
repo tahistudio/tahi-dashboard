@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, UserCog, Mail, Shield, RefreshCw, X, ChevronRight } from 'lucide-react'
+import { Plus, UserCog, Mail, Shield, RefreshCw, X, ChevronRight, Clock } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
@@ -66,8 +66,11 @@ function AddMemberModal({
 }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [title, setTitle] = useState('')
   const [role, setRole] = useState('member')
   const [skillsInput, setSkillsInput] = useState('')
+  const [weeklyCapacity, setWeeklyCapacity] = useState('')
+  const [isContractor, setIsContractor] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -90,7 +93,15 @@ function AddMemberModal({
       const res = await fetch(apiPath('/api/admin/team'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), email: email.trim(), role, skills }),
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim(),
+          title: title.trim() || undefined,
+          role,
+          skills,
+          weeklyCapacityHours: weeklyCapacity ? parseFloat(weeklyCapacity) : undefined,
+          isContractor,
+        }),
       })
 
       if (!res.ok) {
@@ -107,10 +118,12 @@ function AddMemberModal({
     }
   }
 
+  const inputCn = 'w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]'
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
       <div
-        className="bg-[var(--color-bg)] rounded-xl shadow-xl w-full max-w-md mx-4"
+        className="bg-[var(--color-bg)] rounded-xl shadow-xl w-full max-w-lg mx-4"
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-member-title"
@@ -121,7 +134,7 @@ function AddMemberModal({
           </h2>
           <button
             onClick={onClose}
-            className="p-1 rounded-md hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)]"
+            className="p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] transition-colors"
             aria-label="Close"
           >
             <X className="w-5 h-5" />
@@ -130,52 +143,75 @@ function AddMemberModal({
 
         <form onSubmit={handleSubmit} className="px-6 pb-6 space-y-4">
           {error && (
-            <div className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg" role="alert" aria-live="polite">
+            <div
+              className="text-sm px-3 py-2 rounded-lg"
+              role="alert"
+              aria-live="polite"
+              style={{ background: 'var(--color-danger-bg, #fef2f2)', color: 'var(--color-danger, #f87171)' }}
+            >
               {error}
             </div>
           )}
 
-          <div>
-            <label htmlFor="member-name" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-              Name
-            </label>
-            <input
-              id="member-name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
-              placeholder="Jane Smith"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="member-name" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                Name <span style={{ color: 'var(--color-danger)' }}>*</span>
+              </label>
+              <input
+                id="member-name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className={inputCn}
+                placeholder="Jane Smith"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="member-email" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                Email <span style={{ color: 'var(--color-danger)' }}>*</span>
+              </label>
+              <input
+                id="member-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className={inputCn}
+                placeholder="jane@tahi.studio"
+              />
+            </div>
           </div>
 
-          <div>
-            <label htmlFor="member-email" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-              Email
-            </label>
-            <input
-              id="member-email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
-              placeholder="jane@tahi.studio"
-            />
-          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="member-title" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                Job Title
+              </label>
+              <input
+                id="member-title"
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className={inputCn}
+                placeholder="Senior Designer"
+              />
+            </div>
 
-          <div>
-            <label htmlFor="member-role" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-              Role
-            </label>
-            <select
-              id="member-role"
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
-            >
-              <option value="member">Member</option>
-              <option value="admin">Admin</option>
-            </select>
+            <div>
+              <label htmlFor="member-role" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                Role
+              </label>
+              <select
+                id="member-role"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                className={inputCn}
+              >
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
           </div>
 
           <div>
@@ -187,9 +223,40 @@ function AddMemberModal({
               type="text"
               value={skillsInput}
               onChange={(e) => setSkillsInput(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              className={inputCn}
               placeholder="Design, Development, Strategy"
             />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="member-capacity" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                Weekly Capacity (hours)
+              </label>
+              <input
+                id="member-capacity"
+                type="number"
+                min="0"
+                step="1"
+                value={weeklyCapacity}
+                onChange={(e) => setWeeklyCapacity(e.target.value)}
+                className={inputCn}
+                placeholder="40"
+              />
+            </div>
+
+            <div className="flex items-end pb-1">
+              <label className="flex items-center gap-2 text-sm text-[var(--color-text)] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isContractor}
+                  onChange={(e) => setIsContractor(e.target.checked)}
+                  className="rounded border-[var(--color-border)] text-[var(--color-brand)] focus:ring-[var(--color-brand)]"
+                  style={{ width: '1rem', height: '1rem', accentColor: 'var(--color-brand)' }}
+                />
+                Contractor
+              </label>
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
@@ -516,7 +583,7 @@ export function TeamContent() {
           onCtaClick={() => setShowAddModal(true)}
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {members.map((member) => {
             const skills = parseSkills(member.skills)
             const initials = member.name
@@ -529,85 +596,111 @@ export function TeamContent() {
             return (
               <div
                 key={member.id}
-                className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 hover:border-[var(--color-brand)] transition-colors group"
+                className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-hidden hover:border-[var(--color-brand)] transition-colors group"
               >
-                <div className="flex items-start gap-3">
-                  {/* Avatar */}
-                  {member.avatarUrl ? (
-                    <img
-                      src={member.avatarUrl}
-                      alt={member.name}
-                      className="w-10 h-10 rounded-full object-cover flex-shrink-0"
-                    />
-                  ) : (
-                    <div
-                      className="w-10 h-10 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0"
+                {/* Card header with gradient accent */}
+                <div
+                  className="h-1.5"
+                  style={{
+                    background: member.role === 'admin'
+                      ? 'linear-gradient(90deg, var(--color-brand), var(--color-brand-light))'
+                      : 'var(--color-border)',
+                  }}
+                />
+
+                <div className="p-5">
+                  <div className="flex items-start gap-3">
+                    {/* Avatar */}
+                    {member.avatarUrl ? (
+                      <img
+                        src={member.avatarUrl}
+                        alt={member.name}
+                        className="w-11 h-11 rounded-full object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      <div
+                        className="w-11 h-11 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0"
+                        style={{
+                          background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
+                          borderRadius: 'var(--radius-leaf-sm)',
+                        }}
+                      >
+                        {initials}
+                      </div>
+                    )}
+
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-sm font-semibold text-[var(--color-text)] truncate">
+                        {member.name}
+                      </h3>
+                      {member.title && (
+                        <p className="text-xs text-[var(--color-text-muted)] truncate mt-0.5">
+                          {member.title}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-1 mt-1">
+                        <Mail className="w-3 h-3 text-[var(--color-text-subtle)] flex-shrink-0" aria-hidden="true" />
+                        <span className="text-xs text-[var(--color-text-muted)] truncate">
+                          {member.email}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Role badge */}
+                    <span
+                      className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0"
                       style={{
-                        background: 'var(--color-brand)',
-                        borderRadius: 'var(--radius-leaf-sm)',
+                        background: member.role === 'admin' ? 'var(--color-brand-50)' : 'var(--color-bg-tertiary)',
+                        color: member.role === 'admin' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
                       }}
                     >
-                      {initials}
+                      {ROLE_LABELS[member.role] ?? member.role}
+                    </span>
+                  </div>
+
+                  {/* Skills */}
+                  {skills.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-3">
+                      {skills.map((skill) => (
+                        <span
+                          key={skill}
+                          className="text-xs px-2 py-0.5 rounded-full bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]"
+                        >
+                          {skill}
+                        </span>
+                      ))}
                     </div>
                   )}
 
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-semibold text-[var(--color-text)] truncate">
-                      {member.name}
-                    </h3>
-                    <div className="flex items-center gap-1 mt-0.5">
-                      <Mail className="w-3 h-3 text-[var(--color-text-subtle)]" aria-hidden="true" />
-                      <span className="text-xs text-[var(--color-text-muted)] truncate">
-                        {member.email}
-                      </span>
+                  {/* Capacity and contractor info */}
+                  {(member.weeklyCapacityHours || member.isContractor) && (
+                    <div className="flex items-center gap-3 mt-3 pt-3 border-t border-[var(--color-border-subtle)]">
+                      {member.weeklyCapacityHours ? (
+                        <span className="text-xs text-[var(--color-text-muted)] flex items-center gap-1">
+                          <Clock className="w-3 h-3" aria-hidden="true" />
+                          {member.weeklyCapacityHours}h/week
+                        </span>
+                      ) : null}
+                      {member.isContractor && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                          Contractor
+                        </span>
+                      )}
                     </div>
-                  </div>
+                  )}
 
-                  {/* Role badge */}
-                  <span
-                    className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0"
-                    style={{
-                      background: member.role === 'admin' ? 'var(--color-brand-50)' : 'var(--color-bg-tertiary)',
-                      color: member.role === 'admin' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-                    }}
+                  {/* Actions */}
+                  <button
+                    onClick={() => setAccessMember(member)}
+                    className="w-full mt-4 flex items-center justify-between px-3 py-2.5 rounded-lg border border-[var(--color-border-subtle)] hover:border-[var(--color-brand)] hover:bg-[var(--color-bg-secondary)] transition-colors text-sm text-[var(--color-text-muted)] hover:text-[var(--color-brand)]"
                   >
-                    {ROLE_LABELS[member.role] ?? member.role}
-                  </span>
+                    <span className="flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5" aria-hidden="true" />
+                      Manage Access
+                    </span>
+                    <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
                 </div>
-
-                {/* Skills */}
-                {skills.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-3">
-                    {skills.map((skill) => (
-                      <span
-                        key={skill}
-                        className="text-xs px-2 py-0.5 rounded-full bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]"
-                      >
-                        {skill}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Capacity */}
-                {member.weeklyCapacityHours && (
-                  <p className="text-xs text-[var(--color-text-subtle)] mt-2">
-                    {member.weeklyCapacityHours}h/week capacity
-                    {member.isContractor ? ' (contractor)' : ''}
-                  </p>
-                )}
-
-                {/* Actions */}
-                <button
-                  onClick={() => setAccessMember(member)}
-                  className="w-full mt-4 flex items-center justify-between px-3 py-2 rounded-lg border border-[var(--color-border-subtle)] hover:border-[var(--color-brand)] hover:bg-[var(--color-bg-secondary)] transition-colors text-sm text-[var(--color-text-muted)] hover:text-[var(--color-brand)]"
-                >
-                  <span className="flex items-center gap-1.5">
-                    <Shield className="w-3.5 h-3.5" aria-hidden="true" />
-                    Manage Access
-                  </span>
-                  <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
               </div>
             )
           })}

@@ -148,19 +148,20 @@ export function ClientDetail({ clientId }: { clientId: string }) {
     <div className="flex flex-col h-full">
       {/* ── Header ── */}
       <div className="border-b border-[var(--color-border)] bg-[var(--color-bg)]">
-        <div className="px-6 pt-5 pb-0">
+        <div className="px-6 pt-6 pb-0">
           {/* Back + title row */}
-          <div className="flex items-start gap-3 mb-4">
+          <div className="flex items-start gap-3 mb-5">
             <button
               onClick={() => router.push('/clients')}
-              className="mt-0.5 p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+              className="mt-1 p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+              aria-label="Back to clients"
             >
               <ArrowLeft className="w-4 h-4" />
             </button>
 
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-xl font-bold text-[var(--color-text)] truncate">
+                <h1 className="text-2xl font-bold text-[var(--color-text)] truncate">
                   {org.name}
                 </h1>
                 <HealthDot health={org.healthStatus} className="w-2.5 h-2.5" />
@@ -173,7 +174,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
                   href={org.website.startsWith('http') ? org.website : `https://${org.website}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-brand)] mt-0.5"
+                  className="inline-flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-brand)] mt-1"
                 >
                   <Globe className="w-3.5 h-3.5" />
                   {org.website.replace(/^https?:\/\//, '')}
@@ -202,13 +203,13 @@ export function ClientDetail({ clientId }: { clientId: string }) {
 
           {/* Track meter in header for quick glance */}
           {tracks.length > 0 && (
-            <div className="mb-3">
+            <div className="mb-4">
               <TrackMeter tracks={tracks} />
             </div>
           )}
 
           {/* Tab nav */}
-          <nav className="flex gap-0 -mb-px">
+          <nav className="flex gap-0 -mb-px overflow-x-auto">
             {TABS.map(tab => {
               const Icon = tab.icon
               const isActive = activeTab === tab.id
@@ -217,11 +218,12 @@ export function ClientDetail({ clientId }: { clientId: string }) {
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
-                    'flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
+                    'flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
                     isActive
                       ? 'border-[var(--color-brand)] text-[var(--color-brand)]'
                       : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border)]'
                   )}
+                  style={{ minHeight: '2.75rem' }}
                 >
                   <Icon className="w-3.5 h-3.5" />
                   {tab.label}
@@ -263,13 +265,13 @@ export function ClientDetail({ clientId }: { clientId: string }) {
           <CallsTab clientId={clientId} orgName={org.name} />
         )}
         {activeTab === 'messages' && (
-          <PlaceholderTab label="Messages" description="Org-level messaging coming in Phase 2." />
+          <MessagesTab clientId={clientId} orgName={org.name} />
         )}
         {activeTab === 'time' && (
-          <PlaceholderTab label="Time" description="Time tracking coming soon." />
+          <TimeTab clientId={clientId} />
         )}
         {activeTab === 'activity' && (
-          <PlaceholderTab label="Activity" description="Audit log coming in Phase 4." />
+          <ActivityTab clientId={clientId} />
         )}
       </div>
     </div>
@@ -1725,16 +1727,206 @@ function CallRow({ call, onStatusChange }: { call: ScheduledCallRow; onStatusCha
   )
 }
 
-// ── Placeholder tab ────────────────────────────────────────────────────────────
+// ── Messages tab ──────────────────────────────────────────────────────────────
 
-function PlaceholderTab({ label, description }: { label: string; description: string }) {
+function MessagesTab({ orgName }: { clientId: string; orgName: string }) {
+  const router = useRouter()
+
   return (
-    <div className="flex flex-col items-center justify-center py-20 text-center">
-      <div className="w-12 h-12 rounded-xl bg-[var(--color-bg-secondary)] flex items-center justify-center mb-3">
-        <span className="text-2xl">🚧</span>
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-semibold text-[var(--color-text)]">Messages</h2>
+        <TahiButton variant="primary" size="sm" onClick={() => router.push('/messages')}>
+          <MessageSquare className="w-3.5 h-3.5 mr-1.5" />
+          Open Messages
+        </TahiButton>
       </div>
-      <h3 className="font-semibold text-[var(--color-text)] mb-1">{label}</h3>
-      <p className="text-sm text-[var(--color-text-muted)] max-w-xs">{description}</p>
+
+      <div className="flex flex-col items-center justify-center py-16 bg-[var(--color-bg-secondary)] rounded-xl text-center">
+        <MessageSquare className="w-10 h-10 text-[var(--color-text-subtle)] mb-3" />
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-1">
+          Conversations with {orgName}
+        </h3>
+        <p className="text-xs text-[var(--color-text-muted)] max-w-xs">
+          Open the messaging page to view and manage conversations with this client.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ── Time tab ──────────────────────────────────────────────────────────────────
+
+interface TimeEntryRow {
+  id: string
+  hours: number
+  billable: boolean | null
+  notes: string | null
+  date: string
+  teamMemberName: string | null
+  requestTitle: string | null
+}
+
+function TimeTab({ clientId }: { clientId: string }) {
+  const [entries, setEntries] = useState<TimeEntryRow[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    fetch(apiPath(`/api/admin/time?orgId=${clientId}`))
+      .then(r => r.json() as Promise<{ items: TimeEntryRow[] }>)
+      .then(data => setEntries(data.items ?? []))
+      .catch(() => setEntries([]))
+      .finally(() => setLoading(false))
+  }, [clientId])
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading time entries...
+      </div>
+    )
+  }
+
+  const totalHours = entries.reduce((s, e) => s + e.hours, 0)
+  const billableHours = entries.filter(e => e.billable).reduce((s, e) => s + e.hours, 0)
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-semibold text-[var(--color-text)]">
+          Time Entries ({entries.length})
+        </h2>
+        <div className="flex items-center gap-3 text-sm">
+          <span className="text-[var(--color-text-muted)]">
+            Total: <strong className="text-[var(--color-text)]">{totalHours.toFixed(1)}h</strong>
+          </span>
+          <span className="text-[var(--color-text-muted)]">
+            Billable: <strong style={{ color: '#16a34a' }}>{billableHours.toFixed(1)}h</strong>
+          </span>
+        </div>
+      </div>
+
+      {entries.length === 0 ? (
+        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
+          <Clock className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
+          <p className="text-sm text-[var(--color-text-muted)]">No time entries for this client yet</p>
+        </div>
+      ) : (
+        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Date</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Team Member</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Hours</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Billable</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map(entry => (
+                <tr
+                  key={entry.id}
+                  className="border-b border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-secondary)] transition-colors"
+                >
+                  <td className="px-4 py-3 text-[var(--color-text-muted)]">
+                    {new Date(entry.date.includes('T') ? entry.date : entry.date + 'T00:00:00').toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </td>
+                  <td className="px-4 py-3 text-[var(--color-text)] font-medium">
+                    {entry.teamMemberName ?? 'Unknown'}
+                  </td>
+                  <td className="px-4 py-3 text-[var(--color-text)] font-semibold">
+                    {entry.hours.toFixed(1)}h
+                  </td>
+                  <td className="px-4 py-3">
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                      style={{
+                        background: entry.billable ? 'var(--color-success-bg, #f0fdf4)' : 'var(--color-bg-tertiary)',
+                        color: entry.billable ? 'var(--color-success, #4ade80)' : 'var(--color-text-muted)',
+                      }}
+                    >
+                      {entry.billable ? 'Yes' : 'No'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-[var(--color-text-muted)] max-w-[12.5rem] truncate">
+                    {entry.notes ?? '--'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Activity tab ──────────────────────────────────────────────────────────────
+
+interface AuditEntry {
+  id: string
+  action: string
+  entityType: string | null
+  createdAt: string
+  details: string | null
+}
+
+function ActivityTab({ clientId }: { clientId: string }) {
+  const [entries, setEntries] = useState<AuditEntry[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    fetch(apiPath(`/api/admin/audit-log?orgId=${clientId}&limit=50`))
+      .then(r => r.json() as Promise<{ items: AuditEntry[] }>)
+      .then(data => setEntries(data.items ?? []))
+      .catch(() => setEntries([]))
+      .finally(() => setLoading(false))
+  }, [clientId])
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading activity...
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <h2 className="font-semibold text-[var(--color-text)] mb-4">Activity Log</h2>
+
+      {entries.length === 0 ? (
+        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
+          <Activity className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
+          <p className="text-sm text-[var(--color-text-muted)]">No activity recorded for this client yet</p>
+        </div>
+      ) : (
+        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-hidden">
+          <div className="divide-y divide-[var(--color-border-subtle)]">
+            {entries.map(entry => (
+              <div key={entry.id} className="px-4 py-3 flex items-start gap-3">
+                <div className="w-8 h-8 rounded-lg bg-[var(--color-bg-tertiary)] flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Activity className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-[var(--color-text)]">{entry.action}</p>
+                  {entry.details && (
+                    <p className="text-xs text-[var(--color-text-muted)] mt-0.5 truncate">{entry.details}</p>
+                  )}
+                </div>
+                <span className="text-xs text-[var(--color-text-subtle)] flex-shrink-0 whitespace-nowrap">
+                  {new Date(entry.createdAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

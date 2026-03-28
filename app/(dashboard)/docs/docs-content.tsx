@@ -8,6 +8,7 @@ import {
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
+import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -387,16 +388,13 @@ function NewPageForm({
         </div>
 
         <div>
-          <label htmlFor="new-page-content" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+          <label className="block text-sm font-medium text-[var(--color-text)] mb-1">
             Content
           </label>
-          <textarea
-            id="new-page-content"
-            value={content}
-            onChange={e => onContentChange(e.target.value)}
+          <TiptapDocEditor
+            content={content}
+            onChange={onContentChange}
             placeholder="Write your doc content here..."
-            rows={20}
-            className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] font-mono"
           />
         </div>
       </div>
@@ -571,11 +569,9 @@ function PageView({
 
       {/* Content area */}
       {editing ? (
-        <textarea
-          value={editContent}
-          onChange={e => onContentChange(e.target.value)}
-          rows={25}
-          className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] font-mono leading-relaxed"
+        <TiptapDocEditor
+          content={editContent}
+          onChange={onContentChange}
           placeholder="Write your doc content..."
         />
       ) : viewingVersion ? (
@@ -598,11 +594,16 @@ function PageView({
         </div>
       ) : (
         <div className="border border-[var(--color-border)] rounded-xl bg-[var(--color-bg)] p-6">
-          <div className="text-sm text-[var(--color-text)] whitespace-pre-wrap leading-relaxed">
-            {page.contentTiptap || (
+          {page.contentTiptap ? (
+            <div
+              className="prose prose-sm max-w-none text-sm text-[var(--color-text)] leading-relaxed"
+              dangerouslySetInnerHTML={{ __html: page.contentTiptap }}
+            />
+          ) : (
+            <div className="text-sm text-[var(--color-text)] whitespace-pre-wrap leading-relaxed">
               <span className="text-[var(--color-text-subtle)] italic">No content yet. Click Edit to add content.</span>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
     </div>
