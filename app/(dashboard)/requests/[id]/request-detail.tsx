@@ -6,7 +6,7 @@ import {
   ArrowLeft, Clock, AlertTriangle, RefreshCw,
   User, ChevronDown, CheckCircle2, Loader2,
   FileText, Image as ImageIcon, Download, Paperclip,
-  Calendar, Edit2,
+  Calendar, Edit2, Upload,
 } from 'lucide-react'
 import Link from 'next/link'
 import { RequestThread } from '@/components/tahi/request-thread'
@@ -390,7 +390,13 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
 
           {/* Files */}
           {(files.length > 0 || isAdmin) && (
-            <FilesPanel files={files} onRefresh={loadFiles} />
+            <FilesPanel
+              files={files}
+              onRefresh={loadFiles}
+              requestId={requestId}
+              orgId={request.orgId}
+              isAdmin={isAdmin}
+            />
           )}
         </div>
 
@@ -587,7 +593,19 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
 
 // ── FilesPanel ────────────────────────────────────────────────────────────────
 
-function FilesPanel({ files, onRefresh }: { files: RequestFile[]; onRefresh: () => void }) {
+interface FilesPanelProps {
+  files: RequestFile[]
+  onRefresh: () => void
+  requestId: string
+  orgId: string
+  isAdmin: boolean
+}
+
+function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelProps) {
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   function fileIcon(mimeType: string | null) {
     if (!mimeType) return <FileText size={14} className="text-gray-400" />
     if (mimeType.startsWith('image/')) return <ImageIcon size={14} className="text-purple-400" />
@@ -602,6 +620,67 @@ function FilesPanel({ files, onRefresh }: { files: RequestFile[]; onRefresh: () 
     return `${(n / (1024 * 1024)).toFixed(1)} MB`
   }
 
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploading(true)
+    setUploadError(null)
+
+    try {
+      // Step 1: Get presigned URL
+      const presignRes = await fetch(apiPath('/api/uploads/presign'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: file.name,
+          mimeType: file.type,
+          requestId,
+        }),
+      })
+      if (!presignRes.ok) throw new Error('Failed to get upload URL')
+      const presignData = await presignRes.json() as {
+        uploadUrl: string
+        storageKey: string
+        fileId: string
+      }
+
+      // Step 2: Upload file to R2 via proxy
+      const uploadRes = await fetch(apiPath(presignData.uploadUrl), {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        body: file,
+      })
+      if (!uploadRes.ok) throw new Error('File upload failed')
+
+      // Step 3: Confirm upload (creates the file record)
+      const confirmRes = await fetch(apiPath('/api/uploads/confirm'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileId: presignData.fileId,
+          storageKey: presignData.storageKey,
+          filename: file.name,
+          mimeType: file.type,
+          sizeBytes: file.size,
+          requestId,
+          orgId,
+        }),
+      })
+      if (!confirmRes.ok) throw new Error('Failed to confirm upload')
+
+      // Step 4: Refresh the files list
+      onRefresh()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Upload failed'
+      setUploadError(message)
+    } finally {
+      setUploading(false)
+      // Reset the input so the same file can be uploaded again
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   return (
     <div className="bg-white rounded-[var(--radius-card)] border border-gray-200 p-6">
       <div className="flex items-center justify-between mb-4">
@@ -614,14 +693,50 @@ function FilesPanel({ files, onRefresh }: { files: RequestFile[]; onRefresh: () 
             </span>
           )}
         </h2>
-        <button
-          onClick={onRefresh}
-          className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 transition-colors"
-        >
-          <RefreshCw size={12} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={handleFileUpload}
+                className="hidden"
+                aria-label="Upload file"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className={cn(
+                  'text-xs font-medium flex items-center gap-1 px-2.5 py-1.5 rounded-lg border transition-colors',
+                  uploading
+                    ? 'border-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'border-[var(--color-brand)] text-[var(--color-brand)] hover:bg-green-50/50',
+                )}
+              >
+                {uploading ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <Upload size={12} />
+                )}
+                {uploading ? 'Uploading...' : 'Upload File'}
+              </button>
+            </>
+          )}
+          <button
+            onClick={onRefresh}
+            className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 transition-colors"
+          >
+            <RefreshCw size={12} />
+            Refresh
+          </button>
+        </div>
       </div>
+
+      {uploadError && (
+        <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {uploadError}
+        </div>
+      )}
 
       {files.length === 0 ? (
         <p className="text-sm text-gray-400 text-center py-6">No files attached yet.</p>
@@ -634,26 +749,26 @@ function FilesPanel({ files, onRefresh }: { files: RequestFile[]; onRefresh: () 
                 <p className="text-sm text-gray-800 truncate">{f.filename}</p>
                 <p className="text-xs text-gray-400">
                   {f.uploaderName ?? f.uploadedByType}
-                  {f.sizeBytes ? ` · ${formatBytes(f.sizeBytes)}` : ''}
-                  {' · '}{formatDate(f.createdAt)}
+                  {f.sizeBytes ? ` / ${formatBytes(f.sizeBytes)}` : ''}
+                  {' / '}{formatDate(f.createdAt)}
                 </p>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
                 {f.mimeType?.startsWith('image/') && (
                   <a
-                    href={`/api/uploads/serve?key=${encodeURIComponent(f.storageKey)}`}
+                    href={apiPath(`/api/uploads/serve?key=${encodeURIComponent(f.storageKey)}`)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="p-1.5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-                    title="View"
+                    aria-label={`View ${f.filename}`}
                   >
                     <ImageIcon size={14} />
                   </a>
                 )}
                 <a
-                  href={`/api/uploads/serve?key=${encodeURIComponent(f.storageKey)}&download=1`}
+                  href={apiPath(`/api/uploads/serve?key=${encodeURIComponent(f.storageKey)}&download=1`)}
                   className="p-1.5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-                  title="Download"
+                  aria-label={`Download ${f.filename}`}
                 >
                   <Download size={14} />
                 </a>
