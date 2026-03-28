@@ -17,7 +17,7 @@ export function EmptyState({ icon, title, description, ctaLabel, onCtaClick, act
   return (
     <div
       className="flex flex-col items-center justify-center text-center"
-      style={{ padding: '4rem 1.5rem', background: 'white' }}
+      style={{ padding: '4rem 1.5rem', background: 'var(--color-bg)' }}
     >
       <div
         className="flex items-center justify-center"
@@ -29,7 +29,7 @@ export function EmptyState({ icon, title, description, ctaLabel, onCtaClick, act
           marginBottom: '1rem',
         }}
       >
-        {icon}
+        <span aria-hidden="true">{icon}</span>
       </div>
       <h3 className="text-base font-semibold" style={{ color: 'var(--color-text)', marginBottom: '0.5rem' }}>
         {title}

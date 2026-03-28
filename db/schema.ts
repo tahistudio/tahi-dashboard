@@ -394,6 +394,7 @@ export const timeEntries = sqliteTable('time_entries', {
   requestId: text('request_id').references(() => requests.id, { onDelete: 'set null' }),
   teamMemberId: text('team_member_id').notNull().references(() => teamMembers.id),
   hours: real('hours').notNull(),
+  hourlyRate: real('hourly_rate'),
   billable: integer('billable', { mode: 'boolean' }).default(true),
   notes: text('notes'),
   date: text('date').notNull(),
