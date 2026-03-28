@@ -235,6 +235,41 @@ export const requestSteps = sqliteTable('request_steps', {
 ])
 
 // ============================================================
+// CONVERSATIONS (Messaging overhaul)
+// ============================================================
+
+export const conversations = sqliteTable('conversations', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // direct | group | org_channel | request_thread
+  type: text('type').notNull(),
+  name: text('name'),
+  orgId: text('org_id'),
+  requestId: text('request_id'),
+  // internal | external
+  visibility: text('visibility').notNull().default('external'),
+  createdById: text('created_by_id').notNull(),
+  ...timestamps,
+})
+
+// ============================================================
+// CONVERSATION PARTICIPANTS
+// ============================================================
+
+export const conversationParticipants = sqliteTable('conversation_participants', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  conversationId: text('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  participantId: text('participant_id').notNull(),
+  // team_member | contact
+  participantType: text('participant_type').notNull(),
+  // admin | member
+  role: text('role').notNull().default('member'),
+  joinedAt: text('joined_at').notNull(),
+  lastReadAt: text('last_read_at'),
+}, (table) => [
+  index('idx_conv_participants_conv').on(table.conversationId),
+])
+
+// ============================================================
 // MESSAGES (Request threads + org-level messaging)
 // ============================================================
 
@@ -243,6 +278,8 @@ export const messages = sqliteTable('messages', {
   // If null, this is an org-level general message (not request-specific)
   requestId: text('request_id').references(() => requests.id, { onDelete: 'cascade' }),
   orgId: text('org_id').notNull().references(() => organisations.id, { onDelete: 'cascade' }),
+  // Link to the new conversations model (nullable for legacy rows)
+  conversationId: text('conversation_id'),
   authorId: text('author_id').notNull(),
   // team_member | contact
   authorType: text('author_type').notNull(),
@@ -255,6 +292,7 @@ export const messages = sqliteTable('messages', {
 }, (table) => [
   index('idx_messages_request').on(table.requestId),
   index('idx_messages_org').on(table.orgId),
+  index('idx_messages_conversation').on(table.conversationId),
 ])
 
 // ============================================================
@@ -432,9 +470,13 @@ export const announcements = sqliteTable('announcements', {
   targetType: text('target_type').notNull().default('all'),
   // Plan type value or org ID (for targeted announcements)
   targetValue: text('target_value'),
+  // JSON array of org IDs (when targetType = 'org')
+  targetIds: text('target_ids'),
   scheduledAt: text('scheduled_at'),
   publishedAt: text('published_at'),
   expiresAt: text('expires_at'),
+  sentByEmail: integer('sent_by_email').default(0),
+  emailSentAt: text('email_sent_at'),
   createdById: text('created_by_id'),
   ...timestamps,
 })
@@ -528,6 +570,10 @@ export const caseStudySubmissions = sqliteTable('case_study_submissions', {
   logoPermission: integer('logo_permission', { mode: 'boolean' }).default(false),
   // pending | approved | rejected
   status: text('status').notNull().default('pending'),
+  // not_sent | asked | declined | deferred | in_progress | completed
+  outreachStatus: text('outreach_status').default('not_sent'),
+  nextAskAt: text('next_ask_at'),
+  neverAsk: integer('never_ask').default(0),
   submittedAt: text('submitted_at'),
   tokenExpiresAt: text('token_expires_at'),
   ...timestamps,
@@ -628,6 +674,110 @@ export const settings = sqliteTable('settings', {
 })
 
 // ============================================================
+// TEAM MEMBER ACCESS (Scoping rules)
+// ============================================================
+
+export const teamMemberAccess = sqliteTable('team_member_access', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamMemberId: text('team_member_id').notNull().references(() => teamMembers.id, { onDelete: 'cascade' }),
+  // project_manager | task_handler | viewer
+  role: text('role').notNull(),
+  // all_clients | plan_type | specific_clients
+  scopeType: text('scope_type').notNull(),
+  planType: text('plan_type'),
+  // all | small | large
+  trackType: text('track_type').notNull().default('all'),
+  ...timestamps,
+}, (table) => [
+  index('idx_tma_member').on(table.teamMemberId),
+])
+
+export const teamMemberAccessOrgs = sqliteTable('team_member_access_orgs', {
+  accessId: text('access_id').notNull().references(() => teamMemberAccess.id, { onDelete: 'cascade' }),
+  orgId: text('org_id').notNull().references(() => organisations.id, { onDelete: 'cascade' }),
+})
+
+// ============================================================
+// REQUEST FORMS (Intake forms per category/client)
+// ============================================================
+
+export const requestForms = sqliteTable('request_forms', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
+  category: text('category'),
+  orgId: text('org_id'),
+  // JSON: [{id, type, label, required, options?}]
+  questions: text('questions').notNull().default('[]'),
+  isDefault: integer('is_default').notNull().default(0),
+  ...timestamps,
+})
+
+// ============================================================
+// KANBAN COLUMNS (Custom per-client overrides)
+// ============================================================
+
+export const kanbanColumns = sqliteTable('kanban_columns', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  orgId: text('org_id'),
+  label: text('label').notNull(),
+  statusValue: text('status_value').notNull(),
+  colour: text('colour'),
+  position: integer('position').notNull().default(0),
+  isDefault: integer('is_default').notNull().default(0),
+  ...timestamps,
+})
+
+// ============================================================
+// CONTRACTS
+// ============================================================
+
+export const contracts = sqliteTable('contracts', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  orgId: text('org_id').notNull().references(() => organisations.id, { onDelete: 'cascade' }),
+  // nda | sla | msa | sow | other
+  type: text('type').notNull(),
+  name: text('name').notNull(),
+  // draft | sent | signed | expired | cancelled
+  status: text('status').notNull().default('draft'),
+  storageKey: text('storage_key').notNull(),
+  signedStorageKey: text('signed_storage_key'),
+  startDate: text('start_date'),
+  expiryDate: text('expiry_date'),
+  signatoryName: text('signatory_name'),
+  signatoryEmail: text('signatory_email'),
+  signedAt: text('signed_at'),
+  createdById: text('created_by_id').notNull(),
+  ...timestamps,
+}, (table) => [
+  index('idx_contracts_org').on(table.orgId),
+])
+
+// ============================================================
+// SCHEDULED CALLS
+// ============================================================
+
+export const scheduledCalls = sqliteTable('scheduled_calls', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  orgId: text('org_id').notNull().references(() => organisations.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  description: text('description'),
+  scheduledAt: text('scheduled_at').notNull(),
+  durationMinutes: integer('duration_minutes').notNull().default(30),
+  meetingUrl: text('meeting_url'),
+  // JSON: [{id, type, name, email}]
+  attendees: text('attendees').notNull().default('[]'),
+  // scheduled | completed | cancelled | no_show
+  status: text('status').notNull().default('scheduled'),
+  notes: text('notes'),
+  recordingUrl: text('recording_url'),
+  createdById: text('created_by_id').notNull(),
+  ...timestamps,
+}, (table) => [
+  index('idx_calls_org').on(table.orgId),
+  index('idx_calls_scheduled').on(table.scheduledAt),
+])
+
+// ============================================================
 // TYPE EXPORTS
 // ============================================================
 
@@ -660,3 +810,14 @@ export type Tag = typeof tags.$inferSelect
 export type Notification = typeof notifications.$inferSelect
 export type DocPage = typeof docPages.$inferSelect
 export type Integration = typeof integrations.$inferSelect
+export type Conversation = typeof conversations.$inferSelect
+export type NewConversation = typeof conversations.$inferInsert
+export type ConversationParticipant = typeof conversationParticipants.$inferSelect
+export type TeamMemberAccess = typeof teamMemberAccess.$inferSelect
+export type RequestForm = typeof requestForms.$inferSelect
+export type KanbanColumn = typeof kanbanColumns.$inferSelect
+export type Contract = typeof contracts.$inferSelect
+export type NewContract = typeof contracts.$inferInsert
+export type ScheduledCall = typeof scheduledCalls.$inferSelect
+export type NewScheduledCall = typeof scheduledCalls.$inferInsert
+export type CaseStudySubmission = typeof caseStudySubmissions.$inferSelect
