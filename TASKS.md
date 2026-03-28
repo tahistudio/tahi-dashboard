@@ -417,3 +417,32 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [ ] T248 - MCP server: local testing with Claude Code (add to .claude/settings as MCP server) -- [QA]
 - [ ] T249 - MCP server: documentation (README with setup, available tools/resources, example prompts) -- [PM]
 - [ ] T250 - MCP server: deploy alongside dashboard (Cloudflare Worker or separate process) -- [BE]
+
+---
+
+## UX Polish Round 2 (2026-03-28 user feedback)
+
+### Critical UX (these make the product feel broken)
+
+- [ ] T251 - Request detail page: full UI/UX overhaul to match overview/requests list quality. Proper card layout, spacing, typography, sidebar panel styling, status stepper polish, thread section design -- [FE + UIUX]
+- [ ] T252 - Client detail page: same level of UI/UX polish as request detail. Clean tab navigation, card layouts, consistent spacing -- [FE + UIUX]
+- [ ] T253 - Kanban board: implement actual drag and drop (use @dnd-kit/core or similar). Cards must be draggable between columns to change status -- [FE]
+- [ ] T254 - Time logging: replace raw ID text inputs with searchable autocomplete dropdowns for client, team member, and request selection. Allow "no client" for internal/non-billable time -- [FE]
+- [ ] T255 - Delete/edit everywhere: add edit and delete actions on requests, clients, team members, invoices, time entries, contacts. Confirmation dialog before delete -- [FE + BE]
+
+### High Priority UX
+
+- [ ] T256 - Request creation dialog: add date picker for due date field -- [FE]
+- [ ] T257 - Top nav: polish search bar styling and notification bell dropdown to match premium design -- [UIUX]
+- [ ] T258 - Sidebar: save collapse/expand preference to localStorage, restore on page load -- [FE]
+- [ ] T259 - Messaging: voice note recording/playback, better group management (add/remove participants, edit group name), improved Tiptap composer -- [FE + BE]
+- [ ] T260 - Docs Hub: replace textarea with Tiptap rich text editor for doc page content -- [FE]
+- [ ] T261 - Settings page: make all toggles/inputs saveable (persist to settings API on change), improve visual layout and card design -- [FE + UIUX]
+- [ ] T262 - Team page: UI/UX overhaul, member cards need better design, access rule editor needs to be more intuitive -- [FE + UIUX]
+- [ ] T263 - Reports page: deeper insights (delivery time trends, client activity heatmap, revenue by plan type), better card spacing and chart labels -- [FE + BE]
+
+### Nice to Have UX
+
+- [ ] T264 - Persist view preferences: save preferred request view (list/board), active filters, sort order to localStorage per user -- [FE]
+- [ ] T265 - Searchable dropdown component: create a reusable components/tahi/searchable-select.tsx for all entity pickers (clients, team members, requests) -- [FE + UIUX]
+- [ ] T266 - Autocomplete in all forms: wire searchable-select into request creation, time logging, invoice creation, assignment dropdowns -- [FE]
