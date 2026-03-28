@@ -70,8 +70,8 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T33 — Invoice detail page: line items, status, payment link, Stripe sync indicator — FE + BE
 - [x] T34 — API route: GET /api/admin/invoices with Stripe sync — BE — [PM] 2026-03-28
 - [x] T35 — API route: GET /api/admin/invoices/[id] — BE — [PM] 2026-03-28
-- [ ] T36 — Time entries page: list all time entries across clients, filter by billable/date/client — FE + BE
-- [ ] T37 — API route: GET /api/admin/time-entries — BE
+- [x] T36 — Time entries page: list all time entries across clients, filter by billable/date/client — FE + BE — [PM] 2026-03-28
+- [x] T37 — API route: GET /api/admin/time-entries — BE — [PM] 2026-03-28
 - [ ] T38 — Notifications: SSE endpoint for real-time in-app notifications — BE
 - [x] T39 — Notifications: bell icon in header with unread count, dropdown list — FE — [PM] 2026-03-28
 - [ ] T40 — Notifications: mark as read (single + all) — FE + BE

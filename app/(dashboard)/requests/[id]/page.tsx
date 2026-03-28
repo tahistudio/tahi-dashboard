@@ -2,6 +2,8 @@ import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { RequestDetail } from './request-detail'
 
+export const metadata = { title: 'Request Detail -- Tahi Dashboard' }
+
 interface Props {
   params: Promise<{ id: string }>
 }

@@ -6,6 +6,7 @@ import {
   ArrowLeft, Clock, AlertTriangle, RefreshCw,
   User, ChevronDown, CheckCircle2, Loader2,
   FileText, Image as ImageIcon, Download, Paperclip,
+  Calendar, Edit2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { RequestThread } from '@/components/tahi/request-thread'
@@ -79,6 +80,11 @@ interface RequestFile {
   uploaderName?: string | null
 }
 
+interface TeamMemberOption {
+  id: string
+  name: string
+}
+
 interface RequestDetailProps {
   requestId: string
   isAdmin: boolean
@@ -89,10 +95,15 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
   const [request, setRequest] = useState<Request | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [files, setFiles] = useState<RequestFile[]>([])
+  const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([])
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState(false)
   const [isInternal, setIsInternal] = useState(false)
   const [statusUpdating, setStatusUpdating] = useState(false)
+  const [editingPriority, setEditingPriority] = useState(false)
+  const [editingAssignee, setEditingAssignee] = useState(false)
+  const [editingDueDate, setEditingDueDate] = useState(false)
+  const [dueDateInput, setDueDateInput] = useState('')
   const threadBottomRef = useRef<HTMLDivElement>(null)
 
   const apiBase = isAdmin ? apiPath('/api/admin') : apiPath('/api/portal')
@@ -140,10 +151,24 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
     }
   }, [requestId, apiBase, isAdmin])
 
+  const loadTeamMembers = useCallback(async () => {
+    if (!isAdmin) return
+    try {
+      const res = await fetch(apiPath('/api/admin/team-members'))
+      if (res.ok) {
+        const data = await res.json() as { items: TeamMemberOption[] }
+        setTeamMembers(data.items ?? [])
+      }
+    } catch {
+      // non-fatal
+    }
+  }, [isAdmin])
+
   useEffect(() => {
     loadRequest()
     loadFiles()
-  }, [loadRequest, loadFiles])
+    loadTeamMembers()
+  }, [loadRequest, loadFiles, loadTeamMembers])
 
   // Scroll thread to bottom on new messages
   useEffect(() => {
@@ -182,6 +207,36 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scopeFlagged: !request.scopeFlagged }),
     })
+    await loadRequest()
+  }
+
+  async function handlePriorityChange(priority: string) {
+    await fetch(apiPath(`/api/admin/requests/${requestId}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ priority }),
+    })
+    setEditingPriority(false)
+    await loadRequest()
+  }
+
+  async function handleAssigneeChange(assigneeId: string | null) {
+    await fetch(apiPath(`/api/admin/requests/${requestId}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assigneeId }),
+    })
+    setEditingAssignee(false)
+    await loadRequest()
+  }
+
+  async function handleDueDateChange(dueDate: string | null) {
+    await fetch(apiPath(`/api/admin/requests/${requestId}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dueDate }),
+    })
+    setEditingDueDate(false)
     await loadRequest()
   }
 
@@ -375,17 +430,119 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
             <dl className="flex flex-col gap-3 text-sm">
               <Row label="Type" value={request.type.replace(/_/g, ' ')} />
               {request.category && <Row label="Category" value={request.category} />}
-              {request.assigneeName && (
-                <Row
-                  label="Assignee"
-                  value={
-                    <span className="flex items-center gap-1.5">
-                      <User size={12} />
-                      {request.assigneeName}
+
+              {/* Priority (editable for admin) */}
+              <div className="flex justify-between items-start gap-2">
+                <dt className="text-gray-400 flex-shrink-0">Priority</dt>
+                <dd className="text-gray-700 text-right">
+                  {isAdmin && editingPriority ? (
+                    <select
+                      value={request.priority}
+                      onChange={e => handlePriorityChange(e.target.value)}
+                      onBlur={() => setEditingPriority(false)}
+                      autoFocus
+                      className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-[var(--color-brand)]"
+                      style={{ minWidth: 100 }}
+                    >
+                      <option value="standard">Standard</option>
+                      <option value="high">High</option>
+                    </select>
+                  ) : (
+                    <span
+                      className={cn(
+                        'capitalize flex items-center gap-1',
+                        isAdmin && 'cursor-pointer hover:text-[var(--color-brand)]',
+                      )}
+                      onClick={() => isAdmin && setEditingPriority(true)}
+                    >
+                      {request.priority}
+                      {isAdmin && <Edit2 size={10} className="text-gray-400" />}
                     </span>
-                  }
-                />
-              )}
+                  )}
+                </dd>
+              </div>
+
+              {/* Assignee (editable for admin) */}
+              <div className="flex justify-between items-start gap-2">
+                <dt className="text-gray-400 flex-shrink-0">Assignee</dt>
+                <dd className="text-gray-700 text-right">
+                  {isAdmin && editingAssignee ? (
+                    <select
+                      value={request.assigneeId ?? ''}
+                      onChange={e => handleAssigneeChange(e.target.value || null)}
+                      onBlur={() => setEditingAssignee(false)}
+                      autoFocus
+                      className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-[var(--color-brand)]"
+                      style={{ minWidth: 120 }}
+                    >
+                      <option value="">Unassigned</option>
+                      {teamMembers.map(tm => (
+                        <option key={tm.id} value={tm.id}>{tm.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span
+                      className={cn(
+                        'flex items-center gap-1.5',
+                        isAdmin && 'cursor-pointer hover:text-[var(--color-brand)]',
+                      )}
+                      onClick={() => isAdmin && setEditingAssignee(true)}
+                    >
+                      <User size={12} />
+                      {request.assigneeName ?? 'Unassigned'}
+                      {isAdmin && <Edit2 size={10} className="text-gray-400" />}
+                    </span>
+                  )}
+                </dd>
+              </div>
+
+              {/* Due date (editable for admin) */}
+              <div className="flex justify-between items-start gap-2">
+                <dt className="text-gray-400 flex-shrink-0">Due date</dt>
+                <dd className="text-gray-700 text-right">
+                  {isAdmin && editingDueDate ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="date"
+                        value={dueDateInput}
+                        onChange={e => setDueDateInput(e.target.value)}
+                        autoFocus
+                        className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-[var(--color-brand)]"
+                      />
+                      <button
+                        onClick={() => handleDueDateChange(dueDateInput || null)}
+                        className="text-xs px-2 py-1 bg-[var(--color-brand)] text-white rounded hover:opacity-90"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setEditingDueDate(false)}
+                        className="text-xs px-2 py-1 text-gray-500 hover:text-gray-700"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <span
+                      className={cn(
+                        'flex items-center gap-1',
+                        isAdmin && 'cursor-pointer hover:text-[var(--color-brand)]',
+                      )}
+                      onClick={() => {
+                        if (isAdmin) {
+                          setDueDateInput(request.dueDate ?? '')
+                          setEditingDueDate(true)
+                        }
+                      }}
+                    >
+                      <Calendar size={12} />
+                      {request.dueDate ? formatDate(request.dueDate) : 'Not set'}
+                      {isAdmin && <Edit2 size={10} className="text-gray-400" />}
+                    </span>
+                  )}
+                </dd>
+              </div>
+
               {request.estimatedHours != null && (
                 <Row
                   label="Estimated"
