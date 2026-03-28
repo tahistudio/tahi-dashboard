@@ -46,7 +46,7 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T12 — Design system: globals.css with all CSS tokens, brand colours, leaf radius
 
 ### To Build
-- [ ] T13 — Request detail page: full view with status editor, priority, assignee, due date, description (Tiptap), activity log — FE + BE
+- [x] T13 — Request detail page: full view with status editor, priority, assignee, due date, description (Tiptap), activity log — FE + BE — [PM] 2026-03-28
 - [ ] T14 — Request detail: file attachments panel (upload to R2, list, download, delete) — FE + BE
 - [ ] T15 — Request detail: voice note recording and playback panel — FE + BE
 - [ ] T16 — Request detail: internal vs external comment toggle on each message — FE
