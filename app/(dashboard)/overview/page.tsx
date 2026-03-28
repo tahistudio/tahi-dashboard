@@ -2,6 +2,7 @@ import { clerkClient } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
 import { getServerAuth } from '@/lib/server-auth'
 import { AdminOverview, ClientOverview } from './overview-content'
+import { ErrorBoundary } from '@/components/tahi/error-boundary'
 
 export const metadata = { title: 'Overview - Tahi Dashboard' }
 
@@ -34,8 +35,16 @@ export default async function OverviewPage() {
   }
 
   if (isAdmin) {
-    return <AdminOverview userName={userName} />
+    return (
+      <ErrorBoundary fallbackTitle="Overview failed to load">
+        <AdminOverview userName={userName} />
+      </ErrorBoundary>
+    )
   }
 
-  return <ClientOverview userName={userName} orgName={orgName} />
+  return (
+    <ErrorBoundary fallbackTitle="Overview failed to load">
+      <ClientOverview userName={userName} orgName={orgName} />
+    </ErrorBoundary>
+  )
 }

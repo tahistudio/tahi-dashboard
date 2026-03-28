@@ -1,6 +1,7 @@
 import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { ClientDetail } from './client-detail'
+import { ErrorBoundary } from '@/components/tahi/error-boundary'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: 'Client Detail - Tahi Dashboard' }
@@ -14,5 +15,9 @@ export default async function ClientDetailPage({ params }: Props) {
   }
 
   const { id } = await params
-  return <ClientDetail clientId={id} />
+  return (
+    <ErrorBoundary fallbackTitle="Client failed to load">
+      <ClientDetail clientId={id} />
+    </ErrorBoundary>
+  )
 }

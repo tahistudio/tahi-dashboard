@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
-import { Search, Plus, Users, RefreshCw } from 'lucide-react'
+import { Search, Plus, Users, RefreshCw, ArrowUpDown } from 'lucide-react'
 import { ClientCard } from '@/components/tahi/client-card'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { NewClientDialog } from '@/components/tahi/dialogs/new-client-dialog'
@@ -36,6 +36,7 @@ export function ClientList() {
 
   const search = searchParams.get('q') ?? ''
   const statusFilter = searchParams.get('status') ?? 'all'
+  const sortParam = searchParams.get('sort') ?? 'name'
 
   const [orgs, setOrgs] = useState<Organisation[]>([])
   const [loading, setLoading] = useState(true)
@@ -49,6 +50,12 @@ export function ClientList() {
   useEffect(() => {
     setSearchInput(search)
   }, [search])
+
+  function toggleSort() {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('sort', sortParam === 'name' ? 'created' : 'name')
+    router.replace(`${pathname}?${params.toString()}`)
+  }
 
   function setStatusFilter(value: string) {
     const params = new URLSearchParams(searchParams.toString())
@@ -98,6 +105,13 @@ export function ClientList() {
 
   useEffect(() => { fetchClients() }, [fetchClients])
 
+  const sortedOrgs = [...orgs].sort((a, b) => {
+    if (sortParam === 'created') {
+      return new Date(b.createdAt ?? '').getTime() - new Date(a.createdAt ?? '').getTime()
+    }
+    return (a.name ?? '').localeCompare(b.name ?? '')
+  })
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -146,9 +160,18 @@ export function ClientList() {
             {f.label}
           </button>
         ))}
-        {loading && (
-          <RefreshCw className="w-3.5 h-3.5 text-[var(--color-text-subtle)] animate-spin ml-1" />
-        )}
+        <div className="ml-auto flex items-center gap-1.5">
+          {loading && (
+            <RefreshCw className="w-3.5 h-3.5 text-[var(--color-text-subtle)] animate-spin" />
+          )}
+          <button
+            onClick={toggleSort}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-full transition-colors bg-[var(--color-bg)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-brand)] hover:text-[var(--color-brand-dark)]"
+          >
+            <ArrowUpDown className="w-3 h-3" />
+            {sortParam === 'name' ? 'A-Z' : 'Newest'}
+          </button>
+        </div>
       </div>
 
       {/* List */}
@@ -156,7 +179,7 @@ export function ClientList() {
         <EmptyState onAdd={() => setDialogOpen(true)} />
       ) : (
         <div className="space-y-2">
-          {orgs.map(org => (
+          {sortedOrgs.map(org => (
             <ClientCard
               key={org.id}
               id={org.id}

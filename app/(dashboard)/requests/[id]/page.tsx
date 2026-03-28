@@ -1,8 +1,9 @@
 import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { RequestDetail } from './request-detail'
+import { ErrorBoundary } from '@/components/tahi/error-boundary'
 
-export const metadata = { title: 'Request Detail -- Tahi Dashboard' }
+export const metadata = { title: 'Request Detail - Tahi Dashboard' }
 
 interface Props {
   params: Promise<{ id: string }>
@@ -16,10 +17,12 @@ export default async function RequestDetailPage({ params }: Props) {
   const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
 
   return (
-    <RequestDetail
-      requestId={id}
-      isAdmin={isAdmin}
-      currentUserId={userId}
-    />
+    <ErrorBoundary fallbackTitle="Request failed to load">
+      <RequestDetail
+        requestId={id}
+        isAdmin={isAdmin}
+        currentUserId={userId}
+      />
+    </ErrorBoundary>
   )
 }
