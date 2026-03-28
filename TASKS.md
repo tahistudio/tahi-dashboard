@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
-Last updated: 2026-03-28
-Total tasks: 266 (S1-S11 schema + T1-T266 feature + audit findings)
-Completed: S1-S11, T1-T266
+Last updated: 2026-03-29
+Total tasks: 277 (S1-S11 schema + T1-T266 feature + audit findings)
+Completed: 277/277 (S1-S11, T1-T266)
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`

@@ -2,7 +2,7 @@ import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { InvoiceList } from './invoice-list'
 
-export const metadata = { title: 'Invoices -- Tahi Dashboard' }
+export const metadata = { title: 'Invoices - Tahi Dashboard' }
 
 export default async function InvoicesPage() {
   const { userId, orgId } = await getServerAuth()

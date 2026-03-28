@@ -2,7 +2,7 @@ import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { TimeList } from './time-list'
 
-export const metadata = { title: 'Time Tracking -- Tahi Dashboard' }
+export const metadata = { title: 'Time Tracking - Tahi Dashboard' }
 
 export default async function TimePage() {
   const { userId, orgId } = await getServerAuth()
