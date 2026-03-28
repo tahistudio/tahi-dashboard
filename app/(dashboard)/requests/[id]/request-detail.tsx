@@ -813,6 +813,11 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
               </button>
             </SidebarCard>
           )}
+
+          {/* Time entry logging (admin only) */}
+          {isAdmin && (
+            <TimeEntryPanel requestId={requestId} />
+          )}
         </div>
       </div>
     </div>
@@ -1099,6 +1104,154 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
         </div>
       )}
     </div>
+  )
+}
+
+// ---- Time Entry Panel --------------------------------------------------------
+
+interface TimeEntryItem {
+  id: string
+  hours: number
+  billable: boolean | null
+  notes: string | null
+  date: string
+  teamMemberName: string | null
+}
+
+function TimeEntryPanel({ requestId }: { requestId: string }) {
+  const [entries, setEntries] = useState<TimeEntryItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [hours, setHours] = useState('')
+  const [description, setDescription] = useState('')
+  const [billable, setBillable] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  const loadEntries = useCallback(async () => {
+    try {
+      const res = await fetch(apiPath(`/api/admin/requests/${requestId}/time-entries`))
+      if (res.ok) {
+        const data = await res.json() as { items: TimeEntryItem[] }
+        setEntries(data.items ?? [])
+      }
+    } catch {
+      setEntries([])
+    } finally {
+      setLoading(false)
+    }
+  }, [requestId])
+
+  useEffect(() => { void loadEntries() }, [loadEntries])
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const h = parseFloat(hours)
+    if (!h || h <= 0) return
+
+    setSaving(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/requests/${requestId}/time-entries`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hours: h, description: description.trim() || undefined, billable }),
+      })
+      if (res.ok) {
+        setHours('')
+        setDescription('')
+        setBillable(true)
+        await loadEntries()
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const totalHours = entries.reduce((s, e) => s + e.hours, 0)
+
+  return (
+    <SidebarCard title="Time">
+      {/* Summary */}
+      {!loading && entries.length > 0 && (
+        <div style={{ marginBottom: '0.75rem' }}>
+          <div className="flex items-center justify-between text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            <span>{entries.length} {entries.length === 1 ? 'entry' : 'entries'}</span>
+            <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{totalHours.toFixed(1)}h total</span>
+          </div>
+          <div className="flex flex-col gap-1 mt-2">
+            {entries.slice(0, 5).map(entry => (
+              <div key={entry.id} className="flex items-center justify-between text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                <span className="truncate" style={{ maxWidth: '8rem' }}>{entry.teamMemberName ?? 'Unknown'}</span>
+                <span className="font-medium" style={{ color: 'var(--color-text)' }}>{entry.hours.toFixed(1)}h</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Log form */}
+      <form onSubmit={handleSubmit} className="flex flex-col" style={{ gap: '0.5rem' }}>
+        <div className="flex gap-2">
+          <input
+            type="number"
+            min="0.1"
+            step="0.1"
+            value={hours}
+            onChange={e => setHours(e.target.value)}
+            placeholder="Hours"
+            required
+            style={{
+              flex: 1,
+              padding: '0.375rem 0.5rem',
+              fontSize: '0.8125rem',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-button)',
+              color: 'var(--color-text)',
+              background: 'var(--color-bg)',
+              outline: 'none',
+            }}
+          />
+          <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            <input
+              type="checkbox"
+              checked={billable}
+              onChange={e => setBillable(e.target.checked)}
+              style={{ accentColor: 'var(--color-brand)' }}
+            />
+            Billable
+          </label>
+        </div>
+        <input
+          type="text"
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="Description (optional)"
+          style={{
+            padding: '0.375rem 0.5rem',
+            fontSize: '0.8125rem',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-button)',
+            color: 'var(--color-text)',
+            background: 'var(--color-bg)',
+            outline: 'none',
+          }}
+        />
+        <button
+          type="submit"
+          disabled={saving || !hours}
+          style={{
+            padding: '0.375rem 0.75rem',
+            fontSize: '0.8125rem',
+            fontWeight: 600,
+            border: 'none',
+            borderRadius: 'var(--radius-button)',
+            background: saving ? '#9ca3af' : 'var(--color-brand)',
+            color: 'white',
+            cursor: saving ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {saving ? 'Saving...' : 'Log Time'}
+        </button>
+      </form>
+    </SidebarCard>
   )
 }
 
