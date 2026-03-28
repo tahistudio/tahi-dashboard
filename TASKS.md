@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-28
 Total tasks: 228 (S1-S11 schema + T1-T171 feature + T172-T217 audit findings)
-Completed: S1-S11, T1-T13, T18, T32-T37, T39, T41, T172-T180, T185-T186, T189-T192, T194-T196, T200-T203, T205, T207-T208, T210, T216-T217
+Completed: S1-S11, T1-T13, T18, T32-T37, T39, T41, T47-T48, T55-T56, T58-T59, T62, T68, T70, T95-T96, T172-T180, T185-T186, T189-T192, T194-T196, T200-T203, T205, T207-T208, T210, T216-T217
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -89,16 +89,16 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 
 > Requires S1-S3 schema additions before any messaging work.
 
-- [ ] T47 — Messaging: conversations list page (inbox) showing all conversations with unread counts — FE + BE
-- [ ] T48 — Messaging: conversation detail page with message thread, send box, file attach — FE + BE
+- [x] T47 — Messaging: conversations list page (inbox) showing all conversations with unread counts — FE + BE — [PM] 2026-03-28
+- [x] T48 — Messaging: conversation detail page with message thread, send box, file attach — FE + BE — [PM] 2026-03-28
 - [ ] T49 — Messaging: create new direct (1:1) conversation from client detail or contacts page — FE + BE
 - [ ] T50 — Messaging: create group conversation with multiple participants — FE + BE
 - [ ] T51 — Messaging: org-wide channel (1:many) — admin can post, clients read — FE + BE
 - [ ] T52 — Messaging: request-thread conversations linked to a specific request — FE + BE
 - [ ] T53 — Messaging: internal vs external visibility toggle per conversation — FE + BE
 - [ ] T54 — Messaging: voice note recording and playback within conversations — FE + BE
-- [ ] T55 — API route: GET + POST /api/admin/conversations — BE
-- [ ] T56 — API route: GET + POST /api/admin/conversations/[id]/messages — BE
+- [x] T55 — API route: GET + POST /api/admin/conversations — BE — [PM] 2026-03-28
+- [x] T56 — API route: GET + POST /api/admin/conversations/[id]/messages — BE — [PM] 2026-03-28
 - [ ] T57 — API route: GET + POST /api/portal/conversations (client-scoped, external only) — BE
 - [x] T58 — Client portal: dashboard page (active requests summary, recent messages, announcements) — FE + BE — [PM] 2026-03-28
 - [x] T59 — Client portal: requests page (list + board, submit new request via intake form) — FE — [PM] 2026-03-28
@@ -110,9 +110,9 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [ ] T65 — Announcements: in-app banner display on client portal dashboard (dismissible) — FE + BE
 - [ ] T66 — Announcements: email delivery via Resend when email toggle is on — BE
 - [ ] T67 — Announcements: admin list view with sent/draft status, recipient count — FE + BE
-- [ ] T68 — API route: GET + POST /api/admin/announcements — BE
+- [x] T68 — API route: GET + POST /api/admin/announcements — BE — [PM] 2026-03-28
 - [ ] T69 — API route: POST /api/admin/announcements/[id]/send — BE
-- [ ] T70 — API route: GET /api/portal/announcements (client-scoped) — BE
+- [x] T70 — API route: GET /api/portal/announcements (client-scoped) — BE — [PM] 2026-03-28
 - [ ] T71 — API route: POST /api/portal/announcements/[id]/dismiss — BE
 
 
@@ -157,8 +157,8 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 
 
 ### Dark Mode
-- [ ] T95 — Dark mode toggle button in sidebar footer (persists to localStorage) — FE
-- [ ] T96 — Dark mode: add `.dark` overrides in globals.css for all surface and text tokens — UIUX
+- [x] T95 — Dark mode toggle button in sidebar footer (persists to localStorage) — FE — [PM] 2026-03-28
+- [x] T96 — Dark mode: add `.dark` overrides in globals.css for all surface and text tokens — UIUX — [PM] 2026-03-28 (already existed in globals.css)
 - [ ] T97 — Dark mode: audit all existing components for correct token usage in dark — QA + UIUX
 - [ ] T98 — Dark mode: sidebar, header, cards, modals, tables — full visual pass — UIUX
 
