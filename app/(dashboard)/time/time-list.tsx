@@ -80,6 +80,7 @@ function LogTimeModal({
   const [teamMemberId, setTeamMemberId] = useState<string | null>(null)
   const [requestId, setRequestId] = useState<string | null>(null)
   const [hours, setHours] = useState('')
+  const [hourlyRate, setHourlyRate] = useState('')
   const [notes, setNotes] = useState('')
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
   const [billable, setBillable] = useState(true)
@@ -136,6 +137,7 @@ function LogTimeModal({
           teamMemberId,
           requestId: requestId || undefined,
           hours: parseFloat(hours),
+          hourlyRate: hourlyRate ? parseFloat(hourlyRate) : undefined,
           notes: notes.trim() || undefined,
           date,
           billable,
@@ -231,6 +233,10 @@ function LogTimeModal({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: 1 }}>
               <label htmlFor="lt-hours" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Hours</label>
               <input id="lt-hours" type="number" min="0.1" step="0.1" placeholder="0.0" value={hours} onChange={e => setHours(e.target.value)} required style={inputStyle} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: 1 }}>
+              <label htmlFor="lt-rate" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Rate ($/hr)</label>
+              <input id="lt-rate" type="number" min="0" step="1" placeholder="e.g. 150" value={hourlyRate} onChange={e => setHourlyRate(e.target.value)} style={inputStyle} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: 1 }}>
               <label htmlFor="lt-date" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Date</label>

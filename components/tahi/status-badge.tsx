@@ -1,45 +1,24 @@
 import { cn } from '@/lib/utils'
-
-type RequestStatus =
-  | 'draft'
-  | 'submitted'
-  | 'in_review'
-  | 'in_progress'
-  | 'client_review'
-  | 'delivered'
-  | 'archived'
-
-type OrgStatus = 'prospect' | 'active' | 'paused' | 'churned' | 'archived'
-type InvoiceStatus = 'draft' | 'sent' | 'viewed' | 'paid' | 'overdue' | 'written_off'
+import {
+  REQUEST_STATUS_CONFIG,
+  ORG_STATUS_CONFIG,
+  INVOICE_STATUS_CONFIG,
+} from '@/lib/status-config'
 
 type BadgeStyle = { label: string; bg: string; color: string; border?: string }
 
-const REQUEST_STATUS_MAP: Record<RequestStatus, BadgeStyle> = {
-  draft:         { label: 'Draft',         bg: 'var(--status-draft-bg)',          color: 'var(--status-draft-text)',         border: 'var(--status-draft-border)' },
-  submitted:     { label: 'Submitted',     bg: 'var(--status-submitted-bg)',      color: 'var(--status-submitted-text)',     border: 'var(--status-submitted-border)' },
-  in_review:     { label: 'In review',     bg: 'var(--status-in-review-bg)',      color: 'var(--status-in-review-text)',     border: 'var(--status-in-review-border)' },
-  in_progress:   { label: 'In progress',   bg: 'var(--status-in-progress-bg)',    color: 'var(--status-in-progress-text)',   border: 'var(--status-in-progress-border)' },
-  client_review: { label: 'Client review', bg: 'var(--status-client-review-bg)',  color: 'var(--status-client-review-text)', border: 'var(--status-client-review-border)' },
-  delivered:     { label: 'Delivered',     bg: 'var(--status-delivered-bg)',      color: 'var(--status-delivered-text)',     border: 'var(--status-delivered-border)' },
-  archived:      { label: 'Archived',      bg: 'var(--status-archived-bg)',       color: 'var(--status-archived-text)',      border: 'var(--status-archived-border)' },
-}
+// Map the shared config to badge-compatible format
+const REQUEST_STATUS_MAP = Object.fromEntries(
+  Object.entries(REQUEST_STATUS_CONFIG).map(([k, v]) => [k, { label: v.label, bg: v.bg, color: v.text, border: v.border }])
+) as Record<string, BadgeStyle>
 
-const ORG_STATUS_MAP: Record<OrgStatus, BadgeStyle> = {
-  prospect: { label: 'Prospect', bg: 'var(--status-submitted-bg)',   color: 'var(--status-submitted-text)',   border: 'var(--status-submitted-border)' },
-  active:   { label: 'Active',   bg: 'var(--status-delivered-bg)',   color: 'var(--status-delivered-text)',   border: 'var(--status-delivered-border)' },
-  paused:   { label: 'Paused',   bg: 'var(--status-in-review-bg)',   color: 'var(--status-in-review-text)',   border: 'var(--status-in-review-border)' },
-  churned:  { label: 'Churned',  bg: 'var(--color-danger-bg)',       color: 'var(--color-danger)' },
-  archived: { label: 'Archived', bg: 'var(--status-archived-bg)',    color: 'var(--status-archived-text)',    border: 'var(--status-archived-border)' },
-}
+const ORG_STATUS_MAP = Object.fromEntries(
+  Object.entries(ORG_STATUS_CONFIG).map(([k, v]) => [k, { label: v.label, bg: v.bg, color: v.text, border: v.border }])
+) as Record<string, BadgeStyle>
 
-const INVOICE_STATUS_MAP: Record<InvoiceStatus, BadgeStyle> = {
-  draft:       { label: 'Draft',       bg: 'var(--status-draft-bg)',      color: 'var(--status-draft-text)',      border: 'var(--status-draft-border)' },
-  sent:        { label: 'Sent',        bg: 'var(--status-submitted-bg)',  color: 'var(--status-submitted-text)',  border: 'var(--status-submitted-border)' },
-  viewed:      { label: 'Viewed',      bg: 'var(--status-client-review-bg)', color: 'var(--status-client-review-text)', border: 'var(--status-client-review-border)' },
-  paid:        { label: 'Paid',        bg: 'var(--status-delivered-bg)',  color: 'var(--status-delivered-text)',  border: 'var(--status-delivered-border)' },
-  overdue:     { label: 'Overdue',     bg: 'var(--color-danger-bg)',      color: 'var(--color-danger)' },
-  written_off: { label: 'Written off', bg: 'var(--status-archived-bg)',   color: 'var(--status-archived-text)',   border: 'var(--status-archived-border)' },
-}
+const INVOICE_STATUS_MAP = Object.fromEntries(
+  Object.entries(INVOICE_STATUS_CONFIG).map(([k, v]) => [k, { label: v.label, bg: v.bg, color: v.text, border: v.border }])
+) as Record<string, BadgeStyle>
 
 interface StatusBadgeProps {
   status: string

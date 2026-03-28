@@ -333,6 +333,26 @@ export function NewRequestDialog({
               />
             </FieldGroup>
 
+            {/* Flow indicator */}
+            {isAdmin && clientOrgId && (
+              <div style={{
+                padding: '0.625rem 0.75rem',
+                borderRadius: 'var(--radius-card)',
+                background: clientUsesTracks ? 'var(--color-brand-50)' : 'var(--color-bg-secondary)',
+                border: `1px solid ${clientUsesTracks ? 'var(--color-brand-100)' : 'var(--color-border-subtle)'}`,
+                fontSize: '0.75rem',
+                color: clientUsesTracks ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+              }}>
+                <Zap size={12} aria-hidden="true" />
+                {clientUsesTracks
+                  ? `Retainer client (${selectedClient?.planType}) - select task size below`
+                  : 'Project / hourly client - no track selection needed'}
+              </div>
+            )}
+
             {/* Type tiles: only visible for retainer plans (maintain/scale) */}
             {showTrackSelector && (
             <FieldGroup label="Task size">

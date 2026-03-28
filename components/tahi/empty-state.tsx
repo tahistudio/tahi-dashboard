@@ -41,7 +41,7 @@ export function EmptyState({ icon, title, description, ctaLabel, onCtaClick, act
         <button
           onClick={onCtaClick}
           className="flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-          style={{ padding: '0.5rem 1rem', background: 'var(--color-brand)', borderRadius: 6, border: 'none', cursor: 'pointer' }}
+          style={{ padding: '0.5rem 1rem', background: 'var(--color-brand)', borderRadius: 'var(--radius-button, 0.5rem)', border: 'none', cursor: 'pointer' }}
         >
           {ctaLabel}
         </button>

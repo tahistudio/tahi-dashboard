@@ -556,7 +556,7 @@ function RequestRow({ req, isLast, showOrg }: { req: RecentRequest; isLast: bool
             {req.title}
           </p>
           {req.scopeFlagged && (
-            <AlertTriangle size={11} style={{ color: '#f87171', flexShrink: 0 }} />
+            <AlertTriangle size={11} style={{ color: 'var(--color-danger)', flexShrink: 0 }} />
           )}
           {req.priority === 'high' && (
             <span
@@ -575,7 +575,7 @@ function RequestRow({ req, isLast, showOrg }: { req: RecentRequest; isLast: bool
       <span className="text-xs tabular-nums flex-shrink-0" style={{ color: 'var(--color-text-subtle)' }}>
         {timeAgo(req.updatedAt)}
       </span>
-      <ArrowRight size={13} style={{ color: '#d1d5db', flexShrink: 0 }} />
+      <ArrowRight size={13} style={{ color: 'var(--color-border)', flexShrink: 0 }} />
     </Link>
   )
 }
@@ -618,7 +618,7 @@ function EmptyRows({
         className="flex items-center justify-center rounded-xl"
         style={{ width: 44, height: 44, background: 'var(--color-bg-secondary)', marginBottom: '0.25rem' }}
       >
-        <Inbox size={20} style={{ color: '#d1d5db' }} />
+        <Inbox size={20} style={{ color: 'var(--color-border)' }} />
       </div>
       <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{title}</p>
       <p className="text-xs" style={{ color: 'var(--color-text-subtle)', maxWidth: 280 }}>{message}</p>
@@ -703,7 +703,7 @@ function UpcomingCallsWidget() {
           >
             <div
               className="flex items-center justify-center rounded-lg flex-shrink-0"
-              style={{ width: '2.25rem', height: '2.25rem', background: '#eff6ff', color: '#2563eb' }}
+              style={{ width: '2.25rem', height: '2.25rem', background: 'var(--color-info-bg, #eff6ff)', color: 'var(--color-info, #2563eb)' }}
             >
               <Video size={16} />
             </div>
@@ -774,7 +774,7 @@ function GettingStarted() {
               {s.n}
             </span>
             <span className="text-sm" style={{ color: 'var(--color-text)', flex: 1 }}>{s.label}</span>
-            <ArrowRight size={13} style={{ color: '#d1d5db' }} />
+            <ArrowRight size={13} style={{ color: 'var(--color-border)' }} />
           </Link>
         ))}
       </div>

@@ -43,6 +43,14 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
               e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
               e.currentTarget.style.color = 'var(--color-text-subtle)'
             }}
+            onFocus={e => {
+              e.currentTarget.style.borderColor = 'var(--color-border)'
+              e.currentTarget.style.color = 'var(--color-text-muted)'
+            }}
+            onBlur={e => {
+              e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
+              e.currentTarget.style.color = 'var(--color-text-subtle)'
+            }}
             aria-label="Search"
           >
             <Search size={14} style={{ flexShrink: 0 }} />
@@ -93,6 +101,14 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
             e.currentTarget.style.color = 'var(--color-text)'
           }}
           onMouseLeave={e => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'var(--color-text-subtle)'
+          }}
+          onFocus={e => {
+            e.currentTarget.style.background = 'var(--color-bg-secondary)'
+            e.currentTarget.style.color = 'var(--color-text)'
+          }}
+          onBlur={e => {
             e.currentTarget.style.background = 'transparent'
             e.currentTarget.style.color = 'var(--color-text-subtle)'
           }}

@@ -227,7 +227,7 @@ export function NotificationBell() {
             width: 360,
             maxWidth: 'calc(100vw - 32px)',
             background: 'var(--color-bg)',
-            borderRadius: 12,
+            borderRadius: 'var(--radius-card, 0.75rem)',
             border: '1px solid var(--color-border)',
             boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
             zIndex: 100,
