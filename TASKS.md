@@ -14,17 +14,17 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 
 ## Schema Additions (must be done before dependent features)
 
-- [ ] S1 — Add `conversations` table: id, orgId, type (direct|group|org_channel|request_thread), visibility (internal|external), name, requestId (nullable), createdAt — BE
-- [ ] S2 — Add `conversationParticipants` table: id, conversationId, userId, role (member|admin), joinedAt — BE
-- [ ] S3 — Migrate any existing `messages` rows to new conversation model or discard (pre-launch, discard is fine) — BE
-- [ ] S4 — Add `teamMemberAccess` table: id, teamMemberId, accessType (all_clients|plan_type|specific_client), trackType (nullable), createdAt — BE
-- [ ] S5 — Add `teamMemberAccessOrgs` table: id, teamMemberAccessId, orgId — BE
-- [ ] S6 — Add announcement targeting columns to `announcements`: targetType (all|plan_type|specific), targetIds (JSON), sentByEmail (int 0/1), emailSentAt — BE
-- [ ] S7 — Add `requestForms` table: id, orgId (nullable), category (nullable), serviceType (nullable), fields (JSON), createdAt, updatedAt — BE
-- [ ] S8 — Add `kanbanColumns` table: id, orgId (nullable), slug, label, colour, position, isDefault (int 0/1), createdAt — BE
-- [ ] S9 — Add `contracts` table: id, orgId, type (nda|sla|other), fileName, fileUrl, signedAt, expiresAt, notes, createdAt — BE
-- [ ] S10 — Add `scheduledCalls` table: id, orgId, contactId (nullable), bookedAt, notes, outcome, createdAt (for logging Google Cal bookings manually) — BE
-- [ ] S11 — Add review outreach fields to `caseStudySubmissions`: outreachState (pending|emailed|yes|no|deferred), outreachSentAt, deferredUntil, npsScore, writtenReview, videoUrl, logoPermission (int), marketingPermission (int), submissionToken, tokenExpiresAt, aiDraft — BE
+- [x] S1 — Add `conversations` table: id, orgId, type (direct|group|org_channel|request_thread), visibility (internal|external), name, requestId (nullable), createdAt — BE — [PM] 2026-03-28
+- [x] S2 — Add `conversationParticipants` table: id, conversationId, userId, role (member|admin), joinedAt — BE — [PM] 2026-03-28
+- [x] S3 — Add conversationId column to messages table (conversation model link) — BE — [PM] 2026-03-28
+- [x] S4 — Add `teamMemberAccess` table: id, teamMemberId, role, scopeType, planType, trackType, createdAt — BE — [PM] 2026-03-28
+- [x] S5 — Add `teamMemberAccessOrgs` table: accessId, orgId — BE — [PM] 2026-03-28
+- [x] S6 — Add announcement targeting columns to `announcements`: targetIds (JSON), sentByEmail (int 0/1), emailSentAt — BE — [PM] 2026-03-28
+- [x] S7 — Add `requestForms` table: id, name, category, orgId, questions (JSON), isDefault, createdAt, updatedAt — BE — [PM] 2026-03-28
+- [x] S8 — Add `kanbanColumns` table: id, orgId, label, statusValue, colour, position, isDefault, createdAt — BE — [PM] 2026-03-28
+- [x] S9 — Add `contracts` table: id, orgId, type, name, status, storageKey, signedStorageKey, dates, signatory, createdById — BE — [PM] 2026-03-28
+- [x] S10 — Add `scheduledCalls` table: id, orgId, title, description, scheduledAt, durationMinutes, meetingUrl, attendees, status, notes, recordingUrl — BE — [PM] 2026-03-28
+- [x] S11 — Add review outreach fields to `caseStudySubmissions`: outreachStatus, nextAskAt, neverAsk — BE — [PM] 2026-03-28
 
 
 ---
@@ -51,7 +51,7 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [ ] T15 — Request detail: voice note recording and playback panel — FE + BE
 - [ ] T16 — Request detail: internal vs external comment toggle on each message — FE
 - [ ] T17 — Request detail: time entry logging (hours, description, billable toggle) — FE + BE
-- [ ] T18 — API route: GET + POST + PATCH /api/admin/requests/[id] — BE
+- [x] T18 — API route: GET + POST + PATCH /api/admin/requests/[id] — BE — [PM] 2026-03-28
 - [ ] T19 — API route: GET + POST /api/admin/requests/[id]/files — BE
 - [ ] T20 — API route: GET + POST /api/admin/requests/[id]/voice-notes — BE
 - [ ] T21 — API route: GET + POST /api/admin/requests/[id]/time-entries — BE
@@ -68,14 +68,14 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [ ] T31 — Track management: view active tracks, add/archive tracks per client — FE + BE
 - [x] T32 — Invoice list page: table with filters (status, client, date range), totals — FE + BE
 - [x] T33 — Invoice detail page: line items, status, payment link, Stripe sync indicator — FE + BE
-- [ ] T34 — API route: GET /api/admin/invoices with Stripe sync — BE
-- [ ] T35 — API route: GET /api/admin/invoices/[id] — BE
+- [x] T34 — API route: GET /api/admin/invoices with Stripe sync — BE — [PM] 2026-03-28
+- [x] T35 — API route: GET /api/admin/invoices/[id] — BE — [PM] 2026-03-28
 - [ ] T36 — Time entries page: list all time entries across clients, filter by billable/date/client — FE + BE
 - [ ] T37 — API route: GET /api/admin/time-entries — BE
 - [ ] T38 — Notifications: SSE endpoint for real-time in-app notifications — BE
-- [ ] T39 — Notifications: bell icon in header with unread count, dropdown list — FE
+- [x] T39 — Notifications: bell icon in header with unread count, dropdown list — FE — [PM] 2026-03-28
 - [ ] T40 — Notifications: mark as read (single + all) — FE + BE
-- [ ] T41 — API route: GET + PATCH /api/notifications — BE
+- [x] T41 — API route: GET + PATCH /api/notifications — BE — [PM] 2026-03-28
 - [ ] T42 — Bulk request creation: create a request across all clients / selected plan / selected list — FE + BE
 - [ ] T43 — "Save and create another" flow on request creation form (pre-fills category/service) — FE
 - [ ] T44 — Bulk actions on request list: bulk status change, bulk assign, bulk delete — FE + BE
