@@ -1,0 +1,526 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
+import { Plus, FileText, RefreshCw } from 'lucide-react'
+import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
+import { EmptyState } from '@/components/tahi/empty-state'
+import { apiPath } from '@/lib/api'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface Invoice {
+  id: string
+  orgId: string
+  orgName: string | null
+  status: string
+  totalAmount: number
+  currency: string | null
+  dueDate: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+const STATUS_CFG: Record<string, { label: string; bg: string; text: string }> = {
+  draft:        { label: 'Draft',    bg: '#f3f4f6', text: '#4b5563' },
+  sent:         { label: 'Sent',     bg: '#eff6ff', text: '#1d4ed8' },
+  viewed:       { label: 'Viewed',   bg: '#eff6ff', text: '#1d4ed8' },
+  overdue:      { label: 'Overdue',  bg: '#fef2f2', text: '#dc2626' },
+  paid:         { label: 'Paid',     bg: '#f0fdf4', text: '#16a34a' },
+  written_off:  { label: 'Written Off', bg: '#f3f4f6', text: '#6b7280' },
+}
+
+const FILTER_TABS = [
+  { label: 'All',     value: 'all'     },
+  { label: 'Draft',   value: 'draft'   },
+  { label: 'Sent',    value: 'sent'    },
+  { label: 'Overdue', value: 'overdue' },
+  { label: 'Paid',    value: 'paid'    },
+]
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatCurrency(amount: number, currency: string | null): string {
+  const cur = currency ?? 'NZD'
+  return new Intl.NumberFormat('en-NZ', {
+    style: 'currency',
+    currency: cur,
+    minimumFractionDigits: 2,
+  }).format(amount)
+}
+
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return '--'
+  try {
+    const d = new Date(dateStr.includes('T') ? dateStr : dateStr + 'T00:00:00')
+    return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
+  } catch { return '--' }
+}
+
+function isOverdue(dueDate: string | null, status: string): boolean {
+  if (!dueDate || status === 'paid' || status === 'written_off') return false
+  return new Date(dueDate + 'T23:59:59') < new Date()
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function StatusBadge({ status, dueDate }: { status: string; dueDate: string | null }) {
+  const effectiveStatus = isOverdue(dueDate, status) && status === 'sent' ? 'overdue' : status
+  const cfg = STATUS_CFG[effectiveStatus] ?? STATUS_CFG['draft']
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '2px 8px',
+        borderRadius: 99,
+        fontSize: 12,
+        fontWeight: 500,
+        background: cfg.bg,
+        color: cfg.text,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {cfg.label}
+    </span>
+  )
+}
+
+// ─── Create Invoice Modal ─────────────────────────────────────────────────────
+
+function CreateInvoiceModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void
+  onCreated: () => void
+}) {
+  const [orgId, setOrgId] = useState('')
+  const [description, setDescription] = useState('')
+  const [quantity, setQuantity] = useState('1')
+  const [unitAmount, setUnitAmount] = useState('')
+  const [dueDate, setDueDate] = useState('')
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!orgId.trim() || !description.trim() || !unitAmount) {
+      setError('Client ID, description, and amount are required.')
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      const res = await fetch(apiPath('/api/admin/invoices'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orgId: orgId.trim(),
+          lineItems: [{ description: description.trim(), quantity: parseFloat(quantity) || 1, unitAmount: parseFloat(unitAmount) }],
+          dueDate: dueDate || undefined,
+          notes: notes || undefined,
+        }),
+      })
+      if (!res.ok) {
+        const json = await res.json() as { error?: string }
+        setError(json.error ?? 'Failed to create invoice.')
+        return
+      }
+      onCreated()
+    } catch {
+      setError('Network error. Please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }, [orgId, description, quantity, unitAmount, dueDate, notes, onCreated])
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="create-invoice-title"
+      style={{
+        position: 'fixed', inset: 0, zIndex: 50,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(0,0,0,0.4)',
+      }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div
+        style={{
+          background: 'white', borderRadius: 12, padding: 28,
+          width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+        }}
+      >
+        <h2 id="create-invoice-title" className="text-lg font-bold" style={{ color: 'var(--color-text)', marginBottom: 20 }}>
+          Create Invoice
+        </h2>
+        {error && (
+          <div
+            aria-live="polite"
+            style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', marginBottom: 16, color: '#dc2626', fontSize: 13 }}
+          >
+            {error}
+          </div>
+        )}
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label htmlFor="ci-org-id" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>
+              Client ID
+            </label>
+            <input
+              id="ci-org-id"
+              type="text"
+              placeholder="Client organisation ID"
+              value={orgId}
+              onChange={e => setOrgId(e.target.value)}
+              required
+              style={{
+                padding: '8px 12px', borderRadius: 8, fontSize: 14,
+                border: '1px solid var(--color-border)', outline: 'none',
+                color: 'var(--color-text)', background: 'var(--color-bg)',
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label htmlFor="ci-description" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>
+              Description
+            </label>
+            <input
+              id="ci-description"
+              type="text"
+              placeholder="e.g. Monthly retainer - March 2026"
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              required
+              style={{
+                padding: '8px 12px', borderRadius: 8, fontSize: 14,
+                border: '1px solid var(--color-border)', outline: 'none',
+                color: 'var(--color-text)', background: 'var(--color-bg)',
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+              <label htmlFor="ci-quantity" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>
+                Quantity
+              </label>
+              <input
+                id="ci-quantity"
+                type="number"
+                min="0"
+                step="0.01"
+                value={quantity}
+                onChange={e => setQuantity(e.target.value)}
+                style={{
+                  padding: '8px 12px', borderRadius: 8, fontSize: 14,
+                  border: '1px solid var(--color-border)', outline: 'none',
+                  color: 'var(--color-text)', background: 'var(--color-bg)',
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+              <label htmlFor="ci-amount" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>
+                Unit Amount (NZD)
+              </label>
+              <input
+                id="ci-amount"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0.00"
+                value={unitAmount}
+                onChange={e => setUnitAmount(e.target.value)}
+                required
+                style={{
+                  padding: '8px 12px', borderRadius: 8, fontSize: 14,
+                  border: '1px solid var(--color-border)', outline: 'none',
+                  color: 'var(--color-text)', background: 'var(--color-bg)',
+                }}
+              />
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label htmlFor="ci-due-date" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>
+              Due Date
+            </label>
+            <input
+              id="ci-due-date"
+              type="date"
+              value={dueDate}
+              onChange={e => setDueDate(e.target.value)}
+              style={{
+                padding: '8px 12px', borderRadius: 8, fontSize: 14,
+                border: '1px solid var(--color-border)', outline: 'none',
+                color: 'var(--color-text)', background: 'var(--color-bg)',
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label htmlFor="ci-notes" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)' }}>
+              Notes
+            </label>
+            <textarea
+              id="ci-notes"
+              rows={3}
+              placeholder="Optional notes for the client..."
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              style={{
+                padding: '8px 12px', borderRadius: 8, fontSize: 14,
+                border: '1px solid var(--color-border)', outline: 'none',
+                color: 'var(--color-text)', background: 'var(--color-bg)',
+                resize: 'vertical',
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 4 }}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                padding: '8px 16px', borderRadius: 8, fontSize: 14, fontWeight: 500,
+                border: '1px solid var(--color-border)', background: 'white',
+                color: 'var(--color-text)', cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              style={{
+                padding: '8px 20px', borderRadius: 8, fontSize: 14, fontWeight: 600,
+                border: 'none', background: saving ? '#9ca3af' : '#5A824E',
+                color: 'white', cursor: saving ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {saving ? 'Creating...' : 'Create Invoice'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+interface InvoiceListProps {
+  isAdmin: boolean
+}
+
+export function InvoiceList({ isAdmin }: InvoiceListProps) {
+  const [invoices, setInvoices] = useState<Invoice[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+  const [activeTab, setActiveTab] = useState('all')
+  const [showCreateModal, setShowCreateModal] = useState(false)
+
+  const fetchInvoices = useCallback(async (status: string) => {
+    setLoading(true)
+    setError(false)
+    try {
+      const url = isAdmin
+        ? apiPath(`/api/admin/invoices?status=${status}`)
+        : apiPath('/api/portal/invoices')
+      const res = await fetch(url)
+      if (!res.ok) throw new Error('Failed')
+      const json = await res.json() as { items?: Invoice[] }
+      setInvoices(json.items ?? [])
+    } catch {
+      setError(true)
+      setInvoices([])
+    } finally {
+      setLoading(false)
+    }
+  }, [isAdmin])
+
+  useEffect(() => {
+    fetchInvoices(activeTab).catch(() => {})
+  }, [activeTab, fetchInvoices])
+
+  const handleCreated = useCallback(() => {
+    setShowCreateModal(false)
+    fetchInvoices(activeTab).catch(() => {})
+  }, [activeTab, fetchInvoices])
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text)', margin: 0 }}>Invoices</h1>
+          <p style={{ fontSize: 14, color: 'var(--color-text-muted)', marginTop: 4 }}>
+            {isAdmin ? 'All invoices across every client.' : 'Your invoice history and outstanding payments.'}
+          </p>
+        </div>
+        {isAdmin && (
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2"
+            style={{
+              padding: '10px 18px',
+              background: '#5A824E',
+              border: 'none',
+              borderRadius: '0 10px 0 10px',
+              cursor: 'pointer',
+              color: 'white',
+              minHeight: 44,
+            }}
+          >
+            <Plus style={{ width: 16, height: 16 }} aria-hidden="true" />
+            Create Invoice
+          </button>
+        )}
+      </div>
+
+      {/* Filter Tabs */}
+      {isAdmin && (
+        <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--color-border)', paddingBottom: 0 }}>
+          {FILTER_TABS.map(tab => (
+            <button
+              key={tab.value}
+              onClick={() => setActiveTab(tab.value)}
+              style={{
+                padding: '8px 16px',
+                fontSize: 13,
+                fontWeight: activeTab === tab.value ? 600 : 400,
+                color: activeTab === tab.value ? '#5A824E' : 'var(--color-text-muted)',
+                background: 'none',
+                border: 'none',
+                borderBottom: activeTab === tab.value ? '2px solid #5A824E' : '2px solid transparent',
+                cursor: 'pointer',
+                marginBottom: -1,
+                minHeight: 44,
+                transition: 'color 0.15s',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Table */}
+      <div
+        style={{
+          background: 'white',
+          borderRadius: 12,
+          border: '1px solid var(--color-border)',
+          overflow: 'hidden',
+        }}
+      >
+        {loading ? (
+          <LoadingSkeleton rows={5} height={56} />
+        ) : error ? (
+          <div
+            style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--color-text-muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}
+          >
+            <p className="text-sm">Failed to load invoices.</p>
+            <button
+              onClick={() => fetchInvoices(activeTab).catch(() => {})}
+              className="flex items-center gap-2 text-sm font-medium hover:opacity-80 transition-opacity"
+              style={{ color: '#5A824E', background: 'none', border: 'none', cursor: 'pointer' }}
+            >
+              <RefreshCw style={{ width: 14, height: 14 }} aria-hidden="true" />
+              Retry
+            </button>
+          </div>
+        ) : invoices.length === 0 ? (
+          <EmptyState
+            icon={<FileText style={{ width: 28, height: 28, color: 'white' }} aria-hidden="true" />}
+            title={isAdmin ? 'No invoices yet' : 'No invoices'}
+            description={isAdmin ? 'Create your first invoice to get started.' : 'Invoices from Tahi Studio will appear here.'}
+            ctaLabel={isAdmin ? 'Create Invoice' : undefined}
+            onCtaClick={isAdmin ? () => setShowCreateModal(true) : undefined}
+          />
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 600 }}>
+              <thead>
+                <tr style={{ background: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
+                  {isAdmin && (
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Client
+                    </th>
+                  )}
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Amount
+                  </th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Status
+                  </th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Due Date
+                  </th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Created
+                  </th>
+                  <th style={{ padding: '12px 16px', width: 80 }} />
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.map((inv, i) => (
+                  <tr
+                    key={inv.id}
+                    style={{
+                      borderBottom: i < invoices.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
+                      transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLTableRowElement).style.background = 'var(--color-bg-secondary)' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLTableRowElement).style.background = '' }}
+                  >
+                    {isAdmin && (
+                      <td style={{ padding: '14px 16px', fontSize: 14, fontWeight: 500, color: 'var(--color-text)' }}>
+                        {inv.orgName ?? 'Unknown'}
+                      </td>
+                    )}
+                    <td style={{ padding: '14px 16px', fontSize: 14, fontWeight: 600, color: 'var(--color-text)' }}>
+                      {formatCurrency(inv.totalAmount, inv.currency)}
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <StatusBadge status={inv.status} dueDate={inv.dueDate} />
+                    </td>
+                    <td style={{ padding: '14px 16px', fontSize: 13, color: isOverdue(inv.dueDate, inv.status) ? '#dc2626' : 'var(--color-text-muted)' }}>
+                      {formatDate(inv.dueDate)}
+                    </td>
+                    <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--color-text-muted)' }}>
+                      {formatDate(inv.createdAt)}
+                    </td>
+                    <td style={{ padding: '14px 16px', textAlign: 'right' }}>
+                      <Link
+                        href={`/invoices/${inv.id}`}
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: '#5A824E',
+                          textDecoration: 'none',
+                        }}
+                      >
+                        View
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Create Invoice Modal */}
+      {showCreateModal && (
+        <CreateInvoiceModal
+          onClose={() => setShowCreateModal(false)}
+          onCreated={handleCreated}
+        />
+      )}
+    </div>
+  )
+}
