@@ -10,7 +10,8 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { RequestThread } from '@/components/tahi/request-thread'
-import { TiptapEditor } from '@/components/tahi/tiptap-editor'
+import dynamic from 'next/dynamic'
+const TiptapEditor = dynamic(() => import('@/components/tahi/tiptap-editor').then(m => ({ default: m.TiptapEditor })), { ssr: false })
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 

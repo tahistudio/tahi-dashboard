@@ -8,7 +8,8 @@ import {
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
-import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
+import dynamic from 'next/dynamic'
+const TiptapDocEditor = dynamic(() => import('@/components/tahi/tiptap-doc-editor').then(m => ({ default: m.TiptapDocEditor })), { ssr: false })
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 
