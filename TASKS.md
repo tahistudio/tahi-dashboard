@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-28
 Total tasks: 250 (S1-S11 schema + T1-T250 feature + audit findings)
-Completed: S1-S11, T1-T13, T18, T29, T32-T37, T39, T41-T42, T44, T47-T48, T51, T55-T57, T58-T60, T61-T63, T64-T65, T67-T68, T70, T72, T74-T77, T80, T82, T84, T86, T89-T90, T95-T96, T115, T117-T118, T141-T144, T145, T149-T153, T167-T168, T170, T172-T180, T185-T186, T189-T192, T194-T196, T200-T203, T205, T207-T208, T210, T216-T219, T222
+Completed: S1-S11, T1-T13, T15-T17, T18, T20-T22, T29, T32-T37, T39, T41-T42, T44, T47-T48, T50-T51, T53, T55-T57, T58-T60, T61-T63, T64-T65, T67-T68, T70-T72, T74-T77, T80, T82, T84, T86, T89-T90, T95-T96, T115, T117-T118, T141-T144, T145, T149-T153, T167-T168, T170, T172-T180, T185-T186, T189-T192, T194-T196, T198-T203, T205, T207-T208, T210, T216-T219, T222, T252, T254-T255, T259-T262, T264, T266
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -48,14 +48,14 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 ### To Build
 - [x] T13 — Request detail page: full view with status editor, priority, assignee, due date, description (Tiptap), activity log — FE + BE — [PM] 2026-03-28
 - [x] T14 — Request detail: file attachments panel (upload to R2, list, download, delete) — FE + BE — [PM] 2026-03-28
-- [ ] T15 — Request detail: voice note recording and playback panel — FE + BE
-- [ ] T16 — Request detail: internal vs external comment toggle on each message — FE
-- [ ] T17 — Request detail: time entry logging (hours, description, billable toggle) — FE + BE
+- [x] T15 — Request detail: voice note recording and playback panel — FE + BE — [PM] 2026-03-28
+- [x] T16 — Request detail: internal vs external comment toggle on each message — FE — [PM] 2026-03-28
+- [x] T17 — Request detail: time entry logging (hours, description, billable toggle) — FE + BE — [PM] 2026-03-28
 - [x] T18 — API route: GET + POST + PATCH /api/admin/requests/[id] — BE — [PM] 2026-03-28
 - [x] T19 — API route: GET + POST /api/admin/requests/[id]/files — BE — [PM] 2026-03-28
-- [ ] T20 — API route: GET + POST /api/admin/requests/[id]/voice-notes — BE
-- [ ] T21 — API route: GET + POST /api/admin/requests/[id]/time-entries — BE
-- [ ] T22 — Client list page: table with search, filter by plan, sort by name/created — FE
+- [x] T20 — API route: GET + POST /api/admin/requests/[id]/voice-notes — BE — [PM] 2026-03-28
+- [x] T21 — API route: GET + POST /api/admin/requests/[id]/time-entries — BE — [PM] 2026-03-28
+- [x] T22 — Client list page: table with search, filter by plan, sort by name/created — FE — [PM] 2026-03-28
 - [x] T23 — Client detail page: overview tab (health score, active requests, contacts, subscription) — FE + BE — [PM] 2026-03-28
 - [x] T24 — Client detail page: requests tab with inline create — FE — [PM] 2026-03-28
 - [x] T25 — Client detail page: files tab — FE — [PM] 2026-03-28
@@ -92,10 +92,10 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T47 — Messaging: conversations list page (inbox) showing all conversations with unread counts — FE + BE — [PM] 2026-03-28
 - [x] T48 — Messaging: conversation detail page with message thread, send box, file attach — FE + BE — [PM] 2026-03-28
 - [ ] T49 — Messaging: create new direct (1:1) conversation from client detail or contacts page — FE + BE
-- [ ] T50 — Messaging: create group conversation with multiple participants — FE + BE
+- [x] T50 — Messaging: create group conversation with multiple participants — FE + BE — [PM] 2026-03-28
 - [x] T51 — Client onboarding checklist on portal overview with step tracking — FE + BE — [PM] 2026-03-28
 - [ ] T52 — Messaging: request-thread conversations linked to a specific request — FE + BE
-- [ ] T53 — Messaging: internal vs external visibility toggle per conversation — FE + BE
+- [x] T53 — Messaging: internal vs external visibility toggle per conversation — FE + BE — [PM] 2026-03-28
 - [ ] T54 — Messaging: voice note recording and playback within conversations — FE + BE
 - [x] T55 — API route: GET + POST /api/admin/conversations — BE — [PM] 2026-03-28
 - [x] T56 — API route: GET + POST /api/admin/conversations/[id]/messages — BE — [PM] 2026-03-28
@@ -113,7 +113,7 @@ Legend: BE = Backend, FE = Frontend, UIUX = UI/UX, QA = QA, PM = Project Manager
 - [x] T68 — API route: GET + POST /api/admin/announcements — BE — [PM] 2026-03-28
 - [ ] T69 — API route: POST /api/admin/announcements/[id]/send — BE
 - [x] T70 — API route: GET /api/portal/announcements (client-scoped) — BE — [PM] 2026-03-28
-- [ ] T71 — API route: POST /api/portal/announcements/[id]/dismiss — BE
+- [x] T71 — API route: POST /api/portal/announcements/[id]/dismiss — BE — [PM] 2026-03-28
 
 
 ---
@@ -316,8 +316,8 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T195 — Add .catch() handlers to AdminOverview fetch (overview-content.tsx lines 61-66) and ClientOverview fetch (lines 150-155) — [FE]
 - [x] T196 — Add .catch() to Promise.all in RequestDetail (request-detail.tsx lines 105-128) — [FE]
 - [x] T197 — Move request list state (activeTab, view mode, search query) from useState to URL search params so refreshes and shared URLs preserve state — [FE] — [PM] 2026-03-28
-- [ ] T198 — Move client list state (search, statusFilter) from useState to URL search params — [FE]
-- [ ] T199 — Add error boundaries to overview page, request detail page, and client detail page — [FE]
+- [x] T198 — Move client list state (search, statusFilter) from useState to URL search params — [FE] — [PM] 2026-03-28
+- [x] T199 — Add error boundaries to overview page, request detail page, and client detail page — [FE] — [PM] 2026-03-28
 
 ### Accessibility
 
@@ -425,24 +425,24 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 ### Critical UX (these make the product feel broken)
 
 - [ ] T251 - Request detail page: full UI/UX overhaul to match overview/requests list quality. Proper card layout, spacing, typography, sidebar panel styling, status stepper polish, thread section design -- [FE + UIUX]
-- [ ] T252 - Client detail page: same level of UI/UX polish as request detail. Clean tab navigation, card layouts, consistent spacing -- [FE + UIUX]
+- [x] T252 - Client detail page: same level of UI/UX polish as request detail. Clean tab navigation, card layouts, consistent spacing -- [FE + UIUX] — [PM] 2026-03-28
 - [ ] T253 - Kanban board: implement actual drag and drop (use @dnd-kit/core or similar). Cards must be draggable between columns to change status -- [FE]
-- [ ] T254 - Time logging: replace raw ID text inputs with searchable autocomplete dropdowns for client, team member, and request selection. Allow "no client" for internal/non-billable time -- [FE]
-- [ ] T255 - Delete/edit everywhere: add edit and delete actions on requests, clients, team members, invoices, time entries, contacts. Confirmation dialog before delete -- [FE + BE]
+- [x] T254 - Time logging: replace raw ID text inputs with searchable autocomplete dropdowns for client, team member, and request selection. Allow "no client" for internal/non-billable time -- [FE] — [PM] 2026-03-28
+- [x] T255 - Delete/edit everywhere: add edit and delete actions on requests, clients, team members, invoices, time entries, contacts. Confirmation dialog before delete -- [FE + BE] — [PM] 2026-03-28
 
 ### High Priority UX
 
 - [ ] T256 - Request creation dialog: add date picker for due date field -- [FE]
 - [ ] T257 - Top nav: polish search bar styling and notification bell dropdown to match premium design -- [UIUX]
 - [ ] T258 - Sidebar: save collapse/expand preference to localStorage, restore on page load -- [FE]
-- [ ] T259 - Messaging: voice note recording/playback, better group management (add/remove participants, edit group name), improved Tiptap composer -- [FE + BE]
-- [ ] T260 - Docs Hub: replace textarea with Tiptap rich text editor for doc page content -- [FE]
-- [ ] T261 - Settings page: make all toggles/inputs saveable (persist to settings API on change), improve visual layout and card design -- [FE + UIUX]
-- [ ] T262 - Team page: UI/UX overhaul, member cards need better design, access rule editor needs to be more intuitive -- [FE + UIUX]
+- [x] T259 - Messaging: voice note recording/playback, better group management (add/remove participants, edit group name), improved Tiptap composer -- [FE + BE] — [PM] 2026-03-28
+- [x] T260 - Docs Hub: replace textarea with Tiptap rich text editor for doc page content -- [FE] — [PM] 2026-03-28
+- [x] T261 - Settings page: make all toggles/inputs saveable (persist to settings API on change), improve visual layout and card design -- [FE + UIUX] — [PM] 2026-03-28
+- [x] T262 - Team page: UI/UX overhaul, member cards need better design, access rule editor needs to be more intuitive -- [FE + UIUX] — [PM] 2026-03-28
 - [ ] T263 - Reports page: deeper insights (delivery time trends, client activity heatmap, revenue by plan type), better card spacing and chart labels -- [FE + BE]
 
 ### Nice to Have UX
 
-- [ ] T264 - Persist view preferences: save preferred request view (list/board), active filters, sort order to localStorage per user -- [FE]
+- [x] T264 - Persist view preferences: save preferred request view (list/board), active filters, sort order to localStorage per user -- [FE] — [PM] 2026-03-28
 - [ ] T265 - Searchable dropdown component: create a reusable components/tahi/searchable-select.tsx for all entity pickers (clients, team members, requests) -- [FE + UIUX]
-- [ ] T266 - Autocomplete in all forms: wire searchable-select into request creation, time logging, invoice creation, assignment dropdowns -- [FE]
+- [x] T266 - Autocomplete in all forms: wire searchable-select into request creation, time logging, invoice creation, assignment dropdowns -- [FE] — [PM] 2026-03-28
