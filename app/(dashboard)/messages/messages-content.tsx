@@ -131,7 +131,8 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
     setLoading(true)
     setError(false)
     try {
-      const res = await fetch(apiPath('/api/admin/conversations'))
+      const endpoint = isAdmin ? '/api/admin/conversations' : '/api/portal/conversations'
+      const res = await fetch(apiPath(endpoint))
       if (!res.ok) throw new Error('Failed to load conversations')
       const data = await res.json() as { conversations?: ConversationSummary[] }
       setConversations(data.conversations ?? [])
@@ -141,7 +142,7 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [isAdmin])
 
   useEffect(() => { fetchConversations() }, [fetchConversations])
 
@@ -150,7 +151,10 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
   const fetchMessages = useCallback(async (convId: string) => {
     setMessagesLoading(true)
     try {
-      const res = await fetch(apiPath(`/api/admin/conversations/${convId}/messages`))
+      const endpoint = isAdmin
+        ? `/api/admin/conversations/${convId}/messages`
+        : `/api/portal/conversations/${convId}/messages`
+      const res = await fetch(apiPath(endpoint))
       if (!res.ok) throw new Error('Failed to load messages')
       const data = await res.json() as { items?: MessageItem[] }
       setMessages(data.items ?? [])
@@ -159,7 +163,7 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
     } finally {
       setMessagesLoading(false)
     }
-  }, [])
+  }, [isAdmin])
 
   useEffect(() => {
     if (activeConvId) {
@@ -178,7 +182,10 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
     if (!composerText.trim() || !activeConvId || sending) return
     setSending(true)
     try {
-      const res = await fetch(apiPath(`/api/admin/conversations/${activeConvId}/messages`), {
+      const endpoint = isAdmin
+        ? `/api/admin/conversations/${activeConvId}/messages`
+        : `/api/portal/conversations/${activeConvId}/messages`
+      const res = await fetch(apiPath(endpoint), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: composerText.trim() }),
@@ -217,22 +224,20 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
             {isAdmin ? 'Conversations with clients and team.' : 'Messages with the Tahi team.'}
           </p>
         </div>
-        {isAdmin && (
-          <button
-            onClick={() => setShowNewDialog(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white transition-colors"
-            style={{
-              background: 'var(--color-brand)',
-              borderRadius: 'var(--radius-button)',
-              border: 'none',
-              cursor: 'pointer',
-              minHeight: '2.75rem',
-            }}
-          >
-            <Plus className="w-4 h-4" />
-            New Conversation
-          </button>
-        )}
+        <button
+          onClick={() => setShowNewDialog(true)}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white transition-colors"
+          style={{
+            background: 'var(--color-brand)',
+            borderRadius: 'var(--radius-button)',
+            border: 'none',
+            cursor: 'pointer',
+            minHeight: '2.75rem',
+          }}
+        >
+          <Plus className="w-4 h-4" />
+          New Conversation
+        </button>
       </div>
 
       <div
@@ -621,6 +626,7 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
       {/* New Conversation Dialog */}
       {showNewDialog && (
         <NewConversationDialog
+          isAdmin={isAdmin}
           onClose={() => setShowNewDialog(false)}
           onCreated={(id: string) => {
             setShowNewDialog(false)
@@ -636,15 +642,18 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
 // ── New Conversation Dialog ─────────────────────────────────────────────────
 
 function NewConversationDialog({
+  isAdmin,
   onClose,
   onCreated,
 }: {
+  isAdmin: boolean
   onClose: () => void
   onCreated: (id: string) => void
 }) {
   const [type, setType] = useState<string>('direct')
   const [name, setName] = useState('')
   const [visibility, setVisibility] = useState<string>('external')
+  const [initialMessage, setInitialMessage] = useState('')
   const [creating, setCreating] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
 
@@ -652,15 +661,22 @@ function NewConversationDialog({
     setCreating(true)
     setErrorMsg('')
     try {
-      const res = await fetch(apiPath('/api/admin/conversations'), {
+      const endpoint = isAdmin ? '/api/admin/conversations' : '/api/portal/conversations'
+      const payload = isAdmin
+        ? {
+            type,
+            name: name.trim() || null,
+            visibility,
+            participantIds: [],
+          }
+        : {
+            type: 'direct',
+            content: initialMessage.trim() || undefined,
+          }
+      const res = await fetch(apiPath(endpoint), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type,
-          name: name.trim() || null,
-          visibility,
-          participantIds: [],
-        }),
+        body: JSON.stringify(payload),
       })
       if (!res.ok) {
         const errData = await res.json() as { error?: string }
@@ -701,77 +717,107 @@ function NewConversationDialog({
         </h2>
 
         <div className="space-y-4">
-          {/* Type */}
-          <div>
-            <label htmlFor="conv-type" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-              Type
-            </label>
-            <select
-              id="conv-type"
-              value={type}
-              onChange={e => setType(e.target.value)}
-              className="w-full text-sm text-[var(--color-text)]"
-              style={{
-                padding: '0.5rem 0.75rem',
-                borderRadius: 'var(--radius-input)',
-                border: '1px solid var(--color-border)',
-                background: 'var(--color-bg)',
-                minHeight: '2.75rem',
-              }}
-            >
-              <option value="direct">Direct Message</option>
-              <option value="group">Group</option>
-              <option value="org_channel">Org Channel</option>
-              <option value="request_thread">Request Thread</option>
-            </select>
-          </div>
+          {isAdmin ? (
+            <>
+              {/* Type */}
+              <div>
+                <label htmlFor="conv-type" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                  Type
+                </label>
+                <select
+                  id="conv-type"
+                  value={type}
+                  onChange={e => setType(e.target.value)}
+                  className="w-full text-sm text-[var(--color-text)]"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: 'var(--radius-input)',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    minHeight: '2.75rem',
+                  }}
+                >
+                  <option value="direct">Direct Message</option>
+                  <option value="group">Group</option>
+                  <option value="org_channel">Org Channel</option>
+                  <option value="request_thread">Request Thread</option>
+                </select>
+              </div>
 
-          {/* Name (for group/channel) */}
-          {(type === 'group' || type === 'org_channel') && (
-            <div>
-              <label htmlFor="conv-name" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-                Name
-              </label>
-              <input
-                id="conv-name"
-                type="text"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="Conversation name..."
-                className="w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
-                style={{
-                  padding: '0.5rem 0.75rem',
-                  borderRadius: 'var(--radius-input)',
-                  border: '1px solid var(--color-border)',
-                  background: 'var(--color-bg)',
-                  minHeight: '2.75rem',
-                }}
-              />
-            </div>
+              {/* Name (for group/channel) */}
+              {(type === 'group' || type === 'org_channel') && (
+                <div>
+                  <label htmlFor="conv-name" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                    Name
+                  </label>
+                  <input
+                    id="conv-name"
+                    type="text"
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    placeholder="Conversation name..."
+                    className="w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+                    style={{
+                      padding: '0.5rem 0.75rem',
+                      borderRadius: 'var(--radius-input)',
+                      border: '1px solid var(--color-border)',
+                      background: 'var(--color-bg)',
+                      minHeight: '2.75rem',
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Visibility */}
+              <div>
+                <label htmlFor="conv-visibility" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                  Visibility
+                </label>
+                <select
+                  id="conv-visibility"
+                  value={visibility}
+                  onChange={e => setVisibility(e.target.value)}
+                  className="w-full text-sm text-[var(--color-text)]"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: 'var(--radius-input)',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    minHeight: '2.75rem',
+                  }}
+                >
+                  <option value="external">External (visible to clients)</option>
+                  <option value="internal">Internal (team only)</option>
+                </select>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-[var(--color-text-muted)]">
+                Start a new conversation with the Tahi team.
+              </p>
+              {/* Initial message for portal users */}
+              <div>
+                <label htmlFor="conv-initial-msg" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                  Message (optional)
+                </label>
+                <textarea
+                  id="conv-initial-msg"
+                  value={initialMessage}
+                  onChange={e => setInitialMessage(e.target.value)}
+                  placeholder="Type your first message..."
+                  rows={3}
+                  className="w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] resize-none"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: 'var(--radius-input)',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                  }}
+                />
+              </div>
+            </>
           )}
-
-          {/* Visibility */}
-          <div>
-            <label htmlFor="conv-visibility" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-              Visibility
-            </label>
-            <select
-              id="conv-visibility"
-              value={visibility}
-              onChange={e => setVisibility(e.target.value)}
-              className="w-full text-sm text-[var(--color-text)]"
-              style={{
-                padding: '0.5rem 0.75rem',
-                borderRadius: 'var(--radius-input)',
-                border: '1px solid var(--color-border)',
-                background: 'var(--color-bg)',
-                minHeight: '2.75rem',
-              }}
-            >
-              <option value="external">External (visible to clients)</option>
-              <option value="internal">Internal (team only)</option>
-            </select>
-          </div>
 
           {errorMsg && (
             <div aria-live="polite" className="text-sm" style={{ color: 'var(--color-danger)' }}>

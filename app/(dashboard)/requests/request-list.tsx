@@ -6,6 +6,7 @@ import {
   Plus, Search, Filter, LayoutList, Columns3,
   AlertTriangle, ChevronDown, Inbox, RefreshCw,
   Calendar, Zap, Clock, ArrowUpDown, Download,
+  CheckSquare, Square, Users, Loader2, X,
 } from 'lucide-react'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { apiPath } from '@/lib/api'
@@ -242,7 +243,9 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
   const [requests, setRequests] = useState<Request[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [bulkCreateOpen, setBulkCreateOpen] = useState(false)
   const [boardColumns, setBoardColumns] = useState<BoardColumn[]>(BOARD_COLS)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const tabs = isAdmin ? ADMIN_TABS : CLIENT_TABS
 
@@ -289,6 +292,18 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
 
   useEffect(() => { fetchRequests() }, [fetchRequests])
 
+  // Clear selection when tab changes
+  useEffect(() => { setSelectedIds(new Set()) }, [activeTab])
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
   const filtered = search.trim()
     ? requests.filter(r =>
         r.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -297,6 +312,13 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
     : requests
 
   const sorted = sortRequests(filtered, sortKey)
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds(prev => {
+      if (prev.size === sorted.length) return new Set()
+      return new Set(sorted.map(r => r.id))
+    })
+  }, [sorted])
 
   return (
     <>
@@ -338,6 +360,24 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
             <Download className="w-4 h-4" />
             <span className="hidden sm:inline">Export CSV</span>
           </button>
+          {isAdmin && (
+            <button
+              onClick={() => setBulkCreateOpen(true)}
+              className="hidden sm:flex items-center gap-2 font-medium transition-opacity hover:opacity-80"
+              style={{
+                padding: '0.5rem 1rem',
+                fontSize: '0.875rem',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                borderRadius: '0.5rem',
+                cursor: 'pointer',
+                color: 'var(--color-text)',
+              }}
+            >
+              <Users className="w-4 h-4" />
+              Bulk Create
+            </button>
+          )}
           <button
             onClick={() => setDialogOpen(true)}
             className="flex items-center gap-2 font-semibold text-white transition-opacity hover:opacity-90"
@@ -510,6 +550,16 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
           )}
         </div>
 
+        {/* Bulk action bar */}
+        {isAdmin && selectedIds.size > 0 && (
+          <BulkActionBar
+            selectedCount={selectedIds.size}
+            selectedIds={selectedIds}
+            onClear={() => setSelectedIds(new Set())}
+            onDone={() => { setSelectedIds(new Set()); fetchRequests() }}
+          />
+        )}
+
         {/* Content area */}
         <div style={{ background: view === 'board' ? 'var(--color-bg-secondary)' : 'white' }}>
           {loading ? (
@@ -517,34 +567,77 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
           ) : sorted.length === 0 ? (
             <EmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />
           ) : view === 'list' ? (
-            <ListView requests={sorted} isAdmin={isAdmin} />
+            <ListView
+              requests={sorted}
+              isAdmin={isAdmin}
+              selectedIds={selectedIds}
+              onToggleSelect={isAdmin ? toggleSelect : undefined}
+              onToggleAll={isAdmin ? toggleSelectAll : undefined}
+            />
           ) : (
             <BoardView requests={sorted} columns={boardColumns} />
           )}
         </div>
       </div>
+
+      {/* Bulk Create Dialog */}
+      {bulkCreateOpen && (
+        <BulkCreateDialog
+          onClose={() => setBulkCreateOpen(false)}
+          onCreated={() => { setBulkCreateOpen(false); fetchRequests() }}
+        />
+      )}
     </>
   )
 }
 
 // ─── List View ────────────────────────────────────────────────────────────────
 
-function ListView({ requests, isAdmin }: { requests: Request[]; isAdmin: boolean }) {
+function ListView({
+  requests,
+  isAdmin,
+  selectedIds,
+  onToggleSelect,
+  onToggleAll,
+}: {
+  requests: Request[]
+  isAdmin: boolean
+  selectedIds?: Set<string>
+  onToggleSelect?: (id: string) => void
+  onToggleAll?: () => void
+}) {
+  const showCheckboxes = isAdmin && onToggleSelect
+  const allSelected = showCheckboxes && selectedIds && selectedIds.size === requests.length && requests.length > 0
+
   return (
     <div>
       {/* Table header: hidden on mobile, visible md+ */}
       <div
-        className="hidden md:grid text-xs font-semibold uppercase tracking-wide"
+        className="hidden md:grid text-xs font-semibold uppercase tracking-wide items-center"
         style={{
-          gridTemplateColumns: isAdmin
-            ? '1fr 7.5rem 9rem 8rem 5.5rem 6rem 5.5rem'
-            : '1fr 8.75rem 8rem 5.5rem 5.5rem 5.5rem',
+          gridTemplateColumns: showCheckboxes
+            ? '2rem 1fr 7.5rem 9rem 8rem 5.5rem 6rem 5.5rem'
+            : isAdmin
+              ? '1fr 7.5rem 9rem 8rem 5.5rem 6rem 5.5rem'
+              : '1fr 8.75rem 8rem 5.5rem 5.5rem 5.5rem',
           padding: '0.625rem 1rem',
           borderBottom: '1px solid var(--color-border-subtle)',
           color: 'var(--color-th-text)',
           background: 'var(--color-th-bg)',
         }}
       >
+        {showCheckboxes && (
+          <button
+            onClick={e => { e.preventDefault(); onToggleAll?.() }}
+            className="flex items-center justify-center"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            aria-label={allSelected ? 'Deselect all' : 'Select all'}
+          >
+            {allSelected
+              ? <CheckSquare className="w-4 h-4" style={{ color: 'var(--color-brand)' }} />
+              : <Square className="w-4 h-4" style={{ color: 'var(--color-text-subtle)' }} />}
+          </button>
+        )}
         <span>Title</span>
         {isAdmin && <span>Client</span>}
         <span>Type</span>
@@ -562,6 +655,8 @@ function ListView({ requests, isAdmin }: { requests: Request[]; isAdmin: boolean
             req={req}
             isAdmin={isAdmin}
             isLast={i === requests.length - 1}
+            isSelected={selectedIds?.has(req.id)}
+            onToggleSelect={onToggleSelect}
           />
         ))}
       </div>
@@ -569,15 +664,28 @@ function ListView({ requests, isAdmin }: { requests: Request[]; isAdmin: boolean
   )
 }
 
-function ListRow({ req, isAdmin, isLast }: { req: Request; isAdmin: boolean; isLast: boolean }) {
+function ListRow({
+  req,
+  isAdmin,
+  isLast,
+  isSelected,
+  onToggleSelect,
+}: {
+  req: Request
+  isAdmin: boolean
+  isLast: boolean
+  isSelected?: boolean
+  onToggleSelect?: (id: string) => void
+}) {
   const cat = CAT_CFG[req.category ?? ''] ?? { bg: 'var(--cat-admin-bg)', color: 'var(--cat-admin-text)' }
+  const showCheckbox = isAdmin && onToggleSelect
 
   return (
     <Link
       href={`/requests/${req.id}`}
       style={{ textDecoration: 'none', display: 'block' }}
       onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--color-row-hover)' }}
-      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'white' }}
+      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = isSelected ? 'var(--color-brand-50)' : 'white' }}
     >
       {/* Mobile layout (< md): card-style */}
       <div
@@ -618,14 +726,29 @@ function ListRow({ req, isAdmin, isLast }: { req: Request; isAdmin: boolean; isL
       <div
         className="hidden md:grid items-center"
         style={{
-          gridTemplateColumns: isAdmin
-            ? '1fr 7.5rem 9rem 8rem 5.5rem 6rem 5.5rem'
-            : '1fr 8.75rem 8rem 5.5rem 5.5rem 5.5rem',
+          gridTemplateColumns: showCheckbox
+            ? '2rem 1fr 7.5rem 9rem 8rem 5.5rem 6rem 5.5rem'
+            : isAdmin
+              ? '1fr 7.5rem 9rem 8rem 5.5rem 6rem 5.5rem'
+              : '1fr 8.75rem 8rem 5.5rem 5.5rem 5.5rem',
           padding: '0.75rem 1rem',
           borderBottom: isLast ? 'none' : '1px solid var(--color-row-border)',
-          background: 'inherit',
+          background: isSelected ? 'var(--color-brand-50)' : 'inherit',
         }}
       >
+        {/* Checkbox */}
+        {showCheckbox && (
+          <button
+            onClick={e => { e.preventDefault(); e.stopPropagation(); onToggleSelect(req.id) }}
+            className="flex items-center justify-center"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            aria-label={isSelected ? 'Deselect' : 'Select'}
+          >
+            {isSelected
+              ? <CheckSquare className="w-4 h-4" style={{ color: 'var(--color-brand)' }} />
+              : <Square className="w-4 h-4" style={{ color: 'var(--color-text-subtle)' }} />}
+          </button>
+        )}
         {/* Title */}
         <div className="flex items-center gap-2 min-w-0" style={{ paddingRight: '0.75rem' }}>
           {req.scopeFlagged && (
@@ -861,6 +984,503 @@ function LoadingSkeleton() {
           <div className="h-4 rounded hidden md:block" style={{ background: 'var(--color-border-subtle)', width: '4rem' }} />
         </div>
       ))}
+    </div>
+  )
+}
+
+// ─── Empty state ──────────────────────────────────────────────────────────────
+
+// ─── Bulk Action Bar ─────────────────────────────────────────────────────────
+
+function BulkActionBar({
+  selectedCount,
+  selectedIds,
+  onClear,
+  onDone,
+}: {
+  selectedCount: number
+  selectedIds: Set<string>
+  onClear: () => void
+  onDone: () => void
+}) {
+  const [actionLoading, setActionLoading] = useState(false)
+  const [statusDropdown, setStatusDropdown] = useState(false)
+
+  const handleBulkStatus = async (status: string) => {
+    setActionLoading(true)
+    setStatusDropdown(false)
+    try {
+      const res = await fetch(apiPath('/api/admin/requests/bulk'), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedIds), status }),
+      })
+      if (res.ok) onDone()
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleBulkArchive = async () => {
+    setActionLoading(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/requests/bulk'), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedIds), archived: true }),
+      })
+      if (res.ok) onDone()
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const statuses = ['submitted', 'in_review', 'in_progress', 'client_review', 'delivered', 'archived']
+
+  return (
+    <div
+      className="flex items-center gap-3 flex-wrap"
+      style={{
+        padding: '0.5rem 1rem',
+        background: 'var(--color-brand-50)',
+        borderBottom: '1px solid var(--color-border)',
+      }}
+    >
+      <span className="text-sm font-medium" style={{ color: 'var(--color-brand-dark)' }}>
+        {selectedCount} selected
+      </span>
+
+      {/* Change Status dropdown */}
+      <div className="relative">
+        <button
+          onClick={() => setStatusDropdown(!statusDropdown)}
+          disabled={actionLoading}
+          className="flex items-center gap-1 text-sm font-medium transition-colors"
+          style={{
+            padding: '0.25rem 0.625rem',
+            borderRadius: '0.375rem',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg)',
+            cursor: 'pointer',
+            color: 'var(--color-text)',
+          }}
+        >
+          {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+          Change Status
+          <ChevronDown className="w-3 h-3" />
+        </button>
+        {statusDropdown && (
+          <div
+            className="absolute z-50 mt-1"
+            style={{
+              background: 'var(--color-bg)',
+              border: '1px solid var(--color-border)',
+              borderRadius: '0.5rem',
+              boxShadow: 'var(--shadow-md)',
+              minWidth: '10rem',
+            }}
+          >
+            {statuses.map(s => {
+              const cfg = STATUS_CFG[s]
+              return (
+                <button
+                  key={s}
+                  onClick={() => handleBulkStatus(s)}
+                  className="w-full text-left text-sm px-3 py-2 hover:bg-[var(--color-bg-secondary)] transition-colors"
+                  style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--color-text)' }}
+                >
+                  {cfg?.label ?? s}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Archive button */}
+      <button
+        onClick={handleBulkArchive}
+        disabled={actionLoading}
+        className="flex items-center gap-1 text-sm font-medium transition-colors"
+        style={{
+          padding: '0.25rem 0.625rem',
+          borderRadius: '0.375rem',
+          border: '1px solid var(--color-border)',
+          background: 'var(--color-bg)',
+          cursor: 'pointer',
+          color: 'var(--color-danger)',
+        }}
+      >
+        Archive
+      </button>
+
+      <div className="flex-1" />
+
+      <button
+        onClick={onClear}
+        className="text-sm font-medium transition-colors"
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)' }}
+      >
+        Clear selection
+      </button>
+    </div>
+  )
+}
+
+// ─── Bulk Create Dialog ──────────────────────────────────────────────────────
+
+interface OrgOption {
+  id: string
+  name: string
+  planType: string | null
+}
+
+function BulkCreateDialog({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void
+  onCreated: () => void
+}) {
+  const [orgs, setOrgs] = useState<OrgOption[]>([])
+  const [orgsLoading, setOrgsLoading] = useState(true)
+  const [selectedOrgIds, setSelectedOrgIds] = useState<Set<string>>(new Set())
+  const [title, setTitle] = useState('')
+  const [category, setCategory] = useState('')
+  const [type, setType] = useState('small_task')
+  const [description, setDescription] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
+  const [filterPlan, setFilterPlan] = useState('all')
+  const [searchOrg, setSearchOrg] = useState('')
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/clients'))
+      .then(r => r.json() as Promise<{ clients: OrgOption[] }>)
+      .then(data => {
+        setOrgs(data.clients ?? [])
+      })
+      .catch(() => setOrgs([]))
+      .finally(() => setOrgsLoading(false))
+  }, [])
+
+  const filteredOrgs = orgs.filter(o => {
+    if (filterPlan !== 'all' && o.planType !== filterPlan) return false
+    if (searchOrg && !o.name.toLowerCase().includes(searchOrg.toLowerCase())) return false
+    return true
+  })
+
+  const toggleOrg = (id: string) => {
+    setSelectedOrgIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectAllFiltered = () => {
+    setSelectedOrgIds(prev => {
+      const next = new Set(prev)
+      for (const o of filteredOrgs) next.add(o.id)
+      return next
+    })
+  }
+
+  const handleCreate = async () => {
+    if (!title.trim()) { setErrorMsg('Title is required'); return }
+    if (selectedOrgIds.size === 0) { setErrorMsg('Select at least one client'); return }
+
+    setCreating(true)
+    setErrorMsg('')
+    try {
+      const res = await fetch(apiPath('/api/admin/requests/bulk'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orgIds: Array.from(selectedOrgIds),
+          title: title.trim(),
+          category: category || undefined,
+          type,
+          description: description.trim() || undefined,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json() as { error?: string }
+        throw new Error(err.error ?? 'Failed to create')
+      }
+      const result = await res.json() as { created: number }
+      onCreated()
+      setErrorMsg(`Created ${result.created} requests`)
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to create')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const plans = [...new Set(orgs.map(o => o.planType).filter(Boolean))]
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0, 0, 0, 0.5)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="w-full max-w-lg max-h-[90vh] overflow-y-auto"
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          boxShadow: 'var(--shadow-lg)',
+          padding: '1.5rem',
+        }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-[var(--color-text)]">Bulk Create Requests</h2>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)' }}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          {/* Title */}
+          <div>
+            <label htmlFor="bulk-title" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+              Title (applied to all)
+            </label>
+            <input
+              id="bulk-title"
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="Request title..."
+              className="w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+              style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: 'var(--radius-input)',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                minHeight: '2.75rem',
+              }}
+            />
+          </div>
+
+          {/* Category + Type */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="bulk-category" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                Category
+              </label>
+              <select
+                id="bulk-category"
+                value={category}
+                onChange={e => setCategory(e.target.value)}
+                className="w-full text-sm text-[var(--color-text)]"
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 'var(--radius-input)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  minHeight: '2.75rem',
+                }}
+              >
+                <option value="">None</option>
+                <option value="design">Design</option>
+                <option value="development">Development</option>
+                <option value="content">Content</option>
+                <option value="strategy">Strategy</option>
+                <option value="admin">Admin</option>
+                <option value="bug">Bug</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="bulk-type" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                Type
+              </label>
+              <select
+                id="bulk-type"
+                value={type}
+                onChange={e => setType(e.target.value)}
+                className="w-full text-sm text-[var(--color-text)]"
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 'var(--radius-input)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  minHeight: '2.75rem',
+                }}
+              >
+                <option value="small_task">Small Task</option>
+                <option value="large_task">Large Task</option>
+                <option value="bug_fix">Bug Fix</option>
+                <option value="content_update">Content Update</option>
+                <option value="new_feature">New Feature</option>
+                <option value="consultation">Consultation</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <label htmlFor="bulk-desc" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+              Description (optional)
+            </label>
+            <textarea
+              id="bulk-desc"
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Shared description..."
+              rows={2}
+              className="w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] resize-none"
+              style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: 'var(--radius-input)',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+              }}
+            />
+          </div>
+
+          {/* Client selection */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-medium text-[var(--color-text)]">
+                Clients ({selectedOrgIds.size} selected)
+              </label>
+              <button
+                onClick={selectAllFiltered}
+                className="text-xs font-medium"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-brand)' }}
+              >
+                Select all visible
+              </button>
+            </div>
+
+            {/* Filters */}
+            <div className="flex gap-2 mb-2">
+              <input
+                type="text"
+                placeholder="Search clients..."
+                value={searchOrg}
+                onChange={e => setSearchOrg(e.target.value)}
+                className="flex-1 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+                style={{
+                  padding: '0.375rem 0.625rem',
+                  borderRadius: 'var(--radius-input)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg-secondary)',
+                }}
+              />
+              <select
+                value={filterPlan}
+                onChange={e => setFilterPlan(e.target.value)}
+                className="text-sm text-[var(--color-text)]"
+                style={{
+                  padding: '0.375rem 0.625rem',
+                  borderRadius: 'var(--radius-input)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                }}
+              >
+                <option value="all">All plans</option>
+                {plans.map(p => (
+                  <option key={p} value={p ?? ''}>{p}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Client list */}
+            <div
+              className="overflow-y-auto space-y-0.5"
+              style={{
+                maxHeight: '12rem',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-input)',
+                padding: '0.25rem',
+              }}
+            >
+              {orgsLoading ? (
+                <div className="p-4 text-center text-sm text-[var(--color-text-muted)]">Loading clients...</div>
+              ) : filteredOrgs.length === 0 ? (
+                <div className="p-4 text-center text-sm text-[var(--color-text-muted)]">No clients found</div>
+              ) : (
+                filteredOrgs.map(o => (
+                  <button
+                    key={o.id}
+                    onClick={() => toggleOrg(o.id)}
+                    className="w-full flex items-center gap-2 text-left text-sm transition-colors rounded"
+                    style={{
+                      padding: '0.375rem 0.5rem',
+                      background: selectedOrgIds.has(o.id) ? 'var(--color-brand-50)' : 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--color-text)',
+                    }}
+                  >
+                    {selectedOrgIds.has(o.id)
+                      ? <CheckSquare className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--color-brand)' }} />
+                      : <Square className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--color-text-subtle)' }} />}
+                    <span className="truncate">{o.name}</span>
+                    {o.planType && (
+                      <span
+                        className="text-xs px-1.5 py-0.5 rounded flex-shrink-0"
+                        style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text-subtle)' }}
+                      >
+                        {o.planType}
+                      </span>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          {errorMsg && (
+            <div aria-live="polite" className="text-sm" style={{ color: 'var(--color-danger)' }}>
+              {errorMsg}
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium transition-colors"
+            style={{
+              color: 'var(--color-text-muted)',
+              background: 'var(--color-bg-secondary)',
+              borderRadius: 'var(--radius-button)',
+              border: '1px solid var(--color-border)',
+              cursor: 'pointer',
+              minHeight: '2.75rem',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleCreate}
+            disabled={creating || !title.trim() || selectedOrgIds.size === 0}
+            className="px-4 py-2 text-sm font-medium text-white transition-colors"
+            style={{
+              background: 'var(--color-brand)',
+              borderRadius: 'var(--radius-button)',
+              border: 'none',
+              cursor: creating ? 'not-allowed' : 'pointer',
+              opacity: creating || !title.trim() || selectedOrgIds.size === 0 ? 0.6 : 1,
+              minHeight: '2.75rem',
+            }}
+          >
+            {creating ? 'Creating...' : `Create ${selectedOrgIds.size} Request${selectedOrgIds.size !== 1 ? 's' : ''}`}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
