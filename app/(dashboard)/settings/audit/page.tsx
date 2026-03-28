@@ -1,12 +1,13 @@
 import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
-import { BillingContent } from './billing-content'
+import { AuditLogContent } from './audit-log-content'
 
-export const metadata = { title: 'Billing - Tahi Dashboard' }
+export const metadata = { title: 'Audit Log - Tahi Dashboard' }
 
-export default async function BillingPage() {
+export default async function AuditLogPage() {
   const { userId, orgId } = await getServerAuth()
   if (!userId) redirect('/sign-in')
   const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
-  return <BillingContent isAdmin={isAdmin} />
+  if (!isAdmin) redirect('/overview')
+  return <AuditLogContent />
 }

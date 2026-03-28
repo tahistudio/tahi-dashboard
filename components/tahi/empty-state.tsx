@@ -10,9 +10,10 @@ interface EmptyStateProps {
   description: string
   ctaLabel?: string
   onCtaClick?: () => void
+  action?: React.ReactNode
 }
 
-export function EmptyState({ icon, title, description, ctaLabel, onCtaClick }: EmptyStateProps) {
+export function EmptyState({ icon, title, description, ctaLabel, onCtaClick, action }: EmptyStateProps) {
   return (
     <div
       className="flex flex-col items-center justify-center text-center"
@@ -33,7 +34,7 @@ export function EmptyState({ icon, title, description, ctaLabel, onCtaClick }: E
       <h3 className="text-base font-semibold" style={{ color: 'var(--color-text)', marginBottom: '0.5rem' }}>
         {title}
       </h3>
-      <p className="text-sm" style={{ color: 'var(--color-text-muted)', maxWidth: '20rem', marginBottom: ctaLabel ? '1.25rem' : 0 }}>
+      <p className="text-sm" style={{ color: 'var(--color-text-muted)', maxWidth: '20rem', marginBottom: (ctaLabel || action) ? '1.25rem' : 0 }}>
         {description}
       </p>
       {ctaLabel && onCtaClick && (
@@ -45,6 +46,7 @@ export function EmptyState({ icon, title, description, ctaLabel, onCtaClick }: E
           {ctaLabel}
         </button>
       )}
+      {action && !ctaLabel && action}
     </div>
   )
 }
