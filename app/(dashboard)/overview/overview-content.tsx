@@ -259,6 +259,9 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
       {/* Schedule a Call (T88) */}
       <ScheduleCallWidget />
 
+      {/* Review outreach banner (T107) */}
+      <ReviewOutreachBanner />
+
       {/* Recent requests */}
       <SectionCard title="Your Requests" action={{ label: 'View all', href: '/requests' }}>
         {loading ? <LoadingRows /> : requests.length === 0 ? (
@@ -834,6 +837,95 @@ function ScheduleCallWidget() {
         <Video size={14} aria-hidden="true" />
         Schedule a Call
       </a>
+    </div>
+  )
+}
+
+// ─── Review Outreach Banner (T107) ───────────────────────────────────────────
+
+function ReviewOutreachBanner() {
+  const [show, setShow] = useState(false)
+  const [responding, setResponding] = useState(false)
+
+  useEffect(() => {
+    fetch(apiPath('/api/portal/review-outreach'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<{ pending: boolean }>
+      })
+      .then(data => setShow(data.pending))
+      .catch(() => setShow(false))
+  }, [])
+
+  if (!show) return null
+
+  const handleResponse = async (action: 'yes' | 'defer' | 'no') => {
+    setResponding(true)
+    try {
+      await fetch(apiPath('/api/portal/review-outreach'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      setShow(false)
+    } catch {
+      // silent
+    } finally {
+      setResponding(false)
+    }
+  }
+
+  return (
+    <div
+      className="rounded-xl"
+      style={{
+        padding: '1.25rem',
+        background: 'var(--color-info-bg, #eff6ff)',
+        border: '1px solid var(--color-info, #60a5fa)',
+      }}
+    >
+      <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+        We would love your feedback!
+      </p>
+      <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: '0.25rem', marginBottom: '0.75rem' }}>
+        Your experience matters. Share a quick review to help us improve.
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => handleResponse('yes')}
+          disabled={responding}
+          className="px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-opacity hover:opacity-90"
+          style={{ background: 'var(--color-brand)', border: 'none', cursor: 'pointer' }}
+        >
+          Yes, I will
+        </button>
+        <button
+          onClick={() => handleResponse('defer')}
+          disabled={responding}
+          className="px-3 py-1.5 text-xs font-medium rounded-lg transition-opacity hover:opacity-90"
+          style={{
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            color: 'var(--color-text-muted)',
+            cursor: 'pointer',
+          }}
+        >
+          Not right now
+        </button>
+        <button
+          onClick={() => handleResponse('no')}
+          disabled={responding}
+          className="px-3 py-1.5 text-xs font-medium rounded-lg transition-opacity hover:opacity-90"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--color-text-subtle)',
+            cursor: 'pointer',
+          }}
+        >
+          No thanks
+        </button>
+      </div>
     </div>
   )
 }

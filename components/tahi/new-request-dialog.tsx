@@ -87,6 +87,40 @@ export function NewRequestDialog({
   const [dueDate, setDueDate] = useState('')
   const [estimatedHours, setEstimatedHours] = useState('')
 
+  // Intake form questions (portal only)
+  interface FormQuestion {
+    id: string
+    type: 'text' | 'textarea' | 'url' | 'select' | 'multiselect' | 'checkbox' | 'file'
+    label: string
+    required: boolean
+    options?: string[]
+  }
+  const [intakeQuestions, setIntakeQuestions] = useState<FormQuestion[]>([])
+  const [formResponses, setFormResponses] = useState<Record<string, string>>({})
+  const [intakeLoading, setIntakeLoading] = useState(false)
+
+  // Load intake form when category changes (portal only)
+  useEffect(() => {
+    if (isAdmin || !open) return
+    setIntakeLoading(true)
+    fetch(apiPath(`/api/portal/request-forms?category=${category}`))
+      .then(r => r.json() as Promise<{ form?: { questions: string } }>)
+      .then(data => {
+        if (data.form?.questions) {
+          try {
+            const parsed = JSON.parse(data.form.questions) as FormQuestion[]
+            setIntakeQuestions(Array.isArray(parsed) ? parsed : [])
+          } catch {
+            setIntakeQuestions([])
+          }
+        } else {
+          setIntakeQuestions([])
+        }
+      })
+      .catch(() => setIntakeQuestions([]))
+      .finally(() => setIntakeLoading(false))
+  }, [category, open, isAdmin])
+
   // Load client list for admin
   useEffect(() => {
     if (!open || !isAdmin) return
@@ -136,7 +170,10 @@ export function NewRequestDialog({
             dueDate: dueDate || null,
             estimatedHours: estimatedHours ? Number(estimatedHours) : null,
           }
-        : { title: title.trim(), type, category, description, dueDate: dueDate || null }
+        : {
+            title: title.trim(), type, category, description, dueDate: dueDate || null,
+            formResponses: Object.keys(formResponses).length > 0 ? JSON.stringify(formResponses) : undefined,
+          }
 
       const res = await fetch(url, {
         method: 'POST',
@@ -478,6 +515,73 @@ export function NewRequestDialog({
                 You can add files, images, and voice notes after submitting.
               </p>
             </FieldGroup>
+
+            {/* Dynamic intake form questions (portal only) */}
+            {!isAdmin && intakeQuestions.length > 0 && (
+              <div style={{
+                borderTop: '1px solid var(--color-border-subtle)',
+                paddingTop: '1rem',
+                marginTop: '0.5rem',
+              }}>
+                <p style={{
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  color: 'var(--color-text-muted)',
+                  textTransform: 'uppercase' as const,
+                  letterSpacing: '0.05em',
+                  marginBottom: '0.75rem',
+                }}>
+                  Additional questions
+                </p>
+                {intakeQuestions.map(q => (
+                  <FieldGroup key={q.id} label={`${q.label}${q.required ? ' *' : ''}`} htmlFor={`intake-${q.id}`}>
+                    {q.type === 'textarea' ? (
+                      <StyledTextarea
+                        id={`intake-${q.id}`}
+                        value={formResponses[q.id] ?? ''}
+                        onChange={e => setFormResponses(prev => ({ ...prev, [q.id]: e.target.value }))}
+                        rows={3}
+                        required={q.required}
+                      />
+                    ) : q.type === 'select' ? (
+                      <StyledSelect
+                        id={`intake-${q.id}`}
+                        value={formResponses[q.id] ?? ''}
+                        onChange={v => setFormResponses(prev => ({ ...prev, [q.id]: v }))}
+                        required={q.required}
+                      >
+                        <option value="">Select...</option>
+                        {(q.options ?? []).map(opt => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </StyledSelect>
+                    ) : q.type === 'checkbox' ? (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--color-text)' }}>
+                        <input
+                          type="checkbox"
+                          checked={formResponses[q.id] === 'true'}
+                          onChange={e => setFormResponses(prev => ({ ...prev, [q.id]: e.target.checked ? 'true' : 'false' }))}
+                        />
+                        {q.label}
+                      </label>
+                    ) : (
+                      <StyledInput
+                        id={`intake-${q.id}`}
+                        type={q.type === 'url' ? 'url' : 'text'}
+                        value={formResponses[q.id] ?? ''}
+                        onChange={e => setFormResponses(prev => ({ ...prev, [q.id]: e.target.value }))}
+                        required={q.required}
+                      />
+                    )}
+                  </FieldGroup>
+                ))}
+              </div>
+            )}
+            {!isAdmin && intakeLoading && (
+              <div style={{ textAlign: 'center', padding: '0.5rem', color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
+                Loading form...
+              </div>
+            )}
 
             {/* Success message */}
             <div aria-live="polite">
