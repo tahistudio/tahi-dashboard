@@ -113,8 +113,8 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
     try {
       const res = await fetch(apiPath(`/api/admin/requests/${requestId}/files`))
       if (res.ok) {
-        const data = await res.json() as { files: RequestFile[] }
-        setFiles(data.files)
+        const data = await res.json() as { items: RequestFile[] }
+        setFiles(data.items ?? [])
       }
     } catch {
       // non-fatal — files panel will stay empty
@@ -137,11 +137,11 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
       if (msgRes.ok) {
         if (isAdmin) {
           const data = await msgRes.json() as { items: Message[] }
-          setMessages(data.items)
+          setMessages(data.items ?? [])
         } else {
           const data = await msgRes.json() as { request: Request; messages: Message[] }
           setRequest(data.request)
-          setMessages(data.messages)
+          setMessages(data.messages ?? [])
         }
       }
     } catch {

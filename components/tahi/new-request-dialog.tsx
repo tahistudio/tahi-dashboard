@@ -268,7 +268,7 @@ export function NewRequestDialog({
               />
             </FieldGroup>
 
-            {/* Type tiles — 2 options only */}
+            {/* Type tiles: 2 options only */}
             <FieldGroup label="Task size">
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.625rem' }}>
                 {REQUEST_TYPES.map(t => {
@@ -430,7 +430,7 @@ export function NewRequestDialog({
                 value={description}
                 onChange={e => setDescription(e.target.value)}
                 rows={5}
-                placeholder="Describe what you need — include links, context, and any steps you have in mind…"
+                placeholder="Describe what you need: include links, context, and any steps you have in mind."
               />
               <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginTop: '0.375rem' }}>
                 You can add files, images, and voice notes after submitting.
