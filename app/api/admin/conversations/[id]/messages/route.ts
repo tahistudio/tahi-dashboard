@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and } from 'drizzle-orm'
+import { eq, desc, and, isNull } from 'drizzle-orm'
 
 // ── GET /api/admin/conversations/[id]/messages ──────────────────────────────
 // Paginated messages for a conversation. Joins sender info.
@@ -99,6 +99,7 @@ export async function GET(
         authorAvatarUrl,
         createdAt: msg.createdAt,
         editedAt: msg.editedAt,
+        deletedAt: msg.deletedAt ?? null,
       }
     })
   )
@@ -253,4 +254,60 @@ export async function POST(
     )
 
   return NextResponse.json({ id: msgId }, { status: 201 })
+}
+
+// ── PATCH /api/admin/conversations/[id]/messages ────────────────────────────
+// Soft-delete a message: set deletedAt timestamp.
+// Body: { messageId, deleted: true }
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { orgId, userId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const { id: conversationId } = await params
+
+  const body = await req.json() as {
+    messageId?: string
+    deleted?: boolean
+  }
+
+  if (!body.messageId) {
+    return NextResponse.json({ error: 'messageId is required' }, { status: 400 })
+  }
+
+  const database = await db()
+
+  // Verify the message belongs to this conversation
+  const msgRows = await database
+    .select({ id: schema.messages.id })
+    .from(schema.messages)
+    .where(
+      and(
+        eq(schema.messages.id, body.messageId),
+        eq(schema.messages.conversationId, conversationId),
+      )
+    )
+    .limit(1)
+
+  if (msgRows.length === 0) {
+    return NextResponse.json({ error: 'Message not found' }, { status: 404 })
+  }
+
+  const now = new Date().toISOString()
+  await database
+    .update(schema.messages)
+    .set({
+      deletedAt: body.deleted ? now : null,
+      updatedAt: now,
+    })
+    .where(eq(schema.messages.id, body.messageId))
+
+  return NextResponse.json({ success: true })
 }

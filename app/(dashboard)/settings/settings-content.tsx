@@ -5,7 +5,7 @@ import {
   RefreshCw, Sun, Moon,
   CreditCard, Link2, Bell, Building2,
   FileText, Plus, Trash2, GripVertical, ChevronDown, ChevronUp,
-  Webhook, Loader2, User,
+  Webhook, Loader2, User, Palette,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -344,6 +344,18 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
               )}
             </div>
           </section>
+
+          {/* Branding (admin only) - T277 */}
+          {isAdmin && (
+            <BrandingSection
+              settings={settings}
+              onSave={async (key: string, value: string) => {
+                await saveSetting(key, value)
+                setSettings(prev => ({ ...prev, [key]: value }))
+              }}
+              savingKey={savingKey}
+            />
+          )}
 
           {/* Request Forms (admin only) */}
           {isAdmin && <FormsSection />}
@@ -1394,5 +1406,213 @@ function InlineEditText({
     >
       {value}
     </button>
+  )
+}
+
+// ── Branding Section (T277) ─────────────────────────────────────────────────
+
+const COLOR_PRESETS = [
+  '#5A824E', '#2563eb', '#7c3aed', '#dc2626', '#d97706',
+  '#059669', '#0d9488', '#db2777', '#6366f1', '#1e293b',
+]
+
+function BrandingSection({
+  settings,
+  onSave,
+  savingKey,
+}: {
+  settings: Record<string, string | null>
+  onSave: (key: string, value: string) => Promise<void>
+  savingKey: string | null
+}) {
+  const [portalName, setPortalName] = useState('')
+  const [primaryColor, setPrimaryColor] = useState('#5A824E')
+  const [logoUrl, setLogoUrl] = useState('')
+
+  // Sync from settings when loaded
+  useEffect(() => {
+    setPortalName(settings['portal_name'] ?? '')
+    setPrimaryColor(settings['portal_primary_color'] ?? '#5A824E')
+    setLogoUrl(settings['portal_logo_url'] ?? '')
+  }, [settings])
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <Palette className="w-5 h-5" aria-hidden="true" />
+        Portal Branding
+      </h2>
+      <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl divide-y divide-[var(--color-border-subtle)]">
+        {/* Portal name */}
+        <div className="p-5">
+          <label htmlFor="branding-name" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+            Portal Name
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mb-2">
+            Displayed in the client portal header.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              id="branding-name"
+              type="text"
+              value={portalName}
+              onChange={e => setPortalName(e.target.value)}
+              placeholder="Tahi Studio"
+              className="flex-1 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+              style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: 'var(--radius-input)',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                minHeight: '2.75rem',
+              }}
+            />
+            <button
+              onClick={() => onSave('portal_name', portalName)}
+              disabled={savingKey === 'portal_name'}
+              className="px-3 py-2 text-sm font-medium text-white transition-colors"
+              style={{
+                background: 'var(--color-brand)',
+                borderRadius: 'var(--radius-button)',
+                border: 'none',
+                cursor: savingKey === 'portal_name' ? 'not-allowed' : 'pointer',
+                opacity: savingKey === 'portal_name' ? 0.7 : 1,
+                minHeight: '2.75rem',
+              }}
+            >
+              {savingKey === 'portal_name' ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </div>
+
+        {/* Primary color */}
+        <div className="p-5">
+          <label className="block text-sm font-medium text-[var(--color-text)] mb-1">
+            Primary Color
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mb-3">
+            Used for buttons, links, and accents in the client portal.
+          </p>
+          <div className="flex items-center gap-3 flex-wrap">
+            {COLOR_PRESETS.map(color => (
+              <button
+                key={color}
+                onClick={() => {
+                  setPrimaryColor(color)
+                  void onSave('portal_primary_color', color)
+                }}
+                className="w-8 h-8 rounded-full transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
+                style={{
+                  background: color,
+                  border: primaryColor === color ? '3px solid var(--color-text)' : '2px solid var(--color-border)',
+                  cursor: 'pointer',
+                }}
+                aria-label={`Select color ${color}`}
+              />
+            ))}
+            <div className="flex items-center gap-2 ml-2">
+              <input
+                type="color"
+                value={primaryColor}
+                onChange={e => setPrimaryColor(e.target.value)}
+                onBlur={() => onSave('portal_primary_color', primaryColor)}
+                className="w-8 h-8 rounded cursor-pointer"
+                style={{ border: '1px solid var(--color-border)', padding: 0 }}
+                aria-label="Custom color picker"
+              />
+              <span className="text-xs font-mono text-[var(--color-text-muted)]">
+                {primaryColor}
+              </span>
+            </div>
+          </div>
+
+          {/* Live preview */}
+          <div className="mt-4">
+            <p className="text-xs font-medium text-[var(--color-text-muted)] mb-2">Preview</p>
+            <div
+              className="flex items-center gap-3 rounded-lg"
+              style={{
+                padding: '0.75rem 1rem',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg-secondary)',
+              }}
+            >
+              <button
+                className="px-4 py-2 text-sm font-medium text-white rounded-lg"
+                style={{ background: primaryColor, border: 'none', cursor: 'default' }}
+              >
+                Primary Button
+              </button>
+              <span className="text-sm font-medium" style={{ color: primaryColor }}>
+                Link text
+              </span>
+              <span
+                className="text-xs px-2 py-0.5 rounded-full font-medium"
+                style={{
+                  background: `${primaryColor}20`,
+                  color: primaryColor,
+                }}
+              >
+                Badge
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Logo URL */}
+        <div className="p-5">
+          <label htmlFor="branding-logo" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+            Logo URL
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mb-2">
+            Enter a URL to your logo image. Displayed in the portal header.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              id="branding-logo"
+              type="url"
+              value={logoUrl}
+              onChange={e => setLogoUrl(e.target.value)}
+              placeholder="https://example.com/logo.png"
+              className="flex-1 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+              style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: 'var(--radius-input)',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                minHeight: '2.75rem',
+              }}
+            />
+            <button
+              onClick={() => onSave('portal_logo_url', logoUrl)}
+              disabled={savingKey === 'portal_logo_url'}
+              className="px-3 py-2 text-sm font-medium text-white transition-colors"
+              style={{
+                background: 'var(--color-brand)',
+                borderRadius: 'var(--radius-button)',
+                border: 'none',
+                cursor: savingKey === 'portal_logo_url' ? 'not-allowed' : 'pointer',
+                opacity: savingKey === 'portal_logo_url' ? 0.7 : 1,
+                minHeight: '2.75rem',
+              }}
+            >
+              {savingKey === 'portal_logo_url' ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+          {logoUrl && (
+            <div className="mt-3 flex items-center gap-3">
+              <span className="text-xs text-[var(--color-text-muted)]">Preview:</span>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={logoUrl}
+                alt="Logo preview"
+                className="h-8 object-contain"
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
   )
 }

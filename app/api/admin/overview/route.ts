@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, ne, count, and, inArray } from 'drizzle-orm'
+import { eq, ne, count, and, inArray, gte, sql } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,11 +17,17 @@ export async function GET(req: NextRequest) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
+  // Calculate date 6 months ago for revenue query
+  const now = new Date()
+  const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1)
+  const sixMonthsAgoIso = sixMonthsAgo.toISOString()
+
   const [
     activeClientsResult,
     openRequestsResult,
     inProgressResult,
     recentRequests,
+    paidInvoices,
   ] = await Promise.all([
     // Active client orgs
     drizzle
@@ -66,7 +72,48 @@ export async function GET(req: NextRequest) {
       ))
       .orderBy(schema.requests.updatedAt)
       .limit(8),
+
+    // Paid invoices from last 6 months for revenue chart
+    drizzle
+      .select({
+        paidAt: schema.invoices.paidAt,
+        totalUsd: schema.invoices.totalUsd,
+        currency: schema.invoices.currency,
+      })
+      .from(schema.invoices)
+      .where(and(
+        eq(schema.invoices.status, 'paid'),
+        gte(schema.invoices.paidAt, sixMonthsAgoIso),
+      )),
   ])
+
+  // Aggregate paid invoices into monthly buckets
+  const monthlyMap = new Map<string, number>()
+
+  // Pre-fill the last 6 months with 0
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    monthlyMap.set(key, 0)
+  }
+
+  for (const inv of paidInvoices) {
+    if (!inv.paidAt) continue
+    try {
+      const d = new Date(inv.paidAt)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      if (monthlyMap.has(key)) {
+        monthlyMap.set(key, (monthlyMap.get(key) ?? 0) + (inv.totalUsd ?? 0))
+      }
+    } catch {
+      // Skip invalid dates
+    }
+  }
+
+  const monthlyRevenue = Array.from(monthlyMap.entries()).map(([month, total]) => ({
+    month,
+    total: Math.round(total * 100) / 100,
+  }))
 
   return NextResponse.json({
     kpis: {
@@ -76,5 +123,6 @@ export async function GET(req: NextRequest) {
       outstandingInvoicesUsd: 0, // invoices module not yet implemented
     },
     recentRequests,
+    monthlyRevenue,
   })
 }

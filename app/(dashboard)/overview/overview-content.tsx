@@ -52,11 +52,17 @@ interface RecentRequest {
   scopeFlagged: boolean
 }
 
+interface MonthlyRevenue {
+  month: string
+  total: number
+}
+
 // ─── Admin Overview ───────────────────────────────────────────────────────────
 
 export function AdminOverview({ userName }: { userName: string }) {
   const [kpis, setKpis] = useState<KPIs | null>(null)
   const [recentRequests, setRecentRequests] = useState<RecentRequest[]>([])
+  const [monthlyRevenue, setMonthlyRevenue] = useState<MonthlyRevenue[]>([])
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState(false)
 
@@ -64,9 +70,13 @@ export function AdminOverview({ userName }: { userName: string }) {
     fetch(apiPath('/api/admin/overview'))
       .then(r => {
         if (!r.ok) throw new Error('Failed to fetch overview')
-        return r.json() as Promise<{ kpis: KPIs; recentRequests: RecentRequest[] }>
+        return r.json() as Promise<{ kpis: KPIs; recentRequests: RecentRequest[]; monthlyRevenue?: MonthlyRevenue[] }>
       })
-      .then(data => { setKpis(data.kpis); setRecentRequests(data.recentRequests) })
+      .then(data => {
+        setKpis(data.kpis)
+        setRecentRequests(data.recentRequests)
+        setMonthlyRevenue(data.monthlyRevenue ?? [])
+      })
       .catch(() => setFetchError(true))
       .finally(() => setLoading(false))
   }, [])
@@ -131,6 +141,11 @@ export function AdminOverview({ userName }: { userName: string }) {
           sub="Connect Stripe"
         />
       </div>
+
+      {/* Revenue trend */}
+      {!loading && monthlyRevenue.length > 0 && (
+        <RevenueChart data={monthlyRevenue} />
+      )}
 
       {/* Recent requests */}
       <SectionCard title="Recent Requests" action={{ label: 'View all', href: '/requests' }}>
@@ -1080,6 +1095,67 @@ function ReviewOutreachBanner() {
         >
           No thanks
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Revenue Chart ───────────────────────────────────────────────────────────
+
+function RevenueChart({ data }: { data: MonthlyRevenue[] }) {
+  const maxTotal = Math.max(...data.map(d => d.total), 1)
+
+  function formatMonth(m: string): string {
+    try {
+      const [year, month] = m.split('-')
+      const d = new Date(parseInt(year), parseInt(month) - 1)
+      return d.toLocaleDateString('en-NZ', { month: 'short' })
+    } catch {
+      return m
+    }
+  }
+
+  return (
+    <div
+      className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl"
+      style={{ padding: '1.25rem' }}
+    >
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-sm font-semibold text-[var(--color-text)]">Revenue Trend</h2>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Paid invoices, last 6 months</p>
+        </div>
+        <Link
+          href="/reports"
+          className="text-xs font-medium hover:underline"
+          style={{ color: 'var(--color-brand)' }}
+        >
+          View reports
+        </Link>
+      </div>
+      <div className="flex items-end gap-2" style={{ height: '8rem' }}>
+        {data.map(d => {
+          const heightPct = maxTotal > 0 ? (d.total / maxTotal) * 100 : 0
+          return (
+            <div key={d.month} className="flex-1 flex flex-col items-center gap-1">
+              <span className="text-xs font-medium text-[var(--color-text)]">
+                {d.total > 0 ? formatUsd(d.total) : ''}
+              </span>
+              <div
+                className="w-full rounded-t-md transition-all"
+                style={{
+                  height: `${Math.max(heightPct, 2)}%`,
+                  background: d.total > 0 ? 'var(--color-brand)' : 'var(--color-border-subtle)',
+                  minHeight: '0.25rem',
+                  maxWidth: '4rem',
+                }}
+              />
+              <span className="text-xs text-[var(--color-text-muted)]">
+                {formatMonth(d.month)}
+              </span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

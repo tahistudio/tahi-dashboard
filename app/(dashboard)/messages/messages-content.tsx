@@ -39,6 +39,7 @@ interface MessageItem {
   authorAvatarUrl: string | null
   createdAt: string
   editedAt: string | null
+  deletedAt: string | null
 }
 
 interface ParticipantOption {
@@ -205,6 +206,23 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
       // Error sending message
     } finally {
       setSending(false)
+    }
+  }
+
+  // ── Delete message ────────────────────────────────────────────────────────
+
+  const handleDeleteMessage = async (messageId: string) => {
+    if (!activeConvId || !isAdmin) return
+    try {
+      const res = await fetch(apiPath(`/api/admin/conversations/${activeConvId}/messages`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId, deleted: true }),
+      })
+      if (!res.ok) throw new Error('Failed to delete')
+      await fetchMessages(activeConvId)
+    } catch {
+      // Error deleting message
     }
   }
 
@@ -633,64 +651,107 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {messages.map(msg => (
-                      <div
-                        key={msg.id}
-                        className="flex gap-3"
-                        style={{
-                          background: msg.isInternal ? 'var(--color-bg-tertiary)' : 'transparent',
-                          padding: msg.isInternal ? '0.75rem' : '0',
-                          borderRadius: msg.isInternal ? 'var(--radius-card)' : '0',
-                        }}
-                      >
-                        {/* Avatar */}
+                    {messages.map(msg => {
+                      const isDeleted = !!msg.deletedAt
+
+                      return (
                         <div
-                          className="flex items-center justify-center flex-shrink-0"
+                          key={msg.id}
+                          className="group flex gap-3"
                           style={{
-                            width: '2rem',
-                            height: '2rem',
-                            borderRadius: 'var(--radius-full)',
-                            background: msg.authorType === 'team_member'
-                              ? 'var(--color-brand-50)'
-                              : 'var(--color-info-bg)',
-                            color: msg.authorType === 'team_member'
-                              ? 'var(--color-brand)'
-                              : 'var(--color-info)',
-                            fontSize: '0.75rem',
-                            fontWeight: 600,
+                            background: isDeleted
+                              ? 'transparent'
+                              : msg.isInternal ? 'var(--color-bg-tertiary)' : 'transparent',
+                            padding: msg.isInternal && !isDeleted ? '0.75rem' : '0',
+                            borderRadius: msg.isInternal && !isDeleted ? 'var(--radius-card)' : '0',
                           }}
                         >
-                          {getInitial(msg.authorName)}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-baseline gap-2">
-                            <span className="text-sm font-semibold text-[var(--color-text)]">
-                              {msg.authorName}
-                            </span>
-                            <span className="text-xs text-[var(--color-text-subtle)]">
-                              {formatTime(msg.createdAt)}
-                            </span>
-                            {msg.isInternal && (
-                              <span
-                                className="text-xs px-1.5 py-0.5"
+                          {/* Avatar */}
+                          <div
+                            className="flex items-center justify-center flex-shrink-0"
+                            style={{
+                              width: '2rem',
+                              height: '2rem',
+                              borderRadius: 'var(--radius-full)',
+                              background: isDeleted
+                                ? 'var(--color-bg-tertiary)'
+                                : msg.authorType === 'team_member'
+                                  ? 'var(--color-brand-50)'
+                                  : 'var(--color-info-bg)',
+                              color: isDeleted
+                                ? 'var(--color-text-subtle)'
+                                : msg.authorType === 'team_member'
+                                  ? 'var(--color-brand)'
+                                  : 'var(--color-info)',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                            }}
+                          >
+                            {getInitial(msg.authorName)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-[var(--color-text)]">
+                                {msg.authorName}
+                              </span>
+                              <span className="text-xs text-[var(--color-text-subtle)]">
+                                {formatTime(msg.createdAt)}
+                              </span>
+                              {msg.isInternal && !isDeleted && (
+                                <span
+                                  className="text-xs px-1.5 py-0.5"
+                                  style={{
+                                    background: 'var(--color-warning-bg)',
+                                    color: 'var(--color-warning)',
+                                    borderRadius: 'var(--radius-badge)',
+                                    fontSize: '0.625rem',
+                                    fontWeight: 500,
+                                  }}
+                                >
+                                  Internal
+                                </span>
+                              )}
+                              {/* Delete button (admin only, on hover) */}
+                              {isAdmin && !isDeleted && (
+                                <button
+                                  onClick={() => handleDeleteMessage(msg.id)}
+                                  className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                                  style={{
+                                    width: '1.5rem',
+                                    height: '1.5rem',
+                                    borderRadius: 'var(--radius-button)',
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    color: 'var(--color-text-subtle)',
+                                    marginLeft: 'auto',
+                                  }}
+                                  aria-label="Delete message"
+                                  title="Delete message"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                            {isDeleted ? (
+                              <p
+                                className="text-sm mt-0.5"
                                 style={{
-                                  background: 'var(--color-warning-bg)',
-                                  color: 'var(--color-warning)',
-                                  borderRadius: 'var(--radius-badge)',
-                                  fontSize: '0.625rem',
-                                  fontWeight: 500,
+                                  color: 'var(--color-text-subtle)',
+                                  fontStyle: 'italic',
                                 }}
                               >
-                                Internal
-                              </span>
+                                This message has been removed.
+                              </p>
+                            ) : (
+                              <div className="text-sm text-[var(--color-text)] mt-0.5 whitespace-pre-wrap break-words">
+                                {stripHtml(msg.body)}
+                              </div>
                             )}
                           </div>
-                          <div className="text-sm text-[var(--color-text)] mt-0.5 whitespace-pre-wrap break-words">
-                            {stripHtml(msg.body)}
-                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                     <div ref={messagesEndRef} />
                   </div>
                 )}

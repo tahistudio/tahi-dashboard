@@ -6,7 +6,7 @@ import {
   Clock, AlertTriangle, RefreshCw,
   User, CheckCircle2, Loader2,
   FileText, Image as ImageIcon, Download, Paperclip,
-  Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud,
+  Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud, Eye, EyeOff,
 } from 'lucide-react'
 import Link from 'next/link'
 import { RequestThread } from '@/components/tahi/request-thread'
@@ -132,8 +132,29 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
   const [dueDateInput, setDueDateInput] = useState('')
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [checklists, setChecklists] = useState<Checklist[]>([])
+  const [isFollowing, setIsFollowing] = useState(false)
   const threadBottomRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
+
+  // Load following state from localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(`tahi-following-${requestId}`)
+      setIsFollowing(stored === 'true')
+    }
+  }, [requestId])
+
+  function toggleFollowing() {
+    const next = !isFollowing
+    setIsFollowing(next)
+    if (typeof window !== 'undefined') {
+      if (next) {
+        localStorage.setItem(`tahi-following-${requestId}`, 'true')
+      } else {
+        localStorage.removeItem(`tahi-following-${requestId}`)
+      }
+    }
+  }
 
   const apiBase = isAdmin ? apiPath('/api/admin') : apiPath('/api/portal')
 
@@ -455,18 +476,54 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
             )}
           </div>
 
-          {/* Title */}
-          <h1
-            className="text-2xl font-bold tracking-tight"
-            style={{ color: 'var(--color-text)', margin: 0, lineHeight: 1.3 }}
-          >
-            {request.requestNumber != null && (
-              <span className="font-mono" style={{ color: 'var(--color-text-subtle)', marginRight: '0.375rem' }}>
-                #{String(request.requestNumber).padStart(3, '0')}
-              </span>
-            )}
-            {request.title}
-          </h1>
+          {/* Title + Follow */}
+          <div className="flex items-start gap-3">
+            <h1
+              className="text-2xl font-bold tracking-tight flex-1"
+              style={{ color: 'var(--color-text)', margin: 0, lineHeight: 1.3 }}
+            >
+              {isFollowing && (
+                <Eye
+                  size={16}
+                  className="inline-block align-text-top"
+                  style={{ color: 'var(--color-brand)', marginRight: '0.375rem' }}
+                  aria-label="Following this request"
+                />
+              )}
+              {request.requestNumber != null && (
+                <span className="font-mono" style={{ color: 'var(--color-text-subtle)', marginRight: '0.375rem' }}>
+                  #{String(request.requestNumber).padStart(3, '0')}
+                </span>
+              )}
+              {request.title}
+            </h1>
+            <button
+              onClick={toggleFollowing}
+              className="flex items-center gap-1.5 text-xs font-medium transition-colors flex-shrink-0"
+              style={{
+                padding: '0.375rem 0.75rem',
+                borderRadius: 'var(--radius-button)',
+                border: '1px solid var(--color-border)',
+                background: isFollowing ? 'var(--color-brand-50)' : 'var(--color-bg)',
+                color: isFollowing ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                cursor: 'pointer',
+                minHeight: '2rem',
+              }}
+              aria-label={isFollowing ? 'Unfollow this request' : 'Follow this request'}
+            >
+              {isFollowing ? (
+                <>
+                  <EyeOff size={13} aria-hidden="true" />
+                  Unfollow
+                </>
+              ) : (
+                <>
+                  <Eye size={13} aria-hidden="true" />
+                  Follow
+                </>
+              )}
+            </button>
+          </div>
 
           {/* Client name + avatar */}
           {request.orgName && (
