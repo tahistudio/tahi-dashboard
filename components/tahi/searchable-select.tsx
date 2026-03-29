@@ -192,7 +192,7 @@ export function SearchableSelect({
             top: 'calc(100% + 4px)',
             left: 0,
             right: 0,
-            zIndex: 50,
+            zIndex: 100,
             background: 'var(--color-bg)',
             border: '1px solid var(--color-border)',
             borderRadius: 'var(--radius-card)',
@@ -252,7 +252,7 @@ export function SearchableSelect({
           <div
             ref={listRef}
             role="listbox"
-            style={{ maxHeight: '15rem', overflowY: 'auto', padding: '0.25rem' }}
+            style={{ maxHeight: '12rem', overflowY: 'auto', padding: '0.25rem' }}
           >
             {filtered.length === 0 ? (
               <div
@@ -285,7 +285,8 @@ export function SearchableSelect({
                       display: 'flex',
                       alignItems: 'center',
                       gap: '0.5rem',
-                      padding: '0.5rem 0.625rem',
+                      padding: '0.75rem 1rem',
+                      minHeight: '2.75rem',
                       borderRadius: 'var(--radius-button)',
                       cursor: 'pointer',
                       fontSize: '0.875rem',

@@ -36,11 +36,12 @@ export function ClientCard({
   return (
     <Link
       href={`/clients/${id}`}
-      className="group flex items-center gap-4 px-4 py-3.5 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl hover:border-[var(--color-brand)] hover:shadow-sm transition-all"
+      className="group flex items-center gap-3 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl hover:border-[var(--color-brand)] hover:shadow-md transition-all sm:gap-4"
+      style={{ padding: '1rem' }}
     >
       {/* Avatar */}
       <div
-        className="w-10 h-10 flex-shrink-0 flex items-center justify-center text-sm font-bold text-white brand-gradient"
+        className="w-10 h-10 flex-shrink-0 flex items-center justify-center text-sm font-bold text-white brand-gradient sm:w-11 sm:h-11"
         style={{ borderRadius: 'var(--radius-leaf-sm)' }}
       >
         {initials}
@@ -53,6 +54,11 @@ export function ClientCard({
             {name}
           </span>
           <HealthDot health={healthStatus ?? null} />
+          {/* Show badges inline on mobile */}
+          <div className="flex items-center gap-1.5 sm:hidden">
+            <PlanBadge plan={planType ?? null} />
+            <StatusBadge status={status as 'active'} type="org" />
+          </div>
         </div>
         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
           {industry && (
@@ -64,17 +70,23 @@ export function ClientCard({
               {website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
             </span>
           )}
+          {lastActivity && (
+            <span className="flex items-center gap-1 text-xs text-[var(--color-text-subtle)] sm:hidden">
+              <Clock className="w-3 h-3" />
+              {formatRelative(lastActivity)}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Badges */}
+      {/* Badges - desktop */}
       <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
         <PlanBadge plan={planType ?? null} />
         <StatusBadge status={status as 'active'} type="org" />
       </div>
 
       {/* Stats */}
-      <div className="hidden md:flex items-center gap-4 text-xs text-[var(--color-text-muted)] flex-shrink-0 min-w-[160px]">
+      <div className="hidden md:flex items-center gap-4 text-xs text-[var(--color-text-muted)] flex-shrink-0 min-w-[10rem]">
         <span className="flex items-center gap-1">
           <MessageSquare className="w-3.5 h-3.5" />
           {openRequestCount} open

@@ -523,8 +523,8 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
 
         {/* Tabs */}
         <div
-          className="flex items-end overflow-x-auto"
-          style={{ borderBottom: '1px solid var(--color-border)', paddingLeft: '0.25rem', paddingRight: '1rem', background: 'white' }}
+          className="flex items-end overflow-x-auto overflow-y-hidden scrollbar-hide"
+          style={{ borderBottom: '1px solid var(--color-border)', paddingLeft: '0.25rem', paddingRight: '1rem', background: 'white', WebkitOverflowScrolling: 'touch' }}
         >
           {tabs.map(tab => (
             <button
@@ -833,8 +833,8 @@ function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: R
 
   return (
     <div
-      className="flex gap-3 overflow-x-auto"
-      style={{ padding: '1rem', paddingBottom: '1.25rem', background: 'var(--color-bg-secondary)' }}
+      className="flex gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide"
+      style={{ padding: '1rem', paddingBottom: '1.25rem', background: 'var(--color-bg-secondary)', WebkitOverflowScrolling: 'touch', height: 'calc(100vh - 14rem)' }}
     >
       {columns.map(col => {
         const cards = byStatus(col.status)
@@ -843,7 +843,7 @@ function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: R
           <div
             key={col.status}
             className="flex flex-col flex-shrink-0"
-            style={{ width: '17rem' }}
+            style={{ width: '17rem', minWidth: '17rem' }}
           >
             {/* Column header */}
             <div
@@ -887,7 +887,7 @@ function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: R
                 borderTop: 'none',
                 borderRadius: '0 0 0.5rem 0.5rem',
                 minHeight: '10rem',
-                maxHeight: '68vh',
+                maxHeight: 'calc(100vh - 18rem)',
                 transition: 'border-color 0.15s',
               }}
               onDragOver={(e) => {

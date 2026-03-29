@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   MessageSquare, Search, Plus, Send, Users, Hash, AtSign,
-  Loader2, Lock, Eye, EyeOff, Mic, Square, Trash2,
+  Loader2, Lock, Eye, EyeOff, Mic, Square, Trash2, ArrowLeft,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
@@ -365,9 +365,8 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
       >
         {/* Left panel: conversation list */}
         <div
-          className="flex flex-col flex-shrink-0"
+          className={`flex flex-col flex-shrink-0 w-full md:w-80 md:max-w-80 ${activeConvId ? 'hidden md:flex' : 'flex'}`}
           style={{
-            width: '20rem',
             borderRight: '1px solid var(--color-border)',
           }}
         >
@@ -545,7 +544,7 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
         </div>
 
         {/* Right panel: conversation thread */}
-        <div className="flex flex-col flex-1 min-w-0">
+        <div className={`flex flex-col flex-1 min-w-0 ${activeConvId ? 'flex' : 'hidden md:flex'}`}>
           {!activeConvId ? (
             <div className="flex flex-col items-center justify-center flex-1 text-center px-4">
               <div
@@ -571,6 +570,25 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
                   borderBottom: '1px solid var(--color-border)',
                 }}
               >
+                {/* Back button for mobile */}
+                <button
+                  onClick={() => setActiveConvId(null)}
+                  className="flex items-center justify-center flex-shrink-0 md:hidden"
+                  style={{
+                    width: '2rem',
+                    height: '2rem',
+                    borderRadius: 'var(--radius-button)',
+                    background: 'var(--color-bg-secondary)',
+                    color: 'var(--color-text-muted)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    minHeight: '2.75rem',
+                    minWidth: '2.75rem',
+                  }}
+                  aria-label="Back to conversations"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
                 {activeConv && (
                   <>
                     <div

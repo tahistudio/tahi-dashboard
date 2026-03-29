@@ -146,27 +146,29 @@ export function ClientList() {
       </div>
 
       {/* Filter chips */}
-      <div className="flex items-center gap-2 flex-wrap">
-        {STATUS_FILTERS.map(f => (
-          <button
-            key={f.value}
-            onClick={() => setStatusFilter(f.value)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
-              statusFilter === f.value
-                ? 'bg-[var(--color-brand)] text-white'
-                : 'bg-[var(--color-bg)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-brand)] hover:text-[var(--color-brand-dark)]'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
-        <div className="ml-auto flex items-center gap-1.5">
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide flex-1" style={{ WebkitOverflowScrolling: 'touch' }}>
+          {STATUS_FILTERS.map(f => (
+            <button
+              key={f.value}
+              onClick={() => setStatusFilter(f.value)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors whitespace-nowrap flex-shrink-0 ${
+                statusFilter === f.value
+                  ? 'bg-[var(--color-brand)] text-white'
+                  : 'bg-[var(--color-bg)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-brand)] hover:text-[var(--color-brand-dark)]'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
           {loading && (
             <RefreshCw className="w-3.5 h-3.5 text-[var(--color-text-subtle)] animate-spin" />
           )}
           <button
             onClick={toggleSort}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-full transition-colors bg-[var(--color-bg)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-brand)] hover:text-[var(--color-brand-dark)]"
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-full transition-colors bg-[var(--color-bg)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-brand)] hover:text-[var(--color-brand-dark)] whitespace-nowrap flex-shrink-0"
           >
             <ArrowUpDown className="w-3 h-3" />
             {sortParam === 'name' ? 'A-Z' : 'Newest'}

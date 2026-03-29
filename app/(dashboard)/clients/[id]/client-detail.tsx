@@ -148,41 +148,43 @@ export function ClientDetail({ clientId }: { clientId: string }) {
     <div className="flex flex-col h-full">
       {/* ── Header ── */}
       <div className="border-b border-[var(--color-border)] bg-[var(--color-bg)]">
-        <div className="px-6 pt-6 pb-0">
+        <div className="px-4 pt-4 pb-0 md:px-6 md:pt-6">
           {/* Back + title row */}
-          <div className="flex items-start gap-3 mb-5">
-            <button
-              onClick={() => router.push('/clients')}
-              className="mt-1 p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-              aria-label="Back to clients"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
+          <div className="flex flex-col gap-3 mb-5 sm:flex-row sm:items-start">
+            <div className="flex items-start gap-3 flex-1 min-w-0">
+              <button
+                onClick={() => router.push('/clients')}
+                className="mt-1 p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors flex-shrink-0"
+                aria-label="Back to clients"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
 
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-2xl font-bold text-[var(--color-text)] truncate">
-                  {org.name}
-                </h1>
-                <HealthDot health={org.healthStatus} className="w-2.5 h-2.5" />
-                <StatusBadge status={org.status} type="org" />
-                <PlanBadge plan={org.planType} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className="text-xl font-bold text-[var(--color-text)] truncate md:text-2xl">
+                    {org.name}
+                  </h1>
+                  <HealthDot health={org.healthStatus} className="w-2.5 h-2.5" />
+                  <StatusBadge status={org.status} type="org" />
+                  <PlanBadge plan={org.planType} />
+                </div>
+
+                {org.website && (
+                  <a
+                    href={org.website.startsWith('http') ? org.website : `https://${org.website}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-brand)] mt-1"
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    {org.website.replace(/^https?:\/\//, '')}
+                  </a>
+                )}
               </div>
-
-              {org.website && (
-                <a
-                  href={org.website.startsWith('http') ? org.website : `https://${org.website}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-brand)] mt-1"
-                >
-                  <Globe className="w-3.5 h-3.5" />
-                  {org.website.replace(/^https?:\/\//, '')}
-                </a>
-              )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-shrink-0 ml-9 sm:ml-0">
               <TahiButton
                 variant="secondary"
                 size="sm"
@@ -192,24 +194,25 @@ export function ClientDetail({ clientId }: { clientId: string }) {
                 }}
               >
                 <Eye className="w-3.5 h-3.5 mr-1.5" />
-                View as Client
+                <span className="hidden sm:inline">View as Client</span>
+                <span className="sm:hidden">Client View</span>
               </TahiButton>
               <TahiButton variant="secondary" size="sm" onClick={load}>
-                <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-                Refresh
+                <RefreshCw className="w-3.5 h-3.5 sm:mr-1.5" />
+                <span className="hidden sm:inline">Refresh</span>
               </TahiButton>
             </div>
           </div>
 
           {/* Track meter in header for quick glance */}
           {tracks.length > 0 && (
-            <div className="mb-4">
+            <div className="mb-4 px-0">
               <TrackMeter tracks={tracks} />
             </div>
           )}
 
           {/* Tab nav */}
-          <nav className="flex gap-0 -mb-px overflow-x-auto">
+          <nav className="flex gap-0 -mb-px overflow-x-auto scrollbar-hide" style={{ WebkitOverflowScrolling: 'touch' }}>
             {TABS.map(tab => {
               const Icon = tab.icon
               const isActive = activeTab === tab.id
@@ -218,7 +221,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
-                    'flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
+                    'flex items-center gap-1.5 px-3 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex-shrink-0 md:px-4',
                     isActive
                       ? 'border-[var(--color-brand)] text-[var(--color-brand)]'
                       : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border)]'
@@ -235,7 +238,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
       </div>
 
       {/* ── Tab content ── */}
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto p-4 md:p-6">
         {activeTab === 'overview' && (
           <OverviewTab
             org={org}

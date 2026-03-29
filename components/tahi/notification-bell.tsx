@@ -220,12 +220,10 @@ export function NotificationBell() {
           ref={panelRef}
           role="dialog"
           aria-label="Notifications"
+          className="fixed inset-x-0 mx-2 md:absolute md:inset-x-auto md:right-0 md:mx-0 md:w-[22.5rem]"
           style={{
-            position: 'absolute',
-            top: 'calc(100% + 8px)',
-            right: 0,
-            width: 360,
-            maxWidth: 'calc(100vw - 32px)',
+            top: '3.5rem',
+            maxWidth: 'calc(100vw - 1rem)',
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-card, 0.75rem)',
             border: '1px solid var(--color-border)',
@@ -276,7 +274,7 @@ export function NotificationBell() {
           </div>
 
           {/* List */}
-          <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+          <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
             {loading && notifications.length === 0 ? (
               <div style={{ padding: '1.5rem 1rem' }}>
                 {[1, 2, 3].map(i => (
@@ -298,6 +296,7 @@ export function NotificationBell() {
                   onClick={() => { if (!n.read) markOneRead(n.id).catch(() => {}) }}
                   style={{
                     padding: '0.75rem 1rem',
+                    minHeight: '2.75rem',
                     borderBottom: i < notifications.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
                     background: n.read ? 'var(--color-bg)' : 'var(--color-brand-50)',
                     cursor: n.read ? 'default' : 'pointer',

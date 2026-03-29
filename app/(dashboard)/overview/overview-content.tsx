@@ -468,8 +468,8 @@ function StatCard({
       {/* Icon row */}
       <div className="flex items-start justify-between" style={{ marginBottom: '1.25rem' }}>
         <div
-          className="flex items-center justify-center rounded-xl flex-shrink-0"
-          style={{ width: 44, height: 44, background: a.bg, color: a.color }}
+          className="flex items-center justify-center flex-shrink-0"
+          style={{ width: 44, height: 44, background: a.bg, color: a.color, borderRadius: '0 0.75rem 0 0.75rem' }}
         >
           {icon}
         </div>
@@ -615,10 +615,10 @@ function EmptyRows({
   return (
     <div className="flex flex-col items-center justify-center text-center" style={{ padding: '3rem 1.5rem', gap: '0.5rem' }}>
       <div
-        className="flex items-center justify-center rounded-xl"
-        style={{ width: 44, height: 44, background: 'var(--color-bg-secondary)', marginBottom: '0.25rem' }}
+        className="flex items-center justify-center"
+        style={{ width: 44, height: 44, background: 'linear-gradient(135deg, #7aab6b, #425F39)', borderRadius: '0 0.75rem 0 0.75rem', marginBottom: '0.25rem' }}
       >
-        <Inbox size={20} style={{ color: 'var(--color-border)' }} />
+        <Inbox size={20} style={{ color: 'white' }} />
       </div>
       <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{title}</p>
       <p className="text-xs" style={{ color: 'var(--color-text-subtle)', maxWidth: 280 }}>{message}</p>
@@ -702,8 +702,8 @@ function UpcomingCallsWidget() {
             }}
           >
             <div
-              className="flex items-center justify-center rounded-lg flex-shrink-0"
-              style={{ width: '2.25rem', height: '2.25rem', background: 'var(--color-info-bg, #eff6ff)', color: 'var(--color-info, #2563eb)' }}
+              className="flex items-center justify-center flex-shrink-0"
+              style={{ width: '2.25rem', height: '2.25rem', background: 'var(--color-info-bg, #eff6ff)', color: 'var(--color-info, #2563eb)', borderRadius: '0 0.625rem 0 0.625rem' }}
             >
               <Video size={16} />
             </div>
