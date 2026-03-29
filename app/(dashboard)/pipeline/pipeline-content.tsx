@@ -1,0 +1,953 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
+import {
+  Plus, Search, LayoutList, Columns3,
+  TrendingUp, DollarSign, Target,
+  Calendar, User, Building2, Loader2,
+  ChevronDown,
+} from 'lucide-react'
+import { apiPath } from '@/lib/api'
+
+// ---- Types ---------------------------------------------------------------
+
+interface PipelineStage {
+  id: string
+  name: string
+  slug: string
+  probability: number
+  position: number
+  colour: string | null
+  isDefault: number
+  isClosedWon: number
+  isClosedLost: number
+}
+
+interface Deal {
+  id: string
+  title: string
+  orgId: string | null
+  stageId: string
+  ownerId: string | null
+  value: number
+  currency: string
+  valueNzd: number
+  source: string | null
+  estimatedHoursPerWeek: number | null
+  expectedCloseDate: string | null
+  closedAt: string | null
+  closeReason: string | null
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+  orgName: string | null
+  stageName: string | null
+  stageColour: string | null
+  stageProbability: number | null
+  stageIsClosedWon: number | null
+  stageIsClosedLost: number | null
+  ownerName: string | null
+  ownerAvatarUrl: string | null
+  contactCount: number
+}
+
+type ViewMode = 'kanban' | 'list'
+type SortKey = 'updatedAt' | 'value' | 'expectedCloseDate' | 'title'
+
+// ---- Helpers -------------------------------------------------------------
+
+function formatCurrency(value: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat('en-NZ', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value)
+  } catch {
+    return `${currency} ${value.toLocaleString()}`
+  }
+}
+
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return '--'
+  try {
+    const d = new Date(dateStr)
+    return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: '2-digit' })
+  } catch { return '--' }
+}
+
+function getInitials(name: string): string {
+  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+}
+
+const SOURCE_LABELS: Record<string, { label: string; bg: string; text: string }> = {
+  referral:         { label: 'Referral',         bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)' },
+  webflow:          { label: 'Webflow',          bg: '#dbeafe',                  text: '#2563eb' },
+  linkedin:         { label: 'LinkedIn',         bg: '#dbeafe',                  text: '#1d4ed8' },
+  website:          { label: 'Website',          bg: '#d1fae5',                  text: '#059669' },
+  cold:             { label: 'Cold',             bg: '#e0e7ff',                  text: '#4338ca' },
+  existing_client:  { label: 'Existing Client',  bg: '#fef3c7',                  text: '#d97706' },
+  other:            { label: 'Other',            bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-subtle)' },
+}
+
+// ---- Main component ------------------------------------------------------
+
+export function PipelineContent() {
+  const [view, setView] = useState<ViewMode>('kanban')
+  const [search, setSearch] = useState('')
+  const [stages, setStages] = useState<PipelineStage[]>([])
+  const [deals, setDeals] = useState<Deal[]>([])
+  const [loading, setLoading] = useState(true)
+  const [sortKey, setSortKey] = useState<SortKey>('updatedAt')
+  const [showNewDeal, setShowNewDeal] = useState(false)
+
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [stagesRes, dealsRes] = await Promise.all([
+        fetch(apiPath('/api/admin/pipeline/stages')),
+        fetch(apiPath('/api/admin/deals?limit=100')),
+      ])
+      if (stagesRes.ok) {
+        const sData = await stagesRes.json() as { stages: PipelineStage[] }
+        setStages(sData.stages ?? [])
+      }
+      if (dealsRes.ok) {
+        const dData = await dealsRes.json() as { items: Deal[] }
+        setDeals(dData.items ?? [])
+      }
+    } catch {
+      // silent
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchData() }, [fetchData])
+
+  // Filter by search
+  const filtered = search.trim()
+    ? deals.filter(d =>
+        d.title.toLowerCase().includes(search.toLowerCase()) ||
+        (d.orgName ?? '').toLowerCase().includes(search.toLowerCase())
+      )
+    : deals
+
+  // Non-closed deals for summary
+  const openDeals = filtered.filter(d => !d.stageIsClosedWon && !d.stageIsClosedLost)
+  const totalValue = openDeals.reduce((s, d) => s + (d.valueNzd ?? d.value), 0)
+  const weightedForecast = openDeals.reduce((s, d) => {
+    const prob = d.stageProbability ?? 0
+    return s + ((d.valueNzd ?? d.value) * prob / 100)
+  }, 0)
+
+  return (
+    <div style={{ padding: '1.5rem' }}>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3" style={{ marginBottom: '1.5rem' }}>
+        <div>
+          <h1 className="font-bold" style={{ fontSize: '1.5rem', color: 'var(--color-text)' }}>
+            Sales Pipeline
+          </h1>
+          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
+            Track and manage deals through your sales process
+          </p>
+        </div>
+        <button
+          onClick={() => setShowNewDeal(true)}
+          className="inline-flex items-center gap-2 font-medium transition-colors rounded-xl"
+          style={{
+            padding: '0.625rem 1.25rem',
+            fontSize: '0.875rem',
+            background: 'var(--color-brand)',
+            color: 'white',
+            border: 'none',
+            cursor: 'pointer',
+            minHeight: '2.75rem',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-dark)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-brand)' }}
+        >
+          <Plus className="w-4 h-4" />
+          New Deal
+        </button>
+      </div>
+
+      {/* Summary bar */}
+      <div
+        className="grid grid-cols-1 sm:grid-cols-3 gap-4"
+        style={{ marginBottom: '1.5rem' }}
+      >
+        <SummaryCard
+          icon={DollarSign}
+          label="Total Pipeline Value"
+          value={formatCurrency(totalValue, 'NZD')}
+          accent="emerald"
+        />
+        <SummaryCard
+          icon={Target}
+          label="Weighted Forecast"
+          value={formatCurrency(weightedForecast, 'NZD')}
+          accent="blue"
+        />
+        <SummaryCard
+          icon={TrendingUp}
+          label="Open Deals"
+          value={String(openDeals.length)}
+          accent="amber"
+        />
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3" style={{ marginBottom: '1rem' }}>
+        {/* Search */}
+        <div className="relative flex-1" style={{ maxWidth: '20rem' }}>
+          <Search
+            className="absolute pointer-events-none"
+            style={{ width: '1rem', height: '1rem', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)' }}
+          />
+          <input
+            type="text"
+            placeholder="Search deals..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full rounded-lg transition-colors"
+            style={{
+              padding: '0.5rem 0.75rem 0.5rem 2.25rem',
+              fontSize: '0.875rem',
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-bg)',
+              color: 'var(--color-text)',
+              outline: 'none',
+              minHeight: '2.75rem',
+            }}
+            onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
+            onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+          />
+        </div>
+
+        {/* View toggle */}
+        <div
+          className="inline-flex rounded-lg overflow-hidden"
+          style={{ border: '1px solid var(--color-border)' }}
+        >
+          <button
+            onClick={() => setView('kanban')}
+            className="inline-flex items-center gap-1.5 transition-colors"
+            style={{
+              padding: '0.5rem 0.75rem',
+              fontSize: '0.8125rem',
+              fontWeight: 500,
+              background: view === 'kanban' ? 'var(--color-brand)' : 'var(--color-bg)',
+              color: view === 'kanban' ? 'white' : 'var(--color-text-muted)',
+              border: 'none',
+              cursor: 'pointer',
+              minHeight: '2.75rem',
+            }}
+          >
+            <Columns3 className="w-4 h-4" />
+            Board
+          </button>
+          <button
+            onClick={() => setView('list')}
+            className="inline-flex items-center gap-1.5 transition-colors"
+            style={{
+              padding: '0.5rem 0.75rem',
+              fontSize: '0.8125rem',
+              fontWeight: 500,
+              background: view === 'list' ? 'var(--color-brand)' : 'var(--color-bg)',
+              color: view === 'list' ? 'white' : 'var(--color-text-muted)',
+              border: 'none',
+              cursor: 'pointer',
+              minHeight: '2.75rem',
+            }}
+          >
+            <LayoutList className="w-4 h-4" />
+            List
+          </button>
+        </div>
+
+        {/* Sort (list view only) */}
+        {view === 'list' && (
+          <div className="relative">
+            <select
+              value={sortKey}
+              onChange={e => setSortKey(e.target.value as SortKey)}
+              className="appearance-none rounded-lg cursor-pointer transition-colors"
+              style={{
+                padding: '0.5rem 2rem 0.5rem 0.75rem',
+                fontSize: '0.8125rem',
+                fontWeight: 500,
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text-muted)',
+                minHeight: '2.75rem',
+              }}
+            >
+              <option value="updatedAt">Last Updated</option>
+              <option value="value">Value</option>
+              <option value="expectedCloseDate">Expected Close</option>
+              <option value="title">Title</option>
+            </select>
+            <ChevronDown
+              className="absolute pointer-events-none"
+              style={{ width: '0.875rem', height: '0.875rem', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)' }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Content */}
+      {loading ? (
+        <div className="flex items-center justify-center" style={{ padding: '4rem 0' }}>
+          <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--color-brand)' }} />
+        </div>
+      ) : view === 'kanban' ? (
+        <KanbanView
+          deals={filtered}
+          stages={stages}
+          onStageChange={fetchData}
+        />
+      ) : (
+        <ListView
+          deals={filtered}
+          stages={stages}
+          sortKey={sortKey}
+        />
+      )}
+
+      {/* New Deal Dialog */}
+      {showNewDeal && (
+        <NewDealDialog
+          stages={stages}
+          onClose={() => setShowNewDeal(false)}
+          onCreated={() => {
+            setShowNewDeal(false)
+            fetchData()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ---- Summary Card --------------------------------------------------------
+
+const ACCENT_MAP = {
+  emerald: { bg: '#d1fae5', icon: '#059669' },
+  blue:    { bg: '#dbeafe', icon: '#2563eb' },
+  amber:   { bg: '#fef3c7', icon: '#d97706' },
+} as const
+
+function SummaryCard({ icon: Icon, label, value, accent }: {
+  icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>
+  label: string
+  value: string
+  accent: keyof typeof ACCENT_MAP
+}) {
+  const a = ACCENT_MAP[accent]
+  return (
+    <div
+      className="rounded-xl border shadow-sm"
+      style={{ padding: '1.25rem 1.5rem', background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className="rounded-lg flex items-center justify-center"
+          style={{ width: '2.5rem', height: '2.5rem', background: a.bg }}
+        >
+          <Icon className="w-5 h-5" style={{ color: a.icon }} />
+        </div>
+        <div>
+          <p style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            {label}
+          </p>
+          <p className="font-bold" style={{ fontSize: '1.25rem', color: 'var(--color-text)', marginTop: '0.125rem' }}>
+            {value}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---- Kanban View ---------------------------------------------------------
+
+function KanbanView({ deals, stages, onStageChange }: {
+  deals: Deal[]
+  stages: PipelineStage[]
+  onStageChange: () => void
+}) {
+  const byStage = (stageId: string) => deals.filter(d => d.stageId === stageId)
+
+  const handleDrop = async (e: React.DragEvent, newStageId: string) => {
+    e.preventDefault()
+    const el = e.currentTarget as HTMLElement
+    el.style.borderColor = 'var(--color-border)'
+    const dealId = e.dataTransfer.getData('dealId')
+    const fromStageId = e.dataTransfer.getData('fromStageId')
+    if (!dealId || fromStageId === newStageId) return
+
+    try {
+      await fetch(apiPath(`/api/admin/deals/${dealId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stageId: newStageId }),
+      })
+      onStageChange()
+    } catch {
+      // silent
+    }
+  }
+
+  return (
+    <div
+      className="flex gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide"
+      style={{ paddingBottom: '1.25rem', WebkitOverflowScrolling: 'touch', height: 'calc(100vh - 22rem)' }}
+    >
+      {stages.map(stage => {
+        const cards = byStage(stage.id)
+        const stageValue = cards.reduce((s, d) => s + d.value, 0)
+        const colour = stage.colour ?? 'var(--color-brand)'
+
+        return (
+          <div
+            key={stage.id}
+            className="flex flex-col flex-shrink-0"
+            style={{ width: '17rem', minWidth: '17rem' }}
+          >
+            {/* Column header */}
+            <div
+              className="flex items-center justify-between"
+              style={{
+                padding: '0.625rem 0.75rem',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                borderBottom: 'none',
+                borderRadius: '0.5rem 0.5rem 0 0',
+                borderTop: `3px solid ${colour}`,
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="rounded-full flex-shrink-0"
+                  style={{ width: '0.5rem', height: '0.5rem', background: colour, display: 'inline-block' }}
+                />
+                <span
+                  className="font-semibold uppercase tracking-wide"
+                  style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}
+                >
+                  {stage.name}
+                </span>
+                <span
+                  className="font-semibold rounded-full"
+                  style={{ padding: '0.125rem 0.4375rem', fontSize: '0.6875rem', background: 'var(--color-bg-secondary)', color: 'var(--color-text-subtle)' }}
+                >
+                  {cards.length}
+                </span>
+              </div>
+              {stageValue > 0 && (
+                <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)' }}>
+                  {formatCurrency(stageValue, 'NZD')}
+                </span>
+              )}
+            </div>
+
+            {/* Drop zone */}
+            <div
+              className="flex flex-col gap-2 overflow-y-auto"
+              style={{
+                padding: '0.5rem',
+                background: 'var(--color-bg-tertiary)',
+                border: '1px solid var(--color-border)',
+                borderTop: 'none',
+                borderRadius: '0 0 0.5rem 0.5rem',
+                minHeight: '10rem',
+                maxHeight: 'calc(100vh - 26rem)',
+                transition: 'border-color 0.15s',
+              }}
+              onDragOver={e => {
+                e.preventDefault()
+                e.currentTarget.style.borderColor = '#5A824E'
+              }}
+              onDragLeave={e => {
+                e.currentTarget.style.borderColor = 'var(--color-border)'
+              }}
+              onDrop={e => handleDrop(e, stage.id)}
+            >
+              {cards.length === 0 ? (
+                <div
+                  className="flex items-center justify-center rounded-lg"
+                  style={{
+                    padding: '1.75rem 0',
+                    fontSize: '0.75rem',
+                    color: 'var(--color-text-subtle)',
+                    border: '1px dashed var(--color-border)',
+                  }}
+                >
+                  No deals
+                </div>
+              ) : (
+                cards.map(deal => <DealCard key={deal.id} deal={deal} />)
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ---- Deal Card -----------------------------------------------------------
+
+function DealCard({ deal }: { deal: Deal }) {
+  return (
+    <Link
+      href={`/pipeline/${deal.id}`}
+      className="block rounded-lg transition-all"
+      draggable
+      onDragStart={e => {
+        e.dataTransfer.setData('dealId', deal.id)
+        e.dataTransfer.setData('fromStageId', deal.stageId)
+        e.dataTransfer.effectAllowed = 'move'
+        ;(e.currentTarget as HTMLElement).style.opacity = '0.5'
+      }}
+      onDragEnd={e => {
+        ;(e.currentTarget as HTMLElement).style.opacity = '1'
+      }}
+      style={{
+        padding: '0.75rem',
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border)',
+        boxShadow: 'var(--shadow-sm)',
+        textDecoration: 'none',
+        cursor: 'grab',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.borderColor = 'var(--color-brand)'
+        e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.borderColor = 'var(--color-border)'
+        e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
+      }}
+    >
+      {/* Title */}
+      <p className="font-medium truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text)', marginBottom: '0.375rem' }}>
+        {deal.title}
+      </p>
+
+      {/* Company */}
+      {deal.orgName && (
+        <div className="flex items-center gap-1.5" style={{ marginBottom: '0.5rem' }}>
+          <Building2 style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)' }} />
+          <span className="truncate" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+            {deal.orgName}
+          </span>
+        </div>
+      )}
+
+      {/* Value */}
+      <p className="font-semibold" style={{ fontSize: '0.875rem', color: 'var(--color-brand)', marginBottom: '0.5rem' }}>
+        {formatCurrency(deal.value, deal.currency)}
+      </p>
+
+      {/* Footer: owner + close date */}
+      <div className="flex items-center justify-between">
+        {deal.ownerName ? (
+          <div className="flex items-center gap-1.5">
+            {deal.ownerAvatarUrl ? (
+              <img
+                src={deal.ownerAvatarUrl}
+                alt={deal.ownerName}
+                className="rounded-full"
+                style={{ width: '1.25rem', height: '1.25rem' }}
+              />
+            ) : (
+              <div
+                className="rounded-full flex items-center justify-center font-semibold"
+                style={{ width: '1.25rem', height: '1.25rem', fontSize: '0.5rem', background: 'var(--color-brand)', color: 'white' }}
+              >
+                {getInitials(deal.ownerName)}
+              </div>
+            )}
+            <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+              {deal.ownerName.split(' ')[0]}
+            </span>
+          </div>
+        ) : (
+          <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+            <User style={{ width: '0.75rem', height: '0.75rem', display: 'inline' }} /> Unassigned
+          </span>
+        )}
+
+        {deal.expectedCloseDate && (
+          <span className="inline-flex items-center gap-1" style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+            <Calendar style={{ width: '0.625rem', height: '0.625rem' }} />
+            {formatDate(deal.expectedCloseDate)}
+          </span>
+        )}
+      </div>
+    </Link>
+  )
+}
+
+// ---- List View -----------------------------------------------------------
+
+function ListView({ deals, stages, sortKey }: {
+  deals: Deal[]
+  stages: PipelineStage[]
+  sortKey: SortKey
+}) {
+  const sorted = [...deals].sort((a, b) => {
+    if (sortKey === 'value') return (b.value ?? 0) - (a.value ?? 0)
+    if (sortKey === 'expectedCloseDate') {
+      if (!a.expectedCloseDate && !b.expectedCloseDate) return 0
+      if (!a.expectedCloseDate) return 1
+      if (!b.expectedCloseDate) return -1
+      return a.expectedCloseDate.localeCompare(b.expectedCloseDate)
+    }
+    if (sortKey === 'title') return a.title.localeCompare(b.title)
+    return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
+  })
+
+  const stageMap = Object.fromEntries(stages.map(s => [s.id, s]))
+
+  if (sorted.length === 0) {
+    return (
+      <div
+        className="flex flex-col items-center justify-center rounded-xl border"
+        style={{ padding: '4rem 2rem', background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+      >
+        <TrendingUp style={{ width: '2.5rem', height: '2.5rem', color: 'var(--color-text-subtle)', marginBottom: '1rem' }} />
+        <p className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)', marginBottom: '0.25rem' }}>
+          No deals yet
+        </p>
+        <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
+          Create your first deal to get started
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="rounded-xl border overflow-hidden"
+      style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+    >
+      <div className="overflow-x-auto">
+        <table className="w-full" style={{ fontSize: '0.8125rem' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+              {['Title', 'Company', 'Stage', 'Value', 'Owner', 'Source', 'Expected Close', 'Created'].map(h => (
+                <th
+                  key={h}
+                  className="text-left font-semibold uppercase tracking-wide"
+                  style={{ padding: '0.75rem 1rem', fontSize: '0.6875rem', color: 'var(--color-text-subtle)', whiteSpace: 'nowrap' }}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(deal => {
+              const stage = stageMap[deal.stageId]
+              const srcCfg = SOURCE_LABELS[deal.source ?? '']
+              return (
+                <tr
+                  key={deal.id}
+                  className="transition-colors cursor-pointer"
+                  style={{ borderBottom: '1px solid var(--color-border-subtle)' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                >
+                  <td style={{ padding: '0.75rem 1rem' }}>
+                    <Link
+                      href={`/pipeline/${deal.id}`}
+                      className="font-medium hover:underline"
+                      style={{ color: 'var(--color-text)', textDecoration: 'none' }}
+                    >
+                      {deal.title}
+                    </Link>
+                  </td>
+                  <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+                    {deal.orgName ?? '--'}
+                  </td>
+                  <td style={{ padding: '0.75rem 1rem' }}>
+                    {stage && (
+                      <span
+                        className="inline-flex items-center gap-1.5 rounded-full font-medium"
+                        style={{
+                          padding: '0.125rem 0.5rem',
+                          fontSize: '0.75rem',
+                          background: `${stage.colour}20`,
+                          color: stage.colour ?? 'var(--color-text-muted)',
+                        }}
+                      >
+                        <span className="rounded-full" style={{ width: '0.375rem', height: '0.375rem', background: stage.colour ?? 'var(--color-text-subtle)', display: 'inline-block' }} />
+                        {stage.name}
+                      </span>
+                    )}
+                  </td>
+                  <td className="font-semibold" style={{ padding: '0.75rem 1rem', color: 'var(--color-text)', whiteSpace: 'nowrap' }}>
+                    {formatCurrency(deal.value, deal.currency)}
+                  </td>
+                  <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+                    {deal.ownerName ?? '--'}
+                  </td>
+                  <td style={{ padding: '0.75rem 1rem' }}>
+                    {srcCfg ? (
+                      <span
+                        className="inline-flex rounded-full font-medium"
+                        style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: srcCfg.bg, color: srcCfg.text }}
+                      >
+                        {srcCfg.label}
+                      </span>
+                    ) : (
+                      <span style={{ color: 'var(--color-text-subtle)' }}>--</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+                    {formatDate(deal.expectedCloseDate)}
+                  </td>
+                  <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-subtle)', whiteSpace: 'nowrap' }}>
+                    {formatDate(deal.createdAt)}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ---- New Deal Dialog -----------------------------------------------------
+
+function NewDealDialog({ stages, onClose, onCreated }: {
+  stages: PipelineStage[]
+  onClose: () => void
+  onCreated: () => void
+}) {
+  const [title, setTitle] = useState('')
+  const [stageId, setStageId] = useState(() => {
+    const def = stages.find(s => s.isDefault)
+    return def?.id ?? stages[0]?.id ?? ''
+  })
+  const [value, setValue] = useState('')
+  const [currency, setCurrency] = useState('NZD')
+  const [source, setSource] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!title.trim() || !stageId) return
+
+    setSaving(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/deals'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: title.trim(),
+          stageId,
+          value: parseFloat(value) || 0,
+          currency,
+          source: source || undefined,
+        }),
+      })
+      if (res.ok) {
+        onCreated()
+      }
+    } catch {
+      // silent
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.5)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div
+        className="rounded-xl shadow-lg w-full"
+        style={{
+          maxWidth: '28rem',
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h2 className="font-bold" style={{ fontSize: '1.125rem', color: 'var(--color-text)', marginBottom: '1.25rem' }}>
+          New Deal
+        </h2>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          {/* Title */}
+          <div>
+            <label className="block font-medium" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
+              Title *
+            </label>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              className="w-full rounded-lg"
+              style={{
+                padding: '0.5rem 0.75rem',
+                fontSize: '0.875rem',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                minHeight: '2.75rem',
+              }}
+              autoFocus
+            />
+          </div>
+
+          {/* Stage */}
+          <div>
+            <label className="block font-medium" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
+              Stage
+            </label>
+            <select
+              value={stageId}
+              onChange={e => setStageId(e.target.value)}
+              className="w-full rounded-lg"
+              style={{
+                padding: '0.5rem 0.75rem',
+                fontSize: '0.875rem',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                minHeight: '2.75rem',
+              }}
+            >
+              {stages.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Value + Currency */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-medium" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
+                Value
+              </label>
+              <input
+                type="number"
+                value={value}
+                onChange={e => setValue(e.target.value)}
+                placeholder="0"
+                className="w-full rounded-lg"
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  fontSize: '0.875rem',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  color: 'var(--color-text)',
+                  minHeight: '2.75rem',
+                }}
+              />
+            </div>
+            <div>
+              <label className="block font-medium" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
+                Currency
+              </label>
+              <select
+                value={currency}
+                onChange={e => setCurrency(e.target.value)}
+                className="w-full rounded-lg"
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  fontSize: '0.875rem',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  color: 'var(--color-text)',
+                  minHeight: '2.75rem',
+                }}
+              >
+                {['NZD', 'USD', 'AUD', 'GBP', 'EUR', 'CAD', 'SGD'].map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Source */}
+          <div>
+            <label className="block font-medium" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
+              Source
+            </label>
+            <select
+              value={source}
+              onChange={e => setSource(e.target.value)}
+              className="w-full rounded-lg"
+              style={{
+                padding: '0.5rem 0.75rem',
+                fontSize: '0.875rem',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                minHeight: '2.75rem',
+              }}
+            >
+              <option value="">Select source...</option>
+              <option value="referral">Referral</option>
+              <option value="webflow">Webflow</option>
+              <option value="linkedin">LinkedIn</option>
+              <option value="website">Website</option>
+              <option value="cold">Cold</option>
+              <option value="existing_client">Existing Client</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+
+          {/* Actions */}
+          <div className="flex justify-end gap-3" style={{ marginTop: '0.5rem' }}>
+            <button
+              type="button"
+              onClick={onClose}
+              className="font-medium rounded-lg transition-colors"
+              style={{
+                padding: '0.5rem 1rem',
+                fontSize: '0.875rem',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text-muted)',
+                cursor: 'pointer',
+                minHeight: '2.75rem',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !title.trim()}
+              className="font-medium rounded-lg transition-colors"
+              style={{
+                padding: '0.5rem 1.25rem',
+                fontSize: '0.875rem',
+                background: 'var(--color-brand)',
+                color: 'white',
+                border: 'none',
+                cursor: saving ? 'not-allowed' : 'pointer',
+                opacity: saving || !title.trim() ? 0.6 : 1,
+                minHeight: '2.75rem',
+              }}
+            >
+              {saving ? 'Creating...' : 'Create Deal'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}

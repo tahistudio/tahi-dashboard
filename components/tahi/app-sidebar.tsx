@@ -6,7 +6,7 @@ import {
   Inbox, Users, CreditCard, FileText, Clock, CheckSquare,
   BarChart2, BookOpen, UserCog, Settings, MessageSquare,
   FolderOpen, ShoppingBag, PanelLeftClose, PanelLeftOpen,
-  LayoutDashboard, Moon, Sun, Star,
+  LayoutDashboard, Moon, Sun, Star, TrendingUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { TahiWordmark, LeafLogo } from './leaf-logo'
@@ -56,6 +56,12 @@ const NAV: NavGroup[] = [
       { label: 'Reports',   href: '/reports',   icon: BarChart2,  adminOnly: true },
       { label: 'Time',      href: '/time',      icon: Clock,      adminOnly: true },
       { label: 'Reviews',   href: '/reviews',   icon: Star,       adminOnly: true },
+    ],
+  },
+  {
+    group: 'Sales',
+    items: [
+      { label: 'Pipeline',  href: '/pipeline', icon: TrendingUp, adminOnly: true },
     ],
   },
   {
