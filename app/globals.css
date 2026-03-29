@@ -157,11 +157,12 @@
    BASE STYLES
    ============================================================ */
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+/* NOTE: Do NOT add unlayered * { margin: 0; padding: 0 } here.
+   Tailwind v4 uses @layer for its utilities. Unlayered styles always
+   beat layered styles in the CSS cascade, which would kill every
+   Tailwind padding/margin class (px-*, py-*, m-*, etc.).
+   Tailwind's own @layer base already resets *, ::after, ::before
+   with box-sizing, margin: 0, padding: 0, border: 0 solid. */
 
 html {
   font-family: var(--font-sans);
@@ -178,6 +179,21 @@ body {
 /* ============================================================
    TAHI COMPONENT UTILITIES
    ============================================================ */
+
+/* Dashboard main content area : responsive padding in rem */
+.dashboard-main {
+  padding: 1.25rem 1.25rem 7rem;
+}
+@media (min-width: 48rem) {
+  .dashboard-main {
+    padding: 2rem 2.5rem 2rem;
+  }
+}
+@media (min-width: 64rem) {
+  .dashboard-main {
+    padding: 2.5rem 3rem 2.5rem;
+  }
+}
 
 /* Leaf shape : the Tahi signature border radius */
 .leaf {

@@ -442,3 +442,20 @@ Why: HubSpot adds cost and requires context-switching. Tahi already has organisa
 How: BE agent creates schema batch 8 (deals, dealContacts, pipelineStages, activities) and batch 9 (brands, brandContacts). BE agent builds API routes for deals CRUD, activities CRUD, capacity calculation, and close rate metrics. FE agent builds pipeline Kanban board, deal detail page, capacity dashboard, contact detail page, and enhanced reports. UIUX agent reviews all new pages. QA agent tests pipeline flow end to end.
 
 Escalated to Liam: Yes. Four items need confirmation before implementation starts: (1) NZD as base reporting currency, (2) default pipeline stages and probabilities, (3) whether brands should scope portal visibility, (4) whether to remove HubSpot API key from env vars. See SPECS/crm-pipeline.md escalation check section.
+
+---
+
+## #025 - No Unlayered CSS Resets with Tailwind v4
+
+Date: 2026-03-30
+Decision: Never place `* { margin: 0; padding: 0; }` or similar property resets outside a `@layer` block in globals.css. Tailwind v4's own `@layer base` already includes the full reset.
+
+Why: CSS Cascade Layers spec states that unlayered styles always beat layered styles regardless of specificity. Since Tailwind v4 wraps all utilities in `@layer utilities`, an unlayered `*` reset kills every padding and margin utility class while other utilities (flex, grid, gap, text, bg, etc.) appear to work fine. This was the root cause of missing padding/margin across the entire dashboard on the Webflow Cloud deployment. 278 inline style workarounds accumulated across 16+ files before the root cause was identified.
+
+How to apply:
+- The `* { box-sizing: border-box; margin: 0; padding: 0; }` block was removed from globals.css
+- If custom base resets are ever needed, place them inside `@layer base { }` so Tailwind utilities can override them
+- Use rem/em units for all spacing, never raw px
+- Dashboard main content area uses a `.dashboard-main` CSS class with responsive rem padding instead of Tailwind classes
+
+Escalated to Liam: No. Root cause bugfix.

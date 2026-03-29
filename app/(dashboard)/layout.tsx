@@ -27,7 +27,7 @@ export default async function DashboardLayout({
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
           {isAdmin && <ImpersonationBanner />}
           <AppTopNav isAdmin={isAdmin} />
-          <main className="flex-1 overflow-y-auto px-5 pt-5 pb-28 md:px-10 md:pt-8 md:pb-8 lg:px-12 lg:pt-10">
+          <main className="flex-1 overflow-y-auto dashboard-main">
             <div className="max-w-7xl mx-auto w-full">
               {children}
             </div>
