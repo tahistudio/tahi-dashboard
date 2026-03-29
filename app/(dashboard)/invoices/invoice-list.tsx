@@ -6,6 +6,7 @@ import { Plus, FileText, RefreshCw, Download } from 'lucide-react'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { apiPath } from '@/lib/api'
+import { useToast } from '@/components/tahi/toast'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -97,6 +98,7 @@ function CreateInvoiceModal({
   onClose: () => void
   onCreated: () => void
 }) {
+  const { showToast } = useToast()
   const [orgId, setOrgId] = useState('')
   const [description, setDescription] = useState('')
   const [quantity, setQuantity] = useState('1')
@@ -130,13 +132,14 @@ function CreateInvoiceModal({
         setError(json.error ?? 'Failed to create invoice.')
         return
       }
+      showToast('Invoice created successfully')
       onCreated()
     } catch {
       setError('Network error. Please try again.')
     } finally {
       setSaving(false)
     }
-  }, [orgId, description, quantity, unitAmount, dueDate, notes, onCreated])
+  }, [orgId, description, quantity, unitAmount, dueDate, notes, onCreated, showToast])
 
   return (
     <div

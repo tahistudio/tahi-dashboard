@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { apiPath } from '@/lib/api'
 import { X, Building2, Globe, User, Mail, Briefcase } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
+import { useToast } from '@/components/tahi/toast'
 
 interface NewClientDialogProps {
   open: boolean
@@ -28,6 +29,7 @@ const INDUSTRY_OPTIONS = [
 
 export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -61,6 +63,7 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
         const data = await res.json() as { error?: string }
         throw new Error(data.error ?? 'Failed to create client')
       }
+      showToast('Client created successfully')
       router.refresh()
       onClose()
       setForm({ name: '', website: '', industry: '', planType: '', primaryContactName: '', primaryContactEmail: '' })

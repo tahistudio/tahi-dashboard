@@ -200,12 +200,17 @@ export const requests = sqliteTable('requests', {
   // JSON array of tag IDs
   tags: text('tags').default('[]'),
   deliveredAt: text('delivered_at'),
+  // Auto-incrementing request number for display (#001, #002, ...)
+  requestNumber: integer('request_number'),
+  // JSON: array of checklists [{title, items: [{label, done}]}]
+  checklists: text('checklists').default('[]'),
   ...timestamps,
 }, (table) => [
   index('idx_requests_org').on(table.orgId),
   index('idx_requests_status').on(table.status),
   index('idx_requests_assignee').on(table.assigneeId),
   index('idx_requests_track').on(table.trackId),
+  index('idx_requests_number').on(table.requestNumber),
 ])
 
 // ============================================================

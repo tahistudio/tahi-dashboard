@@ -38,6 +38,8 @@ export async function GET(req: NextRequest, { params }: Params) {
       scopeFlagged: schema.requests.scopeFlagged,
       isInternal: schema.requests.isInternal,
       tags: schema.requests.tags,
+      requestNumber: schema.requests.requestNumber,
+      checklists: schema.requests.checklists,
       createdAt: schema.requests.createdAt,
       updatedAt: schema.requests.updatedAt,
       deliveredAt: schema.requests.deliveredAt,
@@ -72,6 +74,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     dueDate?: string | null
     scopeFlagged?: boolean
     trackId?: string | null
+    checklists?: string
   }
 
   const now = new Date().toISOString()
@@ -88,6 +91,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if ('dueDate' in body) patch.dueDate = body.dueDate ?? null
   if (body.scopeFlagged !== undefined) patch.scopeFlagged = body.scopeFlagged
   if ('trackId' in body) patch.trackId = body.trackId ?? null
+  if (body.checklists !== undefined) patch.checklists = body.checklists
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>

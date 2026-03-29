@@ -3,10 +3,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { apiPath } from '@/lib/api'
 import {
-  ArrowLeft, Clock, AlertTriangle, RefreshCw,
+  Clock, AlertTriangle, RefreshCw,
   User, CheckCircle2, Loader2,
   FileText, Image as ImageIcon, Download, Paperclip,
-  Calendar, Upload,
+  Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud,
 } from 'lucide-react'
 import Link from 'next/link'
 import { RequestThread } from '@/components/tahi/request-thread'
@@ -14,6 +14,8 @@ import dynamic from 'next/dynamic'
 const TiptapEditor = dynamic(() => import('@/components/tahi/tiptap-editor').then(m => ({ default: m.TiptapEditor })), { ssr: false })
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
+import { Breadcrumb } from '@/components/tahi/breadcrumb'
+import { useToast } from '@/components/tahi/toast'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -64,6 +66,8 @@ interface Request {
   scopeFlagged: boolean
   isInternal: boolean
   tags: string
+  requestNumber: number | null
+  checklists: string
   createdAt: string
   updatedAt: string
   deliveredAt: string | null
@@ -97,6 +101,16 @@ interface TeamMemberOption {
   name: string
 }
 
+interface ChecklistItem {
+  label: string
+  done: boolean
+}
+
+interface Checklist {
+  title: string
+  items: ChecklistItem[]
+}
+
 interface RequestDetailProps {
   requestId: string
   isAdmin: boolean
@@ -117,7 +131,9 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
   const [editingDueDate, setEditingDueDate] = useState(false)
   const [dueDateInput, setDueDateInput] = useState('')
   const [conversationId, setConversationId] = useState<string | null>(null)
+  const [checklists, setChecklists] = useState<Checklist[]>([])
   const threadBottomRef = useRef<HTMLDivElement>(null)
+  const { showToast } = useToast()
 
   const apiBase = isAdmin ? apiPath('/api/admin') : apiPath('/api/portal')
 
@@ -148,6 +164,11 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
       if (reqRes.ok) {
         const data = await reqRes.json() as { request: Request }
         setRequest(data.request)
+        try {
+          setChecklists(JSON.parse(data.request.checklists || '[]') as Checklist[])
+        } catch {
+          setChecklists([])
+        }
       }
       if (msgRes.ok) {
         if (isAdmin) {
@@ -156,6 +177,11 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
         } else {
           const data = await msgRes.json() as { request: Request; messages: Message[] }
           setRequest(data.request)
+          try {
+            setChecklists(JSON.parse(data.request.checklists || '[]') as Checklist[])
+          } catch {
+            setChecklists([])
+          }
           setMessages(data.messages ?? [])
         }
       }
@@ -242,6 +268,16 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
     })
     await loadRequest()
     setStatusUpdating(false)
+    showToast(`Status updated to ${STATUS_LABELS[newStatus] ?? newStatus}`)
+  }
+
+  async function saveChecklists(updated: Checklist[]) {
+    setChecklists(updated)
+    await fetch(apiPath(`/api/admin/requests/${requestId}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checklists: JSON.stringify(updated) }),
+    })
   }
 
   async function handleScopeFlagToggle() {
@@ -357,17 +393,16 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
 
   return (
     <div className="flex flex-col" style={{ gap: '1.5rem', maxWidth: '68.75rem' }}>
-      {/* Back nav */}
-      <Link
-        href="/requests"
-        className="inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
-        style={{ color: 'var(--color-text-muted)', textDecoration: 'none', alignSelf: 'flex-start' }}
-        onMouseEnter={e => { e.currentTarget.style.color = BRAND }}
-        onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
-      >
-        <ArrowLeft size={15} />
-        Back to requests
-      </Link>
+      {/* Breadcrumb */}
+      <Breadcrumb
+        items={[
+          { label: 'Requests', href: '/requests' },
+          { label: request.requestNumber != null
+            ? `#${String(request.requestNumber).padStart(3, '0')} ${request.title}`
+            : request.title
+          },
+        ]}
+      />
 
       {/* Header card */}
       <div
@@ -425,6 +460,11 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
             className="text-2xl font-bold tracking-tight"
             style={{ color: 'var(--color-text)', margin: 0, lineHeight: 1.3 }}
           >
+            {request.requestNumber != null && (
+              <span className="font-mono" style={{ color: 'var(--color-text-subtle)', marginRight: '0.375rem' }}>
+                #{String(request.requestNumber).padStart(3, '0')}
+              </span>
+            )}
             {request.title}
           </h1>
 
@@ -583,6 +623,13 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
               />
             </div>
           </div>
+
+          {/* Checklists */}
+          <ChecklistsPanel
+            checklists={checklists}
+            onSave={saveChecklists}
+            isAdmin={isAdmin}
+          />
 
           {/* Files */}
           <FilesPanel
@@ -899,6 +946,322 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   )
 }
 
+// ---- Checklists Panel --------------------------------------------------------
+
+interface ChecklistsPanelProps {
+  checklists: Checklist[]
+  onSave: (updated: Checklist[]) => void
+  isAdmin: boolean
+}
+
+function ChecklistsPanel({ checklists, onSave, isAdmin }: ChecklistsPanelProps) {
+  const [newChecklistTitle, setNewChecklistTitle] = useState('')
+  const [addingChecklist, setAddingChecklist] = useState(false)
+  const [newItemLabels, setNewItemLabels] = useState<Record<number, string>>({})
+
+  function addChecklist() {
+    if (!newChecklistTitle.trim()) return
+    const updated = [...checklists, { title: newChecklistTitle.trim(), items: [] }]
+    onSave(updated)
+    setNewChecklistTitle('')
+    setAddingChecklist(false)
+  }
+
+  function removeChecklist(idx: number) {
+    const updated = checklists.filter((_, i) => i !== idx)
+    onSave(updated)
+  }
+
+  function toggleItem(checklistIdx: number, itemIdx: number) {
+    const updated = checklists.map((cl, ci) => {
+      if (ci !== checklistIdx) return cl
+      return {
+        ...cl,
+        items: cl.items.map((item, ii) =>
+          ii === itemIdx ? { ...item, done: !item.done } : item
+        ),
+      }
+    })
+    onSave(updated)
+  }
+
+  function addItem(checklistIdx: number) {
+    const label = (newItemLabels[checklistIdx] ?? '').trim()
+    if (!label) return
+    const updated = checklists.map((cl, ci) => {
+      if (ci !== checklistIdx) return cl
+      return { ...cl, items: [...cl.items, { label, done: false }] }
+    })
+    onSave(updated)
+    setNewItemLabels(prev => ({ ...prev, [checklistIdx]: '' }))
+  }
+
+  function removeItem(checklistIdx: number, itemIdx: number) {
+    const updated = checklists.map((cl, ci) => {
+      if (ci !== checklistIdx) return cl
+      return { ...cl, items: cl.items.filter((_, ii) => ii !== itemIdx) }
+    })
+    onSave(updated)
+  }
+
+  return (
+    <div
+      className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
+      style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+    >
+      <div
+        className="flex items-center justify-between"
+        style={{ padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}
+      >
+        <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+          <ListChecks size={14} style={{ color: 'var(--color-text-subtle)' }} />
+          Checklists
+          {checklists.length > 0 && (
+            <span
+              className="text-xs font-normal rounded-full"
+              style={{
+                padding: '0.0625rem 0.4375rem',
+                background: 'var(--color-bg-tertiary)',
+                color: 'var(--color-text-subtle)',
+              }}
+            >
+              {checklists.length}
+            </span>
+          )}
+        </h2>
+        {isAdmin && !addingChecklist && (
+          <button
+            type="button"
+            onClick={() => setAddingChecklist(true)}
+            className="flex items-center gap-1 text-xs font-medium transition-colors"
+            style={{
+              padding: '0.375rem 0.75rem',
+              borderRadius: 'var(--radius-button)',
+              border: '1px solid var(--color-brand)',
+              color: BRAND,
+              background: 'var(--color-bg)',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-50)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
+          >
+            <Plus size={12} />
+            Add Checklist
+          </button>
+        )}
+      </div>
+
+      {/* Add new checklist form */}
+      {addingChecklist && (
+        <div className="flex items-center gap-2" style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}>
+          <input
+            type="text"
+            value={newChecklistTitle}
+            onChange={e => setNewChecklistTitle(e.target.value)}
+            placeholder="Checklist title..."
+            autoFocus
+            className="flex-1 focus:outline-none"
+            style={{
+              padding: '0.375rem 0.5rem',
+              fontSize: '0.8125rem',
+              border: '1px solid var(--color-border)',
+              borderRadius: '0.25rem',
+              color: 'var(--color-text)',
+              background: 'var(--color-bg)',
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); addChecklist() }
+              if (e.key === 'Escape') setAddingChecklist(false)
+            }}
+          />
+          <button
+            type="button"
+            onClick={addChecklist}
+            className="text-xs font-semibold"
+            style={{
+              padding: '0.375rem 0.75rem',
+              background: BRAND,
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '0.25rem',
+              cursor: 'pointer',
+            }}
+          >
+            Add
+          </button>
+          <button
+            type="button"
+            onClick={() => { setAddingChecklist(false); setNewChecklistTitle('') }}
+            className="text-xs"
+            style={{
+              padding: '0.375rem',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--color-text-subtle)',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {checklists.length === 0 && !addingChecklist ? (
+        <div className="flex flex-col items-center justify-center text-center" style={{ padding: '2.5rem 1.5rem', gap: '0.375rem' }}>
+          <ListChecks size={18} style={{ color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }} />
+          <p className="text-sm" style={{ color: 'var(--color-text-subtle)' }}>No checklists yet.</p>
+        </div>
+      ) : (
+        <div>
+          {checklists.map((cl, ci) => {
+            const doneCount = cl.items.filter(i => i.done).length
+            const totalCount = cl.items.length
+            const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0
+
+            return (
+              <div
+                key={ci}
+                style={{ borderBottom: ci < checklists.length - 1 ? '1px solid var(--color-row-border)' : 'none' }}
+              >
+                {/* Checklist header */}
+                <div className="flex items-center justify-between" style={{ padding: '0.75rem 1.25rem' }}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{cl.title}</span>
+                    {totalCount > 0 && (
+                      <span className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+                        {doneCount}/{totalCount}
+                      </span>
+                    )}
+                  </div>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => removeChecklist(ci)}
+                      className="transition-colors"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem', color: 'var(--color-text-subtle)' }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-danger)' }}
+                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+                      aria-label="Remove checklist"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Progress bar */}
+                {totalCount > 0 && (
+                  <div style={{ padding: '0 1.25rem 0.5rem' }}>
+                    <div style={{ height: 4, borderRadius: 2, background: 'var(--color-bg-tertiary)', overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          height: '100%',
+                          width: `${progress}%`,
+                          background: progress === 100 ? 'var(--color-success)' : BRAND,
+                          borderRadius: 2,
+                          transition: 'width 0.2s',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Items */}
+                <div style={{ padding: '0 1.25rem 0.5rem' }}>
+                  {cl.items.map((item, ii) => (
+                    <div
+                      key={ii}
+                      className="flex items-center gap-2"
+                      style={{ padding: '0.25rem 0' }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleItem(ci, ii)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: 0,
+                          color: item.done ? BRAND : 'var(--color-text-subtle)',
+                          flexShrink: 0,
+                        }}
+                        aria-label={item.done ? 'Mark incomplete' : 'Mark complete'}
+                      >
+                        <CheckCircle2 size={16} style={{ opacity: item.done ? 1 : 0.4 }} />
+                      </button>
+                      <span
+                        className="text-sm flex-1"
+                        style={{
+                          color: item.done ? 'var(--color-text-subtle)' : 'var(--color-text)',
+                          textDecoration: item.done ? 'line-through' : 'none',
+                        }}
+                      >
+                        {item.label}
+                      </span>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => removeItem(ci, ii)}
+                          className="transition-colors"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.125rem', color: 'var(--color-text-subtle)', opacity: 0.5 }}
+                          onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.color = 'var(--color-danger)' }}
+                          onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+                          aria-label="Remove item"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add item */}
+                {isAdmin && (
+                  <div className="flex items-center gap-2" style={{ padding: '0.25rem 1.25rem 0.75rem' }}>
+                    <input
+                      type="text"
+                      value={newItemLabels[ci] ?? ''}
+                      onChange={e => setNewItemLabels(prev => ({ ...prev, [ci]: e.target.value }))}
+                      placeholder="Add item..."
+                      className="flex-1 focus:outline-none"
+                      style={{
+                        padding: '0.25rem 0.5rem',
+                        fontSize: '0.8125rem',
+                        border: '1px solid var(--color-border-subtle)',
+                        borderRadius: '0.25rem',
+                        color: 'var(--color-text)',
+                        background: 'var(--color-bg)',
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') { e.preventDefault(); addItem(ci) }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => addItem(ci)}
+                      className="flex items-center gap-1 text-xs transition-colors"
+                      style={{
+                        padding: '0.25rem 0.5rem',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: BRAND,
+                        fontWeight: 500,
+                      }}
+                    >
+                      <Plus size={12} />
+                      Add
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---- Files Panel -------------------------------------------------------------
 
 interface FilesPanelProps {
@@ -1042,6 +1405,30 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
                 {uploading ? 'Uploading...' : 'Upload'}
               </button>
             </>
+          )}
+          {files.length > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                files.forEach(f => {
+                  window.open(apiPath(`/api/uploads/serve?key=${encodeURIComponent(f.storageKey)}&download=1`), '_blank')
+                })
+              }}
+              className="flex items-center gap-1 text-xs font-medium transition-colors"
+              style={{
+                padding: '0.375rem 0.75rem',
+                borderRadius: 'var(--radius-button)',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-muted)',
+                background: 'var(--color-bg)',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-brand)'; e.currentTarget.style.color = 'var(--color-text)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.color = 'var(--color-text-muted)' }}
+            >
+              <DownloadCloud size={12} />
+              Download All
+            </button>
           )}
           <button
             type="button"

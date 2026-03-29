@@ -42,6 +42,16 @@ export function ClientList() {
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
 
+  // Listen for keyboard shortcut events
+  useEffect(() => {
+    function handleShortcut(e: Event) {
+      const detail = (e as CustomEvent).detail
+      if (detail === 'new-client') setDialogOpen(true)
+    }
+    window.addEventListener('tahi:shortcut', handleShortcut)
+    return () => window.removeEventListener('tahi:shortcut', handleShortcut)
+  }, [])
+
   // Local input state for debouncing
   const [searchInput, setSearchInput] = useState(search)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)

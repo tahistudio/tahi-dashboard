@@ -29,6 +29,7 @@ interface Request {
   assigneeId?: string | null
   updatedAt: string | null
   createdAt: string | null
+  requestNumber?: number | null
 }
 
 type ViewMode = 'list' | 'board'
@@ -247,6 +248,16 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [bulkCreateOpen, setBulkCreateOpen] = useState(false)
+
+  // Listen for keyboard shortcut events
+  useEffect(() => {
+    function handleShortcut(e: Event) {
+      const detail = (e as CustomEvent).detail
+      if (detail === 'new-request') setDialogOpen(true)
+    }
+    window.addEventListener('tahi:shortcut', handleShortcut)
+    return () => window.removeEventListener('tahi:shortcut', handleShortcut)
+  }, [])
   const [boardColumns, setBoardColumns] = useState<BoardColumn[]>(BOARD_COLS)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
@@ -702,6 +713,11 @@ function ListRow({
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
             {req.scopeFlagged && <AlertTriangle style={{ width: '0.875rem', height: '0.875rem', color: 'var(--color-danger)', flexShrink: 0 }} />}
+            {req.requestNumber != null && (
+              <span className="flex-shrink-0 font-mono font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
+                #{String(req.requestNumber).padStart(3, '0')}
+              </span>
+            )}
             <span className="font-medium truncate" style={{ fontSize: '0.9375rem', color: 'var(--color-text)' }}>{req.title}</span>
           </div>
           <StatusPill status={req.status} />
@@ -756,6 +772,11 @@ function ListRow({
         <div className="flex items-center gap-2 min-w-0" style={{ paddingRight: '0.75rem' }}>
           {req.scopeFlagged && (
             <AlertTriangle style={{ width: '0.875rem', height: '0.875rem', color: 'var(--color-danger)', flexShrink: 0 }} aria-label="Scope flagged" />
+          )}
+          {req.requestNumber != null && (
+            <span className="flex-shrink-0 font-mono font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
+              #{String(req.requestNumber).padStart(3, '0')}
+            </span>
           )}
           <span className="font-medium truncate" style={{ fontSize: '0.875rem', color: 'var(--color-text)' }}>
             {req.title}
