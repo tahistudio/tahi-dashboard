@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import {
-  ShoppingBag, Plus, RefreshCw, Tag, Loader2,
+  ShoppingBag, Plus, RefreshCw, Tag, Loader2, Ticket, Trash2,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 
@@ -20,6 +20,15 @@ interface ServiceItem {
   category: string | null
   createdAt: string
   updatedAt: string
+}
+
+interface CouponItem {
+  code: string
+  discountPercent: number
+  maxUses: number | null
+  usedCount: number
+  expiresAt: string | null
+  createdAt: string
 }
 
 // ---- Helpers -----------------------------------------------------------------
@@ -232,6 +241,8 @@ export function AdminServicesContent() {
         </div>
       )}
 
+      <CouponsSection />
+
       {showForm && (
         <CreateServiceDialog
           onClose={() => setShowForm(false)}
@@ -241,6 +252,385 @@ export function AdminServicesContent() {
           }}
         />
       )}
+    </div>
+  )
+}
+
+// ---- Coupons Section ---------------------------------------------------------
+
+function CouponsSection() {
+  const [coupons, setCoupons] = useState<CouponItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
+
+  const fetchCoupons = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/services/coupons'))
+      if (!res.ok) throw new Error('Failed')
+      const data = (await res.json()) as { items: CouponItem[] }
+      setCoupons(data.items ?? [])
+    } catch {
+      setCoupons([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchCoupons()
+  }, [fetchCoupons])
+
+  const handleDelete = async (code: string) => {
+    setDeleting(code)
+    try {
+      const res = await fetch(apiPath(`/api/admin/services/coupons?code=${encodeURIComponent(code)}`), {
+        method: 'DELETE',
+      })
+      if (res.ok) {
+        setCoupons(prev => prev.filter(c => c.code !== code))
+      }
+    } finally {
+      setDeleting(null)
+    }
+  }
+
+  const isExpired = (expiresAt: string | null): boolean => {
+    if (!expiresAt) return false
+    return new Date(expiresAt) < new Date()
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Ticket className="w-5 h-5 text-[var(--color-text-muted)]" aria-hidden="true" />
+          <h2 className="text-lg font-semibold text-[var(--color-text)]">Discount Coupons</h2>
+        </div>
+        <button
+          onClick={() => setShowForm(true)}
+          className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white transition-colors"
+          style={{
+            background: 'var(--color-brand)',
+            borderRadius: 'var(--radius-button)',
+            border: 'none',
+            cursor: 'pointer',
+            minHeight: '2.75rem',
+          }}
+        >
+          <Plus className="w-4 h-4" aria-hidden="true" />
+          Create Coupon
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="space-y-3">
+          {[1, 2].map(i => (
+            <div key={i} className="animate-pulse rounded-xl" style={{ height: '3.5rem', background: 'var(--color-bg-tertiary)' }} />
+          ))}
+        </div>
+      ) : coupons.length === 0 ? (
+        <div
+          className="flex flex-col items-center justify-center py-12 text-center bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl"
+        >
+          <Ticket className="w-8 h-8 text-[var(--color-text-subtle)] mb-2" aria-hidden="true" />
+          <p className="text-sm text-[var(--color-text-muted)]">No coupons yet. Create one to offer discounts.</p>
+        </div>
+      ) : (
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <th className="text-left text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider" style={{ padding: '0.75rem 1rem' }}>Code</th>
+                  <th className="text-left text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider" style={{ padding: '0.75rem 1rem' }}>Discount</th>
+                  <th className="text-left text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider hidden sm:table-cell" style={{ padding: '0.75rem 1rem' }}>Uses</th>
+                  <th className="text-left text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider hidden md:table-cell" style={{ padding: '0.75rem 1rem' }}>Expires</th>
+                  <th className="text-center text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider" style={{ padding: '0.75rem 1rem' }}>Status</th>
+                  <th className="text-right text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider" style={{ padding: '0.75rem 1rem' }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {coupons.map((coupon, i) => {
+                  const expired = isExpired(coupon.expiresAt)
+                  const exhausted = coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses
+                  const active = !expired && !exhausted
+
+                  return (
+                    <tr
+                      key={coupon.code}
+                      className="transition-colors hover:bg-[var(--color-bg-secondary)]"
+                      style={{
+                        borderBottom: i < coupons.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
+                      }}
+                    >
+                      <td style={{ padding: '0.75rem 1rem' }}>
+                        <span className="font-mono font-semibold text-[var(--color-text)]">{coupon.code}</span>
+                      </td>
+                      <td style={{ padding: '0.75rem 1rem' }}>
+                        <span className="font-semibold text-[var(--color-brand-dark)]">{coupon.discountPercent}%</span>
+                      </td>
+                      <td className="hidden sm:table-cell" style={{ padding: '0.75rem 1rem' }}>
+                        <span className="text-[var(--color-text-muted)]">
+                          {coupon.usedCount}{coupon.maxUses !== null ? ` / ${coupon.maxUses}` : ' (unlimited)'}
+                        </span>
+                      </td>
+                      <td className="hidden md:table-cell" style={{ padding: '0.75rem 1rem' }}>
+                        <span className="text-[var(--color-text-muted)]">
+                          {coupon.expiresAt
+                            ? new Date(coupon.expiresAt).toLocaleDateString()
+                            : 'Never'}
+                        </span>
+                      </td>
+                      <td className="text-center" style={{ padding: '0.75rem 1rem' }}>
+                        <span
+                          className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full"
+                          style={{
+                            background: active ? 'var(--color-success-bg, #f0fdf4)' : 'var(--color-bg-tertiary)',
+                            color: active ? 'var(--color-success, #4ade80)' : 'var(--color-text-subtle)',
+                          }}
+                        >
+                          {expired ? 'Expired' : exhausted ? 'Exhausted' : 'Active'}
+                        </span>
+                      </td>
+                      <td className="text-right" style={{ padding: '0.75rem 1rem' }}>
+                        <button
+                          onClick={() => handleDelete(coupon.code)}
+                          disabled={deleting === coupon.code}
+                          className="text-[var(--color-text-subtle)] hover:text-[var(--color-danger)] transition-colors"
+                          style={{ cursor: 'pointer', background: 'none', border: 'none' }}
+                          aria-label={`Delete coupon ${coupon.code}`}
+                        >
+                          {deleting === coupon.code ? (
+                            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                          ) : (
+                            <Trash2 className="w-4 h-4" aria-hidden="true" />
+                          )}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {showForm && (
+        <CreateCouponDialog
+          onClose={() => setShowForm(false)}
+          onCreated={() => {
+            setShowForm(false)
+            fetchCoupons()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ---- Create Coupon Dialog ----------------------------------------------------
+
+function CreateCouponDialog({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void
+  onCreated: () => void
+}) {
+  const [code, setCode] = useState('')
+  const [discountPercent, setDiscountPercent] = useState('')
+  const [maxUses, setMaxUses] = useState('')
+  const [expiresAt, setExpiresAt] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
+
+  const handleSubmit = async () => {
+    if (!code.trim()) {
+      setErrorMsg('Coupon code is required')
+      return
+    }
+    const pct = parseInt(discountPercent, 10)
+    if (!pct || pct < 1 || pct > 100) {
+      setErrorMsg('Discount must be between 1 and 100')
+      return
+    }
+
+    setCreating(true)
+    setErrorMsg('')
+
+    try {
+      const res = await fetch(apiPath('/api/admin/services/coupons'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: code.trim(),
+          discountPercent: pct,
+          maxUses: maxUses ? parseInt(maxUses, 10) : null,
+          expiresAt: expiresAt || null,
+        }),
+      })
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string }
+        throw new Error(data.error ?? 'Failed to create coupon')
+      }
+      onCreated()
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to create coupon')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0, 0, 0, 0.5)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="create-coupon-title"
+    >
+      <div
+        className="w-full max-w-md"
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          boxShadow: 'var(--shadow-lg)',
+          padding: '1.5rem',
+        }}
+      >
+        <h2 id="create-coupon-title" className="text-lg font-semibold text-[var(--color-text)] mb-4">
+          Create Coupon
+        </h2>
+
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="coupon-code" className="block text-sm font-medium text-[var(--color-text)] mb-1">Coupon Code</label>
+            <input
+              id="coupon-code"
+              type="text"
+              value={code}
+              onChange={e => setCode(e.target.value.toUpperCase())}
+              placeholder="e.g. SAVE20"
+              className="w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] font-mono"
+              style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: 'var(--radius-input)',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                minHeight: '2.75rem',
+              }}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="coupon-discount" className="block text-sm font-medium text-[var(--color-text)] mb-1">Discount (%)</label>
+            <input
+              id="coupon-discount"
+              type="number"
+              min="1"
+              max="100"
+              value={discountPercent}
+              onChange={e => setDiscountPercent(e.target.value)}
+              placeholder="e.g. 20"
+              className="w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+              style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: 'var(--radius-input)',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                minHeight: '2.75rem',
+              }}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="coupon-max-uses" className="block text-sm font-medium text-[var(--color-text)] mb-1">Max Uses (optional)</label>
+            <input
+              id="coupon-max-uses"
+              type="number"
+              min="1"
+              value={maxUses}
+              onChange={e => setMaxUses(e.target.value)}
+              placeholder="Leave empty for unlimited"
+              className="w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+              style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: 'var(--radius-input)',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                minHeight: '2.75rem',
+              }}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="coupon-expires" className="block text-sm font-medium text-[var(--color-text)] mb-1">Expiry Date (optional)</label>
+            <input
+              id="coupon-expires"
+              type="date"
+              value={expiresAt}
+              onChange={e => setExpiresAt(e.target.value)}
+              className="w-full text-sm text-[var(--color-text)]"
+              style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: 'var(--radius-input)',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                minHeight: '2.75rem',
+              }}
+            />
+          </div>
+
+          {errorMsg && (
+            <div aria-live="polite" className="text-sm" style={{ color: 'var(--color-danger)' }}>
+              {errorMsg}
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium transition-colors"
+            style={{
+              color: 'var(--color-text-muted)',
+              background: 'var(--color-bg-secondary)',
+              borderRadius: 'var(--radius-button)',
+              border: '1px solid var(--color-border)',
+              cursor: 'pointer',
+              minHeight: '2.75rem',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={creating}
+            className="px-4 py-2 text-sm font-medium text-white transition-colors"
+            style={{
+              background: 'var(--color-brand)',
+              borderRadius: 'var(--radius-button)',
+              border: 'none',
+              cursor: creating ? 'not-allowed' : 'pointer',
+              opacity: creating ? 0.7 : 1,
+              minHeight: '2.75rem',
+            }}
+          >
+            {creating ? (
+              <span className="flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                Creating...
+              </span>
+            ) : (
+              'Create Coupon'
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
