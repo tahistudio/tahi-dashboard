@@ -31,6 +31,8 @@ import {
   Video,
   ExternalLink,
   Eye,
+  Tag,
+  Trash2,
 } from 'lucide-react'
 import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badge'
 import { TrackMeter } from '@/components/tahi/track-meter'
@@ -79,6 +81,7 @@ interface Organisation {
   healthStatus: string | null
   healthNote: string | null
   internalNotes: string | null
+  brands: string | null
   createdAt: string
   updatedAt: string
 }
@@ -311,7 +314,121 @@ function OverviewTab({
         )}
         {!subscription && <NoSubscriptionCard planType={org.planType} />}
         {org.healthNote && <HealthNoteCard note={org.healthNote} health={org.healthStatus} />}
+        <BrandsCard org={org} onUpdated={onUpdated} />
         <InternalNotesCard org={org} onUpdated={onUpdated} />
+      </div>
+    </div>
+  )
+}
+
+// ── Brands card ────────────────────────────────────────────────────────────────
+
+function BrandsCard({ org, onUpdated }: { org: Organisation; onUpdated: () => void }) {
+  const [brands, setBrands] = useState<string[]>(() => {
+    try {
+      return JSON.parse(org.brands ?? '[]') as string[]
+    } catch {
+      return []
+    }
+  })
+  const [newBrand, setNewBrand] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const saveBrands = async (updated: string[]) => {
+    setSaving(true)
+    try {
+      await fetch(apiPath(`/api/admin/clients/${org.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brands: JSON.stringify(updated) }),
+      })
+      setBrands(updated)
+      onUpdated()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const addBrand = () => {
+    const name = newBrand.trim()
+    if (!name || brands.includes(name)) return
+    const updated = [...brands, name]
+    setNewBrand('')
+    saveBrands(updated)
+  }
+
+  const removeBrand = (name: string) => {
+    saveBrands(brands.filter(b => b !== name))
+  }
+
+  return (
+    <div
+      className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl"
+      style={{ padding: '1.25rem' }}
+    >
+      <div className="flex items-center gap-2 mb-3">
+        <Tag className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+        <h3 className="text-sm font-semibold text-[var(--color-text)]">Brands</h3>
+      </div>
+
+      {brands.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          {brands.map(b => (
+            <span
+              key={b}
+              className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full"
+              style={{
+                background: 'var(--color-brand-50)',
+                color: 'var(--color-brand-dark)',
+              }}
+            >
+              {b}
+              <button
+                onClick={() => removeBrand(b)}
+                disabled={saving}
+                className="hover:text-[var(--color-danger)] transition-colors"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                aria-label={`Remove brand ${b}`}
+              >
+                <Trash2 className="w-3 h-3" aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={newBrand}
+          onChange={e => setNewBrand(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') addBrand() }}
+          placeholder="Add brand name..."
+          className="flex-1 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+          style={{
+            padding: '0.375rem 0.5rem',
+            borderRadius: 'var(--radius-input)',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg)',
+            minHeight: '2rem',
+          }}
+        />
+        <button
+          onClick={addBrand}
+          disabled={!newBrand.trim() || saving}
+          className="text-xs font-medium text-white transition-colors"
+          style={{
+            background: 'var(--color-brand)',
+            borderRadius: 'var(--radius-button)',
+            border: 'none',
+            cursor: !newBrand.trim() || saving ? 'not-allowed' : 'pointer',
+            opacity: !newBrand.trim() || saving ? 0.5 : 1,
+            padding: '0.375rem 0.75rem',
+            minHeight: '2rem',
+          }}
+        >
+          {saving ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : 'Add'}
+        </button>
       </div>
     </div>
   )

@@ -98,11 +98,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     healthStatus: string
     healthNote: string
     internalNotes: string
+    brands: string
   }>
 
   const now = new Date().toISOString()
   const patch: Record<string, unknown> = { updatedAt: now }
-  const allowed = ['name', 'website', 'industry', 'planType', 'status', 'healthStatus', 'healthNote', 'internalNotes'] as const
+  const allowed = ['name', 'website', 'industry', 'planType', 'status', 'healthStatus', 'healthNote', 'internalNotes', 'brands'] as const
   for (const key of allowed) {
     if (key in body) patch[key] = body[key] ?? null
   }

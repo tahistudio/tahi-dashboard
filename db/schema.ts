@@ -45,6 +45,8 @@ export const organisations = sqliteTable('organisations', {
   preferredCurrency: text('preferred_currency').default('USD'),
   convertedFromProjectId: text('converted_from_project_id'),
   internalNotes: text('internal_notes'),
+  // JSON array of brand names, e.g. ["Brand A", "Brand B"]
+  brands: text('brands').default('[]'),
   ...timestamps,
 }, (table) => [
   index('idx_orgs_status').on(table.status),
