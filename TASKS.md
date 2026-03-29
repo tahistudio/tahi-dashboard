@@ -446,3 +446,30 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T264 - Persist view preferences: save preferred request view (list/board), active filters, sort order to localStorage per user -- [FE] — [PM] 2026-03-28
 - [x] T265 - Searchable dropdown component: create a reusable components/tahi/searchable-select.tsx for all entity pickers (clients, team members, requests) -- [FE + UIUX] -- [PM] 2026-03-28
 - [x] T266 - Autocomplete in all forms: wire searchable-select into request creation, time logging, invoice creation, assignment dropdowns -- [FE] — [PM] 2026-03-28
+
+---
+
+## ManyRequests Feature Parity + Product Enhancements (2026-03-29)
+
+### Missing from ManyRequests reference
+- [ ] T267 - Workload view: calendar grid showing team member capacity per day (rows = team members, columns = days, colored bars = hours) -- [FE + BE]
+- [ ] T268 - Request numbering: sequential request numbers (#001, #002) displayed on request cards and detail. Add a `requestNumber` integer column or compute from creation order -- [BE + FE]
+- [ ] T269 - Services catalogue: admin page to create/manage services with name, price, currency, recurring toggle. Clients see available services when submitting requests -- [FE + BE]
+- [ ] T270 - Discount coupons: admin can create coupon codes for services -- [BE]
+- [ ] T271 - Brands per org: sub-identities under a client org (eg separate brand names for one company group) -- [FE + BE]
+- [ ] T272 - "Following" on requests: watch a request and receive notifications on changes -- [FE + BE]
+- [ ] T273 - Message deletion: "This message has been removed" indicator instead of hard delete -- [FE + BE]
+- [ ] T274 - Checklists per request: multiple titled checklists with checkbox items on request detail -- [FE + BE]
+- [ ] T275 - "Download all files" button on request detail files section -- [FE]
+- [ ] T276 - Avg response time report: per team member, exportable CSV -- [FE + BE]
+- [ ] T277 - Portal branding settings: custom logo upload (light + dark), favicon, primary color picker, sidebar color picker -- [FE + BE]
+- [ ] T278 - Modules toggle: enable/disable major features (requests, users, billing, messaging) from settings -- [FE + BE]
+
+### Product enhancements
+- [ ] T279 - Track capacity upsell cards: greyed-out cards for unavailable tracks with upgrade CTA. Show what the client could unlock. -- [FE + UIUX]
+- [ ] T280 - Interactive product tour: tooltip walkthrough highlighting key UI elements for new users, stored completion in localStorage -- [FE]
+- [ ] T281 - AI request assistant: suggest estimated hours, priority, and steps from request title/description (Claude API stub) -- [BE + FE]
+- [ ] T282 - Breadcrumb navigation: add to request detail, client detail, invoice detail pages -- [FE]
+- [ ] T283 - Success toast notifications: show after creating request, invoice, client, time entry -- [FE]
+- [ ] T284 - Keyboard shortcuts: N for new request, C for new client, / for search -- [FE]
+- [ ] T285 - Revenue trend chart on overview: line chart showing MRR over last 6 months -- [FE + BE]
