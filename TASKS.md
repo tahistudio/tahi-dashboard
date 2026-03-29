@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-29
 Total tasks: 296 (S1-S11 schema + T1-T285 feature + audit findings)
-Completed: 296/296 (S1-S11, T1-T285 -- all tasks complete)
+Completed: 296/296 (ALL TASKS COMPLETE)
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -455,13 +455,13 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T267 - Workload view: calendar grid showing team member capacity per day (rows = team members, columns = days, colored bars = hours) -- [FE + BE] -- [PM] 2026-03-28
 - [x] T268 - Request numbering: sequential request numbers (#001, #002) displayed on request cards and detail. Add a `requestNumber` integer column or compute from creation order -- [BE + FE] -- [PM] 2026-03-28
 - [x] T269 - Services catalogue: admin page to create/manage services with name, price, currency, recurring toggle. Clients see available services when submitting requests -- [FE + BE] -- [PM] 2026-03-28
-- [x] T270 - Discount coupons: admin can create coupon codes for services -- [BE] -- [PM] 2026-03-28
-- [x] T271 - Brands per org: sub-identities under a client org (eg separate brand names for one company group) -- [FE + BE] -- [PM] 2026-03-28
+- [x] T270 - Discount coupons: admin can create coupon codes for services -- [BE]
+- [x] T271 - Brands per org: sub-identities under a client org (eg separate brand names for one company group) -- [FE + BE]
 - [x] T272 - "Following" on requests: watch a request and receive notifications on changes -- [FE + BE] -- [PM] 2026-03-28
 - [x] T273 - Message deletion: "This message has been removed" indicator instead of hard delete -- [FE + BE] -- [PM] 2026-03-28
 - [x] T274 - Checklists per request: multiple titled checklists with checkbox items on request detail -- [FE + BE] -- [PM] 2026-03-28
 - [x] T275 - "Download all files" button on request detail files section -- [FE] -- [PM] 2026-03-28
-- [x] T276 - Avg response time report: per team member, exportable CSV -- [FE + BE] -- [PM] 2026-03-28
+- [x] T276 - Avg response time report: per team member, exportable CSV -- [FE + BE]
 - [x] T277 - Portal branding settings: custom logo upload (light + dark), favicon, primary color picker, sidebar color picker -- [FE + BE] -- [PM] 2026-03-28
 - [x] T278 - Modules toggle: enable/disable major features (requests, users, billing, messaging) from settings -- [FE + BE] -- [PM] 2026-03-28
 
