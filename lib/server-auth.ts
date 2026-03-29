@@ -55,6 +55,19 @@ function getClerkClient() {
  * were not forwarded from the edge middleware worker.
  */
 export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResult> {
+  // API key auth: for MCP server and service-to-service calls
+  const authHeader = req.headers.get('authorization')
+  if (authHeader?.startsWith('Bearer ') && process.env.TAHI_API_TOKEN) {
+    const token = authHeader.slice(7)
+    if (token === process.env.TAHI_API_TOKEN) {
+      return {
+        userId: 'api-service',
+        orgId: process.env.NEXT_PUBLIC_TAHI_ORG_ID ?? null,
+        sessionId: null,
+      }
+    }
+  }
+
   // Fast path: try the standard auth() : works when middleware headers ARE forwarded
   try {
     const a = await auth()
