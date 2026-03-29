@@ -231,7 +231,7 @@ export function ReportsContent() {
             Requests by Status
           </h3>
           {statusChartData.length === 0 ? (
-            <p className="text-sm text-[var(--color-text-muted)]">No requests yet.</p>
+            <p className="text-sm text-[var(--color-text-muted)]">Data will appear once you have requests and clients.</p>
           ) : (
             <ResponsiveContainer width="100%" height={240}>
               <PieChart>
@@ -274,7 +274,7 @@ export function ReportsContent() {
             Monthly Request Volume
           </h3>
           {monthlyChartData.length === 0 ? (
-            <p className="text-sm text-[var(--color-text-muted)]">No data yet.</p>
+            <p className="text-sm text-[var(--color-text-muted)]">Data will appear once you have requests and clients.</p>
           ) : (
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={monthlyChartData}>
