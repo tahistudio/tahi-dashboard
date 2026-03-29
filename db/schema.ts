@@ -90,6 +90,8 @@ export const teamMembers = sqliteTable('team_members', {
   isContractor: integer('is_contractor', { mode: 'boolean' }).default(false),
   slackUserId: text('slack_user_id'),
   avatarUrl: text('avatar_url'),
+  reportsToId: text('reports_to_id'),
+  department: text('department'),
   ...timestamps,
 })
 
@@ -807,6 +809,103 @@ export const services = sqliteTable('services', {
 })
 
 // ============================================================
+// CRM: PIPELINE STAGES
+// ============================================================
+
+export const pipelineStages = sqliteTable('pipeline_stages', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
+  slug: text('slug').notNull(),
+  probability: integer('probability').notNull().default(0),
+  position: integer('position').notNull().default(0),
+  colour: text('colour'),
+  isDefault: integer('is_default').notNull().default(0),
+  isClosedWon: integer('is_closed_won').notNull().default(0),
+  isClosedLost: integer('is_closed_lost').notNull().default(0),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+})
+
+// ============================================================
+// CRM: DEALS
+// ============================================================
+
+export const deals = sqliteTable('deals', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  title: text('title').notNull(),
+  orgId: text('org_id').references(() => organisations.id, { onDelete: 'set null' }),
+  stageId: text('stage_id').notNull().references(() => pipelineStages.id),
+  ownerId: text('owner_id').references(() => teamMembers.id),
+  value: integer('value').notNull().default(0),
+  currency: text('currency').notNull().default('NZD'),
+  valueNzd: integer('value_nzd').notNull().default(0),
+  source: text('source'),
+  estimatedHoursPerWeek: integer('estimated_hours_per_week').default(0),
+  expectedCloseDate: text('expected_close_date'),
+  closedAt: text('closed_at'),
+  closeReason: text('close_reason'),
+  notes: text('notes'),
+  ...timestamps,
+}, (table) => [
+  index('idx_deals_org').on(table.orgId),
+  index('idx_deals_stage').on(table.stageId),
+  index('idx_deals_owner').on(table.ownerId),
+])
+
+// ============================================================
+// CRM: DEAL CONTACTS (Junction)
+// ============================================================
+
+export const dealContacts = sqliteTable('deal_contacts', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  dealId: text('deal_id').notNull().references(() => deals.id, { onDelete: 'cascade' }),
+  contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
+  role: text('role'),
+})
+
+// ============================================================
+// CRM: ACTIVITIES
+// ============================================================
+
+export const activities = sqliteTable('activities', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  type: text('type').notNull(),
+  title: text('title').notNull(),
+  description: text('description'),
+  dealId: text('deal_id').references(() => deals.id, { onDelete: 'cascade' }),
+  orgId: text('org_id').references(() => organisations.id, { onDelete: 'cascade' }),
+  contactId: text('contact_id').references(() => contacts.id, { onDelete: 'set null' }),
+  createdById: text('created_by_id').notNull(),
+  scheduledAt: text('scheduled_at'),
+  completedAt: text('completed_at'),
+  durationMinutes: integer('duration_minutes'),
+  outcome: text('outcome'),
+  ...timestamps,
+}, (table) => [
+  index('idx_activities_deal').on(table.dealId),
+  index('idx_activities_org').on(table.orgId),
+  index('idx_activities_contact').on(table.contactId),
+])
+
+// ============================================================
+// PLANNED ROLES (Hiring pipeline)
+// ============================================================
+
+export const plannedRoles = sqliteTable('planned_roles', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  title: text('title').notNull(),
+  department: text('department'),
+  priority: text('priority').notNull().default('medium'),
+  description: text('description'),
+  reportsToId: text('reports_to_id').references(() => teamMembers.id),
+  status: text('status').notNull().default('planned'),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+})
+
+// ============================================================
 // TYPE EXPORTS
 // ============================================================
 
@@ -852,3 +951,12 @@ export type NewScheduledCall = typeof scheduledCalls.$inferInsert
 export type CaseStudySubmission = typeof caseStudySubmissions.$inferSelect
 export type Service = typeof services.$inferSelect
 export type NewService = typeof services.$inferInsert
+export type PipelineStage = typeof pipelineStages.$inferSelect
+export type NewPipelineStage = typeof pipelineStages.$inferInsert
+export type Deal = typeof deals.$inferSelect
+export type NewDeal = typeof deals.$inferInsert
+export type DealContact = typeof dealContacts.$inferSelect
+export type Activity = typeof activities.$inferSelect
+export type NewActivity = typeof activities.$inferInsert
+export type PlannedRole = typeof plannedRoles.$inferSelect
+export type NewPlannedRole = typeof plannedRoles.$inferInsert

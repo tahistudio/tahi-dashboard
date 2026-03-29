@@ -148,10 +148,10 @@ export function ClientDetail({ clientId }: { clientId: string }) {
   const { org, contacts, subscription, tracks, recentRequests } = data
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col min-h-0">
       {/* ── Header ── */}
       <div className="border-b border-[var(--color-border)] bg-[var(--color-bg)]">
-        <div className="px-4 pt-4 pb-0 md:px-6 md:pt-6">
+        <div className="pb-0">
           {/* Breadcrumb */}
           <div style={{ marginBottom: '0.75rem' }}>
             <Breadcrumb items={[{ label: 'Clients', href: '/clients' }, { label: org.name }]} />
@@ -212,7 +212,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
           )}
 
           {/* Tab nav */}
-          <nav className="flex gap-0 -mb-px overflow-x-auto scrollbar-hide" style={{ WebkitOverflowScrolling: 'touch' }}>
+          <nav className="flex gap-0 border-b border-[var(--color-border)] overflow-x-auto scrollbar-hide" style={{ WebkitOverflowScrolling: 'touch' }}>
             {TABS.map(tab => {
               const Icon = tab.icon
               const isActive = activeTab === tab.id
@@ -221,9 +221,9 @@ export function ClientDetail({ clientId }: { clientId: string }) {
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
-                    'flex items-center gap-1.5 px-3 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex-shrink-0 md:px-4',
+                    'flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex-shrink-0 -mb-px',
                     isActive
-                      ? 'border-[var(--color-brand)] text-[var(--color-brand)]'
+                      ? 'border-[var(--color-brand)] text-[var(--color-brand)] bg-[var(--color-brand-50)]'
                       : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border)]'
                   )}
                   style={{ minHeight: '2.75rem' }}
@@ -238,7 +238,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
       </div>
 
       {/* ── Tab content ── */}
-      <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="flex-1 overflow-auto py-6 space-y-6">
         {activeTab === 'overview' && (
           <OverviewTab
             org={org}
