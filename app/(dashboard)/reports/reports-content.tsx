@@ -110,7 +110,7 @@ export function ReportsContent() {
                 background: 'var(--color-bg)',
                 borderRadius: 'var(--radius-card)',
                 border: '1px solid var(--color-border)',
-                padding: '1.25rem',
+                padding: '1.5rem',
                 height: '6rem',
               }}
             >
@@ -223,7 +223,7 @@ export function ReportsContent() {
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-card)',
             border: '1px solid var(--color-border)',
-            padding: '1.25rem',
+            padding: '1.5rem',
           }}
         >
           <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -266,7 +266,7 @@ export function ReportsContent() {
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-card)',
             border: '1px solid var(--color-border)',
-            padding: '1.25rem',
+            padding: '1.5rem',
           }}
         >
           <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -320,7 +320,7 @@ export function ReportsContent() {
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-card)',
             border: '1px solid var(--color-border)',
-            padding: '1.25rem',
+            padding: '1.5rem',
           }}
         >
           <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -379,7 +379,7 @@ export function ReportsContent() {
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-card)',
             border: '1px solid var(--color-border)',
-            padding: '1.25rem',
+            padding: '1.5rem',
           }}
         >
           <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -443,15 +443,15 @@ function SummaryCard({
         background: 'var(--color-bg)',
         borderRadius: 'var(--radius-card)',
         border: '1px solid var(--color-border)',
-        padding: '1.25rem',
+        padding: '1.5rem',
       }}
     >
       <div className="flex items-center gap-3">
         <div
           className="flex items-center justify-center flex-shrink-0"
           style={{
-            width: '2.5rem',
-            height: '2.5rem',
+            width: '2.75rem',
+            height: '2.75rem',
             borderRadius: 'var(--radius-leaf-sm)',
             background: colors.bg,
             color: colors.color,
@@ -483,7 +483,7 @@ function StatCard({
         background: 'var(--color-bg)',
         borderRadius: 'var(--radius-card)',
         border: '1px solid var(--color-border)',
-        padding: '1rem',
+        padding: '1.5rem',
       }}
     >
       <div className="flex items-center gap-2 mb-1">

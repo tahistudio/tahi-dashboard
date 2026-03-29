@@ -8,7 +8,6 @@ import { SearchableSelect } from '@/components/tahi/searchable-select'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const BRAND     = 'var(--color-brand)'
 const BRAND_HEX = '#5A824E'   // keep one hex only for box-shadow alpha
 
 // ── Types ──────────────────────────────────────────────────────────────────────

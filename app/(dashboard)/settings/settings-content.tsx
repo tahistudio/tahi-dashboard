@@ -242,8 +242,9 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
                     >
                       <div className="flex items-start gap-3">
                         <div
-                          className="w-10 h-10 flex items-center justify-center rounded-lg flex-shrink-0"
+                          className="w-10 h-10 flex items-center justify-center flex-shrink-0"
                           style={{
+                            borderRadius: 'var(--radius-leaf-sm)',
                             background: isConnected ? 'var(--color-brand-50)' : 'var(--color-bg-tertiary)',
                             color: isConnected ? 'var(--color-brand)' : 'var(--color-text-muted)',
                           }}
@@ -258,8 +259,8 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
                             <span
                               className="text-xs px-2 py-0.5 rounded-full font-medium"
                               style={{
-                                background: isConnected ? '#f0fdf4' : 'var(--color-bg-tertiary)',
-                                color: isConnected ? '#16a34a' : 'var(--color-text-muted)',
+                                background: isConnected ? 'var(--color-success-bg)' : 'var(--color-bg-tertiary)',
+                                color: isConnected ? 'var(--color-success)' : 'var(--color-text-muted)',
                               }}
                             >
                               {isConnected ? 'Connected' : 'Not Connected'}

@@ -403,7 +403,7 @@ function AccessPanel({
         ) : (
           <div className="px-6 pb-6 space-y-4">
             {error && (
-              <div className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg" role="alert" aria-live="polite">
+              <div className="text-sm px-3 py-2 rounded-lg" role="alert" aria-live="polite" style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}>
                 {error}
               </div>
             )}
@@ -692,7 +692,7 @@ export function TeamContent() {
                         </span>
                       ) : null}
                       {member.isContractor && (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                        <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--color-warning-bg)', color: 'var(--color-warning)', border: '1px solid var(--color-warning)' }}>
                           Contractor
                         </span>
                       )}

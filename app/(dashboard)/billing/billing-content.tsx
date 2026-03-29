@@ -215,11 +215,11 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
 
 function InvoiceStatusBadge({ status }: { status: string }) {
   const config: Record<string, { bg: string; text: string }> = {
-    paid: { bg: '#f0fdf4', text: '#16a34a' },
-    sent: { bg: '#eff6ff', text: '#2563eb' },
-    viewed: { bg: '#eff6ff', text: '#2563eb' },
+    paid: { bg: 'var(--color-success-bg)', text: 'var(--color-success)' },
+    sent: { bg: 'var(--status-submitted-bg)', text: 'var(--status-submitted-text)' },
+    viewed: { bg: 'var(--status-submitted-bg)', text: 'var(--status-submitted-text)' },
     draft: { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)' },
-    overdue: { bg: '#fef2f2', text: '#dc2626' },
+    overdue: { bg: 'var(--color-danger-bg)', text: 'var(--color-danger)' },
     written_off: { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-subtle)' },
   }
 

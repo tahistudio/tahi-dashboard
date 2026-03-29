@@ -24,12 +24,12 @@ interface Invoice {
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const STATUS_CFG: Record<string, { label: string; bg: string; text: string }> = {
-  draft:        { label: 'Draft',    bg: '#f3f4f6', text: '#4b5563' },
-  sent:         { label: 'Sent',     bg: '#eff6ff', text: '#1d4ed8' },
-  viewed:       { label: 'Viewed',   bg: '#eff6ff', text: '#1d4ed8' },
-  overdue:      { label: 'Overdue',  bg: '#fef2f2', text: '#dc2626' },
-  paid:         { label: 'Paid',     bg: '#f0fdf4', text: '#16a34a' },
-  written_off:  { label: 'Written Off', bg: '#f3f4f6', text: '#6b7280' },
+  draft:        { label: 'Draft',    bg: 'var(--status-draft-bg)', text: 'var(--status-draft-text)' },
+  sent:         { label: 'Sent',     bg: 'var(--status-submitted-bg)', text: 'var(--status-submitted-text)' },
+  viewed:       { label: 'Viewed',   bg: 'var(--status-submitted-bg)', text: 'var(--status-submitted-text)' },
+  overdue:      { label: 'Overdue',  bg: 'var(--color-danger-bg)', text: 'var(--color-danger)' },
+  paid:         { label: 'Paid',     bg: 'var(--color-success-bg)', text: 'var(--color-success)' },
+  written_off:  { label: 'Written Off', bg: 'var(--status-archived-bg)', text: 'var(--status-archived-text)' },
 }
 
 const FILTER_TABS = [
@@ -152,7 +152,7 @@ function CreateInvoiceModal({
     >
       <div
         style={{
-          background: 'white', borderRadius: 12, padding: '1.75rem',
+          background: 'var(--color-bg)', borderRadius: '0.75rem', padding: '1.75rem',
           width: '100%', maxWidth: '30rem', maxHeight: '90vh', overflowY: 'auto',
           boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
         }}
@@ -163,7 +163,7 @@ function CreateInvoiceModal({
         {error && (
           <div
             aria-live="polite"
-            style={{ background: 'var(--color-danger-bg)', border: '1px solid #fecaca', borderRadius: 8, padding: '0.625rem 0.875rem', marginBottom: '1rem', color: 'var(--color-danger)', fontSize: '0.8125rem' }}
+            style={{ background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger)', borderRadius: '0.5rem', padding: '0.625rem 0.875rem', marginBottom: '1rem', color: 'var(--color-danger)', fontSize: '0.8125rem' }}
           >
             {error}
           </div>
@@ -181,7 +181,7 @@ function CreateInvoiceModal({
               onChange={e => setOrgId(e.target.value)}
               required
               style={{
-                padding: '0.5rem 0.75rem', borderRadius: 8, fontSize: '0.875rem',
+                padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
                 border: '1px solid var(--color-border)', outline: 'none',
                 color: 'var(--color-text)', background: 'var(--color-bg)',
               }}
@@ -199,7 +199,7 @@ function CreateInvoiceModal({
               onChange={e => setDescription(e.target.value)}
               required
               style={{
-                padding: '0.5rem 0.75rem', borderRadius: 8, fontSize: '0.875rem',
+                padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
                 border: '1px solid var(--color-border)', outline: 'none',
                 color: 'var(--color-text)', background: 'var(--color-bg)',
               }}
@@ -218,7 +218,7 @@ function CreateInvoiceModal({
                 value={quantity}
                 onChange={e => setQuantity(e.target.value)}
                 style={{
-                  padding: '0.5rem 0.75rem', borderRadius: 8, fontSize: '0.875rem',
+                  padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
                   border: '1px solid var(--color-border)', outline: 'none',
                   color: 'var(--color-text)', background: 'var(--color-bg)',
                 }}
@@ -238,7 +238,7 @@ function CreateInvoiceModal({
                 onChange={e => setUnitAmount(e.target.value)}
                 required
                 style={{
-                  padding: '0.5rem 0.75rem', borderRadius: 8, fontSize: '0.875rem',
+                  padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
                   border: '1px solid var(--color-border)', outline: 'none',
                   color: 'var(--color-text)', background: 'var(--color-bg)',
                 }}
@@ -255,7 +255,7 @@ function CreateInvoiceModal({
               value={dueDate}
               onChange={e => setDueDate(e.target.value)}
               style={{
-                padding: '0.5rem 0.75rem', borderRadius: 8, fontSize: '0.875rem',
+                padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
                 border: '1px solid var(--color-border)', outline: 'none',
                 color: 'var(--color-text)', background: 'var(--color-bg)',
               }}
@@ -272,7 +272,7 @@ function CreateInvoiceModal({
               value={notes}
               onChange={e => setNotes(e.target.value)}
               style={{
-                padding: '0.5rem 0.75rem', borderRadius: 8, fontSize: '0.875rem',
+                padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
                 border: '1px solid var(--color-border)', outline: 'none',
                 color: 'var(--color-text)', background: 'var(--color-bg)',
                 resize: 'vertical',
@@ -284,9 +284,9 @@ function CreateInvoiceModal({
               type="button"
               onClick={onClose}
               style={{
-                padding: '0.5rem 1rem', borderRadius: 8, fontSize: '0.875rem', fontWeight: 500,
-                border: '1px solid var(--color-border)', background: 'white',
-                color: 'var(--color-text)', cursor: 'pointer',
+                padding: '0.5rem 1rem', borderRadius: '0.5rem', fontSize: '0.875rem', fontWeight: 500,
+                border: '1px solid var(--color-border)', background: 'var(--color-bg)',
+                color: 'var(--color-text)', cursor: 'pointer', minHeight: '2.75rem',
               }}
             >
               Cancel
@@ -295,9 +295,9 @@ function CreateInvoiceModal({
               type="submit"
               disabled={saving}
               style={{
-                padding: '0.5rem 1.25rem', borderRadius: 8, fontSize: '0.875rem', fontWeight: 600,
-                border: 'none', background: saving ? '#9ca3af' : 'var(--color-brand)',
-                color: 'white', cursor: saving ? 'not-allowed' : 'pointer',
+                padding: '0.5rem 1.25rem', borderRadius: '0.5rem', fontSize: '0.875rem', fontWeight: 600,
+                border: 'none', background: saving ? 'var(--color-text-subtle)' : 'var(--color-brand)',
+                color: 'white', cursor: saving ? 'not-allowed' : 'pointer', minHeight: '2.75rem',
               }}
             >
               {saving ? 'Creating...' : 'Create Invoice'}
@@ -433,8 +433,8 @@ export function InvoiceList({ isAdmin }: InvoiceListProps) {
       {/* Table */}
       <div
         style={{
-          background: 'white',
-          borderRadius: 12,
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
           border: '1px solid var(--color-border)',
           overflow: 'hidden',
         }}
@@ -510,7 +510,7 @@ export function InvoiceList({ isAdmin }: InvoiceListProps) {
                     <td style={{ padding: '0.875rem 1rem' }}>
                       <StatusBadge status={inv.status} dueDate={inv.dueDate} />
                     </td>
-                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: isOverdue(inv.dueDate, inv.status) ? '#dc2626' : 'var(--color-text-muted)' }}>
+                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: isOverdue(inv.dueDate, inv.status) ? 'var(--color-danger)' : 'var(--color-text-muted)' }}>
                       {formatDate(inv.dueDate)}
                     </td>
                     <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>

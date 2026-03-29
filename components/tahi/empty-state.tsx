@@ -24,7 +24,7 @@ export function EmptyState({ icon, title, description, ctaLabel, onCtaClick, act
         style={{
           width: 56,
           height: 56,
-          borderRadius: '0 12px 0 12px',
+          borderRadius: 'var(--radius-leaf-sm)',
           background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
           marginBottom: '1rem',
         }}
@@ -41,7 +41,7 @@ export function EmptyState({ icon, title, description, ctaLabel, onCtaClick, act
         <button
           onClick={onCtaClick}
           className="flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-          style={{ padding: '0.5rem 1rem', background: 'var(--color-brand)', borderRadius: 'var(--radius-button, 0.5rem)', border: 'none', cursor: 'pointer' }}
+          style={{ padding: '0.5rem 1rem', background: 'var(--color-brand)', borderRadius: 'var(--radius-button, 0.5rem)', border: 'none', cursor: 'pointer', minHeight: '2.75rem' }}
         >
           {ctaLabel}
         </button>

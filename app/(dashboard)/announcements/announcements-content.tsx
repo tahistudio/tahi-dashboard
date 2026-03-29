@@ -41,10 +41,10 @@ function formatDate(dateStr: string | null): string {
 }
 
 const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
-  info: { bg: '#eff6ff', text: '#1d4ed8' },
-  warning: { bg: '#fff7ed', text: '#c2410c' },
-  success: { bg: '#f0fdf4', text: '#16a34a' },
-  maintenance: { bg: '#f3f4f6', text: '#4b5563' },
+  info: { bg: 'var(--color-info-bg)', text: 'var(--color-info)' },
+  warning: { bg: 'var(--color-warning-bg)', text: 'var(--color-warning)' },
+  success: { bg: 'var(--color-success-bg)', text: 'var(--color-success)' },
+  maintenance: { bg: 'var(--status-draft-bg)', text: 'var(--status-draft-text)' },
 }
 
 const TARGET_LABELS: Record<string, string> = {
@@ -134,7 +134,7 @@ function CreateAnnouncementModal({
 
         <form onSubmit={handleSubmit} className="px-6 pb-6 space-y-4">
           {error && (
-            <div className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg" role="alert" aria-live="polite">
+            <div className="text-sm px-3 py-2 rounded-lg" role="alert" aria-live="polite" style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}>
               {error}
             </div>
           )}
@@ -288,12 +288,12 @@ export function AnnouncementsContent() {
   function getStatus(a: Announcement): { label: string; color: string; bg: string } {
     const now = new Date().toISOString()
     if (!a.publishedAt) {
-      return { label: 'Draft', color: '#4b5563', bg: '#f3f4f6' }
+      return { label: 'Draft', color: 'var(--status-draft-text)', bg: 'var(--status-draft-bg)' }
     }
     if (a.expiresAt && a.expiresAt < now) {
-      return { label: 'Expired', color: '#6b7280', bg: '#f3f4f6' }
+      return { label: 'Expired', color: 'var(--status-archived-text)', bg: 'var(--status-archived-bg)' }
     }
-    return { label: 'Active', color: '#16a34a', bg: '#f0fdf4' }
+    return { label: 'Active', color: 'var(--color-success)', bg: 'var(--color-success-bg)' }
   }
 
   return (

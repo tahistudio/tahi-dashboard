@@ -501,10 +501,10 @@ function StatCard({ label, value, icon }: { label: string; value: string | numbe
   return (
     <div
       style={{
-        padding: '1rem',
+        padding: '1.5rem',
         background: 'var(--color-bg)',
         border: '1px solid var(--color-border)',
-        borderRadius: '0.75rem',
+        borderRadius: 'var(--radius-card)',
       }}
     >
       <div className="flex items-center justify-between mb-2">

@@ -158,7 +158,7 @@ function LogTimeModal({
 
   const inputStyle = {
     padding: '0.5rem 0.75rem',
-    borderRadius: 8,
+    borderRadius: '0.5rem',
     fontSize: '0.875rem',
     border: '1px solid var(--color-border)',
     outline: 'none',
@@ -191,7 +191,7 @@ function LogTimeModal({
         {error && (
           <div
             aria-live="polite"
-            style={{ background: 'var(--color-danger-bg)', border: '1px solid #fecaca', borderRadius: 8, padding: '0.625rem 0.875rem', marginBottom: '1rem', color: 'var(--color-danger)', fontSize: '0.8125rem' }}
+            style={{ background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger)', borderRadius: '0.5rem', padding: '0.625rem 0.875rem', marginBottom: '1rem', color: 'var(--color-danger)', fontSize: '0.8125rem' }}
           >
             {error}
           </div>
@@ -274,7 +274,7 @@ function LogTimeModal({
               disabled={saving}
               style={{
                 padding: '0.5rem 1.25rem', borderRadius: '0.5rem', fontSize: '0.875rem', fontWeight: 600,
-                border: 'none', background: saving ? '#9ca3af' : 'var(--color-brand)',
+                border: 'none', background: saving ? 'var(--color-text-subtle)' : 'var(--color-brand)',
                 color: 'white', cursor: saving ? 'not-allowed' : 'pointer',
               }}
             >
@@ -293,10 +293,10 @@ function SummaryCard({ icon, label, value }: { icon: React.ReactNode; label: str
   return (
     <div
       style={{
-        background: 'white',
+        background: 'var(--color-bg)',
         border: '1px solid var(--color-border)',
-        borderRadius: 12,
-        padding: '1.25rem 1.5rem',
+        borderRadius: 'var(--radius-card)',
+        padding: '1.5rem',
         display: 'flex',
         alignItems: 'center',
         gap: '1rem',
@@ -414,8 +414,8 @@ function ByClientView({
           <div
             key={group.orgId}
             style={{
-              background: 'white',
-              borderRadius: 12,
+              background: 'var(--color-bg)',
+              borderRadius: 'var(--radius-card)',
               border: '1px solid var(--color-border)',
               overflow: 'hidden',
             }}
@@ -466,7 +466,7 @@ function ByClientView({
                   <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>total</p>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#16a34a' }}>
+                  <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-success)' }}>
                     {formatHours(group.billableHours)}
                   </p>
                   <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>billable</p>
@@ -534,8 +534,8 @@ function ByClientView({
                                 borderRadius: 99,
                                 fontSize: '0.75rem',
                                 fontWeight: 500,
-                                background: entry.billable ? '#f0fdf4' : '#f3f4f6',
-                                color: entry.billable ? '#16a34a' : '#6b7280',
+                                background: entry.billable ? 'var(--color-success-bg)' : 'var(--status-draft-bg)',
+                                color: entry.billable ? 'var(--color-success)' : 'var(--color-text-muted)',
                               }}
                             >
                               {entry.billable ? 'Yes' : 'No'}
@@ -741,8 +741,8 @@ export function TimeList() {
       {viewTab === 'entries' && (
       <div
         style={{
-          background: 'white',
-          borderRadius: 12,
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
           border: '1px solid var(--color-border)',
           overflow: 'hidden',
         }}
@@ -831,8 +831,8 @@ export function TimeList() {
                           borderRadius: 99,
                           fontSize: '0.75rem',
                           fontWeight: 500,
-                          background: entry.billable ? '#f0fdf4' : '#f3f4f6',
-                          color: entry.billable ? '#16a34a' : '#6b7280',
+                          background: entry.billable ? 'var(--color-success-bg)' : 'var(--status-draft-bg)',
+                          color: entry.billable ? 'var(--color-success)' : 'var(--color-text-muted)',
                         }}
                       >
                         {entry.billable ? 'Billable' : 'Non-billable'}
@@ -844,7 +844,7 @@ export function TimeList() {
                     <td style={{ padding: '0.875rem 0.5rem', width: '2.5rem' }}>
                       <button
                         onClick={() => setDeleteTarget(entry.id)}
-                        className="p-1.5 rounded-lg hover:bg-red-50 text-[var(--color-text-subtle)] hover:text-red-500 transition-colors"
+                        className="p-1.5 rounded-lg hover:bg-[var(--color-danger-bg)] text-[var(--color-text-subtle)] hover:text-[var(--color-danger)] transition-colors"
                         aria-label="Delete time entry"
                         style={{ border: 'none', background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       >

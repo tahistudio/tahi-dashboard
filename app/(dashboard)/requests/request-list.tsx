@@ -397,7 +397,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
       <div
         className="overflow-hidden"
         style={{
-          background: 'white',
+          background: 'var(--color-bg)',
           border: '1px solid var(--color-border)',
           borderRadius: '0.75rem',
           boxShadow: 'var(--shadow-sm)',
@@ -447,7 +447,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
                 border: '1px solid var(--color-border)',
                 borderRadius: '0.5rem',
                 color: 'var(--color-text-muted)',
-                background: 'white',
+                background: 'var(--color-bg)',
                 cursor: 'pointer',
               }}
             >
@@ -471,7 +471,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
               border: '1px solid var(--color-border)',
               borderRadius: '0.5rem',
               color: 'var(--color-text-muted)',
-              background: 'white',
+              background: 'var(--color-bg)',
               cursor: 'pointer',
             }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-brand)'; e.currentTarget.style.color = 'var(--color-text)' }}

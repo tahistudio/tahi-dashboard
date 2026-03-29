@@ -1275,7 +1275,7 @@ function TimeEntryPanel({ requestId }: { requestId: string }) {
             fontWeight: 600,
             border: 'none',
             borderRadius: 'var(--radius-button)',
-            background: saving ? '#9ca3af' : 'var(--color-brand)',
+            background: saving ? 'var(--color-text-subtle)' : 'var(--color-brand)',
             color: 'white',
             cursor: saving ? 'not-allowed' : 'pointer',
           }}

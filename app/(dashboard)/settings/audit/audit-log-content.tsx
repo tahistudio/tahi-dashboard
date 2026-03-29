@@ -254,12 +254,12 @@ export function AuditLogContent() {
 
 function ActionBadge({ action }: { action: string }) {
   const colorMap: Record<string, { bg: string; text: string }> = {
-    created: { bg: '#f0fdf4', text: '#16a34a' },
-    updated: { bg: '#eff6ff', text: '#2563eb' },
-    deleted: { bg: '#fef2f2', text: '#dc2626' },
-    login: { bg: '#f0fdf4', text: '#16a34a' },
-    impersonated: { bg: '#fff7ed', text: '#ea580c' },
-    status_changed: { bg: '#eff6ff', text: '#2563eb' },
+    created: { bg: 'var(--color-success-bg)', text: 'var(--color-success)' },
+    updated: { bg: 'var(--color-info-bg)', text: 'var(--color-info)' },
+    deleted: { bg: 'var(--color-danger-bg)', text: 'var(--color-danger)' },
+    login: { bg: 'var(--color-success-bg)', text: 'var(--color-success)' },
+    impersonated: { bg: 'var(--color-warning-bg)', text: 'var(--color-warning)' },
+    status_changed: { bg: 'var(--color-info-bg)', text: 'var(--color-info)' },
   }
 
   const c = colorMap[action] ?? { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)' }

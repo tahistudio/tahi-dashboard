@@ -150,6 +150,7 @@ export function ConfirmDialog({
               color: 'var(--color-text)',
               cursor: loading ? 'not-allowed' : 'pointer',
               opacity: loading ? 0.5 : 1,
+              minHeight: '2.75rem',
             }}
           >
             {cancelLabel}
@@ -164,12 +165,13 @@ export function ConfirmDialog({
               fontSize: '0.875rem',
               fontWeight: 600,
               border: 'none',
-              background: loading ? '#9ca3af' : confirmBg,
+              background: loading ? 'var(--color-text-subtle)' : confirmBg,
               color: 'white',
               cursor: loading ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: '0.375rem',
+              minHeight: '2.75rem',
             }}
           >
             {loading && <Loader2 style={{ width: '0.875rem', height: '0.875rem' }} className="animate-spin" />}

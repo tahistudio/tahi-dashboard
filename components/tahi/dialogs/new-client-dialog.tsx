@@ -115,7 +115,7 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
           <div aria-live="polite">
             {error && (
-              <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-100 text-sm text-red-700">
+              <div className="px-3 py-2 rounded-lg text-sm" style={{ background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger)', color: 'var(--color-danger)' }}>
                 {error}
               </div>
             )}

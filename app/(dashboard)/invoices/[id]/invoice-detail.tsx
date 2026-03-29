@@ -42,12 +42,12 @@ interface LineItem {
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const STATUS_CFG: Record<string, { label: string; bg: string; text: string }> = {
-  draft:        { label: 'Draft',       bg: '#f3f4f6', text: '#4b5563' },
-  sent:         { label: 'Sent',        bg: '#eff6ff', text: '#1d4ed8' },
-  viewed:       { label: 'Viewed',      bg: '#eff6ff', text: '#1d4ed8' },
-  overdue:      { label: 'Overdue',     bg: '#fef2f2', text: '#dc2626' },
-  paid:         { label: 'Paid',        bg: '#f0fdf4', text: '#16a34a' },
-  written_off:  { label: 'Written Off', bg: '#f3f4f6', text: '#6b7280' },
+  draft:        { label: 'Draft',       bg: 'var(--status-draft-bg)', text: 'var(--status-draft-text)' },
+  sent:         { label: 'Sent',        bg: 'var(--status-submitted-bg)', text: 'var(--status-submitted-text)' },
+  viewed:       { label: 'Viewed',      bg: 'var(--status-submitted-bg)', text: 'var(--status-submitted-text)' },
+  overdue:      { label: 'Overdue',     bg: 'var(--color-danger-bg)', text: 'var(--color-danger)' },
+  paid:         { label: 'Paid',        bg: 'var(--color-success-bg)', text: 'var(--color-success)' },
+  written_off:  { label: 'Written Off', bg: 'var(--status-archived-bg)', text: 'var(--status-archived-text)' },
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -139,10 +139,10 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-        <div style={{ height: 32, width: 120, borderRadius: 8, background: '#f3f4f6' }} className="animate-pulse" />
-        <div style={{ background: 'white', borderRadius: 12, border: '1px solid var(--color-border)', padding: 28 }}>
-          <div style={{ height: 40, width: 200, borderRadius: 8, background: '#f3f4f6', marginBottom: 16 }} className="animate-pulse" />
-          <div style={{ height: 20, width: 120, borderRadius: 8, background: '#f3f4f6' }} className="animate-pulse" />
+        <div style={{ height: 32, width: 120, borderRadius: '0.5rem', background: 'var(--color-bg-tertiary)' }} className="animate-pulse" />
+        <div style={{ background: 'var(--color-bg)', borderRadius: 'var(--radius-card)', border: '1px solid var(--color-border)', padding: '1.75rem' }}>
+          <div style={{ height: 40, width: 200, borderRadius: '0.5rem', background: 'var(--color-bg-tertiary)', marginBottom: '1rem' }} className="animate-pulse" />
+          <div style={{ height: 20, width: 120, borderRadius: '0.5rem', background: 'var(--color-bg-tertiary)' }} className="animate-pulse" />
         </div>
       </div>
     )
@@ -155,8 +155,8 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
           <ArrowLeft style={{ width: 14, height: 14 }} aria-hidden="true" />
           Back to Invoices
         </Link>
-        <div style={{ background: 'white', borderRadius: 12, border: '1px solid var(--color-border)', padding: '48px 24px', textAlign: 'center', width: '100%' }}>
-          <FileText style={{ width: 32, height: 32, color: '#9ca3af', margin: '0 auto 12px' }} aria-hidden="true" />
+        <div style={{ background: 'var(--color-bg)', borderRadius: 'var(--radius-card)', border: '1px solid var(--color-border)', padding: '3rem 1.5rem', textAlign: 'center', width: '100%' }}>
+          <FileText style={{ width: 32, height: 32, color: 'var(--color-text-subtle)', margin: '0 auto 0.75rem' }} aria-hidden="true" />
           <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginBottom: 12 }}>
             {error ? 'Failed to load invoice.' : 'Invoice not found.'}
           </p>
@@ -164,7 +164,7 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
             <button
               onClick={() => fetchInvoice().catch(() => {})}
               className="flex items-center gap-2 text-sm font-medium hover:opacity-80 transition-opacity mx-auto"
-              style={{ color: '#5A824E', background: 'none', border: 'none', cursor: 'pointer' }}
+              style={{ color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer' }}
             >
               <RefreshCw style={{ width: 14, height: 14 }} aria-hidden="true" />
               Retry
@@ -195,8 +195,8 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
       {/* Invoice header card */}
       <div
         style={{
-          background: 'white',
-          borderRadius: 12,
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
           border: '1px solid var(--color-border)',
           padding: '1.75rem 1.75rem 1.5rem',
         }}
@@ -306,7 +306,7 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
         <div
           style={{
             background: 'var(--color-bg-secondary)',
-            borderRadius: 8,
+            borderRadius: '0.5rem',
             border: '1px solid var(--color-border-subtle)',
             padding: '0.875rem 1rem',
           }}
@@ -323,8 +323,8 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
       {/* Line items */}
       <div
         style={{
-          background: 'white',
-          borderRadius: 12,
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
           border: '1px solid var(--color-border)',
           overflow: 'hidden',
         }}
@@ -402,7 +402,7 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
           {(invoice.discountAmountUsd ?? 0) > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', width: 240 }}>
               <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>Discount</span>
-              <span style={{ fontSize: '0.8125rem', color: '#dc2626' }}>-{formatCurrency(invoice.discountAmountUsd ?? 0, invoice.currency)}</span>
+              <span style={{ fontSize: '0.8125rem', color: 'var(--color-danger)' }}>-{formatCurrency(invoice.discountAmountUsd ?? 0, invoice.currency)}</span>
             </div>
           )}
           <div
@@ -431,7 +431,7 @@ function MetaField({ label, value, highlight }: { label: string; value: string; 
       <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.125rem' }}>
         {label}
       </p>
-      <p style={{ fontSize: '0.8125rem', fontWeight: 500, color: highlight ? '#dc2626' : 'var(--color-text)' }}>
+      <p style={{ fontSize: '0.8125rem', fontWeight: 500, color: highlight ? 'var(--color-danger)' : 'var(--color-text)' }}>
         {value}
       </p>
     </div>
@@ -452,7 +452,7 @@ function ActionButton({
   const styles: Record<string, React.CSSProperties> = {
     primary: { background: 'var(--color-brand)', color: 'white', border: 'none' },
     success: { background: '#16a34a', color: 'white', border: 'none' },
-    ghost:   { background: 'white', color: 'var(--color-text)', border: '1px solid var(--color-border)' },
+    ghost:   { background: 'var(--color-bg)', color: 'var(--color-text)', border: '1px solid var(--color-border)' },
   }
   return (
     <button
@@ -460,7 +460,7 @@ function ActionButton({
       disabled={disabled}
       style={{
         padding: '0.5625rem 1.125rem',
-        borderRadius: 8,
+        borderRadius: '0.5rem',
         fontSize: '0.875rem',
         fontWeight: 600,
         cursor: disabled ? 'not-allowed' : 'pointer',
