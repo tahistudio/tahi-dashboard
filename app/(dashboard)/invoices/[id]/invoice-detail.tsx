@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, RefreshCw, FileText } from 'lucide-react'
+import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { apiPath } from '@/lib/api'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -182,15 +183,13 @@ export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Back link */}
-      <Link
-        href="/invoices"
-        className="flex items-center gap-2 text-sm hover:opacity-70 transition-opacity"
-        style={{ color: 'var(--color-text-muted)', textDecoration: 'none', width: 'fit-content' }}
-      >
-        <ArrowLeft style={{ width: 14, height: 14 }} aria-hidden="true" />
-        Back to Invoices
-      </Link>
+      {/* Breadcrumb */}
+      <Breadcrumb
+        items={[
+          { label: 'Invoices', href: '/invoices' },
+          { label: `INV-${invoiceId.slice(0, 6).toUpperCase()}` },
+        ]}
+      />
 
       {/* Invoice header card */}
       <div

@@ -2,7 +2,7 @@ import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, ne } from 'drizzle-orm'
+import { eq, desc, and, ne, max } from 'drizzle-orm'
 
 // ── GET /api/portal/requests ─────────────────────────────────────────────────
 // Returns requests scoped to the client's own org.
@@ -47,6 +47,7 @@ export async function GET(req: NextRequest) {
       createdAt: schema.requests.createdAt,
       updatedAt: schema.requests.updatedAt,
       deliveredAt: schema.requests.deliveredAt,
+      requestNumber: schema.requests.requestNumber,
     })
     .from(schema.requests)
     .where(and(...conditions))
@@ -75,10 +76,17 @@ export async function POST(req: NextRequest) {
   }
 
   const database = await db()
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
-  await (database as ReturnType<typeof import('drizzle-orm/d1').drizzle>)
+  // Calculate next request number
+  const [maxRow] = await drizzle
+    .select({ maxNum: max(schema.requests.requestNumber) })
+    .from(schema.requests)
+  const nextNumber = (maxRow?.maxNum ?? 0) + 1
+
+  await drizzle
     .insert(schema.requests)
     .values({
       id,
@@ -93,6 +101,7 @@ export async function POST(req: NextRequest) {
       isInternal: false,
       revisionCount: 0,
       maxRevisions: 3,
+      requestNumber: nextNumber,
       createdAt: now,
       updatedAt: now,
     })

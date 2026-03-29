@@ -200,12 +200,17 @@ export const requests = sqliteTable('requests', {
   // JSON array of tag IDs
   tags: text('tags').default('[]'),
   deliveredAt: text('delivered_at'),
+  // Auto-incrementing request number for display (#001, #002, ...)
+  requestNumber: integer('request_number'),
+  // JSON: array of checklists [{title, items: [{label, done}]}]
+  checklists: text('checklists').default('[]'),
   ...timestamps,
 }, (table) => [
   index('idx_requests_org').on(table.orgId),
   index('idx_requests_status').on(table.status),
   index('idx_requests_assignee').on(table.assigneeId),
   index('idx_requests_track').on(table.trackId),
+  index('idx_requests_number').on(table.requestNumber),
 ])
 
 // ============================================================
@@ -288,6 +293,7 @@ export const messages = sqliteTable('messages', {
   // If true, only visible to Tahi team
   isInternal: integer('is_internal', { mode: 'boolean' }).default(false),
   editedAt: text('edited_at'),
+  deletedAt: text('deleted_at'),
   ...timestamps,
 }, (table) => [
   index('idx_messages_request').on(table.requestId),
@@ -779,6 +785,26 @@ export const scheduledCalls = sqliteTable('scheduled_calls', {
 ])
 
 // ============================================================
+// SERVICES (Service catalogue)
+// ============================================================
+
+export const services = sqliteTable('services', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
+  description: text('description'),
+  // Price in cents
+  price: integer('price').notNull().default(0),
+  currency: text('currency').notNull().default('NZD'),
+  isRecurring: integer('is_recurring').notNull().default(0),
+  // month | year
+  recurringInterval: text('recurring_interval'),
+  showInCatalog: integer('show_in_catalog').notNull().default(1),
+  // service | topup | addon
+  category: text('category'),
+  ...timestamps,
+})
+
+// ============================================================
 // TYPE EXPORTS
 // ============================================================
 
@@ -822,3 +848,5 @@ export type NewContract = typeof contracts.$inferInsert
 export type ScheduledCall = typeof scheduledCalls.$inferSelect
 export type NewScheduledCall = typeof scheduledCalls.$inferInsert
 export type CaseStudySubmission = typeof caseStudySubmissions.$inferSelect
+export type Service = typeof services.$inferSelect
+export type NewService = typeof services.$inferInsert

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { apiPath } from '@/lib/api'
 import { X, Loader2, Zap, CheckCircle2, Lock, Layers, AlignLeft } from 'lucide-react'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
+import { useToast } from '@/components/tahi/toast'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -59,6 +60,7 @@ export function NewRequestDialog({
   open, onClose, isAdmin, canUseLargeTrack = true,
 }: NewRequestDialogProps) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [createAnother, setCreateAnother] = useState(false)
@@ -187,6 +189,8 @@ export function NewRequestDialog({
       }
 
       const data = await res.json() as { id: string }
+
+      showToast('Request created successfully')
 
       if (saveAndCreateAnother) {
         // Reset form but keep client and category pre-selected

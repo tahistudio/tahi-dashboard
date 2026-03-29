@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { apiPath } from '@/lib/api'
+import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import {
-  ArrowLeft,
   Globe,
   Building2,
   Mail,
@@ -34,12 +34,10 @@ import {
 } from 'lucide-react'
 import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badge'
 import { TrackMeter } from '@/components/tahi/track-meter'
-import { TrackCapacityCard } from '@/components/tahi/track-capacity-card'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { RequestCard } from '@/components/tahi/request-card'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { cn } from '@/lib/utils'
-import { Breadcrumbs } from '@/components/tahi/breadcrumbs'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -151,21 +149,14 @@ export function ClientDetail({ clientId }: { clientId: string }) {
       {/* ── Header ── */}
       <div className="border-b border-[var(--color-border)] bg-[var(--color-bg)]">
         <div className="px-4 pt-4 pb-0 md:px-6 md:pt-6">
-          <Breadcrumbs items={[
-            { label: 'Clients', href: '/clients' },
-            { label: org.name },
-          ]} />
-          {/* Back + title row */}
+          {/* Breadcrumb */}
+          <div style={{ marginBottom: '0.75rem' }}>
+            <Breadcrumb items={[{ label: 'Clients', href: '/clients' }, { label: org.name }]} />
+          </div>
+
+          {/* Title row */}
           <div className="flex flex-col gap-3 mb-5 sm:flex-row sm:items-start">
             <div className="flex items-start gap-3 flex-1 min-w-0">
-              <button
-                onClick={() => router.push('/clients')}
-                className="mt-1 p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors flex-shrink-0"
-                aria-label="Back to clients"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h1 className="text-xl font-bold text-[var(--color-text)] truncate md:text-2xl">
@@ -314,14 +305,6 @@ function OverviewTab({
 
       {/* Right column (narrow) */}
       <div className="flex flex-col gap-6">
-        <TrackCapacityCard
-          planType={org.planType}
-          smallTracksUsed={tracks.filter(t => t.type === 'small' && t.currentRequestId !== null).length}
-          smallTracksTotal={tracks.filter(t => t.type === 'small').length}
-          largeTracksUsed={tracks.filter(t => t.type === 'large' && t.currentRequestId !== null).length}
-          largeTracksTotal={tracks.filter(t => t.type === 'large').length}
-          hasPriority={subscription?.hasPrioritySupport ?? false}
-        />
         <ContactsCard contacts={contacts} />
         {subscription && (
           <SubscriptionCard subscription={subscription} tracks={tracks} orgId={org.id} onUpdated={onUpdated} />

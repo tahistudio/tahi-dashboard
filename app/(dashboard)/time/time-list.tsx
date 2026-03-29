@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/tahi/empty-state'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
+import { useToast } from '@/components/tahi/toast'
 
 // ---- Types ----
 
@@ -76,6 +77,7 @@ function LogTimeModal({
   onClose: () => void
   onCreated: () => void
 }) {
+  const { showToast } = useToast()
   const [orgId, setOrgId] = useState<string | null>(null)
   const [teamMemberId, setTeamMemberId] = useState<string | null>(null)
   const [requestId, setRequestId] = useState<string | null>(null)
@@ -148,13 +150,14 @@ function LogTimeModal({
         setError(json.error ?? 'Failed to log time.')
         return
       }
+      showToast('Time entry logged successfully')
       onCreated()
     } catch {
       setError('Network error. Please try again.')
     } finally {
       setSaving(false)
     }
-  }, [orgId, teamMemberId, requestId, hours, notes, date, billable, onCreated])
+  }, [orgId, teamMemberId, requestId, hours, hourlyRate, notes, date, billable, onCreated, showToast])
 
   const inputStyle = {
     padding: '0.5rem 0.75rem',

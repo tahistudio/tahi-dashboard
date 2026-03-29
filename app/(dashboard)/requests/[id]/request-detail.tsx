@@ -6,7 +6,7 @@ import {
   Clock, AlertTriangle, RefreshCw,
   User, CheckCircle2, Loader2,
   FileText, Image as ImageIcon, Download, Paperclip,
-  Calendar, Upload, Video, Archive, Palette, Sparkles,
+  Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud,
 } from 'lucide-react'
 import Link from 'next/link'
 import { RequestThread } from '@/components/tahi/request-thread'
@@ -14,7 +14,8 @@ import dynamic from 'next/dynamic'
 const TiptapEditor = dynamic(() => import('@/components/tahi/tiptap-editor').then(m => ({ default: m.TiptapEditor })), { ssr: false })
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
-import { Breadcrumbs } from '@/components/tahi/breadcrumbs'
+import { Breadcrumb } from '@/components/tahi/breadcrumb'
+import { useToast } from '@/components/tahi/toast'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -65,6 +66,8 @@ interface Request {
   scopeFlagged: boolean
   isInternal: boolean
   tags: string
+  requestNumber: number | null
+  checklists: string
   createdAt: string
   updatedAt: string
   deliveredAt: string | null
@@ -98,6 +101,16 @@ interface TeamMemberOption {
   name: string
 }
 
+interface ChecklistItem {
+  label: string
+  done: boolean
+}
+
+interface Checklist {
+  title: string
+  items: ChecklistItem[]
+}
+
 interface RequestDetailProps {
   requestId: string
   isAdmin: boolean
@@ -118,7 +131,9 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
   const [editingDueDate, setEditingDueDate] = useState(false)
   const [dueDateInput, setDueDateInput] = useState('')
   const [conversationId, setConversationId] = useState<string | null>(null)
+  const [checklists, setChecklists] = useState<Checklist[]>([])
   const threadBottomRef = useRef<HTMLDivElement>(null)
+  const { showToast } = useToast()
 
   const apiBase = isAdmin ? apiPath('/api/admin') : apiPath('/api/portal')
 
@@ -149,6 +164,11 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
       if (reqRes.ok) {
         const data = await reqRes.json() as { request: Request }
         setRequest(data.request)
+        try {
+          setChecklists(JSON.parse(data.request.checklists || '[]') as Checklist[])
+        } catch {
+          setChecklists([])
+        }
       }
       if (msgRes.ok) {
         if (isAdmin) {
@@ -157,6 +177,11 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
         } else {
           const data = await msgRes.json() as { request: Request; messages: Message[] }
           setRequest(data.request)
+          try {
+            setChecklists(JSON.parse(data.request.checklists || '[]') as Checklist[])
+          } catch {
+            setChecklists([])
+          }
           setMessages(data.messages ?? [])
         }
       }
@@ -243,6 +268,16 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
     })
     await loadRequest()
     setStatusUpdating(false)
+    showToast(`Status updated to ${STATUS_LABELS[newStatus] ?? newStatus}`)
+  }
+
+  async function saveChecklists(updated: Checklist[]) {
+    setChecklists(updated)
+    await fetch(apiPath(`/api/admin/requests/${requestId}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checklists: JSON.stringify(updated) }),
+    })
   }
 
   async function handleScopeFlagToggle() {
@@ -282,59 +317,6 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
     })
     setEditingDueDate(false)
     await loadRequest()
-  }
-
-  // ---- AI Suggest -----------------------------------------------------------
-
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiSuggestion, setAiSuggestion] = useState<{
-    estimatedHours: number
-    suggestedPriority: string
-    suggestedSteps: string[]
-    summary: string
-  } | null>(null)
-
-  async function handleAiSuggest() {
-    if (!request) return
-    setAiLoading(true)
-    setAiSuggestion(null)
-    try {
-      const res = await fetch(apiPath('/api/admin/ai/suggest'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requestTitle: request.title,
-          requestDescription: request.description,
-          category: request.category,
-        }),
-      })
-      if (!res.ok) throw new Error('AI suggest failed')
-      const data = await res.json() as {
-        estimatedHours: number
-        suggestedPriority: string
-        suggestedSteps: string[]
-        summary: string
-      }
-      setAiSuggestion(data)
-    } catch {
-      setAiSuggestion(null)
-    } finally {
-      setAiLoading(false)
-    }
-  }
-
-  async function applyAiSuggestion() {
-    if (!aiSuggestion) return
-    await fetch(apiPath(`/api/admin/requests/${requestId}`), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        priority: aiSuggestion.suggestedPriority,
-        estimatedHours: aiSuggestion.estimatedHours,
-      }),
-    })
-    await loadRequest()
-    setAiSuggestion(null)
   }
 
   // ---- Loading / Error / Not Found ------------------------------------------
@@ -411,11 +393,16 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
 
   return (
     <div className="flex flex-col" style={{ gap: '1.5rem', maxWidth: '68.75rem' }}>
-      {/* Breadcrumbs */}
-      <Breadcrumbs items={[
-        { label: 'Requests', href: '/requests' },
-        { label: request.title },
-      ]} />
+      {/* Breadcrumb */}
+      <Breadcrumb
+        items={[
+          { label: 'Requests', href: '/requests' },
+          { label: request.requestNumber != null
+            ? `#${String(request.requestNumber).padStart(3, '0')} ${request.title}`
+            : request.title
+          },
+        ]}
+      />
 
       {/* Header card */}
       <div
@@ -473,6 +460,11 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
             className="text-2xl font-bold tracking-tight"
             style={{ color: 'var(--color-text)', margin: 0, lineHeight: 1.3 }}
           >
+            {request.requestNumber != null && (
+              <span className="font-mono" style={{ color: 'var(--color-text-subtle)', marginRight: '0.375rem' }}>
+                #{String(request.requestNumber).padStart(3, '0')}
+              </span>
+            )}
             {request.title}
           </h1>
 
@@ -631,6 +623,13 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
               />
             </div>
           </div>
+
+          {/* Checklists */}
+          <ChecklistsPanel
+            checklists={checklists}
+            onSave={saveChecklists}
+            isAdmin={isAdmin}
+          />
 
           {/* Files */}
           <FilesPanel
@@ -891,117 +890,6 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
                 <AlertTriangle size={13} />
                 {request.scopeFlagged ? 'Remove scope flag' : 'Flag as scope creep'}
               </button>
-
-              {/* AI Suggest */}
-              <button
-                type="button"
-                onClick={handleAiSuggest}
-                disabled={aiLoading}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  padding: '0.5rem 0.75rem',
-                  fontSize: '0.8125rem',
-                  fontWeight: 500,
-                  borderRadius: 'var(--radius-button)',
-                  cursor: aiLoading ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.15s',
-                  border: '1px solid var(--color-border)',
-                  background: 'var(--color-bg)',
-                  color: aiLoading ? 'var(--color-text-subtle)' : BRAND,
-                  marginTop: '0.5rem',
-                  opacity: aiLoading ? 0.7 : 1,
-                }}
-                onMouseEnter={e => {
-                  if (!aiLoading) {
-                    e.currentTarget.style.borderColor = BRAND
-                    e.currentTarget.style.background = 'var(--color-brand-50)'
-                  }
-                }}
-                onMouseLeave={e => {
-                  if (!aiLoading) {
-                    e.currentTarget.style.borderColor = 'var(--color-border)'
-                    e.currentTarget.style.background = 'var(--color-bg)'
-                  }
-                }}
-              >
-                {aiLoading ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-                {aiLoading ? 'Analyzing...' : 'AI Suggest'}
-              </button>
-
-              {/* AI Suggestion results */}
-              {aiSuggestion && (
-                <div
-                  style={{
-                    marginTop: '0.75rem',
-                    padding: '0.75rem',
-                    background: 'var(--color-brand-50)',
-                    borderRadius: 'var(--radius-button)',
-                    border: `1px solid var(--color-brand-100)`,
-                  }}
-                >
-                  <p className="text-xs font-medium" style={{ color: BRAND, marginBottom: '0.5rem' }}>
-                    AI Suggestion
-                  </p>
-                  <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginBottom: '0.5rem', lineHeight: 1.4 }}>
-                    {aiSuggestion.summary}
-                  </p>
-                  <div className="flex flex-col gap-1 text-xs" style={{ color: 'var(--color-text)', marginBottom: '0.5rem' }}>
-                    <div className="flex justify-between">
-                      <span style={{ color: 'var(--color-text-muted)' }}>Hours</span>
-                      <span className="font-medium">{aiSuggestion.estimatedHours}h</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span style={{ color: 'var(--color-text-muted)' }}>Priority</span>
-                      <span className="font-medium capitalize">{aiSuggestion.suggestedPriority}</span>
-                    </div>
-                  </div>
-                  {aiSuggestion.suggestedSteps.length > 0 && (
-                    <div style={{ marginBottom: '0.5rem' }}>
-                      <p className="text-xs font-medium" style={{ color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>Steps</p>
-                      <ol className="text-xs" style={{ color: 'var(--color-text)', paddingLeft: '1rem', margin: 0, lineHeight: 1.5 }}>
-                        {aiSuggestion.suggestedSteps.map((s, i) => (
-                          <li key={i}>{s}</li>
-                        ))}
-                      </ol>
-                    </div>
-                  )}
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={applyAiSuggestion}
-                      className="flex-1 text-xs font-semibold transition-opacity hover:opacity-80"
-                      style={{
-                        padding: '0.375rem 0.5rem',
-                        background: BRAND,
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '0.25rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Apply
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAiSuggestion(null)}
-                      className="flex-1 text-xs font-medium transition-opacity hover:opacity-80"
-                      style={{
-                        padding: '0.375rem 0.5rem',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text-muted)',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: '0.25rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
-              )}
             </SidebarCard>
           )}
 
@@ -1058,6 +946,322 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   )
 }
 
+// ---- Checklists Panel --------------------------------------------------------
+
+interface ChecklistsPanelProps {
+  checklists: Checklist[]
+  onSave: (updated: Checklist[]) => void
+  isAdmin: boolean
+}
+
+function ChecklistsPanel({ checklists, onSave, isAdmin }: ChecklistsPanelProps) {
+  const [newChecklistTitle, setNewChecklistTitle] = useState('')
+  const [addingChecklist, setAddingChecklist] = useState(false)
+  const [newItemLabels, setNewItemLabels] = useState<Record<number, string>>({})
+
+  function addChecklist() {
+    if (!newChecklistTitle.trim()) return
+    const updated = [...checklists, { title: newChecklistTitle.trim(), items: [] }]
+    onSave(updated)
+    setNewChecklistTitle('')
+    setAddingChecklist(false)
+  }
+
+  function removeChecklist(idx: number) {
+    const updated = checklists.filter((_, i) => i !== idx)
+    onSave(updated)
+  }
+
+  function toggleItem(checklistIdx: number, itemIdx: number) {
+    const updated = checklists.map((cl, ci) => {
+      if (ci !== checklistIdx) return cl
+      return {
+        ...cl,
+        items: cl.items.map((item, ii) =>
+          ii === itemIdx ? { ...item, done: !item.done } : item
+        ),
+      }
+    })
+    onSave(updated)
+  }
+
+  function addItem(checklistIdx: number) {
+    const label = (newItemLabels[checklistIdx] ?? '').trim()
+    if (!label) return
+    const updated = checklists.map((cl, ci) => {
+      if (ci !== checklistIdx) return cl
+      return { ...cl, items: [...cl.items, { label, done: false }] }
+    })
+    onSave(updated)
+    setNewItemLabels(prev => ({ ...prev, [checklistIdx]: '' }))
+  }
+
+  function removeItem(checklistIdx: number, itemIdx: number) {
+    const updated = checklists.map((cl, ci) => {
+      if (ci !== checklistIdx) return cl
+      return { ...cl, items: cl.items.filter((_, ii) => ii !== itemIdx) }
+    })
+    onSave(updated)
+  }
+
+  return (
+    <div
+      className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
+      style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+    >
+      <div
+        className="flex items-center justify-between"
+        style={{ padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}
+      >
+        <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+          <ListChecks size={14} style={{ color: 'var(--color-text-subtle)' }} />
+          Checklists
+          {checklists.length > 0 && (
+            <span
+              className="text-xs font-normal rounded-full"
+              style={{
+                padding: '0.0625rem 0.4375rem',
+                background: 'var(--color-bg-tertiary)',
+                color: 'var(--color-text-subtle)',
+              }}
+            >
+              {checklists.length}
+            </span>
+          )}
+        </h2>
+        {isAdmin && !addingChecklist && (
+          <button
+            type="button"
+            onClick={() => setAddingChecklist(true)}
+            className="flex items-center gap-1 text-xs font-medium transition-colors"
+            style={{
+              padding: '0.375rem 0.75rem',
+              borderRadius: 'var(--radius-button)',
+              border: '1px solid var(--color-brand)',
+              color: BRAND,
+              background: 'var(--color-bg)',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-50)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
+          >
+            <Plus size={12} />
+            Add Checklist
+          </button>
+        )}
+      </div>
+
+      {/* Add new checklist form */}
+      {addingChecklist && (
+        <div className="flex items-center gap-2" style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}>
+          <input
+            type="text"
+            value={newChecklistTitle}
+            onChange={e => setNewChecklistTitle(e.target.value)}
+            placeholder="Checklist title..."
+            autoFocus
+            className="flex-1 focus:outline-none"
+            style={{
+              padding: '0.375rem 0.5rem',
+              fontSize: '0.8125rem',
+              border: '1px solid var(--color-border)',
+              borderRadius: '0.25rem',
+              color: 'var(--color-text)',
+              background: 'var(--color-bg)',
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); addChecklist() }
+              if (e.key === 'Escape') setAddingChecklist(false)
+            }}
+          />
+          <button
+            type="button"
+            onClick={addChecklist}
+            className="text-xs font-semibold"
+            style={{
+              padding: '0.375rem 0.75rem',
+              background: BRAND,
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '0.25rem',
+              cursor: 'pointer',
+            }}
+          >
+            Add
+          </button>
+          <button
+            type="button"
+            onClick={() => { setAddingChecklist(false); setNewChecklistTitle('') }}
+            className="text-xs"
+            style={{
+              padding: '0.375rem',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--color-text-subtle)',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {checklists.length === 0 && !addingChecklist ? (
+        <div className="flex flex-col items-center justify-center text-center" style={{ padding: '2.5rem 1.5rem', gap: '0.375rem' }}>
+          <ListChecks size={18} style={{ color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }} />
+          <p className="text-sm" style={{ color: 'var(--color-text-subtle)' }}>No checklists yet.</p>
+        </div>
+      ) : (
+        <div>
+          {checklists.map((cl, ci) => {
+            const doneCount = cl.items.filter(i => i.done).length
+            const totalCount = cl.items.length
+            const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0
+
+            return (
+              <div
+                key={ci}
+                style={{ borderBottom: ci < checklists.length - 1 ? '1px solid var(--color-row-border)' : 'none' }}
+              >
+                {/* Checklist header */}
+                <div className="flex items-center justify-between" style={{ padding: '0.75rem 1.25rem' }}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{cl.title}</span>
+                    {totalCount > 0 && (
+                      <span className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+                        {doneCount}/{totalCount}
+                      </span>
+                    )}
+                  </div>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => removeChecklist(ci)}
+                      className="transition-colors"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem', color: 'var(--color-text-subtle)' }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-danger)' }}
+                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+                      aria-label="Remove checklist"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Progress bar */}
+                {totalCount > 0 && (
+                  <div style={{ padding: '0 1.25rem 0.5rem' }}>
+                    <div style={{ height: 4, borderRadius: 2, background: 'var(--color-bg-tertiary)', overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          height: '100%',
+                          width: `${progress}%`,
+                          background: progress === 100 ? 'var(--color-success)' : BRAND,
+                          borderRadius: 2,
+                          transition: 'width 0.2s',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Items */}
+                <div style={{ padding: '0 1.25rem 0.5rem' }}>
+                  {cl.items.map((item, ii) => (
+                    <div
+                      key={ii}
+                      className="flex items-center gap-2"
+                      style={{ padding: '0.25rem 0' }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleItem(ci, ii)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: 0,
+                          color: item.done ? BRAND : 'var(--color-text-subtle)',
+                          flexShrink: 0,
+                        }}
+                        aria-label={item.done ? 'Mark incomplete' : 'Mark complete'}
+                      >
+                        <CheckCircle2 size={16} style={{ opacity: item.done ? 1 : 0.4 }} />
+                      </button>
+                      <span
+                        className="text-sm flex-1"
+                        style={{
+                          color: item.done ? 'var(--color-text-subtle)' : 'var(--color-text)',
+                          textDecoration: item.done ? 'line-through' : 'none',
+                        }}
+                      >
+                        {item.label}
+                      </span>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => removeItem(ci, ii)}
+                          className="transition-colors"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.125rem', color: 'var(--color-text-subtle)', opacity: 0.5 }}
+                          onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.color = 'var(--color-danger)' }}
+                          onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+                          aria-label="Remove item"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add item */}
+                {isAdmin && (
+                  <div className="flex items-center gap-2" style={{ padding: '0.25rem 1.25rem 0.75rem' }}>
+                    <input
+                      type="text"
+                      value={newItemLabels[ci] ?? ''}
+                      onChange={e => setNewItemLabels(prev => ({ ...prev, [ci]: e.target.value }))}
+                      placeholder="Add item..."
+                      className="flex-1 focus:outline-none"
+                      style={{
+                        padding: '0.25rem 0.5rem',
+                        fontSize: '0.8125rem',
+                        border: '1px solid var(--color-border-subtle)',
+                        borderRadius: '0.25rem',
+                        color: 'var(--color-text)',
+                        background: 'var(--color-bg)',
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') { e.preventDefault(); addItem(ci) }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => addItem(ci)}
+                      className="flex items-center gap-1 text-xs transition-colors"
+                      style={{
+                        padding: '0.25rem 0.5rem',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: BRAND,
+                        fontWeight: 500,
+                      }}
+                    >
+                      <Plus size={12} />
+                      Add
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---- Files Panel -------------------------------------------------------------
 
 interface FilesPanelProps {
@@ -1073,27 +1277,10 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  function fileIcon(mimeType: string | null, filename: string | null) {
-    const ext = filename?.split('.').pop()?.toLowerCase() ?? ''
-    if (!mimeType && !ext) return <FileText size={14} style={{ color: 'var(--color-text-subtle)' }} />
-    if (mimeType?.startsWith('image/') || ['png','jpg','jpeg','gif','webp','svg'].includes(ext)) {
-      return <ImageIcon size={14} style={{ color: '#7c3aed' }} />
-    }
-    if (mimeType?.startsWith('video/') || ['mp4','webm'].includes(ext)) {
-      return <Video size={14} style={{ color: '#2563eb' }} />
-    }
-    if (mimeType === 'application/pdf' || ext === 'pdf') {
-      return <FileText size={14} style={{ color: 'var(--color-danger)' }} />
-    }
-    if (['doc','docx','xls','xlsx','ppt','pptx'].includes(ext)) {
-      return <FileText size={14} style={{ color: '#2563eb' }} />
-    }
-    if (['zip','rar','7z'].includes(ext)) {
-      return <Archive size={14} style={{ color: '#d97706' }} />
-    }
-    if (['fig','sketch','ai','psd'].includes(ext)) {
-      return <Palette size={14} style={{ color: '#ec4899' }} />
-    }
+  function fileIcon(mimeType: string | null) {
+    if (!mimeType) return <FileText size={14} style={{ color: 'var(--color-text-subtle)' }} />
+    if (mimeType.startsWith('image/')) return <ImageIcon size={14} style={{ color: '#7c3aed' }} />
+    if (mimeType === 'application/pdf') return <FileText size={14} style={{ color: 'var(--color-danger)' }} />
     return <FileText size={14} style={{ color: 'var(--color-text-subtle)' }} />
   }
 
@@ -1190,7 +1377,6 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
                 onChange={handleFileUpload}
                 className="hidden"
                 aria-label="Upload file"
-                accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.fig,.sketch,.ai,.psd,.svg"
               />
               <button
                 type="button"
@@ -1219,6 +1405,30 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
                 {uploading ? 'Uploading...' : 'Upload'}
               </button>
             </>
+          )}
+          {files.length > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                files.forEach(f => {
+                  window.open(apiPath(`/api/uploads/serve?key=${encodeURIComponent(f.storageKey)}&download=1`), '_blank')
+                })
+              }}
+              className="flex items-center gap-1 text-xs font-medium transition-colors"
+              style={{
+                padding: '0.375rem 0.75rem',
+                borderRadius: 'var(--radius-button)',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-muted)',
+                background: 'var(--color-bg)',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-brand)'; e.currentTarget.style.color = 'var(--color-text)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.color = 'var(--color-text-muted)' }}
+            >
+              <DownloadCloud size={12} />
+              Download All
+            </button>
           )}
           <button
             type="button"
@@ -1267,22 +1477,7 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
               onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-row-hover)' }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
             >
-              <div className="flex-shrink-0">
-                {f.mimeType?.startsWith('image/') ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
-                    src={apiPath(`/api/uploads/serve?key=${encodeURIComponent(f.storageKey)}`)}
-                    alt={f.filename}
-                    style={{
-                      width: '2rem',
-                      height: '2rem',
-                      objectFit: 'cover',
-                      borderRadius: '0.25rem',
-                      border: '1px solid var(--color-border)',
-                    }}
-                  />
-                ) : fileIcon(f.mimeType, f.filename)}
-              </div>
+              <div className="flex-shrink-0">{fileIcon(f.mimeType)}</div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm truncate" style={{ color: 'var(--color-text)' }}>{f.filename}</p>
                 <p className="text-xs" style={{ color: 'var(--color-text-subtle)', marginTop: '0.0625rem' }}>
