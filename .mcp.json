@@ -2,8 +2,7 @@
   "mcpServers": {
     "tahi-dashboard": {
       "command": "npx",
-      "args": ["tsx", "mcp-server/index.ts"],
-      "cwd": "C:\\Users\\Work\\projects\\tahi-dashboard",
+      "args": ["tsx", "C:\\Users\\Work\\projects\\tahi-dashboard\\mcp-server\\index.ts"],
       "env": {
         "TAHI_API_URL": "https://fdd08ec9-43a5-4c62-aa6d-309da23e3d0f.wf-app-prod.cosmic.webflow.services/dashboard",
         "TAHI_API_TOKEN": "tahi-mcp-dev-token-2026"
