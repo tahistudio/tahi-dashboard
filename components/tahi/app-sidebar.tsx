@@ -182,6 +182,7 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
                     <Link
                       href={item.href}
                       title={collapsed ? item.label : undefined}
+                      data-tour={`nav-${item.label.toLowerCase()}`}
                       className="flex items-center transition-colors"
                       style={{
                         gap: '10px',

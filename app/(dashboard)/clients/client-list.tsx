@@ -7,6 +7,7 @@ import { ClientCard } from '@/components/tahi/client-card'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { NewClientDialog } from '@/components/tahi/dialogs/new-client-dialog'
 import { apiPath } from '@/lib/api'
+import { useToast } from '@/components/tahi/toast'
 
 const STATUS_FILTERS = [
   { label: 'All',      value: 'all' },
@@ -41,6 +42,7 @@ export function ClientList() {
   const [orgs, setOrgs] = useState<Organisation[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const { showToast } = useToast()
 
   // Local input state for debouncing
   const [searchInput, setSearchInput] = useState(search)
@@ -197,7 +199,7 @@ export function ClientList() {
         </div>
       )}
 
-      <NewClientDialog open={dialogOpen} onClose={() => { setDialogOpen(false); fetchClients() }} />
+      <NewClientDialog open={dialogOpen} onClose={() => { setDialogOpen(false); fetchClients(); showToast('Client created successfully') }} />
     </div>
   )
 }

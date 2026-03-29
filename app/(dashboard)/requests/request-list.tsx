@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { apiPath } from '@/lib/api'
+import { useToast } from '@/components/tahi/toast'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -249,6 +250,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
   const [bulkCreateOpen, setBulkCreateOpen] = useState(false)
   const [boardColumns, setBoardColumns] = useState<BoardColumn[]>(BOARD_COLS)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const { showToast } = useToast()
 
   const tabs = isAdmin ? ADMIN_TABS : CLIENT_TABS
 
@@ -327,7 +329,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
     <>
       <NewRequestDialog
         open={dialogOpen}
-        onClose={() => { setDialogOpen(false); fetchRequests() }}
+        onClose={() => { setDialogOpen(false); fetchRequests(); showToast('Request created successfully') }}
         isAdmin={isAdmin}
       />
 
