@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   Plus, Search, Filter, LayoutList, Columns3, BarChart3,
@@ -231,9 +232,10 @@ function getStoredPreference<T>(key: string, fallback: T): T {
 }
 
 export function RequestList({ isAdmin }: { isAdmin: boolean }) {
+  const searchParams = useSearchParams()
   const [view, setViewRaw] = useState<ViewMode>(() => getStoredPreference<ViewMode>('tahi-request-view', 'list'))
   const [activeTab, setActiveTab] = useState('active')
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(() => searchParams.get('q') ?? '')
   const [sortKey, setSortKeyRaw] = useState<SortKey>(() => getStoredPreference<SortKey>('tahi-request-sort', 'updatedAt'))
 
   const setView = useCallback((v: ViewMode) => {

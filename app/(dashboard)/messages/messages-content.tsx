@@ -293,7 +293,7 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
       }
 
       // 2. Upload to R2
-      await fetch(uploadUrl, {
+      await fetch(apiPath(uploadUrl), {
         method: 'PUT',
         headers: { 'Content-Type': 'audio/webm' },
         body: recordedBlob,
@@ -925,6 +925,9 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
           }}
         />
       )}
+
+      {/* Mobile bottom nav spacer */}
+      <div className="h-28 md:hidden" aria-hidden="true" />
     </div>
   )
 }

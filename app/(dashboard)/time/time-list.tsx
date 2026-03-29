@@ -881,6 +881,9 @@ export function TimeList() {
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      {/* Mobile bottom nav spacer */}
+      <div className="h-28 md:hidden" aria-hidden="true" />
     </div>
   )
 }

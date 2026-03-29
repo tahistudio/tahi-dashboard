@@ -94,8 +94,10 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="new-client-dialog-title"
-        className="relative w-full max-w-lg bg-[var(--color-bg)] shadow-2xl overflow-hidden"
-        style={{ borderRadius: 'var(--radius-card)' }}
+        className="relative w-full max-w-lg bg-[var(--color-bg)] shadow-2xl flex flex-col max-h-[calc(100dvh-2rem)]"
+        style={{
+          borderRadius: 'var(--radius-card)',
+        }}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-[var(--color-border)]">
@@ -120,7 +122,7 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
           <div aria-live="polite">
             {error && (
               <div className="px-3 py-2 rounded-lg text-sm" style={{ background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger)', color: 'var(--color-danger)' }}>
@@ -231,7 +233,10 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-end gap-2 pt-2">
+          <div
+            className="flex items-center justify-end gap-2 pt-2"
+            style={{ paddingBottom: 'calc(0.25rem + env(safe-area-inset-bottom, 0px))' }}
+          >
             <TahiButton variant="secondary" type="button" onClick={onClose} disabled={loading}>
               Cancel
             </TahiButton>

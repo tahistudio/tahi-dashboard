@@ -959,6 +959,9 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
           )}
         </div>
       </div>
+
+      {/* Mobile bottom nav spacer */}
+      <div className="h-28 md:hidden" aria-hidden="true" />
     </div>
   )
 }

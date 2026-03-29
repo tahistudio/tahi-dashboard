@@ -161,10 +161,10 @@ export function ClientDetail({ clientId }: { clientId: string }) {
           <div className="flex flex-col gap-3 mb-5 sm:flex-row sm:items-start">
             <div className="flex items-start gap-3 flex-1 min-w-0">
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-xl font-bold text-[var(--color-text)] truncate md:text-2xl">
-                    {org.name}
-                  </h1>
+                <h1 className="text-xl font-bold text-[var(--color-text)] md:text-2xl break-words">
+                  {org.name}
+                </h1>
+                <div className="flex items-center gap-2 flex-wrap mt-2">
                   <HealthDot health={org.healthStatus} className="w-2.5 h-2.5" />
                   <StatusBadge status={org.status} type="org" />
                   <PlanBadge plan={org.planType} />
@@ -175,7 +175,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
                     href={org.website.startsWith('http') ? org.website : `https://${org.website}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-brand)] mt-1"
+                    className="inline-flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-brand)] mt-1.5"
                   >
                     <Globe className="w-3.5 h-3.5" />
                     {org.website.replace(/^https?:\/\//, '')}
@@ -184,7 +184,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 flex-shrink-0 ml-9 sm:ml-0">
+            <div className="flex items-center gap-2 flex-shrink-0 sm:ml-0">
               <TahiButton
                 variant="secondary"
                 size="sm"
@@ -276,6 +276,9 @@ export function ClientDetail({ clientId }: { clientId: string }) {
         {activeTab === 'activity' && (
           <ActivityTab clientId={clientId} />
         )}
+
+        {/* Mobile bottom nav spacer */}
+        <div className="h-28 md:hidden" aria-hidden="true" />
       </div>
     </div>
   )
@@ -2027,10 +2030,10 @@ function TimeTab({ clientId }: { clientId: string }) {
             <thead>
               <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
                 <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Date</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Team Member</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)] hidden sm:table-cell">Team Member</th>
                 <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Hours</th>
                 <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Billable</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Notes</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)] hidden md:table-cell">Notes</th>
               </tr>
             </thead>
             <tbody>
@@ -2042,7 +2045,7 @@ function TimeTab({ clientId }: { clientId: string }) {
                   <td className="px-4 py-3 text-[var(--color-text-muted)]">
                     {new Date(entry.date.includes('T') ? entry.date : entry.date + 'T00:00:00').toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
                   </td>
-                  <td className="px-4 py-3 text-[var(--color-text)] font-medium">
+                  <td className="px-4 py-3 text-[var(--color-text)] font-medium hidden sm:table-cell">
                     {entry.teamMemberName ?? 'Unknown'}
                   </td>
                   <td className="px-4 py-3 text-[var(--color-text)] font-semibold">
@@ -2059,7 +2062,7 @@ function TimeTab({ clientId }: { clientId: string }) {
                       {entry.billable ? 'Yes' : 'No'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-[var(--color-text-muted)] max-w-[12.5rem] truncate">
+                  <td className="px-4 py-3 text-[var(--color-text-muted)] max-w-[12.5rem] truncate hidden md:table-cell">
                     {entry.notes ?? '--'}
                   </td>
                 </tr>
