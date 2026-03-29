@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Plus, FileText, RefreshCw, Download } from 'lucide-react'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
@@ -96,7 +97,7 @@ function CreateInvoiceModal({
   onCreated,
 }: {
   onClose: () => void
-  onCreated: () => void
+  onCreated: (invoiceId?: string) => void
 }) {
   const { showToast } = useToast()
   const [orgId, setOrgId] = useState('')
@@ -132,8 +133,9 @@ function CreateInvoiceModal({
         setError(json.error ?? 'Failed to create invoice.')
         return
       }
+      const json = await res.json() as { id?: string }
       showToast('Invoice created successfully')
-      onCreated()
+      onCreated(json.id)
     } catch {
       setError('Network error. Please try again.')
     } finally {
@@ -319,6 +321,7 @@ interface InvoiceListProps {
 }
 
 export function InvoiceList({ isAdmin }: InvoiceListProps) {
+  const router = useRouter()
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -348,10 +351,14 @@ export function InvoiceList({ isAdmin }: InvoiceListProps) {
     fetchInvoices(activeTab).catch(() => {})
   }, [activeTab, fetchInvoices])
 
-  const handleCreated = useCallback(() => {
+  const handleCreated = useCallback((invoiceId?: string) => {
     setShowCreateModal(false)
-    fetchInvoices(activeTab).catch(() => {})
-  }, [activeTab, fetchInvoices])
+    if (invoiceId) {
+      router.push(`/invoices/${invoiceId}`)
+    } else {
+      fetchInvoices(activeTab).catch(() => {})
+    }
+  }, [activeTab, fetchInvoices, router])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>

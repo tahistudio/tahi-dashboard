@@ -63,10 +63,15 @@ export function NewClientDialog({ open, onClose }: NewClientDialogProps) {
         const data = await res.json() as { error?: string }
         throw new Error(data.error ?? 'Failed to create client')
       }
+      const data = await res.json() as { id?: string }
       showToast('Client created successfully')
-      router.refresh()
       onClose()
       setForm({ name: '', website: '', industry: '', planType: '', primaryContactName: '', primaryContactEmail: '' })
+      if (data.id) {
+        router.push(`/clients/${data.id}`)
+      } else {
+        router.refresh()
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {

@@ -345,14 +345,14 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
       />
 
       {/* Page header */}
-      <div className="flex items-center justify-between" style={{ marginBottom: '1.5rem' }}>
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="font-bold" style={{ fontSize: '1.25rem', color: 'var(--color-text)', lineHeight: 1.2 }}>Requests</h1>
-          {!loading && (
-            <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
-              {filtered.length} {filtered.length === 1 ? 'request' : 'requests'}
-            </p>
-          )}
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text)' }}>Requests</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+            {!loading
+              ? `${filtered.length} ${filtered.length === 1 ? 'request' : 'requests'}`
+              : 'Manage all work items and track progress'}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <button

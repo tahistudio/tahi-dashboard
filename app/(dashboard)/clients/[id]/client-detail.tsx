@@ -989,7 +989,7 @@ function InvoicesTab({ clientId }: { clientId: string }) {
           <p className="text-sm text-[var(--color-text-muted)]">No invoices for this client yet</p>
         </div>
       ) : (
-        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-hidden">
+        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
@@ -1354,7 +1354,7 @@ function FilesTab({ clientId }: { clientId: string }) {
           <p className="text-sm text-[var(--color-text-muted)]">No files uploaded for this client yet</p>
         </div>
       ) : (
-        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-hidden">
+        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
@@ -1481,7 +1481,7 @@ function ContractsTab({ clientId }: { clientId: string }) {
           <p className="text-xs text-[var(--color-text-subtle)] mt-1">Upload contracts from the contracts page.</p>
         </div>
       ) : (
-        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-hidden">
+        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
@@ -1905,7 +1905,7 @@ function TimeTab({ clientId }: { clientId: string }) {
           <p className="text-sm text-[var(--color-text-muted)]">No time entries for this client yet</p>
         </div>
       ) : (
-        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-hidden">
+        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
@@ -1997,7 +1997,7 @@ function ActivityTab({ clientId }: { clientId: string }) {
           <p className="text-sm text-[var(--color-text-muted)]">No activity recorded for this client yet</p>
         </div>
       ) : (
-        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-hidden">
+        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-x-auto">
           <div className="divide-y divide-[var(--color-border-subtle)]">
             {entries.map(entry => (
               <div key={entry.id} className="px-4 py-3 flex items-start gap-3">

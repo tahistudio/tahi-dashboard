@@ -245,7 +245,28 @@ export function DocsContent() {
             <LoadingSkeleton rows={5} />
           ) : pages.length === 0 ? (
             <div className="p-4 text-center">
-              <p className="text-xs text-[var(--color-text-muted)]">No docs found</p>
+              <div
+                className="w-10 h-10 brand-gradient flex items-center justify-center mx-auto mb-2"
+                style={{ borderRadius: 'var(--radius-leaf-sm)' }}
+              >
+                <BookOpen className="w-5 h-5 text-white" />
+              </div>
+              <p className="text-sm font-medium text-[var(--color-text)] mb-1">No docs yet</p>
+              <p className="text-xs text-[var(--color-text-muted)] mb-3">Create your first doc page to build your knowledge hub.</p>
+              <TahiButton
+                size="sm"
+                onClick={() => {
+                  setShowNewForm(true)
+                  setSelectedPage(null)
+                  setEditTitle('')
+                  setEditContent('')
+                  setEditCategory('operations')
+                }}
+                iconLeft={<Plus className="w-3 h-3" />}
+                className="w-full"
+              >
+                Create first page
+              </TahiButton>
             </div>
           ) : (
             grouped.map(group => (

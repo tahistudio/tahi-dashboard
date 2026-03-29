@@ -349,7 +349,7 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[var(--color-text)]">Messages</h1>
           <p className="text-sm text-[var(--color-text-muted)] mt-1">
@@ -446,6 +446,23 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
                 <p className="text-xs text-[var(--color-text-muted)] mt-1">
                   {searchQuery ? 'Try a different search term.' : 'Start a conversation to get going.'}
                 </p>
+                {!searchQuery && (
+                  <button
+                    onClick={() => setShowNewDialog(true)}
+                    className="mt-3 flex items-center gap-1.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                    style={{
+                      padding: '0.5rem 1rem',
+                      background: 'var(--color-brand)',
+                      borderRadius: 'var(--radius-button, 0.5rem)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      minHeight: '2.75rem',
+                    }}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Start a conversation
+                  </button>
+                )}
               </div>
             ) : (
               filtered.map(conv => {
