@@ -94,10 +94,6 @@ CREATE TABLE IF NOT EXISTS `services` (
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE `messages` ADD `deleted_at` text;--> statement-breakpoint
-ALTER TABLE `organisations` ADD `brands` text DEFAULT '[]';--> statement-breakpoint
-ALTER TABLE `requests` ADD `request_number` integer;--> statement-breakpoint
-ALTER TABLE `requests` ADD `checklists` text DEFAULT '[]';--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_requests_number` ON `requests` (`request_number`);--> statement-breakpoint
 ALTER TABLE `team_members` ADD `reports_to_id` text;--> statement-breakpoint
 ALTER TABLE `team_members` ADD `department` text;--> statement-breakpoint
