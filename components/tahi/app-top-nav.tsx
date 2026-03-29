@@ -141,7 +141,7 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
       {/* Search overlay */}
       {searchOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center"
+          className="fixed inset-0 z-[70] flex items-start justify-center"
           style={{ background: 'rgba(0,0,0,0.4)', paddingTop: '10vh' }}
           onClick={(e) => {
             if (e.target === e.currentTarget) {

@@ -1376,7 +1376,7 @@ function BulkActionBar({
         </button>
         {statusDropdown && (
           <div
-            className="absolute z-50 mt-1"
+            className="absolute z-[70] mt-1"
             style={{
               background: 'var(--color-bg)',
               border: '1px solid var(--color-border)',
@@ -1528,7 +1528,7 @@ function BulkCreateDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-[70] flex items-center justify-center"
       style={{ background: 'rgba(0, 0, 0, 0.5)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
       role="dialog"

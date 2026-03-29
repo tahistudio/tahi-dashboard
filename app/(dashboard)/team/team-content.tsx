@@ -122,7 +122,7 @@ function AddMemberModal({
   const inputCn = 'w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
       <div
         className="bg-[var(--color-bg)] rounded-xl shadow-xl w-full max-w-lg mx-4"
         role="dialog"
@@ -373,7 +373,7 @@ function AccessPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
+    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
       <div
         className="bg-[var(--color-bg)] rounded-t-xl sm:rounded-xl shadow-xl w-full max-w-lg mx-0 sm:mx-4 max-h-[80vh] overflow-y-auto"
         role="dialog"

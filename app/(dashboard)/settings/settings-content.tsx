@@ -154,7 +154,7 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
       {/* Saved toast */}
       {savedToast && (
         <div
-          className="fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium animate-in fade-in slide-in-from-top-2"
+          className="fixed top-4 right-4 z-[70] flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium animate-in fade-in slide-in-from-top-2"
           style={{
             background: 'var(--color-success-bg, #f0fdf4)',
             color: 'var(--color-success, #4ade80)',

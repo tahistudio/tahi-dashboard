@@ -486,7 +486,7 @@ function CreateCouponDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-[70] flex items-center justify-center"
       style={{ background: 'rgba(0, 0, 0, 0.5)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
       role="dialog"
@@ -786,7 +786,7 @@ function CreateServiceDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-[70] flex items-center justify-center"
       style={{ background: 'rgba(0, 0, 0, 0.5)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
       role="dialog"
