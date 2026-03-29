@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import {
-  Plus, Search, Filter, LayoutList, Columns3,
+  Plus, Search, Filter, LayoutList, Columns3, BarChart3,
   AlertTriangle, ChevronDown, Inbox, RefreshCw,
   Calendar, Zap, Clock, ArrowUpDown, Download,
   CheckSquare, Square, Users, Loader2, X,
@@ -33,7 +33,7 @@ interface Request {
   requestNumber?: number | null
 }
 
-type ViewMode = 'list' | 'board'
+type ViewMode = 'list' | 'board' | 'workload'
 type SortKey = 'updatedAt' | 'dueDate' | 'priority' | 'status'
 
 // ─── Config using CSS variables ────────────────────────────────────────────────
