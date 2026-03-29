@@ -198,7 +198,143 @@ server.resource(
 )
 
 // ---------------------------------------------------------------------------
-// Tools (T237-T244)
+// Read Tools (so clients that don't support resources can still read data)
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'get_overview',
+  'Get dashboard overview: KPIs, recent requests, summary stats',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/overview')
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_clients',
+  'List all client organisations with status, plan, health score',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/clients')
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'get_client',
+  'Get full detail for a specific client: org info, contacts, subscription, tracks, recent requests',
+  { clientId: z.string().describe('Client organisation ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/clients/${args.clientId}`)
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_requests',
+  'List all requests (work items) with status, priority, assignee, client',
+  { status: z.string().optional().describe('Filter by status (e.g. submitted, in_progress, delivered)') },
+  async (args) => {
+    const params = args.status ? `?status=${args.status}` : ''
+    const data = await apiFetch(`/api/admin/requests${params}`)
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'get_request',
+  'Get full detail for a specific request: metadata, messages, files, steps',
+  { requestId: z.string().describe('Request ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/requests/${args.requestId}`)
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_invoices',
+  'List all invoices with status, amount, client, dates',
+  { status: z.string().optional().describe('Filter by status (draft, sent, overdue, paid)') },
+  async (args) => {
+    const params = args.status ? `?status=${args.status}` : ''
+    const data = await apiFetch(`/api/admin/invoices${params}`)
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_time_entries',
+  'List time entries logged by team members with hours, client, billable status',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/time')
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'get_reports',
+  'Get aggregate reports: total clients, requests, billable hours, outstanding invoices, monthly trends',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/reports/overview')
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_deals',
+  'List all sales pipeline deals with stage, value, owner, company',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/deals')
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'get_capacity',
+  'Get team capacity: utilization per member, available hours, pipeline impact, forecasted capacity',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/capacity')
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_team',
+  'List all team members with roles, capacity, and skills',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/team')
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_docs',
+  'List all knowledge hub documentation pages',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/docs')
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_conversations',
+  'List all messaging conversations with unread counts',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/conversations')
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+// ---------------------------------------------------------------------------
+// Write Tools (T237-T244)
 // ---------------------------------------------------------------------------
 
 server.tool(
