@@ -25,7 +25,7 @@ export function EmptyState({ icon, title, description, ctaLabel, onCtaClick, act
           width: 56,
           height: 56,
           borderRadius: 'var(--radius-leaf-sm)',
-          background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
+          background: 'linear-gradient(135deg, var(--color-brand-light), var(--color-brand-dark))',
           marginBottom: '1rem',
         }}
       >

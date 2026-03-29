@@ -55,7 +55,7 @@ export function MobileBottomNav({ isAdmin = false }: MobileBottomNavProps) {
             }}
           >
             <Icon
-              size={20}
+              size={isActive ? 22 : 20}
               aria-hidden="true"
               style={{ flexShrink: 0 }}
             />

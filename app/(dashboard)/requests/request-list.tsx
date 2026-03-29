@@ -420,7 +420,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
         {/* Toolbar */}
         <div
           className="flex flex-wrap items-center gap-2"
-          style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--color-border-subtle)', background: 'white' }}
+          style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--color-border-subtle)', background: 'var(--color-bg)' }}
         >
           {/* Search */}
           <div className="relative" style={{ width: '16rem', minWidth: '8rem', flexShrink: 1 }}>
@@ -554,7 +554,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
         {/* Tabs */}
         <div
           className="flex items-end overflow-x-auto overflow-y-hidden scrollbar-hide"
-          style={{ borderBottom: '1px solid var(--color-border)', paddingLeft: '0.25rem', paddingRight: '1rem', background: 'white', WebkitOverflowScrolling: 'touch' }}
+          style={{ borderBottom: '1px solid var(--color-border)', paddingLeft: '0.25rem', paddingRight: '1rem', background: 'var(--color-bg)', WebkitOverflowScrolling: 'touch' }}
         >
           {tabs.map(tab => (
             <button
@@ -720,7 +720,7 @@ function ListRow({
       href={`/requests/${req.id}`}
       style={{ textDecoration: 'none', display: 'block' }}
       onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--color-row-hover)' }}
-      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = isSelected ? 'var(--color-brand-50)' : 'white' }}
+      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = isSelected ? 'var(--color-brand-50)' : 'var(--color-bg)' }}
     >
       {/* Mobile layout (< md): card-style */}
       <div
@@ -1796,7 +1796,7 @@ function EmptyState({ isAdmin, onNew }: { isAdmin: boolean; onNew: () => void })
   return (
     <div
       className="flex flex-col items-center justify-center text-center"
-      style={{ padding: '4rem 1.5rem', background: 'white' }}
+      style={{ padding: '4rem 1.5rem', background: 'var(--color-bg)' }}
     >
       <div
         className="flex items-center justify-center"

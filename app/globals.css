@@ -244,7 +244,13 @@ body {
   --color-bg-tertiary: var(--color-bg-dark-tertiary);
   --color-text: var(--color-text-dark);
   --color-text-muted: var(--color-text-dark-muted);
+  --color-text-subtle: #6b8a64;
   --color-border: var(--color-border-dark);
+  --color-border-subtle: #334430;
+  --color-row-hover: #313e2d;
+  --color-row-border: #2d3a28;
+  --color-th-bg: #2d3a28;
+  --color-th-text: #7a9a72;
 }
 
 /* ============================================================

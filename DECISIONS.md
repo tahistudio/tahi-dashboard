@@ -419,3 +419,13 @@ The Rewardful API key is stored in environment variables as
 **Docs Hub connection:** The Docs Hub (T155-T158) serves as the knowledge base that the MCP server can reference. When Claude answers questions about Tahi processes, it reads from the docs hub. When it takes actions, it uses the MCP tools.
 
 **Escalated to Liam:** No. Architecture is clear and non-destructive.
+
+---
+
+## #023 - Full Dashboard Build Session (2026-03-28 to 2026-03-29)
+
+**Decision:** Built the entire Tahi Dashboard from core infrastructure to 300+ completed tasks in a single intensive session using multi-agent workflows.
+
+**What was built:** 95 API routes, 27 pages, 31 components, 176 tests, MCP server with 18 tools/resources. Features: request management (list/board/workload/detail), client management with 7 tabs, invoicing, time tracking, messaging, reports with charts, team management with access scoping, docs hub, settings with 8 sections, announcements, review pipeline, services catalogue, dark mode, PWA, mobile responsive, keyboard shortcuts, product tour, AI suggestions, breadcrumbs, toasts, and file uploads.
+
+**Key architecture decisions validated:** Cloudflare Workers + D1 + R2, Clerk multi-org auth, CSS custom properties for dark mode, rem units for scalability, shared status config, SearchableSelect for all pickers.
