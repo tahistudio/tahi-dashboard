@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   Users, Inbox, Clock, CreditCard, BarChart2,
-  TrendingUp, RefreshCw, Calendar,
+  TrendingUp, RefreshCw, Calendar, Download,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -411,6 +411,166 @@ export function ReportsContent() {
           )}
         </div>
       </div>
+
+      {/* Response Time per Team Member */}
+      <ResponseTimeSection />
+    </div>
+  )
+}
+
+// ── Response Time Section ──────────────────────────────────────────────────
+
+interface ResponseTimeRow {
+  teamMemberId: string
+  name: string
+  messageCount: number
+  avgResponseMinutes: number
+}
+
+function ResponseTimeSection() {
+  const [rows, setRows] = useState<ResponseTimeRow[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/reports/response-time'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<{ items: ResponseTimeRow[] }>
+      })
+      .then(d => setRows(d.items ?? []))
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const formatTime = (mins: number): string => {
+    if (mins === 0) return 'N/A'
+    if (mins < 60) return `${mins}m`
+    const hours = Math.floor(mins / 60)
+    const remaining = mins % 60
+    if (hours < 24) return remaining > 0 ? `${hours}h ${remaining}m` : `${hours}h`
+    const days = Math.floor(hours / 24)
+    const remHours = hours % 24
+    return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`
+  }
+
+  const exportCsv = () => {
+    const header = 'Team Member,Responses,Avg Response Time (minutes)\n'
+    const csvRows = rows.map(r =>
+      `"${r.name}",${r.messageCount},${r.avgResponseMinutes}`
+    )
+    const blob = new Blob([header + csvRows.join('\n')], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'response-times.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div
+      style={{
+        background: 'var(--color-bg)',
+        borderRadius: 'var(--radius-card)',
+        border: '1px solid var(--color-border)',
+        padding: '1.5rem',
+      }}
+    >
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-[var(--color-text)] flex items-center gap-2">
+          <Clock className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Avg Response Time per Team Member
+        </h3>
+        {rows.length > 0 && (
+          <button
+            onClick={exportCsv}
+            className="flex items-center gap-1 text-xs font-medium transition-colors hover:text-[var(--color-brand)]"
+            style={{
+              color: 'var(--color-text-muted)',
+              background: 'var(--color-bg-secondary)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-button)',
+              padding: '0.375rem 0.75rem',
+              cursor: 'pointer',
+              minHeight: '2rem',
+            }}
+          >
+            <Download className="w-3.5 h-3.5" aria-hidden="true" />
+            Export CSV
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="space-y-2">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="animate-pulse rounded" style={{ height: '2.5rem', background: 'var(--color-bg-tertiary)' }} />
+          ))}
+        </div>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-[var(--color-text-muted)]">No response data available yet.</p>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th
+                  className="text-left text-xs font-medium text-[var(--color-text-muted)]"
+                  style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                >
+                  Team Member
+                </th>
+                <th
+                  className="text-right text-xs font-medium text-[var(--color-text-muted)]"
+                  style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                >
+                  Responses
+                </th>
+                <th
+                  className="text-right text-xs font-medium text-[var(--color-text-muted)]"
+                  style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                >
+                  Avg Response Time
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(row => (
+                <tr key={row.teamMemberId}>
+                  <td
+                    className="text-sm text-[var(--color-text)] font-medium"
+                    style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                  >
+                    {row.name}
+                  </td>
+                  <td
+                    className="text-sm text-[var(--color-text-muted)] text-right"
+                    style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                  >
+                    {row.messageCount}
+                  </td>
+                  <td
+                    className="text-sm text-right font-medium"
+                    style={{
+                      padding: '0.5rem 0.75rem',
+                      borderBottom: '1px solid var(--color-border-subtle)',
+                      color: row.avgResponseMinutes === 0
+                        ? 'var(--color-text-subtle)'
+                        : row.avgResponseMinutes <= 60
+                          ? 'var(--color-success)'
+                          : row.avgResponseMinutes <= 480
+                            ? 'var(--color-warning)'
+                            : 'var(--color-danger)',
+                    }}
+                  >
+                    {formatTime(row.avgResponseMinutes)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
