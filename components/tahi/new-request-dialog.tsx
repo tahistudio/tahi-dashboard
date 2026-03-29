@@ -219,7 +219,7 @@ export function NewRequestDialog({
           position: 'fixed', inset: 0,
           background: 'rgba(0,0,0,0.4)',
           backdropFilter: 'blur(2px)',
-          zIndex: 40,
+          zIndex: 60,
         }}
         onClick={onClose}
       />
@@ -236,7 +236,7 @@ export function NewRequestDialog({
           maxWidth: '32.5rem',
           background: 'var(--color-bg)',
           boxShadow: 'var(--shadow-lg)',
-          zIndex: 50,
+          zIndex: 70,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -643,6 +643,7 @@ export function NewRequestDialog({
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '1rem 1.5rem',
+            paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))',
             borderTop: '1px solid var(--color-border-subtle)',
             background: 'var(--color-bg-secondary)',
             flexShrink: 0,
