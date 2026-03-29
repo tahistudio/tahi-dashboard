@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
-Last updated: 2026-03-29
-Total tasks: 296 (S1-S11 schema + T1-T285 feature + audit findings)
-Completed: 296/296 (ALL TASKS COMPLETE)
+Last updated: 2026-03-28
+Total tasks: 402 (S1-S15 schema + T1-T391 feature + audit findings)
+Completed: 296/402
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -473,3 +473,169 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T283 - Success toast notifications: show after creating request, invoice, client, time entry -- [FE] -- [PM] 2026-03-28
 - [x] T284 - Keyboard shortcuts: N for new request, C for new client, / for search -- [FE] -- [PM] 2026-03-28
 - [x] T285 - Revenue trend chart on overview: line chart showing MRR over last 6 months -- [FE + BE] -- [PM] 2026-03-28
+
+---
+
+## Phase 6: CRM Pipeline, Capacity Tracking, Multi-Currency, Brands (Decision #024)
+
+### Schema Additions
+
+- [ ] S12 - [BE] Add CRM schema batch 8: `deals`, `dealContacts`, `pipelineStages`, `activities` tables per SPECS/crm-pipeline.md
+- [ ] S13 - [BE] Add CRM schema batch 9: `brands`, `brandContacts` tables; add `brandId` column to `requests` table; add `phone` and `customFields` columns to `contacts`; add `customFields`, `defaultHourlyRate`, `size`, `annualRevenue` columns to `organisations`
+
+### Pipeline Stages and Configuration
+
+- [ ] S14 - [BE] Add org chart schema: add `reportsToId` and `department` columns to `teamMembers`; create `plannedRoles` table (id, title, department, reportsToId, priority, status, notes, estimatedStartDate, weeklyCapacityHours)
+- [ ] S15 - [BE] Add close rate tracking fields: add `wonSource` column to deals table (text, nullable)
+
+- [ ] T286 - [BE] Seed default pipeline stages (Inquiry, Contacted, Discovery, Proposal Sent, Won, Lost, Stalled) in migration per Tahi's actual sales process
+- [ ] T287 - [BE] GET /api/admin/pipeline-stages: return all stages ordered by position
+- [ ] T288 - [BE] PUT /api/admin/pipeline-stages: bulk update stage order, names, colours, probabilities
+- [ ] T289 - [FE] Settings page: pipeline stages editor (reorder, rename, change colour, set probability)
+
+### Deals CRUD
+
+- [ ] T290 - [BE] GET /api/admin/deals: list deals with filters (stage, owner, org, search, status, date range), include org name, contact names, owner name
+- [ ] T291 - [BE] POST /api/admin/deals: create deal with title, value, currency, orgId, contactIds, stageId, ownerId, expectedCloseDate, estimatedHoursPerWeek, estimatedDurationWeeks, notes
+- [ ] T292 - [BE] GET /api/admin/deals/[id]: deal detail with contacts (via dealContacts), activities, associated requests, org info
+- [ ] T293 - [BE] PATCH /api/admin/deals/[id]: update deal fields including stage change; auto-compute valueNzd from exchange rates; set actualCloseDate when status changes to won/lost
+- [ ] T294 - [BE] DELETE /api/admin/deals/[id]: soft delete (set status to archived)
+- [ ] T295 - [BE] POST /api/admin/deals/[id]/contacts: add/remove contacts on a deal with role assignment
+
+### Pipeline Board (FE)
+
+- [ ] T296 - [FE] Pipeline page: Kanban board with columns per stage, deal cards showing title, org, value, currency, expected close date, owner avatar
+- [ ] T297 - [FE] Pipeline board: drag and drop deals between stages (updates deal stageId and probability via PATCH)
+- [ ] T298 - [FE] Pipeline board: list view toggle (table with sortable columns)
+- [ ] T299 - [FE] Pipeline board: filters panel (stage, owner, org, value range, date range)
+- [ ] T300 - [FE] Pipeline board: summary bar at top showing total pipeline value, weighted value, deal count per stage
+
+### Deal Detail Page (FE)
+
+- [ ] T301 - [FE] Deal detail page: two-column layout (main content left, summary panel right) following request detail pattern
+- [ ] T302 - [FE] Deal detail: summary panel with stage selector, value, currency, owner, expected close date, probability, source, estimated hours/week
+- [ ] T303 - [FE] Deal detail: contacts tab showing linked contacts with role badges, add/remove contact
+- [ ] T304 - [FE] Deal detail: activities tab with chronological timeline (calls, meetings, emails, notes), add activity form
+- [ ] T305 - [FE] Deal detail: notes tab with rich text editor (Tiptap)
+- [ ] T306 - [FE] Deal detail: associated requests tab (requests from the same org, linkable)
+- [ ] T307 - [FE] Deal detail: capacity impact card showing how closing this deal would affect team capacity
+- [ ] T308 - [FE] Deal close dialog: when moving to Won/Lost stage, prompt for wonSource or lostReason
+
+### Activities CRUD
+
+- [ ] T309 - [BE] GET /api/admin/activities: list activities with filters (contactId, orgId, dealId, type, date range, performedById)
+- [ ] T310 - [BE] POST /api/admin/activities: create activity (type, subject, body, contactId, orgId, dealId, activityDate, durationMinutes, attendees, actionItems)
+- [ ] T311 - [BE] PATCH /api/admin/activities/[id]: update activity
+- [ ] T312 - [BE] DELETE /api/admin/activities/[id]: delete activity
+- [ ] T313 - [BE] GET /api/admin/deals/[id]/activities: activities scoped to a specific deal
+
+### Contact Detail Enhancements
+
+- [ ] T314 - [FE] Contact detail page: full page with activity timeline, deals, messages, requests, files
+- [ ] T315 - [BE] GET /api/admin/contacts/[id]: return contact detail with activity timeline, deals (via dealContacts), org info, custom fields
+- [ ] T316 - [BE] PATCH /api/admin/contacts/[id]: update contact fields including phone, customFields
+- [ ] T317 - [FE] Contact detail: activity log form (quick-add call, meeting, email, note inline)
+
+### Company/Organisation Enhancements
+
+- [ ] T318 - [FE] Client detail: add Deals tab showing all deals for this org with stage, value, owner
+- [ ] T319 - [FE] Client detail: add Activities tab showing all activities for this org
+- [ ] T320 - [FE] Client detail: add Revenue tab showing deal history, invoice totals, time cost, LTV
+- [ ] T321 - [BE] PATCH /api/admin/clients/[id]: support updating customFields, defaultHourlyRate, size, annualRevenue
+
+### Sales Reports
+
+- [ ] T322 - [BE] GET /api/admin/reports/sales: pipeline value by stage, weighted pipeline, win rate, avg deal size, avg days to close
+- [ ] T323 - [BE] GET /api/admin/reports/close-rates: conversion rate between each stage, win/loss over time, revenue per stage, stage velocity
+- [ ] T324 - [FE] Reports page: sales metrics section with pipeline value chart (stacked bar by stage), win rate trend, avg deal size, forecast chart
+- [ ] T325 - [FE] Reports page: sales funnel visualization showing conversion between stages
+- [ ] T326 - [FE] Reports page: revenue forecast chart (weighted pipeline value over next 3/6/12 months)
+
+### Capacity Tracking
+
+- [ ] T327 - [BE] Seed capacity settings in settings table: capacity_hours_maintain, capacity_hours_scale, base_currency
+- [ ] T328 - [BE] GET /api/admin/capacity: return current utilization (per team member and total), projected capacity (from subscriptions), forecasted impact (from pipeline deals)
+- [ ] T329 - [BE] POST /api/admin/capacity/start-date: accept estimatedHoursPerWeek, return earliest week with sufficient capacity, available team members, confidence level
+- [ ] T330 - [FE] Capacity page: current utilization section with horizontal bars per team member (used vs available hours)
+- [ ] T331 - [FE] Capacity page: projected capacity section showing committed hours from active subscriptions vs total team hours
+- [ ] T332 - [FE] Capacity page: forecasted section showing weighted pipeline impact, worst case, if-all-close scenario
+- [ ] T333 - [FE] Capacity page: timeline chart showing capacity over next 8 weeks (line chart: total, committed, forecasted)
+- [ ] T334 - [FE] Capacity page: "Earliest Start Date" calculator widget (input hours/week, output date and available team members)
+- [ ] T335 - [FE] Capacity page: "Sales Call Helper" card showing utilization, free capacity, next capacity opening, deal impact selector
+
+### Multi-Currency
+
+- [ ] T336 - [BE] GET /api/admin/exchange-rates: return all rates with last updated timestamp
+- [ ] T337 - [BE] POST /api/admin/exchange-rates: trigger rate refresh from external API (Open Exchange Rates or similar), update exchangeRates table
+- [ ] T338 - [BE] Utility function: convertCurrency(amount, fromCurrency, toCurrency) using exchangeRates table
+- [ ] T339 - [BE] Auto-compute valueNzd on deal create/update using exchange rates
+- [ ] T340 - [FE] Reports: currency selector dropdown to view all monetary reports in selected currency
+- [ ] T341 - [FE] Deal form: currency picker with live conversion preview (e.g. "NZD 10,000 = approx USD 6,200")
+- [ ] T342 - [BE] Cloudflare Cron Trigger: refresh exchange rates daily
+
+### Brands (Proper Entity)
+
+- [ ] T343 - [BE] GET /api/admin/brands: list all brands with org name, contact count, request count
+- [ ] T344 - [BE] POST /api/admin/brands: create brand under an org (name, logoUrl, website, primaryColour)
+- [ ] T345 - [BE] GET /api/admin/brands/[id]: brand detail with contacts, requests, files
+- [ ] T346 - [BE] PATCH /api/admin/brands/[id]: update brand
+- [ ] T347 - [BE] DELETE /api/admin/brands/[id]: delete brand (cascade brandContacts, clear brandId on requests)
+- [ ] T348 - [BE] Migration: convert existing organisations.brands JSON arrays into brands table rows
+- [ ] T349 - [FE] Client detail: brands tab with card per brand, create/edit/delete brand
+- [ ] T350 - [FE] Brand detail page: contacts, requests, files filtered to that brand
+- [ ] T351 - [FE] Request form: brand selector dropdown (filtered to selected org's brands)
+- [ ] T352 - [BE] Portal scoping: contacts linked to a brand only see requests tagged with that brand
+
+### Close Rate and Pipeline Analytics
+
+- [ ] T353 - [BE] Track stage transitions: when a deal moves between stages, log the transition with timestamp (use activities table with type 'stage_change')
+- [ ] T354 - [BE] Compute stage velocity: avg days deals spend in each stage based on stage transition history
+- [ ] T355 - [FE] Pipeline analytics: stage velocity chart (bar chart showing avg days per stage)
+- [ ] T356 - [FE] Pipeline analytics: conversion funnel (deals entering vs exiting each stage)
+- [ ] T357 - [FE] Deal close: win/loss reason selector with predefined options plus free text
+
+### Sidebar and Navigation
+
+- [ ] T358 - [FE] Add "Pipeline" nav item to sidebar under a "Sales" group (above Clients)
+- [ ] T359 - [FE] Add "Capacity" nav item to sidebar under the "Sales" group
+- [ ] T360 - [FE] Overview page: add pipeline summary card (total pipeline value, deals closing this month, capacity utilization)
+
+### Integration and Polish
+
+- [ ] T361 - [FE] Deal creation from client detail page (pre-fill orgId)
+- [ ] T362 - [FE] Activity creation from contact detail page (pre-fill contactId)
+- [ ] T363 - [BE] MCP tool: create_deal (title, value, currency, orgId, stageSlug)
+- [ ] T364 - [BE] MCP tool: update_deal_stage (dealId, stageSlug)
+- [ ] T365 - [BE] MCP resource: dashboard://pipeline (deal list with stage, value, owner)
+- [ ] T366 - [BE] MCP resource: dashboard://capacity (current utilization, projected, forecast)
+- [ ] T367 - [UIUX] Review all CRM pages for spacing, colour consistency, dark mode, mobile responsiveness
+- [ ] T368 - [QA] End-to-end test: create deal, move through stages, close as won, verify capacity updates
+- [ ] T369 - [QA] End-to-end test: multi-currency deal creation, verify NZD conversion, verify reports in different currencies
+- [ ] T370 - [QA] End-to-end test: brand CRUD, portal scoping for brand-linked contacts
+
+### Org Chart
+
+- [ ] T371 - [BE] GET /api/admin/org-chart: return team members with reportsToId structured as a tree, include planned roles
+- [ ] T372 - [BE] PATCH /api/admin/team-members/[id]: support updating reportsToId and department
+- [ ] T373 - [BE] GET /api/admin/planned-roles: list all planned/vacant roles
+- [ ] T374 - [BE] POST /api/admin/planned-roles: create a planned role
+- [ ] T375 - [BE] PATCH /api/admin/planned-roles/[id]: update planned role
+- [ ] T376 - [BE] DELETE /api/admin/planned-roles/[id]: delete planned role
+- [ ] T377 - [FE] Org chart page: tree visualization with connected nodes (filled team members and vacant planned roles)
+- [ ] T378 - [FE] Org chart: each filled node shows avatar, name, title, department badge, capacity utilization bar
+- [ ] T379 - [FE] Org chart: each vacant node shows dotted border, title, department, hiring priority badge
+- [ ] T380 - [FE] Org chart: drag nodes to reorganize reporting structure (updates reportsToId via PATCH)
+- [ ] T381 - [FE] Org chart: department colour grouping and filtering
+- [ ] T382 - [FE] Org chart: click node navigates to team member detail page
+- [ ] T383 - [FE] Org chart: export as PNG image button
+- [ ] T384 - [FE] Org chart: responsive layout (horizontal tree desktop, vertical list mobile)
+- [ ] T385 - [FE] Add "Org Chart" nav item to sidebar under "Team" group
+- [ ] T386 - [FE] Planned roles management: create/edit/delete dialog on org chart page
+- [ ] T387 - [UIUX] Review org chart for spacing, node sizing, line rendering, dark mode
+- [ ] T388 - [QA] End-to-end test: org chart rendering, drag reorder, planned role CRUD
+
+### Sales Analytics (per-source breakdowns)
+
+- [ ] T389 - [BE] GET /api/admin/reports/sales: add per-source breakdowns (avg deal size by source, close rate by source, avg cycle length by source)
+- [ ] T390 - [FE] Reports: source breakdown charts (bar chart of deal count by source, pie chart of revenue by source)
+- [ ] T391 - [FE] Reports: sales cycle length chart (avg days from Inquiry to Won, trended over time)

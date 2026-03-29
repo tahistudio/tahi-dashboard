@@ -429,3 +429,16 @@ The Rewardful API key is stored in environment variables as
 **What was built:** 95 API routes, 27 pages, 31 components, 176 tests, MCP server with 18 tools/resources. Features: request management (list/board/workload/detail), client management with 7 tabs, invoicing, time tracking, messaging, reports with charts, team management with access scoping, docs hub, settings with 8 sections, announcements, review pipeline, services catalogue, dark mode, PWA, mobile responsive, keyboard shortcuts, product tour, AI suggestions, breadcrumbs, toasts, and file uploads.
 
 **Key architecture decisions validated:** Cloudflare Workers + D1 + R2, Clerk multi-org auth, CSS custom properties for dark mode, rem units for scalability, shared status config, SearchableSelect for all pickers.
+
+---
+
+## #024 - Replace HubSpot with Built-in CRM Pipeline
+
+Date: 2026-03-28
+Decision: Build a native CRM pipeline inside the dashboard to replace HubSpot. New tables: deals, dealContacts, pipelineStages, activities, brands, brandContacts. Extends organisations and contacts with custom fields. Adds capacity tracking and forecasting from the pipeline. Adds proper multi-currency support. Promotes brands from a JSON array to a proper entity.
+
+Why: HubSpot adds cost and requires context-switching. Tahi already has organisations, contacts, invoices, and time tracking in the dashboard. A built-in pipeline keeps all sales and delivery data in one system. Capacity forecasting from the pipeline is a key sales enabler: Liam needs to tell prospects when work can start.
+
+How: BE agent creates schema batch 8 (deals, dealContacts, pipelineStages, activities) and batch 9 (brands, brandContacts). BE agent builds API routes for deals CRUD, activities CRUD, capacity calculation, and close rate metrics. FE agent builds pipeline Kanban board, deal detail page, capacity dashboard, contact detail page, and enhanced reports. UIUX agent reviews all new pages. QA agent tests pipeline flow end to end.
+
+Escalated to Liam: Yes. Four items need confirmation before implementation starts: (1) NZD as base reporting currency, (2) default pipeline stages and probabilities, (3) whether brands should scope portal visibility, (4) whether to remove HubSpot API key from env vars. See SPECS/crm-pipeline.md escalation check section.
