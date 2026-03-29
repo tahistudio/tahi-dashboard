@@ -5,7 +5,7 @@ import {
   RefreshCw, Sun, Moon,
   CreditCard, Link2, Bell, Building2,
   FileText, Plus, Trash2, GripVertical, ChevronDown, ChevronUp,
-  Webhook, Loader2, User, Palette,
+  Webhook, Loader2, User, Palette, ToggleLeft,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -348,6 +348,18 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
           {/* Branding (admin only) - T277 */}
           {isAdmin && (
             <BrandingSection
+              settings={settings}
+              onSave={async (key: string, value: string) => {
+                await saveSetting(key, value)
+                setSettings(prev => ({ ...prev, [key]: value }))
+              }}
+              savingKey={savingKey}
+            />
+          )}
+
+          {/* Modules Toggle (admin only) - T278 */}
+          {isAdmin && (
+            <ModulesSection
               settings={settings}
               onSave={async (key: string, value: string) => {
                 await saveSetting(key, value)
@@ -1613,6 +1625,104 @@ function BrandingSection({
           )}
         </div>
       </div>
+    </section>
+  )
+}
+
+// -- Modules Section (T278) --
+
+const MODULE_CONFIG = [
+  {
+    key: 'requests',
+    name: 'Requests',
+    description: 'Task and request management for client work',
+  },
+  {
+    key: 'messaging',
+    name: 'Messaging',
+    description: 'Direct and group conversations with clients and team',
+  },
+  {
+    key: 'billing',
+    name: 'Billing',
+    description: 'Invoicing, payments, and subscription management',
+  },
+  {
+    key: 'time_tracking',
+    name: 'Time Tracking',
+    description: 'Log and report hours worked per client and request',
+  },
+  {
+    key: 'reports',
+    name: 'Reports',
+    description: 'Charts, analytics, and performance dashboards',
+  },
+]
+
+function ModulesSection({
+  settings,
+  onSave,
+  savingKey,
+}: {
+  settings: Record<string, string | null>
+  onSave: (key: string, value: string) => Promise<void>
+  savingKey: string | null
+}) {
+  function isEnabled(moduleKey: string): boolean {
+    const settingKey = `module_${moduleKey}_enabled`
+    // Default to enabled if not explicitly set
+    return settings[settingKey] !== 'false'
+  }
+
+  async function handleToggle(moduleKey: string) {
+    const settingKey = `module_${moduleKey}_enabled`
+    const next = !isEnabled(moduleKey)
+    await onSave(settingKey, next ? 'true' : 'false')
+  }
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <ToggleLeft className="w-5 h-5" aria-hidden="true" />
+        Modules
+      </h2>
+      <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl divide-y divide-[var(--color-border-subtle)]">
+        {MODULE_CONFIG.map(mod => {
+          const enabled = isEnabled(mod.key)
+          const settingKey = `module_${mod.key}_enabled`
+          return (
+            <div key={mod.key} className="flex items-center justify-between p-5">
+              <div>
+                <p className="text-sm font-medium text-[var(--color-text)]">{mod.name}</p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                  {mod.description}
+                </p>
+              </div>
+              <button
+                onClick={() => handleToggle(mod.key)}
+                className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
+                style={{
+                  background: enabled ? 'var(--color-brand)' : 'var(--color-border)',
+                }}
+                role="switch"
+                aria-checked={enabled}
+                aria-label={`Toggle ${mod.name}`}
+                disabled={savingKey === settingKey}
+              >
+                <span
+                  className="inline-block h-4 w-4 rounded-full bg-white transition-transform"
+                  style={{
+                    transform: enabled ? 'translateX(1.375rem)' : 'translateX(0.25rem)',
+                  }}
+                />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+      <p className="text-xs text-[var(--color-text-subtle)] mt-2">
+        Toggling a module stores the preference. Feature visibility will be enforced in a future update.
+      </p>
     </section>
   )
 }

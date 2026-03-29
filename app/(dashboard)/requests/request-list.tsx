@@ -531,6 +531,23 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
             >
               <Columns3 className="w-4 h-4" />
             </button>
+            {isAdmin && (
+              <button
+                onClick={() => setView('workload')}
+                className="flex items-center justify-center transition-colors"
+                style={{
+                  padding: '0.5rem',
+                  background: view === 'workload' ? 'var(--color-brand)' : 'var(--color-bg)',
+                  color: view === 'workload' ? 'white' : 'var(--color-text-muted)',
+                  border: 'none',
+                  borderLeft: '1px solid var(--color-border)',
+                  cursor: 'pointer',
+                }}
+                aria-label="Workload view"
+              >
+                <BarChart3 className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -577,9 +594,11 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
         )}
 
         {/* Content area */}
-        <div style={{ background: view === 'board' ? 'var(--color-bg-secondary)' : 'var(--color-bg)' }}>
+        <div style={{ background: view === 'board' || view === 'workload' ? 'var(--color-bg-secondary)' : 'var(--color-bg)' }}>
           {loading ? (
             <LoadingSkeleton />
+          ) : view === 'workload' && isAdmin ? (
+            <WorkloadView requests={sorted} />
           ) : sorted.length === 0 ? (
             <EmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />
           ) : view === 'list' ? (
@@ -1026,6 +1045,226 @@ function KanbanCard({ req }: { req: Request }) {
         </div>
       </div>
     </Link>
+  )
+}
+
+// ─── Workload View ───────────────────────────────────────────────────────────
+
+interface WorkloadTeamMember {
+  id: string
+  name: string
+  role: string | null
+  avatarUrl: string | null
+}
+
+function WorkloadView({ requests }: { requests: Request[] }) {
+  const [members, setMembers] = useState<WorkloadTeamMember[]>([])
+  const [loadingMembers, setLoadingMembers] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/team-members'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<{ items: WorkloadTeamMember[] }>
+      })
+      .then(data => setMembers(data.items ?? []))
+      .catch(() => setMembers([]))
+      .finally(() => setLoadingMembers(false))
+  }, [])
+
+  if (loadingMembers) {
+    return (
+      <div style={{ padding: '1.5rem' }}>
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="flex items-center gap-3 animate-pulse" style={{ marginBottom: '1rem' }}>
+            <div className="rounded-full" style={{ width: '2rem', height: '2rem', background: 'var(--color-border-subtle)' }} />
+            <div className="h-4 rounded" style={{ width: '8rem', background: 'var(--color-border-subtle)' }} />
+            <div className="h-4 rounded" style={{ width: '3rem', background: 'var(--color-border-subtle)', marginLeft: 'auto' }} />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  // Count assigned requests per team member
+  const assignmentMap = new Map<string, Request[]>()
+  const unassigned: Request[] = []
+
+  for (const req of requests) {
+    if (req.assigneeId) {
+      const existing = assignmentMap.get(req.assigneeId) ?? []
+      existing.push(req)
+      assignmentMap.set(req.assigneeId, existing)
+    } else {
+      unassigned.push(req)
+    }
+  }
+
+  const maxCount = Math.max(
+    1,
+    ...members.map(m => (assignmentMap.get(m.id) ?? []).length),
+    unassigned.length
+  )
+
+  return (
+    <div style={{ padding: '1rem' }}>
+      <div
+        className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
+        style={{ border: '1px solid var(--color-border)' }}
+      >
+        {/* Table header */}
+        <div
+          className="grid text-xs font-semibold uppercase tracking-wide"
+          style={{
+            gridTemplateColumns: '1fr 5rem 1fr',
+            padding: '0.625rem 1rem',
+            borderBottom: '1px solid var(--color-border-subtle)',
+            color: 'var(--color-th-text)',
+            background: 'var(--color-th-bg)',
+          }}
+        >
+          <span>Team Member</span>
+          <span style={{ textAlign: 'center' }}>Assigned</span>
+          <span>Capacity</span>
+        </div>
+
+        {members.map((member, i) => {
+          const assigned = assignmentMap.get(member.id) ?? []
+          const pct = maxCount > 0 ? Math.round((assigned.length / maxCount) * 100) : 0
+          const isLast = i === members.length - 1 && unassigned.length === 0
+
+          return (
+            <div
+              key={member.id}
+              className="grid items-center"
+              style={{
+                gridTemplateColumns: '1fr 5rem 1fr',
+                padding: '0.75rem 1rem',
+                borderBottom: isLast ? 'none' : '1px solid var(--color-row-border)',
+              }}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div
+                  className="flex items-center justify-center rounded-full flex-shrink-0 font-semibold"
+                  style={{
+                    width: '2rem',
+                    height: '2rem',
+                    fontSize: '0.6875rem',
+                    background: 'var(--color-brand)',
+                    color: 'white',
+                  }}
+                >
+                  {getInitials(member.name)}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>
+                    {member.name}
+                  </p>
+                  {member.role && (
+                    <p className="text-xs truncate" style={{ color: 'var(--color-text-subtle)' }}>
+                      {member.role}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <span
+                className="text-sm font-semibold"
+                style={{ textAlign: 'center', color: assigned.length > 0 ? 'var(--color-text)' : 'var(--color-text-subtle)' }}
+              >
+                {assigned.length}
+              </span>
+              <div className="flex items-center gap-2">
+                <div
+                  style={{
+                    flex: 1,
+                    height: '0.5rem',
+                    background: 'var(--color-bg-tertiary)',
+                    borderRadius: '0.25rem',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${pct}%`,
+                      height: '100%',
+                      background: pct > 75 ? 'var(--color-warning)' : 'var(--color-brand)',
+                      borderRadius: '0.25rem',
+                      transition: 'width 0.3s',
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )
+        })}
+
+        {/* Unassigned row */}
+        {unassigned.length > 0 && (
+          <div
+            className="grid items-center"
+            style={{
+              gridTemplateColumns: '1fr 5rem 1fr',
+              padding: '0.75rem 1rem',
+              background: 'var(--color-bg-secondary)',
+            }}
+          >
+            <div className="flex items-center gap-2.5">
+              <div
+                className="flex items-center justify-center rounded-full flex-shrink-0"
+                style={{
+                  width: '2rem',
+                  height: '2rem',
+                  background: 'var(--color-bg-tertiary)',
+                  color: 'var(--color-text-subtle)',
+                }}
+              >
+                <Inbox style={{ width: '0.875rem', height: '0.875rem' }} />
+              </div>
+              <p className="text-sm font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                Unassigned
+              </p>
+            </div>
+            <span
+              className="text-sm font-semibold"
+              style={{ textAlign: 'center', color: 'var(--color-warning)' }}
+            >
+              {unassigned.length}
+            </span>
+            <div className="flex items-center gap-2">
+              <div
+                style={{
+                  flex: 1,
+                  height: '0.5rem',
+                  background: 'var(--color-bg-tertiary)',
+                  borderRadius: '0.25rem',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.round((unassigned.length / maxCount) * 100)}%`,
+                    height: '100%',
+                    background: 'var(--color-danger)',
+                    borderRadius: '0.25rem',
+                    transition: 'width 0.3s',
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {members.length === 0 && (
+          <div className="flex flex-col items-center justify-center text-center" style={{ padding: '3rem 1.5rem' }}>
+            <Users style={{ width: '2rem', height: '2rem', color: 'var(--color-text-subtle)', marginBottom: '0.75rem' }} />
+            <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>No team members</p>
+            <p className="text-xs" style={{ color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>
+              Add team members to see workload distribution.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

@@ -322,6 +322,20 @@ const ONBOARDING_STEPS = [
   },
 ]
 
+function toLoomEmbedUrl(url: string): string {
+  // Convert loom.com/share/VIDEO_ID to loom.com/embed/VIDEO_ID
+  const shareMatch = url.match(/loom\.com\/share\/([a-zA-Z0-9]+)/)
+  if (shareMatch) {
+    return `https://www.loom.com/embed/${shareMatch[1]}`
+  }
+  // Already an embed URL
+  if (url.includes('loom.com/embed/')) {
+    return url
+  }
+  // Fallback: just return as-is
+  return url
+}
+
 function OnboardingChecklist() {
   const [state, setState] = useState<Record<string, boolean> | null>(null)
   const [loomUrl, setLoomUrl] = useState<string | null>(null)
@@ -502,17 +516,35 @@ function OnboardingChecklist() {
       {/* Loom embed */}
       {loomUrl && (
         <div style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}>
-          <a
-            href={loomUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 text-sm font-medium hover:underline"
-            style={{ color: BRAND }}
+          <div className="flex items-center gap-2 mb-2">
+            <Video size={14} style={{ color: BRAND }} aria-hidden="true" />
+            <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+              Onboarding Video
+            </span>
+          </div>
+          <div
+            style={{
+              position: 'relative',
+              paddingBottom: '56.25%',
+              height: 0,
+              overflow: 'hidden',
+              borderRadius: '0.5rem',
+            }}
           >
-            <Play size={14} />
-            Watch your onboarding video
-            <ExternalLink size={11} />
-          </a>
+            <iframe
+              src={toLoomEmbedUrl(loomUrl)}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                border: 'none',
+              }}
+              allowFullScreen
+              title="Onboarding video"
+            />
+          </div>
         </div>
       )}
 

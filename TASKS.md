@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-29
 Total tasks: 296 (S1-S11 schema + T1-T285 feature + audit findings)
-Completed: 291/296 (S1-S11, T1-T266, T268-T269, T272-T275, T277, T279-T285)
+Completed: 293/296 (S1-S11, T1-T285 except T270, T271, T276)
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -452,24 +452,24 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 ## ManyRequests Feature Parity + Product Enhancements (2026-03-29)
 
 ### Missing from ManyRequests reference
-- [ ] T267 - Workload view: calendar grid showing team member capacity per day (rows = team members, columns = days, colored bars = hours) -- [FE + BE]
-- [x] T268 - Request numbering: sequential request numbers (#001, #002) displayed on request cards and detail. Add a `requestNumber` integer column or compute from creation order -- [BE + FE]
+- [x] T267 - Workload view: calendar grid showing team member capacity per day (rows = team members, columns = days, colored bars = hours) -- [FE + BE] -- [PM] 2026-03-28
+- [x] T268 - Request numbering: sequential request numbers (#001, #002) displayed on request cards and detail. Add a `requestNumber` integer column or compute from creation order -- [BE + FE] -- [PM] 2026-03-28
 - [x] T269 - Services catalogue: admin page to create/manage services with name, price, currency, recurring toggle. Clients see available services when submitting requests -- [FE + BE] -- [PM] 2026-03-28
 - [ ] T270 - Discount coupons: admin can create coupon codes for services -- [BE]
 - [ ] T271 - Brands per org: sub-identities under a client org (eg separate brand names for one company group) -- [FE + BE]
 - [x] T272 - "Following" on requests: watch a request and receive notifications on changes -- [FE + BE] -- [PM] 2026-03-28
 - [x] T273 - Message deletion: "This message has been removed" indicator instead of hard delete -- [FE + BE] -- [PM] 2026-03-28
-- [x] T274 - Checklists per request: multiple titled checklists with checkbox items on request detail -- [FE + BE]
-- [x] T275 - "Download all files" button on request detail files section -- [FE]
+- [x] T274 - Checklists per request: multiple titled checklists with checkbox items on request detail -- [FE + BE] -- [PM] 2026-03-28
+- [x] T275 - "Download all files" button on request detail files section -- [FE] -- [PM] 2026-03-28
 - [ ] T276 - Avg response time report: per team member, exportable CSV -- [FE + BE]
 - [x] T277 - Portal branding settings: custom logo upload (light + dark), favicon, primary color picker, sidebar color picker -- [FE + BE] -- [PM] 2026-03-28
-- [ ] T278 - Modules toggle: enable/disable major features (requests, users, billing, messaging) from settings -- [FE + BE]
+- [x] T278 - Modules toggle: enable/disable major features (requests, users, billing, messaging) from settings -- [FE + BE] -- [PM] 2026-03-28
 
 ### Product enhancements
-- [x] T279 - Track capacity upsell cards: greyed-out cards for unavailable tracks with upgrade CTA. Show what the client could unlock. -- [FE + UIUX]
-- [x] T280 - Interactive product tour: tooltip walkthrough highlighting key UI elements for new users, stored completion in localStorage -- [FE]
-- [x] T281 - AI request assistant: suggest estimated hours, priority, and steps from request title/description (Claude API stub) -- [BE + FE]
-- [x] T282 - Breadcrumb navigation: add to request detail, client detail, invoice detail pages -- [FE]
-- [x] T283 - Success toast notifications: show after creating request, invoice, client, time entry -- [FE]
-- [x] T284 - Keyboard shortcuts: N for new request, C for new client, / for search -- [FE]
+- [x] T279 - Track capacity upsell cards: greyed-out cards for unavailable tracks with upgrade CTA. Show what the client could unlock. -- [FE + UIUX] -- [PM] 2026-03-28
+- [x] T280 - Interactive product tour: tooltip walkthrough highlighting key UI elements for new users, stored completion in localStorage -- [FE] -- [PM] 2026-03-28
+- [x] T281 - AI request assistant: suggest estimated hours, priority, and steps from request title/description (Claude API stub) -- [BE + FE] -- [PM] 2026-03-28
+- [x] T282 - Breadcrumb navigation: add to request detail, client detail, invoice detail pages -- [FE] -- [PM] 2026-03-28
+- [x] T283 - Success toast notifications: show after creating request, invoice, client, time entry -- [FE] -- [PM] 2026-03-28
+- [x] T284 - Keyboard shortcuts: N for new request, C for new client, / for search -- [FE] -- [PM] 2026-03-28
 - [x] T285 - Revenue trend chart on overview: line chart showing MRR over last 6 months -- [FE + BE] -- [PM] 2026-03-28

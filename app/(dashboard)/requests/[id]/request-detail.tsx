@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { apiPath } from '@/lib/api'
 import {
   Clock, AlertTriangle, RefreshCw,
-  User, CheckCircle2, Loader2,
+  User, CheckCircle2, Loader2, Activity,
   FileText, Image as ImageIcon, Download, Paperclip,
   Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud, Eye, EyeOff,
 } from 'lucide-react'
@@ -681,6 +681,9 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
             </div>
           </div>
 
+          {/* Activity Log */}
+          <ActivityLog request={request} messages={messages} files={files} />
+
           {/* Checklists */}
           <ChecklistsPanel
             checklists={checklists}
@@ -958,6 +961,202 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
       </div>
     </div>
   )
+}
+
+// ---- Activity Log ------------------------------------------------------------
+
+interface ActivityEvent {
+  id: string
+  type: 'created' | 'status_change' | 'message' | 'file_upload'
+  description: string
+  author: string | null
+  timestamp: string
+}
+
+function ActivityLog({
+  request,
+  messages,
+  files,
+}: {
+  request: Request
+  messages: Message[]
+  files: RequestFile[]
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  // Build activity events from available data
+  const events: ActivityEvent[] = []
+
+  // Request created
+  events.push({
+    id: 'created',
+    type: 'created',
+    description: 'Request was created',
+    author: null,
+    timestamp: request.createdAt,
+  })
+
+  // Status changes inferred: if updatedAt differs from createdAt, the request was updated
+  if (request.updatedAt !== request.createdAt) {
+    events.push({
+      id: 'status-update',
+      type: 'status_change',
+      description: `Status changed to ${STATUS_LABELS[request.status] ?? request.status}`,
+      author: request.assigneeName,
+      timestamp: request.updatedAt,
+    })
+  }
+
+  // Delivered event
+  if (request.deliveredAt) {
+    events.push({
+      id: 'delivered',
+      type: 'status_change',
+      description: 'Request was delivered',
+      author: request.assigneeName,
+      timestamp: request.deliveredAt,
+    })
+  }
+
+  // Messages posted
+  for (const msg of messages) {
+    events.push({
+      id: `msg-${msg.id}`,
+      type: 'message',
+      description: msg.isInternal ? 'Posted an internal note' : 'Posted a comment',
+      author: msg.teamMemberName ?? (msg.authorType === 'contact' ? 'Client' : null),
+      timestamp: msg.createdAt,
+    })
+  }
+
+  // Files uploaded
+  for (const file of files) {
+    events.push({
+      id: `file-${file.id}`,
+      type: 'file_upload',
+      description: `Uploaded ${file.filename}`,
+      author: file.uploaderName ?? null,
+      timestamp: file.createdAt,
+    })
+  }
+
+  // Sort chronologically (newest first)
+  events.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+
+  const displayed = expanded ? events : events.slice(0, 5)
+
+  const iconMap: Record<ActivityEvent['type'], React.ReactNode> = {
+    created: <Plus size={10} />,
+    status_change: <RefreshCw size={10} />,
+    message: <FileText size={10} />,
+    file_upload: <Upload size={10} />,
+  }
+
+  return (
+    <div
+      className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
+      style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+    >
+      <div
+        className="flex items-center justify-between"
+        style={{ padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}
+      >
+        <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+          <Activity size={14} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
+          Activity
+          {events.length > 0 && (
+            <span
+              className="text-xs font-normal rounded-full"
+              style={{
+                padding: '0.0625rem 0.4375rem',
+                background: 'var(--color-bg-tertiary)',
+                color: 'var(--color-text-subtle)',
+              }}
+            >
+              {events.length}
+            </span>
+          )}
+        </h2>
+      </div>
+
+      <div style={{ padding: '0.75rem 1.25rem' }}>
+        {events.length === 0 ? (
+          <p className="text-xs" style={{ color: 'var(--color-text-subtle)', padding: '0.5rem 0' }}>
+            No activity yet.
+          </p>
+        ) : (
+          <div className="flex flex-col" style={{ gap: '0.5rem' }}>
+            {displayed.map(event => (
+              <div key={event.id} className="flex items-start gap-2.5" style={{ padding: '0.25rem 0' }}>
+                <div
+                  className="flex items-center justify-center rounded-full flex-shrink-0"
+                  style={{
+                    width: '1.25rem',
+                    height: '1.25rem',
+                    marginTop: '0.0625rem',
+                    background: 'var(--color-bg-tertiary)',
+                    color: 'var(--color-text-subtle)',
+                  }}
+                >
+                  {iconMap[event.type]}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs" style={{ color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                    {event.author ? (
+                      <span className="font-medium" style={{ color: 'var(--color-text)' }}>
+                        {event.author}
+                      </span>
+                    ) : null}
+                    {event.author ? ' ' : ''}
+                    {event.description}
+                  </p>
+                  <p className="text-xs" style={{ color: 'var(--color-text-subtle)', marginTop: '0.0625rem' }}>
+                    {formatActivityDate(event.timestamp)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {events.length > 5 && (
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
+            className="text-xs font-medium transition-colors"
+            style={{
+              color: BRAND,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '0.375rem 0 0',
+              display: 'block',
+            }}
+          >
+            {expanded ? 'Show less' : `Show all ${events.length} events`}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function formatActivityDate(iso: string) {
+  try {
+    const d = new Date(iso)
+    const now = new Date()
+    const diffMs = now.getTime() - d.getTime()
+    const diffMin = Math.floor(diffMs / 60000)
+    if (diffMin < 1) return 'Just now'
+    if (diffMin < 60) return `${diffMin}m ago`
+    const diffHrs = Math.floor(diffMin / 60)
+    if (diffHrs < 24) return `${diffHrs}h ago`
+    const diffDays = Math.floor(diffHrs / 24)
+    if (diffDays < 7) return `${diffDays}d ago`
+    return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
+  } catch {
+    return iso
+  }
 }
 
 // ---- Sidebar Card ------------------------------------------------------------
