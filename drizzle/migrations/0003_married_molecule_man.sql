@@ -1,4 +1,4 @@
-CREATE TABLE `activities` (
+CREATE TABLE IF NOT EXISTS `activities` (
 	`id` text PRIMARY KEY NOT NULL,
 	`type` text NOT NULL,
 	`title` text NOT NULL,
@@ -18,10 +18,10 @@ CREATE TABLE `activities` (
 	FOREIGN KEY (`contact_id`) REFERENCES `contacts`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
-CREATE INDEX `idx_activities_deal` ON `activities` (`deal_id`);--> statement-breakpoint
-CREATE INDEX `idx_activities_org` ON `activities` (`org_id`);--> statement-breakpoint
-CREATE INDEX `idx_activities_contact` ON `activities` (`contact_id`);--> statement-breakpoint
-CREATE TABLE `deal_contacts` (
+CREATE INDEX IF NOT EXISTS `idx_activities_deal` ON `activities` (`deal_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_activities_org` ON `activities` (`org_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_activities_contact` ON `activities` (`contact_id`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `deal_contacts` (
 	`id` text PRIMARY KEY NOT NULL,
 	`deal_id` text NOT NULL,
 	`contact_id` text NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE `deal_contacts` (
 	FOREIGN KEY (`contact_id`) REFERENCES `contacts`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE TABLE `deals` (
+CREATE TABLE IF NOT EXISTS `deals` (
 	`id` text PRIMARY KEY NOT NULL,
 	`title` text NOT NULL,
 	`org_id` text,
@@ -52,10 +52,10 @@ CREATE TABLE `deals` (
 	FOREIGN KEY (`owner_id`) REFERENCES `team_members`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE INDEX `idx_deals_org` ON `deals` (`org_id`);--> statement-breakpoint
-CREATE INDEX `idx_deals_stage` ON `deals` (`stage_id`);--> statement-breakpoint
-CREATE INDEX `idx_deals_owner` ON `deals` (`owner_id`);--> statement-breakpoint
-CREATE TABLE `pipeline_stages` (
+CREATE INDEX IF NOT EXISTS `idx_deals_org` ON `deals` (`org_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_deals_stage` ON `deals` (`stage_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_deals_owner` ON `deals` (`owner_id`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `pipeline_stages` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
 	`slug` text NOT NULL,
@@ -68,7 +68,7 @@ CREATE TABLE `pipeline_stages` (
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE `planned_roles` (
+CREATE TABLE IF NOT EXISTS `planned_roles` (
 	`id` text PRIMARY KEY NOT NULL,
 	`title` text NOT NULL,
 	`department` text,
@@ -80,7 +80,7 @@ CREATE TABLE `planned_roles` (
 	FOREIGN KEY (`reports_to_id`) REFERENCES `team_members`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE TABLE `services` (
+CREATE TABLE IF NOT EXISTS `services` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
 	`description` text,
@@ -98,7 +98,6 @@ ALTER TABLE `messages` ADD `deleted_at` text;--> statement-breakpoint
 ALTER TABLE `organisations` ADD `brands` text DEFAULT '[]';--> statement-breakpoint
 ALTER TABLE `requests` ADD `request_number` integer;--> statement-breakpoint
 ALTER TABLE `requests` ADD `checklists` text DEFAULT '[]';--> statement-breakpoint
-CREATE INDEX `idx_requests_number` ON `requests` (`request_number`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_requests_number` ON `requests` (`request_number`);--> statement-breakpoint
 ALTER TABLE `team_members` ADD `reports_to_id` text;--> statement-breakpoint
 ALTER TABLE `team_members` ADD `department` text;--> statement-breakpoint
-ALTER TABLE `time_entries` ADD `hourly_rate` real;
