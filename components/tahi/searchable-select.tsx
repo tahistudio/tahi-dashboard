@@ -20,6 +20,7 @@ interface SearchableSelectProps {
   emptyMessage?: string
   allowClear?: boolean
   disabled?: boolean
+  size?: 'sm' | 'default'
 }
 
 export function SearchableSelect({
@@ -31,7 +32,9 @@ export function SearchableSelect({
   emptyMessage = 'No results found.',
   allowClear = false,
   disabled = false,
+  size = 'default',
 }: SearchableSelectProps) {
+  const isSmall = size === 'sm'
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [highlightIdx, setHighlightIdx] = useState(0)
@@ -132,7 +135,7 @@ export function SearchableSelect({
             alignItems: 'center',
             gap: '0.5rem',
             padding: '0 0.625rem',
-            height: '2.75rem',
+            height: isSmall ? '2rem' : '2.75rem',
             background: 'var(--color-bg-secondary)',
             borderRadius: 'var(--radius-button)',
             border: '1px solid var(--color-border-subtle)',
@@ -176,7 +179,7 @@ export function SearchableSelect({
       <div
         ref={listRef}
         role="listbox"
-        style={{ maxHeight: isMobile ? '50vh' : '12rem', overflowY: 'auto', padding: '0.25rem' }}
+        style={{ maxHeight: isMobile ? '50vh' : (isSmall ? '10rem' : '12rem'), overflowY: 'auto', padding: '0.25rem' }}
       >
         {filtered.length === 0 ? (
           <div
@@ -209,8 +212,8 @@ export function SearchableSelect({
                   display: 'flex',
                   alignItems: 'center',
                   gap: '0.5rem',
-                  padding: '0.75rem 1rem',
-                  minHeight: '2.75rem',
+                  padding: isSmall ? '0.5rem 0.75rem' : '0.75rem 1rem',
+                  minHeight: isSmall ? '2rem' : '2.75rem',
                   borderRadius: 'var(--radius-button)',
                   cursor: 'pointer',
                   fontSize: '0.875rem',
@@ -252,13 +255,13 @@ export function SearchableSelect({
         onClick={() => !disabled && setOpen(!open)}
         style={{
           width: '100%',
-          height: '2.625rem',
-          padding: '0 0.75rem',
+          height: isSmall ? '2rem' : '2.625rem',
+          padding: isSmall ? '0 0.5rem' : '0 0.75rem',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: '0.5rem',
-          fontSize: '0.875rem',
+          fontSize: isSmall ? '0.8125rem' : '0.875rem',
           color: selectedOption ? 'var(--color-text)' : 'var(--color-text-subtle)',
           background: disabled ? 'var(--color-bg-secondary)' : 'var(--color-bg)',
           border: '1px solid var(--color-border)',
@@ -306,7 +309,7 @@ export function SearchableSelect({
             </span>
           )}
           <ChevronDown
-            size={14}
+            size={isSmall ? 12 : 14}
             style={{
               color: 'var(--color-text-subtle)',
               transition: 'transform 0.15s',

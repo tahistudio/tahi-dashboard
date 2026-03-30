@@ -57,7 +57,7 @@ const INTEGRATIONS: IntegrationCard[] = [
 
 export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
   const [settings, setSettings] = useState<Record<string, string | null>>({})
-  const [integrations] = useState<Record<string, string>>({})
+  const [integrationStatus, setIntegrationStatus] = useState<Record<string, { configured: boolean }>>({})
   const [loading, setLoading] = useState(true)
   const [darkMode, setDarkMode] = useState(false)
   const [savingKey, setSavingKey] = useState<string | null>(null)
@@ -75,22 +75,22 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
 
     setLoading(true)
     try {
-      const [settingsRes, integrationsRes] = await Promise.all([
+      const [settingsRes, intStatusRes] = await Promise.all([
         fetch(apiPath('/api/admin/settings')),
-        fetch(apiPath('/api/admin/settings')).then(() => null), // integrations live in settings too
+        fetch(apiPath('/api/admin/integrations/status')),
       ])
 
       if (settingsRes.ok) {
         const data = await settingsRes.json() as { settings: Record<string, string | null> }
         setSettings(data.settings ?? {})
-        // Load notification prefs from settings
         setEmailNotifications(data.settings?.['notifications.email'] !== 'false')
         setSlackNotifications(data.settings?.['notifications.slack'] === 'true')
       }
 
-      // Load integration statuses (stored as settings keys)
-      // integration.stripe.status, etc.
-      void integrationsRes
+      if (intStatusRes.ok) {
+        const statusData = await intStatusRes.json() as Record<string, { configured: boolean }>
+        setIntegrationStatus(statusData)
+      }
     } catch {
       // Settings load failed, keep defaults
     } finally {
@@ -146,7 +146,8 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
   }
 
   function getIntegrationStatus(key: string): string {
-    return integrations[key] ?? settings[`integration.${key}.status`] ?? 'disconnected'
+    if (integrationStatus[key]?.configured) return 'connected'
+    return settings[`integration.${key}.status`] ?? 'disconnected'
   }
 
   return (
@@ -393,7 +394,7 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
                   Manage your team members and their access scoping rules.
                 </p>
                 <a
-                  href="/team"
+                  href="/dashboard/team"
                   className="inline-flex items-center gap-2 mt-3 text-sm font-medium transition-colors hover:opacity-80"
                   style={{ color: 'var(--color-brand)', textDecoration: 'none' }}
                 >
@@ -1721,7 +1722,7 @@ function ModulesSection({
         })}
       </div>
       <p className="text-xs text-[var(--color-text-subtle)] mt-2">
-        Toggling a module stores the preference. Feature visibility will be enforced in a future update.
+        Disabled modules will be hidden from the sidebar navigation.
       </p>
     </section>
   )

@@ -225,49 +225,49 @@ function PipelineCapacityCard() {
 
   return (
     <SectionCard title="Team Capacity" action={{ label: 'View pipeline', href: '/pipeline' }}>
-      <div style={{ padding: '0 0.25rem' }}>
+      <div style={{ padding: '0 0.5rem' }}>
         {/* Overall utilization */}
-        <div className="flex items-center justify-between" style={{ marginBottom: '0.5rem' }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: '0.375rem' }}>
           <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>
             Overall Utilization
           </span>
-          <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: barColor }}>
+          <span style={{ fontSize: '0.875rem', fontWeight: 700, color: barColor }}>
             {utilizationPct}%
           </span>
         </div>
         <div
-          className="rounded-full overflow-hidden"
-          style={{ height: '0.5rem', background: 'var(--color-bg-tertiary)', marginBottom: '1rem' }}
+          className="overflow-hidden"
+          style={{ height: '0.5rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem', marginBottom: '1.25rem' }}
         >
           <div
-            className="rounded-full transition-all"
-            style={{ height: '100%', width: `${Math.min(utilizationPct, 100)}%`, background: barColor }}
+            className="transition-all"
+            style={{ height: '100%', width: `${Math.min(utilizationPct, 100)}%`, background: barColor, borderRadius: '0.25rem' }}
           />
         </div>
 
         {/* Stats row */}
-        <div className="grid grid-cols-3 gap-4" style={{ marginBottom: '1rem' }}>
-          <div>
-            <p style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)', textTransform: 'uppercase' }}>
+        <div className="grid grid-cols-3" style={{ gap: '0.75rem', marginBottom: '1.25rem' }}>
+          <div style={{ padding: '0.625rem 0.75rem', background: 'var(--color-bg-secondary)', borderRadius: '0.5rem' }}>
+            <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.125rem' }}>
               Available
             </p>
-            <p className="font-bold" style={{ fontSize: '1.125rem', color: 'var(--color-text)' }}>
+            <p style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-text)' }}>
               {data.availableCapacity}h
             </p>
           </div>
-          <div>
-            <p style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)', textTransform: 'uppercase' }}>
-              Pipeline Impact
+          <div style={{ padding: '0.625rem 0.75rem', background: 'var(--color-bg-secondary)', borderRadius: '0.5rem' }}>
+            <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.125rem' }}>
+              Pipeline
             </p>
-            <p className="font-bold" style={{ fontSize: '1.125rem', color: 'var(--color-warning)' }}>
+            <p style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-warning)' }}>
               {data.pipelineImpact}h
             </p>
           </div>
-          <div>
-            <p style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)', textTransform: 'uppercase' }}>
-              Forecasted
+          <div style={{ padding: '0.625rem 0.75rem', background: 'var(--color-bg-secondary)', borderRadius: '0.5rem' }}>
+            <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.125rem' }}>
+              Forecast
             </p>
-            <p className="font-bold" style={{ fontSize: '1.125rem', color: data.forecastedCapacity < 0 ? 'var(--color-danger)' : 'var(--color-brand)' }}>
+            <p style={{ fontSize: '1.125rem', fontWeight: 700, color: data.forecastedCapacity < 0 ? 'var(--color-danger)' : 'var(--color-brand)' }}>
               {data.forecastedCapacity}h
             </p>
           </div>
@@ -275,28 +275,41 @@ function PipelineCapacityCard() {
 
         {/* Per-member bars */}
         {data.teamMembers.length > 0 && (
-          <div className="flex flex-col gap-2">
-            {data.teamMembers.slice(0, 5).map(m => (
-              <div key={m.id} className="flex items-center gap-3">
-                <span className="truncate flex-shrink-0" style={{ width: '5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                  {m.name.split(' ')[0]}
-                </span>
-                <div className="flex-1 rounded-full overflow-hidden" style={{ height: '0.375rem', background: 'var(--color-bg-tertiary)' }}>
-                  <div
-                    className="rounded-full"
-                    style={{
-                      height: '100%',
-                      width: `${Math.min(m.utilization, 100)}%`,
-                      background: m.utilization > 90 ? 'var(--color-danger)' : m.utilization > 70 ? 'var(--color-warning)' : 'var(--color-brand)',
-                    }}
-                  />
-                </div>
-                <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', width: '2.5rem', textAlign: 'right' }}>
-                  {m.utilization}%
-                </span>
+          <>
+            <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: '1rem' }}>
+              <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.75rem' }}>
+                Team Members
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+                {data.teamMembers.slice(0, 5).map(m => {
+                  const memberBarColor = m.utilization > 90 ? 'var(--color-danger)' : m.utilization > 70 ? 'var(--color-warning)' : 'var(--color-brand)'
+                  return (
+                    <div key={m.id}>
+                      <div className="flex items-center justify-between" style={{ marginBottom: '0.25rem' }}>
+                        <span className="truncate" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text-muted)', maxWidth: '10rem' }}>
+                          {m.name.split(' ')[0]}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: memberBarColor }}>
+                          {m.utilization}%
+                        </span>
+                      </div>
+                      <div className="overflow-hidden" style={{ height: '0.375rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.1875rem' }}>
+                        <div
+                          className="transition-all"
+                          style={{
+                            height: '100%',
+                            width: `${Math.min(m.utilization, 100)}%`,
+                            background: memberBarColor,
+                            borderRadius: '0.1875rem',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
-            ))}
-          </div>
+            </div>
+          </>
         )}
       </div>
     </SectionCard>

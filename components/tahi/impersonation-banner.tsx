@@ -1,47 +1,75 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import { Eye, X } from 'lucide-react'
 
 interface ImpersonationData {
   orgId: string
   orgName: string
+  contactId?: string
+  contactName?: string
+}
+
+const STORAGE_KEY = 'tahi-impersonate'
+
+// ---- Reactive sessionStorage store ----
+// Allows all components using useImpersonation() to update immediately
+// when impersonation is set or cleared, without page refresh.
+
+const listeners = new Set<() => void>()
+
+function getSnapshot(): ImpersonationData | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const stored = sessionStorage.getItem(STORAGE_KEY)
+    if (!stored) return null
+    const parsed = JSON.parse(stored) as ImpersonationData
+    return parsed.orgId ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function subscribe(cb: () => void): () => void {
+  listeners.add(cb)
+  return () => listeners.delete(cb)
+}
+
+function notify() {
+  listeners.forEach(cb => cb())
+}
+
+/** Set impersonation (call from client detail page) */
+export function setImpersonation(data: ImpersonationData) {
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+  notify()
+}
+
+/** Clear impersonation */
+export function clearImpersonation() {
+  sessionStorage.removeItem(STORAGE_KEY)
+  notify()
 }
 
 /**
- * Reads impersonation state from sessionStorage and shows a banner.
- * Also provides the impersonated orgId to child components via context.
- *
- * This is a client-side-only preview feature. API calls still use
- * the admin's real auth. The purpose is to see what the client portal
- * looks like for a specific org.
+ * Banner shown when impersonating a client.
+ * Uses useSyncExternalStore for immediate reactivity.
  */
 export function ImpersonationBanner() {
   const router = useRouter()
-  const [impersonation, setImpersonation] = useState<ImpersonationData | null>(null)
-
-  useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem('tahi-impersonate')
-      if (stored) {
-        const parsed = JSON.parse(stored) as ImpersonationData
-        if (parsed.orgId && parsed.orgName) {
-          setImpersonation(parsed)
-        }
-      }
-    } catch {
-      // Invalid or missing data
-    }
-  }, [])
+  const impersonation = useSyncExternalStore(subscribe, getSnapshot, () => null)
 
   const handleExit = useCallback(() => {
-    sessionStorage.removeItem('tahi-impersonate')
-    setImpersonation(null)
+    clearImpersonation()
     router.push('/clients')
   }, [router])
 
   if (!impersonation) return null
+
+  const displayName = impersonation.contactName
+    ? `${impersonation.contactName} at ${impersonation.orgName}`
+    : impersonation.orgName
 
   return (
     <div
@@ -55,7 +83,7 @@ export function ImpersonationBanner() {
     >
       <Eye className="w-4 h-4 flex-shrink-0" />
       <span className="text-sm font-medium">
-        Viewing as <strong>{impersonation.orgName}</strong>
+        Viewing as <strong>{displayName}</strong>
       </span>
       <button
         onClick={handleExit}
@@ -78,32 +106,16 @@ export function ImpersonationBanner() {
 
 /**
  * Hook to check if impersonation is active.
- * Returns { isImpersonating, impersonatedOrgId, impersonatedOrgName } or null values.
+ * Reactively updates when impersonation state changes.
  */
-export function useImpersonation(): {
-  isImpersonating: boolean
-  impersonatedOrgId: string | null
-  impersonatedOrgName: string | null
-} {
-  const [data, setData] = useState<ImpersonationData | null>(null)
-
-  useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem('tahi-impersonate')
-      if (stored) {
-        const parsed = JSON.parse(stored) as ImpersonationData
-        if (parsed.orgId && parsed.orgName) {
-          setData(parsed)
-        }
-      }
-    } catch {
-      // Invalid data
-    }
-  }, [])
+export function useImpersonation() {
+  const data = useSyncExternalStore(subscribe, getSnapshot, () => null)
 
   return {
     isImpersonating: data !== null,
     impersonatedOrgId: data?.orgId ?? null,
     impersonatedOrgName: data?.orgName ?? null,
+    impersonatedContactId: data?.contactId ?? null,
+    impersonatedContactName: data?.contactName ?? null,
   }
 }

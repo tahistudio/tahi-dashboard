@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Moon, Sun, Star, TrendingUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { TahiWordmark, LeafLogo } from './leaf-logo'
+// LeafLogo / TahiWordmark available in ./leaf-logo but sidebar uses the PNG logo directly
 import { useState, useEffect } from 'react'
 
 type NavItem = {
@@ -153,10 +153,16 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
           borderBottom: `1px solid ${S.border}`,
         }}
       >
-        {collapsed
-          ? <LeafLogo size="sm" />
-          : <TahiWordmark size="sm" light />
-        }
+        <img
+          src="/dashboard/tahi-logo.png"
+          alt="Tahi Studio"
+          style={{
+            maxHeight: collapsed ? '28px' : '40px',
+            width: 'auto',
+            display: 'block',
+            margin: collapsed ? '0 auto' : undefined,
+          }}
+        />
       </div>
 
       {/* Navigation */}

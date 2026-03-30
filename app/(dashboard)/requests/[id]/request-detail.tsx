@@ -782,6 +782,7 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
                       value={request.priority}
                       onChange={handlePriorityChange}
                       placeholder="Select priority"
+                      size="sm"
                     />
                   </div>
                 ) : (
@@ -800,6 +801,7 @@ export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDeta
                       placeholder="Unassigned"
                       searchPlaceholder="Search team..."
                       allowClear
+                      size="sm"
                     />
                   </div>
                 ) : (

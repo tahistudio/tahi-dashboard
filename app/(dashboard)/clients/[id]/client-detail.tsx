@@ -188,8 +188,15 @@ export function ClientDetail({ clientId }: { clientId: string }) {
               <TahiButton
                 variant="secondary"
                 size="sm"
-                onClick={() => {
-                  sessionStorage.setItem('tahi-impersonate', JSON.stringify({ orgId: org.id, orgName: org.name }))
+                onClick={async () => {
+                  const { setImpersonation } = await import('@/components/tahi/impersonation-banner')
+                  const primaryContact = contacts[0]
+                  setImpersonation({
+                    orgId: org.id,
+                    orgName: org.name,
+                    contactId: primaryContact?.id,
+                    contactName: primaryContact?.name,
+                  })
                   router.push('/overview')
                 }}
               >
