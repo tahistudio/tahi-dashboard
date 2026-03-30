@@ -1,11 +1,26 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { schema } from '@/db/d1'
+import { eq } from 'drizzle-orm'
+import Stripe from 'stripe'
+
+export const dynamic = 'force-dynamic'
+
+let _stripe: Stripe | null = null
+function getStripe(): Stripe | null {
+  if (!process.env.STRIPE_SECRET_KEY) return null
+  if (!_stripe) {
+    _stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: '2025-02-24.acacia',
+    })
+  }
+  return _stripe
+}
 
 /**
  * POST /api/admin/integrations/stripe/provision
- * T133: Auto-create Stripe subscription when client is provisioned with a paid plan.
- * Stub: in production this would use the Stripe SDK to create a customer and subscription.
- *
+ * Create a Stripe Customer for a client org.
  * Body: { orgId, planType, contactEmail, contactName }
  */
 export async function POST(req: NextRequest) {
@@ -28,25 +43,59 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const stripeKey = process.env.STRIPE_SECRET_KEY
-  if (!stripeKey) {
+  const stripe = getStripe()
+  if (!stripe) {
+    return NextResponse.json({
+      success: false,
+      error: 'STRIPE_SECRET_KEY not configured',
+    }, { status: 503 })
+  }
+
+  const database = await db()
+
+  // Check if org already has a Stripe customer
+  const [org] = await database
+    .select({
+      id: schema.organisations.id,
+      name: schema.organisations.name,
+      stripeCustomerId: schema.organisations.stripeCustomerId,
+    })
+    .from(schema.organisations)
+    .where(eq(schema.organisations.id, body.orgId))
+    .limit(1)
+
+  if (!org) {
+    return NextResponse.json({ error: 'Organisation not found' }, { status: 404 })
+  }
+
+  if (org.stripeCustomerId) {
     return NextResponse.json({
       success: true,
-      message: 'Stripe provisioning stub: STRIPE_SECRET_KEY not configured',
-      stripeCustomerId: null,
-      stripeSubscriptionId: null,
+      message: 'Customer already exists in Stripe',
+      stripeCustomerId: org.stripeCustomerId,
     })
   }
 
-  // Stub: In production this would:
-  // 1. Create a Stripe Customer (or look up existing)
-  // 2. Create a Stripe Subscription with the correct price ID for planType
-  // 3. Update the org with stripeCustomerId
-  // 4. Update the subscription with stripeSubscriptionId
+  // Create Stripe Customer
+  const customer = await stripe.customers.create({
+    name: org.name,
+    email: body.contactEmail ?? undefined,
+    metadata: {
+      orgId: body.orgId,
+      planType: body.planType,
+      dashboardUrl: 'https://dashboard.tahi.studio',
+    },
+  })
+
+  // Save stripeCustomerId to organisation
+  await database
+    .update(schema.organisations)
+    .set({ stripeCustomerId: customer.id, updatedAt: new Date().toISOString() })
+    .where(eq(schema.organisations.id, body.orgId))
 
   return NextResponse.json({
     success: true,
-    message: 'Stripe subscription provisioning stub',
+    stripeCustomerId: customer.id,
     orgId: body.orgId,
     planType: body.planType,
   })
@@ -54,7 +103,7 @@ export async function POST(req: NextRequest) {
 
 /**
  * GET /api/admin/integrations/stripe/provision
- * T134: Get Stripe hosted invoice pay-now URL for a specific invoice.
+ * Get Stripe hosted invoice URL for a specific invoice.
  * Query: ?invoiceId=xxx
  */
 export async function GET(req: NextRequest) {
@@ -70,10 +119,25 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'invoiceId is required' }, { status: 400 })
   }
 
-  // Stub: In production, look up the Stripe invoice ID from local invoices table
-  // and return the hosted_invoice_url from Stripe
+  const stripe = getStripe()
+  if (!stripe) {
+    return NextResponse.json({ payUrl: null, error: 'Stripe not configured' }, { status: 503 })
+  }
+
+  const database = await db()
+  const [invoice] = await database
+    .select({ stripeInvoiceId: schema.invoices.stripeInvoiceId })
+    .from(schema.invoices)
+    .where(eq(schema.invoices.id, invoiceId))
+    .limit(1)
+
+  if (!invoice?.stripeInvoiceId) {
+    return NextResponse.json({ payUrl: null, message: 'No Stripe invoice linked' })
+  }
+
+  const stripeInvoice = await stripe.invoices.retrieve(invoice.stripeInvoiceId)
+
   return NextResponse.json({
-    payUrl: null,
-    message: 'Stripe pay-now URL stub: would fetch hosted_invoice_url in production',
+    payUrl: stripeInvoice.hosted_invoice_url ?? null,
   })
 }
