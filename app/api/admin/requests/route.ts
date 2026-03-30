@@ -94,6 +94,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json() as {
     clientOrgId?: string; title?: string; type?: string
     category?: string; description?: string; priority?: string
+    isInternal?: boolean | number
     startDate?: string | null; dueDate?: string | null; estimatedHours?: number | null
   }
   const { clientOrgId, title, type, category, description, priority, startDate, dueDate, estimatedHours } = body
@@ -128,7 +129,7 @@ export async function POST(req: NextRequest) {
       dueDate: dueDate ?? null,
       estimatedHours: estimatedHours ?? null,
       submittedById: userId ?? null,
-      isInternal: true, // admin created on behalf of client
+      isInternal: !!body.isInternal,
       revisionCount: 0,
       maxRevisions: 3,
       requestNumber: nextNumber,

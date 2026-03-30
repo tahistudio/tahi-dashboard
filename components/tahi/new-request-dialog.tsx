@@ -86,6 +86,7 @@ export function NewRequestDialog({
   const [category, setCategory] = useState('development')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState('standard')
+  const [isInternal, setIsInternal] = useState(false)
   const [startDate, setStartDate] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [estimatedHours, setEstimatedHours] = useState('')
@@ -143,6 +144,7 @@ export function NewRequestDialog({
       setCategory('development')
       setDescription('')
       setPriority('standard')
+      setIsInternal(false)
       setStartDate('')
       setDueDate('')
       setEstimatedHours('')
@@ -176,6 +178,7 @@ export function NewRequestDialog({
       const reqBody = isAdmin
         ? {
             clientOrgId, title: title.trim(), type, category, description, priority,
+            isInternal: isInternal ? 1 : 0,
             startDate: startDate || null,
             dueDate: dueDate || null,
             estimatedHours: estimatedHours ? Number(estimatedHours) : null,
@@ -507,6 +510,37 @@ export function NewRequestDialog({
                 </FieldGroup>
               )}
             </div>
+
+            {/* Internal toggle (admin only) */}
+            {isAdmin && (
+              <div
+                className="flex items-center justify-between"
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: 'var(--radius-card)',
+                  border: '1px solid var(--color-border-subtle)',
+                  background: isInternal ? 'var(--color-bg-tertiary)' : 'var(--color-bg)',
+                }}
+              >
+                <div>
+                  <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>Internal only</p>
+                  <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Hidden from client portal</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsInternal(!isInternal)}
+                  className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
+                  style={{ background: isInternal ? 'var(--color-brand)' : 'var(--color-border)' }}
+                  role="switch"
+                  aria-checked={isInternal}
+                >
+                  <span
+                    className="inline-block h-4 w-4 rounded-full bg-white transition-transform"
+                    style={{ transform: isInternal ? 'translateX(1.375rem)' : 'translateX(0.25rem)' }}
+                  />
+                </button>
+              </div>
+            )}
 
             {/* Dates + hours (admin only) */}
             {isAdmin && (
