@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   BookOpen, Plus, Search, ChevronRight, Clock, Save,
-  Trash2, ArrowLeft, History, X, RefreshCw, FileText,
+  Trash2, ArrowLeft, History, X, RefreshCw, FileText, Upload,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -62,6 +62,7 @@ export function DocsContent() {
   const [showNewForm, setShowNewForm] = useState(false)
   const [showVersions, setShowVersions] = useState(false)
   const [viewingVersion, setViewingVersion] = useState<DocVersion | null>(null)
+  const [importing, setImporting] = useState(false)
 
   const fetchPages = useCallback(async () => {
     setLoading(true)
@@ -79,6 +80,26 @@ export function DocsContent() {
       setLoading(false)
     }
   }, [activeCategory, search])
+
+  const handleImportSeedDocs = useCallback(async () => {
+    setImporting(true)
+    try {
+      const payloadRes = await fetch(apiPath('/seed-docs.json'))
+      if (!payloadRes.ok) throw new Error('Seed file not found')
+      const payload = await payloadRes.json()
+      const res = await fetch(apiPath('/api/admin/docs/import'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error('Import failed')
+      await fetchPages()
+    } catch {
+      // Import failed silently
+    } finally {
+      setImporting(false)
+    }
+  }, [fetchPages])
 
   useEffect(() => { fetchPages() }, [fetchPages])
 
@@ -237,6 +258,18 @@ export function DocsContent() {
           >
             New Page
           </TahiButton>
+          {pages.length === 0 && !loading && (
+            <TahiButton
+              size="sm"
+              variant="secondary"
+              onClick={handleImportSeedDocs}
+              loading={importing}
+              iconLeft={<Upload className="w-3.5 h-3.5" />}
+              className="w-full mt-2"
+            >
+              Import Seed Docs
+            </TahiButton>
+          )}
         </div>
 
         {/* Page tree */}

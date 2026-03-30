@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { Plus, UserCog, Mail, Shield, RefreshCw, X, ChevronRight, Clock, Trash2 } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useUser } from '@clerk/nextjs'
+import { Plus, UserCog, Mail, Shield, RefreshCw, X, ChevronRight, Clock, Trash2, Pencil, Link2 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
@@ -274,6 +275,221 @@ function AddMemberModal({
   )
 }
 
+// -- Edit Team Member Modal --
+
+function EditMemberModal({
+  member,
+  onClose,
+  onUpdated,
+}: {
+  member: TeamMember
+  onClose: () => void
+  onUpdated: () => void
+}) {
+  const [name, setName] = useState(member.name)
+  const [email, setEmail] = useState(member.email)
+  const [title, setTitle] = useState(member.title ?? '')
+  const [role, setRole] = useState(member.role)
+  const [skillsInput, setSkillsInput] = useState(parseSkills(member.skills).join(', '))
+  const [weeklyCapacity, setWeeklyCapacity] = useState(member.weeklyCapacityHours?.toString() ?? '')
+  const [isContractor, setIsContractor] = useState(member.isContractor ?? false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!name.trim() || !email.trim()) {
+      setError('Name and email are required')
+      return
+    }
+
+    setSaving(true)
+    setError('')
+
+    try {
+      const skills = skillsInput
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+
+      const res = await fetch(apiPath(`/api/admin/team/${member.id}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim(),
+          title: title.trim() || null,
+          role,
+          skills,
+          weeklyCapacityHours: weeklyCapacity ? parseFloat(weeklyCapacity) : null,
+          isContractor,
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json() as { error?: string }
+        throw new Error(data.error ?? 'Failed to update team member')
+      }
+
+      onUpdated()
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update team member')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const inputCn = 'w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]'
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
+      <div
+        className="bg-[var(--color-bg)] rounded-xl shadow-xl w-full max-w-lg mx-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-member-title"
+      >
+        <div className="flex items-center justify-between px-6 pt-6 pb-2">
+          <h2 id="edit-member-title" className="text-lg font-bold text-[var(--color-text)]">
+            Edit Team Member
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] transition-colors"
+            aria-label="Close"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="px-6 pb-6 space-y-4">
+          {error && (
+            <div
+              className="text-sm px-3 py-2 rounded-lg"
+              role="alert"
+              aria-live="polite"
+              style={{ background: 'var(--color-danger-bg, #fef2f2)', color: 'var(--color-danger, #f87171)' }}
+            >
+              {error}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="edit-member-name" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                Name <span style={{ color: 'var(--color-danger)' }}>*</span>
+              </label>
+              <input
+                id="edit-member-name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className={inputCn}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="edit-member-email" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                Email <span style={{ color: 'var(--color-danger)' }}>*</span>
+              </label>
+              <input
+                id="edit-member-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className={inputCn}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="edit-member-title" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                Job Title
+              </label>
+              <input
+                id="edit-member-title"
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className={inputCn}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="edit-member-role" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                Role
+              </label>
+              <select
+                id="edit-member-role"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                className={inputCn}
+              >
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="edit-member-skills" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+              Skills (comma-separated)
+            </label>
+            <input
+              id="edit-member-skills"
+              type="text"
+              value={skillsInput}
+              onChange={(e) => setSkillsInput(e.target.value)}
+              className={inputCn}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="edit-member-capacity" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+                Weekly Capacity (hours)
+              </label>
+              <input
+                id="edit-member-capacity"
+                type="number"
+                min="0"
+                step="1"
+                value={weeklyCapacity}
+                onChange={(e) => setWeeklyCapacity(e.target.value)}
+                className={inputCn}
+              />
+            </div>
+
+            <div className="flex items-end pb-1">
+              <label className="flex items-center gap-2 text-sm text-[var(--color-text)] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isContractor}
+                  onChange={(e) => setIsContractor(e.target.checked)}
+                  className="rounded border-[var(--color-border)] text-[var(--color-brand)] focus:ring-[var(--color-brand)]"
+                  style={{ width: '1rem', height: '1rem', accentColor: 'var(--color-brand)' }}
+                />
+                Contractor
+              </label>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <TahiButton variant="secondary" type="button" onClick={onClose}>
+              Cancel
+            </TahiButton>
+            <TahiButton type="submit" loading={saving}>
+              Save Changes
+            </TahiButton>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // -- Access Panel --
 
 function AccessPanel({
@@ -532,8 +748,11 @@ export function TeamContent() {
   const [members, setMembers] = useState<TeamMember[]>([])
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [editMember, setEditMember] = useState<TeamMember | null>(null)
   const [accessMember, setAccessMember] = useState<TeamMember | null>(null)
   const [deleteMember, setDeleteMember] = useState<TeamMember | null>(null)
+  const [linkingAccount, setLinkingAccount] = useState(false)
+  const { user } = useUser()
 
   const fetchTeam = useCallback(async () => {
     setLoading(true)
@@ -548,6 +767,44 @@ export function TeamContent() {
       setLoading(false)
     }
   }, [])
+
+  // Check if the current Clerk user has a linked team member record
+  const currentUserLinked = useMemo(() => {
+    if (!user || members.length === 0) return true
+    return members.some((m) => m.email === user.primaryEmailAddress?.emailAddress)
+  }, [members, user])
+
+  const handleLinkAccount = useCallback(async () => {
+    if (!user) return
+    setLinkingAccount(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/team'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: user.fullName ?? user.firstName ?? 'Admin',
+          email: user.primaryEmailAddress?.emailAddress ?? '',
+          title: 'Co-founder',
+          role: 'admin',
+          skills: [],
+          weeklyCapacityHours: 40,
+          isContractor: false,
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to create')
+      const data = await res.json() as { id: string }
+      await fetch(apiPath(`/api/admin/team/${data.id}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clerkUserId: user.id }),
+      })
+      fetchTeam()
+    } catch {
+      // silently fail
+    } finally {
+      setLinkingAccount(false)
+    }
+  }, [user, fetchTeam])
 
   const handleDeleteMember = useCallback(async () => {
     if (!deleteMember) return
@@ -580,6 +837,32 @@ export function TeamContent() {
           </TahiButton>
         </div>
       </div>
+
+      {/* Self-link banner */}
+      {!loading && !currentUserLinked && (
+        <div
+          className="flex items-center justify-between px-4 py-3 rounded-xl border"
+          style={{
+            background: 'var(--color-info-bg, #eff6ff)',
+            borderColor: 'var(--color-info, #60a5fa)',
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <Link2 className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--color-info, #60a5fa)' }} />
+            <div>
+              <p className="text-sm font-medium text-[var(--color-text)]">
+                You are not listed as a team member
+              </p>
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Add yourself so you can be assigned to requests and tasks.
+              </p>
+            </div>
+          </div>
+          <TahiButton size="sm" onClick={handleLinkAccount} loading={linkingAccount}>
+            Add Me
+          </TahiButton>
+        </div>
+      )}
 
       {/* Content */}
       {loading ? (
@@ -702,6 +985,13 @@ export function TeamContent() {
                   {/* Actions */}
                   <div className="flex items-center gap-2 mt-4">
                     <button
+                      onClick={() => setEditMember(member)}
+                      className="p-2.5 rounded-lg border border-[var(--color-border-subtle)] hover:border-[var(--color-brand)] hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-subtle)] hover:text-[var(--color-brand)] transition-colors"
+                      aria-label={`Edit ${member.name}`}
+                    >
+                      <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
+                    </button>
+                    <button
                       onClick={() => setAccessMember(member)}
                       className="flex-1 flex items-center justify-between px-3 py-2.5 rounded-lg border border-[var(--color-border-subtle)] hover:border-[var(--color-brand)] hover:bg-[var(--color-bg-secondary)] transition-colors text-sm text-[var(--color-text-muted)] hover:text-[var(--color-brand)]"
                     >
@@ -731,6 +1021,14 @@ export function TeamContent() {
         <AddMemberModal
           onClose={() => setShowAddModal(false)}
           onCreated={fetchTeam}
+        />
+      )}
+
+      {editMember && (
+        <EditMemberModal
+          member={editMember}
+          onClose={() => setEditMember(null)}
+          onUpdated={fetchTeam}
         />
       )}
 
