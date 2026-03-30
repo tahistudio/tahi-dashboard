@@ -280,27 +280,32 @@ function PipelineCapacityCard() {
               <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.75rem' }}>
                 Team Members
               </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {data.teamMembers.slice(0, 5).map(m => {
-                  const memberBarColor = m.utilization > 90 ? 'var(--color-danger)' : m.utilization > 70 ? 'var(--color-warning)' : 'var(--color-brand)'
+                  const memberBarColor = m.utilization > 85 ? 'var(--color-danger)' : m.utilization >= 60 ? 'var(--color-warning)' : 'var(--color-brand)'
                   return (
-                    <div key={m.id}>
-                      <div className="flex items-center justify-between" style={{ marginBottom: '0.25rem' }}>
-                        <span className="truncate" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text-muted)', maxWidth: '10rem' }}>
-                          {m.name.split(' ')[0]}
+                    <div key={m.id} style={{ background: 'var(--color-bg-secondary)', padding: '0.75rem', borderRadius: '0.5rem' }}>
+                      <div className="flex items-center justify-between" style={{ marginBottom: '0.375rem' }}>
+                        <span className="truncate" style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)', maxWidth: '10rem' }}>
+                          {m.name}
                         </span>
-                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: memberBarColor }}>
-                          {m.utilization}%
-                        </span>
+                        <div className="flex items-center" style={{ gap: '0.5rem' }}>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>
+                            {m.currentHoursAllocated}h / {m.weeklyCapacityHours}h
+                          </span>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: memberBarColor }}>
+                            {m.utilization}%
+                          </span>
+                        </div>
                       </div>
-                      <div className="overflow-hidden" style={{ height: '0.375rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.1875rem' }}>
+                      <div className="overflow-hidden" style={{ height: '0.5rem', background: 'var(--color-bg-tertiary)', borderRadius: '9999px' }}>
                         <div
                           className="transition-all"
                           style={{
                             height: '100%',
                             width: `${Math.min(m.utilization, 100)}%`,
                             background: memberBarColor,
-                            borderRadius: '0.1875rem',
+                            borderRadius: '9999px',
                           }}
                         />
                       </div>

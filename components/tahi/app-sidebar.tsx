@@ -6,7 +6,7 @@ import {
   Inbox, Users, CreditCard, FileText, Clock, CheckSquare,
   BarChart2, BookOpen, UserCog, Settings, MessageSquare,
   FolderOpen, ShoppingBag, PanelLeftClose, PanelLeftOpen,
-  LayoutDashboard, Moon, Sun, Star, TrendingUp,
+  LayoutDashboard, Moon, Sun, Star, TrendingUp, FileSignature,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
@@ -70,6 +70,7 @@ const NAV: NavGroup[] = [
     group: 'Studio',
     items: [
       { label: 'Team',      href: '/team',      icon: UserCog,    adminOnly: true },
+      { label: 'Contracts', href: '/contracts', icon: FileSignature, adminOnly: true },
       { label: 'Docs Hub',  href: '/docs',      icon: BookOpen,   adminOnly: true },
       { label: 'Settings',  href: '/settings',  icon: Settings, adminOnly: true },
     ],

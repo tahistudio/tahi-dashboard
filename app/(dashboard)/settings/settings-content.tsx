@@ -1597,12 +1597,16 @@ function BrandingSection({
   const [portalName, setPortalName] = useState('')
   const [primaryColor, setPrimaryColor] = useState('#5A824E')
   const [logoUrl, setLogoUrl] = useState('')
+  const [faviconLightUrl, setFaviconLightUrl] = useState('/dashboard/favicon.png')
+  const [faviconDarkUrl, setFaviconDarkUrl] = useState('/dashboard/favicon.png')
 
   // Sync from settings when loaded
   useEffect(() => {
     setPortalName(settings['portal_name'] ?? '')
     setPrimaryColor(settings['portal_primary_color'] ?? '#5A824E')
     setLogoUrl(settings['portal_logo_url'] ?? '')
+    setFaviconLightUrl(settings['favicon_light_url'] ?? '/dashboard/favicon.png')
+    setFaviconDarkUrl(settings['favicon_dark_url'] ?? '/dashboard/favicon.png')
   }, [settings])
 
   return (
@@ -1776,6 +1780,114 @@ function BrandingSection({
                 src={logoUrl}
                 alt="Logo preview"
                 className="h-8 object-contain"
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Favicon (Light Mode) */}
+        <div className="p-5">
+          <label htmlFor="branding-favicon-light" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+            Favicon (Light Mode)
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mb-2">
+            Favicon displayed when the user is in light mode.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              id="branding-favicon-light"
+              type="url"
+              value={faviconLightUrl}
+              onChange={e => setFaviconLightUrl(e.target.value)}
+              placeholder="/dashboard/favicon.png"
+              className="flex-1 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+              style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: 'var(--radius-input)',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                minHeight: '2.75rem',
+              }}
+            />
+            <button
+              onClick={() => onSave('favicon_light_url', faviconLightUrl)}
+              disabled={savingKey === 'favicon_light_url'}
+              className="px-3 py-2 text-sm font-medium text-white transition-colors"
+              style={{
+                background: 'var(--color-brand)',
+                borderRadius: 'var(--radius-button)',
+                border: 'none',
+                cursor: savingKey === 'favicon_light_url' ? 'not-allowed' : 'pointer',
+                opacity: savingKey === 'favicon_light_url' ? 0.7 : 1,
+                minHeight: '2.75rem',
+              }}
+            >
+              {savingKey === 'favicon_light_url' ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+          {faviconLightUrl && (
+            <div className="mt-3 flex items-center gap-3">
+              <span className="text-xs text-[var(--color-text-muted)]">Preview:</span>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={faviconLightUrl}
+                alt="Favicon light mode preview"
+                style={{ width: '2rem', height: '2rem', objectFit: 'contain' }}
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Favicon (Dark Mode) */}
+        <div className="p-5">
+          <label htmlFor="branding-favicon-dark" className="block text-sm font-medium text-[var(--color-text)] mb-1">
+            Favicon (Dark Mode)
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mb-2">
+            Favicon displayed when the user is in dark mode.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              id="branding-favicon-dark"
+              type="url"
+              value={faviconDarkUrl}
+              onChange={e => setFaviconDarkUrl(e.target.value)}
+              placeholder="/dashboard/favicon.png"
+              className="flex-1 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+              style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: 'var(--radius-input)',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                minHeight: '2.75rem',
+              }}
+            />
+            <button
+              onClick={() => onSave('favicon_dark_url', faviconDarkUrl)}
+              disabled={savingKey === 'favicon_dark_url'}
+              className="px-3 py-2 text-sm font-medium text-white transition-colors"
+              style={{
+                background: 'var(--color-brand)',
+                borderRadius: 'var(--radius-button)',
+                border: 'none',
+                cursor: savingKey === 'favicon_dark_url' ? 'not-allowed' : 'pointer',
+                opacity: savingKey === 'favicon_dark_url' ? 0.7 : 1,
+                minHeight: '2.75rem',
+              }}
+            >
+              {savingKey === 'favicon_dark_url' ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+          {faviconDarkUrl && (
+            <div className="mt-3 flex items-center gap-3">
+              <span className="text-xs text-[var(--color-text-muted)]">Preview:</span>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={faviconDarkUrl}
+                alt="Favicon dark mode preview"
+                style={{ width: '2rem', height: '2rem', objectFit: 'contain' }}
                 onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
               />
             </div>
