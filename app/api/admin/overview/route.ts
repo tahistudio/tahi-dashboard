@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
     inProgressResult,
     recentRequests,
     paidInvoices,
+    outstandingInvoices,
   ] = await Promise.all([
     // Active client orgs
     drizzle
@@ -85,6 +86,14 @@ export async function GET(req: NextRequest) {
         eq(schema.invoices.status, 'paid'),
         gte(schema.invoices.paidAt, sixMonthsAgoIso),
       )),
+
+    // Outstanding invoices (sent or overdue)
+    drizzle
+      .select({
+        total: sql<number>`COALESCE(SUM(${schema.invoices.totalUsd}), 0)`,
+      })
+      .from(schema.invoices)
+      .where(inArray(schema.invoices.status, ['sent', 'overdue'])),
   ])
 
   // Aggregate paid invoices into monthly buckets
@@ -120,7 +129,7 @@ export async function GET(req: NextRequest) {
       activeClients: activeClientsResult[0]?.count ?? 0,
       openRequests: openRequestsResult[0]?.count ?? 0,
       inProgress: inProgressResult[0]?.count ?? 0,
-      outstandingInvoicesUsd: 0, // invoices module not yet implemented
+      outstandingInvoicesUsd: outstandingInvoices[0]?.total ?? 0,
     },
     recentRequests,
     monthlyRevenue,
