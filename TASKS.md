@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
-Last updated: 2026-03-28
-Total tasks: 402 (S1-S15 schema + T1-T391 feature + audit findings)
-Completed: 296/402
+Last updated: 2026-03-30
+Total tasks: 406 (S1-S15 schema + T1-T395 feature + audit findings)
+Completed: 298/406
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -639,3 +639,24 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [ ] T389 - [BE] GET /api/admin/reports/sales: add per-source breakdowns (avg deal size by source, close rate by source, avg cycle length by source)
 - [ ] T390 - [FE] Reports: source breakdown charts (bar chart of deal count by source, pie chart of revenue by source)
 - [ ] T391 - [FE] Reports: sales cycle length chart (avg days from Inquiry to Won, trended over time)
+
+---
+
+## Visual Fixes (2026-03-30)
+
+- [x] T392 - [FE] SearchableSelect: add `size="sm"` variant with smaller trigger, dropdown items, and search input. Apply to request detail DETAILS section (Priority, Assignee) -- [FE] -- [FE] 2026-03-30
+- [x] T393 - [FE] Overview Team Capacity card: polish utilization bars with label-above-bar layout, stat mini-cards with backgrounds, team members section divider and heading -- [FE] -- [FE] 2026-03-30
+- [ ] T394 - [UIUX] Review: spacing pass on SearchableSelect sm variant and Team Capacity card changes -- [UIUX]
+- [ ] T395 - [QA] Regression: verify SearchableSelect default size unchanged, sm variant renders correctly in request detail, Team Capacity card data still loads -- [QA]
+
+---
+
+## Tasks Page (2026-03-30)
+
+- [x] T396 - [BE] API route: GET /api/admin/tasks with filters (status, type, orgId), joined org name, access scoping -- [FE] 2026-03-30
+- [x] T397 - [BE] API route: POST /api/admin/tasks with validation (type, orgId requirement, title) -- [FE] 2026-03-30
+- [x] T398 - [FE] Tasks page: list view with filter tabs (All, To Do, In Progress, Blocked, Done), search, task rows with status/priority/type/due/client -- [FE] 2026-03-30
+- [x] T399 - [FE] New Task dialog: slide-over with title, type selector (3 tiles), client picker (SearchableSelect), description, priority, due date, assignee picker -- [FE] 2026-03-30
+- [x] T400 - [FE] Tasks page: loading skeleton, empty state with leaf icon and CTA -- [FE] 2026-03-30
+- [ ] T401 - [UIUX] Review: spacing pass on tasks page list view, dialog, and mobile layout -- [UIUX]
+- [ ] T402 - [QA] Regression: verify tasks page loads, create task flow works, filters apply correctly -- [QA]

@@ -51,12 +51,18 @@ export async function GET(req: NextRequest) {
       submissionId: submission?.id ?? null,
       npsScore: submission?.npsScore ?? null,
       writtenTestimonial: submission?.writtenTestimonial ?? null,
+      videoUrl: submission?.videoUrl ?? null,
       marketingPermission: submission?.marketingPermission ?? null,
       logoPermission: submission?.logoPermission ?? null,
+      caseStudyPermission: submission?.caseStudyPermission ?? null,
+      clutchReviewUrl: submission?.clutchReviewUrl ?? null,
       submittedAt: submission?.submittedAt ?? null,
       nextAskAt: submission?.nextAskAt ?? null,
       neverAsk: submission?.neverAsk ?? 0,
       submissionToken: submission?.submissionToken ?? null,
+      lovedMost: submission?.lovedMost ?? null,
+      improve: submission?.improve ?? null,
+      projectName: submission?.projectName ?? null,
     }
   })
 

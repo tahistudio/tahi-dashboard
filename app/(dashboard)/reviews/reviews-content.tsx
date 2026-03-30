@@ -3,8 +3,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   Star, Search, ChevronDown, Loader2, Copy,
-  Send, CheckCircle2,
-  MessageSquare, ThumbsUp, Sparkles,
+  Send, CheckCircle2, ExternalLink, Video, Globe,
+  MessageSquare, ThumbsUp, Sparkles, Shield, FileText,
+  Heart, AlertCircle,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 
@@ -19,12 +20,18 @@ interface ReviewItem {
   submissionId: string | null
   npsScore: number | null
   writtenTestimonial: string | null
+  videoUrl: string | null
   marketingPermission: boolean | null
   logoPermission: boolean | null
+  caseStudyPermission: boolean | null
+  clutchReviewUrl: string | null
   submittedAt: string | null
   nextAskAt: string | null
   neverAsk: number
   submissionToken: string | null
+  lovedMost: string | null
+  improve: string | null
+  projectName: string | null
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -42,10 +49,19 @@ const FILTER_TABS = [
   { label: 'All', value: 'all' },
   { label: 'Not Sent', value: 'not_sent' },
   { label: 'Asked', value: 'asked' },
+  { label: 'In Progress', value: 'in_progress' },
   { label: 'Completed', value: 'completed' },
   { label: 'Declined', value: 'declined' },
   { label: 'Deferred', value: 'deferred' },
 ]
+
+const NPS_LABELS: Record<string, { label: string; color: string }> = {
+  promoter:  { label: 'Promoter',  color: 'var(--color-success)' },
+  passive:   { label: 'Passive',   color: 'var(--color-warning)' },
+  detractor: { label: 'Detractor', color: 'var(--color-danger)' },
+}
+
+const CLUTCH_URL = 'https://clutch.co'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -64,6 +80,18 @@ function getNpsColor(score: number | null): string {
   return 'var(--color-danger)'
 }
 
+function getNpsCategory(score: number | null): string | null {
+  if (score === null) return null
+  if (score >= 9) return 'promoter'
+  if (score >= 7) return 'passive'
+  return 'detractor'
+}
+
+function isVideoUrl(url: string | null): boolean {
+  if (!url) return false
+  return url.includes('loom.com') || url.includes('youtube.com') || url.includes('youtu.be') || url.includes('vimeo.com')
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function ReviewsContent() {
@@ -76,6 +104,7 @@ export function ReviewsContent() {
   const [copiedToken, setCopiedToken] = useState<string | null>(null)
   const [generatingDraft, setGeneratingDraft] = useState<string | null>(null)
   const [draftContent, setDraftContent] = useState<Record<string, string>>({})
+  const [hoveredRow, setHoveredRow] = useState<string | null>(null)
 
   const fetchReviews = useCallback(async () => {
     setLoading(true)
@@ -148,29 +177,42 @@ export function ReviewsContent() {
   // Stats
   const totalOrgs = reviews.length
   const completed = reviews.filter(r => r.outreachStatus === 'completed').length
-  const avgNps = reviews
-    .filter(r => r.npsScore !== null)
-    .reduce((sum, r, _, arr) => sum + (r.npsScore ?? 0) / arr.length, 0)
+  const npsScores = reviews.filter(r => r.npsScore !== null)
+  const avgNps = npsScores.length > 0
+    ? npsScores.reduce((sum, r) => sum + (r.npsScore ?? 0), 0) / npsScores.length
+    : 0
   const withPermission = reviews.filter(r => r.marketingPermission).length
+  const withVideo = reviews.filter(r => r.videoUrl).length
+  const promoters = reviews.filter(r => r.npsScore !== null && r.npsScore >= 9).length
+  const detractors = reviews.filter(r => r.npsScore !== null && r.npsScore <= 6).length
+  const npsNet = npsScores.length > 0
+    ? Math.round(((promoters - detractors) / npsScores.length) * 100)
+    : null
 
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between" style={{ marginBottom: '1.5rem' }}>
         <div>
           <h1 className="text-2xl font-bold text-[var(--color-text)]">Reviews and Testimonials</h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">
-            Manage client outreach and review submissions.
+          <p className="text-sm text-[var(--color-text-muted)]" style={{ marginTop: '0.25rem' }}>
+            Manage client outreach, collect NPS scores, testimonials, and build case studies.
           </p>
         </div>
       </div>
 
       {/* Stats cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4" style={{ marginBottom: '1.5rem' }}>
         <StatCard label="Total Clients" value={totalOrgs} icon={<MessageSquare className="w-5 h-5" />} />
         <StatCard label="Reviews Completed" value={completed} icon={<CheckCircle2 className="w-5 h-5" />} />
-        <StatCard label="Avg NPS" value={avgNps > 0 ? avgNps.toFixed(1) : '--'} icon={<Star className="w-5 h-5" />} />
+        <StatCard
+          label="NPS Score"
+          value={npsNet !== null ? `${npsNet > 0 ? '+' : ''}${npsNet}` : '--'}
+          icon={<Star className="w-5 h-5" />}
+          subtitle={avgNps > 0 ? `Avg: ${avgNps.toFixed(1)}` : undefined}
+        />
         <StatCard label="Marketing Permission" value={withPermission} icon={<ThumbsUp className="w-5 h-5" />} />
+        <StatCard label="Video Testimonials" value={withVideo} icon={<Video className="w-5 h-5" />} />
       </div>
 
       {/* Main card */}
@@ -243,31 +285,17 @@ export function ReviewsContent() {
 
         {/* Content */}
         {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-5 h-5 animate-spin text-[var(--color-text-subtle)]" />
-          </div>
+          <LoadingSkeleton />
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div
-              className="w-14 h-14 flex items-center justify-center mb-3"
-              style={{
-                borderRadius: 'var(--radius-leaf)',
-                background: 'linear-gradient(135deg, var(--color-brand-light), var(--color-brand-dark))',
-              }}
-            >
-              <Star className="w-7 h-7 text-white" />
-            </div>
-            <h3 className="text-base font-semibold text-[var(--color-text)] mb-1">No reviews found</h3>
-            <p className="text-sm text-[var(--color-text-muted)]">
-              {search ? 'Try a different search term.' : 'Start outreach to collect client reviews.'}
-            </p>
-          </div>
+          <EmptyState search={search} />
         ) : (
           <div>
             {filtered.map((review, i) => {
               const isExpanded = expandedId === review.orgId
               const statusCfg = STATUS_CFG[review.outreachStatus] ?? STATUS_CFG.not_sent
               const isUpdating = updatingId === review.orgId
+              const isHovered = hoveredRow === review.orgId
+              const npsCategory = getNpsCategory(review.npsScore)
 
               return (
                 <div
@@ -278,31 +306,102 @@ export function ReviewsContent() {
                 >
                   {/* Main row */}
                   <div
-                    className="flex items-center gap-3 cursor-pointer transition-colors hover:bg-[var(--color-bg-secondary)]"
-                    style={{ padding: '0.75rem 1rem' }}
+                    className="flex items-center gap-3 cursor-pointer transition-colors"
+                    style={{
+                      padding: '0.75rem 1rem',
+                      background: isHovered ? 'var(--color-bg-secondary)' : 'transparent',
+                    }}
                     onClick={() => setExpandedId(isExpanded ? null : review.orgId)}
+                    onMouseEnter={() => setHoveredRow(review.orgId)}
+                    onMouseLeave={() => setHoveredRow(null)}
                   >
                     {/* Org name */}
                     <div className="flex-1 min-w-0">
                       <span className="text-sm font-medium text-[var(--color-text)] truncate block">
                         {review.orgName}
                       </span>
-                      {review.planType && (
-                        <span className="text-xs text-[var(--color-text-subtle)]">{review.planType}</span>
+                      <span className="text-xs text-[var(--color-text-subtle)]">
+                        {review.planType ?? 'No plan'}
+                        {review.projectName ? ` / ${review.projectName}` : ''}
+                      </span>
+                    </div>
+
+                    {/* NPS score */}
+                    <div className="hidden sm:flex items-center gap-1.5" style={{ width: '5.5rem' }}>
+                      {review.npsScore !== null ? (
+                        <>
+                          <span
+                            className="text-sm font-bold"
+                            style={{ color: getNpsColor(review.npsScore) }}
+                          >
+                            {review.npsScore}
+                          </span>
+                          {npsCategory && (
+                            <span
+                              className="text-xs"
+                              style={{ color: NPS_LABELS[npsCategory].color }}
+                            >
+                              {NPS_LABELS[npsCategory].label}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-xs text-[var(--color-text-subtle)]">--</span>
                       )}
                     </div>
 
-                    {/* NPS */}
-                    <div className="hidden sm:block" style={{ width: '4rem', textAlign: 'center' }}>
-                      {review.npsScore !== null ? (
+                    {/* Content indicators */}
+                    <div className="hidden md:flex items-center gap-1">
+                      {review.writtenTestimonial && (
                         <span
-                          className="text-sm font-bold"
-                          style={{ color: getNpsColor(review.npsScore) }}
+                          title="Has written testimonial"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: '1.5rem',
+                            height: '1.5rem',
+                            borderRadius: '0.375rem',
+                            background: 'var(--color-bg-tertiary)',
+                            color: 'var(--color-brand)',
+                          }}
                         >
-                          {review.npsScore}
+                          <FileText style={{ width: '0.75rem', height: '0.75rem' }} />
                         </span>
-                      ) : (
-                        <span className="text-xs text-[var(--color-text-subtle)]">--</span>
+                      )}
+                      {review.videoUrl && (
+                        <span
+                          title="Has video testimonial"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: '1.5rem',
+                            height: '1.5rem',
+                            borderRadius: '0.375rem',
+                            background: 'var(--color-bg-tertiary)',
+                            color: 'var(--color-brand)',
+                          }}
+                        >
+                          <Video style={{ width: '0.75rem', height: '0.75rem' }} />
+                        </span>
+                      )}
+                      {review.clutchReviewUrl && (
+                        <span
+                          title="Clutch review submitted"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: '1.5rem',
+                            height: '1.5rem',
+                            borderRadius: '0.375rem',
+                            background: 'var(--color-bg-tertiary)',
+                            color: 'var(--color-brand)',
+                          }}
+                        >
+                          <Globe style={{ width: '0.75rem', height: '0.75rem' }} />
+                        </span>
                       )}
                     </div>
 
@@ -362,50 +461,162 @@ export function ReviewsContent() {
                         background: 'var(--color-bg-secondary)',
                       }}
                     >
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4" style={{ paddingTop: '0.75rem' }}>
                         {/* Review details */}
                         <div>
-                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)] mb-2">
+                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]" style={{ marginBottom: '0.5rem' }}>
                             Review Details
                           </h4>
-                          <div className="space-y-2">
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                             <DetailRow label="NPS Score" value={review.npsScore !== null ? String(review.npsScore) : 'Not submitted'} />
                             <DetailRow label="Submitted" value={formatDate(review.submittedAt)} />
-                            <DetailRow label="Marketing Permission" value={review.marketingPermission ? 'Yes' : review.marketingPermission === false ? 'No' : '--'} />
-                            <DetailRow label="Logo Permission" value={review.logoPermission ? 'Yes' : review.logoPermission === false ? 'No' : '--'} />
                             {review.nextAskAt && (
                               <DetailRow label="Follow-up" value={formatDate(review.nextAskAt)} />
+                            )}
+                            {review.neverAsk === 1 && (
+                              <div className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-danger)' }}>
+                                <AlertCircle style={{ width: '0.75rem', height: '0.75rem' }} />
+                                Client opted out of future asks
+                              </div>
                             )}
                           </div>
                         </div>
 
-                        {/* Testimonial text */}
+                        {/* Permissions */}
                         <div>
-                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)] mb-2">
-                            Written Testimonial
+                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]" style={{ marginBottom: '0.5rem' }}>
+                            Permissions Granted
                           </h4>
-                          {review.writtenTestimonial ? (
-                            <p
-                              className="text-sm text-[var(--color-text)] whitespace-pre-wrap"
-                              style={{
-                                padding: '0.75rem',
-                                background: 'var(--color-bg)',
-                                borderRadius: '0.5rem',
-                                border: '1px solid var(--color-border)',
-                              }}
-                            >
-                              {review.writtenTestimonial}
-                            </p>
-                          ) : (
-                            <p className="text-sm text-[var(--color-text-muted)] italic">No testimonial submitted yet.</p>
-                          )}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+                            <PermissionRow label="Website use" granted={review.marketingPermission} />
+                            <PermissionRow label="Logo use" granted={review.logoPermission} />
+                            <PermissionRow label="Case study" granted={review.caseStudyPermission} />
+                          </div>
                         </div>
+
+                        {/* Feedback highlights */}
+                        <div>
+                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]" style={{ marginBottom: '0.5rem' }}>
+                            Feedback
+                          </h4>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+                            {review.lovedMost && (
+                              <div>
+                                <span className="text-xs text-[var(--color-text-subtle)]">Loved most:</span>
+                                <p className="text-sm text-[var(--color-text)]" style={{ margin: '0.125rem 0 0 0' }}>
+                                  {review.lovedMost}
+                                </p>
+                              </div>
+                            )}
+                            {review.improve && (
+                              <div>
+                                <span className="text-xs text-[var(--color-text-subtle)]">To improve:</span>
+                                <p className="text-sm text-[var(--color-text)]" style={{ margin: '0.125rem 0 0 0' }}>
+                                  {review.improve}
+                                </p>
+                              </div>
+                            )}
+                            {!review.lovedMost && !review.improve && (
+                              <p className="text-sm text-[var(--color-text-muted)] italic">No feedback submitted yet.</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Written testimonial */}
+                      <div style={{ marginTop: '1rem' }}>
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]" style={{ marginBottom: '0.5rem' }}>
+                          Written Testimonial
+                        </h4>
+                        {review.writtenTestimonial ? (
+                          <div
+                            style={{
+                              padding: '0.75rem',
+                              background: 'var(--color-bg)',
+                              borderRadius: '0.5rem',
+                              border: '1px solid var(--color-border)',
+                              borderLeft: '3px solid var(--color-brand)',
+                            }}
+                          >
+                            <p className="text-sm text-[var(--color-text)] whitespace-pre-wrap" style={{ margin: 0 }}>
+                              &ldquo;{review.writtenTestimonial}&rdquo;
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-[var(--color-text-muted)] italic">No testimonial submitted yet.</p>
+                        )}
+                      </div>
+
+                      {/* Video testimonial */}
+                      {review.videoUrl && (
+                        <div style={{ marginTop: '1rem' }}>
+                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]" style={{ marginBottom: '0.5rem' }}>
+                            Video Testimonial
+                          </h4>
+                          <a
+                            href={review.videoUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
+                            style={{
+                              padding: '0.5rem 0.75rem',
+                              background: 'var(--color-bg)',
+                              border: '1px solid var(--color-border)',
+                              borderRadius: '0.5rem',
+                              color: 'var(--color-brand)',
+                              textDecoration: 'none',
+                            }}
+                          >
+                            <Video style={{ width: '1rem', height: '1rem' }} />
+                            {isVideoUrl(review.videoUrl) ? 'Watch video testimonial' : 'Open video link'}
+                            <ExternalLink style={{ width: '0.75rem', height: '0.75rem', opacity: 0.6 }} />
+                          </a>
+                        </div>
+                      )}
+
+                      {/* Clutch review */}
+                      <div style={{ marginTop: '1rem' }}>
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]" style={{ marginBottom: '0.5rem' }}>
+                          Clutch Review
+                        </h4>
+                        {review.clutchReviewUrl ? (
+                          <a
+                            href={review.clutchReviewUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
+                            style={{
+                              padding: '0.5rem 0.75rem',
+                              background: 'var(--color-bg)',
+                              border: '1px solid var(--color-border)',
+                              borderRadius: '0.5rem',
+                              color: 'var(--color-brand)',
+                              textDecoration: 'none',
+                            }}
+                          >
+                            <Globe style={{ width: '1rem', height: '1rem' }} />
+                            View Clutch review
+                            <ExternalLink style={{ width: '0.75rem', height: '0.75rem', opacity: 0.6 }} />
+                          </a>
+                        ) : (
+                          <p className="text-sm text-[var(--color-text-muted)] italic">
+                            No Clutch review submitted. Client can leave a review at{' '}
+                            <a
+                              href={CLUTCH_URL}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ color: 'var(--color-brand)', textDecoration: 'underline' }}
+                            >
+                              clutch.co
+                            </a>
+                          </p>
+                        )}
                       </div>
 
                       {/* Case study draft */}
                       {review.outreachStatus === 'completed' && review.submissionId && (
-                        <div className="mt-4 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
-                          <div className="flex items-center justify-between mb-2">
+                        <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--color-border)' }}>
+                          <div className="flex items-center justify-between" style={{ marginBottom: '0.5rem' }}>
                             <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]">
                               Case Study Draft
                             </h4>
@@ -448,7 +659,7 @@ export function ReviewsContent() {
                       )}
 
                       {/* Status change buttons */}
-                      <div className="flex flex-wrap gap-2 mt-4 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+                      <div className="flex flex-wrap gap-2" style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--color-border)' }}>
                         <span className="text-xs font-medium text-[var(--color-text-subtle)] mr-2 self-center">
                           Change status:
                         </span>
@@ -497,23 +708,28 @@ export function ReviewsContent() {
 
 // ── Sub-components ─────────────────────────────────────────────────────────
 
-function StatCard({ label, value, icon }: { label: string; value: string | number; icon: React.ReactNode }) {
+function StatCard({ label, value, icon, subtitle }: { label: string; value: string | number; icon: React.ReactNode; subtitle?: string }) {
   return (
     <div
       style={{
-        padding: '1.5rem',
+        padding: '1.25rem',
         background: 'var(--color-bg)',
         border: '1px solid var(--color-border)',
         borderRadius: 'var(--radius-card)',
       }}
     >
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between" style={{ marginBottom: '0.5rem' }}>
         <span className="text-xs font-medium text-[var(--color-text-subtle)] uppercase tracking-wide">
           {label}
         </span>
         <span style={{ color: 'var(--color-brand)' }}>{icon}</span>
       </div>
       <span className="text-2xl font-bold text-[var(--color-text)]">{value}</span>
+      {subtitle && (
+        <span className="block text-xs text-[var(--color-text-subtle)]" style={{ marginTop: '0.125rem' }}>
+          {subtitle}
+        </span>
+      )}
     </div>
   )
 }
@@ -523,6 +739,85 @@ function DetailRow({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between text-sm">
       <span className="text-[var(--color-text-muted)]">{label}</span>
       <span className="font-medium text-[var(--color-text)]">{value}</span>
+    </div>
+  )
+}
+
+function PermissionRow({ label, granted }: { label: string; granted: boolean | null }) {
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '1.25rem',
+          height: '1.25rem',
+          borderRadius: '0.25rem',
+          background: granted ? 'var(--color-success-bg)' : 'var(--color-bg-tertiary)',
+          border: `1px solid ${granted ? 'var(--color-success)' : 'var(--color-border)'}`,
+        }}
+      >
+        {granted ? (
+          <CheckCircle2 style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-success)' }} />
+        ) : granted === false ? (
+          <span style={{ width: '0.5rem', height: '0.125rem', background: 'var(--color-text-subtle)', borderRadius: '0.0625rem' }} />
+        ) : (
+          <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.625rem' }}>?</span>
+        )}
+      </span>
+      <span style={{ color: granted ? 'var(--color-text)' : 'var(--color-text-muted)' }}>
+        {label}
+      </span>
+    </div>
+  )
+}
+
+function LoadingSkeleton() {
+  return (
+    <div style={{ padding: '1rem' }}>
+      {[1, 2, 3, 4, 5].map(i => (
+        <div
+          key={i}
+          className="flex items-center gap-3"
+          style={{
+            padding: '0.75rem 0',
+            borderBottom: i < 5 ? '1px solid var(--color-border-subtle)' : 'none',
+          }}
+        >
+          <div className="flex-1 min-w-0">
+            <div className="animate-pulse" style={{ width: '10rem', height: '0.875rem', background: '#f3f4f6', borderRadius: '0.25rem', marginBottom: '0.25rem' }} />
+            <div className="animate-pulse" style={{ width: '5rem', height: '0.75rem', background: '#f3f4f6', borderRadius: '0.25rem' }} />
+          </div>
+          <div className="animate-pulse" style={{ width: '2.5rem', height: '0.875rem', background: '#f3f4f6', borderRadius: '0.25rem' }} />
+          <div className="animate-pulse" style={{ width: '5rem', height: '1.25rem', background: '#f3f4f6', borderRadius: '9999px' }} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function EmptyState({ search }: { search: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center text-center" style={{ padding: '3rem 1rem' }}>
+      <div
+        className="flex items-center justify-center"
+        style={{
+          width: '3.5rem',
+          height: '3.5rem',
+          borderRadius: 'var(--radius-leaf)',
+          background: 'linear-gradient(135deg, var(--color-brand-light), var(--color-brand-dark))',
+          marginBottom: '0.75rem',
+        }}
+      >
+        <Star className="w-7 h-7 text-white" />
+      </div>
+      <h3 className="text-base font-semibold text-[var(--color-text)]" style={{ marginBottom: '0.25rem' }}>
+        No reviews found
+      </h3>
+      <p className="text-sm text-[var(--color-text-muted)]">
+        {search ? 'Try a different search term.' : 'Start outreach to collect client reviews and testimonials.'}
+      </p>
     </div>
   )
 }

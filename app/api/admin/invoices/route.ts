@@ -69,6 +69,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json() as {
     orgId?: string
     subscriptionId?: string
+    currency?: string
     lineItems?: Array<{
       description: string
       quantity: number
@@ -99,7 +100,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const currency = body.lineItems[0]?.currency ?? 'NZD'
+  const VALID_CURRENCIES = ['NZD', 'USD', 'AUD', 'GBP', 'EUR']
+  const rawCurrency = body.currency ?? body.lineItems[0]?.currency ?? 'NZD'
+  const currency = VALID_CURRENCIES.includes(rawCurrency) ? rawCurrency : 'NZD'
   const totalAmount = body.lineItems.reduce(
     (sum, item) => sum + item.quantity * item.unitAmount,
     0,

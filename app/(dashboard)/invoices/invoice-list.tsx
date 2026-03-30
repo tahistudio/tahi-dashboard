@@ -34,6 +34,8 @@ const STATUS_CFG: Record<string, { label: string; bg: string; text: string }> = 
   written_off:  { label: 'Written Off', bg: 'var(--status-archived-bg)', text: 'var(--status-archived-text)' },
 }
 
+const SUPPORTED_CURRENCIES = ['NZD', 'USD', 'AUD', 'GBP', 'EUR'] as const
+
 const FILTER_TABS = [
   { label: 'All',     value: 'all'     },
   { label: 'Draft',   value: 'draft'   },
@@ -104,6 +106,7 @@ function CreateInvoiceModal({
   const [description, setDescription] = useState('')
   const [quantity, setQuantity] = useState('1')
   const [unitAmount, setUnitAmount] = useState('')
+  const [currency, setCurrency] = useState('NZD')
   const [dueDate, setDueDate] = useState('')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
@@ -123,6 +126,7 @@ function CreateInvoiceModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           orgId: orgId.trim(),
+          currency,
           lineItems: [{ description: description.trim(), quantity: parseFloat(quantity) || 1, unitAmount: parseFloat(unitAmount) }],
           dueDate: dueDate || undefined,
           notes: notes || undefined,
@@ -141,7 +145,7 @@ function CreateInvoiceModal({
     } finally {
       setSaving(false)
     }
-  }, [orgId, description, quantity, unitAmount, dueDate, notes, onCreated, showToast])
+  }, [orgId, description, quantity, unitAmount, currency, dueDate, notes, onCreated, showToast])
 
   return (
     <div
@@ -210,8 +214,8 @@ function CreateInvoiceModal({
               }}
             />
           </div>
-          <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: 1 }}>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: '1 1 5rem', minWidth: '5rem' }}>
               <label htmlFor="ci-quantity" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
                 Quantity
               </label>
@@ -229,9 +233,9 @@ function CreateInvoiceModal({
                 }}
               />
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: 1 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: '2 1 8rem', minWidth: '8rem' }}>
               <label htmlFor="ci-amount" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
-                Unit Amount (NZD)
+                Unit Amount
               </label>
               <input
                 id="ci-amount"
@@ -248,6 +252,26 @@ function CreateInvoiceModal({
                   color: 'var(--color-text)', background: 'var(--color-bg)',
                 }}
               />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: '1 1 5rem', minWidth: '5rem' }}>
+              <label htmlFor="ci-currency" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
+                Currency
+              </label>
+              <select
+                id="ci-currency"
+                value={currency}
+                onChange={e => setCurrency(e.target.value)}
+                style={{
+                  padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
+                  border: '1px solid var(--color-border)', outline: 'none',
+                  color: 'var(--color-text)', background: 'var(--color-bg)',
+                  minHeight: '2.375rem',
+                }}
+              >
+                {SUPPORTED_CURRENCIES.map(cur => (
+                  <option key={cur} value={cur}>{cur}</option>
+                ))}
+              </select>
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>

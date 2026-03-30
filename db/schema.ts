@@ -579,6 +579,8 @@ export const caseStudySubmissions = sqliteTable('case_study_submissions', {
   improve: text('improve'),
   marketingPermission: integer('marketing_permission', { mode: 'boolean' }).default(false),
   logoPermission: integer('logo_permission', { mode: 'boolean' }).default(false),
+  caseStudyPermission: integer('case_study_permission', { mode: 'boolean' }).default(false),
+  clutchReviewUrl: text('clutch_review_url'),
   // pending | approved | rejected
   status: text('status').notNull().default('pending'),
   // not_sent | asked | declined | deferred | in_progress | completed
