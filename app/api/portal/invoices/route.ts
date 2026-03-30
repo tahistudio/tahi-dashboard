@@ -2,7 +2,7 @@ import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, desc } from 'drizzle-orm'
+import { eq, and, desc, ne } from 'drizzle-orm'
 
 // ── GET /api/portal/invoices ──────────────────────────────────────────────────
 // Returns invoices scoped to the authenticated client's org.
@@ -50,6 +50,7 @@ export async function GET(req: NextRequest) {
       .where(and(
         eq(schema.invoices.orgId, orgId),
         eq(schema.invoices.status, statusParam),
+        ne(schema.invoices.status, 'draft'),
       ))
       .orderBy(desc(schema.invoices.createdAt))
       .limit(limit)
@@ -69,7 +70,7 @@ export async function GET(req: NextRequest) {
         updatedAt: schema.invoices.updatedAt,
       })
       .from(schema.invoices)
-      .where(eq(schema.invoices.orgId, orgId))
+      .where(and(eq(schema.invoices.orgId, orgId), ne(schema.invoices.status, 'draft')))
       .orderBy(desc(schema.invoices.createdAt))
       .limit(limit)
       .offset(offset)

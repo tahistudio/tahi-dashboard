@@ -20,13 +20,14 @@ export async function GET(req: NextRequest, { params }: Params) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // Verify request belongs to this org
+  // Verify request belongs to this org and is not internal
   const [request] = await drizzle
     .select({ id: schema.requests.id })
     .from(schema.requests)
     .where(and(
       eq(schema.requests.id, id),
       eq(schema.requests.orgId, orgId),
+      eq(schema.requests.isInternal, false),
     ))
     .limit(1)
 

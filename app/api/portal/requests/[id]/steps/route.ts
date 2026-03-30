@@ -23,7 +23,7 @@ export async function GET(
   const [request] = await database
     .select({ id: schema.requests.id })
     .from(schema.requests)
-    .where(and(eq(schema.requests.id, requestId), eq(schema.requests.orgId, orgId)))
+    .where(and(eq(schema.requests.id, requestId), eq(schema.requests.orgId, orgId), eq(schema.requests.isInternal, false)))
     .limit(1)
 
   if (!request) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -64,7 +64,7 @@ export async function POST(
   const [request] = await database
     .select({ id: schema.requests.id })
     .from(schema.requests)
-    .where(and(eq(schema.requests.id, requestId), eq(schema.requests.orgId, orgId)))
+    .where(and(eq(schema.requests.id, requestId), eq(schema.requests.orgId, orgId), eq(schema.requests.isInternal, false)))
     .limit(1)
 
   if (!request) return NextResponse.json({ error: 'Not found' }, { status: 404 })
