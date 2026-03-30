@@ -660,3 +660,19 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T400 - [FE] Tasks page: loading skeleton, empty state with leaf icon and CTA -- [FE] 2026-03-30
 - [ ] T401 - [UIUX] Review: spacing pass on tasks page list view, dialog, and mobile layout -- [UIUX]
 - [ ] T402 - [QA] Regression: verify tasks page loads, create task flow works, filters apply correctly -- [QA]
+
+### Reviews Pipeline Enhancement
+
+- [x] T403 - [BE] Schema: add caseStudyPermission (boolean) and clutchReviewUrl (text) columns to caseStudySubmissions -- [FE] 2026-03-30
+- [x] T404 - [BE] API: update GET /api/admin/reviews to return videoUrl, caseStudyPermission, clutchReviewUrl, lovedMost, improve, projectName -- [FE] 2026-03-30
+- [x] T405 - [FE] Reviews page: add video testimonial display with external link, Clutch review section, permissions panel (website/logo/case study), NPS category labels (promoter/passive/detractor), NPS net score stat, feedback highlights (lovedMost/improve), loading skeleton, proper empty state -- [FE] 2026-03-30
+- [ ] T406 - [UIUX] Review: spacing pass on reviews pipeline page, expanded detail layout, mobile responsiveness -- [UIUX]
+- [ ] T407 - [QA] Regression: verify reviews page loads, status changes work, expanded detail shows all fields, video/Clutch links render -- [QA]
+
+## Invoice and Kanban Enhancements (2026-03-30)
+
+- [x] T408 - [FE] Invoice create dialog: currency selector dropdown (NZD, USD, AUD, GBP, EUR) defaulting to NZD -- [FE] 2026-03-30
+- [x] T409 - [BE] POST /api/admin/invoices: accept top-level currency field with validation against supported currencies -- [FE] 2026-03-30
+- [x] T410 - [FE] Kanban columns settings: add Global Default / Per-Client Override mode toggle with client picker and info banner for global fallback -- [FE] 2026-03-30
+- [ ] T411 - [UIUX] Review: spacing pass on invoice currency selector and kanban per-client override UI -- [UIUX]
+- [ ] T412 - [QA] Regression: verify invoice creation with all 5 currencies, kanban column per-client override CRUD -- [QA]

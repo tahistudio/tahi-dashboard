@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Star, Search, ChevronDown, Loader2, Copy,
   Send, CheckCircle2, ExternalLink, Video, Globe,
-  MessageSquare, ThumbsUp, Sparkles, Shield, FileText,
-  Heart, AlertCircle,
+  MessageSquare, ThumbsUp, Sparkles, FileText,
+  AlertCircle,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 

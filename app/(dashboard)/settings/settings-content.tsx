@@ -965,6 +965,7 @@ function FormEditor({ form, onSaved }: { form: FormTemplate; onSaved: () => void
 
 interface KanbanColumnData {
   id: string
+  orgId?: string | null
   label: string
   statusValue: string
   colour: string | null
@@ -972,7 +973,13 @@ interface KanbanColumnData {
   isDefault: number
 }
 
+interface ClientOption {
+  id: string
+  name: string
+}
+
 function KanbanColumnsSection() {
+  const [mode, setMode] = useState<'global' | 'client'>('global')
   const [columns, setColumns] = useState<KanbanColumnData[]>([])
   const [loadingCols, setLoadingCols] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
@@ -981,10 +988,17 @@ function KanbanColumnsSection() {
   const [newColour, setNewColour] = useState('#5A824E')
   const [saving, setSaving] = useState(false)
 
-  const fetchColumns = useCallback(async () => {
+  // Per-client state
+  const [clients, setClients] = useState<ClientOption[]>([])
+  const [loadingClients, setLoadingClients] = useState(false)
+  const [selectedClientId, setSelectedClientId] = useState('')
+  const [clientSearch, setClientSearch] = useState('')
+
+  const fetchColumns = useCallback(async (orgId?: string) => {
     setLoadingCols(true)
     try {
-      const res = await fetch(apiPath('/api/admin/kanban-columns'))
+      const qs = orgId ? `?orgId=${encodeURIComponent(orgId)}` : ''
+      const res = await fetch(apiPath(`/api/admin/kanban-columns${qs}`))
       if (!res.ok) throw new Error('Failed')
       const data = await res.json() as { columns: KanbanColumnData[] }
       setColumns((data.columns ?? []).sort((a, b) => a.position - b.position))
@@ -995,16 +1009,47 @@ function KanbanColumnsSection() {
     }
   }, [])
 
-  useEffect(() => { void fetchColumns() }, [fetchColumns])
+  const fetchClients = useCallback(async () => {
+    setLoadingClients(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/clients?limit=200'))
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as { organisations?: ClientOption[] }
+      setClients(data.organisations ?? [])
+    } catch {
+      setClients([])
+    } finally {
+      setLoadingClients(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (mode === 'global') {
+      void fetchColumns()
+      setSelectedClientId('')
+    } else {
+      void fetchClients()
+    }
+  }, [mode, fetchColumns, fetchClients])
+
+  useEffect(() => {
+    if (mode === 'client' && selectedClientId) {
+      void fetchColumns(selectedClientId)
+    }
+  }, [mode, selectedClientId, fetchColumns])
+
+  const currentOrgId = mode === 'client' ? selectedClientId : undefined
 
   async function handleAdd() {
     if (!newLabel.trim() || !newStatus.trim()) return
+    if (mode === 'client' && !selectedClientId) return
     setSaving(true)
     try {
       await fetch(apiPath('/api/admin/kanban-columns'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          orgId: currentOrgId ?? null,
           label: newLabel.trim(),
           statusValue: newStatus.trim(),
           colour: newColour,
@@ -1015,7 +1060,7 @@ function KanbanColumnsSection() {
       setNewLabel('')
       setNewStatus('')
       setNewColour('#5A824E')
-      await fetchColumns()
+      await fetchColumns(currentOrgId)
     } catch {
       // Failed
     } finally {
@@ -1026,7 +1071,7 @@ function KanbanColumnsSection() {
   async function handleDeleteColumn(id: string) {
     try {
       await fetch(apiPath(`/api/admin/kanban-columns/${id}`), { method: 'DELETE' })
-      await fetchColumns()
+      await fetchColumns(currentOrgId)
     } catch {
       // Failed
     }
@@ -1039,7 +1084,7 @@ function KanbanColumnsSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
       })
-      await fetchColumns()
+      await fetchColumns(currentOrgId)
     } catch {
       // Failed
     }
@@ -1056,6 +1101,13 @@ function KanbanColumnsSection() {
     ])
   }
 
+  const filteredClients = clientSearch
+    ? clients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase()))
+    : clients
+
+  // Check if current columns are global defaults (shown when viewing a client with no overrides)
+  const isShowingGlobalFallback = mode === 'client' && selectedClientId && columns.length > 0 && columns.every(c => !c.orgId)
+
   return (
     <section>
       <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -1063,10 +1115,114 @@ function KanbanColumnsSection() {
         Kanban Columns
       </h2>
 
-      {loadingCols ? (
+      {/* Mode toggle */}
+      <div className="flex items-center gap-1 mb-4 p-0.5 rounded-lg" style={{ background: 'var(--color-bg-tertiary)', display: 'inline-flex' }}>
+        <button
+          onClick={() => setMode('global')}
+          className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors"
+          style={{
+            background: mode === 'global' ? 'var(--color-bg)' : 'transparent',
+            color: mode === 'global' ? 'var(--color-text)' : 'var(--color-text-muted)',
+            border: 'none',
+            cursor: 'pointer',
+            boxShadow: mode === 'global' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+            minHeight: '2rem',
+          }}
+        >
+          Global Default
+        </button>
+        <button
+          onClick={() => setMode('client')}
+          className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors"
+          style={{
+            background: mode === 'client' ? 'var(--color-bg)' : 'transparent',
+            color: mode === 'client' ? 'var(--color-text)' : 'var(--color-text-muted)',
+            border: 'none',
+            cursor: 'pointer',
+            boxShadow: mode === 'client' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+            minHeight: '2rem',
+          }}
+        >
+          Per-Client Override
+        </button>
+      </div>
+
+      {/* Client picker (per-client mode only) */}
+      {mode === 'client' && (
+        <div className="mb-4">
+          <label htmlFor="kanban-client-search" className="block text-xs font-medium text-[var(--color-text)] mb-1">
+            Select Client
+          </label>
+          <input
+            id="kanban-client-search"
+            type="text"
+            value={clientSearch}
+            onChange={e => setClientSearch(e.target.value)}
+            placeholder="Search clients..."
+            className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] mb-2"
+            style={{ maxWidth: '24rem' }}
+          />
+          {loadingClients ? (
+            <LoadingSkeleton rows={3} height={36} />
+          ) : (
+            <div
+              className="border border-[var(--color-border)] rounded-lg overflow-hidden"
+              style={{ maxWidth: '24rem', maxHeight: '12rem', overflowY: 'auto' }}
+            >
+              {filteredClients.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-[var(--color-text-muted)]">No clients found</div>
+              ) : (
+                filteredClients.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => { setSelectedClientId(c.id); setClientSearch('') }}
+                    className="w-full text-left px-3 py-2 text-sm transition-colors hover:bg-[var(--color-bg-secondary)]"
+                    style={{
+                      background: selectedClientId === c.id ? 'var(--color-brand-50)' : 'var(--color-bg)',
+                      color: selectedClientId === c.id ? 'var(--color-brand-dark)' : 'var(--color-text)',
+                      fontWeight: selectedClientId === c.id ? 600 : 400,
+                      border: 'none',
+                      borderBottom: '1px solid var(--color-border-subtle)',
+                      cursor: 'pointer',
+                      minHeight: '2.75rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                  >
+                    {c.name}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Show columns only when we have context */}
+      {mode === 'client' && !selectedClientId ? (
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 text-center">
+          <p className="text-sm text-[var(--color-text-muted)]">
+            Select a client above to view or create custom kanban columns for them.
+          </p>
+        </div>
+      ) : loadingCols ? (
         <LoadingSkeleton rows={3} />
       ) : (
         <div className="space-y-2">
+          {/* Info banner when showing global fallback for a client */}
+          {isShowingGlobalFallback && (
+            <div
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm"
+              style={{
+                background: 'var(--color-info-bg, #eff6ff)',
+                color: 'var(--color-info, #60a5fa)',
+                border: '1px solid var(--color-info, #60a5fa)',
+              }}
+            >
+              This client has no custom columns. Showing global defaults. Add a column below to create a client-specific override.
+            </div>
+          )}
+
           {columns.map((col, idx) => (
             <div key={col.id} className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl px-4 py-3 flex items-center gap-3">
               <div
