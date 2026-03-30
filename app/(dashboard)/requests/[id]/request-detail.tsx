@@ -1565,7 +1565,10 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filename: file.name, mimeType: file.type, requestId }),
       })
-      if (!presignRes.ok) throw new Error('Failed to get upload URL')
+      if (!presignRes.ok) {
+        const errBody = await presignRes.json().catch(() => null) as { error?: string } | null
+        throw new Error(`Upload failed: ${errBody?.error ?? presignRes.statusText}`)
+      }
       const presignData = await presignRes.json() as {
         uploadUrl: string
         storageKey: string
@@ -1577,7 +1580,10 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
         headers: { 'Content-Type': file.type || 'application/octet-stream' },
         body: file,
       })
-      if (!uploadRes.ok) throw new Error('File upload failed')
+      if (!uploadRes.ok) {
+        const errBody = await uploadRes.json().catch(() => null) as { error?: string } | null
+        throw new Error(`File upload failed: ${errBody?.error ?? uploadRes.statusText}`)
+      }
 
       const confirmRes = await fetch(apiPath('/api/uploads/confirm'), {
         method: 'POST',
@@ -1592,7 +1598,10 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
           orgId,
         }),
       })
-      if (!confirmRes.ok) throw new Error('Failed to confirm upload')
+      if (!confirmRes.ok) {
+        const errBody = await confirmRes.json().catch(() => null) as { error?: string } | null
+        throw new Error(`Confirm failed: ${errBody?.error ?? confirmRes.statusText}`)
+      }
 
       onRefresh()
     } catch (err) {
