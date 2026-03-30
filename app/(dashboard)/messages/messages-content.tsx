@@ -91,6 +91,75 @@ function getConversationDisplayName(conv: ConversationSummary): string {
   return 'Unnamed conversation'
 }
 
+function VoiceNotePlayer({ body }: { body: string }) {
+  const [playing, setPlaying] = useState(false)
+  const durationMatch = body.match(/(\d+)s/)
+  const duration = durationMatch ? parseInt(durationMatch[1]) : 0
+
+  return (
+    <div
+      className="flex items-center gap-3 mt-1"
+      style={{
+        padding: '0.5rem 0.75rem',
+        background: 'var(--color-bg-secondary)',
+        borderRadius: '1.25rem',
+        maxWidth: '16rem',
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setPlaying(!playing)}
+        style={{
+          width: '2rem',
+          height: '2rem',
+          borderRadius: '50%',
+          background: 'var(--color-brand)',
+          border: 'none',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          color: 'white',
+        }}
+        aria-label={playing ? 'Pause' : 'Play'}
+      >
+        {playing ? (
+          <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor">
+            <rect x="0" y="0" width="3" height="12" rx="1" />
+            <rect x="7" y="0" width="3" height="12" rx="1" />
+          </svg>
+        ) : (
+          <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor">
+            <path d="M0 0L10 6L0 12z" />
+          </svg>
+        )}
+      </button>
+      {/* Waveform bars (decorative) */}
+      <div className="flex items-center gap-0.5 flex-1">
+        {Array.from({ length: 20 }).map((_, i) => {
+          const height = Math.random() * 0.75 + 0.25
+          return (
+            <div
+              key={i}
+              style={{
+                width: '0.1875rem',
+                height: `${height * 1.25}rem`,
+                borderRadius: '0.125rem',
+                background: i < (playing ? 10 : 0) ? 'var(--color-brand)' : 'var(--color-border)',
+                transition: 'background 0.2s',
+              }}
+            />
+          )
+        })}
+      </div>
+      <span className="text-xs font-medium" style={{ color: 'var(--color-text-muted)', flexShrink: 0 }}>
+        {duration}s
+      </span>
+    </div>
+  )
+}
+
 function stripHtml(text: string): string {
   // Simple strip for message preview - handles Tiptap JSON or plain text
   try {
@@ -760,6 +829,8 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
                               >
                                 This message has been removed.
                               </p>
+                            ) : msg.body.startsWith('[Voice note:') ? (
+                              <VoiceNotePlayer body={msg.body} />
                             ) : (
                               <div className="text-sm text-[var(--color-text)] mt-0.5 whitespace-pre-wrap break-words">
                                 {stripHtml(msg.body)}
@@ -885,6 +956,8 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
                     </button>
                   )}
 
+                  {/* Hide text send button when voice note is recorded (avoids duplicate) */}
+                  {!recordedBlob && (
                   <button
                     onClick={handleSend}
                     disabled={!composerText.trim() || sending}
@@ -906,6 +979,7 @@ export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
                       <Send className="w-4 h-4" />
                     )}
                   </button>
+                  )}
                 </div>
               </div>
             </>
