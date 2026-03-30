@@ -12,6 +12,7 @@ interface InvoiceRow {
   status: string
   amountUsd: number
   totalUsd: number
+  totalAmount?: number
   currency: string
   dueDate: string | null
   paidAt: string | null
@@ -174,7 +175,7 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                             {inv.id.slice(0, 8).toUpperCase()}
                           </td>
                           <td className="px-4 py-3 font-medium text-[var(--color-text)]">
-                            ${inv.totalUsd.toFixed(2)} {inv.currency}
+                            ${(inv.totalUsd ?? inv.totalAmount ?? 0).toFixed(2)} {inv.currency}
                           </td>
                           <td className="px-4 py-3">
                             <InvoiceStatusBadge status={inv.status} />
@@ -242,7 +243,6 @@ function AdminBillingView() {
   useEffect(() => { fetchData() }, [fetchData])
 
   const activeSubs = subs.filter(s => s.status === 'active')
-  const totalMRR = activeSubs.length // Placeholder - would calculate from plan prices
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -270,7 +270,7 @@ function AdminBillingView() {
             <BillingKPI label="Recent Invoices" value={recentInvoices.length} />
             <BillingKPI
               label="Outstanding"
-              value={`$${recentInvoices.filter(i => i.status === 'sent' || i.status === 'overdue').reduce((s, i) => s + i.totalUsd, 0).toFixed(0)}`}
+              value={`$${recentInvoices.filter(i => i.status === 'sent' || i.status === 'overdue').reduce((s, i) => s + (i.totalUsd ?? i.totalAmount ?? 0), 0).toFixed(0)}`}
             />
           </div>
 
@@ -358,7 +358,7 @@ function AdminBillingView() {
                             {inv.id.slice(0, 8).toUpperCase()}
                           </td>
                           <td className="font-medium" style={{ padding: '0.75rem 1rem', color: 'var(--color-text)' }}>
-                            ${inv.totalUsd.toFixed(2)} {inv.currency}
+                            ${(inv.totalUsd ?? inv.totalAmount ?? 0).toFixed(2)} {inv.currency}
                           </td>
                           <td style={{ padding: '0.75rem 1rem' }}>
                             <InvoiceStatusBadge status={inv.status} />
