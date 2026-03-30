@@ -1,0 +1,130 @@
+import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { schema } from '@/db/d1'
+import { eq, desc, and, inArray } from 'drizzle-orm'
+import { resolveAccessScoping } from '@/lib/access-scoping'
+
+// ── GET /api/admin/tasks ───────────────────────────────────────────────────
+export async function GET(req: NextRequest) {
+  const { orgId, userId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const url = new URL(req.url)
+  const status = url.searchParams.get('status')
+  const type = url.searchParams.get('type')
+  const clientId = url.searchParams.get('orgId')
+
+  const database = await db()
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Apply team member access scoping
+  const scopedOrgIds = await resolveAccessScoping(drizzle, userId)
+
+  const conditions = []
+
+  // If scoping returned a specific set of org IDs, filter to those
+  if (scopedOrgIds !== null) {
+    if (scopedOrgIds.length === 0) {
+      return NextResponse.json({ tasks: [] })
+    }
+    conditions.push(inArray(schema.tasks.orgId, scopedOrgIds))
+  }
+
+  if (status && status !== 'all') {
+    conditions.push(eq(schema.tasks.status, status))
+  }
+  if (type && type !== 'all') {
+    conditions.push(eq(schema.tasks.type, type))
+  }
+  if (clientId) {
+    conditions.push(eq(schema.tasks.orgId, clientId))
+  }
+
+  const tasks = await drizzle
+    .select({
+      id: schema.tasks.id,
+      type: schema.tasks.type,
+      orgId: schema.tasks.orgId,
+      title: schema.tasks.title,
+      description: schema.tasks.description,
+      status: schema.tasks.status,
+      priority: schema.tasks.priority,
+      assigneeId: schema.tasks.assigneeId,
+      assigneeType: schema.tasks.assigneeType,
+      dueDate: schema.tasks.dueDate,
+      completedAt: schema.tasks.completedAt,
+      createdById: schema.tasks.createdById,
+      tags: schema.tasks.tags,
+      createdAt: schema.tasks.createdAt,
+      updatedAt: schema.tasks.updatedAt,
+      orgName: schema.organisations.name,
+    })
+    .from(schema.tasks)
+    .leftJoin(schema.organisations, eq(schema.tasks.orgId, schema.organisations.id))
+    .where(conditions.length ? and(...conditions) : undefined)
+    .orderBy(desc(schema.tasks.updatedAt))
+
+  return NextResponse.json({ tasks })
+}
+
+// ── POST /api/admin/tasks ──────────────────────────────────────────────────
+export async function POST(req: NextRequest) {
+  const { orgId, userId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const body = await req.json() as {
+    title?: string
+    type?: string
+    orgId?: string | null
+    description?: string | null
+    status?: string
+    priority?: string
+    assigneeId?: string | null
+    assigneeType?: string | null
+    dueDate?: string | null
+  }
+
+  const { title, type, description, priority, assigneeId, assigneeType, dueDate } = body
+
+  if (!title?.trim()) {
+    return NextResponse.json({ error: 'Title is required' }, { status: 400 })
+  }
+  if (!type || !['client_task', 'internal_client_task', 'tahi_internal'].includes(type)) {
+    return NextResponse.json({ error: 'Invalid task type' }, { status: 400 })
+  }
+
+  // client_task and internal_client_task require orgId
+  if (type !== 'tahi_internal' && !body.orgId) {
+    return NextResponse.json({ error: 'Client is required for this task type' }, { status: 400 })
+  }
+
+  const database = await db()
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const id = crypto.randomUUID()
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+
+  await drizzle.insert(schema.tasks).values({
+    id,
+    type,
+    orgId: type === 'tahi_internal' ? null : (body.orgId ?? null),
+    title: title.trim(),
+    description: description ?? null,
+    status: 'todo',
+    priority: priority ?? 'standard',
+    assigneeId: assigneeId ?? null,
+    assigneeType: assigneeType ?? null,
+    dueDate: dueDate ?? null,
+    createdById: userId,
+    tags: '[]',
+    createdAt: now,
+    updatedAt: now,
+  })
+
+  return NextResponse.json({ id }, { status: 201 })
+}

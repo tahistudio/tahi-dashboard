@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LayoutDashboard, Inbox, MessageSquare, FileText, Users, FolderOpen } from 'lucide-react'
+import { useImpersonation } from '@/components/tahi/impersonation-banner'
 
 const ADMIN_NAV = [
   { label: 'Overview', href: '/overview', icon: LayoutDashboard },
@@ -25,7 +26,10 @@ interface MobileBottomNavProps {
 
 export function MobileBottomNav({ isAdmin = false }: MobileBottomNavProps) {
   const pathname = usePathname()
-  const items = isAdmin ? ADMIN_NAV : CLIENT_NAV
+  const { isImpersonating } = useImpersonation()
+  // When impersonating a client, show client nav instead of admin nav
+  const showAsAdmin = isAdmin && !isImpersonating
+  const items = showAsAdmin ? ADMIN_NAV : CLIENT_NAV
 
   return (
     <nav

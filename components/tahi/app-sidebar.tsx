@@ -9,6 +9,7 @@ import {
   LayoutDashboard, Moon, Sun, Star, TrendingUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useImpersonation } from '@/components/tahi/impersonation-banner'
 // LeafLogo / TahiWordmark available in ./leaf-logo but sidebar uses the PNG logo directly
 import { useState, useEffect } from 'react'
 
@@ -18,6 +19,7 @@ type NavItem = {
   icon: React.ComponentType<{ className?: string }>
   adminOnly?: boolean
   clientOnly?: boolean
+  clientVisible?: boolean
 }
 
 type NavGroup = {
@@ -29,16 +31,16 @@ const NAV: NavGroup[] = [
   {
     group: 'Work',
     items: [
-      { label: 'Overview',  href: '/overview',  icon: LayoutDashboard },
-      { label: 'Requests',  href: '/requests',  icon: Inbox },
+      { label: 'Overview',  href: '/overview',  icon: LayoutDashboard, clientVisible: true },
+      { label: 'Requests',  href: '/requests',  icon: Inbox, clientVisible: true },
       { label: 'Tasks',     href: '/tasks',     icon: CheckSquare },
-      { label: 'Messages',  href: '/messages',  icon: MessageSquare },
+      { label: 'Messages',  href: '/messages',  icon: MessageSquare, clientVisible: true },
     ],
   },
   {
     group: 'Finance',
     items: [
-      { label: 'Invoices',  href: '/invoices',  icon: FileText },
+      { label: 'Invoices',  href: '/invoices',  icon: FileText, clientVisible: true },
       { label: 'Billing',   href: '/billing',   icon: CreditCard, adminOnly: true },
     ],
   },
@@ -46,8 +48,8 @@ const NAV: NavGroup[] = [
     group: 'Clients',
     items: [
       { label: 'Clients',   href: '/clients',   icon: Users,       adminOnly: true },
-      { label: 'Files',     href: '/files',     icon: FolderOpen,  clientOnly: true },
-      { label: 'Services',  href: '/services',  icon: ShoppingBag, clientOnly: true },
+      { label: 'Files',     href: '/files',     icon: FolderOpen,  clientOnly: true, clientVisible: true },
+      { label: 'Services',  href: '/services',  icon: ShoppingBag, clientOnly: true, clientVisible: true },
     ],
   },
   {
@@ -69,7 +71,7 @@ const NAV: NavGroup[] = [
     items: [
       { label: 'Team',      href: '/team',      icon: UserCog,    adminOnly: true },
       { label: 'Docs Hub',  href: '/docs',      icon: BookOpen,   adminOnly: true },
-      { label: 'Settings',  href: '/settings',  icon: Settings },
+      { label: 'Settings',  href: '/settings',  icon: Settings, adminOnly: true },
     ],
   },
 ]
@@ -94,6 +96,10 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
+  const { isImpersonating } = useImpersonation()
+
+  // When impersonating a client, show the client view instead of admin
+  const showAsAdmin = isAdmin && !isImpersonating
 
   // Read sidebar + dark mode preferences from localStorage on mount
   useEffect(() => {
@@ -127,8 +133,13 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const visibleNav = NAV.map(group => ({
     ...group,
     items: group.items.filter(item => {
-      if (item.adminOnly && !isAdmin) return false
-      if (item.clientOnly && isAdmin) return false
+      if (showAsAdmin) {
+        // Admin view: hide client-only items
+        if (item.clientOnly) return false
+        return true
+      }
+      // Client view (or impersonating): only show items marked clientVisible
+      if (!item.clientVisible) return false
       return true
     }),
   })).filter(group => group.items.length > 0)
