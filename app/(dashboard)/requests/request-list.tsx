@@ -249,7 +249,8 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
   }, [])
   const [requests, setRequests] = useState<Request[]>([])
   const [loading, setLoading] = useState(true)
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(() => searchParams.get('new') === '1')
+  const defaultClientId = searchParams.get('client') ?? undefined
   const [bulkCreateOpen, setBulkCreateOpen] = useState(false)
 
   // Listen for keyboard shortcut events
@@ -344,6 +345,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
         open={dialogOpen}
         onClose={() => { setDialogOpen(false); fetchRequests(); showToast('Request created successfully') }}
         isAdmin={isAdmin}
+        defaultOrgId={defaultClientId}
       />
 
       {/* Page header */}

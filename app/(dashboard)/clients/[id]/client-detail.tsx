@@ -1018,6 +1018,7 @@ function RequestsTab({ clientId }: { clientId: string }) {
       open={dialogOpen}
       onClose={() => { setDialogOpen(false); void load() }}
       isAdmin={true}
+      defaultOrgId={clientId}
     />
     <div>
       <div className="flex items-center justify-between mb-4">

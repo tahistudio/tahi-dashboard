@@ -25,6 +25,8 @@ interface NewRequestDialogProps {
   isAdmin: boolean
   /** Portal only: does the client's plan allow large_task requests? */
   canUseLargeTrack?: boolean
+  /** Pre-select a client org when opening from a client's page */
+  defaultOrgId?: string
 }
 
 const REQUEST_TYPES = [
@@ -57,7 +59,7 @@ const CATEGORIES = [
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export function NewRequestDialog({
-  open, onClose, isAdmin, canUseLargeTrack = true,
+  open, onClose, isAdmin, canUseLargeTrack = true, defaultOrgId,
 }: NewRequestDialogProps) {
   const router = useRouter()
   const { showToast } = useToast()
@@ -144,12 +146,19 @@ export function NewRequestDialog({
       setStartDate('')
       setDueDate('')
       setEstimatedHours('')
-      setClientOrgId('')
+      setClientOrgId(defaultOrgId ?? '')
       setError(null)
       setSuccessMessage(null)
       setCreateAnother(false)
     }
   }, [open])
+
+  // Reset type to small_task if selected client is on maintain plan
+  useEffect(() => {
+    if (isAdmin && selectedClient?.planType === 'maintain' && type === 'large_task') {
+      setType('small_task')
+    }
+  }, [isAdmin, selectedClient?.planType, type])
 
   async function handleSubmit(e: React.FormEvent, saveAndCreateAnother = false) {
     e.preventDefault()
@@ -361,7 +370,13 @@ export function NewRequestDialog({
             <FieldGroup label="Task size">
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.625rem' }}>
                 {REQUEST_TYPES.map(t => {
-                  const locked = !isAdmin && t.requiresScale && !canUseLargeTrack
+                  // Block large tasks for maintain plans - for both admin and portal
+                  const clientPlan = selectedClient?.planType
+                  const locked = t.requiresScale && (
+                    isAdmin
+                      ? clientPlan === 'maintain'  // Admin: block if selected client is on maintain
+                      : !canUseLargeTrack          // Portal: parent controls via prop
+                  )
                   const active = type === t.value
                   const Icon = t.icon
                   return (
