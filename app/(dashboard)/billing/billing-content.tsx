@@ -83,23 +83,9 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
-  // Admin placeholder
+  // Admin billing dashboard
   if (isAdmin) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">Billing</h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">Subscriptions, plans, and Stripe management.</p>
-        </div>
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="w-16 h-16 brand-gradient flex items-center justify-center mb-4" style={{ borderRadius: 'var(--radius-leaf)' }}>
-            <CreditCard className="w-8 h-8 text-white" />
-          </div>
-          <h3 className="text-base font-semibold text-[var(--color-text)] mb-2">Admin billing coming soon</h3>
-          <p className="text-sm text-[var(--color-text-muted)] max-w-sm">Stripe subscription management and billing configuration will live here.</p>
-        </div>
-      </div>
-    )
+    return <AdminBillingView />
   }
 
   return (
@@ -209,6 +195,201 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// -- Admin Billing View --
+
+interface AdminSubscription {
+  id: string
+  orgName: string
+  planType: string
+  status: string
+  hasPrioritySupport: boolean
+  currentPeriodEnd: string | null
+}
+
+function AdminBillingView() {
+  const [subs, setSubs] = useState<AdminSubscription[]>([])
+  const [recentInvoices, setRecentInvoices] = useState<InvoiceRow[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [subsRes, invRes] = await Promise.all([
+        fetch(apiPath('/api/admin/subscriptions')),
+        fetch(apiPath('/api/admin/invoices?limit=10')),
+      ])
+
+      if (subsRes.ok) {
+        const data = await subsRes.json() as { items: AdminSubscription[] }
+        setSubs(data.items ?? [])
+      }
+
+      if (invRes.ok) {
+        const data = await invRes.json() as { items: InvoiceRow[] }
+        setRecentInvoices(data.items ?? [])
+      }
+    } catch {
+      // Failed
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchData() }, [fetchData])
+
+  const activeSubs = subs.filter(s => s.status === 'active')
+  const totalMRR = activeSubs.length // Placeholder - would calculate from plan prices
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text)' }}>Billing</h1>
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
+            Subscriptions, invoices, and revenue overview.
+          </p>
+        </div>
+        <TahiButton variant="secondary" size="sm" onClick={fetchData} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+          Refresh
+        </TahiButton>
+      </div>
+
+      {loading ? (
+        <LoadingSkeleton rows={6} />
+      ) : (
+        <>
+          {/* KPI Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <BillingKPI label="Active Subscriptions" value={activeSubs.length} />
+            <BillingKPI label="Total Clients" value={subs.length} />
+            <BillingKPI label="Recent Invoices" value={recentInvoices.length} />
+            <BillingKPI
+              label="Outstanding"
+              value={`$${recentInvoices.filter(i => i.status === 'sent' || i.status === 'overdue').reduce((s, i) => s + i.totalUsd, 0).toFixed(0)}`}
+            />
+          </div>
+
+          {/* Active Subscriptions */}
+          <div>
+            <h2 className="text-base font-semibold mb-3" style={{ color: 'var(--color-text)' }}>
+              Active Subscriptions
+            </h2>
+            {subs.length === 0 ? (
+              <EmptyState
+                icon={<CreditCard className="w-8 h-8 text-white" />}
+                title="No subscriptions"
+                description="Client subscriptions will appear here."
+              />
+            ) : (
+              <div style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-card)', overflow: 'hidden' }}>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
+                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Client</th>
+                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Plan</th>
+                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Status</th>
+                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Priority</th>
+                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Next Billing</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {subs.map(sub => (
+                        <tr key={sub.id} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
+                          <td style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text)' }}>{sub.orgName}</td>
+                          <td style={{ padding: '0.75rem 1rem' }}>
+                            <span className="capitalize text-sm" style={{ color: 'var(--color-text)' }}>{sub.planType}</span>
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem' }}>
+                            <InvoiceStatusBadge status={sub.status} />
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>
+                            {sub.hasPrioritySupport ? 'Yes' : 'No'}
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>
+                            {sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd).toLocaleDateString() : '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Recent Invoices */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-semibold" style={{ color: 'var(--color-text)' }}>
+                Recent Invoices
+              </h2>
+              <a href="/dashboard/invoices" className="text-sm font-medium" style={{ color: 'var(--color-brand)', textDecoration: 'none' }}>
+                View all
+              </a>
+            </div>
+            {recentInvoices.length === 0 ? (
+              <EmptyState
+                icon={<FileText className="w-8 h-8 text-white" />}
+                title="No invoices yet"
+                description="Invoices will appear here once created."
+              />
+            ) : (
+              <div style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-card)', overflow: 'hidden' }}>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
+                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>ID</th>
+                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Amount</th>
+                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Status</th>
+                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Due Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentInvoices.map(inv => (
+                        <tr key={inv.id} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
+                          <td className="font-mono text-xs" style={{ padding: '0.75rem 1rem', color: 'var(--color-text)' }}>
+                            {inv.id.slice(0, 8).toUpperCase()}
+                          </td>
+                          <td className="font-medium" style={{ padding: '0.75rem 1rem', color: 'var(--color-text)' }}>
+                            ${inv.totalUsd.toFixed(2)} {inv.currency}
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem' }}>
+                            <InvoiceStatusBadge status={inv.status} />
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>
+                            {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function BillingKPI({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div style={{
+      background: 'var(--color-bg)',
+      border: '1px solid var(--color-border)',
+      borderRadius: 'var(--radius-card)',
+      padding: '1.25rem',
+    }}>
+      <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{label}</p>
+      <p className="text-2xl font-bold" style={{ color: 'var(--color-text)', marginTop: '0.25rem' }}>{value}</p>
     </div>
   )
 }

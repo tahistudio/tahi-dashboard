@@ -9,6 +9,10 @@ export const metadata: Metadata = {
   },
   description: 'Tahi Studio client portal and operations dashboard.',
   manifest: '/dashboard/manifest.json',
+  icons: {
+    icon: '/dashboard/favicon.png',
+    apple: '/dashboard/favicon.png',
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
@@ -39,7 +43,7 @@ export default function RootLayout({
           <meta name="apple-mobile-web-app-capable" content="yes" />
           <meta name="apple-mobile-web-app-status-bar-style" content="default" />
           <meta name="apple-mobile-web-app-title" content="Tahi Dashboard" />
-          <link rel="apple-touch-icon" href="/dashboard/icons/icon-192.svg" />
+          <link rel="apple-touch-icon" href="/dashboard/favicon.png" />
           <script
             dangerouslySetInnerHTML={{
               __html: `try{if(localStorage.getItem('tahi-theme')==='dark'){document.documentElement.classList.add('dark')}}catch(e){}`,
