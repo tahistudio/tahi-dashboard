@@ -111,12 +111,10 @@ export function NewRequestDialog({
       .then(r => r.json() as Promise<{ form?: { questions: string } }>)
       .then(data => {
         if (data.form?.questions) {
-          try {
-            const parsed = JSON.parse(data.form.questions) as FormQuestion[]
-            setIntakeQuestions(Array.isArray(parsed) ? parsed : [])
-          } catch {
-            setIntakeQuestions([])
-          }
+          // API may return already-parsed array or JSON string
+          const q = data.form.questions
+          const parsed = typeof q === 'string' ? JSON.parse(q) as FormQuestion[] : q as unknown as FormQuestion[]
+          setIntakeQuestions(Array.isArray(parsed) ? parsed : [])
         } else {
           setIntakeQuestions([])
         }
@@ -145,6 +143,8 @@ export function NewRequestDialog({
       setDescription('')
       setPriority('standard')
       setIsInternal(false)
+      setFormResponses({})
+      setIntakeQuestions([])
       setStartDate('')
       setDueDate('')
       setEstimatedHours('')

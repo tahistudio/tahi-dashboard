@@ -68,8 +68,9 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json() as {
     title?: string; type?: string; category?: string; description?: string
+    dueDate?: string | null; formResponses?: string
   }
-  const { title, type, category, description } = body
+  const { title, type, category, description, dueDate, formResponses } = body
 
   if (!title?.trim()) {
     return NextResponse.json({ error: 'Request title is required' }, { status: 400 })
@@ -95,6 +96,8 @@ export async function POST(req: NextRequest) {
       type: type ?? 'small_task',
       category: category ?? 'development',
       description: description ?? null,
+      dueDate: dueDate ?? null,
+      formResponses: formResponses ?? null,
       status: 'submitted',
       priority: 'standard',
       submittedById: userId,
