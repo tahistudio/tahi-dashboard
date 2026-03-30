@@ -391,6 +391,9 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
         />
       </div>
 
+      {/* Track capacity card */}
+      <TrackCapacityCard />
+
       {/* Review alert */}
       {inReview.length > 0 && (
         <div
@@ -1187,6 +1190,177 @@ function ScheduleCallWidget() {
         <Video size={14} aria-hidden="true" />
         Schedule a Call
       </a>
+    </div>
+  )
+}
+
+// ─── Track Capacity Card (Client Portal) ────────────────────────────────────
+
+interface TrackData {
+  id: string
+  type: string
+  isPriorityTrack: boolean
+  currentRequest: { id: string; title: string; status: string } | null
+}
+
+interface CapacityData {
+  subscription: { planType: string; hasPrioritySupport: boolean } | null
+  entitlements: { smallTracks: number; largeTracks: number; totalSlots: number; canUseLargeTrack: boolean }
+  summary: string
+  tracks: TrackData[]
+  queue: Array<{ id: string; title: string; status: string; priority: string }>
+}
+
+function TrackCapacityCard() {
+  const [data, setData] = useState<CapacityData | null>(null)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    fetch(apiPath('/api/portal/capacity'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<CapacityData>
+      })
+      .then(d => setData(d))
+      .catch(() => setData(null))
+      .finally(() => setLoaded(true))
+  }, [])
+
+  if (!loaded || !data?.subscription) return null
+
+  const plan = data.subscription
+  const ent = data.entitlements
+
+  // Build upsell messages based on plan
+  const upsells: string[] = []
+  if (plan.planType === 'maintain' && !plan.hasPrioritySupport) {
+    upsells.push('Add Priority Support for an extra small track')
+    upsells.push('Upgrade to Scale for large tasks and more capacity')
+  } else if (plan.planType === 'maintain' && plan.hasPrioritySupport) {
+    upsells.push('Upgrade to Scale for large tasks and more capacity')
+  } else if (plan.planType === 'scale' && !plan.hasPrioritySupport) {
+    upsells.push('Add Priority Support for an extra small track')
+  }
+
+  return (
+    <div
+      className="rounded-xl"
+      style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', overflow: 'hidden' }}
+    >
+      {/* Header */}
+      <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--color-border-subtle)' }}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+              Your Plan: <span className="capitalize">{plan.planType}</span>
+              {plan.hasPrioritySupport && (
+                <span
+                  className="ml-2 text-xs px-2 py-0.5 rounded-full font-medium"
+                  style={{ background: 'var(--color-brand-50)', color: 'var(--color-brand)' }}
+                >
+                  Priority
+                </span>
+              )}
+            </h3>
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
+              {data.summary}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Track slots */}
+      <div style={{ padding: '1rem 1.25rem' }}>
+        <div className="flex gap-3 flex-wrap">
+          {data.tracks.map(track => {
+            const isOccupied = !!track.currentRequest
+            return (
+              <div
+                key={track.id}
+                style={{
+                  flex: '1 1 8rem',
+                  minWidth: '8rem',
+                  padding: '0.75rem',
+                  borderRadius: 'var(--radius-card)',
+                  border: `2px solid ${isOccupied ? 'var(--color-brand)' : 'var(--color-border-subtle)'}`,
+                  background: isOccupied ? 'var(--color-brand-50)' : 'var(--color-bg-secondary)',
+                }}
+              >
+                <div className="flex items-center gap-2 mb-1.5">
+                  <div
+                    style={{
+                      width: '0.5rem',
+                      height: '0.5rem',
+                      borderRadius: '50%',
+                      background: isOccupied ? 'var(--color-brand)' : 'var(--color-border)',
+                    }}
+                  />
+                  <span className="text-xs font-medium uppercase" style={{ color: 'var(--color-text-muted)' }}>
+                    {track.type === 'large' ? 'Large' : 'Small'} Track
+                    {track.isPriorityTrack ? ' (Priority)' : ''}
+                  </span>
+                </div>
+                {isOccupied ? (
+                  <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>
+                    {track.currentRequest?.title}
+                  </p>
+                ) : (
+                  <p className="text-sm" style={{ color: 'var(--color-text-subtle)' }}>
+                    Available
+                  </p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Queue */}
+        {data.queue.length > 0 && (
+          <div style={{ marginTop: '0.75rem' }}>
+            <p className="text-xs font-medium" style={{ color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
+              Queue ({data.queue.length} waiting)
+            </p>
+            <div className="flex flex-col gap-1">
+              {data.queue.slice(0, 5).map((req, i) => (
+                <div key={req.id} className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-text)' }}>
+                  <span style={{ color: 'var(--color-text-subtle)', fontWeight: 500, minWidth: '1rem' }}>{i + 1}.</span>
+                  <span className="truncate">{req.title}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Upsell */}
+      {upsells.length > 0 && (
+        <div style={{
+          padding: '0.75rem 1.25rem',
+          borderTop: '1px solid var(--color-border-subtle)',
+          background: 'var(--color-bg-secondary)',
+        }}>
+          {upsells.map((msg, i) => (
+            <div key={i} className="flex items-center gap-2" style={{ marginTop: i > 0 ? '0.375rem' : 0 }}>
+              <TrendingUp size={12} style={{ color: 'var(--color-brand)', flexShrink: 0 }} />
+              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{msg}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Full package badge */}
+      {plan.planType === 'scale' && plan.hasPrioritySupport && (
+        <div style={{
+          padding: '0.5rem 1.25rem',
+          borderTop: '1px solid var(--color-border-subtle)',
+          background: 'var(--color-success-bg)',
+          textAlign: 'center',
+        }}>
+          <span className="text-xs font-medium" style={{ color: 'var(--color-success)' }}>
+            You have the full package
+          </span>
+        </div>
+      )}
     </div>
   )
 }
