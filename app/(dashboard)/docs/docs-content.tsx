@@ -271,7 +271,7 @@ export function DocsContent() {
           >
             New Page
           </TahiButton>
-          {pages.length === 0 && !loading && (
+          {!loading && (
             <TahiButton
               size="sm"
               variant="secondary"
