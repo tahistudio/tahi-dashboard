@@ -10,6 +10,7 @@ const isPublicRoute = createRouteMatcher([
   '/demo(.*)',
   '/api/webhooks/(.*)',
   '/api/case-study/(.*)',
+  '/api/admin/docs/seed(.*)',
 ])
 
 // Admin-only routes : if a client hits these, redirect them to /requests
