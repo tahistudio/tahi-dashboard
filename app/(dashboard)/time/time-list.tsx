@@ -7,6 +7,7 @@ import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
+import { DateRangePicker, type DateRange } from '@/components/tahi/date-range-picker'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 
@@ -574,6 +575,14 @@ export function TimeList() {
   const [billableHours, setBillableHours] = useState(0)
   const [entryCount, setEntryCount] = useState(0)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
+
+  // Client-side date filter
+  const filteredEntries = entries.filter(e => {
+    if (!dateRange.from || !dateRange.to) return true
+    const d = new Date(e.date ?? e.createdAt).getTime()
+    return d >= dateRange.from.getTime() && d <= dateRange.to.getTime()
+  })
 
   const fetchEntries = useCallback(async (billable: string) => {
     setLoading(true)
@@ -735,9 +744,14 @@ export function TimeList() {
         ))}
       </div>
 
+      {/* Date filter */}
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <DateRangePicker value={dateRange} onChange={setDateRange} label="Entry date" />
+      </div>
+
       {/* By Client View */}
       {viewTab === 'by_client' && (
-        <ByClientView entries={entries} loading={loading} error={error} onRetry={() => fetchEntries(billableTab).catch(() => {})} />
+        <ByClientView entries={filteredEntries} loading={loading} error={error} onRetry={() => fetchEntries(billableTab).catch(() => {})} />
       )}
 
       {/* Table */}
@@ -766,7 +780,7 @@ export function TimeList() {
               Retry
             </button>
           </div>
-        ) : entries.length === 0 ? (
+        ) : filteredEntries.length === 0 ? (
           <EmptyState
             icon={<Clock style={{ width: 28, height: 28, color: 'white' }} aria-hidden="true" />}
             title="No time entries yet"
@@ -794,7 +808,7 @@ export function TimeList() {
                 </tr>
               </thead>
               <tbody>
-                {entries.map((entry, i) => (
+                {filteredEntries.map((entry, i) => (
                   <tr
                     key={entry.id}
                     style={{

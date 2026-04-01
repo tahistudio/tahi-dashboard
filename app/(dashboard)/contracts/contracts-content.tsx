@@ -5,6 +5,7 @@ import {
   FileText, Plus, Search, RefreshCw, X, Trash2,
   Calendar, User, Building2,
 } from 'lucide-react'
+import { DateRangePicker, type DateRange } from '@/components/tahi/date-range-picker'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
@@ -284,6 +285,8 @@ export function ContractsContent() {
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [deleteContract, setDeleteContract] = useState<Contract | null>(null)
   const [editContract, setEditContract] = useState<Contract | null>(null)
+  const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
+  const [typeFilter, setTypeFilter] = useState('all')
   const [editStatus, setEditStatus] = useState('')
   const [updatingStatus, setUpdatingStatus] = useState(false)
 
@@ -354,12 +357,13 @@ export function ContractsContent() {
     if (statusFilter !== 'all' && c.status !== statusFilter) return false
     if (search.trim()) {
       const q = search.toLowerCase()
-      return (
-        c.name.toLowerCase().includes(q) ||
-        orgName(c.orgId).toLowerCase().includes(q) ||
-        c.type.toLowerCase().includes(q)
-      )
+      if (!c.name.toLowerCase().includes(q) && !orgName(c.orgId).toLowerCase().includes(q) && !c.type.toLowerCase().includes(q)) return false
     }
+    if (dateRange.from && dateRange.to && c.expiryDate) {
+      const d = new Date(c.expiryDate).getTime()
+      if (d < dateRange.from.getTime() || d > dateRange.to.getTime()) return false
+    }
+    if (typeFilter !== 'all' && c.type !== typeFilter) return false
     return true
   })
 
@@ -414,6 +418,32 @@ export function ContractsContent() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        <DateRangePicker value={dateRange} onChange={setDateRange} label="Expiry date" />
+        <select
+          value={typeFilter}
+          onChange={e => setTypeFilter(e.target.value)}
+          className="appearance-none focus:outline-none"
+          style={{
+            padding: '0.4375rem 2rem 0.4375rem 0.75rem',
+            fontSize: '0.8125rem',
+            border: '1px solid var(--color-border)',
+            borderRadius: '0.5rem',
+            color: typeFilter !== 'all' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+            background: typeFilter !== 'all' ? 'var(--color-brand-50)' : 'var(--color-bg)',
+            cursor: 'pointer',
+          }}
+        >
+          <option value="all">All Types</option>
+          <option value="nda">NDA</option>
+          <option value="sla">SLA</option>
+          <option value="msa">MSA</option>
+          <option value="sow">SOW</option>
+          <option value="other">Other</option>
+        </select>
       </div>
 
       {/* Content */}

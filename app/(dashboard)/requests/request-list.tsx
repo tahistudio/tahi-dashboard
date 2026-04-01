@@ -10,6 +10,7 @@ import {
   CheckSquare, Square, Users, Loader2, X,
 } from 'lucide-react'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
+import { DateRangePicker, type DateRange } from '@/components/tahi/date-range-picker'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 
@@ -247,6 +248,9 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
     setSortKeyRaw(k)
     try { localStorage.setItem('tahi-request-sort', k) } catch { /* noop */ }
   }, [])
+  const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
+  const [categoryFilter, setCategoryFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')
   const [requests, setRequests] = useState<Request[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(() => searchParams.get('new') === '1')
@@ -323,12 +327,23 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
     })
   }, [])
 
-  const filtered = search.trim()
-    ? requests.filter(r =>
-        r.title.toLowerCase().includes(search.toLowerCase()) ||
-        (r.orgName ?? '').toLowerCase().includes(search.toLowerCase())
-      )
-    : requests
+  const filtered = requests.filter(r => {
+    // Text search
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      if (!r.title.toLowerCase().includes(q) && !(r.orgName ?? '').toLowerCase().includes(q)) return false
+    }
+    // Date range filter (on createdAt)
+    if (dateRange.from && dateRange.to && r.createdAt) {
+      const d = new Date(r.createdAt).getTime()
+      if (d < dateRange.from.getTime() || d > dateRange.to.getTime()) return false
+    }
+    // Category filter
+    if (categoryFilter !== 'all' && (r.category ?? '') !== categoryFilter) return false
+    // Type filter
+    if (typeFilter !== 'all' && r.type !== typeFilter) return false
+    return true
+  })
 
   const sorted = sortRequests(filtered, sortKey)
 
@@ -479,25 +494,48 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
             />
           </div>
 
-          {/* Filter button */}
-          <button
-            className="hidden sm:flex items-center gap-1.5 font-medium flex-shrink-0 transition-colors"
+          {/* Filters */}
+          <DateRangePicker value={dateRange} onChange={setDateRange} label="Created date" />
+          <select
+            value={categoryFilter}
+            onChange={e => setCategoryFilter(e.target.value)}
+            className="hidden sm:block appearance-none focus:outline-none"
             style={{
-              padding: '0.4375rem 0.75rem',
+              padding: '0.4375rem 2rem 0.4375rem 0.75rem',
               fontSize: '0.8125rem',
               border: '1px solid var(--color-border)',
               borderRadius: '0.5rem',
-              color: 'var(--color-text-muted)',
-              background: 'var(--color-bg)',
+              color: categoryFilter !== 'all' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+              background: categoryFilter !== 'all' ? 'var(--color-brand-50)' : 'var(--color-bg)',
               cursor: 'pointer',
             }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-brand)'; e.currentTarget.style.color = 'var(--color-text)' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.color = 'var(--color-text-muted)' }}
           >
-            <Filter className="w-3.5 h-3.5" />
-            Filter
-            <ChevronDown className="w-3 h-3 opacity-50" />
-          </button>
+            <option value="all">All Categories</option>
+            <option value="design">Design</option>
+            <option value="development">Development</option>
+            <option value="strategy">Strategy</option>
+            <option value="content">Content</option>
+            <option value="marketing">Marketing</option>
+            <option value="other">Other</option>
+          </select>
+          <select
+            value={typeFilter}
+            onChange={e => setTypeFilter(e.target.value)}
+            className="hidden sm:block appearance-none focus:outline-none"
+            style={{
+              padding: '0.4375rem 2rem 0.4375rem 0.75rem',
+              fontSize: '0.8125rem',
+              border: '1px solid var(--color-border)',
+              borderRadius: '0.5rem',
+              color: typeFilter !== 'all' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+              background: typeFilter !== 'all' ? 'var(--color-brand-50)' : 'var(--color-bg)',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="all">All Types</option>
+            <option value="small_task">Small Task</option>
+            <option value="large_task">Large Task</option>
+          </select>
 
           <div className="flex-1" />
 

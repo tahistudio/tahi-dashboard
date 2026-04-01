@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
+import { DateRangePicker, type DateRange } from '@/components/tahi/date-range-picker'
 import { useToast } from '@/components/tahi/toast'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -192,6 +193,9 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
+  const [priorityFilter, setPriorityFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')
 
   const fetchTasks = useCallback(async () => {
     setLoading(true)
@@ -212,12 +216,19 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
 
   useEffect(() => { fetchTasks() }, [fetchTasks])
 
-  const filtered = search.trim()
-    ? tasks.filter(t =>
-        t.title.toLowerCase().includes(search.toLowerCase()) ||
-        (t.orgName ?? '').toLowerCase().includes(search.toLowerCase())
-      )
-    : tasks
+  const filtered = tasks.filter(t => {
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      if (!t.title.toLowerCase().includes(q) && !(t.orgName ?? '').toLowerCase().includes(q)) return false
+    }
+    if (dateRange.from && dateRange.to && t.dueDate) {
+      const d = new Date(t.dueDate).getTime()
+      if (d < dateRange.from.getTime() || d > dateRange.to.getTime()) return false
+    }
+    if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false
+    if (typeFilter !== 'all' && t.type !== typeFilter) return false
+    return true
+  })
 
   return (
     <>
@@ -295,6 +306,48 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
               }}
             />
           </div>
+
+          {/* Filters */}
+          <DateRangePicker value={dateRange} onChange={setDateRange} label="Due date" />
+          <select
+            value={priorityFilter}
+            onChange={e => setPriorityFilter(e.target.value)}
+            className="hidden sm:block appearance-none focus:outline-none"
+            style={{
+              padding: '0.4375rem 2rem 0.4375rem 0.75rem',
+              fontSize: '0.8125rem',
+              border: '1px solid var(--color-border)',
+              borderRadius: '0.5rem',
+              color: priorityFilter !== 'all' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+              background: priorityFilter !== 'all' ? 'var(--color-brand-50)' : 'var(--color-bg)',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="all">All Priorities</option>
+            <option value="urgent">Urgent</option>
+            <option value="high">High</option>
+            <option value="standard">Standard</option>
+            <option value="low">Low</option>
+          </select>
+          <select
+            value={typeFilter}
+            onChange={e => setTypeFilter(e.target.value)}
+            className="hidden sm:block appearance-none focus:outline-none"
+            style={{
+              padding: '0.4375rem 2rem 0.4375rem 0.75rem',
+              fontSize: '0.8125rem',
+              border: '1px solid var(--color-border)',
+              borderRadius: '0.5rem',
+              color: typeFilter !== 'all' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+              background: typeFilter !== 'all' ? 'var(--color-brand-50)' : 'var(--color-bg)',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="all">All Types</option>
+            <option value="client_task">Client Task</option>
+            <option value="internal_client_task">Internal Client</option>
+            <option value="tahi_internal">Tahi Internal</option>
+          </select>
 
           <div className="flex-1" />
         </div>

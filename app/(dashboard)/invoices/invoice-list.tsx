@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Plus, FileText, RefreshCw, Download } from 'lucide-react'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
+import { FilterBar, type DateRange } from '@/components/tahi/date-range-picker'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 
@@ -351,6 +352,16 @@ export function InvoiceList({ isAdmin }: InvoiceListProps) {
   const [error, setError] = useState(false)
   const [activeTab, setActiveTab] = useState('all')
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
+
+  // Client-side date filter
+  const filteredInvoices = useMemo(() => {
+    if (!dateRange.from || !dateRange.to) return invoices
+    return invoices.filter(inv => {
+      const d = new Date(inv.dueDate ?? inv.createdAt).getTime()
+      return d >= dateRange.from!.getTime() && d <= dateRange.to!.getTime()
+    })
+  }, [invoices, dateRange])
 
   const fetchInvoices = useCallback(async (status: string) => {
     setLoading(true)
@@ -464,6 +475,13 @@ export function InvoiceList({ isAdmin }: InvoiceListProps) {
         </div>
       )}
 
+      {/* Date filter */}
+      <FilterBar
+        dateRange={dateRange}
+        onDateRangeChange={setDateRange}
+        dateLabel="Due date"
+      />
+
       {/* Table */}
       <div
         style={{
@@ -489,7 +507,7 @@ export function InvoiceList({ isAdmin }: InvoiceListProps) {
               Retry
             </button>
           </div>
-        ) : invoices.length === 0 ? (
+        ) : filteredInvoices.length === 0 ? (
           <EmptyState
             icon={<FileText style={{ width: 28, height: 28, color: 'white' }} aria-hidden="true" />}
             title={isAdmin ? 'No invoices yet' : 'No invoices'}
@@ -523,7 +541,7 @@ export function InvoiceList({ isAdmin }: InvoiceListProps) {
                 </tr>
               </thead>
               <tbody>
-                {invoices.map((inv, i) => (
+                {filteredInvoices.map((inv, i) => (
                   <tr
                     key={inv.id}
                     style={{
