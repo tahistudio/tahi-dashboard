@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   BookOpen, Plus, Search, ChevronRight, Clock, Save,
-  Trash2, ArrowLeft, History, X, RefreshCw, FileText, Upload,
+  Trash2, ArrowLeft, History, X, RefreshCw, FileText,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -36,6 +36,51 @@ interface DocVersion {
   savedAt: string
 }
 
+/** Lightweight markdown to HTML for doc content display */
+function renderMarkdown(md: string): string {
+  const escaped = md
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  return escaped
+    .split('\n')
+    .map(line => {
+      // Headings
+      if (line.startsWith('# ')) return `<h1>${line.slice(2)}</h1>`
+      if (line.startsWith('## ')) return `<h2>${line.slice(3)}</h2>`
+      if (line.startsWith('### ')) return `<h3>${line.slice(4)}</h3>`
+      if (line.startsWith('#### ')) return `<h4>${line.slice(5)}</h4>`
+      // Horizontal rule
+      if (/^---+$/.test(line.trim())) return '<hr />'
+      // Unordered list
+      if (/^[-*] /.test(line.trim())) {
+        const indent = line.match(/^(\s*)/)?.[1]?.length ?? 0
+        const content = line.replace(/^\s*[-*] /, '')
+        return `<li style="margin-left:${indent * 0.5}rem">${inlineFormat(content)}</li>`
+      }
+      // Empty line = paragraph break
+      if (line.trim() === '') return '<br />'
+      // Regular paragraph
+      return `<p>${inlineFormat(line)}</p>`
+    })
+    .join('\n')
+}
+
+function inlineFormat(text: string): string {
+  return text
+    // Bold + italic
+    .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    // Bold
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    // Italic
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    // Inline code
+    .replace(/`(.*?)`/g, '<code>$1</code>')
+    // Links
+    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+}
+
 const CATEGORIES = [
   { value: 'brand', label: 'Brand' },
   { value: 'services', label: 'Services' },
@@ -62,8 +107,6 @@ export function DocsContent() {
   const [showNewForm, setShowNewForm] = useState(false)
   const [showVersions, setShowVersions] = useState(false)
   const [viewingVersion, setViewingVersion] = useState<DocVersion | null>(null)
-  const [importing, setImporting] = useState(false)
-
   const fetchPages = useCallback(async () => {
     setLoading(true)
     try {
@@ -80,26 +123,6 @@ export function DocsContent() {
       setLoading(false)
     }
   }, [activeCategory, search])
-
-  const handleImportSeedDocs = useCallback(async () => {
-    setImporting(true)
-    try {
-      const payloadRes = await fetch(apiPath('/seed-docs.json'))
-      if (!payloadRes.ok) throw new Error('Seed file not found')
-      const payload = await payloadRes.json()
-      const res = await fetch(apiPath('/api/admin/docs/import'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) throw new Error('Import failed')
-      await fetchPages()
-    } catch {
-      // Import failed silently
-    } finally {
-      setImporting(false)
-    }
-  }, [fetchPages])
 
   useEffect(() => { fetchPages() }, [fetchPages])
 
@@ -186,24 +209,21 @@ export function DocsContent() {
     setEditing(true)
   }
 
-  // Group pages: parent pages (no parentId) with children nested under them, grouped by category
+  // Group pages: parent pages as folder headers with children nested underneath
+  // Standalone pages (no parent) that aren't parents themselves appear as top-level items
   const parentPages = pages.filter(p => !p.parentId)
   const childPages = pages.filter(p => p.parentId)
+  const parentIds = new Set(childPages.map(c => c.parentId).filter(Boolean))
 
-  const grouped = CATEGORIES.map(cat => {
-    const catParents = parentPages.filter(p => p.category === cat.value)
-    const catOrphans = childPages.filter(
-      c => c.category === cat.value && !catParents.some(p => p.id === c.parentId),
-    )
-    return {
-      ...cat,
-      parents: catParents.map(parent => ({
-        ...parent,
-        children: childPages.filter(c => c.parentId === parent.id),
-      })),
-      orphans: catOrphans,
-    }
-  }).filter(g => g.parents.length > 0 || g.orphans.length > 0)
+  // Parents that have children = folders. Parents with no children = standalone pages.
+  const folders = parentPages
+    .filter(p => parentIds.has(p.id))
+    .map(parent => ({
+      ...parent,
+      children: childPages.filter(c => c.parentId === parent.id),
+    }))
+
+  const standalonPages = parentPages.filter(p => !parentIds.has(p.id))
 
   return (
     <div className="flex gap-0 h-[calc(100vh-7rem)]">
@@ -271,18 +291,6 @@ export function DocsContent() {
           >
             New Page
           </TahiButton>
-          {!loading && (
-            <TahiButton
-              size="sm"
-              variant="secondary"
-              onClick={handleImportSeedDocs}
-              loading={importing}
-              iconLeft={<Upload className="w-3.5 h-3.5" />}
-              className="w-full mt-2"
-            >
-              Import Seed Docs
-            </TahiButton>
-          )}
         </div>
 
         {/* Page tree */}
@@ -315,61 +323,54 @@ export function DocsContent() {
               </TahiButton>
             </div>
           ) : (
-            grouped.map(group => (
-              <div key={group.value} className="mb-3">
-                <p className="text-xs font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider px-2 mb-1">
-                  {group.label}
-                </p>
-                {group.parents.map(parent => (
-                  <div key={parent.id}>
+            <>
+              {/* Folders (parent pages with children) */}
+              {folders.map(folder => (
+                <div key={folder.id} className="mb-3">
+                  <p className="text-xs font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider px-2 mb-1">
+                    {folder.title}
+                  </p>
+                  {folder.children.map(child => (
                     <button
-                      onClick={() => loadPage(parent.id)}
+                      key={child.id}
+                      onClick={() => loadPage(child.id)}
                       className="w-full text-left px-2 py-1.5 rounded-md text-sm transition-colors flex items-center gap-2 cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
                       style={{
-                        background: selectedPage?.id === parent.id ? 'var(--color-bg-tertiary)' : 'transparent',
-                        color: selectedPage?.id === parent.id ? 'var(--color-text)' : 'var(--color-text-muted)',
-                        fontWeight: parent.children.length > 0 ? 600 : 400,
+                        background: selectedPage?.id === child.id ? 'var(--color-bg-tertiary)' : 'transparent',
+                        color: selectedPage?.id === child.id ? 'var(--color-text)' : 'var(--color-text-muted)',
                       }}
                     >
                       <FileText style={{ width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
-                      <span className="truncate">{parent.title}</span>
+                      <span className="truncate">{child.title}</span>
                     </button>
-                    {parent.children.length > 0 && (
-                      <div className="ml-4 border-l border-[var(--color-border-subtle)] pl-1">
-                        {parent.children.map(child => (
-                          <button
-                            key={child.id}
-                            onClick={() => loadPage(child.id)}
-                            className="w-full text-left px-2 py-1 rounded-md text-sm transition-colors flex items-center gap-2 cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
-                            style={{
-                              background: selectedPage?.id === child.id ? 'var(--color-bg-tertiary)' : 'transparent',
-                              color: selectedPage?.id === child.id ? 'var(--color-text)' : 'var(--color-text-muted)',
-                            }}
-                          >
-                            <FileText style={{ width: '0.75rem', height: '0.75rem', flexShrink: 0 }} />
-                            <span className="truncate text-xs">{child.title}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {group.orphans.map(page => (
-                  <button
-                    key={page.id}
-                    onClick={() => loadPage(page.id)}
-                    className="w-full text-left px-2 py-1.5 rounded-md text-sm transition-colors flex items-center gap-2 cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
-                    style={{
-                      background: selectedPage?.id === page.id ? 'var(--color-bg-tertiary)' : 'transparent',
-                      color: selectedPage?.id === page.id ? 'var(--color-text)' : 'var(--color-text-muted)',
-                    }}
-                  >
-                    <FileText style={{ width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
-                    <span className="truncate">{page.title}</span>
-                  </button>
-                ))}
-              </div>
-            ))
+                  ))}
+                </div>
+              ))}
+              {/* Standalone pages (no children) */}
+              {standalonPages.length > 0 && (
+                <div className="mb-3">
+                  {folders.length > 0 && (
+                    <p className="text-xs font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider px-2 mb-1">
+                      Other
+                    </p>
+                  )}
+                  {standalonPages.map(page => (
+                    <button
+                      key={page.id}
+                      onClick={() => loadPage(page.id)}
+                      className="w-full text-left px-2 py-1.5 rounded-md text-sm transition-colors flex items-center gap-2 cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+                      style={{
+                        background: selectedPage?.id === page.id ? 'var(--color-bg-tertiary)' : 'transparent',
+                        color: selectedPage?.id === page.id ? 'var(--color-text)' : 'var(--color-text-muted)',
+                      }}
+                    >
+                      <FileText style={{ width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
+                      <span className="truncate">{page.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -702,9 +703,10 @@ function PageView({
               dangerouslySetInnerHTML={{ __html: page.contentTiptap }}
             />
           ) : page.contentText ? (
-            <div className="prose prose-sm max-w-none text-sm text-[var(--color-text)] whitespace-pre-wrap leading-relaxed">
-              {page.contentText}
-            </div>
+            <div
+              className="tahi-doc-prose"
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(page.contentText) }}
+            />
           ) : (
             <div className="text-sm text-[var(--color-text)] whitespace-pre-wrap leading-relaxed">
               <span className="text-[var(--color-text-subtle)] italic">No content yet. Click Edit to add content.</span>
