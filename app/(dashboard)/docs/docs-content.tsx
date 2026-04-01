@@ -186,11 +186,24 @@ export function DocsContent() {
     setEditing(true)
   }
 
-  // Group pages by category
-  const grouped = CATEGORIES.map(cat => ({
-    ...cat,
-    pages: pages.filter(p => p.category === cat.value),
-  })).filter(g => g.pages.length > 0)
+  // Group pages: parent pages (no parentId) with children nested under them, grouped by category
+  const parentPages = pages.filter(p => !p.parentId)
+  const childPages = pages.filter(p => p.parentId)
+
+  const grouped = CATEGORIES.map(cat => {
+    const catParents = parentPages.filter(p => p.category === cat.value)
+    const catOrphans = childPages.filter(
+      c => c.category === cat.value && !catParents.some(p => p.id === c.parentId),
+    )
+    return {
+      ...cat,
+      parents: catParents.map(parent => ({
+        ...parent,
+        children: childPages.filter(c => c.parentId === parent.id),
+      })),
+      orphans: catOrphans,
+    }
+  }).filter(g => g.parents.length > 0 || g.orphans.length > 0)
 
   return (
     <div className="flex gap-0 h-[calc(100vh-7rem)]">
@@ -219,7 +232,7 @@ export function DocsContent() {
         <div className="p-3 border-b border-[var(--color-border-subtle)] flex flex-wrap gap-1">
           <button
             onClick={() => setActiveCategory(null)}
-            className="text-xs px-2.5 py-1 rounded-md font-medium transition-colors"
+            className="text-xs px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer"
             style={{
               background: !activeCategory ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
               color: !activeCategory ? 'white' : 'var(--color-text-muted)',
@@ -231,7 +244,7 @@ export function DocsContent() {
             <button
               key={cat.value}
               onClick={() => setActiveCategory(activeCategory === cat.value ? null : cat.value)}
-              className="text-xs px-2.5 py-1 rounded-md font-medium transition-colors"
+              className="text-xs px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer"
               style={{
                 background: activeCategory === cat.value ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
                 color: activeCategory === cat.value ? 'white' : 'var(--color-text-muted)',
@@ -307,11 +320,45 @@ export function DocsContent() {
                 <p className="text-xs font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider px-2 mb-1">
                   {group.label}
                 </p>
-                {group.pages.map(page => (
+                {group.parents.map(parent => (
+                  <div key={parent.id}>
+                    <button
+                      onClick={() => loadPage(parent.id)}
+                      className="w-full text-left px-2 py-1.5 rounded-md text-sm transition-colors flex items-center gap-2 cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+                      style={{
+                        background: selectedPage?.id === parent.id ? 'var(--color-bg-tertiary)' : 'transparent',
+                        color: selectedPage?.id === parent.id ? 'var(--color-text)' : 'var(--color-text-muted)',
+                        fontWeight: parent.children.length > 0 ? 600 : 400,
+                      }}
+                    >
+                      <FileText style={{ width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
+                      <span className="truncate">{parent.title}</span>
+                    </button>
+                    {parent.children.length > 0 && (
+                      <div className="ml-4 border-l border-[var(--color-border-subtle)] pl-1">
+                        {parent.children.map(child => (
+                          <button
+                            key={child.id}
+                            onClick={() => loadPage(child.id)}
+                            className="w-full text-left px-2 py-1 rounded-md text-sm transition-colors flex items-center gap-2 cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+                            style={{
+                              background: selectedPage?.id === child.id ? 'var(--color-bg-tertiary)' : 'transparent',
+                              color: selectedPage?.id === child.id ? 'var(--color-text)' : 'var(--color-text-muted)',
+                            }}
+                          >
+                            <FileText style={{ width: '0.75rem', height: '0.75rem', flexShrink: 0 }} />
+                            <span className="truncate text-xs">{child.title}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {group.orphans.map(page => (
                   <button
                     key={page.id}
                     onClick={() => loadPage(page.id)}
-                    className="w-full text-left px-2 py-1.5 rounded-md text-sm transition-colors flex items-center gap-2"
+                    className="w-full text-left px-2 py-1.5 rounded-md text-sm transition-colors flex items-center gap-2 cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
                     style={{
                       background: selectedPage?.id === page.id ? 'var(--color-bg-tertiary)' : 'transparent',
                       color: selectedPage?.id === page.id ? 'var(--color-text)' : 'var(--color-text-muted)',
@@ -557,7 +604,7 @@ function PageView({
               </TahiButton>
               <button
                 onClick={onDelete}
-                className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-bg-tertiary)] transition-colors"
+                className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-bg-tertiary)] transition-colors cursor-pointer"
                 aria-label="Delete page"
               >
                 <Trash2 className="w-4 h-4" />
@@ -574,7 +621,7 @@ function PageView({
             <h3 className="text-sm font-semibold text-[var(--color-text)]">Version History</h3>
             <button
               onClick={onToggleVersions}
-              className="p-1 rounded hover:bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]"
+              className="p-1 rounded hover:bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -654,6 +701,10 @@ function PageView({
               className="prose prose-sm max-w-none text-sm text-[var(--color-text)] leading-relaxed"
               dangerouslySetInnerHTML={{ __html: page.contentTiptap }}
             />
+          ) : page.contentText ? (
+            <div className="prose prose-sm max-w-none text-sm text-[var(--color-text)] whitespace-pre-wrap leading-relaxed">
+              {page.contentText}
+            </div>
           ) : (
             <div className="text-sm text-[var(--color-text)] whitespace-pre-wrap leading-relaxed">
               <span className="text-[var(--color-text-subtle)] italic">No content yet. Click Edit to add content.</span>
