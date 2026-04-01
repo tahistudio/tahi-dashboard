@@ -138,7 +138,8 @@ export function ClientDetail({ clientId }: { clientId: string }) {
     } finally {
       setLoading(false)
     }
-  }, [clientId, router])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId])
 
   useEffect(() => { void load() }, [load])
 
