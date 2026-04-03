@@ -205,6 +205,21 @@ export function ClientDetail({ clientId }: { clientId: string }) {
                 <span className="hidden sm:inline">View as Client</span>
                 <span className="sm:hidden">Client View</span>
               </TahiButton>
+              <TahiButton
+                variant="secondary"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    const res = await fetch(apiPath(`/api/admin/clients/${clientId}/welcome-email`), { method: 'POST' })
+                    if (!res.ok) throw new Error('Failed')
+                  } catch {
+                    // silently fail
+                  }
+                }}
+              >
+                <Mail className="w-3.5 h-3.5 sm:mr-1.5" />
+                <span className="hidden sm:inline">Welcome Email</span>
+              </TahiButton>
               <TahiButton variant="secondary" size="sm" onClick={load}>
                 <RefreshCw className="w-3.5 h-3.5 sm:mr-1.5" />
                 <span className="hidden sm:inline">Refresh</span>
