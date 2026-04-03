@@ -295,8 +295,13 @@ function getStoredPreference<T>(key: string, fallback: T): T {
 }
 
 export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
-  const { isImpersonating } = useImpersonation()
-  const isAdmin = isAdminProp && !isImpersonating
+  const { isImpersonating, isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
+  // Only switch to client view when impersonating a client, not a team member
+  const isAdmin = isAdminProp && !isImpersonatingClient
+  // Check if impersonated team member is a viewer
+  const isViewerImpersonation = isImpersonatingTeamMember &&
+    impersonatedAccessRules.length > 0 &&
+    impersonatedAccessRules.every(r => r.role === 'viewer')
   const searchParams = useSearchParams()
   const [view, setViewRaw] = useState<ViewMode>(() => getStoredPreference<ViewMode>('tahi-request-view', 'list'))
   const [activeTab, setActiveTab] = useState('active')
@@ -493,15 +498,17 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
               Bulk Create
             </button>
           )}
-          <button
-            onClick={() => setDialogOpen(true)}
-            className="flex items-center gap-2 font-semibold text-white transition-opacity hover:opacity-90"
-            style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', background: 'var(--color-brand)', borderRadius: '0.375rem', border: 'none', cursor: 'pointer' }}
-          >
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Create Request</span>
-            <span className="sm:hidden">New</span>
-          </button>
+          {!isViewerImpersonation && (
+            <button
+              onClick={() => setDialogOpen(true)}
+              className="flex items-center gap-2 font-semibold text-white transition-opacity hover:opacity-90"
+              style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', background: 'var(--color-brand)', borderRadius: '0.375rem', border: 'none', cursor: 'pointer' }}
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">Create Request</span>
+              <span className="sm:hidden">New</span>
+            </button>
+          )}
         </div>
       </div>
 

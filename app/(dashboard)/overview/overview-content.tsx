@@ -62,10 +62,17 @@ interface MonthlyRevenue {
 // ─── Overview Switcher (handles impersonation) ───────────────────────────────
 
 export function OverviewSwitcher({ userName, orgName }: { userName: string; orgName: string }) {
-  const { isImpersonating, impersonatedOrgName } = useImpersonation()
+  const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedOrgName, impersonatedTeamMemberName } = useImpersonation()
 
-  if (isImpersonating) {
+  // Client impersonation: show the client portal overview
+  if (isImpersonatingClient) {
     return <ClientOverview userName={userName} orgName={impersonatedOrgName ?? orgName} />
+  }
+
+  // Team member impersonation: show admin overview (they are still admin-side, just scoped)
+  // The admin overview will show with a note about viewing as team member
+  if (isImpersonatingTeamMember) {
+    return <AdminOverview userName={impersonatedTeamMemberName ?? userName} />
   }
 
   return <AdminOverview userName={userName} />

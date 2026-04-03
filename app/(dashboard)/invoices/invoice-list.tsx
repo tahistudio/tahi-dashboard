@@ -347,8 +347,9 @@ interface InvoiceListProps {
 }
 
 export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
-  const { isImpersonating } = useImpersonation()
-  const isAdmin = isAdminProp && !isImpersonating
+  const { isImpersonatingClient } = useImpersonation()
+  // Only switch to client view when impersonating a client, not a team member
+  const isAdmin = isAdminProp && !isImpersonatingClient
   const router = useRouter()
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)

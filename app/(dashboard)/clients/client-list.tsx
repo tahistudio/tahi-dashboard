@@ -151,8 +151,8 @@ export function ClientList() {
         <div>
           <h1 className="text-2xl font-bold text-[var(--color-text)]">Clients</h1>
           <p className="text-sm text-[var(--color-text-muted)] mt-1">
-            {orgs.length > 0
-              ? `${orgs.length} client${orgs.length !== 1 ? 's' : ''} (${orgs.filter(o => o.status === 'active').length} active)`
+            {filteredOrgs.length > 0
+              ? `${filteredOrgs.length} client${filteredOrgs.length !== 1 ? 's' : ''} (${filteredOrgs.filter(o => o.status === 'active').length} active)`
               : 'All client organisations and their current status'}
           </p>
         </div>

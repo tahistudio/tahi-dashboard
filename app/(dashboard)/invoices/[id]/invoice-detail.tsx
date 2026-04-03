@@ -89,8 +89,9 @@ interface InvoiceDetailProps {
 }
 
 export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetailProps) {
-  const { isImpersonating } = useImpersonation()
-  const isAdmin = isAdminProp && !isImpersonating
+  const { isImpersonatingClient } = useImpersonation()
+  // Only switch to client view when impersonating a client, not a team member
+  const isAdmin = isAdminProp && !isImpersonatingClient
   const [invoice, setInvoice] = useState<InvoiceRow | null>(null)
   const [items, setItems] = useState<LineItem[]>([])
   const [loading, setLoading] = useState(true)

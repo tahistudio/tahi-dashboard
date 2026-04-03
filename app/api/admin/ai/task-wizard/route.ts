@@ -36,7 +36,164 @@ interface WizardResponse {
   done: boolean
 }
 
-// ── Category detection ────────────────────────────────────────────────────────
+// ── System prompt ─────────────────────────────────────────────────────────────
+
+const SYSTEM_PROMPT = `You are a task creation assistant for Tahi Studio, a Webflow design and development agency. You help break down client requests into well-structured tasks.
+
+BRAND VOICE:
+- Direct, warm, and human. Get to the point without being blunt.
+- Confident recommendations. Lead with your suggestion, then offer alternatives.
+- No filler phrases like "I'd be happy to" or "Great question!" Just respond naturally.
+- Use contractions (we're, you'll, it's). Short sentences. Vary length for rhythm.
+- NEVER use em dashes or en dashes. Use commas, colons, full stops, or restructure the sentence instead.
+- NZ English spelling (colour, organise, centre).
+
+SERVICE CATEGORIES:
+- design: UI/UX, page mockups, graphics, icons, illustrations, brand assets, presentations
+- development: Webflow builds, code, integrations, bug fixes, features, migrations, performance
+- content: Blog posts, copy, newsletters, email sequences, case studies, scripts
+- seo: Audits, keyword optimisation, meta tags, sitemaps, technical SEO, AEO (AI overview optimisation)
+- strategy: Roadmaps, audits, competitor analysis, conversion funnels, growth planning, campaign planning
+
+TRACK TYPES:
+- small: Tasks that take up to 1 day. Quick fixes, section updates, copy changes, bug fixes, small design tweaks.
+- large: Tasks that take 1+ weeks. Full page builds, redesigns, SEO overhauls, CMS restructures, multi-day integrations.
+
+PRICING CONTEXT (internal, do not share with clients):
+- Maintain plan: 1 small track running at a time. $1,500/month.
+- Scale plan: 1 large track + 1 small track running simultaneously. $4,000/month.
+- Hours are internal estimates only. Never mention hours or pricing to the client.
+
+HOUR ESTIMATES (use these as baselines, adjust based on complexity):
+- design small: 4-8 hours | design large: 16-24 hours
+- development small: 4-10 hours | development large: 24-40 hours
+- content small: 3-6 hours | content large: 10-16 hours
+- seo small: 4-8 hours | seo large: 12-20 hours
+- strategy small: 3-6 hours | strategy large: 12-20 hours
+
+YOUR JOB:
+1. When a user describes what they need, identify the category and ask 2-3 smart follow-up questions to scope the task properly. Questions should cover: specific deliverable, affected pages/sections, available assets, and deadline.
+2. Once you have enough detail (usually after 1-2 follow-up rounds), generate task drafts.
+3. If the request spans multiple categories or is clearly multiple tasks, break it into separate tasks.
+4. For each task, provide a clear title and actionable description.
+
+OUTPUT FORMAT:
+When you are still gathering information, respond with a natural conversational message. Ask focused questions.
+
+When you are ready to generate tasks, you MUST include a JSON block wrapped in <tasks> tags at the END of your response. The JSON must be a valid array of task objects. Example:
+
+Here is what I have put together based on your description. Review the details below and let me know if anything needs adjusting.
+
+<tasks>
+[
+  {
+    "title": "Update homepage hero section",
+    "description": "Replace the current hero image and headline. Client has provided the new image asset. Update CTA copy to match new messaging.",
+    "category": "design",
+    "type": "small",
+    "estimatedHours": 6,
+    "priority": "medium"
+  }
+]
+</tasks>
+
+RULES:
+- Always include estimatedHours as a number (integer).
+- category must be one of: design, development, content, seo, strategy.
+- type must be "small" or "large".
+- priority must be one of: low, medium, high, urgent.
+- Title should be concise (under 60 characters).
+- Description should be actionable and include key details from the conversation.
+- If the user mentions urgency, ASAP, or a tight deadline, set priority to high or urgent.
+- If the user says "no rush" or "whenever", set priority to low.
+- Default priority is medium.
+- When generating tasks, your conversational reply should summarise what you have created. Mention if any tasks are large track items.
+- Never use em dashes or en dashes in titles, descriptions, or replies.`
+
+// ── Claude Haiku integration ──────────────────────────────────────────────────
+
+interface AnthropicMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+interface AnthropicResponse {
+  content: Array<{ type: string; text?: string }>
+}
+
+async function callClaudeHaiku(
+  messages: AnthropicMessage[],
+  systemPrompt: string,
+  contextNote: string
+): Promise<string> {
+  const Anthropic = (await import('@anthropic-ai/sdk')).default
+  const client = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  })
+
+  const fullSystem = contextNote
+    ? `${systemPrompt}\n\nCONTEXT: ${contextNote}`
+    : systemPrompt
+
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 1024,
+    system: fullSystem,
+    messages,
+  }) as AnthropicResponse
+
+  const textBlock = response.content.find(
+    (block: { type: string; text?: string }) => block.type === 'text'
+  )
+  return textBlock?.text ?? ''
+}
+
+function parseTasksFromResponse(text: string): { reply: string; tasks: TaskDraft[] } {
+  const tasksMatch = text.match(/<tasks>([\s\S]*?)<\/tasks>/)
+
+  if (!tasksMatch) {
+    return { reply: text.trim(), tasks: [] }
+  }
+
+  // Extract the reply text (everything before the <tasks> block)
+  const reply = text.slice(0, text.indexOf('<tasks>')).trim()
+
+  try {
+    const parsed = JSON.parse(tasksMatch[1]) as Array<{
+      title: string
+      description: string
+      category: string
+      type: 'small' | 'large'
+      estimatedHours: number
+      priority: 'low' | 'medium' | 'high' | 'urgent'
+    }>
+
+    if (!Array.isArray(parsed)) {
+      return { reply: text.replace(/<tasks>[\s\S]*?<\/tasks>/, '').trim(), tasks: [] }
+    }
+
+    const tasks: TaskDraft[] = parsed.map((t) => ({
+      id: generateId(),
+      title: (t.title ?? 'New task').slice(0, 60),
+      description: t.description ?? '',
+      category: ['design', 'development', 'content', 'seo', 'strategy'].includes(t.category)
+        ? t.category
+        : 'design',
+      type: t.type === 'large' ? 'large' : 'small',
+      estimatedHours: typeof t.estimatedHours === 'number' ? t.estimatedHours : 6,
+      priority: ['low', 'medium', 'high', 'urgent'].includes(t.priority)
+        ? t.priority
+        : 'medium',
+    }))
+
+    return { reply, tasks }
+  } catch {
+    // JSON parse failed, return the text without the tags
+    return { reply: text.replace(/<tasks>[\s\S]*?<\/tasks>/, '').trim(), tasks: [] }
+  }
+}
+
+// ── Deterministic fallback ────────────────────────────────────────────────────
 
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   design: [
@@ -116,15 +273,13 @@ function detectMultipleTasks(text: string): boolean {
     (lower.match(/,/g)?.length ?? 0) >= 2
 }
 
-// ── Category-specific follow-up questions ─────────────────────────────────────
-
 const FOLLOW_UP_QUESTIONS: Record<string, string> = {
   design: [
     'I can help with that design work. A few questions to scope it properly:',
     '',
     '1. What is the specific deliverable? (e.g. web page mockup, social graphics, logo variations)',
     '2. Do you have brand guidelines or existing assets I should know about?',
-    '3. What is the timeline - is there a deadline?',
+    '3. What is the timeline? Is there a deadline?',
   ].join('\n'),
   development: [
     'Got it, sounds like a development task. Let me ask a few things:',
@@ -141,22 +296,20 @@ const FOLLOW_UP_QUESTIONS: Record<string, string> = {
     '3. Do you have a rough word count or length in mind?',
   ].join('\n'),
   seo: [
-    'SEO work - great. Let me understand the scope:',
+    'SEO work. Let me understand the scope:',
     '',
-    '1. Is this a site audit, keyword optimization, or technical SEO fix?',
+    '1. Is this a site audit, keyword optimisation, or technical SEO fix?',
     '2. Which pages or sections are the priority?',
     '3. Are there specific keywords or competitors you are targeting?',
   ].join('\n'),
   strategy: [
-    'Strategy and planning - I can help structure that. A few questions:',
+    'Strategy and planning. Let me get a bit more detail:',
     '',
     '1. What is the goal? (increase conversions, launch a product, grow traffic)',
     '2. Do you have existing data or analytics to work from?',
     '3. What is the timeframe for implementation?',
   ].join('\n'),
 }
-
-// ── Estimate hours by category and size ───────────────────────────────────────
 
 function estimateHours(category: string, size: 'small' | 'large'): number {
   const estimates: Record<string, Record<string, number>> = {
@@ -169,10 +322,7 @@ function estimateHours(category: string, size: 'small' | 'large'): number {
   return estimates[category]?.[size] ?? (size === 'large' ? 16 : 6)
 }
 
-// ── Generate task title from description ──────────────────────────────────────
-
 function generateTitle(text: string, category: string): string {
-  // Take the first meaningful sentence, truncate to a reasonable title
   const firstSentence = text.split(/[.!?\n]/)[0].trim()
   const cleaned = firstSentence
     .replace(/^(i need|we need|i want|we want|can you|please|i'd like|we'd like)\s+/i, '')
@@ -186,58 +336,23 @@ function generateTitle(text: string, category: string): string {
   return truncated || `New ${category} task`
 }
 
-// ── Main handler ──────────────────────────────────────────────────────────────
-
-/**
- * POST /api/admin/ai/task-wizard
- *
- * Conversational task creation wizard.
- * Currently uses deterministic heuristics (no external AI API).
- * Returns follow-up questions or generated task drafts.
- */
-export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
-  if (!isTahiAdmin(orgId)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
-  let body: WizardBody
-  try {
-    body = (await req.json()) as WizardBody
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
-  }
-
-  const { messages, context } = body
-
-  if (!messages || !Array.isArray(messages) || messages.length === 0) {
-    return NextResponse.json({ error: 'Messages array is required' }, { status: 400 })
-  }
-
-  // Gather all user messages to build context
+function handleDeterministic(messages: WizardMessage[], context: WizardContext): WizardResponse {
   const userMessages = messages.filter(m => m.role === 'user')
   const allUserText = userMessages.map(m => m.content).join(' ')
   const latestUserMessage = userMessages[userMessages.length - 1]?.content ?? ''
   const conversationLength = messages.length
 
-  // Detect category from all user input
   const category = detectCategory(allUserText)
 
-  // First user message: detect category and ask follow-ups
   if (conversationLength <= 1 && category) {
     const followUp = FOLLOW_UP_QUESTIONS[category]
     if (followUp) {
-      const response: WizardResponse = {
-        reply: followUp,
-        done: false,
-      }
-      return NextResponse.json(response)
+      return { reply: followUp, done: false }
     }
   }
 
-  // First user message but no category detected
   if (conversationLength <= 1 && !category) {
-    const response: WizardResponse = {
+    return {
       reply: [
         'I want to make sure I set this up correctly. Could you tell me a bit more about what you need?',
         '',
@@ -249,10 +364,8 @@ export async function POST(req: NextRequest) {
       ].join('\n'),
       done: false,
     }
-    return NextResponse.json(response)
   }
 
-  // Subsequent messages: we have enough context to generate tasks
   const resolvedCategory = category ?? 'design'
   const size = context.trackType === 'small' || context.trackType === 'large'
     ? context.trackType as 'small' | 'large'
@@ -263,7 +376,6 @@ export async function POST(req: NextRequest) {
   const tasks: TaskDraft[] = []
 
   if (isMulti) {
-    // Try to split on conjunctions and commas to create multiple tasks
     const parts = allUserText
       .split(/(?:,\s*(?:and\s+)?|\s+and\s+|\s+plus\s+|\s+also\s+|\s+as well as\s+)/i)
       .map(p => p.trim())
@@ -284,7 +396,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // If we did not generate multiple tasks, create a single one
   if (tasks.length === 0) {
     tasks.push({
       id: generateId(),
@@ -305,19 +416,111 @@ export async function POST(req: NextRequest) {
     ? '\n\nNote: Large track items (1+ weeks) will be queued in your large track slot.'
     : ''
 
-  const response: WizardResponse = {
+  return {
     reply: `${taskSummary}${trackNote}\n\nReview the details below and click "Create Tasks" when everything looks good. You can also edit any task before creating.`,
     tasks,
     done: true,
   }
+}
 
-  return NextResponse.json(response)
+// ── Main handler ──────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/admin/ai/task-wizard
+ *
+ * Conversational task creation wizard powered by Claude Haiku.
+ * Falls back to deterministic heuristics when ANTHROPIC_API_KEY is not set.
+ */
+export async function POST(req: NextRequest) {
+  const { orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  let body: WizardBody
+  try {
+    body = (await req.json()) as WizardBody
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+
+  const { messages, context } = body
+
+  if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    return NextResponse.json({ error: 'Messages array is required' }, { status: 400 })
+  }
+
+  // Validate message shape
+  for (const msg of messages) {
+    if (!msg.role || !msg.content || typeof msg.content !== 'string') {
+      return NextResponse.json({ error: 'Each message must have a role and content string' }, { status: 400 })
+    }
+    if (msg.role !== 'user' && msg.role !== 'assistant') {
+      return NextResponse.json({ error: 'Message role must be "user" or "assistant"' }, { status: 400 })
+    }
+  }
+
+  // Fall back to deterministic logic if no API key
+  if (!process.env.ANTHROPIC_API_KEY) {
+    const result = handleDeterministic(messages, context ?? {})
+    return NextResponse.json(result)
+  }
+
+  // Build context note for the system prompt
+  const contextParts: string[] = []
+  if (context?.trackType) {
+    contextParts.push(`The client's current track type is "${context.trackType}".`)
+  }
+  if (context?.orgId) {
+    contextParts.push(`Client org ID: ${context.orgId}.`)
+  }
+  const contextNote = contextParts.join(' ')
+
+  try {
+    const anthropicMessages: AnthropicMessage[] = messages.map(m => ({
+      role: m.role,
+      content: m.content,
+    }))
+
+    const responseText = await callClaudeHaiku(anthropicMessages, SYSTEM_PROMPT, contextNote)
+
+    if (!responseText) {
+      // Empty response from API, fall back
+      const result = handleDeterministic(messages, context ?? {})
+      return NextResponse.json(result)
+    }
+
+    const { reply, tasks } = parseTasksFromResponse(responseText)
+
+    const response: WizardResponse = {
+      reply: reply || 'Could you tell me more about what you need?',
+      done: tasks.length > 0,
+      ...(tasks.length > 0 ? { tasks } : {}),
+    }
+
+    return NextResponse.json(response)
+  } catch (err: unknown) {
+    console.error('Claude Haiku API error:', err)
+
+    // Check for rate limiting
+    if (err instanceof Error && 'status' in err) {
+      const statusErr = err as Error & { status: number }
+      if (statusErr.status === 429) {
+        // Rate limited, fall back to deterministic
+        const result = handleDeterministic(messages, context ?? {})
+        return NextResponse.json(result)
+      }
+    }
+
+    // For other API errors, fall back to deterministic logic
+    const result = handleDeterministic(messages, context ?? {})
+    return NextResponse.json(result)
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function generateId(): string {
-  // Simple ID for draft tasks (not persisted yet)
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
   let id = 'draft_'
   for (let i = 0; i < 8; i++) {
@@ -327,7 +530,6 @@ function generateId(): string {
 }
 
 function buildDescription(text: string): string {
-  // Clean up user text into a reasonable description
   const sentences = text.split(/[.!?]/).map(s => s.trim()).filter(Boolean)
   const desc = sentences
     .map(s => s.charAt(0).toUpperCase() + s.slice(1))

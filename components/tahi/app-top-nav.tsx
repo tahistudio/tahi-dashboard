@@ -16,7 +16,7 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchValue, setSearchValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
-  const { isImpersonating, impersonatedContactName, impersonatedOrgName } = useImpersonation()
+  const { isImpersonating, isImpersonatingClient, isImpersonatingTeamMember, impersonatedContactName, impersonatedOrgName, impersonatedTeamMemberName } = useImpersonation()
 
   const handleSearch = useCallback(() => {
     const q = searchValue.trim()
@@ -60,13 +60,20 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
     >
       {/* Left */}
       <div className="flex items-center gap-3 flex-1 min-w-0">
-        {isAdmin && isImpersonating ? (
+        {isAdmin && isImpersonatingClient ? (
           <div className="flex items-center gap-2">
             <Eye size={16} style={{ color: 'var(--color-warning)', flexShrink: 0 }} aria-hidden="true" />
             <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
               {impersonatedContactName
                 ? `${impersonatedContactName} at ${impersonatedOrgName}`
                 : impersonatedOrgName}
+            </span>
+          </div>
+        ) : isAdmin && isImpersonatingTeamMember ? (
+          <div className="flex items-center gap-2">
+            <UserCog size={16} style={{ color: 'var(--color-info, #60a5fa)', flexShrink: 0 }} aria-hidden="true" />
+            <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+              Viewing as {impersonatedTeamMemberName}
             </span>
           </div>
         ) : isAdmin ? (

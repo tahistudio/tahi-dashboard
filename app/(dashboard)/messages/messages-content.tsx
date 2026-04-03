@@ -209,8 +209,9 @@ function stripHtml(text: string): string {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function MessagesContent({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
-  const { isImpersonating } = useImpersonation()
-  const isAdmin = isAdminProp && !isImpersonating
+  const { isImpersonatingClient } = useImpersonation()
+  // Only switch to client view when impersonating a client, not a team member
+  const isAdmin = isAdminProp && !isImpersonatingClient
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)

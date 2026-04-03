@@ -121,8 +121,9 @@ interface RequestDetailProps {
 // ---- Main Component ----------------------------------------------------------
 
 export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }: RequestDetailProps) {
-  const { isImpersonating } = useImpersonation()
-  const isAdmin = isAdminProp && !isImpersonating
+  const { isImpersonatingClient } = useImpersonation()
+  // Only switch to client view when impersonating a client, not a team member
+  const isAdmin = isAdminProp && !isImpersonatingClient
   const [request, setRequest] = useState<Request | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [files, setFiles] = useState<RequestFile[]>([])
