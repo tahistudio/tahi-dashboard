@@ -516,3 +516,18 @@ Escalated to Liam: No. Direct confirmation from Liam.
 - When a migration fails in production, check the D1 state before fixing: if D1 rolled back the transaction, simply fix the SQL and re-push; if partial application occurred, create a compensating migration
 
 **How to apply:** Every BE agent must review generated migration SQL against production schema before committing. Use `npx wrangler d1 execute <db> --remote --command "PRAGMA table_info(<table>)"` to check existing columns when in doubt.
+
+## #030 - Requests are Client-Facing, Tasks are Internal-Only
+
+**Date:** 2026-04-04
+**Context:** Liam clarified the mental model for tasks vs requests.
+
+**Decision:**
+- **Requests** = client-facing work items. Clients see these, submit these, track these in their portal. This is the client's interface to Tahi's work.
+- **Tasks** = internal-only. Tahi team uses these to run the business. Clients never see tasks.
+- Both are functionally similar (title, description, status, priority, assignee, subtasks, dependencies, time, files, @mentions)
+- Tasks can block requests, but clients only see the request status change (e.g. "On Hold") - they don't see the blocking task
+- Task types remain: client_task (linked to a client but invisible to them), internal_client (ops for a client), tahi_internal (company-wide)
+- Cross-entity dependencies work: task blocks request, request blocks task
+- The task system needs full feature parity with requests
+- Tahi should be able to run the entire business on tasks alone (internal ops, client delivery, sales)
