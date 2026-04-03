@@ -1,7 +1,7 @@
 import { clerkClient } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
 import { getServerAuth } from '@/lib/server-auth'
-import { AdminOverview, ClientOverview } from './overview-content'
+import { OverviewSwitcher, ClientOverview } from './overview-content'
 import { ErrorBoundary } from '@/components/tahi/error-boundary'
 
 export const metadata = { title: 'Overview - Tahi Dashboard' }
@@ -22,9 +22,9 @@ export default async function OverviewPage() {
 
   const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
 
-  // For client portal: get org name via Clerk client API
+  // Get org name via Clerk (used for client portal and impersonation)
   let orgName = 'Your workspace'
-  if (!isAdmin && orgId) {
+  if (orgId) {
     try {
       const clerk = await clerkClient()
       const org = await clerk.organizations.getOrganization({ organizationId: orgId })
@@ -37,7 +37,7 @@ export default async function OverviewPage() {
   if (isAdmin) {
     return (
       <ErrorBoundary fallbackTitle="Overview failed to load">
-        <AdminOverview userName={userName} />
+        <OverviewSwitcher userName={userName} orgName={orgName} />
       </ErrorBoundary>
     )
   }

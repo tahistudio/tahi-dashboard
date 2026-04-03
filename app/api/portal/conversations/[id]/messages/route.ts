@@ -160,107 +160,117 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId, userId } = await getRequestAuth(req)
+  try {
+    const { orgId, userId } = await getRequestAuth(req)
 
-  if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+    if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
-  const { id: conversationId } = await params
+    const { id: conversationId } = await params
 
-  const body = await req.json() as { content?: string }
+    let body: { content?: string }
+    try {
+      body = await req.json() as { content?: string }
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    }
 
-  if (!body.content?.trim()) {
-    return NextResponse.json({ error: 'content is required' }, { status: 400 })
-  }
+    if (!body.content?.trim()) {
+      return NextResponse.json({ error: 'content is required' }, { status: 400 })
+    }
 
-  const database = await db()
+    const database = await db()
 
-  // Verify conversation exists and is external
-  const convRows = await database
-    .select()
-    .from(schema.conversations)
-    .where(eq(schema.conversations.id, conversationId))
-    .limit(1)
+    // Verify conversation exists and is external
+    const convRows = await database
+      .select()
+      .from(schema.conversations)
+      .where(eq(schema.conversations.id, conversationId))
+      .limit(1)
 
-  if (convRows.length === 0) {
-    return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
-  }
+    if (convRows.length === 0) {
+      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
+    }
 
-  const conv = convRows[0]
+    const conv = convRows[0]
 
-  if (conv.visibility !== 'external') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+    if (conv.visibility !== 'external') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
-  // Find the contact record
-  const contactRows = await database
-    .select({ id: schema.contacts.id })
-    .from(schema.contacts)
-    .where(
-      and(
-        eq(schema.contacts.orgId, orgId),
-        eq(schema.contacts.clerkUserId, userId)
+    // Find the contact record
+    const contactRows = await database
+      .select({ id: schema.contacts.id })
+      .from(schema.contacts)
+      .where(
+        and(
+          eq(schema.contacts.orgId, orgId),
+          eq(schema.contacts.clerkUserId, userId)
+        )
       )
-    )
-    .limit(1)
+      .limit(1)
 
-  const participantId = contactRows.length > 0 ? contactRows[0].id : userId
+    const participantId = contactRows.length > 0 ? contactRows[0].id : userId
 
-  // Verify access (org match or participant)
-  let hasAccess = conv.orgId === orgId
+    // Verify access (org match or participant)
+    let hasAccess = conv.orgId === orgId
 
-  if (!hasAccess) {
-    const participantCheck = await database
-      .select({ id: schema.conversationParticipants.id })
-      .from(schema.conversationParticipants)
+    if (!hasAccess) {
+      const participantCheck = await database
+        .select({ id: schema.conversationParticipants.id })
+        .from(schema.conversationParticipants)
+        .where(
+          and(
+            eq(schema.conversationParticipants.conversationId, conversationId),
+            eq(schema.conversationParticipants.participantId, participantId)
+          )
+        )
+        .limit(1)
+
+      hasAccess = participantCheck.length > 0
+    }
+
+    if (!hasAccess) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    const now = new Date().toISOString()
+    const msgId = crypto.randomUUID()
+
+    await database.insert(schema.messages).values({
+      id: msgId,
+      conversationId,
+      requestId: conv.requestId ?? null,
+      orgId,
+      authorId: participantId,
+      authorType: 'contact',
+      body: body.content.trim(),
+      isInternal: false,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    // Update conversation updatedAt
+    await database
+      .update(schema.conversations)
+      .set({ updatedAt: now })
+      .where(eq(schema.conversations.id, conversationId))
+
+    // Update sender's lastReadAt
+    await database
+      .update(schema.conversationParticipants)
+      .set({ lastReadAt: now })
       .where(
         and(
           eq(schema.conversationParticipants.conversationId, conversationId),
           eq(schema.conversationParticipants.participantId, participantId)
         )
       )
-      .limit(1)
 
-    hasAccess = participantCheck.length > 0
+    return NextResponse.json({ id: msgId }, { status: 201 })
+  } catch (err) {
+    console.error('[POST /api/portal/conversations/[id]/messages]', err)
+    return NextResponse.json({ error: 'Failed to send message' }, { status: 500 })
   }
-
-  if (!hasAccess) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
-  const now = new Date().toISOString()
-  const msgId = crypto.randomUUID()
-
-  await database.insert(schema.messages).values({
-    id: msgId,
-    conversationId,
-    requestId: conv.requestId ?? null,
-    orgId,
-    authorId: participantId,
-    authorType: 'contact',
-    body: body.content.trim(),
-    isInternal: false,
-    createdAt: now,
-    updatedAt: now,
-  })
-
-  // Update conversation updatedAt
-  await database
-    .update(schema.conversations)
-    .set({ updatedAt: now })
-    .where(eq(schema.conversations.id, conversationId))
-
-  // Update sender's lastReadAt
-  await database
-    .update(schema.conversationParticipants)
-    .set({ lastReadAt: now })
-    .where(
-      and(
-        eq(schema.conversationParticipants.conversationId, conversationId),
-        eq(schema.conversationParticipants.participantId, participantId)
-      )
-    )
-
-  return NextResponse.json({ id: msgId }, { status: 201 })
 }

@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/tahi/empty-state'
 import { FilterBar, type DateRange } from '@/components/tahi/date-range-picker'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
+import { useImpersonation } from '@/components/tahi/impersonation-banner'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -345,7 +346,9 @@ interface InvoiceListProps {
   isAdmin: boolean
 }
 
-export function InvoiceList({ isAdmin }: InvoiceListProps) {
+export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
+  const { isImpersonating } = useImpersonation()
+  const isAdmin = isAdminProp && !isImpersonating
   const router = useRouter()
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)

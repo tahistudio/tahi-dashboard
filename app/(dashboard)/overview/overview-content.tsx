@@ -12,6 +12,7 @@ import { OnboardingChecklist, type OnboardingState } from '@/components/tahi/onb
 import { BookingWidget } from '@/components/tahi/booking-widget'
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
+import { useImpersonation } from '@/components/tahi/impersonation-banner'
 
 // ─── Brand / palette constants ────────────────────────────────────────────────
 
@@ -56,6 +57,18 @@ interface RecentRequest {
 interface MonthlyRevenue {
   month: string
   total: number
+}
+
+// ─── Overview Switcher (handles impersonation) ───────────────────────────────
+
+export function OverviewSwitcher({ userName, orgName }: { userName: string; orgName: string }) {
+  const { isImpersonating, impersonatedOrgName } = useImpersonation()
+
+  if (isImpersonating) {
+    return <ClientOverview userName={userName} orgName={impersonatedOrgName ?? orgName} />
+  }
+
+  return <AdminOverview userName={userName} />
 }
 
 // ─── Admin Overview ───────────────────────────────────────────────────────────

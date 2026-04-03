@@ -12,7 +12,7 @@ import {
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { DateRangePicker, type DateRange } from '@/components/tahi/date-range-picker'
 import { apiPath } from '@/lib/api'
-import { useToast } from '@/components/tahi/toast'
+import { useImpersonation } from '@/components/tahi/impersonation-banner'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -294,7 +294,9 @@ function getStoredPreference<T>(key: string, fallback: T): T {
   }
 }
 
-export function RequestList({ isAdmin }: { isAdmin: boolean }) {
+export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
+  const { isImpersonating } = useImpersonation()
+  const isAdmin = isAdminProp && !isImpersonating
   const searchParams = useSearchParams()
   const [view, setViewRaw] = useState<ViewMode>(() => getStoredPreference<ViewMode>('tahi-request-view', 'list'))
   const [activeTab, setActiveTab] = useState('active')
@@ -330,7 +332,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
   }, [])
   const [boardColumns, setBoardColumns] = useState<BoardColumn[]>(BOARD_COLS)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const { showToast } = useToast()
+
 
   const tabs = isAdmin ? ADMIN_TABS : CLIENT_TABS
 
@@ -436,7 +438,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
     <>
       <NewRequestDialog
         open={dialogOpen}
-        onClose={() => { setDialogOpen(false); fetchRequests(); showToast('Request created successfully') }}
+        onClose={() => { setDialogOpen(false); fetchRequests() }}
         isAdmin={isAdmin}
         defaultOrgId={defaultClientId}
       />

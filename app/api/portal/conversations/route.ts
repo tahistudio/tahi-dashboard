@@ -180,15 +180,18 @@ export async function GET(req: NextRequest) {
 // Client creates a new conversation. Always external visibility.
 // Body: { type: 'direct', content? }
 export async function POST(req: NextRequest) {
+  try {
   const { orgId, userId } = await getRequestAuth(req)
 
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const body = await req.json() as {
-    type?: string
-    content?: string
+  let body: { type?: string; content?: string }
+  try {
+    body = await req.json() as { type?: string; content?: string }
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
   const type = body.type ?? 'direct'
@@ -290,4 +293,8 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ id: convId }, { status: 201 })
+  } catch (err) {
+    console.error('[POST /api/portal/conversations]', err)
+    return NextResponse.json({ error: 'Failed to create conversation' }, { status: 500 })
+  }
 }

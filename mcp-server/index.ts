@@ -37,11 +37,13 @@ if (!TOKEN) {
 // HTTP helper
 // ---------------------------------------------------------------------------
 
+const BASE_PATH = process.env.TAHI_BASE_PATH ?? '/dashboard'
+
 async function apiFetch(
   path: string,
   options: { method?: string; body?: Record<string, unknown> } = {}
 ): Promise<unknown> {
-  const url = `${DASHBOARD_URL}${path}`
+  const url = `${DASHBOARD_URL}${BASE_PATH}${path}`
   const headers: Record<string, string> = {
     Authorization: `Bearer ${TOKEN}`,
     'Content-Type': 'application/json',

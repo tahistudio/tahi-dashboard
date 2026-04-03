@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { ArrowLeft, RefreshCw, FileText } from 'lucide-react'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { apiPath } from '@/lib/api'
+import { useImpersonation } from '@/components/tahi/impersonation-banner'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,7 +88,9 @@ interface InvoiceDetailProps {
   isAdmin: boolean
 }
 
-export function InvoiceDetail({ invoiceId, isAdmin }: InvoiceDetailProps) {
+export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetailProps) {
+  const { isImpersonating } = useImpersonation()
+  const isAdmin = isAdminProp && !isImpersonating
   const [invoice, setInvoice] = useState<InvoiceRow | null>(null)
   const [items, setItems] = useState<LineItem[]>([])
   const [loading, setLoading] = useState(true)

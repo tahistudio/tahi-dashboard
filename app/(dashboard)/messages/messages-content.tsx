@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
+import { useImpersonation } from '@/components/tahi/impersonation-banner'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -207,7 +208,9 @@ function stripHtml(text: string): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function MessagesContent({ isAdmin }: { isAdmin: boolean }) {
+export function MessagesContent({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
+  const { isImpersonating } = useImpersonation()
+  const isAdmin = isAdminProp && !isImpersonating
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)

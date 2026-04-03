@@ -13,6 +13,7 @@ import { RequestThread } from '@/components/tahi/request-thread'
 import dynamic from 'next/dynamic'
 const TiptapEditor = dynamic(() => import('@/components/tahi/tiptap-editor').then(m => ({ default: m.TiptapEditor })), { ssr: false })
 import { StatusBadge } from '@/components/tahi/status-badge'
+import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { useToast } from '@/components/tahi/toast'
@@ -119,7 +120,9 @@ interface RequestDetailProps {
 
 // ---- Main Component ----------------------------------------------------------
 
-export function RequestDetail({ requestId, isAdmin, currentUserId }: RequestDetailProps) {
+export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }: RequestDetailProps) {
+  const { isImpersonating } = useImpersonation()
+  const isAdmin = isAdminProp && !isImpersonating
   const [request, setRequest] = useState<Request | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [files, setFiles] = useState<RequestFile[]>([])

@@ -167,91 +167,101 @@ export async function GET(req: NextRequest) {
 // Create a new conversation.
 // Body: { type, name?, orgId?, visibility, participantIds: [{id, type}] }
 export async function POST(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
-  if (!isTahiAdmin(orgId)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-  if (!userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  const body = await req.json() as {
-    type?: string
-    name?: string
-    orgId?: string
-    requestId?: string
-    visibility?: string
-    participantIds?: Array<{ id: string; type: string }>
-  }
-
-  const { type, name, orgId: convOrgId, requestId, visibility, participantIds } = body
-
-  if (!type || !['direct', 'group', 'org_channel', 'request_thread'].includes(type)) {
-    return NextResponse.json(
-      { error: 'type must be one of: direct, group, org_channel, request_thread' },
-      { status: 400 }
-    )
-  }
-
-  if (!visibility || !['internal', 'external'].includes(visibility)) {
-    return NextResponse.json(
-      { error: 'visibility must be one of: internal, external' },
-      { status: 400 }
-    )
-  }
-
-  const database = await db()
-
-  // Resolve the current user's team member ID
-  const teamMemberRows = await database
-    .select({ id: schema.teamMembers.id })
-    .from(schema.teamMembers)
-    .where(eq(schema.teamMembers.clerkUserId, userId))
-    .limit(1)
-
-  const creatorParticipantId = teamMemberRows.length > 0 ? teamMemberRows[0].id : userId
-
-  const convId = crypto.randomUUID()
-  const now = new Date().toISOString()
-
-  await database.insert(schema.conversations).values({
-    id: convId,
-    type,
-    name: name ?? null,
-    orgId: convOrgId ?? null,
-    requestId: requestId ?? null,
-    visibility,
-    createdById: userId,
-    createdAt: now,
-    updatedAt: now,
-  })
-
-  // Add the creator as an admin participant
-  await database.insert(schema.conversationParticipants).values({
-    id: crypto.randomUUID(),
-    conversationId: convId,
-    participantId: creatorParticipantId,
-    participantType: 'team_member',
-    role: 'admin',
-    joinedAt: now,
-  })
-
-  // Add other participants
-  if (participantIds && participantIds.length > 0) {
-    for (const p of participantIds) {
-      // Skip if the participant is the creator
-      if (p.id === creatorParticipantId) continue
-
-      await database.insert(schema.conversationParticipants).values({
-        id: crypto.randomUUID(),
-        conversationId: convId,
-        participantId: p.id,
-        participantType: p.type === 'contact' ? 'contact' : 'team_member',
-        role: 'member',
-        joinedAt: now,
-      })
+  try {
+    const { orgId, userId } = await getRequestAuth(req)
+    if (!isTahiAdmin(orgId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
-  }
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
-  return NextResponse.json({ id: convId }, { status: 201 })
+    let body: {
+      type?: string
+      name?: string
+      orgId?: string
+      requestId?: string
+      visibility?: string
+      participantIds?: Array<{ id: string; type: string }>
+    }
+    try {
+      body = await req.json()
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    }
+
+    const { type, name, orgId: convOrgId, requestId, visibility, participantIds } = body
+
+    if (!type || !['direct', 'group', 'org_channel', 'request_thread'].includes(type)) {
+      return NextResponse.json(
+        { error: 'type must be one of: direct, group, org_channel, request_thread' },
+        { status: 400 }
+      )
+    }
+
+    if (!visibility || !['internal', 'external'].includes(visibility)) {
+      return NextResponse.json(
+        { error: 'visibility must be one of: internal, external' },
+        { status: 400 }
+      )
+    }
+
+    const database = await db()
+
+    // Resolve the current user's team member ID
+    const teamMemberRows = await database
+      .select({ id: schema.teamMembers.id })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.clerkUserId, userId))
+      .limit(1)
+
+    const creatorParticipantId = teamMemberRows.length > 0 ? teamMemberRows[0].id : userId
+
+    const convId = crypto.randomUUID()
+    const now = new Date().toISOString()
+
+    await database.insert(schema.conversations).values({
+      id: convId,
+      type,
+      name: name ?? null,
+      orgId: convOrgId ?? null,
+      requestId: requestId ?? null,
+      visibility,
+      createdById: userId,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    // Add the creator as an admin participant
+    await database.insert(schema.conversationParticipants).values({
+      id: crypto.randomUUID(),
+      conversationId: convId,
+      participantId: creatorParticipantId,
+      participantType: 'team_member',
+      role: 'admin',
+      joinedAt: now,
+    })
+
+    // Add other participants
+    if (participantIds && participantIds.length > 0) {
+      for (const p of participantIds) {
+        // Skip if the participant is the creator
+        if (p.id === creatorParticipantId) continue
+
+        await database.insert(schema.conversationParticipants).values({
+          id: crypto.randomUUID(),
+          conversationId: convId,
+          participantId: p.id,
+          participantType: p.type === 'contact' ? 'contact' : 'team_member',
+          role: 'member',
+          joinedAt: now,
+        })
+      }
+    }
+
+    return NextResponse.json({ id: convId }, { status: 201 })
+  } catch (err) {
+    console.error('[POST /api/admin/conversations]', err)
+    return NextResponse.json({ error: 'Failed to create conversation' }, { status: 500 })
+  }
 }
