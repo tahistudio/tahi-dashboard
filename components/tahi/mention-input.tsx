@@ -528,6 +528,7 @@ export function MentionInput({
             autoFocus={autoFocus}
             rows={rows}
             style={inputStyles}
+            role="combobox"
             aria-autocomplete="list"
             aria-expanded={state.isOpen}
             aria-haspopup="listbox"
@@ -548,6 +549,7 @@ export function MentionInput({
             disabled={disabled}
             autoFocus={autoFocus}
             style={inputStyles}
+            role="combobox"
             aria-autocomplete="list"
             aria-expanded={state.isOpen}
             aria-haspopup="listbox"

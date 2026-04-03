@@ -4,6 +4,9 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Plus, Search, Inbox, RefreshCw,
   Calendar, Zap, AlertTriangle, X, Loader2,
+  CheckCircle2, Circle, Link2, Clock,
+  ChevronRight, Trash2, GitBranch, Users,
+  Building2, Briefcase, Shield,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
@@ -26,9 +29,33 @@ interface Task {
   completedAt: string | null
   createdById: string | null
   tags: string | null
+  trackId?: string | null
+  requestId?: string | null
+  position?: number | null
   createdAt: string | null
   updatedAt: string | null
   orgName: string | null
+  assigneeName?: string | null
+  subtaskCount?: number
+  subtaskDone?: number
+  blockedByCount?: number
+}
+
+interface Subtask {
+  id: string
+  taskId: string
+  title: string
+  completed: boolean
+  createdAt: string
+}
+
+interface TaskDependency {
+  id: string
+  taskId: string
+  dependsOnTaskId: string
+  dependsOnTitle?: string
+  dependsOnStatus?: string
+  createdAt: string
 }
 
 interface TeamMember {
@@ -45,6 +72,17 @@ interface OrgOption {
   name: string
 }
 
+interface TaskTemplate {
+  id: string
+  name: string
+  type: string
+  category: string | null
+  description: string | null
+  defaultPriority: string
+  subtasks: string
+  estimatedHours: number | null
+}
+
 // ── Status config ────────────────────────────────────────────────────────────
 
 const TASK_STATUS_CONFIG: Record<string, { label: string; dot: string; bg: string; text: string; border: string }> = {
@@ -55,12 +93,19 @@ const TASK_STATUS_CONFIG: Record<string, { label: string; dot: string; bg: strin
 }
 
 const TASK_TYPE_LABELS: Record<string, string> = {
-  client_task: 'Client Task',
+  client_task: 'Client Tasks',
   internal_client_task: 'Internal Client',
   tahi_internal: 'Tahi Internal',
 }
 
-const TABS = [
+const TYPE_TABS = [
+  { label: 'All Tasks',        value: 'all',                    icon: Briefcase },
+  { label: 'Client Tasks',     value: 'client_task',            icon: Users },
+  { label: 'Internal Client',  value: 'internal_client_task',   icon: Building2 },
+  { label: 'Tahi Internal',    value: 'tahi_internal',          icon: Shield },
+]
+
+const STATUS_TABS = [
   { label: 'All',         value: 'all'         },
   { label: 'To Do',       value: 'todo'        },
   { label: 'In Progress', value: 'in_progress' },
@@ -68,7 +113,11 @@ const TABS = [
   { label: 'Done',        value: 'done'        },
 ]
 
-const BRAND_HEX = '#5A824E'
+const TASK_TYPES = [
+  { value: 'client_task',          label: 'Client Task',          desc: 'Visible to the client' },
+  { value: 'internal_client_task', label: 'Internal Client Task', desc: 'Hidden from client' },
+  { value: 'tahi_internal',        label: 'Tahi Internal',        desc: 'Studio-only task' },
+]
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -185,23 +234,83 @@ function OrgAvatar({ name }: { name: string }) {
   )
 }
 
+function AssigneeAvatar({ name }: { name: string }) {
+  return (
+    <div
+      className="flex items-center justify-center font-semibold flex-shrink-0"
+      style={{
+        width: '1.5rem',
+        height: '1.5rem',
+        fontSize: '0.5625rem',
+        background: 'var(--color-brand-50)',
+        color: 'var(--color-brand-dark)',
+        borderRadius: 'var(--radius-leaf-sm)',
+        border: '1px solid var(--color-brand-100)',
+      }}
+    >
+      {getInitials(name)}
+    </div>
+  )
+}
+
+function SubtaskProgress({ done, total }: { done: number; total: number }) {
+  if (total === 0) return null
+  const pct = Math.round((done / total) * 100)
+  return (
+    <div className="flex items-center gap-1.5" style={{ minWidth: '4rem' }}>
+      <div
+        className="flex-1 rounded-full overflow-hidden"
+        style={{ height: '0.25rem', background: 'var(--color-border-subtle)' }}
+      >
+        <div
+          className="rounded-full"
+          style={{
+            width: `${pct}%`,
+            height: '100%',
+            background: pct === 100 ? 'var(--color-success)' : 'var(--color-brand)',
+            transition: 'width 0.3s ease',
+          }}
+        />
+      </div>
+      <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', whiteSpace: 'nowrap' }}>
+        {done}/{total}
+      </span>
+    </div>
+  )
+}
+
+function BlockedIndicator() {
+  return (
+    <span
+      className="inline-flex items-center"
+      title="This task has unresolved dependencies"
+      style={{ color: 'var(--color-danger)', marginRight: '0.25rem' }}
+    >
+      <GitBranch style={{ width: '0.75rem', height: '0.75rem' }} />
+    </span>
+  )
+}
+
 // ── Main component ───────────────────────────────────────────────────────────
 
 export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
-  const [activeTab, setActiveTab] = useState('all')
+  const [typeTab, setTypeTab] = useState('all')
+  const [statusTab, setStatusTab] = useState('all')
   const [search, setSearch] = useState('')
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
   const [priorityFilter, setPriorityFilter] = useState('all')
-  const [typeFilter, setTypeFilter] = useState('all')
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
 
   const fetchTasks = useCallback(async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
-      if (activeTab !== 'all') params.set('status', activeTab)
+      if (statusTab !== 'all') params.set('status', statusTab)
+      if (typeTab !== 'all') params.set('type', typeTab)
       const endpoint = apiPath('/api/admin/tasks')
       const res = await fetch(`${endpoint}?${params}`)
       if (!res.ok) throw new Error('Failed to fetch')
@@ -212,9 +321,20 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
     } finally {
       setLoading(false)
     }
-  }, [activeTab])
+  }, [statusTab, typeTab])
+
+  // Load team members for assignee display
+  useEffect(() => {
+    if (!isAdmin) return
+    fetch(apiPath('/api/admin/team-members'))
+      .then(r => r.json() as Promise<{ items: TeamMember[] }>)
+      .then(data => setTeamMembers(data.items ?? []))
+      .catch(() => setTeamMembers([]))
+  }, [isAdmin])
 
   useEffect(() => { fetchTasks() }, [fetchTasks])
+
+  const teamMap = new Map(teamMembers.map(m => [m.id, m]))
 
   const filtered = tasks.filter(t => {
     if (search.trim()) {
@@ -226,9 +346,16 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
       if (d < dateRange.from.getTime() || d > dateRange.to.getTime()) return false
     }
     if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false
-    if (typeFilter !== 'all' && t.type !== typeFilter) return false
     return true
   })
+
+  // Type tab counts
+  const typeCounts: Record<string, number> = { all: tasks.length }
+  for (const t of tasks) {
+    typeCounts[t.type] = (typeCounts[t.type] ?? 0) + 1
+  }
+
+  const selectedTask = selectedTaskId ? tasks.find(t => t.id === selectedTaskId) ?? null : null
 
   return (
     <>
@@ -241,11 +368,21 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
         />
       )}
 
+      {selectedTask && (
+        <TaskDetailPanel
+          task={selectedTask}
+          isAdmin={isAdmin}
+          teamMembers={teamMembers}
+          onClose={() => setSelectedTaskId(null)}
+          onRefresh={fetchTasks}
+        />
+      )}
+
       {/* Page header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between" style={{ marginBottom: '1.5rem' }}>
         <div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text)' }}>Tasks</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
             {!loading
               ? `${filtered.length} ${filtered.length === 1 ? 'task' : 'tasks'}`
               : isAdmin ? 'All tasks: client-facing, internal, and Tahi Studio.' : 'Tasks assigned to you by the Tahi team.'}
@@ -256,7 +393,7 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
             <button
               onClick={() => setDialogOpen(true)}
               className="flex items-center gap-2 font-semibold text-white transition-opacity hover:opacity-90"
-              style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', background: 'var(--color-brand)', borderRadius: '0.375rem', border: 'none', cursor: 'pointer' }}
+              style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', background: 'var(--color-brand)', borderRadius: '0.5rem', border: 'none', cursor: 'pointer' }}
             >
               <Plus className="w-4 h-4" />
               <span className="hidden sm:inline">Create Task</span>
@@ -265,6 +402,61 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
           )}
         </div>
       </div>
+
+      {/* Type tabs (top-level filter) */}
+      {isAdmin && (
+        <div className="flex items-center gap-1 flex-wrap" style={{ marginBottom: '0.75rem' }}>
+          {TYPE_TABS.map(tab => {
+            const active = typeTab === tab.value
+            const Icon = tab.icon
+            const count = typeCounts[tab.value] ?? 0
+            return (
+              <button
+                key={tab.value}
+                onClick={() => setTypeTab(tab.value)}
+                className="flex items-center gap-1.5 font-medium transition-colors"
+                style={{
+                  padding: '0.4375rem 0.75rem',
+                  fontSize: '0.8125rem',
+                  borderRadius: '0.5rem',
+                  border: active ? '1px solid var(--color-brand)' : '1px solid transparent',
+                  background: active ? 'var(--color-brand-50)' : 'transparent',
+                  color: active ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={e => {
+                  if (!active) {
+                    e.currentTarget.style.background = 'var(--color-bg-tertiary)'
+                    e.currentTarget.style.color = 'var(--color-text)'
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (!active) {
+                    e.currentTarget.style.background = 'transparent'
+                    e.currentTarget.style.color = 'var(--color-text-muted)'
+                  }
+                }}
+              >
+                <Icon style={{ width: '0.875rem', height: '0.875rem' }} />
+                <span className="hidden sm:inline">{tab.label}</span>
+                <span
+                  className="rounded-full"
+                  style={{
+                    padding: '0 0.375rem',
+                    fontSize: '0.6875rem',
+                    fontWeight: 600,
+                    background: active ? 'var(--color-brand)' : 'var(--color-border-subtle)',
+                    color: active ? 'white' : 'var(--color-text-subtle)',
+                    lineHeight: '1.375rem',
+                  }}
+                >
+                  {count}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {/* Main card */}
       <div
@@ -329,46 +521,27 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
             <option value="standard">Standard</option>
             <option value="low">Low</option>
           </select>
-          <select
-            value={typeFilter}
-            onChange={e => setTypeFilter(e.target.value)}
-            className="hidden sm:block appearance-none focus:outline-none"
-            style={{
-              padding: '0.4375rem 2rem 0.4375rem 0.75rem',
-              fontSize: '0.8125rem',
-              border: '1px solid var(--color-border)',
-              borderRadius: '0.5rem',
-              color: typeFilter !== 'all' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-              background: typeFilter !== 'all' ? 'var(--color-brand-50)' : 'var(--color-bg)',
-              cursor: 'pointer',
-            }}
-          >
-            <option value="all">All Types</option>
-            <option value="client_task">Client Task</option>
-            <option value="internal_client_task">Internal Client</option>
-            <option value="tahi_internal">Tahi Internal</option>
-          </select>
 
           <div className="flex-1" />
         </div>
 
-        {/* Tabs */}
+        {/* Status tabs */}
         <div
           className="flex items-end overflow-x-auto overflow-y-hidden scrollbar-hide"
           style={{ borderBottom: '1px solid var(--color-border)', paddingLeft: '0.25rem', paddingRight: '1rem', background: 'var(--color-bg)', WebkitOverflowScrolling: 'touch' }}
         >
-          {TABS.map(tab => (
+          {STATUS_TABS.map(tab => (
             <button
               key={tab.value}
-              onClick={() => setActiveTab(tab.value)}
+              onClick={() => setStatusTab(tab.value)}
               className="font-medium whitespace-nowrap flex-shrink-0 transition-colors"
               style={{
                 padding: '0.625rem 1rem',
                 fontSize: '0.875rem',
                 border: 0,
-                borderBottom: activeTab === tab.value ? '2px solid var(--color-brand)' : '2px solid transparent',
+                borderBottom: statusTab === tab.value ? '2px solid var(--color-brand)' : '2px solid transparent',
                 marginBottom: '-1px',
-                color: activeTab === tab.value ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                color: statusTab === tab.value ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
                 background: 'transparent',
                 cursor: 'pointer',
               }}
@@ -391,7 +564,7 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
           ) : filtered.length === 0 ? (
             <EmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />
           ) : (
-            <TaskListView tasks={filtered} isAdmin={isAdmin} />
+            <TaskListView tasks={filtered} isAdmin={isAdmin} teamMap={teamMap} onSelect={setSelectedTaskId} />
           )}
         </div>
       </div>
@@ -401,7 +574,12 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
 
 // ── Task List View ───────────────────────────────────────────────────────────
 
-function TaskListView({ tasks, isAdmin }: { tasks: Task[]; isAdmin: boolean }) {
+function TaskListView({ tasks, isAdmin, teamMap, onSelect }: {
+  tasks: Task[]
+  isAdmin: boolean
+  teamMap: Map<string, TeamMember>
+  onSelect: (id: string) => void
+}) {
   return (
     <div>
       {/* Table header */}
@@ -409,8 +587,8 @@ function TaskListView({ tasks, isAdmin }: { tasks: Task[]; isAdmin: boolean }) {
         className="hidden md:grid text-xs font-semibold uppercase tracking-wide items-center"
         style={{
           gridTemplateColumns: isAdmin
-            ? '1fr 8rem 7.5rem 7rem 5.5rem 5.5rem'
-            : '1fr 7.5rem 7rem 5.5rem 5.5rem',
+            ? '1fr 8rem 7rem 7rem 5.5rem 5.5rem 6rem'
+            : '1fr 7rem 7rem 5.5rem 5.5rem',
           padding: '0.625rem 1rem',
           borderBottom: '1px solid var(--color-border-subtle)',
           color: 'var(--color-th-text)',
@@ -423,6 +601,7 @@ function TaskListView({ tasks, isAdmin }: { tasks: Task[]; isAdmin: boolean }) {
         <span>Status</span>
         <span>Due</span>
         <span>Priority</span>
+        {isAdmin && <span>Assignee</span>}
       </div>
 
       {/* Rows */}
@@ -433,6 +612,8 @@ function TaskListView({ tasks, isAdmin }: { tasks: Task[]; isAdmin: boolean }) {
             task={task}
             isAdmin={isAdmin}
             isLast={i === tasks.length - 1}
+            teamMap={teamMap}
+            onSelect={onSelect}
           />
         ))}
       </div>
@@ -440,10 +621,21 @@ function TaskListView({ tasks, isAdmin }: { tasks: Task[]; isAdmin: boolean }) {
   )
 }
 
-function TaskRow({ task, isAdmin, isLast }: { task: Task; isAdmin: boolean; isLast: boolean }) {
+function TaskRow({ task, isAdmin, isLast, teamMap, onSelect }: {
+  task: Task
+  isAdmin: boolean
+  isLast: boolean
+  teamMap: Map<string, TeamMember>
+  onSelect: (id: string) => void
+}) {
+  const assignee = task.assigneeId ? teamMap.get(task.assigneeId) : null
+  const hasSubtasks = (task.subtaskCount ?? 0) > 0
+  const isBlocked = (task.blockedByCount ?? 0) > 0
+
   return (
     <div
-      style={{ textDecoration: 'none', display: 'block' }}
+      style={{ textDecoration: 'none', display: 'block', cursor: 'pointer' }}
+      onClick={() => onSelect(task.id)}
       onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--color-row-hover)' }}
       onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--color-bg)' }}
     >
@@ -456,7 +648,10 @@ function TaskRow({ task, isAdmin, isLast }: { task: Task; isAdmin: boolean; isLa
         }}
       >
         <div className="flex items-start justify-between gap-2">
-          <span className="font-medium truncate" style={{ fontSize: '0.9375rem', color: 'var(--color-text)' }}>{task.title}</span>
+          <div className="flex items-center gap-1 min-w-0">
+            {isBlocked && <BlockedIndicator />}
+            <span className="font-medium truncate" style={{ fontSize: '0.9375rem', color: 'var(--color-text)' }}>{task.title}</span>
+          </div>
           <StatusPill status={task.status} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -474,6 +669,13 @@ function TaskRow({ task, isAdmin, isLast }: { task: Task; isAdmin: boolean; isLa
           </span>
           <PriorityBadge priority={task.priority} />
           {task.dueDate && <DueDateChip dueDate={task.dueDate} status={task.status} />}
+          {hasSubtasks && <SubtaskProgress done={task.subtaskDone ?? 0} total={task.subtaskCount ?? 0} />}
+          {assignee && (
+            <div className="flex items-center gap-1">
+              <AssigneeAvatar name={assignee.name} />
+              <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>{assignee.name.split(' ')[0]}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -482,15 +684,20 @@ function TaskRow({ task, isAdmin, isLast }: { task: Task; isAdmin: boolean; isLa
         className="hidden md:grid items-center"
         style={{
           gridTemplateColumns: isAdmin
-            ? '1fr 8rem 7.5rem 7rem 5.5rem 5.5rem'
-            : '1fr 7.5rem 7rem 5.5rem 5.5rem',
+            ? '1fr 8rem 7rem 7rem 5.5rem 5.5rem 6rem'
+            : '1fr 7rem 7rem 5.5rem 5.5rem',
           padding: '0.75rem 1rem',
           borderBottom: isLast ? 'none' : '1px solid var(--color-row-border)',
         }}
       >
         {/* Title */}
         <div className="flex items-center gap-1.5 min-w-0">
+          {isBlocked && <BlockedIndicator />}
           <span className="font-medium truncate" style={{ fontSize: '0.875rem', color: 'var(--color-text)' }}>{task.title}</span>
+          {hasSubtasks && (
+            <SubtaskProgress done={task.subtaskDone ?? 0} total={task.subtaskCount ?? 0} />
+          )}
+          <ChevronRight style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }} />
         </div>
 
         {/* Client */}
@@ -523,6 +730,20 @@ function TaskRow({ task, isAdmin, isLast }: { task: Task; isAdmin: boolean; isLa
 
         {/* Priority */}
         <PriorityBadge priority={task.priority} />
+
+        {/* Assignee */}
+        {isAdmin && (
+          <div className="flex items-center gap-1 min-w-0">
+            {assignee ? (
+              <>
+                <AssigneeAvatar name={assignee.name} />
+                <span className="truncate" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{assignee.name.split(' ')[0]}</span>
+              </>
+            ) : (
+              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>--</span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -585,7 +806,7 @@ function EmptyState({ isAdmin, onNew }: { isAdmin: boolean; onNew: () => void })
         <button
           onClick={onNew}
           className="flex items-center gap-2 font-semibold text-white transition-opacity hover:opacity-90"
-          style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', background: 'var(--color-brand)', borderRadius: '0.375rem', border: 'none', cursor: 'pointer' }}
+          style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', background: 'var(--color-brand)', borderRadius: '0.5rem', border: 'none', cursor: 'pointer' }}
         >
           <Plus className="w-4 h-4" />
           Create a task
@@ -595,13 +816,476 @@ function EmptyState({ isAdmin, onNew }: { isAdmin: boolean; onNew: () => void })
   )
 }
 
-// ── New Task Dialog ──────────────────────────────────────────────────────────
+// ── Task Detail Panel (slide-over) ──────────────────────────────────────────
 
-const TASK_TYPES = [
-  { value: 'client_task',          label: 'Client Task',          desc: 'Visible to the client' },
-  { value: 'internal_client_task', label: 'Internal Client Task', desc: 'Hidden from client' },
-  { value: 'tahi_internal',        label: 'Tahi Internal',        desc: 'Studio-only task' },
-]
+function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
+  task: Task
+  isAdmin: boolean
+  teamMembers: TeamMember[]
+  onClose: () => void
+  onRefresh: () => void
+}) {
+  const { showToast } = useToast()
+  const [subtasks, setSubtasks] = useState<Subtask[]>([])
+  const [subtasksLoading, setSubtasksLoading] = useState(true)
+  const [dependencies, setDependencies] = useState<TaskDependency[]>([])
+  const [depsLoading, setDepsLoading] = useState(true)
+  const [comment, setComment] = useState('')
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
+  const [editingStatus, setEditingStatus] = useState(task.status)
+  const [saving, setSaving] = useState(false)
+
+  const teamMap = new Map(teamMembers.map(m => [m.id, m]))
+  const assignee = task.assigneeId ? teamMap.get(task.assigneeId) : null
+
+  // Fetch subtasks
+  useEffect(() => {
+    setSubtasksLoading(true)
+    fetch(apiPath(`/api/admin/tasks/${task.id}/subtasks`))
+      .then(r => {
+        if (!r.ok) throw new Error('Not found')
+        return r.json() as Promise<{ subtasks?: Subtask[] }>
+      })
+      .then(data => setSubtasks(data.subtasks ?? []))
+      .catch(() => setSubtasks([]))
+      .finally(() => setSubtasksLoading(false))
+  }, [task.id])
+
+  // Fetch dependencies
+  useEffect(() => {
+    setDepsLoading(true)
+    fetch(apiPath(`/api/admin/tasks/${task.id}/dependencies`))
+      .then(r => {
+        if (!r.ok) throw new Error('Not found')
+        return r.json() as Promise<{ dependencies?: TaskDependency[] }>
+      })
+      .then(data => setDependencies(data.dependencies ?? []))
+      .catch(() => setDependencies([]))
+      .finally(() => setDepsLoading(false))
+  }, [task.id])
+
+  async function toggleSubtask(sub: Subtask) {
+    const updated = subtasks.map(s => s.id === sub.id ? { ...s, completed: !s.completed } : s)
+    setSubtasks(updated)
+    try {
+      await fetch(apiPath(`/api/admin/tasks/${task.id}/subtasks/${sub.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed: !sub.completed }),
+      })
+    } catch {
+      // Revert on error
+      setSubtasks(subtasks)
+    }
+  }
+
+  async function addSubtask() {
+    if (!newSubtaskTitle.trim()) return
+    try {
+      const res = await fetch(apiPath(`/api/admin/tasks/${task.id}/subtasks`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newSubtaskTitle.trim() }),
+      })
+      if (res.ok) {
+        const data = await res.json() as { subtask?: Subtask; id?: string }
+        const newSub: Subtask = data.subtask ?? {
+          id: data.id ?? crypto.randomUUID(),
+          taskId: task.id,
+          title: newSubtaskTitle.trim(),
+          completed: false,
+          createdAt: new Date().toISOString(),
+        }
+        setSubtasks(prev => [...prev, newSub])
+        setNewSubtaskTitle('')
+      }
+    } catch {
+      showToast('Failed to add subtask')
+    }
+  }
+
+  async function updateStatus(newStatus: string) {
+    setEditingStatus(newStatus)
+    setSaving(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/tasks/${task.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      if (res.ok) {
+        showToast('Status updated')
+        onRefresh()
+      }
+    } catch {
+      setEditingStatus(task.status)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const subtasksDone = subtasks.filter(s => s.completed).length
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        style={{
+          position: 'fixed', inset: 0,
+          background: 'rgba(0,0,0,0.4)',
+          backdropFilter: 'blur(2px)',
+          zIndex: 60,
+        }}
+        onClick={onClose}
+      />
+
+      {/* Slide-over */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="task-detail-title"
+        style={{
+          position: 'fixed',
+          top: 0, right: 0, bottom: 0,
+          width: '100%',
+          maxWidth: '36rem',
+          background: 'var(--color-bg)',
+          boxShadow: 'var(--shadow-lg)',
+          zIndex: 70,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            padding: '1.25rem 1.5rem',
+            borderBottom: '1px solid var(--color-border-subtle)',
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <h2 id="task-detail-title" style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--color-text)', margin: 0, lineHeight: 1.4 }}>
+              {task.title}
+            </h2>
+            <div className="flex items-center gap-2 flex-wrap" style={{ marginTop: '0.375rem' }}>
+              <span
+                className="inline-flex items-center rounded"
+                style={{ padding: '0.125rem 0.5rem', fontSize: '0.6875rem', background: 'var(--color-bg-tertiary)', color: 'var(--color-text-muted)' }}
+              >
+                {formatType(task.type)}
+              </span>
+              {task.orgName && (
+                <div className="flex items-center gap-1">
+                  <OrgAvatar name={task.orgName} />
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{task.orgName}</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              padding: '0.375rem',
+              borderRadius: 'var(--radius-button)',
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--color-text-subtle)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              marginLeft: '0.75rem',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)'; e.currentTarget.style.color = 'var(--color-text)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+            aria-label="Close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+
+            {/* Status + Priority + Due row */}
+            <div className="grid grid-cols-3 gap-3">
+              <DetailField label="Status">
+                {isAdmin ? (
+                  <select
+                    value={editingStatus}
+                    onChange={e => updateStatus(e.target.value)}
+                    disabled={saving}
+                    style={{
+                      width: '100%',
+                      padding: '0.375rem 0.5rem',
+                      fontSize: '0.8125rem',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: '0.5rem',
+                      background: 'var(--color-bg)',
+                      color: 'var(--color-text)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="todo">To Do</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="blocked">Blocked</option>
+                    <option value="done">Done</option>
+                  </select>
+                ) : (
+                  <StatusPill status={task.status} />
+                )}
+              </DetailField>
+
+              <DetailField label="Priority">
+                <PriorityBadge priority={task.priority} />
+              </DetailField>
+
+              <DetailField label="Due Date">
+                <DueDateChip dueDate={task.dueDate} status={task.status} />
+              </DetailField>
+            </div>
+
+            {/* Assignee */}
+            <DetailField label="Assignee">
+              {assignee ? (
+                <div className="flex items-center gap-2">
+                  <AssigneeAvatar name={assignee.name} />
+                  <div>
+                    <p style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-text)', margin: 0 }}>{assignee.name}</p>
+                    {assignee.title && <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>{assignee.title}</p>}
+                  </div>
+                </div>
+              ) : (
+                <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)' }}>Unassigned</span>
+              )}
+            </DetailField>
+
+            {/* Linked Request */}
+            {task.requestId && (
+              <DetailField label="Linked Request">
+                <a
+                  href={`/requests/${task.requestId}`}
+                  className="inline-flex items-center gap-1"
+                  style={{ fontSize: '0.8125rem', color: 'var(--color-brand)', textDecoration: 'none' }}
+                  onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline' }}
+                  onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none' }}
+                >
+                  <Link2 style={{ width: '0.75rem', height: '0.75rem' }} />
+                  View Request
+                </a>
+              </DetailField>
+            )}
+
+            {/* Description */}
+            <DetailField label="Description">
+              {task.description ? (
+                <p style={{ fontSize: '0.875rem', color: 'var(--color-text)', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                  {task.description}
+                </p>
+              ) : (
+                <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', margin: 0, fontStyle: 'italic' }}>
+                  No description provided.
+                </p>
+              )}
+            </DetailField>
+
+            {/* Subtasks */}
+            <DetailField label={`Subtasks${subtasks.length > 0 ? ` (${subtasksDone}/${subtasks.length})` : ''}`}>
+              {subtasks.length > 0 && (
+                <div style={{ marginBottom: '0.5rem' }}>
+                  <SubtaskProgress done={subtasksDone} total={subtasks.length} />
+                </div>
+              )}
+
+              {subtasksLoading ? (
+                <div className="flex items-center gap-2" style={{ padding: '0.5rem 0' }}>
+                  <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-subtle)' }} />
+                  <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)' }}>Loading...</span>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  {subtasks.map(sub => (
+                    <div
+                      key={sub.id}
+                      className="flex items-center gap-2"
+                      style={{
+                        padding: '0.375rem 0.5rem',
+                        borderRadius: '0.375rem',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => toggleSubtask(sub)}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                    >
+                      {sub.completed ? (
+                        <CheckCircle2 style={{ width: '1rem', height: '1rem', color: 'var(--color-success)', flexShrink: 0 }} />
+                      ) : (
+                        <Circle style={{ width: '1rem', height: '1rem', color: 'var(--color-text-subtle)', flexShrink: 0 }} />
+                      )}
+                      <span style={{
+                        fontSize: '0.8125rem',
+                        color: sub.completed ? 'var(--color-text-subtle)' : 'var(--color-text)',
+                        textDecoration: sub.completed ? 'line-through' : 'none',
+                      }}>
+                        {sub.title}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add subtask inline */}
+              {isAdmin && (
+                <div className="flex items-center gap-2" style={{ marginTop: '0.5rem' }}>
+                  <input
+                    type="text"
+                    placeholder="Add a subtask..."
+                    value={newSubtaskTitle}
+                    onChange={e => setNewSubtaskTitle(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSubtask() } }}
+                    style={{
+                      flex: 1,
+                      padding: '0.375rem 0.625rem',
+                      fontSize: '0.8125rem',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: '0.375rem',
+                      background: 'var(--color-bg)',
+                      color: 'var(--color-text)',
+                      outline: 'none',
+                    }}
+                    onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
+                    onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={addSubtask}
+                    disabled={!newSubtaskTitle.trim()}
+                    style={{
+                      padding: '0.375rem 0.625rem',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      borderRadius: '0.375rem',
+                      border: 'none',
+                      background: newSubtaskTitle.trim() ? 'var(--color-brand)' : 'var(--color-border-subtle)',
+                      color: newSubtaskTitle.trim() ? 'white' : 'var(--color-text-subtle)',
+                      cursor: newSubtaskTitle.trim() ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    <Plus style={{ width: '0.75rem', height: '0.75rem' }} />
+                  </button>
+                </div>
+              )}
+            </DetailField>
+
+            {/* Dependencies (Blocked by) */}
+            <DetailField label="Blocked By">
+              {depsLoading ? (
+                <div className="flex items-center gap-2" style={{ padding: '0.5rem 0' }}>
+                  <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-text-subtle)' }} />
+                  <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)' }}>Loading...</span>
+                </div>
+              ) : dependencies.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+                  {dependencies.map(dep => (
+                    <div
+                      key={dep.id}
+                      className="flex items-center gap-2"
+                      style={{
+                        padding: '0.375rem 0.625rem',
+                        borderRadius: '0.375rem',
+                        border: '1px solid var(--color-border-subtle)',
+                        background: 'var(--color-bg-secondary)',
+                      }}
+                    >
+                      <GitBranch style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }} />
+                      <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)', flex: 1 }}>
+                        {dep.dependsOnTitle ?? dep.dependsOnTaskId}
+                      </span>
+                      {dep.dependsOnStatus && <StatusPill status={dep.dependsOnStatus} />}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>
+                  No dependencies.
+                </span>
+              )}
+            </DetailField>
+
+            {/* Time logged placeholder */}
+            <DetailField label="Time Logged">
+              <div className="flex items-center gap-1.5">
+                <Clock style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)' }} />
+                <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>
+                  No time entries yet.
+                </span>
+              </div>
+            </DetailField>
+
+            {/* Activity / Comments */}
+            <DetailField label="Activity">
+              <div style={{ marginTop: '0.25rem' }}>
+                <textarea
+                  value={comment}
+                  onChange={e => setComment(e.target.value)}
+                  placeholder="Add a comment or note..."
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '0.625rem 0.75rem',
+                    fontSize: '0.8125rem',
+                    color: 'var(--color-text)',
+                    background: 'var(--color-bg)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: '0.5rem',
+                    outline: 'none',
+                    resize: 'vertical',
+                    minHeight: '4rem',
+                    fontFamily: 'inherit',
+                    lineHeight: '1.5',
+                    boxSizing: 'border-box',
+                  }}
+                  onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
+                  onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+                />
+                <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', margin: '0.375rem 0 0' }}>
+                  Use @name to mention someone (coming soon).
+                </p>
+              </div>
+            </DetailField>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function DetailField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p style={{
+        fontSize: '0.6875rem',
+        fontWeight: 600,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        color: 'var(--color-text-subtle)',
+        margin: '0 0 0.375rem',
+      }}>
+        {label}
+      </p>
+      {children}
+    </div>
+  )
+}
+
+// ── New Task Dialog ──────────────────────────────────────────────────────────
 
 function NewTaskDialog({ onClose }: { onClose: () => void }) {
   const { showToast } = useToast()
@@ -616,16 +1300,21 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
   const [dueDate, setDueDate] = useState('')
   const [assigneeId, setAssigneeId] = useState('')
   const [clientOrgId, setClientOrgId] = useState('')
+  const [subtaskTitles, setSubtaskTitles] = useState<string[]>([])
+  const [newSubtask, setNewSubtask] = useState('')
+  const [templateId, setTemplateId] = useState('')
 
   // Data for selectors
   const [clients, setClients] = useState<OrgOption[]>([])
   const [clientsLoading, setClientsLoading] = useState(false)
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
   const [teamLoading, setTeamLoading] = useState(false)
+  const [templates, setTemplates] = useState<TaskTemplate[]>([])
+  const [, setTemplatesLoading] = useState(false)
 
   const showClientPicker = type === 'client_task' || type === 'internal_client_task'
 
-  // Load clients and team members on open
+  // Load clients, team, and templates on open
   useEffect(() => {
     setClientsLoading(true)
     fetch(apiPath('/api/admin/clients?status=active'))
@@ -640,7 +1329,40 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
       .then(data => setTeamMembers(data.items ?? []))
       .catch(() => setTeamMembers([]))
       .finally(() => setTeamLoading(false))
+
+    setTemplatesLoading(true)
+    fetch(apiPath('/api/admin/task-templates'))
+      .then(r => {
+        if (!r.ok) throw new Error('Not found')
+        return r.json() as Promise<{ templates?: TaskTemplate[] }>
+      })
+      .then(data => setTemplates(data.templates ?? []))
+      .catch(() => setTemplates([]))
+      .finally(() => setTemplatesLoading(false))
   }, [])
+
+  function applyTemplate(tplId: string) {
+    setTemplateId(tplId)
+    const tpl = templates.find(t => t.id === tplId)
+    if (!tpl) return
+    if (tpl.description) setDescription(tpl.description)
+    if (tpl.defaultPriority) setPriority(tpl.defaultPriority)
+    if (tpl.type) setType(tpl.type)
+    try {
+      const subs = JSON.parse(tpl.subtasks || '[]') as string[]
+      if (Array.isArray(subs) && subs.length > 0) setSubtaskTitles(subs)
+    } catch { /* ignore parse errors */ }
+  }
+
+  function addSubtask() {
+    if (!newSubtask.trim()) return
+    setSubtaskTitles(prev => [...prev, newSubtask.trim()])
+    setNewSubtask('')
+  }
+
+  function removeSubtask(index: number) {
+    setSubtaskTitles(prev => prev.filter((_, i) => i !== index))
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -665,6 +1387,7 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
           assigneeId: assigneeId || null,
           assigneeType: assigneeId ? 'team_member' : null,
           dueDate: dueDate || null,
+          subtasks: subtaskTitles.length > 0 ? subtaskTitles : undefined,
         }),
       })
 
@@ -764,20 +1487,34 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
-            {/* Title */}
-            <FieldGroup label="Task title" required htmlFor="task-title">
-              <StyledInput
-                id="task-title"
-                type="text"
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                required
-                maxLength={200}
-                placeholder="e.g. Set up analytics dashboard"
-              />
-            </FieldGroup>
+            {/* Template picker */}
+            {templates.length > 0 && (
+              <FieldGroup label="Template" htmlFor="task-template">
+                <select
+                  id="task-template"
+                  value={templateId}
+                  onChange={e => applyTemplate(e.target.value)}
+                  style={{
+                    width: '100%',
+                    height: '2.625rem',
+                    padding: '0 0.75rem',
+                    fontSize: '0.875rem',
+                    color: templateId ? 'var(--color-text)' : 'var(--color-text-subtle)',
+                    background: 'var(--color-bg)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius-input)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value="">Choose a template (optional)</option>
+                  {templates.map(tpl => (
+                    <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+                  ))}
+                </select>
+              </FieldGroup>
+            )}
 
-            {/* Type selector */}
+            {/* Task type selector */}
             <FieldGroup label="Task type" required>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
                 {TASK_TYPES.map(t => {
@@ -826,6 +1563,19 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
                   )
                 })}
               </div>
+            </FieldGroup>
+
+            {/* Title */}
+            <FieldGroup label="Task title" required htmlFor="task-title">
+              <StyledInput
+                id="task-title"
+                type="text"
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                required
+                maxLength={200}
+                placeholder="e.g. Set up analytics dashboard"
+              />
             </FieldGroup>
 
             {/* Client selector */}
@@ -937,6 +1687,91 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
               )}
             </FieldGroup>
 
+            {/* Subtasks */}
+            <FieldGroup label="Subtasks">
+              {subtaskTitles.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', marginBottom: '0.5rem' }}>
+                  {subtaskTitles.map((st, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2"
+                      style={{
+                        padding: '0.375rem 0.625rem',
+                        borderRadius: '0.375rem',
+                        border: '1px solid var(--color-border-subtle)',
+                        background: 'var(--color-bg-secondary)',
+                      }}
+                    >
+                      <Circle style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }} />
+                      <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)', flex: 1 }}>{st}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeSubtask(i)}
+                        style={{
+                          padding: '0.125rem',
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'var(--color-text-subtle)',
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                          display: 'flex',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-danger)' }}
+                        onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+                        aria-label="Remove subtask"
+                      >
+                        <Trash2 style={{ width: '0.75rem', height: '0.75rem' }} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Add a subtask..."
+                  value={newSubtask}
+                  onChange={e => setNewSubtask(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSubtask() } }}
+                  style={{
+                    flex: 1,
+                    height: '2.25rem',
+                    padding: '0 0.625rem',
+                    fontSize: '0.8125rem',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: '0.375rem',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    outline: 'none',
+                  }}
+                  onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
+                  onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+                />
+                <button
+                  type="button"
+                  onClick={addSubtask}
+                  disabled={!newSubtask.trim()}
+                  style={{
+                    height: '2.25rem',
+                    padding: '0 0.75rem',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    borderRadius: '0.375rem',
+                    border: 'none',
+                    background: newSubtask.trim() ? 'var(--color-brand)' : 'var(--color-border-subtle)',
+                    color: newSubtask.trim() ? 'white' : 'var(--color-text-subtle)',
+                    cursor: newSubtask.trim() ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                  }}
+                >
+                  <Plus style={{ width: '0.75rem', height: '0.75rem' }} />
+                  Add
+                </button>
+              </div>
+            </FieldGroup>
+
             {/* Error */}
             {error && (
               <div style={{
@@ -1029,6 +1864,8 @@ function FieldGroup({
     </div>
   )
 }
+
+const BRAND_HEX = '#5A824E'
 
 function StyledInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (

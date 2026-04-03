@@ -759,10 +759,12 @@ Requires S19.
 - [ ] T445 - [BE] Utility: parseMentions(content) extracts mention patterns from Tiptap JSON or plain text. Returns array of {id, type}.
 - [ ] T446 - [BE] Wire mention detection into POST /api/admin/tasks (description field), POST /api/admin/requests/[id]/messages (content field), POST /api/admin/conversations/[id]/messages (content field).
 - [ ] T447 - [FE] Tiptap extension: @mention node type. Typing "@" triggers autocomplete dropdown of team members and contacts. Selecting inserts a styled mention chip.
-- [ ] T448 - [FE] Mention autocomplete: fetch team members and contacts on "@" keypress. Filter by typed text. Show avatar, name, and role. Keyboard navigation (arrow keys, enter to select).
+- [x] T448 - [FE] Mention autocomplete: fetch team members and contacts on "@" keypress. Filter by typed text. Show avatar, name, and role. Keyboard navigation (arrow keys, enter to select). -- [FE] 2026-04-03
 - [ ] T449 - [FE] Mention chip: styled inline element showing mentioned person's name with distinct background. Clickable to navigate to their profile.
 - [ ] T450 - [BE] Notification trigger: when a mention is created, insert a notification row for the mentioned person with entityType and entityId linking to the source.
 - [ ] T451 - [FE] Notification: mention notifications show "@You were mentioned in [task/request/message]" with link to source.
+- [ ] T451b - [UIUX] Review: spacing pass on MentionInput dropdown, avatar sizing, type badges, mobile layout -- [UIUX]
+- [ ] T451c - [QA] Regression: verify MentionInput component triggers on "@", filters results, keyboard nav works, mention inserts correctly -- [QA]
 
 ### Priority 4: Org Chart
 
@@ -808,12 +810,12 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 
 ### Audit Bug Fixes (from AUDIT.md)
 
-- [ ] T479 - [FE] B3: Fix currency formatting inconsistency on invoices. Standardize to consistent format (e.g. "NZ$500" for NZD, "US$2,500" for USD) across all invoice views.
-- [ ] T480 - [BE] B4: Fix invoice status mismatch between billing page and invoices page. Ensure both views read from the same source of truth and apply the same status logic.
-- [ ] T481 - [FE] B6: Impersonation polish: hide admin sidebar nav items during impersonation. Show the impersonated contact's name (not org name) in the header. Add "Exit impersonation" button.
-- [ ] T482 - [FE] B7: Voice notes: fix waveform visualization (render actual audio waveform, not text placeholder). Remove duplicate send button. Ensure playback works.
-- [ ] T483 - [FE] B8: Pipeline column headers: prevent text truncation. Use smaller font or allow wrapping for long stage names like "Verbal Commitment".
-- [ ] T484 - [FE] B9: Overview MRR card: replace "Connect Stripe" placeholder with actual MRR calculation from subscriptions table. Show real value even without Stripe connected.
-- [ ] T485 - [FE] B10: Settings page: fix broken Team button navigation, portal branding save, and modules toggle persistence.
+- [x] T479 - [FE] B3: Fix currency formatting inconsistency on invoices. Standardize to consistent format (e.g. "NZ$500" for NZD, "US$2,500" for USD) across all invoice views. -- [FE] 2026-04-03
+- [x] T480 - [BE] B4: Fix invoice status mismatch between billing page and invoices page. Ensure both views read from the same source of truth and apply the same status logic. -- [FE] 2026-04-03
+- [x] T481 - [FE] B6: Impersonation polish: hide admin sidebar nav items during impersonation. Show the impersonated contact's name (not org name) in the header. Add "Exit impersonation" button. -- [FE] 2026-04-03
+- [x] T482 - [FE] B7: Voice notes: fix waveform visualization (render actual audio waveform, not text placeholder). Remove duplicate send button. Ensure playback works. -- [FE] 2026-04-03
+- [x] T483 - [FE] B8: Pipeline column headers: prevent text truncation. Use smaller font or allow wrapping for long stage names like "Verbal Commitment". -- [FE] 2026-04-03
+- [x] T484 - [FE] B9: Overview MRR card: replace "Connect Stripe" placeholder with actual MRR calculation from subscriptions table. Show real value even without Stripe connected. -- [FE] 2026-04-03
+- [x] T485 - [FE] B10: Settings page: fix broken Team button navigation, portal branding save, and modules toggle persistence. -- [FE] 2026-04-03
 - [ ] T486 - [UIUX] Review all audit bug fixes for visual consistency and dark mode.
 - [ ] T487 - [QA] Regression test all audit bug fixes: currency formatting, invoice status, impersonation, voice notes, pipeline headers, MRR card, settings page. -- [QA]
