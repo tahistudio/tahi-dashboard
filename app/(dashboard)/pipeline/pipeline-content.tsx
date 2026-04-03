@@ -6,7 +6,7 @@ import {
   Plus, Search, LayoutList, Columns3,
   TrendingUp, DollarSign, Target,
   Calendar, User, Building2, Loader2,
-  ChevronDown,
+  ChevronDown, BarChart3, Award,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 
@@ -22,6 +22,8 @@ interface PipelineStage {
   isDefault: number
   isClosedWon: number
   isClosedLost: number
+  isClosed?: number
+  closedType?: string | null
 }
 
 interface Deal {
@@ -41,6 +43,7 @@ interface Deal {
   notes: string | null
   createdAt: string
   updatedAt: string
+  stageEnteredAt: string | null
   orgName: string | null
   stageName: string | null
   stageColour: string | null
@@ -54,6 +57,18 @@ interface Deal {
 
 type ViewMode = 'kanban' | 'list'
 type SortKey = 'updatedAt' | 'value' | 'expectedCloseDate' | 'title'
+
+// ---- Default pipeline stages (fallback when API has none) ----------------
+
+const DEFAULT_STAGES: PipelineStage[] = [
+  { id: '_inquiry',       name: 'Inquiry',       slug: 'inquiry',       probability: 5,   position: 0, colour: '#60a5fa', isDefault: 1, isClosedWon: 0, isClosedLost: 0 },
+  { id: '_contacted',     name: 'Contacted',     slug: 'contacted',     probability: 15,  position: 1, colour: '#a78bfa', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
+  { id: '_discovery',     name: 'Discovery',     slug: 'discovery',     probability: 35,  position: 2, colour: '#fbbf24', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
+  { id: '_proposal_sent', name: 'Proposal Sent', slug: 'proposal_sent', probability: 60,  position: 3, colour: '#fb923c', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
+  { id: '_won',           name: 'Won',           slug: 'won',           probability: 100, position: 4, colour: '#4ade80', isDefault: 0, isClosedWon: 1, isClosedLost: 0, isClosed: 1, closedType: 'won' },
+  { id: '_lost',          name: 'Lost',          slug: 'lost',          probability: 0,   position: 5, colour: '#f87171', isDefault: 0, isClosedWon: 0, isClosedLost: 1, isClosed: 1, closedType: 'lost' },
+  { id: '_stalled',       name: 'Stalled',       slug: 'stalled',       probability: 0,   position: 6, colour: '#8a9987', isDefault: 0, isClosedWon: 0, isClosedLost: 1, isClosed: 1, closedType: 'lost' },
+]
 
 // ---- Helpers -------------------------------------------------------------
 
@@ -82,14 +97,23 @@ function getInitials(name: string): string {
   return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
+function daysInStage(stageEnteredAt: string | null, updatedAt: string): number {
+  const ref = stageEnteredAt ?? updatedAt
+  if (!ref) return 0
+  const diff = Date.now() - new Date(ref).getTime()
+  return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)))
+}
+
 const SOURCE_LABELS: Record<string, { label: string; bg: string; text: string }> = {
-  referral:         { label: 'Referral',         bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)' },
-  webflow:          { label: 'Webflow',          bg: '#dbeafe',                  text: '#2563eb' },
-  linkedin:         { label: 'LinkedIn',         bg: '#dbeafe',                  text: '#1d4ed8' },
-  website:          { label: 'Website',          bg: '#d1fae5',                  text: '#059669' },
-  cold:             { label: 'Cold',             bg: '#e0e7ff',                  text: '#4338ca' },
-  existing_client:  { label: 'Existing Client',  bg: '#fef3c7',                  text: '#d97706' },
-  other:            { label: 'Other',            bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-subtle)' },
+  referral:         { label: 'Referral',        bg: '#fef3c7', text: '#d97706' },
+  linkedin:         { label: 'LinkedIn',        bg: '#dbeafe', text: '#1d4ed8' },
+  website:          { label: 'Website',         bg: '#d1fae5', text: '#059669' },
+  cold:             { label: 'Cold Outreach',   bg: '#e0e7ff', text: '#4338ca' },
+  cold_outreach:    { label: 'Cold Outreach',   bg: '#e0e7ff', text: '#4338ca' },
+  partner:          { label: 'Partner',         bg: '#fce7f3', text: '#be185d' },
+  webflow:          { label: 'Webflow',         bg: '#dbeafe', text: '#2563eb' },
+  existing_client:  { label: 'Existing Client', bg: '#fef3c7', text: '#d97706' },
+  other:            { label: 'Other',           bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-subtle)' },
 }
 
 // ---- Main component ------------------------------------------------------
@@ -112,14 +136,17 @@ export function PipelineContent() {
       ])
       if (stagesRes.ok) {
         const sData = await stagesRes.json() as { stages: PipelineStage[] }
-        setStages(sData.stages ?? [])
+        const fetched = sData.stages ?? []
+        setStages(fetched.length > 0 ? fetched : DEFAULT_STAGES)
+      } else {
+        setStages(DEFAULT_STAGES)
       }
       if (dealsRes.ok) {
         const dData = await dealsRes.json() as { items: Deal[] }
         setDeals(dData.items ?? [])
       }
     } catch {
-      // silent
+      setStages(DEFAULT_STAGES)
     } finally {
       setLoading(false)
     }
@@ -137,11 +164,19 @@ export function PipelineContent() {
 
   // Non-closed deals for summary
   const openDeals = filtered.filter(d => !d.stageIsClosedWon && !d.stageIsClosedLost)
+  const closedDeals = filtered.filter(d => d.stageIsClosedWon || d.stageIsClosedLost)
+  const wonDeals = filtered.filter(d => d.stageIsClosedWon)
   const totalValue = openDeals.reduce((s, d) => s + (d.valueNzd ?? d.value), 0)
   const weightedForecast = openDeals.reduce((s, d) => {
     const prob = d.stageProbability ?? 0
     return s + ((d.valueNzd ?? d.value) * prob / 100)
   }, 0)
+  const winRate = closedDeals.length > 0
+    ? Math.round((wonDeals.length / closedDeals.length) * 100)
+    : 0
+  const avgDealSize = openDeals.length > 0
+    ? Math.round(totalValue / openDeals.length)
+    : 0
 
   return (
     <div style={{ padding: '1.5rem' }}>
@@ -175,9 +210,9 @@ export function PipelineContent() {
         </button>
       </div>
 
-      {/* Summary bar */}
+      {/* KPI summary bar */}
       <div
-        className="grid grid-cols-1 sm:grid-cols-3 gap-4"
+        className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4"
         style={{ marginBottom: '1.5rem' }}
       >
         <SummaryCard
@@ -197,6 +232,18 @@ export function PipelineContent() {
           label="Open Deals"
           value={String(openDeals.length)}
           accent="amber"
+        />
+        <SummaryCard
+          icon={Award}
+          label="Win Rate"
+          value={closedDeals.length > 0 ? `${winRate}%` : '--'}
+          accent="purple"
+        />
+        <SummaryCard
+          icon={BarChart3}
+          label="Avg Deal Size"
+          value={openDeals.length > 0 ? formatCurrency(avgDealSize, 'NZD') : '--'}
+          accent="rose"
         />
       </div>
 
@@ -301,9 +348,7 @@ export function PipelineContent() {
 
       {/* Content */}
       {loading ? (
-        <div className="flex items-center justify-center" style={{ padding: '4rem 0' }}>
-          <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--color-brand)' }} />
-        </div>
+        <LoadingSkeleton />
       ) : view === 'kanban' ? (
         <KanbanView
           deals={filtered}
@@ -333,12 +378,33 @@ export function PipelineContent() {
   )
 }
 
+// ---- Loading Skeleton ----------------------------------------------------
+
+function LoadingSkeleton() {
+  return (
+    <div className="flex gap-3 overflow-hidden">
+      {[1, 2, 3, 4].map(i => (
+        <div key={i} className="flex-shrink-0" style={{ width: '17rem' }}>
+          <div className="animate-pulse rounded-t-lg" style={{ height: '2.5rem', background: '#f3f4f6' }} />
+          <div className="flex flex-col gap-2" style={{ padding: '0.5rem' }}>
+            {[1, 2].map(j => (
+              <div key={j} className="animate-pulse rounded-lg" style={{ height: '7rem', background: '#f3f4f6' }} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ---- Summary Card --------------------------------------------------------
 
 const ACCENT_MAP = {
   emerald: { bg: '#d1fae5', icon: '#059669' },
   blue:    { bg: '#dbeafe', icon: '#2563eb' },
   amber:   { bg: '#fef3c7', icon: '#d97706' },
+  purple:  { bg: '#ede9fe', icon: '#7c3aed' },
+  rose:    { bg: '#ffe4e6', icon: '#e11d48' },
 } as const
 
 function SummaryCard({ icon: Icon, label, value, accent }: {
@@ -355,16 +421,16 @@ function SummaryCard({ icon: Icon, label, value, accent }: {
     >
       <div className="flex items-center gap-3">
         <div
-          className="rounded-lg flex items-center justify-center"
+          className="rounded-lg flex items-center justify-center flex-shrink-0"
           style={{ width: '2.5rem', height: '2.5rem', background: a.bg }}
         >
           <Icon className="w-5 h-5" style={{ color: a.icon }} />
         </div>
-        <div>
-          <p style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+        <div style={{ minWidth: 0 }}>
+          <p style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
             {label}
           </p>
-          <p className="font-bold" style={{ fontSize: '1.25rem', color: 'var(--color-text)', marginTop: '0.125rem' }}>
+          <p className="font-bold truncate" style={{ fontSize: '1.125rem', color: 'var(--color-text)', marginTop: '0.125rem' }}>
             {value}
           </p>
         </div>
@@ -405,7 +471,7 @@ function KanbanView({ deals, stages, onStageChange }: {
   return (
     <div
       className="flex gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide"
-      style={{ paddingBottom: '1.25rem', WebkitOverflowScrolling: 'touch', height: 'calc(100vh - 22rem)' }}
+      style={{ paddingBottom: '1.25rem', WebkitOverflowScrolling: 'touch', height: 'calc(100vh - 24rem)' }}
     >
       {stages.map(stage => {
         const cards = byStage(stage.id)
@@ -471,7 +537,7 @@ function KanbanView({ deals, stages, onStageChange }: {
                 borderTop: 'none',
                 borderRadius: '0 0 0.5rem 0.5rem',
                 minHeight: '10rem',
-                maxHeight: 'calc(100vh - 26rem)',
+                maxHeight: 'calc(100vh - 28rem)',
                 transition: 'border-color 0.15s',
               }}
               onDragOver={e => {
@@ -496,7 +562,9 @@ function KanbanView({ deals, stages, onStageChange }: {
                   No deals
                 </div>
               ) : (
-                cards.map(deal => <DealCard key={deal.id} deal={deal} />)
+                cards.map(deal => (
+                  <DealCard key={deal.id} deal={deal} stages={stages} />
+                ))
               )}
             </div>
           </div>
@@ -508,7 +576,12 @@ function KanbanView({ deals, stages, onStageChange }: {
 
 // ---- Deal Card -----------------------------------------------------------
 
-function DealCard({ deal }: { deal: Deal }) {
+function DealCard({ deal, stages }: { deal: Deal; stages: PipelineStage[] }) {
+  const stage = stages.find(s => s.id === deal.stageId)
+  const probability = deal.stageProbability ?? stage?.probability ?? 0
+  const days = daysInStage(deal.stageEnteredAt ?? null, deal.updatedAt)
+  const srcCfg = SOURCE_LABELS[deal.source ?? '']
+
   return (
     <Link
       href={`/pipeline/${deal.id}`}
@@ -547,21 +620,47 @@ function DealCard({ deal }: { deal: Deal }) {
 
       {/* Company */}
       {deal.orgName && (
-        <div className="flex items-center gap-1.5" style={{ marginBottom: '0.5rem' }}>
-          <Building2 style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)' }} />
+        <div className="flex items-center gap-1.5" style={{ marginBottom: '0.375rem' }}>
+          <Building2 style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }} />
           <span className="truncate" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
             {deal.orgName}
           </span>
         </div>
       )}
 
-      {/* Value */}
-      <p className="font-semibold" style={{ fontSize: '0.875rem', color: 'var(--color-brand)', marginBottom: '0.5rem' }}>
-        {formatCurrency(deal.value, deal.currency)}
-      </p>
+      {/* Value + Probability row */}
+      <div className="flex items-center gap-2" style={{ marginBottom: '0.375rem' }}>
+        <p className="font-semibold" style={{ fontSize: '0.875rem', color: 'var(--color-brand)' }}>
+          {formatCurrency(deal.value, deal.currency)}
+        </p>
+        <span
+          className="inline-flex items-center rounded-full font-medium"
+          style={{
+            padding: '0.0625rem 0.375rem',
+            fontSize: '0.625rem',
+            background: probability >= 60 ? '#d1fae520' : probability >= 25 ? '#fef3c720' : '#dbeafe20',
+            color: probability >= 60 ? '#059669' : probability >= 25 ? '#d97706' : '#2563eb',
+            border: `1px solid ${probability >= 60 ? '#d1fae5' : probability >= 25 ? '#fef3c7' : '#dbeafe'}`,
+          }}
+        >
+          {probability}%
+        </span>
+      </div>
 
-      {/* Footer: owner + close date */}
-      <div className="flex items-center justify-between">
+      {/* Source badge */}
+      {srcCfg && (
+        <div style={{ marginBottom: '0.375rem' }}>
+          <span
+            className="inline-flex rounded-full font-medium"
+            style={{ padding: '0.0625rem 0.375rem', fontSize: '0.625rem', background: srcCfg.bg, color: srcCfg.text }}
+          >
+            {srcCfg.label}
+          </span>
+        </div>
+      )}
+
+      {/* Footer: owner + close date + days in stage */}
+      <div className="flex items-center justify-between" style={{ marginTop: '0.25rem' }}>
         {deal.ownerName ? (
           <div className="flex items-center gap-1.5">
             {deal.ownerAvatarUrl ? (
@@ -584,17 +683,24 @@ function DealCard({ deal }: { deal: Deal }) {
             </span>
           </div>
         ) : (
-          <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
-            <User style={{ width: '0.75rem', height: '0.75rem', display: 'inline' }} /> Unassigned
+          <span className="inline-flex items-center gap-1" style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+            <User style={{ width: '0.75rem', height: '0.75rem' }} /> Unassigned
           </span>
         )}
 
-        {deal.expectedCloseDate && (
-          <span className="inline-flex items-center gap-1" style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
-            <Calendar style={{ width: '0.625rem', height: '0.625rem' }} />
-            {formatDate(deal.expectedCloseDate)}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {deal.expectedCloseDate && (
+            <span className="inline-flex items-center gap-1" style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+              <Calendar style={{ width: '0.625rem', height: '0.625rem' }} />
+              {formatDate(deal.expectedCloseDate)}
+            </span>
+          )}
+          {days > 0 && (
+            <span style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', opacity: 0.8 }}>
+              {days}d
+            </span>
+          )}
+        </div>
       </div>
     </Link>
   )
@@ -627,7 +733,18 @@ function ListView({ deals, stages, sortKey }: {
         className="flex flex-col items-center justify-center rounded-xl border"
         style={{ padding: '4rem 2rem', background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
       >
-        <TrendingUp style={{ width: '2.5rem', height: '2.5rem', color: 'var(--color-text-subtle)', marginBottom: '1rem' }} />
+        <div
+          className="flex items-center justify-center"
+          style={{
+            width: '3.5rem',
+            height: '3.5rem',
+            borderRadius: '0 1rem 0 1rem',
+            background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
+            marginBottom: '1rem',
+          }}
+        >
+          <TrendingUp style={{ width: '1.5rem', height: '1.5rem', color: 'white' }} />
+        </div>
         <p className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)', marginBottom: '0.25rem' }}>
           No deals yet
         </p>
@@ -647,7 +764,7 @@ function ListView({ deals, stages, sortKey }: {
         <table className="w-full" style={{ fontSize: '0.8125rem' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-              {['Title', 'Company', 'Stage', 'Value', 'Owner', 'Source', 'Expected Close', 'Created'].map(h => (
+              {['Title', 'Company', 'Stage', 'Value', 'Probability', 'Owner', 'Source', 'Expected Close', 'Days in Stage'].map(h => (
                 <th
                   key={h}
                   className="text-left font-semibold uppercase tracking-wide"
@@ -662,6 +779,8 @@ function ListView({ deals, stages, sortKey }: {
             {sorted.map(deal => {
               const stage = stageMap[deal.stageId]
               const srcCfg = SOURCE_LABELS[deal.source ?? '']
+              const probability = deal.stageProbability ?? stage?.probability ?? 0
+              const days = daysInStage(deal.stageEnteredAt ?? null, deal.updatedAt)
               return (
                 <tr
                   key={deal.id}
@@ -701,6 +820,19 @@ function ListView({ deals, stages, sortKey }: {
                   <td className="font-semibold" style={{ padding: '0.75rem 1rem', color: 'var(--color-text)', whiteSpace: 'nowrap' }}>
                     {formatCurrency(deal.value, deal.currency)}
                   </td>
+                  <td style={{ padding: '0.75rem 1rem', whiteSpace: 'nowrap' }}>
+                    <span
+                      className="inline-flex rounded-full font-medium"
+                      style={{
+                        padding: '0.125rem 0.5rem',
+                        fontSize: '0.75rem',
+                        background: probability >= 60 ? '#d1fae5' : probability >= 25 ? '#fef3c7' : '#dbeafe',
+                        color: probability >= 60 ? '#059669' : probability >= 25 ? '#d97706' : '#2563eb',
+                      }}
+                    >
+                      {probability}%
+                    </span>
+                  </td>
                   <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
                     {deal.ownerName ?? '--'}
                   </td>
@@ -720,7 +852,7 @@ function ListView({ deals, stages, sortKey }: {
                     {formatDate(deal.expectedCloseDate)}
                   </td>
                   <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-subtle)', whiteSpace: 'nowrap' }}>
-                    {formatDate(deal.createdAt)}
+                    {days > 0 ? `${days} days` : '--'}
                   </td>
                 </tr>
               )
@@ -747,6 +879,7 @@ function NewDealDialog({ stages, onClose, onCreated }: {
   const [value, setValue] = useState('')
   const [currency, setCurrency] = useState('NZD')
   const [source, setSource] = useState('')
+  const [expectedCloseDate, setExpectedCloseDate] = useState('')
   const [saving, setSaving] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -764,6 +897,7 @@ function NewDealDialog({ stages, onClose, onCreated }: {
           value: parseFloat(value) || 0,
           currency,
           source: source || undefined,
+          expectedCloseDate: expectedCloseDate || undefined,
         }),
       })
       if (res.ok) {
@@ -825,7 +959,7 @@ function NewDealDialog({ stages, onClose, onCreated }: {
             <select
               value={stageId}
               onChange={e => setStageId(e.target.value)}
-              className="w-full rounded-lg"
+              className="w-full rounded-lg cursor-pointer"
               style={{
                 padding: '0.5rem 0.75rem',
                 fontSize: '0.875rem',
@@ -836,7 +970,9 @@ function NewDealDialog({ stages, onClose, onCreated }: {
               }}
             >
               {stages.map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
+                <option key={s.id} value={s.id}>
+                  {s.name} ({s.probability}%)
+                </option>
               ))}
             </select>
           </div>
@@ -870,7 +1006,7 @@ function NewDealDialog({ stages, onClose, onCreated }: {
               <select
                 value={currency}
                 onChange={e => setCurrency(e.target.value)}
-                className="w-full rounded-lg"
+                className="w-full rounded-lg cursor-pointer"
                 style={{
                   padding: '0.5rem 0.75rem',
                   fontSize: '0.875rem',
@@ -890,12 +1026,12 @@ function NewDealDialog({ stages, onClose, onCreated }: {
           {/* Source */}
           <div>
             <label className="block font-medium" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
-              Source
+              Lead Source
             </label>
             <select
               value={source}
               onChange={e => setSource(e.target.value)}
-              className="w-full rounded-lg"
+              className="w-full rounded-lg cursor-pointer"
               style={{
                 padding: '0.5rem 0.75rem',
                 fontSize: '0.875rem',
@@ -907,13 +1043,33 @@ function NewDealDialog({ stages, onClose, onCreated }: {
             >
               <option value="">Select source...</option>
               <option value="referral">Referral</option>
-              <option value="webflow">Webflow</option>
               <option value="linkedin">LinkedIn</option>
               <option value="website">Website</option>
-              <option value="cold">Cold</option>
-              <option value="existing_client">Existing Client</option>
+              <option value="cold">Cold Outreach</option>
+              <option value="partner">Partner</option>
               <option value="other">Other</option>
             </select>
+          </div>
+
+          {/* Expected Close Date */}
+          <div>
+            <label className="block font-medium" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
+              Expected Close Date
+            </label>
+            <input
+              type="date"
+              value={expectedCloseDate}
+              onChange={e => setExpectedCloseDate(e.target.value)}
+              className="w-full rounded-lg cursor-pointer"
+              style={{
+                padding: '0.5rem 0.75rem',
+                fontSize: '0.875rem',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                minHeight: '2.75rem',
+              }}
+            />
           </div>
 
           {/* Actions */}

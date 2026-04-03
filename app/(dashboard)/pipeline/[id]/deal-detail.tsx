@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   ArrowLeft, Building2, Calendar, Clock,
   Phone, Mail, FileText, MessageSquare,
-  Plus, Loader2, Check, ChevronDown,
+  Plus, Loader2, Check, ChevronDown, Tag,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 

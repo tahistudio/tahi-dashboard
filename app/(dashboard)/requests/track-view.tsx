@@ -13,7 +13,7 @@ import { TrackQueueView } from '@/components/tahi/track-queue-view'
 import type { TrackWithQueue, TrackActiveRequest, TrackQueueItem } from '@/components/tahi/track-queue-view'
 import { apiPath } from '@/lib/api'
 import { trackCanHandle } from '@/lib/plan-utils'
-import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
+// LoadingSkeleton available for future use
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 

@@ -133,7 +133,6 @@ export function TiptapEditor({
                 .map(m => ({ id: m.id, label: m.name }))
             } catch { return [] }
           },
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           render: () => {
             let popup: HTMLDivElement | null = null
             let selectedIndex = 0

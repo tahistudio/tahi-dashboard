@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
   const gst = calculateGst(cycleTotal, sub.billingCountry ?? null)
 
   // Calculate commitment end date from currentPeriodStart if available
-  let commitmentEndDate: string | null = sub.currentPeriodEnd ?? null
+  const commitmentEndDate: string | null = sub.currentPeriodEnd ?? null
 
   return NextResponse.json({
     subscription: {

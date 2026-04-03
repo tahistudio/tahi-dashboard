@@ -1,6 +1,6 @@
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
-import type { DrizzleD1Database } from 'drizzle-orm/d1'
+
 
 // Types for automation rules
 interface AutomationCondition {
