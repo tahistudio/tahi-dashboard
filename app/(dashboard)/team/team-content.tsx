@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useUser } from '@clerk/nextjs'
-import { Plus, UserCog, Mail, Shield, RefreshCw, X, ChevronRight, Clock, Trash2, Pencil, Link2 } from 'lucide-react'
+import { Plus, UserCog, Mail, Shield, RefreshCw, X, ChevronRight, Clock, Trash2, Pencil, Link2, GitBranch } from 'lucide-react'
+import { OrgChart } from '@/components/tahi/org-chart'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
@@ -752,6 +753,7 @@ export function TeamContent() {
   const [accessMember, setAccessMember] = useState<TeamMember | null>(null)
   const [deleteMember, setDeleteMember] = useState<TeamMember | null>(null)
   const [linkingAccount, setLinkingAccount] = useState(false)
+  const [view, setView] = useState<'members' | 'org-chart'>('members')
   const { user } = useUser()
 
   const fetchTeam = useCallback(async () => {
@@ -838,6 +840,36 @@ export function TeamContent() {
         </div>
       </div>
 
+      {/* View toggle tabs */}
+      <div className="flex gap-1 border-b border-[var(--color-border-subtle)]">
+        <button
+          onClick={() => setView('members')}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors cursor-pointer"
+          style={{
+            color: view === 'members' ? 'var(--color-brand)' : 'var(--color-text-muted)',
+            borderBottom: view === 'members' ? '2px solid var(--color-brand)' : '2px solid transparent',
+          }}
+        >
+          <UserCog style={{ width: '0.875rem', height: '0.875rem' }} />
+          Members
+        </button>
+        <button
+          onClick={() => setView('org-chart')}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors cursor-pointer"
+          style={{
+            color: view === 'org-chart' ? 'var(--color-brand)' : 'var(--color-text-muted)',
+            borderBottom: view === 'org-chart' ? '2px solid var(--color-brand)' : '2px solid transparent',
+          }}
+        >
+          <GitBranch style={{ width: '0.875rem', height: '0.875rem' }} />
+          Org Chart
+        </button>
+      </div>
+
+      {view === 'org-chart' ? (
+        <OrgChart />
+      ) : (
+      <>
       {/* Self-link banner */}
       {!loading && !currentUserLinked && (
         <div
@@ -1048,6 +1080,8 @@ export function TeamContent() {
         onConfirm={handleDeleteMember}
         onCancel={() => setDeleteMember(null)}
       />
+      </>
+      )}
     </div>
   )
 }
