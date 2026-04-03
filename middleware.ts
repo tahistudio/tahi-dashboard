@@ -33,7 +33,14 @@ export default clerkMiddleware(async (auth, req) => {
   // Allow public routes without auth
   if (isPublicRoute(req)) return NextResponse.next()
 
-  // Require auth for everything else
+  // Allow Bearer token auth for API routes (MCP server, service-to-service)
+  // The actual token validation happens in getRequestAuth() in the route handler
+  const authHeader = req.headers.get('authorization')
+  if (authHeader?.startsWith('Bearer ') && req.nextUrl.pathname.startsWith('/api/')) {
+    return NextResponse.next()
+  }
+
+  // Require Clerk auth for everything else
   await auth.protect()
 
   const { orgId } = await auth()
