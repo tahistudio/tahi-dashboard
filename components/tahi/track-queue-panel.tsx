@@ -27,7 +27,7 @@
 
 import Link from 'next/link'
 import { ArrowRight, Layers, AlignLeft, Clock, GripVertical } from 'lucide-react'
-import { trackCanHandle } from '@/lib/plan-utils'
+// trackCanHandle reserved for future per-track type filtering
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -276,9 +276,6 @@ export function TrackQueuePanel({
   const largeTracks = tracks.filter(t => t.type === 'large')
   const smallTracks = tracks.filter(t => t.type === 'small')
 
-  // Queue: separate into large-eligible and small-only
-  const largeQueue = queue.filter(r => r.type === 'large_task')
-  const smallQueue = queue.filter(r => r.type === 'small_task')
   const allQueue = queue  // show unified queue with type badge
 
   if (tracks.length === 0 && queue.length === 0) {

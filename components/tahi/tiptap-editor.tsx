@@ -6,6 +6,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
+import Mention from '@tiptap/extension-mention'
 import {
   Bold, Italic, List, ListOrdered, Code, Link as LinkIcon,
   CornerDownLeft, Loader2, Paperclip, X, FileText, Image as ImageIcon,
@@ -114,6 +115,85 @@ export function TiptapEditor({
       StarterKit.configure({ heading: false }),
       Link.configure({ openOnClick: false, HTMLAttributes: { class: 'underline text-brand' } }),
       Placeholder.configure({ placeholder }),
+      Mention.configure({
+        HTMLAttributes: {
+          class: 'mention',
+          style: 'color: var(--color-brand); font-weight: 600; cursor: default;',
+        },
+        suggestion: {
+          char: '@',
+          items: async ({ query }: { query: string }) => {
+            try {
+              const res = await fetch(apiPath('/api/admin/team'))
+              if (!res.ok) return []
+              const data = await res.json() as { items: Array<{ id: string; name: string; title: string | null }> }
+              return data.items
+                .filter(m => m.name.toLowerCase().includes(query.toLowerCase()))
+                .slice(0, 8)
+                .map(m => ({ id: m.id, label: m.name }))
+            } catch { return [] }
+          },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          render: () => {
+            let popup: HTMLDivElement | null = null
+            let selectedIndex = 0
+            let items: Array<{ id: string; label: string }> = []
+            let commandFn: ((item: { id: string; label: string }) => void) | null = null
+
+            function updatePopup() {
+              if (!popup) return
+              popup.innerHTML = items.map((item, i) =>
+                `<div class="mention-item${i === selectedIndex ? ' selected' : ''}" data-index="${i}" style="padding: 0.375rem 0.75rem; cursor: pointer; font-size: 0.8125rem; color: var(--color-text); border-radius: 0.25rem; ${i === selectedIndex ? 'background: var(--color-bg-tertiary); font-weight: 600;' : ''}">${item.label}</div>`
+              ).join('')
+              popup.querySelectorAll('.mention-item').forEach(el => {
+                el.addEventListener('mouseenter', () => {
+                  selectedIndex = parseInt(el.getAttribute('data-index') ?? '0')
+                  updatePopup()
+                })
+                el.addEventListener('click', () => {
+                  const idx = parseInt(el.getAttribute('data-index') ?? '0')
+                  if (commandFn && items[idx]) commandFn(items[idx])
+                })
+              })
+            }
+
+            return {
+              onStart: (props: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+                items = props.items
+                commandFn = props.command
+                selectedIndex = 0
+                popup = document.createElement('div')
+                popup.style.cssText = 'position: fixed; z-index: 50; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 0.5rem; padding: 0.25rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-height: 12rem; overflow-y: auto; min-width: 10rem;'
+                const rect = props.clientRect?.()
+                if (rect) {
+                  popup.style.left = `${rect.left}px`
+                  popup.style.top = `${rect.bottom + 4}px`
+                }
+                updatePopup()
+                document.body.appendChild(popup)
+              },
+              onUpdate: (props: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+                items = props.items
+                selectedIndex = 0
+                const rect = props.clientRect?.()
+                if (rect && popup) {
+                  popup.style.left = `${rect.left}px`
+                  popup.style.top = `${rect.bottom + 4}px`
+                }
+                updatePopup()
+              },
+              onKeyDown: (props: { event: KeyboardEvent }) => {
+                if (props.event.key === 'ArrowDown') { selectedIndex = (selectedIndex + 1) % items.length; updatePopup(); return true }
+                if (props.event.key === 'ArrowUp') { selectedIndex = (selectedIndex - 1 + items.length) % items.length; updatePopup(); return true }
+                if (props.event.key === 'Enter') { if (commandFn && items[selectedIndex]) commandFn(items[selectedIndex]); return true }
+                if (props.event.key === 'Escape') { popup?.remove(); popup = null; return true }
+                return false
+              },
+              onExit: () => { popup?.remove(); popup = null },
+            }
+          },
+        },
+      }),
     ],
     editorProps: {
       attributes: {

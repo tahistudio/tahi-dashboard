@@ -6,7 +6,7 @@ import {
   Users, Inbox, FileText, TrendingUp,
   Plus, Clock, UserPlus,
   ArrowRight, AlertTriangle, RefreshCw, Video, ExternalLink,
-  CheckCircle2, Circle, Play,
+  CheckCircle2, Circle,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { apiPath } from '@/lib/api'
@@ -1238,7 +1238,6 @@ function TrackCapacityCard() {
   if (!loaded || !data?.subscription) return null
 
   const plan = data.subscription
-  const ent = data.entitlements
 
   // Build upsell messages based on plan
   const upsells: string[] = []

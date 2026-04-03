@@ -26,11 +26,6 @@ export async function GET(req: NextRequest, { params }: Params) {
     .where(eq(schema.teamMemberAccess.role, 'project_manager'))
 
   for (const rule of rules) {
-    const accessOrgs = await database
-      .select()
-      .from(schema.teamMemberAccessOrgs)
-      .where(eq(schema.teamMemberAccessOrgs.accessId, rule.teamMemberId))
-
     // Check via full access rule lookup
     const accessRules = await database
       .select()

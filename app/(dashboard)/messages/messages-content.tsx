@@ -42,12 +42,6 @@ interface MessageItem {
   deletedAt: string | null
 }
 
-interface ParticipantOption {
-  id: string
-  name: string
-  type: 'team_member' | 'contact'
-}
-
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const TYPE_LABELS: Record<string, { label: string; icon: typeof MessageSquare }> = {

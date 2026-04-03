@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { sql, eq, and, isNull } from 'drizzle-orm'
+import { sql, eq, and } from 'drizzle-orm'
 
 // POST /api/admin/reviews/outreach
 // Trigger review outreach for all orgs older than N days (default 90) that

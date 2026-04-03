@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 
 // POST /api/admin/announcements/[id]/send
 // Publishes the announcement and optionally sends emails via Resend.

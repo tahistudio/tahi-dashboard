@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { and, gte, lt, eq, sql } from 'drizzle-orm'
+import { and, gte, lt, sql } from 'drizzle-orm'
 
 // GET /api/admin/reports/billing-summary?month=YYYY-MM
 // Returns per-org breakdown of billable hours, hourly rate, and total amount due.

@@ -2,7 +2,7 @@ import { headers } from 'next/headers'
 import Stripe from 'stripe'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 
 // Force dynamic : prevents Next.js from trying to statically analyse this
 // route at build time (when env vars are unavailable on Webflow Cloud).

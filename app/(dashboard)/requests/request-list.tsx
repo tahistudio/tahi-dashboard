@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
-  Plus, Search, Filter, LayoutList, Columns3, BarChart3,
+  Plus, Search, LayoutList, Columns3, BarChart3,
   AlertTriangle, ChevronDown, Inbox, RefreshCw,
   Calendar, Zap, Clock, ArrowUpDown, Download,
   CheckSquare, Square, Users, Loader2, X,

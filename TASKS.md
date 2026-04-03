@@ -658,8 +658,8 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T398 - [FE] Tasks page: list view with filter tabs (All, To Do, In Progress, Blocked, Done), search, task rows with status/priority/type/due/client -- [FE] 2026-03-30
 - [x] T399 - [FE] New Task dialog: slide-over with title, type selector (3 tiles), client picker (SearchableSelect), description, priority, due date, assignee picker -- [FE] 2026-03-30
 - [x] T400 - [FE] Tasks page: loading skeleton, empty state with leaf icon and CTA -- [FE] 2026-03-30
-- [ ] T401 - [UIUX] Review: spacing pass on tasks page list view, dialog, and mobile layout -- [UIUX]
-- [ ] T402 - [QA] Regression: verify tasks page loads, create task flow works, filters apply correctly -- [QA]
+- [ ] T401 - [UIUX] Review: spacing pass on tasks page list view, dialog, detail panel, type tabs, and mobile layout -- [UIUX]
+- [ ] T402 - [QA] Regression: verify tasks page loads, create task flow works, type/status filters, detail panel, subtask toggle, template picker -- [QA]
 
 ### Reviews Pipeline Enhancement
 
@@ -702,9 +702,9 @@ Requires S16, S17, S18.
 - [ ] T413 - [BE] POST /api/admin/tasks/[id]/dependencies: add a dependency (dependsOnTaskId). Validate no circular references.
 - [ ] T414 - [BE] GET /api/admin/tasks/[id]/dependencies: return both "blocks" and "blocked by" relationships for a task.
 - [ ] T415 - [BE] DELETE /api/admin/tasks/[id]/dependencies/[depId]: remove a dependency.
-- [ ] T416 - [FE] Task detail: dependencies section showing blocked-by and blocks lists with status badges. Add dependency picker (SearchableSelect of tasks).
+- [x] T416 - [FE] Task detail: dependencies section showing blocked-by and blocks lists with status badges. Add dependency picker (SearchableSelect of tasks). -- [FE] 2026-04-03
 - [ ] T417 - [BE] PATCH /api/admin/tasks/[id]: support requestId field for task-to-request linking.
-- [ ] T418 - [FE] Task detail: linked request section showing request title, status, and link. Request picker to set or change.
+- [x] T418 - [FE] Task detail: linked request section showing request title, status, and link. Request picker to set or change. -- [FE] 2026-04-03
 
 #### Task Templates
 
@@ -713,11 +713,11 @@ Requires S16, S17, S18.
 - [ ] T421 - [BE] PATCH /api/admin/task-templates/[id]: update template.
 - [ ] T422 - [BE] DELETE /api/admin/task-templates/[id]: delete template.
 - [ ] T423 - [FE] Settings page: task templates manager (list, create, edit, delete templates).
-- [ ] T424 - [FE] New task dialog: "Use template" dropdown that pre-fills fields and subtasks from selected template.
+- [x] T424 - [FE] New task dialog: "Use template" dropdown that pre-fills fields and subtasks from selected template. -- [FE] 2026-04-03
 
 #### Subtask Checklists
 
-- [ ] T425 - [FE] Task detail: subtask checklist UI with add, toggle complete, reorder (drag), delete. Show completion count (e.g. "3/7 done").
+- [x] T425 - [FE] Task detail: subtask checklist UI with add, toggle complete, reorder (drag), delete. Show completion count (e.g. "3/7 done"). -- [FE] 2026-04-03
 - [ ] T426 - [BE] GET /api/admin/tasks/[id]/subtasks: return subtasks ordered by creation.
 - [ ] T427 - [BE] POST /api/admin/tasks/[id]/subtasks: create subtask.
 - [ ] T428 - [BE] PATCH /api/admin/tasks/[id]/subtasks/[subId]: toggle completed, update title.

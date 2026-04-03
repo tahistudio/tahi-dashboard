@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Users, Plus, ChevronDown, ChevronRight, Briefcase, Clock } from 'lucide-react'
+import { Users, ChevronDown, ChevronRight, Briefcase, Clock } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'

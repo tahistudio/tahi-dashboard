@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, isNull } from 'drizzle-orm'
+import { eq, desc, and } from 'drizzle-orm'
 
 // ── GET /api/admin/conversations/[id]/messages ──────────────────────────────
 // Paginated messages for a conversation. Joins sender info.

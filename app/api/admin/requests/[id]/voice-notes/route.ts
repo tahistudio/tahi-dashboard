@@ -48,7 +48,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const { id: _requestId } = await params
+  await params
   const body = await req.json() as {
     messageId?: string
     storageKey?: string
