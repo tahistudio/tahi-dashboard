@@ -488,7 +488,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] S14 - [BE] Add org chart schema: add `reportsToId` and `department` columns to `teamMembers`; create `plannedRoles` table (id, title, department, reportsToId, priority, status, notes, estimatedStartDate, weeklyCapacityHours)
 - [ ] S15 - [BE] Add close rate tracking fields: add `wonSource` column to deals table (text, nullable)
 
-- [ ] T286 - [BE] Seed default pipeline stages (Inquiry, Contacted, Discovery, Proposal Sent, Won, Lost, Stalled) in migration per Tahi's actual sales process
+- [x] T286 - [BE] Seed default pipeline stages (Inquiry, Contacted, Discovery, Proposal Sent, Won, Lost, Stalled) in migration per Tahi's actual sales process -- [FE] 2026-04-03
 - [ ] T287 - [BE] GET /api/admin/pipeline-stages: return all stages ordered by position
 - [ ] T288 - [BE] PUT /api/admin/pipeline-stages: bulk update stage order, names, colours, probabilities
 - [ ] T289 - [FE] Settings page: pipeline stages editor (reorder, rename, change colour, set probability)

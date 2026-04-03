@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { asc } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -61,6 +61,69 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to initialize pipeline stages' }, { status: 500 })
     }
   }
+
+  return NextResponse.json({ stages })
+}
+
+// PUT /api/admin/pipeline/stages - bulk update (reorder, rename, change colors, probabilities)
+export async function PUT(req: NextRequest) {
+  const { orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const body = await req.json() as {
+    stages?: Array<{
+      id: string
+      name?: string
+      slug?: string
+      probability?: number
+      position?: number
+      colour?: string | null
+      isDefault?: number
+      isClosedWon?: number
+      isClosedLost?: number
+    }>
+  }
+
+  if (!body.stages || !Array.isArray(body.stages) || body.stages.length === 0) {
+    return NextResponse.json({ error: 'stages array is required' }, { status: 400 })
+  }
+
+  // Validate all entries have an id
+  for (const stage of body.stages) {
+    if (!stage.id) {
+      return NextResponse.json({ error: 'Each stage must have an id' }, { status: 400 })
+    }
+  }
+
+  const database = await db() as unknown as D1
+
+  for (const stage of body.stages) {
+    const updates: Record<string, unknown> = {}
+
+    if (stage.name !== undefined) updates.name = stage.name.trim()
+    if (stage.slug !== undefined) updates.slug = stage.slug
+    if (stage.probability !== undefined) updates.probability = stage.probability
+    if (stage.position !== undefined) updates.position = stage.position
+    if (stage.colour !== undefined) updates.colour = stage.colour
+    if (stage.isDefault !== undefined) updates.isDefault = stage.isDefault
+    if (stage.isClosedWon !== undefined) updates.isClosedWon = stage.isClosedWon
+    if (stage.isClosedLost !== undefined) updates.isClosedLost = stage.isClosedLost
+
+    if (Object.keys(updates).length > 0) {
+      await database
+        .update(schema.pipelineStages)
+        .set(updates)
+        .where(eq(schema.pipelineStages.id, stage.id))
+    }
+  }
+
+  // Return the updated stages
+  const stages = await database
+    .select()
+    .from(schema.pipelineStages)
+    .orderBy(asc(schema.pipelineStages.position))
 
   return NextResponse.json({ stages })
 }

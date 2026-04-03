@@ -5,9 +5,9 @@ import { schema } from '@/db/d1'
 
 const DEFAULT_STAGES = [
   { name: 'Inquiry',       slug: 'inquiry',       probability: 5,   position: 0, colour: '#60a5fa', isDefault: 1, isClosedWon: 0, isClosedLost: 0 },
-  { name: 'Contacted',     slug: 'contacted',     probability: 10,  position: 1, colour: '#a78bfa', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
-  { name: 'Discovery',     slug: 'discovery',     probability: 25,  position: 2, colour: '#fbbf24', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
-  { name: 'Proposal Sent', slug: 'proposal_sent', probability: 50,  position: 3, colour: '#fb923c', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
+  { name: 'Contacted',     slug: 'contacted',     probability: 15,  position: 1, colour: '#a78bfa', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
+  { name: 'Discovery',     slug: 'discovery',     probability: 35,  position: 2, colour: '#fbbf24', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
+  { name: 'Proposal Sent', slug: 'proposal_sent', probability: 60,  position: 3, colour: '#fb923c', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
   { name: 'Won',           slug: 'won',           probability: 100, position: 4, colour: '#4ade80', isDefault: 0, isClosedWon: 1, isClosedLost: 0 },
   { name: 'Lost',          slug: 'lost',          probability: 0,   position: 5, colour: '#f87171', isDefault: 0, isClosedWon: 0, isClosedLost: 1 },
   { name: 'Stalled',       slug: 'stalled',       probability: 0,   position: 6, colour: '#8a9987', isDefault: 0, isClosedWon: 0, isClosedLost: 1 },

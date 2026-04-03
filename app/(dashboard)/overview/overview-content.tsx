@@ -167,6 +167,9 @@ export function AdminOverview({ userName }: { userName: string }) {
         />
       </div>
 
+      {/* Pipeline summary */}
+      <PipelineSummaryCard />
+
       {/* Revenue trend */}
       {!loading && monthlyRevenue.length > 0 && (
         <RevenueChart data={monthlyRevenue} />
@@ -194,6 +197,169 @@ export function AdminOverview({ userName }: { userName: string }) {
       {!loading && (kpis?.activeClients ?? 0) === 0 && <GettingStarted />}
     </div>
   )
+}
+
+// ─── Pipeline Summary Card (T360) ───────────────────────────────────────────
+
+interface DealSummary {
+  id: string
+  title: string
+  value: number | null
+  valueNzd: number | null
+  currency: string | null
+  expectedCloseDate: string | null
+  stageName: string | null
+  stageColour: string | null
+  stageProbability: number | null
+  stageIsClosedWon: number | null
+  stageIsClosedLost: number | null
+  orgName: string | null
+}
+
+function PipelineSummaryCard() {
+  const [deals, setDeals] = useState<DealSummary[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/deals?limit=100'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<{ items: DealSummary[] }>
+      })
+      .then(data => setDeals(data.items ?? []))
+      .catch(() => setDeals([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return null
+  if (deals.length === 0) return null
+
+  // Calculate totals: only open deals (not won/lost)
+  const openDeals = deals.filter(d => !d.stageIsClosedWon && !d.stageIsClosedLost)
+  const totalPipelineValue = openDeals.reduce((sum, d) => sum + (d.valueNzd ?? d.value ?? 0), 0)
+  const weightedValue = openDeals.reduce((sum, d) => {
+    const val = d.valueNzd ?? d.value ?? 0
+    const prob = d.stageProbability ?? 0
+    return sum + (val * prob / 100)
+  }, 0)
+
+  // Deals closing this month
+  const now = new Date()
+  const currentMonth = now.getMonth()
+  const currentYear = now.getFullYear()
+  const closingThisMonth = openDeals.filter(d => {
+    if (!d.expectedCloseDate) return false
+    const close = new Date(d.expectedCloseDate)
+    return close.getMonth() === currentMonth && close.getFullYear() === currentYear
+  })
+  const closingThisMonthValue = closingThisMonth.reduce((sum, d) => sum + (d.valueNzd ?? d.value ?? 0), 0)
+
+  return (
+    <div
+      className="grid grid-cols-1 sm:grid-cols-3 gap-4"
+    >
+      <Link
+        href="/pipeline"
+        className="block rounded-xl transition-all"
+        style={{
+          padding: '1.25rem',
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border)',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+          textDecoration: 'none',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)' }}
+        onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.06)' }}
+      >
+        <div className="flex items-center gap-2" style={{ marginBottom: '0.75rem' }}>
+          <div
+            className="flex items-center justify-center flex-shrink-0"
+            style={{ width: '2rem', height: '2rem', background: ACCENTS.emerald.bg, color: ACCENTS.emerald.color, borderRadius: '0 0.5rem 0 0.5rem' }}
+          >
+            <TrendingUp size={14} />
+          </div>
+          <span className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--color-text-subtle)' }}>
+            Pipeline Value
+          </span>
+        </div>
+        <p className="font-bold tabular-nums" style={{ fontSize: '1.5rem', color: 'var(--color-text)', marginBottom: '0.25rem' }}>
+          {formatNzd(totalPipelineValue)}
+        </p>
+        <p className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+          {openDeals.length} open deal{openDeals.length !== 1 ? 's' : ''}
+        </p>
+      </Link>
+
+      <Link
+        href="/pipeline"
+        className="block rounded-xl transition-all"
+        style={{
+          padding: '1.25rem',
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border)',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+          textDecoration: 'none',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)' }}
+        onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.06)' }}
+      >
+        <div className="flex items-center gap-2" style={{ marginBottom: '0.75rem' }}>
+          <div
+            className="flex items-center justify-center flex-shrink-0"
+            style={{ width: '2rem', height: '2rem', background: ACCENTS.blue.bg, color: ACCENTS.blue.color, borderRadius: '0 0.5rem 0 0.5rem' }}
+          >
+            <TrendingUp size={14} />
+          </div>
+          <span className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--color-text-subtle)' }}>
+            Weighted Value
+          </span>
+        </div>
+        <p className="font-bold tabular-nums" style={{ fontSize: '1.5rem', color: 'var(--color-text)', marginBottom: '0.25rem' }}>
+          {formatNzd(weightedValue)}
+        </p>
+        <p className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+          probability-adjusted
+        </p>
+      </Link>
+
+      <Link
+        href="/pipeline"
+        className="block rounded-xl transition-all"
+        style={{
+          padding: '1.25rem',
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border)',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+          textDecoration: 'none',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)' }}
+        onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.06)' }}
+      >
+        <div className="flex items-center gap-2" style={{ marginBottom: '0.75rem' }}>
+          <div
+            className="flex items-center justify-center flex-shrink-0"
+            style={{ width: '2rem', height: '2rem', background: ACCENTS.amber.bg, color: ACCENTS.amber.color, borderRadius: '0 0.5rem 0 0.5rem' }}
+          >
+            <Clock size={14} />
+          </div>
+          <span className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--color-text-subtle)' }}>
+            Closing This Month
+          </span>
+        </div>
+        <p className="font-bold tabular-nums" style={{ fontSize: '1.5rem', color: 'var(--color-text)', marginBottom: '0.25rem' }}>
+          {formatNzd(closingThisMonthValue)}
+        </p>
+        <p className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+          {closingThisMonth.length} deal{closingThisMonth.length !== 1 ? 's' : ''}
+        </p>
+      </Link>
+    </div>
+  )
+}
+
+function formatNzd(n: number) {
+  if (n === 0) return '$0'
+  return new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD', maximumFractionDigits: 0 }).format(n)
 }
 
 // ─── Pipeline Capacity Card ──────────────────────────────────────────────────
