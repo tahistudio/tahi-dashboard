@@ -2,7 +2,8 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and } from 'drizzle-orm'
+import { eq, desc, and, ne } from 'drizzle-orm'
+import { createNotifications } from '@/lib/notifications'
 
 // ── GET /api/admin/conversations/[id]/messages ──────────────────────────────
 // Paginated messages for a conversation. Joins sender info.
@@ -255,6 +256,39 @@ export async function POST(
           eq(schema.conversationParticipants.participantId, participantId)
         )
       )
+
+    // Notify other participants about the new message
+    const otherParticipants = await database
+      .select({
+        participantId: schema.conversationParticipants.participantId,
+        participantType: schema.conversationParticipants.participantType,
+      })
+      .from(schema.conversationParticipants)
+      .where(
+        and(
+          eq(schema.conversationParticipants.conversationId, conversationId),
+          ne(schema.conversationParticipants.participantId, participantId)
+        )
+      )
+
+    // If internal-only, only notify team members
+    const recipients = otherParticipants
+      .filter((p) => !body.isInternal || p.participantType === 'team_member')
+      .map((p) => ({
+        userId: p.participantId,
+        userType: p.participantType as 'team_member' | 'contact',
+      }))
+
+    if (recipients.length > 0) {
+      const convName = conv.name ?? 'conversation'
+      await createNotifications(database, recipients, {
+        type: 'new_message',
+        title: `New message in ${convName}`,
+        body: body.content.trim().slice(0, 200),
+        entityType: 'message',
+        entityId: conversationId,
+      })
+    }
 
     return NextResponse.json({ id: msgId }, { status: 201 })
   } catch (err) {

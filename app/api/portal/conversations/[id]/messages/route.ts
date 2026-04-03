@@ -2,7 +2,8 @@ import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and } from 'drizzle-orm'
+import { eq, desc, and, ne } from 'drizzle-orm'
+import { createNotifications } from '@/lib/notifications'
 
 // ── GET /api/portal/conversations/[id]/messages ────────────────────────────
 // Paginated messages for a conversation. Only returns non-internal messages.

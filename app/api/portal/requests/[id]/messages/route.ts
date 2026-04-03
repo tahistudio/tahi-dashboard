@@ -71,6 +71,25 @@ export async function POST(req: NextRequest, { params }: Params) {
       .set({ updatedAt: new Date().toISOString() })
       .where(eq(schema.requests.id, id))
 
+    // Notify the request assignee about the client message
+    const [reqInfo] = await drizzle
+      .select({ assigneeId: schema.requests.assigneeId, title: schema.requests.title })
+      .from(schema.requests)
+      .where(eq(schema.requests.id, id))
+      .limit(1)
+
+    if (reqInfo?.assigneeId) {
+      await createNotification(drizzle, {
+        userId: reqInfo.assigneeId,
+        userType: 'team_member',
+        type: 'new_message',
+        title: `New client message on "${reqInfo.title}"`,
+        body: body.body.trim().slice(0, 200),
+        entityType: 'request',
+        entityId: id,
+      })
+    }
+
     return NextResponse.json({ id: msgId }, { status: 201 })
   } catch (err) {
     console.error('[POST /api/portal/requests/[id]/messages]', err)
