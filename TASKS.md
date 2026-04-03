@@ -723,6 +723,13 @@ Requires S16, S17, S18.
 - [ ] T428 - [BE] PATCH /api/admin/tasks/[id]/subtasks/[subId]: toggle completed, update title.
 - [ ] T429 - [BE] DELETE /api/admin/tasks/[id]/subtasks/[subId]: delete subtask.
 
+#### Task Detail Page and Board View
+
+- [x] T425a - [FE] Task detail page: full page at /tasks/[id] with breadcrumb, editable title, description, status selector, priority selector, assignee picker, due date picker, type badge, client association, subtask checklist, dependencies, linked request, time entries, activity/comments, delete with confirm. -- [FE] 2026-04-03
+- [x] T425b - [FE] Tasks board/kanban view: column layout (To Do, In Progress, Blocked, Done) with drag-and-drop status change, task cards with title, type badge, priority, assignee avatar, due date, subtask progress. View toggle in toolbar. -- [FE] 2026-04-03
+- [ ] T425c - [UIUX] Review task detail page spacing and layout (app/(dashboard)/tasks/[id]/task-detail.tsx)
+- [ ] T425d - [QA] Regression test task detail page and board view: navigation, editing, drag-drop, subtask toggle, delete
+
 #### Bulk Task Operations
 
 - [ ] T430 - [FE] Tasks page: multi-select checkboxes on task rows. Bulk actions bar: change status, change priority, assign, delete.

@@ -49,11 +49,17 @@ BRAND VOICE:
 - NZ English spelling (colour, organise, centre).
 
 SERVICE CATEGORIES:
-- design: UI/UX, page mockups, graphics, icons, illustrations, brand assets, presentations
-- development: Webflow builds, code, integrations, bug fixes, features, migrations, performance
+- design: UI/UX, page mockups, graphics, icons, illustrations, brand assets, presentations, visual redesigns, layout changes, brand refresh, Figma work, wireframes, style guides
+- development: Webflow builds (after design is approved), code, integrations, bug fixes, features, migrations, performance, CMS setup, custom code
 - content: Blog posts, copy, newsletters, email sequences, case studies, scripts
 - seo: Audits, keyword optimisation, meta tags, sitemaps, technical SEO, AEO (AI overview optimisation)
 - strategy: Roadmaps, audits, competitor analysis, conversion funnels, growth planning, campaign planning
+
+CATEGORY RULES (important):
+- Visual redesign, mockup, and layout work is ALWAYS "design" category. Webflow build/implementation is "development". For full redesign projects, create design tasks first, then development tasks.
+- For any redesign or new build project, ALWAYS recommend creating designs/mockups first in Figma before building in Webflow. Never suggest jumping straight into building without design approval. This is a core process at Tahi.
+- When a project involves both design and development, create the design task(s) first with a note that development will follow after design approval.
+- "Redesign" = design. "Rebuild" = development. "Redesign and rebuild" = design task first, then development task.
 
 TRACK TYPES:
 - small: Tasks that take up to 1 day. Quick fixes, section updates, copy changes, bug fixes, small design tweaks.
@@ -65,11 +71,11 @@ PRICING CONTEXT (internal, do not share with clients):
 - Hours are internal estimates only. Never mention hours or pricing to the client.
 
 HOUR ESTIMATES (use these as baselines, adjust based on complexity):
-- design small: 4-8 hours | design large: 16-24 hours
-- development small: 4-10 hours | development large: 24-40 hours
-- content small: 3-6 hours | content large: 10-16 hours
-- seo small: 4-8 hours | seo large: 12-20 hours
-- strategy small: 3-6 hours | strategy large: 12-20 hours
+- design small: 6-12 hours | design large: 24-40 hours
+- development small: 8-16 hours | development large: 32-60 hours
+- content small: 4-8 hours | content large: 12-24 hours
+- seo small: 6-12 hours | seo large: 16-30 hours
+- strategy small: 4-8 hours | strategy large: 16-30 hours
 
 YOUR JOB:
 1. When a user describes what they need, identify the category and ask 2-3 smart follow-up questions to scope the task properly. Questions should cover: specific deliverable, affected pages/sections, available assets, and deadline.
@@ -197,15 +203,17 @@ function parseTasksFromResponse(text: string): { reply: string; tasks: TaskDraft
 
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   design: [
-    'design', 'ui', 'ux', 'mockup', 'wireframe', 'logo', 'brand', 'graphic',
-    'figma', 'layout', 'visual', 'icon', 'banner', 'hero', 'illustration',
-    'thumbnail', 'poster', 'flyer', 'infographic', 'presentation',
+    'design', 'redesign', 'ui', 'ux', 'mockup', 'wireframe', 'logo', 'brand',
+    'graphic', 'figma', 'layout', 'visual', 'icon', 'banner', 'hero',
+    'illustration', 'thumbnail', 'poster', 'flyer', 'infographic',
+    'presentation', 'style guide', 'colour palette', 'color palette',
+    'brand refresh', 'look and feel', 'aesthetic', 'rebrand',
   ],
   development: [
     'develop', 'build', 'code', 'implement', 'feature', 'bug', 'fix',
-    'website', 'app', 'api', 'database', 'integration', 'deploy', 'page',
+    'webflow', 'app', 'api', 'database', 'integration', 'deploy',
     'form', 'checkout', 'login', 'plugin', 'module', 'component',
-    'responsive', 'mobile', 'performance', 'speed', 'migration',
+    'responsive', 'mobile', 'performance', 'speed', 'migration', 'cms',
   ],
   content: [
     'content', 'copy', 'blog', 'write', 'article', 'newsletter', 'email',
@@ -313,13 +321,13 @@ const FOLLOW_UP_QUESTIONS: Record<string, string> = {
 
 function estimateHours(category: string, size: 'small' | 'large'): number {
   const estimates: Record<string, Record<string, number>> = {
-    design:      { small: 6,  large: 20 },
-    development: { small: 8,  large: 32 },
-    content:     { small: 4,  large: 12 },
-    seo:         { small: 6,  large: 16 },
-    strategy:    { small: 4,  large: 16 },
+    design:      { small: 9,  large: 32 },
+    development: { small: 12, large: 46 },
+    content:     { small: 6,  large: 18 },
+    seo:         { small: 9,  large: 23 },
+    strategy:    { small: 6,  large: 23 },
   }
-  return estimates[category]?.[size] ?? (size === 'large' ? 16 : 6)
+  return estimates[category]?.[size] ?? (size === 'large' ? 23 : 9)
 }
 
 function generateTitle(text: string, category: string): string {

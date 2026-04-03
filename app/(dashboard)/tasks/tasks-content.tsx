@@ -7,7 +7,9 @@ import {
   CheckCircle2, Circle, Link2, Clock,
   ChevronRight, Trash2, GitBranch, Users,
   Building2, Briefcase, Shield, Sparkles,
+  LayoutList, Columns3,
 } from 'lucide-react'
+import Link from 'next/link'
 import { apiPath } from '@/lib/api'
 import { AiTaskWizard } from '@/components/tahi/ai-task-wizard'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
@@ -306,6 +308,7 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
   const [priorityFilter, setPriorityFilter] = useState('all')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
+  const [viewMode, setViewMode] = useState<'list' | 'board'>('list')
 
   const fetchTasks = useCallback(async () => {
     setLoading(true)
@@ -539,6 +542,42 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
           </select>
 
           <div className="flex-1" />
+
+          {/* View toggle */}
+          <div
+            className="flex items-center overflow-hidden flex-shrink-0"
+            style={{ border: '1px solid var(--color-border)', borderRadius: '0.5rem' }}
+          >
+            <button
+              onClick={() => setViewMode('list')}
+              className="flex items-center justify-center transition-colors"
+              style={{
+                padding: '0.5rem',
+                background: viewMode === 'list' ? 'var(--color-brand)' : 'var(--color-bg)',
+                color: viewMode === 'list' ? 'white' : 'var(--color-text-muted)',
+                cursor: 'pointer',
+                border: 'none',
+              }}
+              aria-label="List view"
+            >
+              <LayoutList className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('board')}
+              className="flex items-center justify-center transition-colors"
+              style={{
+                padding: '0.5rem',
+                background: viewMode === 'board' ? 'var(--color-brand)' : 'var(--color-bg)',
+                color: viewMode === 'board' ? 'white' : 'var(--color-text-muted)',
+                border: 'none',
+                borderLeft: '1px solid var(--color-border)',
+                cursor: 'pointer',
+              }}
+              aria-label="Board view"
+            >
+              <Columns3 className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Status tabs */}
@@ -574,11 +613,13 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
         </div>
 
         {/* Content area */}
-        <div style={{ background: 'var(--color-bg)' }}>
+        <div style={{ background: viewMode === 'board' ? 'var(--color-bg-secondary)' : 'var(--color-bg)' }}>
           {loading ? (
             <LoadingSkeleton />
           ) : filtered.length === 0 ? (
             <EmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />
+          ) : viewMode === 'board' ? (
+            <TaskBoardView tasks={filtered} isAdmin={isAdmin} teamMap={teamMap} onStatusChange={fetchTasks} />
           ) : (
             <TaskListView tasks={filtered} isAdmin={isAdmin} teamMap={teamMap} onSelect={setSelectedTaskId} />
           )}
@@ -769,6 +810,266 @@ function TaskRow({ task, isAdmin, isLast, teamMap, onSelect }: {
         )}
       </div>
     </div>
+  )
+}
+
+// ── Board View ──────────────────────────────────────────────────────────────
+
+const BOARD_COLUMNS = [
+  { status: 'todo',        label: 'To Do',       topColor: 'var(--status-submitted-dot)' },
+  { status: 'in_progress', label: 'In Progress', topColor: 'var(--status-in-progress-dot)' },
+  { status: 'blocked',     label: 'Blocked',     topColor: 'var(--color-danger)' },
+  { status: 'done',        label: 'Done',        topColor: 'var(--status-delivered-dot)' },
+]
+
+function TaskBoardView({ tasks, isAdmin, teamMap, onStatusChange }: {
+  tasks: Task[]
+  isAdmin: boolean
+  teamMap: Map<string, TeamMember>
+  onStatusChange: () => void
+}) {
+  const byStatus = (status: string) => tasks.filter(t => t.status === status)
+
+  const handleDrop = async (e: React.DragEvent, newStatus: string) => {
+    e.preventDefault()
+    const el = e.currentTarget as HTMLElement
+    el.style.borderColor = 'var(--color-border)'
+    const taskId = e.dataTransfer.getData('taskId')
+    const fromStatus = e.dataTransfer.getData('fromStatus')
+    if (!taskId || fromStatus === newStatus) return
+    if (!isAdmin) return
+    try {
+      await fetch(apiPath(`/api/admin/tasks/${taskId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      onStatusChange()
+    } catch {
+      // silent
+    }
+  }
+
+  return (
+    <div
+      className="flex gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide"
+      style={{ padding: '1rem', paddingBottom: '1.25rem', background: 'var(--color-bg-secondary)', WebkitOverflowScrolling: 'touch', height: 'calc(100vh - 14rem)' }}
+    >
+      {BOARD_COLUMNS.map(col => {
+        const cards = byStatus(col.status)
+        const cfg = TASK_STATUS_CONFIG[col.status] ?? TASK_STATUS_CONFIG.todo
+        return (
+          <div
+            key={col.status}
+            className="flex flex-col flex-shrink-0"
+            style={{ width: '17rem', minWidth: '17rem' }}
+          >
+            {/* Column header */}
+            <div
+              className="flex items-center justify-between"
+              style={{
+                padding: '0.625rem 0.75rem',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                borderBottom: 'none',
+                borderRadius: '0.5rem 0.5rem 0 0',
+                borderTop: `3px solid ${col.topColor}`,
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="rounded-full flex-shrink-0"
+                  style={{ width: '0.5rem', height: '0.5rem', background: cfg.dot, display: 'inline-block' }}
+                />
+                <span
+                  className="font-semibold uppercase tracking-wide"
+                  style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}
+                >
+                  {cfg.label}
+                </span>
+              </div>
+              <span
+                className="font-semibold rounded-full"
+                style={{ padding: '0.125rem 0.4375rem', fontSize: '0.6875rem', background: 'var(--color-bg-secondary)', color: 'var(--color-text-subtle)' }}
+              >
+                {cards.length}
+              </span>
+            </div>
+
+            {/* Cards area - drop target */}
+            <div
+              className="flex flex-col gap-2 overflow-y-auto"
+              style={{
+                padding: '0.5rem',
+                background: 'var(--color-bg-tertiary)',
+                border: '1px solid var(--color-border)',
+                borderTop: 'none',
+                borderRadius: '0 0 0.5rem 0.5rem',
+                minHeight: '10rem',
+                maxHeight: 'calc(100vh - 18rem)',
+                transition: 'border-color 0.15s',
+              }}
+              onDragOver={(e) => {
+                e.preventDefault()
+                e.currentTarget.style.borderColor = '#5A824E'
+              }}
+              onDragLeave={(e) => {
+                e.currentTarget.style.borderColor = 'var(--color-border)'
+              }}
+              onDrop={(e) => { handleDrop(e, col.status) }}
+            >
+              {cards.length === 0 ? (
+                <div
+                  className="flex items-center justify-center rounded-lg"
+                  style={{
+                    padding: '1.75rem 0',
+                    fontSize: '0.75rem',
+                    color: 'var(--color-text-subtle)',
+                    border: '1px dashed var(--color-border)',
+                    background: 'transparent',
+                  }}
+                >
+                  No tasks
+                </div>
+              ) : (
+                cards.map(task => <TaskKanbanCard key={task.id} task={task} teamMap={teamMap} />)
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function TaskKanbanCard({ task, teamMap }: { task: Task; teamMap: Map<string, TeamMember> }) {
+  const assignee = task.assigneeId ? teamMap.get(task.assigneeId) : null
+  const hasSubtasks = (task.subtaskCount ?? 0) > 0
+  const dueDateState = getDueDateState(task.dueDate, task.status)
+
+  return (
+    <Link
+      href={`/tasks/${task.id}`}
+      className="block rounded-lg transition-all"
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('taskId', task.id)
+        e.dataTransfer.setData('fromStatus', task.status)
+        e.dataTransfer.effectAllowed = 'move'
+        ;(e.currentTarget as HTMLElement).style.opacity = '0.5'
+      }}
+      onDragEnd={(e) => {
+        ;(e.currentTarget as HTMLElement).style.opacity = '1'
+      }}
+      style={{
+        padding: '0.75rem',
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border)',
+        boxShadow: 'var(--shadow-sm)',
+        textDecoration: 'none',
+        cursor: 'grab',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.borderColor = 'var(--color-brand)'
+        e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.borderColor = 'var(--color-border)'
+        e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
+      }}
+    >
+      {/* Type badge */}
+      <div className="flex items-center justify-between" style={{ marginBottom: '0.5rem' }}>
+        <span
+          className="inline-flex items-center rounded"
+          style={{ padding: '0.125rem 0.4375rem', fontSize: '0.6875rem', background: 'var(--color-bg-tertiary)', color: 'var(--color-text-muted)' }}
+        >
+          {formatType(task.type)}
+        </span>
+        {(task.blockedByCount ?? 0) > 0 && (
+          <GitBranch style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-danger)', flexShrink: 0 }} />
+        )}
+      </div>
+
+      {/* Title */}
+      <p
+        className="font-medium leading-snug line-clamp-2"
+        style={{ fontSize: '0.875rem', color: 'var(--color-text)', marginBottom: '0.625rem' }}
+      >
+        {task.title}
+      </p>
+
+      {/* Due date */}
+      {task.dueDate && (
+        <div className="flex items-center gap-1" style={{ marginBottom: '0.5rem' }}>
+          {dueDateState === 'overdue' && <AlertTriangle style={{ width: '0.625rem', height: '0.625rem', color: 'var(--color-overdue-text)' }} />}
+          <Calendar style={{ width: '0.625rem', height: '0.625rem', color: dueDateState === 'overdue' ? 'var(--color-overdue-text)' : dueDateState === 'due-soon' ? 'var(--color-due-soon-text)' : 'var(--color-text-muted)' }} />
+          <span style={{
+            fontSize: '0.75rem',
+            color: dueDateState === 'overdue' ? 'var(--color-overdue-text)' : dueDateState === 'due-soon' ? 'var(--color-due-soon-text)' : 'var(--color-text-muted)',
+          }}>
+            {formatDate(task.dueDate)}
+          </span>
+        </div>
+      )}
+
+      {/* Subtask progress */}
+      {hasSubtasks && (
+        <div className="flex items-center gap-1.5" style={{ marginBottom: '0.5rem' }}>
+          <div
+            className="flex-1 rounded-full overflow-hidden"
+            style={{ height: '0.25rem', background: 'var(--color-border-subtle)' }}
+          >
+            <div
+              className="rounded-full"
+              style={{
+                width: `${(task.subtaskCount ?? 0) > 0 ? Math.round(((task.subtaskDone ?? 0) / (task.subtaskCount ?? 1)) * 100) : 0}%`,
+                height: '100%',
+                background: (task.subtaskDone ?? 0) === (task.subtaskCount ?? 0) ? 'var(--color-success)' : 'var(--color-brand)',
+                transition: 'width 0.3s ease',
+              }}
+            />
+          </div>
+          <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', whiteSpace: 'nowrap' }}>
+            {task.subtaskDone ?? 0}/{task.subtaskCount ?? 0}
+          </span>
+        </div>
+      )}
+
+      {/* Footer: org + assignee + priority */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 min-w-0">
+          {task.orgName && (
+            <>
+              <OrgAvatar name={task.orgName} />
+              <span className="truncate" style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', maxWidth: '5.625rem' }}>
+                {task.orgName}
+              </span>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <PriorityBadge priority={task.priority} />
+          {assignee && (
+            <div
+              className="flex items-center justify-center font-semibold flex-shrink-0"
+              style={{
+                width: '1.5rem',
+                height: '1.5rem',
+                fontSize: '0.5625rem',
+                background: 'var(--color-brand-50)',
+                color: 'var(--color-brand-dark)',
+                borderRadius: 'var(--radius-leaf-sm)',
+                border: '1px solid var(--color-brand-100)',
+              }}
+              title={assignee.name}
+            >
+              {getInitials(assignee.name)}
+            </div>
+          )}
+        </div>
+      </div>
+    </Link>
   )
 }
 

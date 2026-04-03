@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 import { X, Sparkles, Send, Loader2, Pencil, Check, ChevronDown } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 
@@ -188,18 +188,28 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
     try {
       const results: boolean[] = []
       for (const task of latestTasks.tasks) {
+        // Map wizard priority to schema priority (standard | high | urgent)
+        let mappedPriority = 'standard'
+        if (task.priority === 'urgent') mappedPriority = 'urgent'
+        else if (task.priority === 'high') mappedPriority = 'high'
+
+        // Task type: client_task when org is set, tahi_internal otherwise
+        const taskType = context.orgId ? 'client_task' : 'tahi_internal'
+
+        // Append category and estimated hours as metadata in description
+        const descParts = [task.description]
+        if (task.category) descParts.push(`\nCategory: ${task.category}`)
+        if (task.estimatedHours) descParts.push(`Estimated hours: ${task.estimatedHours}`)
+
         const res = await fetch(apiPath('/api/admin/tasks'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             title: task.title,
-            description: task.description,
-            category: task.category,
-            type: task.type === 'large' ? 'internal_client' : 'client_external',
-            status: 'open',
-            priority: task.priority,
-            estimatedHours: task.estimatedHours,
-            orgId: context.orgId,
+            description: descParts.join('\n'),
+            type: taskType,
+            priority: mappedPriority,
+            orgId: context.orgId ?? null,
           }),
         })
         results.push(res.ok)
@@ -582,6 +592,95 @@ export function AiTaskWizardButton({ onClick }: { onClick: () => void }) {
   )
 }
 
+// ── Inline Markdown Renderer ─────────────────────────────────────────────────
+
+function renderInlineFormatting(text: string): ReactNode[] {
+  const parts: ReactNode[] = []
+  // Match **bold** and *italic* patterns
+  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*)/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null = null
+
+  while ((match = regex.exec(text)) !== null) {
+    // Add text before the match
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index))
+    }
+    if (match[2]) {
+      // **bold**
+      parts.push(<strong key={match.index}>{match[2]}</strong>)
+    } else if (match[3]) {
+      // *italic*
+      parts.push(<em key={match.index}>{match[3]}</em>)
+    }
+    lastIndex = match.index + match[0].length
+  }
+
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex))
+  }
+
+  return parts.length > 0 ? parts : [text]
+}
+
+function renderMessageContent(content: string): ReactNode {
+  const lines = content.split('\n')
+  const elements: ReactNode[] = []
+  let listItems: ReactNode[] = []
+  let listStart = 0
+
+  const flushList = () => {
+    if (listItems.length > 0) {
+      elements.push(
+        <ol
+          key={`ol-${listStart}`}
+          style={{
+            margin: '0.375rem 0',
+            paddingLeft: '1.25rem',
+            listStyleType: 'decimal',
+          }}
+        >
+          {listItems}
+        </ol>
+      )
+      listItems = []
+    }
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const numberedMatch = line.match(/^(\d+)\.\s+(.+)$/)
+
+    if (numberedMatch) {
+      if (listItems.length === 0) {
+        listStart = i
+      }
+      listItems.push(
+        <li key={i} style={{ marginBottom: '0.125rem' }}>
+          {renderInlineFormatting(numberedMatch[2])}
+        </li>
+      )
+    } else {
+      flushList()
+      if (line.trim() === '') {
+        elements.push(<br key={i} />)
+      } else {
+        elements.push(
+          <span key={i}>
+            {i > 0 && listItems.length === 0 && elements.length > 0 && lines[i - 1].trim() !== '' ? <br /> : null}
+            {renderInlineFormatting(line)}
+          </span>
+        )
+      }
+    }
+  }
+
+  flushList()
+
+  return <>{elements}</>
+}
+
 // ── Message Bubble ────────────────────────────────────────────────────────────
 
 function MessageBubble({ message }: { message: ChatMessage }) {
@@ -626,11 +725,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             : 'var(--color-text, #121A0F)',
           fontSize: '0.875rem',
           lineHeight: 1.6,
-          whiteSpace: 'pre-wrap',
+          whiteSpace: isUser ? 'pre-wrap' : 'normal',
           wordBreak: 'break-word' as const,
         }}
       >
-        {message.content}
+        {isUser ? message.content : renderMessageContent(message.content)}
       </div>
     </div>
   )
