@@ -291,6 +291,28 @@ export function DocsContent() {
           >
             New Page
           </TahiButton>
+          {pages.length === 0 && !loading && (
+            <TahiButton
+              size="sm"
+              variant="secondary"
+              onClick={async () => {
+                try {
+                  const payloadRes = await fetch(apiPath('/seed-docs.json'))
+                  if (!payloadRes.ok) return
+                  const payload = await payloadRes.json()
+                  const res = await fetch(apiPath('/api/admin/docs/import'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                  })
+                  if (res.ok) fetchPages()
+                } catch { /* silently fail */ }
+              }}
+              className="w-full mt-2"
+            >
+              Import Tahi Docs
+            </TahiButton>
+          )}
         </div>
 
         {/* Page tree */}
