@@ -37,7 +37,8 @@ if (!TOKEN) {
 // HTTP helper
 // ---------------------------------------------------------------------------
 
-const BASE_PATH = process.env.TAHI_BASE_PATH ?? '/dashboard'
+// If TAHI_API_URL already includes /dashboard, don't double it
+const BASE_PATH = DASHBOARD_URL?.endsWith('/dashboard') ? '' : (process.env.TAHI_BASE_PATH ?? '/dashboard')
 
 async function apiFetch(
   path: string,
