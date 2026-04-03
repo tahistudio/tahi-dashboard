@@ -18,6 +18,7 @@ interface IntegrationCard {
   name: string
   description: string
   icon: React.ReactNode
+  disabled?: boolean
 }
 
 const INTEGRATIONS: IntegrationCard[] = [
@@ -42,8 +43,9 @@ const INTEGRATIONS: IntegrationCard[] = [
   {
     key: 'hubspot',
     name: 'HubSpot',
-    description: 'CRM sync for contacts and companies',
+    description: 'CRM is built-in, no external integration needed',
     icon: <Link2 className="w-5 h-5" />,
+    disabled: true,
   },
   {
     key: 'mailerlite',
@@ -236,40 +238,54 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
               </h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {INTEGRATIONS.map((integration) => {
+                  const isDisabled = integration.disabled === true
                   const status = getIntegrationStatus(integration.key)
-                  const isConnected = status === 'connected'
+                  const isConnected = !isDisabled && status === 'connected'
                   return (
                     <div
                       key={integration.key}
                       className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5"
+                      style={{ opacity: isDisabled ? 0.6 : 1 }}
                     >
                       <div className="flex items-start gap-3">
                         <div
                           className="w-10 h-10 flex items-center justify-center flex-shrink-0"
                           style={{
                             borderRadius: 'var(--radius-leaf-sm)',
-                            background: isConnected ? 'var(--color-brand-50)' : 'var(--color-bg-tertiary)',
-                            color: isConnected ? 'var(--color-brand)' : 'var(--color-text-muted)',
+                            background: isDisabled ? 'var(--color-bg-tertiary)' : isConnected ? 'var(--color-brand-50)' : 'var(--color-bg-tertiary)',
+                            color: isDisabled ? 'var(--color-text-subtle)' : isConnected ? 'var(--color-brand)' : 'var(--color-text-muted)',
                           }}
                         >
                           {integration.icon}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <h3 className="text-sm font-semibold text-[var(--color-text)]">
+                            <h3 className="text-sm font-semibold" style={{ color: isDisabled ? 'var(--color-text-subtle)' : 'var(--color-text)' }}>
                               {integration.name}
                             </h3>
-                            <span
-                              className="text-xs px-2 py-0.5 rounded-full font-medium"
-                              style={{
-                                background: isConnected ? 'var(--color-success-bg)' : 'var(--color-bg-tertiary)',
-                                color: isConnected ? 'var(--color-success)' : 'var(--color-text-muted)',
-                              }}
-                            >
-                              {isConnected ? 'Connected' : 'Not Connected'}
-                            </span>
+                            {isDisabled ? (
+                              <span
+                                className="text-xs px-2 py-0.5 rounded-full font-medium"
+                                style={{
+                                  background: 'var(--color-bg-tertiary)',
+                                  color: 'var(--color-text-subtle)',
+                                }}
+                              >
+                                Built-in
+                              </span>
+                            ) : (
+                              <span
+                                className="text-xs px-2 py-0.5 rounded-full font-medium"
+                                style={{
+                                  background: isConnected ? 'var(--color-success-bg)' : 'var(--color-bg-tertiary)',
+                                  color: isConnected ? 'var(--color-success)' : 'var(--color-text-muted)',
+                                }}
+                              >
+                                {isConnected ? 'Connected' : 'Not Connected'}
+                              </span>
+                            )}
                           </div>
-                          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                          <p className="text-xs mt-0.5" style={{ color: isDisabled ? 'var(--color-text-subtle)' : 'var(--color-text-muted)' }}>
                             {integration.description}
                           </p>
                         </div>

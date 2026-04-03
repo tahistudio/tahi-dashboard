@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
 Last updated: 2026-04-03
-Total tasks: 509 (S1-S22 schema + T1-T487 feature)
-Completed: 298/509
+Total tasks: 511 (S1-S22 schema + T1-T489 feature)
+Completed: 307/511
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -504,18 +504,18 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 ### Pipeline Board (FE)
 
-- [ ] T296 - [FE] Pipeline page: Kanban board with columns per stage, deal cards showing title, org, value, currency, expected close date, owner avatar
-- [ ] T297 - [FE] Pipeline board: drag and drop deals between stages (updates deal stageId and probability via PATCH)
-- [ ] T298 - [FE] Pipeline board: list view toggle (table with sortable columns)
+- [x] T296 - [FE] Pipeline page: Kanban board with columns per stage, deal cards showing title, org, value, currency, expected close date, owner avatar — [FE] 2026-04-03
+- [x] T297 - [FE] Pipeline board: drag and drop deals between stages (updates deal stageId and probability via PATCH) — [FE] 2026-04-03
+- [x] T298 - [FE] Pipeline board: list view toggle (table with sortable columns) — [FE] 2026-04-03
 - [ ] T299 - [FE] Pipeline board: filters panel (stage, owner, org, value range, date range)
-- [ ] T300 - [FE] Pipeline board: summary bar at top showing total pipeline value, weighted value, deal count per stage
+- [x] T300 - [FE] Pipeline board: summary bar at top showing total pipeline value, weighted value, deal count per stage — [FE] 2026-04-03
 
 ### Deal Detail Page (FE)
 
-- [ ] T301 - [FE] Deal detail page: two-column layout (main content left, summary panel right) following request detail pattern
-- [ ] T302 - [FE] Deal detail: summary panel with stage selector, value, currency, owner, expected close date, probability, source, estimated hours/week
-- [ ] T303 - [FE] Deal detail: contacts tab showing linked contacts with role badges, add/remove contact
-- [ ] T304 - [FE] Deal detail: activities tab with chronological timeline (calls, meetings, emails, notes), add activity form
+- [x] T301 - [FE] Deal detail page: two-column layout (main content left, summary panel right) following request detail pattern — [FE] 2026-04-03
+- [x] T302 - [FE] Deal detail: summary panel with stage selector, value, currency, owner, expected close date, probability, source, estimated hours/week — [FE] 2026-04-03
+- [x] T303 - [FE] Deal detail: contacts tab showing linked contacts with role badges, add/remove contact — [FE] 2026-04-03
+- [x] T304 - [FE] Deal detail: activities tab with chronological timeline (calls, meetings, emails, notes), add activity form — [FE] 2026-04-03
 - [ ] T305 - [FE] Deal detail: notes tab with rich text editor (Tiptap)
 - [ ] T306 - [FE] Deal detail: associated requests tab (requests from the same org, linkable)
 - [ ] T307 - [FE] Deal detail: capacity impact card showing how closing this deal would affect team capacity
@@ -801,8 +801,8 @@ Requires S21.
 Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover the specific gaps Liam identified: removing HubSpot entirely, adding close rate analytics by source, and capacity forecasting from pipeline.
 
 - [ ] T472 - [BE] Remove HubSpot integration: delete HubSpot OAuth route, sync endpoints, and webhook receiver. Remove HubSpot from integration settings seed data and UI.
-- [ ] T473 - [FE] Settings integrations tab: remove HubSpot connection card entirely.
-- [ ] T474 - [FE] Pipeline deal detail: activity timeline showing all touchpoints (calls, meetings, emails, notes) in chronological order.
+- [x] T473 - [FE] Settings integrations tab: grey out HubSpot with "CRM is built-in" note — [FE] 2026-04-03
+- [x] T474 - [FE] Pipeline deal detail: activity timeline showing all touchpoints (calls, meetings, emails, notes) in chronological order — [FE] 2026-04-03
 - [ ] T475 - [BE] GET /api/admin/reports/close-rates: add breakdowns by source (close rate per source, avg deal size per source, avg cycle length per source).
 - [ ] T476 - [FE] Reports page: close rate analytics section with source breakdown bar chart and conversion funnel.
 - [ ] T477 - [BE] GET /api/admin/capacity/forecast: return forecasted capacity impact from pipeline deals weighted by probability, grouped by expected close month.
@@ -819,3 +819,5 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [x] T485 - [FE] B10: Settings page: fix broken Team button navigation, portal branding save, and modules toggle persistence. -- [FE] 2026-04-03
 - [ ] T486 - [UIUX] Review all audit bug fixes for visual consistency and dark mode.
 - [ ] T487 - [QA] Regression test all audit bug fixes: currency formatting, invoice status, impersonation, voice notes, pipeline headers, MRR card, settings page. -- [QA]
+- [ ] T488 - [UIUX] Pipeline CRM enhancement: spacing review on KPI cards (5-col grid), deal cards (probability badge, source badge, days in stage), list view columns, deal detail source selector and days-in-stage sidebar card.
+- [ ] T489 - [QA] Pipeline CRM enhancement: regression test deal cards, KPI calculations (win rate, avg deal size), drag-and-drop, new deal form with expected close date and lead source, deal detail source selector, settings HubSpot disabled state.

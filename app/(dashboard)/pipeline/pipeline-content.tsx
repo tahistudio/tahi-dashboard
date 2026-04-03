@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   Plus, Search, LayoutList, Columns3,
   TrendingUp, DollarSign, Target,
-  Calendar, User, Building2, Loader2,
+  Calendar, User, Building2,
   ChevronDown, BarChart3, Award,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'

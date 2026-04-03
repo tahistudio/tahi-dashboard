@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   ArrowLeft, Building2, Calendar, Clock,
   Phone, Mail, FileText, MessageSquare,
-  Plus, Loader2, Check, ChevronDown, Tag,
+  Plus, Loader2, Check, ChevronDown,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 
@@ -119,14 +119,33 @@ const ACTIVITY_COLORS: Record<string, string> = {
   task: '#fb923c',
 }
 
-const SOURCE_LABELS: Record<string, string> = {
-  referral: 'Referral',
-  webflow: 'Webflow',
-  linkedin: 'LinkedIn',
-  website: 'Website',
-  cold: 'Cold',
-  existing_client: 'Existing Client',
-  other: 'Other',
+const SOURCE_STYLES: Record<string, { label: string; bg: string; text: string }> = {
+  referral:       { label: 'Referral',        bg: '#fef3c7', text: '#d97706' },
+  linkedin:       { label: 'LinkedIn',        bg: '#dbeafe', text: '#1d4ed8' },
+  website:        { label: 'Website',         bg: '#d1fae5', text: '#059669' },
+  cold:           { label: 'Cold Outreach',   bg: '#e0e7ff', text: '#4338ca' },
+  cold_outreach:  { label: 'Cold Outreach',   bg: '#e0e7ff', text: '#4338ca' },
+  partner:        { label: 'Partner',         bg: '#fce7f3', text: '#be185d' },
+  webflow:        { label: 'Webflow',         bg: '#dbeafe', text: '#2563eb' },
+  existing_client:{ label: 'Existing Client', bg: '#fef3c7', text: '#d97706' },
+  other:          { label: 'Other',           bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-subtle)' },
+}
+
+const SOURCE_OPTIONS = [
+  { value: '', label: 'None' },
+  { value: 'referral', label: 'Referral' },
+  { value: 'linkedin', label: 'LinkedIn' },
+  { value: 'website', label: 'Website' },
+  { value: 'cold', label: 'Cold Outreach' },
+  { value: 'partner', label: 'Partner' },
+  { value: 'other', label: 'Other' },
+]
+
+function daysInStage(stageEnteredAt: string | null, updatedAt: string): number {
+  const ref = stageEnteredAt ?? updatedAt
+  if (!ref) return 0
+  const diff = Date.now() - new Date(ref).getTime()
+  return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)))
 }
 
 // ---- Main component ------------------------------------------------------
@@ -376,9 +395,21 @@ export function DealDetail({ dealId }: { dealId: string }) {
           </SidebarCard>
 
           {/* Source */}
-          <SidebarCard title="Source">
-            <span style={{ fontSize: '0.875rem', color: 'var(--color-text)' }}>
-              {deal.source ? SOURCE_LABELS[deal.source] ?? deal.source : '--'}
+          <SidebarCard title="Lead Source">
+            <SourceSelector
+              dealId={dealId}
+              currentSource={deal.source}
+              onUpdated={fetchDeal}
+            />
+          </SidebarCard>
+
+          {/* Days in Stage */}
+          <SidebarCard title="Days in Stage">
+            <span className="font-semibold" style={{ fontSize: '1.125rem', color: 'var(--color-text)' }}>
+              {daysInStage(null, deal.updatedAt)}
+            </span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginLeft: '0.25rem' }}>
+              days
             </span>
           </SidebarCard>
 
@@ -946,6 +977,70 @@ function NotesSection({ dealId, initialNotes, onUpdated }: {
         onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
         onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
       />
+    </div>
+  )
+}
+
+// ---- Source Selector ----------------------------------------------------
+
+function SourceSelector({ dealId, currentSource, onUpdated }: {
+  dealId: string
+  currentSource: string | null
+  onUpdated: () => void
+}) {
+  const [saving, setSaving] = useState(false)
+  const srcCfg = SOURCE_STYLES[currentSource ?? '']
+
+  const handleChange = async (newSource: string) => {
+    setSaving(true)
+    try {
+      await fetch(apiPath(`/api/admin/deals/${dealId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: newSource || null }),
+      })
+      onUpdated()
+    } catch {
+      // silent
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {srcCfg && currentSource && (
+        <span
+          className="inline-flex self-start rounded-full font-medium"
+          style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: srcCfg.bg, color: srcCfg.text }}
+        >
+          {srcCfg.label}
+        </span>
+      )}
+      <div className="relative">
+        <select
+          value={currentSource ?? ''}
+          onChange={e => handleChange(e.target.value)}
+          disabled={saving}
+          className="w-full rounded-lg cursor-pointer appearance-none"
+          style={{
+            padding: '0.5rem 2rem 0.5rem 0.75rem',
+            fontSize: '0.875rem',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg)',
+            color: 'var(--color-text)',
+            minHeight: '2.75rem',
+          }}
+        >
+          {SOURCE_OPTIONS.map(o => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+        <ChevronDown
+          className="absolute pointer-events-none"
+          style={{ width: '0.875rem', height: '0.875rem', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)' }}
+        />
+      </div>
     </div>
   )
 }
