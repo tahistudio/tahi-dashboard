@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
+import { createNotification, createNotifications } from '@/lib/notifications'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -101,8 +102,49 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .set(patch)
     .where(eq(schema.requests.id, id))
 
-  // If moving to in_progress, increment revision count if coming back from client_review
-  // (handled client-side for now : the status change message is enough)
+  // Send notifications on status change
+  if (body.status !== undefined) {
+    // Fetch the request to get orgId and assigneeId
+    const [updatedReq] = await drizzle
+      .select({
+        title: schema.requests.title,
+        orgId: schema.requests.orgId,
+        assigneeId: schema.requests.assigneeId,
+      })
+      .from(schema.requests)
+      .where(eq(schema.requests.id, id))
+      .limit(1)
+
+    if (updatedReq) {
+      const statusLabel = body.status.replace(/_/g, ' ')
+      const notifTitle = `Request "${updatedReq.title}" status changed to ${statusLabel}`
+      const recipients: Array<{ userId: string; userType: 'team_member' | 'contact' }> = []
+
+      // Notify the assignee (if one exists)
+      if (updatedReq.assigneeId) {
+        recipients.push({ userId: updatedReq.assigneeId, userType: 'team_member' })
+      }
+
+      // Notify the primary contact at the client org
+      const contacts = await drizzle
+        .select({ id: schema.contacts.id })
+        .from(schema.contacts)
+        .where(eq(schema.contacts.orgId, updatedReq.orgId))
+        .limit(5)
+
+      for (const c of contacts) {
+        recipients.push({ userId: c.id, userType: 'contact' })
+      }
+
+      await createNotifications(drizzle, recipients, {
+        type: 'request_status_changed',
+        title: notifTitle,
+        body: `Status is now "${statusLabel}"`,
+        entityType: 'request',
+        entityId: id,
+      })
+    }
+  }
 
   return NextResponse.json({ success: true })
 }

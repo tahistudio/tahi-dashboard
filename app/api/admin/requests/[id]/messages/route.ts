@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, asc } from 'drizzle-orm'
+import { createNotifications } from '@/lib/notifications'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -104,6 +105,47 @@ export async function POST(req: NextRequest, { params }: Params) {
       .update(schema.requests)
       .set({ updatedAt: new Date().toISOString() })
       .where(eq(schema.requests.id, id))
+
+    // Notify client contacts about the new message (unless internal-only)
+    if (!body.isInternal) {
+      const contacts = await drizzle
+        .select({ id: schema.contacts.id })
+        .from(schema.contacts)
+        .where(eq(schema.contacts.orgId, request.orgId))
+        .limit(10)
+
+      const recipients = contacts.map((c) => ({
+        userId: c.id,
+        userType: 'contact' as const,
+      }))
+
+      if (recipients.length > 0) {
+        await createNotifications(drizzle, recipients, {
+          type: 'new_message',
+          title: 'New message on your request',
+          body: body.body.trim().slice(0, 200),
+          entityType: 'request',
+          entityId: id,
+        })
+      }
+    }
+
+    // Notify request assignee about the new message (if sender is not the assignee)
+    const [reqInfo] = await drizzle
+      .select({ assigneeId: schema.requests.assigneeId, title: schema.requests.title })
+      .from(schema.requests)
+      .where(eq(schema.requests.id, id))
+      .limit(1)
+
+    if (reqInfo?.assigneeId && reqInfo.assigneeId !== (member?.id ?? userId)) {
+      await createNotifications(drizzle, [{ userId: reqInfo.assigneeId, userType: 'team_member' }], {
+        type: 'new_message',
+        title: `New message on "${reqInfo.title}"`,
+        body: body.body.trim().slice(0, 200),
+        entityType: 'request',
+        entityId: id,
+      })
+    }
 
     return NextResponse.json({ id: msgId }, { status: 201 })
   } catch (err) {

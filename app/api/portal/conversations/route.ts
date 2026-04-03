@@ -181,118 +181,118 @@ export async function GET(req: NextRequest) {
 // Body: { type: 'direct', content? }
 export async function POST(req: NextRequest) {
   try {
-  const { orgId, userId } = await getRequestAuth(req)
+    const { orgId, userId } = await getRequestAuth(req)
 
-  if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+    if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
-  let body: { type?: string; content?: string }
-  try {
-    body = await req.json() as { type?: string; content?: string }
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
-  }
+    let body: { type?: string; content?: string }
+    try {
+      body = await req.json() as { type?: string; content?: string }
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    }
 
-  const type = body.type ?? 'direct'
-  if (!['direct', 'group'].includes(type)) {
-    return NextResponse.json(
-      { error: 'Clients can only create direct or group conversations' },
-      { status: 400 }
-    )
-  }
-
-  const database = await db()
-
-  // Find the contact record for this user (primary contact of the org)
-  const contactRows = await database
-    .select({ id: schema.contacts.id, name: schema.contacts.name })
-    .from(schema.contacts)
-    .where(
-      and(
-        eq(schema.contacts.orgId, orgId),
-        eq(schema.contacts.clerkUserId, userId)
+    const type = body.type ?? 'direct'
+    if (!['direct', 'group'].includes(type)) {
+      return NextResponse.json(
+        { error: 'Clients can only create direct or group conversations' },
+        { status: 400 }
       )
-    )
-    .limit(1)
+    }
 
-  // If no matching contact by clerkUserId, try primary contact
-  let contactId: string
-  if (contactRows.length > 0) {
-    contactId = contactRows[0].id
-  } else {
-    const primaryRows = await database
-      .select({ id: schema.contacts.id })
+    const database = await db()
+
+    // Find the contact record for this user (primary contact of the org)
+    const contactRows = await database
+      .select({ id: schema.contacts.id, name: schema.contacts.name })
       .from(schema.contacts)
       .where(
         and(
           eq(schema.contacts.orgId, orgId),
-          eq(schema.contacts.isPrimary, true)
+          eq(schema.contacts.clerkUserId, userId)
         )
       )
       .limit(1)
 
-    if (primaryRows.length === 0) {
-      return NextResponse.json(
-        { error: 'No contact found for this organisation' },
-        { status: 400 }
-      )
+    // If no matching contact by clerkUserId, try primary contact
+    let contactId: string
+    if (contactRows.length > 0) {
+      contactId = contactRows[0].id
+    } else {
+      const primaryRows = await database
+        .select({ id: schema.contacts.id })
+        .from(schema.contacts)
+        .where(
+          and(
+            eq(schema.contacts.orgId, orgId),
+            eq(schema.contacts.isPrimary, true)
+          )
+        )
+        .limit(1)
+
+      if (primaryRows.length === 0) {
+        return NextResponse.json(
+          { error: 'No contact found for this organisation' },
+          { status: 400 }
+        )
+      }
+      contactId = primaryRows[0].id
     }
-    contactId = primaryRows[0].id
-  }
 
-  const convId = crypto.randomUUID()
-  const now = new Date().toISOString()
+    const convId = crypto.randomUUID()
+    const now = new Date().toISOString()
 
-  // Get org name for conversation name
-  const orgRows = await database
-    .select({ name: schema.organisations.name })
-    .from(schema.organisations)
-    .where(eq(schema.organisations.id, orgId))
-    .limit(1)
+    // Get org name for conversation name
+    const orgRows = await database
+      .select({ name: schema.organisations.name })
+      .from(schema.organisations)
+      .where(eq(schema.organisations.id, orgId))
+      .limit(1)
 
-  const orgName = orgRows.length > 0 ? orgRows[0].name : 'Client'
+    const orgName = orgRows.length > 0 ? orgRows[0].name : 'Client'
 
-  await database.insert(schema.conversations).values({
-    id: convId,
-    type,
-    name: `${orgName} - New conversation`,
-    orgId,
-    requestId: null,
-    visibility: 'external',
-    createdById: userId,
-    createdAt: now,
-    updatedAt: now,
-  })
-
-  // Add the contact as a participant
-  await database.insert(schema.conversationParticipants).values({
-    id: crypto.randomUUID(),
-    conversationId: convId,
-    participantId: contactId,
-    participantType: 'contact',
-    role: 'member',
-    joinedAt: now,
-  })
-
-  // If there is initial content, send as the first message
-  if (body.content?.trim()) {
-    const msgId = crypto.randomUUID()
-    await database.insert(schema.messages).values({
-      id: msgId,
-      conversationId: convId,
-      requestId: null,
+    await database.insert(schema.conversations).values({
+      id: convId,
+      type,
+      name: `${orgName} - New conversation`,
       orgId,
-      authorId: contactId,
-      authorType: 'contact',
-      body: body.content.trim(),
-      isInternal: false,
+      requestId: null,
+      visibility: 'external',
+      createdById: userId,
       createdAt: now,
       updatedAt: now,
     })
-  }
 
-  return NextResponse.json({ id: convId }, { status: 201 })
+    // Add the contact as a participant
+    await database.insert(schema.conversationParticipants).values({
+      id: crypto.randomUUID(),
+      conversationId: convId,
+      participantId: contactId,
+      participantType: 'contact',
+      role: 'member',
+      joinedAt: now,
+    })
+
+    // If there is initial content, send as the first message
+    if (body.content?.trim()) {
+      const msgId = crypto.randomUUID()
+      await database.insert(schema.messages).values({
+        id: msgId,
+        conversationId: convId,
+        requestId: null,
+        orgId,
+        authorId: contactId,
+        authorType: 'contact',
+        body: body.content.trim(),
+        isInternal: false,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+
+    return NextResponse.json({ id: convId }, { status: 201 })
   } catch (err) {
     console.error('[POST /api/portal/conversations]', err)
     return NextResponse.json({ error: 'Failed to create conversation' }, { status: 500 })

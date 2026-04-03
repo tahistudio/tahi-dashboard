@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { createNotification } from '@/lib/notifications'
 
 // ── PATCH /api/admin/tasks/[id] ───────────────────────────────────────────
 export async function PATCH(
@@ -86,6 +87,27 @@ export async function PATCH(
     .update(schema.tasks)
     .set(updates)
     .where(eq(schema.tasks.id, id))
+
+  // Notify assignee when a task is assigned to them
+  if (body.assigneeId !== undefined && body.assigneeId) {
+    const [task] = await drizzle
+      .select({ title: schema.tasks.title })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.id, id))
+      .limit(1)
+
+    const assigneeType = (body.assigneeType === 'contact' ? 'contact' : 'team_member') as 'team_member' | 'contact'
+
+    await createNotification(drizzle, {
+      userId: body.assigneeId,
+      userType: assigneeType,
+      type: 'task_assigned',
+      title: `Task assigned to you: "${task?.title ?? 'Untitled'}"`,
+      body: null,
+      entityType: 'task',
+      entityId: id,
+    })
+  }
 
   return NextResponse.json({ success: true })
 }

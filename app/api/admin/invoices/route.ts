@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and } from 'drizzle-orm'
+import { createNotifications } from '@/lib/notifications'
 
 // ── GET /api/admin/invoices ───────────────────────────────────────────────────
 // Returns paginated invoices with org name joined.
@@ -138,6 +139,29 @@ export async function POST(req: NextRequest) {
   }))
 
   await drizzle.insert(schema.invoiceItems).values(itemRows)
+
+  // Notify client contacts about the new invoice
+  const contacts = await drizzle
+    .select({ id: schema.contacts.id })
+    .from(schema.contacts)
+    .where(eq(schema.contacts.orgId, body.orgId))
+    .limit(10)
+
+  const recipients = contacts.map((c) => ({
+    userId: c.id,
+    userType: 'contact' as const,
+  }))
+
+  if (recipients.length > 0) {
+    const formattedAmount = `${currency} ${(totalAmount / 100).toFixed(2)}`
+    await createNotifications(drizzle, recipients, {
+      type: 'invoice_created',
+      title: 'New invoice created',
+      body: `An invoice for ${formattedAmount} has been created for your account`,
+      entityType: 'invoice',
+      entityId: invoiceId,
+    })
+  }
 
   return NextResponse.json({ id: invoiceId })
 }
