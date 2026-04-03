@@ -2,7 +2,7 @@ import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, ne, max } from 'drizzle-orm'
+import { eq, desc, and, ne, sql } from 'drizzle-orm'
 
 // ── GET /api/portal/requests ─────────────────────────────────────────────────
 // Returns requests scoped to the client's own org.
@@ -81,33 +81,33 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
-  // Calculate next request number
-  const [maxRow] = await drizzle
-    .select({ maxNum: max(schema.requests.requestNumber) })
-    .from(schema.requests)
-  const nextNumber = (maxRow?.maxNum ?? 0) + 1
-
-  await drizzle
-    .insert(schema.requests)
-    .values({
-      id,
-      orgId,
-      title: title.trim(),
-      type: type ?? 'small_task',
-      category: category ?? 'development',
-      description: description ?? null,
-      dueDate: dueDate ?? null,
-      formResponses: formResponses ?? null,
-      status: 'submitted',
-      priority: 'standard',
-      submittedById: userId,
-      isInternal: false,
-      revisionCount: 0,
-      maxRevisions: 3,
-      requestNumber: nextNumber,
-      createdAt: now,
-      updatedAt: now,
-    })
+  // Atomically assign the next request number via a subquery in the INSERT
+  // to avoid race conditions between concurrent request creations.
+  await drizzle.run(sql`
+    INSERT INTO requests (
+      id, org_id, title, type, category, description, due_date, form_responses,
+      status, priority, submitted_by_id, is_internal,
+      revision_count, max_revisions, request_number, created_at, updated_at
+    ) VALUES (
+      ${id},
+      ${orgId},
+      ${title.trim()},
+      ${type ?? 'small_task'},
+      ${category ?? 'development'},
+      ${description ?? null},
+      ${dueDate ?? null},
+      ${formResponses ?? null},
+      'submitted',
+      'standard',
+      ${userId},
+      0,
+      0,
+      3,
+      COALESCE((SELECT MAX(request_number) FROM requests), 0) + 1,
+      ${now},
+      ${now}
+    )
+  `)
 
   return NextResponse.json({ id }, { status: 201 })
 }

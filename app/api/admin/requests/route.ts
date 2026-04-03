@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, ne, inArray, isNull, max } from 'drizzle-orm'
+import { eq, desc, and, ne, inArray, isNull, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 
 // ── GET /api/admin/requests ─────────────────────────────────────────────────
@@ -108,34 +108,34 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
-  // Calculate next request number
-  const [maxRow] = await drizzle
-    .select({ maxNum: max(schema.requests.requestNumber) })
-    .from(schema.requests)
-  const nextNumber = (maxRow?.maxNum ?? 0) + 1
-
-  await drizzle
-    .insert(schema.requests)
-    .values({
-      id,
-      orgId: clientOrgId,
-      title: title.trim(),
-      type: type ?? 'small_task',
-      category: category ?? 'development',
-      description: description ?? null,
-      status: 'submitted',
-      priority: priority ?? 'standard',
-      startDate: startDate ?? null,
-      dueDate: dueDate ?? null,
-      estimatedHours: estimatedHours ?? null,
-      submittedById: userId ?? null,
-      isInternal: !!body.isInternal,
-      revisionCount: 0,
-      maxRevisions: 3,
-      requestNumber: nextNumber,
-      createdAt: now,
-      updatedAt: now,
-    })
+  // Atomically assign the next request number via a subquery in the INSERT
+  // to avoid race conditions between concurrent request creations.
+  await drizzle.run(sql`
+    INSERT INTO requests (
+      id, org_id, title, type, category, description, status, priority,
+      start_date, due_date, estimated_hours, submitted_by_id, is_internal,
+      revision_count, max_revisions, request_number, created_at, updated_at
+    ) VALUES (
+      ${id},
+      ${clientOrgId},
+      ${title.trim()},
+      ${type ?? 'small_task'},
+      ${category ?? 'development'},
+      ${description ?? null},
+      'submitted',
+      ${priority ?? 'standard'},
+      ${startDate ?? null},
+      ${dueDate ?? null},
+      ${estimatedHours ?? null},
+      ${userId ?? null},
+      ${body.isInternal ? 1 : 0},
+      0,
+      3,
+      COALESCE((SELECT MAX(request_number) FROM requests), 0) + 1,
+      ${now},
+      ${now}
+    )
+  `)
 
   return NextResponse.json({ id }, { status: 201 })
 }
