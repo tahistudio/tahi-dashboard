@@ -6,9 +6,9 @@ import {
   Users, Inbox, FileText, TrendingUp,
   Plus, Clock, UserPlus,
   ArrowRight, AlertTriangle, RefreshCw, Video, ExternalLink,
-  CheckCircle2, Circle,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/tahi/status-badge'
+import { OnboardingChecklist, type OnboardingState } from '@/components/tahi/onboarding-checklist'
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -429,7 +429,7 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
       )}
 
       {/* Onboarding Checklist */}
-      <OnboardingChecklist />
+      <OnboardingChecklistWrapper />
 
       {/* Schedule a Call (T88) */}
       <ScheduleCallWidget />
@@ -454,14 +454,6 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
 }
 
 // ─── Onboarding Checklist Wrapper ──────────────────────────────────────────────
-
-const ONBOARDING_STEP_KEYS = [
-  'welcomeVideoWatched',
-  'brandAssetsUploaded',
-  'firstRequestSubmitted',
-  'billingSetUp',
-  'meetTheTeam',
-] as const
 
 function OnboardingChecklistWrapper() {
   const [state, setState] = useState<Record<string, boolean> | null>(null)
