@@ -269,6 +269,36 @@ export async function POST(
         )
       )
 
+    // Notify other participants (team members) about the client message
+    const otherParticipants = await database
+      .select({
+        participantId: schema.conversationParticipants.participantId,
+        participantType: schema.conversationParticipants.participantType,
+      })
+      .from(schema.conversationParticipants)
+      .where(
+        and(
+          eq(schema.conversationParticipants.conversationId, conversationId),
+          ne(schema.conversationParticipants.participantId, participantId)
+        )
+      )
+
+    const recipients = otherParticipants.map((p) => ({
+      userId: p.participantId,
+      userType: p.participantType as 'team_member' | 'contact',
+    }))
+
+    if (recipients.length > 0) {
+      const convName = conv.name ?? 'conversation'
+      await createNotifications(database, recipients, {
+        type: 'new_message',
+        title: `New message in ${convName}`,
+        body: body.content.trim().slice(0, 200),
+        entityType: 'message',
+        entityId: conversationId,
+      })
+    }
+
     return NextResponse.json({ id: msgId }, { status: 201 })
   } catch (err) {
     console.error('[POST /api/portal/conversations/[id]/messages]', err)
