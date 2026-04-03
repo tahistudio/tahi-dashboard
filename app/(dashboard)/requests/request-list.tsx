@@ -728,6 +728,7 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
               selectedIds={selectedIds}
               onToggleSelect={isAdmin ? toggleSelect : undefined}
               onToggleAll={isAdmin ? toggleSelectAll : undefined}
+              onStatusChange={isAdmin ? handleStatusChange : undefined}
             />
           ) : (
             <BoardView requests={sorted} columns={boardColumns} isAdmin={isAdmin} onStatusChange={fetchRequests} />
@@ -754,11 +755,13 @@ function ListView({
   selectedIds,
   onToggleSelect,
   onToggleAll,
+  onStatusChange,
 }: {
   requests: Request[]
   isAdmin: boolean
   selectedIds?: Set<string>
   onToggleSelect?: (id: string) => void
+  onStatusChange?: (id: string, status: string) => void
   onToggleAll?: () => void
 }) {
   const showCheckboxes = isAdmin && onToggleSelect
@@ -812,6 +815,7 @@ function ListView({
             isLast={i === requests.length - 1}
             isSelected={selectedIds?.has(req.id)}
             onToggleSelect={onToggleSelect}
+            onStatusChange={onStatusChange}
           />
         ))}
       </div>
@@ -825,12 +829,14 @@ function ListRow({
   isLast,
   isSelected,
   onToggleSelect,
+  onStatusChange,
 }: {
   req: Request
   isAdmin: boolean
   isLast: boolean
   isSelected?: boolean
   onToggleSelect?: (id: string) => void
+  onStatusChange?: (id: string, status: string) => void
 }) {
   const cat = CAT_CFG[req.category ?? ''] ?? { bg: 'var(--cat-admin-bg)', color: 'var(--cat-admin-text)' }
   const showCheckbox = isAdmin && onToggleSelect
@@ -861,7 +867,7 @@ function ListRow({
             )}
             <span className="font-medium truncate" style={{ fontSize: '0.9375rem', color: 'var(--color-text)' }}>{req.title}</span>
           </div>
-          <StatusPill status={req.status} />
+          <StatusPill status={req.status} requestId={req.id} isAdmin={isAdmin} onStatusChange={onStatusChange} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {isAdmin && req.orgName && (
@@ -946,7 +952,7 @@ function ListRow({
 
         {/* Status */}
         <div style={{ paddingRight: '0.75rem' }}>
-          <StatusPill status={req.status} />
+          <StatusPill status={req.status} requestId={req.id} isAdmin={isAdmin} onStatusChange={onStatusChange} />
         </div>
 
         {/* Due date */}
