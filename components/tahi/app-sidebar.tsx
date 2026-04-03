@@ -149,12 +149,13 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <aside
-      className="flex flex-col h-full flex-shrink-0 transition-all duration-200 relative"
+      className="flex flex-col h-full flex-shrink-0 relative"
       style={{
         width: `${w}px`,
         minWidth: `${w}px`,
         background: S.bg,
         borderRight: `1px solid ${S.border}`,
+        transition: 'width 200ms ease, min-width 200ms ease',
       }}
     >
       {/* Logo */}

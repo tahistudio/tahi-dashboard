@@ -29,6 +29,12 @@ export async function GET(req: NextRequest) {
   // Build conditions
   const conditions = []
 
+  // Exclude the admin org (Tahi Studio) from the clients list
+  const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
+  if (tahiOrgId) {
+    conditions.push(ne(schema.organisations.id, tahiOrgId))
+  }
+
   // If scoping returned a specific set of org IDs, filter to those
   if (scopedOrgIds !== null) {
     if (scopedOrgIds.length === 0) {

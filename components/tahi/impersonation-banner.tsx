@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useSyncExternalStore } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import { Eye, X } from 'lucide-react'
 
@@ -19,14 +19,29 @@ const STORAGE_KEY = 'tahi-impersonate'
 
 const listeners = new Set<() => void>()
 
+// Cache the snapshot so useSyncExternalStore gets a stable reference.
+// Without this, JSON.parse returns a new object on every call, which
+// causes useSyncExternalStore to detect a "change" every render and
+// trigger an infinite re-render loop.
+let cachedRaw: string | null = null
+let cachedSnapshot: ImpersonationData | null = null
+
 function getSnapshot(): ImpersonationData | null {
   if (typeof window === 'undefined') return null
   try {
     const stored = sessionStorage.getItem(STORAGE_KEY)
-    if (!stored) return null
+    if (stored === cachedRaw) return cachedSnapshot
+    cachedRaw = stored
+    if (!stored) {
+      cachedSnapshot = null
+      return null
+    }
     const parsed = JSON.parse(stored) as ImpersonationData
-    return parsed.orgId ? parsed : null
+    cachedSnapshot = parsed.orgId ? parsed : null
+    return cachedSnapshot
   } catch {
+    cachedRaw = null
+    cachedSnapshot = null
     return null
   }
 }
