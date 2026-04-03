@@ -453,59 +453,23 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
   )
 }
 
-// ─── Onboarding Checklist ─────────────────────────────────────────────────────
+// ─── Onboarding Checklist Wrapper ──────────────────────────────────────────────
 
-const ONBOARDING_STEPS = [
-  {
-    key: 'complete_profile',
-    label: 'Complete your profile',
-    description: 'Add your company details so we can tailor our work to your brand.',
-    href: '/settings',
-  },
-  {
-    key: 'first_request',
-    label: 'Submit your first request',
-    description: 'Tell us what you need and we will get started right away.',
-    href: '/requests?new=1',
-  },
-  {
-    key: 'upload_assets',
-    label: 'Upload brand assets',
-    description: 'Logos, fonts, and brand guidelines help us deliver on-brand work.',
-    href: '/files',
-  },
-  {
-    key: 'schedule_call',
-    label: 'Schedule a kickoff call',
-    description: 'A quick intro call to align on goals and expectations.',
-    href: '/calls',
-  },
-]
+const ONBOARDING_STEP_KEYS = [
+  'welcomeVideoWatched',
+  'brandAssetsUploaded',
+  'firstRequestSubmitted',
+  'billingSetUp',
+  'meetTheTeam',
+] as const
 
-function toLoomEmbedUrl(url: string): string {
-  // Convert loom.com/share/VIDEO_ID to loom.com/embed/VIDEO_ID
-  const shareMatch = url.match(/loom\.com\/share\/([a-zA-Z0-9]+)/)
-  if (shareMatch) {
-    return `https://www.loom.com/embed/${shareMatch[1]}`
-  }
-  // Already an embed URL
-  if (url.includes('loom.com/embed/')) {
-    return url
-  }
-  // Fallback: just return as-is
-  return url
-}
-
-function OnboardingChecklist() {
+function OnboardingChecklistWrapper() {
   const [state, setState] = useState<Record<string, boolean> | null>(null)
   const [loomUrl, setLoomUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [dismissed, setDismissed] = useState(false)
-  const [expandedStep, setExpandedStep] = useState<string | null>(null)
-  const [showCongrats, setShowCongrats] = useState(false)
 
   const fetchOnboarding = useCallback(async () => {
-    // Check if user has permanently dismissed onboarding
     if (typeof window !== 'undefined' && localStorage.getItem('tahi-onboarding-dismissed') === '1') {
       setDismissed(true)
       setLoading(false)
@@ -529,23 +493,17 @@ function OnboardingChecklist() {
 
   useEffect(() => { void fetchOnboarding() }, [fetchOnboarding])
 
-  async function toggleStep(key: string) {
+  async function handleToggleStep(step: string, completed: boolean) {
     if (!state) return
-    const completed = !state[key]
-    setState(prev => prev ? { ...prev, [key]: completed } : prev)
+    setState(prev => prev ? { ...prev, [step]: completed } : prev)
     try {
       await fetch(apiPath('/api/portal/onboarding'), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ step: key, completed }),
+        body: JSON.stringify({ step, completed }),
       })
-      // Check if all steps are now complete
-      const newState = { ...state, [key]: completed }
-      if (ONBOARDING_STEPS.every(s => newState[s.key])) {
-        setShowCongrats(true)
-      }
     } catch {
-      setState(prev => prev ? { ...prev, [key]: !completed } : prev)
+      setState(prev => prev ? { ...prev, [step]: !completed } : prev)
     }
   }
 
@@ -556,246 +514,23 @@ function OnboardingChecklist() {
     setDismissed(true)
   }
 
-  if (loading || dismissed) return null
+  if (loading || dismissed || !state) return null
 
-  const allComplete = state && ONBOARDING_STEPS.every(s => state[s.key])
-  const completedCount = state ? ONBOARDING_STEPS.filter(s => state[s.key]).length : 0
-  const pct = Math.round((completedCount / ONBOARDING_STEPS.length) * 100)
-
-  // Show congratulations when all steps are complete
-  if (allComplete || showCongrats) {
-    return (
-      <div
-        className="rounded-xl"
-        style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', overflow: 'hidden' }}
-      >
-        <div className="flex flex-col items-center text-center" style={{ padding: '2rem 1.5rem' }}>
-          <div
-            style={{
-              width: '3rem',
-              height: '3rem',
-              borderRadius: 'var(--radius-leaf)',
-              background: 'var(--color-brand-50)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: '0.75rem',
-            }}
-          >
-            <CheckCircle2 size={24} style={{ color: BRAND }} />
-          </div>
-          <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
-            You are all set!
-          </h2>
-          <p className="text-xs" style={{ color: 'var(--color-text-subtle)', marginTop: '0.25rem', maxWidth: '16rem' }}>
-            Onboarding complete. Your team at Tahi is ready to start delivering.
-          </p>
-          <button
-            onClick={handleDismiss}
-            className="text-xs font-medium transition-opacity hover:opacity-80"
-            style={{
-              marginTop: '0.75rem',
-              padding: '0.375rem 0.75rem',
-              background: 'var(--color-bg-tertiary)',
-              color: 'var(--color-text-muted)',
-              border: 'none',
-              borderRadius: '0.375rem',
-              cursor: 'pointer',
-            }}
-          >
-            Dismiss
-          </button>
-        </div>
-      </div>
-    )
+  const onboardingState: OnboardingState = {
+    welcomeVideoWatched: state.welcomeVideoWatched ?? false,
+    brandAssetsUploaded: state.brandAssetsUploaded ?? false,
+    firstRequestSubmitted: state.firstRequestSubmitted ?? false,
+    billingSetUp: state.billingSetUp ?? false,
+    meetTheTeam: state.meetTheTeam ?? false,
   }
 
   return (
-    <div
-      className="rounded-xl"
-      style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', overflow: 'hidden' }}
-    >
-      <div
-        className="flex items-center justify-between"
-        style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}
-      >
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
-              Getting Started
-            </h2>
-            <span
-              className="text-xs font-semibold"
-              style={{
-                padding: '0.0625rem 0.4375rem',
-                borderRadius: '1rem',
-                background: pct === 100 ? 'var(--color-success-bg)' : 'var(--color-brand-50)',
-                color: pct === 100 ? 'var(--color-success)' : BRAND,
-              }}
-            >
-              {pct}%
-            </span>
-          </div>
-          <p className="text-xs" style={{ color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
-            {completedCount} of {ONBOARDING_STEPS.length} steps complete
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* Progress bar */}
-          <div style={{ width: 80, height: 6, background: 'var(--color-bg-tertiary)', borderRadius: 3 }}>
-            <div
-              style={{
-                width: `${pct}%`,
-                height: '100%',
-                background: BRAND,
-                borderRadius: 3,
-                transition: 'width 0.3s',
-              }}
-            />
-          </div>
-          <button
-            onClick={handleDismiss}
-            className="text-xs transition-colors"
-            style={{
-              color: 'var(--color-text-subtle)',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '0.125rem',
-              whiteSpace: 'nowrap',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text)' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-subtle)' }}
-            aria-label="Skip onboarding"
-          >
-            Skip
-          </button>
-        </div>
-      </div>
-
-      {/* Loom embed */}
-      {loomUrl && (
-        <div style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}>
-          <div className="flex items-center gap-2 mb-2">
-            <Video size={14} style={{ color: BRAND }} aria-hidden="true" />
-            <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
-              Onboarding Video
-            </span>
-          </div>
-          <div
-            style={{
-              position: 'relative',
-              paddingBottom: '56.25%',
-              height: 0,
-              overflow: 'hidden',
-              borderRadius: '0.5rem',
-            }}
-          >
-            <iframe
-              src={toLoomEmbedUrl(loomUrl)}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                border: 'none',
-              }}
-              allowFullScreen
-              title="Onboarding video"
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Steps */}
-      <div>
-        {ONBOARDING_STEPS.map((step, i) => {
-          const isComplete = state?.[step.key] ?? false
-          const isExpanded = expandedStep === step.key
-          return (
-            <div
-              key={step.key}
-              style={{
-                borderBottom: i < ONBOARDING_STEPS.length - 1 ? '1px solid var(--color-row-border)' : 'none',
-              }}
-            >
-              <div
-                className="flex items-center gap-3"
-                style={{ padding: '0.75rem 1.25rem', cursor: 'pointer' }}
-                onClick={() => setExpandedStep(isExpanded ? null : step.key)}
-              >
-                <button
-                  onClick={(e) => { e.stopPropagation(); toggleStep(step.key) }}
-                  className="flex-shrink-0 transition-colors"
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: isComplete ? BRAND : 'var(--color-text-subtle)',
-                    padding: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                  }}
-                  aria-label={isComplete ? `Mark ${step.label} as incomplete` : `Mark ${step.label} as complete`}
-                >
-                  {isComplete ? (
-                    <CheckCircle2 size={18} />
-                  ) : (
-                    <Circle size={18} />
-                  )}
-                </button>
-                <span
-                  className="text-sm flex-1"
-                  style={{
-                    color: isComplete ? 'var(--color-text-subtle)' : 'var(--color-text)',
-                    textDecoration: isComplete ? 'line-through' : 'none',
-                  }}
-                >
-                  {step.label}
-                </span>
-                {!isComplete && (
-                  <ArrowRight
-                    size={12}
-                    style={{
-                      color: 'var(--color-text-subtle)',
-                      flexShrink: 0,
-                      transform: isExpanded ? 'rotate(90deg)' : 'none',
-                      transition: 'transform 0.2s',
-                    }}
-                  />
-                )}
-              </div>
-              {isExpanded && !isComplete && (
-                <div
-                  style={{
-                    padding: '0 1.25rem 0.75rem 3.375rem',
-                  }}
-                >
-                  <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginBottom: '0.5rem' }}>
-                    {step.description}
-                  </p>
-                  <Link
-                    href={step.href}
-                    className="inline-flex items-center gap-1 text-xs font-semibold transition-opacity hover:opacity-80"
-                    style={{
-                      padding: '0.375rem 0.75rem',
-                      background: BRAND,
-                      color: 'white',
-                      borderRadius: '0.375rem',
-                      textDecoration: 'none',
-                    }}
-                  >
-                    Get started
-                    <ArrowRight size={11} />
-                  </Link>
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-    </div>
+    <OnboardingChecklist
+      state={onboardingState}
+      loomUrl={loomUrl}
+      onToggleStep={(step, completed) => handleToggleStep(step, completed)}
+      onDismiss={handleDismiss}
+    />
   )
 }
 
