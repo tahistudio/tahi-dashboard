@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -115,19 +115,81 @@ function sortRequests(requests: Request[], sortKey: SortKey): Request[] {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function StatusPill({ status }: { status: string }) {
+const ALL_STATUSES = ['submitted', 'in_review', 'in_progress', 'client_review', 'on_hold', 'delivered', 'cancelled']
+
+function StatusPill({ status, requestId, isAdmin, onStatusChange }: {
+  status: string
+  requestId?: string
+  isAdmin?: boolean
+  onStatusChange?: (id: string, newStatus: string) => void
+}) {
+  const [open, setOpen] = useState(false)
   const c = STATUS_CFG[status] ?? STATUS_CFG.submitted
-  return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-full whitespace-nowrap font-medium"
-      style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: c.bg, color: c.text, border: `1px solid ${c.border}` }}
-    >
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  if (!isAdmin || !requestId || !onStatusChange) {
+    return (
       <span
-        className="rounded-full flex-shrink-0"
-        style={{ width: '0.375rem', height: '0.375rem', background: c.dot, display: 'inline-block' }}
-      />
-      {c.label}
-    </span>
+        className="inline-flex items-center gap-1.5 rounded-full whitespace-nowrap font-medium"
+        style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: c.bg, color: c.text, border: `1px solid ${c.border}` }}
+      >
+        <span className="rounded-full flex-shrink-0" style={{ width: '0.375rem', height: '0.375rem', background: c.dot, display: 'inline-block' }} />
+        {c.label}
+      </span>
+    )
+  }
+
+  return (
+    <div ref={ref} className="relative" style={{ display: 'inline-block' }}>
+      <button
+        onClick={e => { e.stopPropagation(); setOpen(!open) }}
+        className="inline-flex items-center gap-1.5 rounded-full whitespace-nowrap font-medium cursor-pointer transition-opacity hover:opacity-80"
+        style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: c.bg, color: c.text, border: `1px solid ${c.border}` }}
+      >
+        <span className="rounded-full flex-shrink-0" style={{ width: '0.375rem', height: '0.375rem', background: c.dot, display: 'inline-block' }} />
+        {c.label}
+        <ChevronDown style={{ width: '0.625rem', height: '0.625rem', opacity: 0.6 }} />
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 z-50 mt-1 rounded-lg border shadow-lg overflow-hidden"
+          style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)', minWidth: '9rem' }}
+        >
+          {ALL_STATUSES.map(s => {
+            const sc = STATUS_CFG[s] ?? STATUS_CFG.submitted
+            return (
+              <button
+                key={s}
+                onClick={e => {
+                  e.stopPropagation()
+                  onStatusChange(requestId, s)
+                  setOpen(false)
+                }}
+                className="w-full text-left flex items-center gap-2 cursor-pointer transition-colors hover:bg-[var(--color-bg-tertiary)]"
+                style={{
+                  padding: '0.375rem 0.75rem',
+                  fontSize: '0.75rem',
+                  color: s === status ? sc.text : 'var(--color-text-muted)',
+                  fontWeight: s === status ? 600 : 400,
+                }}
+              >
+                <span className="rounded-full flex-shrink-0" style={{ width: '0.375rem', height: '0.375rem', background: sc.dot }} />
+                {sc.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -314,6 +376,22 @@ export function RequestList({ isAdmin }: { isAdmin: boolean }) {
   }, [activeTab, isAdmin])
 
   useEffect(() => { fetchRequests() }, [fetchRequests])
+
+  // Inline status change from list view
+  const handleStatusChange = useCallback(async (requestId: string, newStatus: string) => {
+    // Optimistic update
+    setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: newStatus } : r))
+    try {
+      const res = await fetch(apiPath(`/api/admin/requests/${requestId}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      if (!res.ok) throw new Error('Failed')
+    } catch {
+      fetchRequests() // Revert on failure
+    }
+  }, [fetchRequests])
 
   // Clear selection when tab changes
   useEffect(() => { setSelectedIds(new Set()) }, [activeTab])
