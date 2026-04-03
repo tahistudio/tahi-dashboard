@@ -498,3 +498,21 @@ Why: Liam confirmed NZ GST is the only tax obligation. Implementing VAT for othe
 How: BE agent adds billingCountry to subscriptions schema (S21). Billing logic applies 15% GST when billingCountry is "NZ" and zero tax otherwise.
 
 Escalated to Liam: No. Direct confirmation from Liam.
+
+## #029 - Migration Safety: Always Use IF NOT EXISTS and Verify Against Production
+
+**Date:** 2026-04-04
+**Context:** This is a recurring issue. Migration 0004_orange_sumo.sql failed in production because it tried to ADD COLUMN `case_study_permission` which already existed from migration 0006. This happened because:
+
+1. Drizzle `generate` creates migrations based on schema diff against the local snapshot, not the production DB state
+2. Migration numbering (0004) can come after a migration (0006) that already ran in production, if 0004 was generated later
+3. When a migration fails mid-way on D1, the entire transaction rolls back (nothing is applied), but the migration is NOT recorded - so the next deploy retries it
+
+**Decision:**
+- All migrations MUST use `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`
+- Before generating a migration with `drizzle-kit generate`, check what columns/tables already exist in production
+- After generating, manually review the SQL and remove any ALTER TABLE ADD COLUMN statements for columns that already exist in production
+- Never assume migration order matches chronological order of when schema changes were added
+- When a migration fails in production, check the D1 state before fixing: if D1 rolled back the transaction, simply fix the SQL and re-push; if partial application occurred, create a compensating migration
+
+**How to apply:** Every BE agent must review generated migration SQL against production schema before committing. Use `npx wrangler d1 execute <db> --remote --command "PRAGMA table_info(<table>)"` to check existing columns when in doubt.
