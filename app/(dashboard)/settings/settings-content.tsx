@@ -209,6 +209,8 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
                   className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
                   style={{
                     background: darkMode ? 'var(--color-brand)' : 'var(--color-border)',
+                    cursor: 'pointer',
+                    border: 'none',
                   }}
                   role="switch"
                   aria-checked={darkMode}
@@ -394,9 +396,9 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
                   Manage your team members and their access scoping rules.
                 </p>
                 <a
-                  href="/dashboard/team"
+                  href="/team"
                   className="inline-flex items-center gap-2 mt-3 text-sm font-medium transition-colors hover:opacity-80"
-                  style={{ color: 'var(--color-brand)', textDecoration: 'none' }}
+                  style={{ color: 'var(--color-brand)', textDecoration: 'none', cursor: 'pointer' }}
                 >
                   Go to Team Management
                 </a>
@@ -1972,6 +1974,8 @@ function ModulesSection({
                 className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
                 style={{
                   background: enabled ? 'var(--color-brand)' : 'var(--color-border)',
+                  cursor: savingKey === settingKey ? 'not-allowed' : 'pointer',
+                  border: 'none',
                 }}
                 role="switch"
                 aria-checked={enabled}

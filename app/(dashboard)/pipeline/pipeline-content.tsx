@@ -437,7 +437,13 @@ function KanbanView({ deals, stages, onStageChange }: {
                 />
                 <span
                   className="font-semibold uppercase tracking-wide"
-                  style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}
+                  style={{
+                    fontSize: '0.625rem',
+                    color: 'var(--color-text-muted)',
+                    lineHeight: 1.3,
+                    wordBreak: 'break-word',
+                  }}
+                  title={stage.name}
                 >
                   {stage.name}
                 </span>

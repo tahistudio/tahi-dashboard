@@ -3,8 +3,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { UserButton, OrganizationSwitcher } from '@clerk/nextjs'
-import { Search, X } from 'lucide-react'
+import { Search, X, Eye } from 'lucide-react'
 import { NotificationBell } from './notification-bell'
+import { useImpersonation } from './impersonation-banner'
 
 interface AppTopNavProps {
   isAdmin: boolean
@@ -15,6 +16,7 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchValue, setSearchValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const { isImpersonating, impersonatedContactName, impersonatedOrgName } = useImpersonation()
 
   const handleSearch = useCallback(() => {
     const q = searchValue.trim()
@@ -58,7 +60,16 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
     >
       {/* Left */}
       <div className="flex items-center gap-3 flex-1 min-w-0">
-        {isAdmin ? (
+        {isAdmin && isImpersonating ? (
+          <div className="flex items-center gap-2">
+            <Eye size={16} style={{ color: 'var(--color-warning)', flexShrink: 0 }} aria-hidden="true" />
+            <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+              {impersonatedContactName
+                ? `${impersonatedContactName} at ${impersonatedOrgName}`
+                : impersonatedOrgName}
+            </span>
+          </div>
+        ) : isAdmin ? (
           <>
             {/* Desktop: full search bar */}
             <button

@@ -459,3 +459,42 @@ How to apply:
 - Dashboard main content area uses a `.dashboard-main` CSS class with responsive rem padding instead of Tailwind classes
 
 Escalated to Liam: No. Root cause bugfix.
+
+---
+
+## #026 - Feature Depth Sprint: April 2026 Priorities
+
+Date: 2026-04-03
+Decision: Six priorities for the next sprint, directed by Liam. (1) Task management overhaul with dependencies, templates, AI wizard, track queue, and bulk ops. (2) Track queue visualization on client portal with drag reorder and upsell prompt. (3) @mentions system across tasks, requests, and messages with autocomplete and notifications. (4) Org chart with multiple roles per person and department grouping. (5) Subscription billing tiers: monthly, 3 month (includes SEO dashboard), 12 month (includes extra track, priority support, SEO dashboard), GST for NZ only. (6) Replace HubSpot entirely with built-in CRM, no HubSpot integration, remove all HubSpot references.
+
+Why: These features close the gap between the dashboard and ClickUp/HubSpot, making the dashboard the single tool for both internal ops and client-facing work. Billing tiers enable upselling. CRM replacement removes a paid dependency.
+
+How: BE agent handles schema additions S16-S22 first, then API routes. FE agent builds UI after schema is in place. UIUX reviews each feature. QA tests end-to-end. PM coordinates sequencing.
+
+Escalated to Liam: No. All priorities came directly from Liam.
+
+---
+
+## #027 - Remove HubSpot Integration Entirely
+
+Date: 2026-04-03
+Decision: HubSpot is not integrated. It is replaced by the built-in CRM pipeline. All HubSpot OAuth routes, sync endpoints, webhook receivers, and integration settings UI must be removed.
+
+Why: Liam explicitly said "do NOT integrate HubSpot, REPLACE it." The built-in CRM pipeline (Phase 6 tasks T286-T391 plus new tasks T472-T478) is the replacement. Keeping HubSpot code is dead weight.
+
+How: BE agent removes HubSpot API routes and references. FE agent removes HubSpot from integration settings card. Tasks T119-T123 (HubSpot integration) are superseded by this decision.
+
+Escalated to Liam: No. Direct instruction from Liam.
+
+---
+
+## #028 - Subscription Billing: GST for NZ Only, No VAT
+
+Date: 2026-04-03
+Decision: Tax is GST at 15% for New Zealand clients only. No VAT is charged for any other country. The billingCountry field on subscriptions determines tax treatment.
+
+Why: Liam confirmed NZ GST is the only tax obligation. Implementing VAT for other jurisdictions is unnecessary complexity.
+
+How: BE agent adds billingCountry to subscriptions schema (S21). Billing logic applies 15% GST when billingCountry is "NZ" and zero tax otherwise.
+
+Escalated to Liam: No. Direct confirmation from Liam.

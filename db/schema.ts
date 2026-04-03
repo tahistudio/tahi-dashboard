@@ -92,6 +92,8 @@ export const teamMembers = sqliteTable('team_members', {
   avatarUrl: text('avatar_url'),
   reportsToId: text('reports_to_id'),
   department: text('department'),
+  // S20: JSON array of role strings, e.g. ["CEO","Developer"]
+  roles: text('roles').default('[]'),
   ...timestamps,
 })
 
@@ -143,6 +145,14 @@ export const subscriptions = sqliteTable('subscriptions', {
   referralCouponId: text('referral_coupon_id'),
   cancelledAt: text('cancelled_at'),
   cancellationReason: text('cancellation_reason'),
+  // S21: Billing tiers
+  // monthly | quarterly | annual
+  billingInterval: text('billing_interval').default('monthly'),
+  // JSON array, e.g. ["seo_dashboard","extra_track","priority_support"]
+  includedAddons: text('included_addons').default('[]'),
+  discountPercent: real('discount_percent'),
+  // ISO country code for GST logic (e.g. "NZ" for 15% GST)
+  billingCountry: text('billing_country'),
   ...timestamps,
 }, (table) => [
   index('idx_subs_org').on(table.orgId),
@@ -439,12 +449,60 @@ export const tasks = sqliteTable('tasks', {
   createdById: text('created_by_id'),
   // JSON array of tag IDs
   tags: text('tags').default('[]'),
+  // S18: Track queue ordering and request linking
+  trackId: text('track_id').references(() => tracks.id),
+  // Position in queue within a track (lower = sooner)
+  position: integer('position'),
+  // Link task to a request
+  requestId: text('request_id').references(() => requests.id),
   ...timestamps,
 }, (table) => [
   index('idx_tasks_org').on(table.orgId),
   index('idx_tasks_type').on(table.type),
   index('idx_tasks_status').on(table.status),
+  index('idx_tasks_track').on(table.trackId),
+  index('idx_tasks_request').on(table.requestId),
 ])
+
+// ============================================================
+// TASK DEPENDENCIES (S16)
+// ============================================================
+
+export const taskDependencies = sqliteTable('task_dependencies', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  taskId: text('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  dependsOnTaskId: text('depends_on_task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_task_deps_task').on(table.taskId),
+  index('idx_task_deps_depends').on(table.dependsOnTaskId),
+])
+
+// ============================================================
+// TASK TEMPLATES (S17)
+// ============================================================
+
+export const taskTemplates = sqliteTable('task_templates', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
+  // client_task | internal_client_task | tahi_internal
+  type: text('type').notNull(),
+  category: text('category'),
+  description: text('description'),
+  // standard | high | urgent
+  defaultPriority: text('default_priority').notNull().default('standard'),
+  // JSON array of title strings
+  subtasks: text('subtasks').default('[]'),
+  estimatedHours: real('estimated_hours'),
+  createdById: text('created_by_id').notNull(),
+  ...timestamps,
+})
+
+// ============================================================
+// TASK SUBTASKS
+// ============================================================
 
 export const taskSubtasks = sqliteTable('task_subtasks', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -453,6 +511,27 @@ export const taskSubtasks = sqliteTable('task_subtasks', {
   completed: integer('completed', { mode: 'boolean' }).default(false),
   createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
 })
+
+// ============================================================
+// MENTIONS (S19)
+// ============================================================
+
+export const mentions = sqliteTable('mentions', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // task | request | message
+  entityType: text('entity_type').notNull(),
+  entityId: text('entity_id').notNull(),
+  mentionedId: text('mentioned_id').notNull(),
+  // team_member | contact
+  mentionedType: text('mentioned_type').notNull(),
+  mentionedById: text('mentioned_by_id').notNull(),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_mentions_mentioned').on(table.mentionedId),
+  index('idx_mentions_entity').on(table.entityId),
+])
 
 // ============================================================
 // TAGS
@@ -848,6 +927,8 @@ export const deals = sqliteTable('deals', {
   closedAt: text('closed_at'),
   closeReason: text('close_reason'),
   notes: text('notes'),
+  // S22: Won source tracking for close rate analytics
+  wonSource: text('won_source'),
   ...timestamps,
 }, (table) => [
   index('idx_deals_org').on(table.orgId),
@@ -962,3 +1043,9 @@ export type Activity = typeof activities.$inferSelect
 export type NewActivity = typeof activities.$inferInsert
 export type PlannedRole = typeof plannedRoles.$inferSelect
 export type NewPlannedRole = typeof plannedRoles.$inferInsert
+export type TaskDependency = typeof taskDependencies.$inferSelect
+export type NewTaskDependency = typeof taskDependencies.$inferInsert
+export type TaskTemplate = typeof taskTemplates.$inferSelect
+export type NewTaskTemplate = typeof taskTemplates.$inferInsert
+export type Mention = typeof mentions.$inferSelect
+export type NewMention = typeof mentions.$inferInsert

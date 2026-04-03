@@ -91,10 +91,43 @@ function getConversationDisplayName(conv: ConversationSummary): string {
   return 'Unnamed conversation'
 }
 
+// Deterministic waveform bar heights (seeded pattern, not random per render)
+const WAVEFORM_HEIGHTS = [
+  0.35, 0.55, 0.75, 0.45, 0.90, 0.60, 0.80, 0.40, 0.95, 0.50,
+  0.70, 0.85, 0.30, 0.65, 1.00, 0.55, 0.45, 0.80, 0.60, 0.38,
+]
+
 function VoiceNotePlayer({ body }: { body: string }) {
   const [playing, setPlaying] = useState(false)
+  const [progress, setProgress] = useState(0)
   const durationMatch = body.match(/(\d+)s/)
   const duration = durationMatch ? parseInt(durationMatch[1]) : 0
+
+  // Animate progress when "playing"
+  useEffect(() => {
+    if (!playing) return
+    const totalMs = duration * 1000
+    const interval = totalMs / 20
+    const timer = setInterval(() => {
+      setProgress(prev => {
+        if (prev >= 20) {
+          setPlaying(false)
+          return 0
+        }
+        return prev + 1
+      })
+    }, interval || 100)
+    return () => clearInterval(timer)
+  }, [playing, duration])
+
+  function handlePlayPause() {
+    if (playing) {
+      setPlaying(false)
+    } else {
+      setProgress(0)
+      setPlaying(true)
+    }
+  }
 
   return (
     <div
@@ -108,7 +141,7 @@ function VoiceNotePlayer({ body }: { body: string }) {
     >
       <button
         type="button"
-        onClick={() => setPlaying(!playing)}
+        onClick={handlePlayPause}
         style={{
           width: '2rem',
           height: '2rem',
@@ -135,26 +168,23 @@ function VoiceNotePlayer({ body }: { body: string }) {
           </svg>
         )}
       </button>
-      {/* Waveform bars (decorative) */}
+      {/* Waveform bars (deterministic) */}
       <div className="flex items-center gap-0.5 flex-1">
-        {Array.from({ length: 20 }).map((_, i) => {
-          const height = Math.random() * 0.75 + 0.25
-          return (
-            <div
-              key={i}
-              style={{
-                width: '0.1875rem',
-                height: `${height * 1.25}rem`,
-                borderRadius: '0.125rem',
-                background: i < (playing ? 10 : 0) ? 'var(--color-brand)' : 'var(--color-border)',
-                transition: 'background 0.2s',
-              }}
-            />
-          )
-        })}
+        {WAVEFORM_HEIGHTS.map((h, i) => (
+          <div
+            key={i}
+            style={{
+              width: '0.1875rem',
+              height: `${h * 1.25}rem`,
+              borderRadius: '0.125rem',
+              background: i < progress ? 'var(--color-brand)' : 'var(--color-border)',
+              transition: 'background 0.15s',
+            }}
+          />
+        ))}
       </div>
       <span className="text-xs font-medium" style={{ color: 'var(--color-text-muted)', flexShrink: 0 }}>
-        {duration}s
+        {playing ? `${Math.min(Math.round((progress / 20) * duration), duration)}s` : `${duration}s`}
       </span>
     </div>
   )

@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
-Last updated: 2026-03-30
-Total tasks: 406 (S1-S15 schema + T1-T395 feature + audit findings)
-Completed: 298/406
+Last updated: 2026-04-03
+Total tasks: 509 (S1-S22 schema + T1-T487 feature)
+Completed: 298/509
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -675,4 +675,145 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T409 - [BE] POST /api/admin/invoices: accept top-level currency field with validation against supported currencies -- [FE] 2026-03-30
 - [x] T410 - [FE] Kanban columns settings: add Global Default / Per-Client Override mode toggle with client picker and info banner for global fallback -- [FE] 2026-03-30
 - [ ] T411 - [UIUX] Review: spacing pass on invoice currency selector and kanban per-client override UI -- [UIUX]
-- [ ] T412 - [QA] Regression: verify invoice creation with all 5 currencies, kanban column per-client override CRUD -- [QA]
+- [ ] T412 - [QA] Regression: verify invoice creation with all 5 currencies, kanban column per-client override CRUD
+
+---
+
+## Sprint: Feature Depth Round (April 2026)
+
+Direction from Liam (co-founder). Six priorities plus audit bug fixes. All schema tasks (S16-S22) must land before their dependent feature tasks.
+
+### Schema Additions (Feature Depth)
+
+- [x] S16 - [BE] Add `taskDependencies` table: id (uuid pk), taskId (text, FK tasks), dependsOnTaskId (text, FK tasks), createdAt. Index on taskId and dependsOnTaskId. -- [BE] 2026-04-03
+- [x] S17 - [BE] Add `taskTemplates` table: id (uuid pk), name (text), type (text: client_task, internal_client_task, tahi_internal), category (text nullable), description (text nullable), defaultPriority (text, default 'standard'), subtasks (text, JSON array of title strings), estimatedHours (real nullable), createdById (text), createdAt, updatedAt. -- [BE] 2026-04-03
+- [x] S18 - [BE] Add columns to `tasks` table: trackId (text nullable, FK tracks), position (integer nullable, for queue ordering within a track), requestId (text nullable, FK requests for task-to-request linking). -- [BE] 2026-04-03
+- [x] S19 - [BE] Add `mentions` table: id (uuid pk), entityType (text: 'task', 'request', 'message'), entityId (text), mentionedId (text), mentionedType (text: 'team_member', 'contact'), mentionedById (text), createdAt. Index on mentionedId and entityId. -- [BE] 2026-04-03
+- [x] S20 - [BE] Add columns to `teamMembers` table: roles (text, JSON array of role strings, e.g. ["CEO","Developer"]), department (text nullable) if not already present. -- [BE] 2026-04-03
+- [x] S21 - [BE] Add columns to `subscriptions` table: billingInterval (text: 'monthly', 'quarterly', 'annual', default 'monthly'), includedAddons (text, JSON array, e.g. ["seo_dashboard","extra_track","priority_support"]), discountPercent (real nullable), billingCountry (text nullable, for GST logic). -- [BE] 2026-04-03
+- [x] S22 - [BE] Add columns to `deals` table: wonSource (text nullable) if not already present. Remove HubSpot references from integrations seed data. -- [BE] 2026-04-03
+
+### Priority 1: Task Management Overhaul
+
+Requires S16, S17, S18.
+
+#### Task Dependencies and Linking
+
+- [ ] T413 - [BE] POST /api/admin/tasks/[id]/dependencies: add a dependency (dependsOnTaskId). Validate no circular references.
+- [ ] T414 - [BE] GET /api/admin/tasks/[id]/dependencies: return both "blocks" and "blocked by" relationships for a task.
+- [ ] T415 - [BE] DELETE /api/admin/tasks/[id]/dependencies/[depId]: remove a dependency.
+- [ ] T416 - [FE] Task detail: dependencies section showing blocked-by and blocks lists with status badges. Add dependency picker (SearchableSelect of tasks).
+- [ ] T417 - [BE] PATCH /api/admin/tasks/[id]: support requestId field for task-to-request linking.
+- [ ] T418 - [FE] Task detail: linked request section showing request title, status, and link. Request picker to set or change.
+
+#### Task Templates
+
+- [ ] T419 - [BE] GET /api/admin/task-templates: list all templates with filters (type, category).
+- [ ] T420 - [BE] POST /api/admin/task-templates: create template with name, type, category, description, defaultPriority, subtasks, estimatedHours.
+- [ ] T421 - [BE] PATCH /api/admin/task-templates/[id]: update template.
+- [ ] T422 - [BE] DELETE /api/admin/task-templates/[id]: delete template.
+- [ ] T423 - [FE] Settings page: task templates manager (list, create, edit, delete templates).
+- [ ] T424 - [FE] New task dialog: "Use template" dropdown that pre-fills fields and subtasks from selected template.
+
+#### Subtask Checklists
+
+- [ ] T425 - [FE] Task detail: subtask checklist UI with add, toggle complete, reorder (drag), delete. Show completion count (e.g. "3/7 done").
+- [ ] T426 - [BE] GET /api/admin/tasks/[id]/subtasks: return subtasks ordered by creation.
+- [ ] T427 - [BE] POST /api/admin/tasks/[id]/subtasks: create subtask.
+- [ ] T428 - [BE] PATCH /api/admin/tasks/[id]/subtasks/[subId]: toggle completed, update title.
+- [ ] T429 - [BE] DELETE /api/admin/tasks/[id]/subtasks/[subId]: delete subtask.
+
+#### Bulk Task Operations
+
+- [ ] T430 - [FE] Tasks page: multi-select checkboxes on task rows. Bulk actions bar: change status, change priority, assign, delete.
+- [ ] T431 - [BE] PATCH /api/admin/tasks/bulk: accept array of task IDs and fields to update (status, priority, assigneeId). Validate all IDs exist.
+
+#### AI Task Creation Wizard
+
+- [ ] T432 - [FE] "AI Create" button on tasks page opens conversational wizard dialog. Step 1: ask what needs to be done (free text). Step 2: ask clarifying questions (client, priority, track). Step 3: preview generated task(s) with subtasks. Step 4: confirm and create.
+- [ ] T433 - [BE] POST /api/admin/ai/task-wizard: accept user input text, return structured task suggestion(s) with title, description, subtasks, priority, estimated hours, recommended track. Uses Claude API.
+- [ ] T434 - [FE] AI wizard: allow editing each generated task before confirming. Support creating multiple tasks from one wizard session.
+
+#### High Priority Warning
+
+- [ ] T435 - [FE] Task creation and edit: when priority is set to "high" or "urgent", show warning dialog explaining it will displace the currently active task in the track. Show the task that will be displaced. Require confirmation.
+
+### Priority 2: Track Queue Experience (Client Portal)
+
+Requires S18.
+
+- [ ] T436 - [BE] GET /api/portal/tracks: return the client's tracks with current active task per track and queued tasks behind it, ordered by position.
+- [ ] T437 - [BE] PATCH /api/portal/tracks/[trackId]/reorder: accept ordered array of task IDs. Validate all tasks belong to the client's org. Update position values.
+- [ ] T438 - [FE] Client portal: track queue page showing each track as a lane. Active task highlighted at top, queued tasks below in order.
+- [ ] T439 - [FE] Track queue: drag-to-reorder tasks within a track (client can prioritize their own queue). Calls reorder API on drop.
+- [ ] T440 - [FE] Track queue: "active" badge on the task currently being worked on. "Next up" label on the first queued task.
+- [ ] T441 - [FE] Track queue: upsell card when all tracks are occupied. Show plan name, current track count, and "Upgrade to get more tracks" CTA with link to billing.
+- [ ] T442 - [BE] GET /api/admin/clients/[id]/tracks: return track queue visualization data for admin view of a client's tracks.
+- [ ] T443 - [FE] Client detail page: track queue tab showing admin view of the client's track lanes with active and queued tasks.
+
+### Priority 3: @mentions System
+
+Requires S19.
+
+- [ ] T444 - [BE] POST /api/admin/mentions: parse content for @mention patterns, create mentions rows, trigger notification for each mentioned person.
+- [ ] T445 - [BE] Utility: parseMentions(content) extracts mention patterns from Tiptap JSON or plain text. Returns array of {id, type}.
+- [ ] T446 - [BE] Wire mention detection into POST /api/admin/tasks (description field), POST /api/admin/requests/[id]/messages (content field), POST /api/admin/conversations/[id]/messages (content field).
+- [ ] T447 - [FE] Tiptap extension: @mention node type. Typing "@" triggers autocomplete dropdown of team members and contacts. Selecting inserts a styled mention chip.
+- [ ] T448 - [FE] Mention autocomplete: fetch team members and contacts on "@" keypress. Filter by typed text. Show avatar, name, and role. Keyboard navigation (arrow keys, enter to select).
+- [ ] T449 - [FE] Mention chip: styled inline element showing mentioned person's name with distinct background. Clickable to navigate to their profile.
+- [ ] T450 - [BE] Notification trigger: when a mention is created, insert a notification row for the mentioned person with entityType and entityId linking to the source.
+- [ ] T451 - [FE] Notification: mention notifications show "@You were mentioned in [task/request/message]" with link to source.
+
+### Priority 4: Org Chart
+
+Requires S20. S14 (reportsToId, plannedRoles) already exists in Phase 6 schema.
+
+- [ ] T452 - [BE] PATCH /api/admin/team-members/[id]: support updating roles (JSON array) and department.
+- [ ] T453 - [FE] Org chart page: tree visualization with connected nodes. Each node shows avatar, name, roles list (multiple badges), department, capacity bar.
+- [ ] T454 - [FE] Org chart: drag nodes to reorganize reporting structure (updates reportsToId).
+- [ ] T455 - [FE] Org chart: department grouping with colour-coded sections. Filter by department.
+- [ ] T456 - [FE] Org chart: vacant/planned role nodes with dotted border and "Planned" badge.
+- [ ] T457 - [FE] Org chart: click node to expand detail panel or navigate to team member detail.
+- [ ] T458 - [FE] Org chart: capacity per member shown as utilization bar on each node (hours committed vs available).
+- [ ] T459 - [FE] Org chart: responsive layout (horizontal tree on desktop, vertical list on mobile).
+- [ ] T460 - [FE] Add "Org Chart" nav item to sidebar under "Team" group.
+- [ ] T461 - [UIUX] Review org chart for spacing, node sizing, line rendering, dark mode.
+- [ ] T462 - [QA] Test org chart: rendering, drag reorder, multiple roles display, planned roles, mobile layout.
+
+### Priority 5: Subscription Billing Tiers
+
+Requires S21.
+
+- [ ] T463 - [BE] PATCH /api/admin/subscriptions/[id]: support updating billingInterval, includedAddons, discountPercent, billingCountry.
+- [ ] T464 - [BE] Billing logic: compute plan pricing for monthly, quarterly (3 month), and annual (12 month) intervals. Apply bundled addons per tier: quarterly includes seo_dashboard; annual includes seo_dashboard, extra_track, priority_support.
+- [ ] T465 - [BE] GST logic: apply 15% GST only when billingCountry is "NZ". No VAT for any other country.
+- [ ] T466 - [FE] Subscription editor on client detail: billing interval selector (monthly, 3 month, 12 month) with savings calculation displayed to admin.
+- [ ] T467 - [FE] Subscription editor: show bundled addons per tier. Quarterly: "Includes free SEO dashboard". Annual: "Includes free extra track, priority support, and SEO dashboard".
+- [ ] T468 - [FE] Client portal billing page: show current plan, billing interval, included addons, next renewal date, and savings vs monthly.
+- [ ] T469 - [BE] Stripe integration: map billing intervals to Stripe subscription price IDs. Create or update Stripe subscription when interval changes.
+- [ ] T470 - [FE] Admin billing page: summary of clients by billing interval (monthly, quarterly, annual) with MRR impact.
+- [ ] T471 - [QA] Test billing tiers: verify correct addon bundling, GST calculation for NZ, savings display, Stripe subscription mapping.
+
+### Priority 6: CRM Pipeline (Replace HubSpot)
+
+Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover the specific gaps Liam identified: removing HubSpot entirely, adding close rate analytics by source, and capacity forecasting from pipeline.
+
+- [ ] T472 - [BE] Remove HubSpot integration: delete HubSpot OAuth route, sync endpoints, and webhook receiver. Remove HubSpot from integration settings seed data and UI.
+- [ ] T473 - [FE] Settings integrations tab: remove HubSpot connection card entirely.
+- [ ] T474 - [FE] Pipeline deal detail: activity timeline showing all touchpoints (calls, meetings, emails, notes) in chronological order.
+- [ ] T475 - [BE] GET /api/admin/reports/close-rates: add breakdowns by source (close rate per source, avg deal size per source, avg cycle length per source).
+- [ ] T476 - [FE] Reports page: close rate analytics section with source breakdown bar chart and conversion funnel.
+- [ ] T477 - [BE] GET /api/admin/capacity/forecast: return forecasted capacity impact from pipeline deals weighted by probability, grouped by expected close month.
+- [ ] T478 - [FE] Capacity page: pipeline impact section showing forecasted hours from deals, worst case vs weighted vs best case scenarios.
+
+### Audit Bug Fixes (from AUDIT.md)
+
+- [ ] T479 - [FE] B3: Fix currency formatting inconsistency on invoices. Standardize to consistent format (e.g. "NZ$500" for NZD, "US$2,500" for USD) across all invoice views.
+- [ ] T480 - [BE] B4: Fix invoice status mismatch between billing page and invoices page. Ensure both views read from the same source of truth and apply the same status logic.
+- [ ] T481 - [FE] B6: Impersonation polish: hide admin sidebar nav items during impersonation. Show the impersonated contact's name (not org name) in the header. Add "Exit impersonation" button.
+- [ ] T482 - [FE] B7: Voice notes: fix waveform visualization (render actual audio waveform, not text placeholder). Remove duplicate send button. Ensure playback works.
+- [ ] T483 - [FE] B8: Pipeline column headers: prevent text truncation. Use smaller font or allow wrapping for long stage names like "Verbal Commitment".
+- [ ] T484 - [FE] B9: Overview MRR card: replace "Connect Stripe" placeholder with actual MRR calculation from subscriptions table. Show real value even without Stripe connected.
+- [ ] T485 - [FE] B10: Settings page: fix broken Team button navigation, portal branding save, and modules toggle persistence.
+- [ ] T486 - [UIUX] Review all audit bug fixes for visual consistency and dark mode.
+- [ ] T487 - [QA] Regression test all audit bug fixes: currency formatting, invoice status, impersonation, voice notes, pipeline headers, MRR card, settings page. -- [QA]

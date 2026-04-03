@@ -134,11 +134,15 @@ export function AdminOverview({ userName }: { userName: string }) {
         />
         <StatCard
           label="MRR"
-          value="--"
+          value={loading ? null : (() => {
+            if (monthlyRevenue.length === 0) return '$0'
+            const latest = monthlyRevenue[monthlyRevenue.length - 1]
+            return formatUsd(latest.total)
+          })()}
           icon={<TrendingUp size={18} />}
           href="/reports"
           accent="emerald"
-          sub="Connect Stripe"
+          sub={monthlyRevenue.length > 0 ? 'from invoices' : 'no invoice data'}
         />
       </div>
 

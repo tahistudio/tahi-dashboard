@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { CreditCard, ExternalLink, FileText, RefreshCw } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -24,6 +25,20 @@ interface SubscriptionRow {
   planType: string
   status: string
   currentPeriodEnd: string | null
+}
+
+function formatCurrency(amount: number, currency: string): string {
+  const cur = currency || 'NZD'
+  return new Intl.NumberFormat('en-NZ', {
+    style: 'currency',
+    currency: cur,
+    minimumFractionDigits: 2,
+  }).format(amount)
+}
+
+function isOverdue(dueDate: string | null, status: string): boolean {
+  if (!dueDate || status === 'paid' || status === 'written_off') return false
+  return new Date(dueDate + 'T23:59:59') < new Date()
 }
 
 export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
@@ -175,10 +190,10 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                             {inv.id.slice(0, 8).toUpperCase()}
                           </td>
                           <td className="px-4 py-3 font-medium text-[var(--color-text)]">
-                            ${(inv.totalUsd ?? inv.totalAmount ?? 0).toFixed(2)} {inv.currency}
+                            {formatCurrency(inv.totalUsd ?? inv.totalAmount ?? 0, inv.currency)}
                           </td>
                           <td className="px-4 py-3">
-                            <InvoiceStatusBadge status={inv.status} />
+                            <InvoiceStatusBadge status={isOverdue(inv.dueDate, inv.status) && inv.status === 'sent' ? 'overdue' : inv.status} />
                           </td>
                           <td className="px-4 py-3 text-[var(--color-text-muted)]">
                             {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : '-'}
@@ -270,7 +285,12 @@ function AdminBillingView() {
             <BillingKPI label="Recent Invoices" value={recentInvoices.length} />
             <BillingKPI
               label="Outstanding"
-              value={`$${recentInvoices.filter(i => i.status === 'sent' || i.status === 'overdue').reduce((s, i) => s + (i.totalUsd ?? i.totalAmount ?? 0), 0).toFixed(0)}`}
+              value={formatCurrency(
+                recentInvoices
+                  .filter(i => i.status === 'sent' || i.status === 'overdue' || (i.status === 'sent' && isOverdue(i.dueDate, i.status)))
+                  .reduce((s, i) => s + (i.totalUsd ?? i.totalAmount ?? 0), 0),
+                'NZD'
+              )}
             />
           </div>
 
@@ -329,9 +349,9 @@ function AdminBillingView() {
               <h2 className="text-base font-semibold" style={{ color: 'var(--color-text)' }}>
                 Recent Invoices
               </h2>
-              <a href="/dashboard/invoices" className="text-sm font-medium" style={{ color: 'var(--color-brand)', textDecoration: 'none' }}>
+              <Link href="/invoices" className="text-sm font-medium" style={{ color: 'var(--color-brand)', textDecoration: 'none', cursor: 'pointer' }}>
                 View all
-              </a>
+              </Link>
             </div>
             {recentInvoices.length === 0 ? (
               <EmptyState
@@ -358,10 +378,10 @@ function AdminBillingView() {
                             {inv.id.slice(0, 8).toUpperCase()}
                           </td>
                           <td className="font-medium" style={{ padding: '0.75rem 1rem', color: 'var(--color-text)' }}>
-                            ${(inv.totalUsd ?? inv.totalAmount ?? 0).toFixed(2)} {inv.currency}
+                            {formatCurrency(inv.totalUsd ?? inv.totalAmount ?? 0, inv.currency)}
                           </td>
                           <td style={{ padding: '0.75rem 1rem' }}>
-                            <InvoiceStatusBadge status={inv.status} />
+                            <InvoiceStatusBadge status={isOverdue(inv.dueDate, inv.status) && inv.status === 'sent' ? 'overdue' : inv.status} />
                           </td>
                           <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>
                             {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : '-'}
