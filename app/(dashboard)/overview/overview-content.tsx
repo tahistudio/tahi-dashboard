@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { OnboardingChecklist, type OnboardingState } from '@/components/tahi/onboarding-checklist'
+import { BookingWidget } from '@/components/tahi/booking-widget'
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -433,6 +434,9 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
 
       {/* Schedule a Call (T88) */}
       <ScheduleCallWidget />
+
+      {/* Book a Call - Google Calendar embed */}
+      <BookingWidget />
 
       {/* Review outreach banner (T107) */}
       <ReviewOutreachBanner />
