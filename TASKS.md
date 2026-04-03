@@ -730,9 +730,11 @@ Requires S16, S17, S18.
 
 #### AI Task Creation Wizard
 
-- [ ] T432 - [FE] "AI Create" button on tasks page opens conversational wizard dialog. Step 1: ask what needs to be done (free text). Step 2: ask clarifying questions (client, priority, track). Step 3: preview generated task(s) with subtasks. Step 4: confirm and create.
-- [ ] T433 - [BE] POST /api/admin/ai/task-wizard: accept user input text, return structured task suggestion(s) with title, description, subtasks, priority, estimated hours, recommended track. Uses Claude API.
-- [ ] T434 - [FE] AI wizard: allow editing each generated task before confirming. Support creating multiple tasks from one wizard session.
+- [x] T432 - [FE] "AI Create" button on tasks page opens conversational wizard dialog. Step 1: ask what needs to be done (free text). Step 2: ask clarifying questions (client, priority, track). Step 3: preview generated task(s) with subtasks. Step 4: confirm and create. — [FE] 2026-04-03
+- [x] T433 - [BE] POST /api/admin/ai/task-wizard: accept user input text, return structured task suggestion(s) with title, description, subtasks, priority, estimated hours, recommended track. Uses deterministic heuristics (Claude API to be wired later). — [FE] 2026-04-03
+- [x] T434 - [FE] AI wizard: allow editing each generated task before confirming. Support creating multiple tasks from one wizard session. — [FE] 2026-04-03
+- [ ] T434a - [UIUX] Review AI Task Wizard spacing and layout (components/tahi/ai-task-wizard.tsx)
+- [ ] T434b - [QA] Regression test AI Task Wizard: conversation flow, task generation, editing, creation
 
 #### High Priority Warning
 

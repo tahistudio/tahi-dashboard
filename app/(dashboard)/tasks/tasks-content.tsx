@@ -6,9 +6,10 @@ import {
   Calendar, Zap, AlertTriangle, X, Loader2,
   CheckCircle2, Circle, Link2, Clock,
   ChevronRight, Trash2, GitBranch, Users,
-  Building2, Briefcase, Shield,
+  Building2, Briefcase, Shield, Sparkles,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { AiTaskWizard } from '@/components/tahi/ai-task-wizard'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { DateRangePicker, type DateRange } from '@/components/tahi/date-range-picker'
 import { useToast } from '@/components/tahi/toast'
@@ -300,6 +301,7 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [wizardOpen, setWizardOpen] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
   const [priorityFilter, setPriorityFilter] = useState('all')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
@@ -390,15 +392,29 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
         </div>
         <div className="flex items-center gap-2">
           {isAdmin && (
-            <button
-              onClick={() => setDialogOpen(true)}
-              className="flex items-center gap-2 font-semibold text-white transition-opacity hover:opacity-90"
-              style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', background: 'var(--color-brand)', borderRadius: '0.5rem', border: 'none', cursor: 'pointer' }}
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">Create Task</span>
-              <span className="sm:hidden">New</span>
-            </button>
+            <>
+              <button
+                onClick={() => setWizardOpen(true)}
+                className="flex items-center gap-2 font-medium transition-colors hover:opacity-90"
+                style={{
+                  padding: '0.5rem 0.875rem', fontSize: '0.875rem',
+                  background: 'var(--color-bg-tertiary)', color: 'var(--color-brand)',
+                  borderRadius: '0.5rem', border: '1px solid var(--color-brand-light)', cursor: 'pointer',
+                }}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">AI Help</span>
+              </button>
+              <button
+                onClick={() => setDialogOpen(true)}
+                className="flex items-center gap-2 font-semibold text-white transition-opacity hover:opacity-90"
+                style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', background: 'var(--color-brand)', borderRadius: '0.5rem', border: 'none', cursor: 'pointer' }}
+              >
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">Create Task</span>
+                <span className="sm:hidden">New</span>
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -568,6 +584,13 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
           )}
         </div>
       </div>
+
+      {/* AI Task Wizard */}
+      <AiTaskWizard
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onTasksCreated={fetchTasks}
+      />
     </>
   )
 }
@@ -1263,6 +1286,7 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
           </div>
         </div>
       </div>
+
     </>
   )
 }
