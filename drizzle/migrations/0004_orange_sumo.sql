@@ -35,8 +35,6 @@ CREATE TABLE `task_templates` (
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE `case_study_submissions` ADD `case_study_permission` integer DEFAULT false;--> statement-breakpoint
-ALTER TABLE `case_study_submissions` ADD `clutch_review_url` text;--> statement-breakpoint
 ALTER TABLE `deals` ADD `won_source` text;--> statement-breakpoint
 ALTER TABLE `subscriptions` ADD `billing_interval` text DEFAULT 'monthly';--> statement-breakpoint
 ALTER TABLE `subscriptions` ADD `included_addons` text DEFAULT '[]';--> statement-breakpoint
