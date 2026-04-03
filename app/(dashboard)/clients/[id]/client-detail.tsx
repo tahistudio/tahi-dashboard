@@ -33,6 +33,9 @@ import {
   Eye,
   Tag,
   Trash2,
+  TrendingUp,
+  Handshake,
+  CalendarDays,
 } from 'lucide-react'
 import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badge'
 import { TrackMeter } from '@/components/tahi/track-meter'
@@ -115,7 +118,10 @@ const TABS = [
   { id: 'contacts',   label: 'Contacts',   icon: Users },
   { id: 'calls',      label: 'Calls',      icon: Phone },
   { id: 'messages',   label: 'Messages',   icon: MessageSquare },
+  { id: 'deals',      label: 'Deals',      icon: Handshake },
   { id: 'time',       label: 'Time',       icon: Clock },
+  { id: 'crm',        label: 'Activities', icon: CalendarDays },
+  { id: 'revenue',    label: 'Revenue',    icon: TrendingUp },
   { id: 'activity',   label: 'Activity',   icon: Activity },
 ] as const
 
@@ -293,8 +299,17 @@ export function ClientDetail({ clientId }: { clientId: string }) {
         {activeTab === 'messages' && (
           <MessagesTab clientId={clientId} orgName={org.name} />
         )}
+        {activeTab === 'deals' && (
+          <DealsTab clientId={clientId} orgName={org.name} />
+        )}
         {activeTab === 'time' && (
           <TimeTab clientId={clientId} />
+        )}
+        {activeTab === 'crm' && (
+          <CrmActivitiesTab clientId={clientId} />
+        )}
+        {activeTab === 'revenue' && (
+          <RevenueTab clientId={clientId} />
         )}
         {activeTab === 'activity' && (
           <ActivityTab clientId={clientId} />
@@ -2095,6 +2110,482 @@ function TimeTab({ clientId }: { clientId: string }) {
           </table>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Deals tab ─────────────────────────────────────────────────────────────────
+
+interface DealRow {
+  id: string
+  title: string
+  orgId: string | null
+  stageId: string
+  ownerId: string | null
+  value: number
+  currency: string
+  expectedCloseDate: string | null
+  closedAt: string | null
+  createdAt: string
+  updatedAt: string
+  orgName: string | null
+  stageName: string | null
+  stageColour: string | null
+  stageProbability: number | null
+  stageIsClosedWon: number | null
+  stageIsClosedLost: number | null
+  ownerName: string | null
+  ownerAvatarUrl: string | null
+  contactCount: number
+}
+
+const DEAL_STAGE_FALLBACK = { bg: '#f3f4f6', text: '#374151' }
+
+function DealsTab({ clientId, orgName }: { clientId: string; orgName: string }) {
+  const [deals, setDeals] = useState<DealRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const router = useRouter()
+
+  useEffect(() => {
+    setLoading(true)
+    fetch(apiPath(`/api/admin/deals?orgId=${clientId}`))
+      .then(r => r.json() as Promise<{ items: DealRow[] }>)
+      .then(data => setDeals(data.items ?? []))
+      .catch(() => setDeals([]))
+      .finally(() => setLoading(false))
+  }, [clientId])
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading deals...
+      </div>
+    )
+  }
+
+  const totalValue = deals.reduce((s, d) => s + d.value, 0)
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-semibold text-[var(--color-text)]">
+          Deals ({deals.length})
+          {deals.length > 0 && (
+            <span className="text-sm font-normal text-[var(--color-text-muted)] ml-2">
+              Total: ${totalValue.toLocaleString('en-US')}
+            </span>
+          )}
+        </h2>
+        <TahiButton variant="primary" size="sm" onClick={() => router.push('/pipeline')}>
+          <Plus className="w-3.5 h-3.5 mr-1.5" />
+          New Deal
+        </TahiButton>
+      </div>
+
+      {deals.length === 0 ? (
+        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
+          <Handshake className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
+          <p className="text-sm text-[var(--color-text-muted)]">No deals for {orgName} yet</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {deals.map(deal => {
+            const stageColor = deal.stageColour ?? DEAL_STAGE_FALLBACK.text
+            const isWon = deal.stageIsClosedWon === 1
+            const isLost = deal.stageIsClosedLost === 1
+            return (
+              <div
+                key={deal.id}
+                className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl cursor-pointer hover:border-[var(--color-brand)] transition-colors"
+                style={{ padding: '1.25rem' }}
+                onClick={() => router.push(`/pipeline?deal=${deal.id}`)}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-[var(--color-text)] truncate mr-2">
+                    {deal.title}
+                  </h3>
+                  <span
+                    className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0"
+                    style={{
+                      background: isWon ? '#f0fdf4' : isLost ? '#fef2f2' : `${stageColor}18`,
+                      color: isWon ? '#16a34a' : isLost ? '#dc2626' : stageColor,
+                    }}
+                  >
+                    {deal.stageName ?? 'Unknown'}
+                  </span>
+                </div>
+
+                <p className="text-lg font-bold text-[var(--color-text)] mb-2">
+                  ${deal.value.toLocaleString('en-US')}
+                  <span className="text-xs font-normal text-[var(--color-text-muted)] ml-1">
+                    {deal.currency}
+                  </span>
+                </p>
+
+                <div className="flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
+                  {deal.ownerName && (
+                    <span className="flex items-center gap-1">
+                      <User className="w-3 h-3" />
+                      {deal.ownerName}
+                    </span>
+                  )}
+                  {deal.expectedCloseDate && (
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {new Date(deal.expectedCloseDate).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}
+                    </span>
+                  )}
+                  {deal.contactCount > 0 && (
+                    <span className="flex items-center gap-1">
+                      <Users className="w-3 h-3" />
+                      {deal.contactCount}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── CRM Activities tab ────────────────────────────────────────────────────────
+
+interface CrmActivityRow {
+  id: string
+  type: string
+  title: string
+  description: string | null
+  scheduledAt: string | null
+  completedAt: string | null
+  durationMinutes: number | null
+  outcome: string | null
+  createdAt: string
+  createdByName: string | null
+}
+
+const ACTIVITY_TYPE_ICONS: Record<string, { icon: typeof Phone; color: string; bg: string }> = {
+  call:    { icon: Phone,          color: '#3b82f6', bg: '#eff6ff' },
+  meeting: { icon: Video,          color: '#8b5cf6', bg: '#f5f3ff' },
+  email:   { icon: Mail,           color: '#f59e0b', bg: '#fffbeb' },
+  note:    { icon: FileText,       color: '#6b7280', bg: '#f9fafb' },
+  task:    { icon: Check,          color: '#16a34a', bg: '#f0fdf4' },
+}
+
+const ACTIVITY_TYPE_FALLBACK = { icon: Activity, color: '#6b7280', bg: '#f9fafb' }
+
+function CrmActivitiesTab({ clientId }: { clientId: string }) {
+  const [items, setItems] = useState<CrmActivityRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({ type: 'note', title: '', description: '' })
+
+  const fetchActivities = useCallback(() => {
+    setLoading(true)
+    fetch(apiPath(`/api/admin/activities?orgId=${clientId}`))
+      .then(r => r.json() as Promise<{ items: CrmActivityRow[] }>)
+      .then(data => setItems(data.items ?? []))
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false))
+  }, [clientId])
+
+  useEffect(() => { fetchActivities() }, [fetchActivities])
+
+  const handleSubmit = async () => {
+    if (!form.title.trim()) return
+    setSaving(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/activities'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: form.type,
+          title: form.title.trim(),
+          description: form.description.trim() || undefined,
+          orgId: clientId,
+        }),
+      })
+      if (!res.ok) throw new Error('Failed')
+      setForm({ type: 'note', title: '', description: '' })
+      setShowForm(false)
+      fetchActivities()
+    } catch {
+      // silent
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading activities...
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-semibold text-[var(--color-text)]">
+          CRM Activities ({items.length})
+        </h2>
+        <TahiButton variant="primary" size="sm" onClick={() => setShowForm(!showForm)}>
+          <Plus className="w-3.5 h-3.5 mr-1.5" />
+          Log Activity
+        </TahiButton>
+      </div>
+
+      {/* Quick-add form */}
+      {showForm && (
+        <div
+          className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl mb-4"
+          style={{ padding: '1.25rem' }}
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Type</label>
+              <select
+                value={form.type}
+                onChange={e => setForm(f => ({ ...f, type: e.target.value }))}
+                className="w-full border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm bg-[var(--color-bg)] text-[var(--color-text)]"
+              >
+                <option value="note">Note</option>
+                <option value="call">Call</option>
+                <option value="meeting">Meeting</option>
+                <option value="email">Email</option>
+                <option value="task">Task</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Title</label>
+              <input
+                type="text"
+                value={form.title}
+                onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                placeholder="Activity title"
+                className="w-full border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm bg-[var(--color-bg)] text-[var(--color-text)]"
+              />
+            </div>
+          </div>
+          <div className="mb-3">
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Description (optional)</label>
+            <textarea
+              value={form.description}
+              onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+              rows={2}
+              placeholder="Add notes..."
+              className="w-full border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm bg-[var(--color-bg)] text-[var(--color-text)] resize-none"
+            />
+          </div>
+          <div className="flex items-center gap-2 justify-end">
+            <TahiButton variant="secondary" size="sm" onClick={() => setShowForm(false)}>
+              Cancel
+            </TahiButton>
+            <TahiButton variant="primary" size="sm" onClick={handleSubmit} disabled={saving || !form.title.trim()}>
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : null}
+              Save
+            </TahiButton>
+          </div>
+        </div>
+      )}
+
+      {items.length === 0 ? (
+        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
+          <CalendarDays className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
+          <p className="text-sm text-[var(--color-text-muted)]">No CRM activities for this client yet</p>
+        </div>
+      ) : (
+        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)]">
+          <div className="divide-y divide-[var(--color-border-subtle)]">
+            {items.map(item => {
+              const typeConfig = ACTIVITY_TYPE_ICONS[item.type] ?? ACTIVITY_TYPE_FALLBACK
+              const Icon = typeConfig.icon
+              return (
+                <div key={item.id} className="px-4 py-3 flex items-start gap-3 hover:bg-[var(--color-bg-secondary)] transition-colors">
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
+                    style={{ background: typeConfig.bg }}
+                  >
+                    <Icon className="w-3.5 h-3.5" style={{ color: typeConfig.color }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-[var(--color-text)] truncate">{item.title}</p>
+                      <span
+                        className="text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0"
+                        style={{ background: typeConfig.bg, color: typeConfig.color }}
+                      >
+                        {item.type}
+                      </span>
+                    </div>
+                    {item.description && (
+                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5 truncate">{item.description}</p>
+                    )}
+                    {item.createdByName && (
+                      <p className="text-xs text-[var(--color-text-subtle)] mt-0.5">by {item.createdByName}</p>
+                    )}
+                  </div>
+                  <span className="text-xs text-[var(--color-text-subtle)] flex-shrink-0 whitespace-nowrap">
+                    {new Date(item.createdAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Revenue tab ───────────────────────────────────────────────────────────────
+
+interface RevenueInvoice {
+  id: string
+  totalAmount: number
+  currency: string | null
+  status: string
+}
+
+interface RevenueTimeEntry {
+  id: string
+  hours: number
+  billable: boolean | null
+}
+
+function RevenueTab({ clientId }: { clientId: string }) {
+  const [invoices, setInvoices] = useState<RevenueInvoice[]>([])
+  const [timeEntries, setTimeEntries] = useState<RevenueTimeEntry[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    Promise.all([
+      fetch(apiPath(`/api/admin/invoices?orgId=${clientId}`))
+        .then(r => r.json() as Promise<{ items: RevenueInvoice[] }>)
+        .then(d => d.items ?? [])
+        .catch(() => [] as RevenueInvoice[]),
+      fetch(apiPath(`/api/admin/time?orgId=${clientId}`))
+        .then(r => r.json() as Promise<{ items: RevenueTimeEntry[] }>)
+        .then(d => d.items ?? [])
+        .catch(() => [] as RevenueTimeEntry[]),
+    ]).then(([inv, time]) => {
+      setInvoices(inv)
+      setTimeEntries(time)
+    }).finally(() => setLoading(false))
+  }, [clientId])
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading revenue data...
+      </div>
+    )
+  }
+
+  const totalInvoiced = invoices.reduce((s, i) => s + (i.totalAmount ?? 0), 0)
+  const paidInvoices = invoices.filter(i => i.status === 'paid')
+  const totalPaid = paidInvoices.reduce((s, i) => s + (i.totalAmount ?? 0), 0)
+  const outstandingInvoices = invoices.filter(i => i.status === 'sent' || i.status === 'overdue')
+  const totalOutstanding = outstandingInvoices.reduce((s, i) => s + (i.totalAmount ?? 0), 0)
+
+  const totalHours = timeEntries.reduce((s, e) => s + e.hours, 0)
+  const billableHours = timeEntries.filter(e => e.billable).reduce((s, e) => s + e.hours, 0)
+  // Estimate cost at $50/hr for LTV calculation
+  const HOURLY_RATE = 50
+  const estimatedTimeCost = billableHours * HOURLY_RATE
+
+  // LTV = total paid + outstanding (expected revenue)
+  const ltv = totalPaid + totalOutstanding
+
+  const statCards = [
+    {
+      label: 'Total Invoiced',
+      value: `$${totalInvoiced.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+      detail: `${invoices.length} invoices`,
+      icon: DollarSign,
+      color: '#5A824E',
+      bg: '#f0f7ee',
+    },
+    {
+      label: 'Total Paid',
+      value: `$${totalPaid.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+      detail: `${paidInvoices.length} paid`,
+      icon: Check,
+      color: '#16a34a',
+      bg: '#f0fdf4',
+    },
+    {
+      label: 'Outstanding',
+      value: `$${totalOutstanding.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+      detail: `${outstandingInvoices.length} unpaid`,
+      icon: AlertTriangle,
+      color: totalOutstanding > 0 ? '#f59e0b' : '#6b7280',
+      bg: totalOutstanding > 0 ? '#fffbeb' : '#f9fafb',
+    },
+    {
+      label: 'Billable Hours',
+      value: `${billableHours.toFixed(1)}h`,
+      detail: `${totalHours.toFixed(1)}h total`,
+      icon: Clock,
+      color: '#3b82f6',
+      bg: '#eff6ff',
+    },
+    {
+      label: 'Estimated Time Cost',
+      value: `$${estimatedTimeCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+      detail: `at $${HOURLY_RATE}/hr`,
+      icon: TrendingUp,
+      color: '#8b5cf6',
+      bg: '#f5f3ff',
+    },
+    {
+      label: 'Lifetime Value (LTV)',
+      value: `$${ltv.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+      detail: 'paid + outstanding',
+      icon: TrendingUp,
+      color: '#5A824E',
+      bg: '#f0f7ee',
+    },
+  ]
+
+  return (
+    <div>
+      <h2 className="font-semibold text-[var(--color-text)] mb-4">Revenue Summary</h2>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {statCards.map(card => {
+          const Icon = card.icon
+          return (
+            <div
+              key={card.label}
+              className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl"
+              style={{ padding: '1.25rem' }}
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <div
+                  className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                  style={{ background: card.bg }}
+                >
+                  <Icon className="w-5 h-5" style={{ color: card.color }} />
+                </div>
+                <span className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">
+                  {card.label}
+                </span>
+              </div>
+              <p className="text-xl font-bold text-[var(--color-text)]">{card.value}</p>
+              <p className="text-xs text-[var(--color-text-subtle)] mt-1">{card.detail}</p>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

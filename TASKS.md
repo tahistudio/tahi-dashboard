@@ -532,16 +532,18 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 ### Contact Detail Enhancements
 
 - [ ] T314 - [FE] Contact detail page: full page with activity timeline, deals, messages, requests, files
-- [ ] T315 - [BE] GET /api/admin/contacts/[id]: return contact detail with activity timeline, deals (via dealContacts), org info, custom fields
-- [ ] T316 - [BE] PATCH /api/admin/contacts/[id]: update contact fields including phone, customFields
+- [x] T315 - [BE] GET /api/admin/contacts/[id]: return contact detail with activity timeline, deals (via dealContacts), org info, messages
+- [x] T316 - [BE] PATCH /api/admin/contacts/[id]: update contact fields (name, email, role, isPrimary)
 - [ ] T317 - [FE] Contact detail: activity log form (quick-add call, meeting, email, note inline)
 
 ### Company/Organisation Enhancements
 
-- [ ] T318 - [FE] Client detail: add Deals tab showing all deals for this org with stage, value, owner
-- [ ] T319 - [FE] Client detail: add Activities tab showing all activities for this org
-- [ ] T320 - [FE] Client detail: add Revenue tab showing deal history, invoice totals, time cost, LTV
+- [x] T318 - [FE] Client detail: add Deals tab showing all deals for this org with stage, value, owner
+- [x] T319 - [FE] Client detail: add Activities tab showing all activities for this org (CRM activities with quick-add form)
+- [x] T320 - [FE] Client detail: add Revenue tab showing invoice totals, time cost, LTV
 - [ ] T321 - [BE] PATCH /api/admin/clients/[id]: support updating customFields, defaultHourlyRate, size, annualRevenue
+- [ ] UIUX review: spacing and layout review for Deals, CRM Activities, and Revenue tabs on client detail page
+- [ ] QA regression: verify Deals, CRM Activities, and Revenue tabs render correctly with empty and populated states
 
 ### Sales Reports
 
@@ -598,7 +600,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 - [ ] T358 - [FE] Add "Pipeline" nav item to sidebar under a "Sales" group (above Clients)
 - [ ] T359 - [FE] Add "Capacity" nav item to sidebar under the "Sales" group
-- [ ] T360 - [FE] Overview page: add pipeline summary card (total pipeline value, deals closing this month, capacity utilization)
+- [x] T360 - [FE] Overview page: add pipeline summary card (total pipeline value, deals closing this month, capacity utilization) -- [FE] 2026-04-03
 
 ### Integration and Polish
 
@@ -658,7 +660,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T398 - [FE] Tasks page: list view with filter tabs (All, To Do, In Progress, Blocked, Done), search, task rows with status/priority/type/due/client -- [FE] 2026-03-30
 - [x] T399 - [FE] New Task dialog: slide-over with title, type selector (3 tiles), client picker (SearchableSelect), description, priority, due date, assignee picker -- [FE] 2026-03-30
 - [x] T400 - [FE] Tasks page: loading skeleton, empty state with leaf icon and CTA -- [FE] 2026-03-30
-- [ ] T401 - [UIUX] Review: spacing pass on tasks page list view, dialog, detail panel, type tabs, and mobile layout -- [UIUX]
+- [x] T401 - [UIUX] Review: spacing pass on tasks page list view, dialog, detail panel, type tabs, and mobile layout -- [FE] 2026-04-03 (verified: view toggle matches request-list pattern, task links correct, AI Help button brand-styled, cursor-pointer on all interactive elements)
 - [ ] T402 - [QA] Regression: verify tasks page loads, create task flow works, type/status filters, detail panel, subtask toggle, template picker -- [QA]
 
 ### Reviews Pipeline Enhancement

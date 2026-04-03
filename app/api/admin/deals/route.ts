@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
   }
 
   const url = new URL(req.url)
+  const filterOrgId = url.searchParams.get('orgId')
   const stageId = url.searchParams.get('stageId')
   const ownerId = url.searchParams.get('ownerId')
   const source = url.searchParams.get('source')
@@ -35,6 +36,7 @@ export async function GET(req: NextRequest) {
     }
     conditions.push(inArray(schema.deals.orgId, scopedOrgIds))
   }
+  if (filterOrgId) conditions.push(eq(schema.deals.orgId, filterOrgId))
   if (stageId) conditions.push(eq(schema.deals.stageId, stageId))
   if (ownerId) conditions.push(eq(schema.deals.ownerId, ownerId))
   if (source) conditions.push(eq(schema.deals.source, source))
