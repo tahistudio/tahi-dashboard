@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { UserButton, OrganizationSwitcher } from '@clerk/nextjs'
-import { Search, X, Eye } from 'lucide-react'
+import { Search, X, Eye, UserCog } from 'lucide-react'
 import { NotificationBell } from './notification-bell'
 import { useImpersonation } from './impersonation-banner'
 
@@ -16,7 +16,7 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchValue, setSearchValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
-  const { isImpersonating, isImpersonatingClient, isImpersonatingTeamMember, impersonatedContactName, impersonatedOrgName, impersonatedTeamMemberName } = useImpersonation()
+  const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedContactName, impersonatedOrgName, impersonatedTeamMemberName } = useImpersonation()
 
   const handleSearch = useCallback(() => {
     const q = searchValue.trim()

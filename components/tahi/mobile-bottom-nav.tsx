@@ -26,9 +26,10 @@ interface MobileBottomNavProps {
 
 export function MobileBottomNav({ isAdmin = false }: MobileBottomNavProps) {
   const pathname = usePathname()
-  const { isImpersonating } = useImpersonation()
+  const { isImpersonatingClient } = useImpersonation()
   // When impersonating a client, show client nav instead of admin nav
-  const showAsAdmin = isAdmin && !isImpersonating
+  // When impersonating a team member, keep admin nav
+  const showAsAdmin = isAdmin && !isImpersonatingClient
   const items = showAsAdmin ? ADMIN_NAV : CLIENT_NAV
 
   return (

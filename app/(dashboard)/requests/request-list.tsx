@@ -295,7 +295,7 @@ function getStoredPreference<T>(key: string, fallback: T): T {
 }
 
 export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
-  const { isImpersonating, isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
+  const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
   // Check if impersonated team member is a viewer

@@ -97,7 +97,7 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
-  const { isImpersonating, isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
+  const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
 
   // When impersonating a client, show the client view instead of admin
   // When impersonating a team member, keep admin view but respect their role
