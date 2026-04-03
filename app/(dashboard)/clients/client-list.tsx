@@ -7,6 +7,7 @@ import { ClientCard } from '@/components/tahi/client-card'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { NewClientDialog } from '@/components/tahi/dialogs/new-client-dialog'
 import { apiPath } from '@/lib/api'
+import { useImpersonation } from '@/components/tahi/impersonation-banner'
 
 const STATUS_FILTERS = [
   { label: 'All',      value: 'all' },
@@ -115,7 +116,28 @@ export function ClientList() {
 
   useEffect(() => { fetchClients() }, [fetchClients])
 
-  const sortedOrgs = [...orgs].sort((a, b) => {
+  const { isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
+
+  // When impersonating a team member, filter clients to only those they have access to
+  const filteredOrgs = isImpersonatingTeamMember
+    ? orgs.filter(org => {
+      // No access rules means no access to any client
+      if (impersonatedAccessRules.length === 0) return false
+      return impersonatedAccessRules.some(rule => {
+        if (rule.scopeType === 'all_clients') return true
+        if (rule.scopeType === 'plan_type') return org.planType === rule.planType
+        if (rule.scopeType === 'specific_clients') return rule.orgIds?.includes(org.id) ?? false
+        return false
+      })
+    })
+    : orgs
+
+  // Determine if the impersonated team member is a viewer (hide create/edit actions)
+  const isViewerImpersonation = isImpersonatingTeamMember &&
+    impersonatedAccessRules.length > 0 &&
+    impersonatedAccessRules.every(r => r.role === 'viewer')
+
+  const sortedOrgs = [...filteredOrgs].sort((a, b) => {
     if (sortParam === 'created') {
       return new Date(b.createdAt ?? '').getTime() - new Date(a.createdAt ?? '').getTime()
     }
@@ -134,13 +156,15 @@ export function ClientList() {
               : 'All client organisations and their current status'}
           </p>
         </div>
-        <TahiButton
-          iconLeft={<Plus className="w-4 h-4" />}
-          onClick={() => setDialogOpen(true)}
-          size="md"
-        >
-          Add client
-        </TahiButton>
+        {!isViewerImpersonation && (
+          <TahiButton
+            iconLeft={<Plus className="w-4 h-4" />}
+            onClick={() => setDialogOpen(true)}
+            size="md"
+          >
+            Add client
+          </TahiButton>
+        )}
       </div>
 
       {/* Search */}

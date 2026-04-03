@@ -2,9 +2,36 @@
 
 import { useCallback, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
-import { Eye, X } from 'lucide-react'
+import { Eye, X, UserCog } from 'lucide-react'
 
-interface ImpersonationData {
+/** Access rule for a team member (mirrors the AccessRule shape from team page) */
+export interface TeamMemberAccessRule {
+  role: string        // 'project_manager' | 'task_handler' | 'viewer'
+  scopeType: string   // 'all_clients' | 'plan_type' | 'specific_clients'
+  planType?: string | null
+  trackType: string   // 'all' | 'small' | 'large'
+  orgIds?: string[]   // set when scopeType = 'specific_clients'
+}
+
+interface ClientImpersonationData {
+  type: 'client'
+  orgId: string
+  orgName: string
+  contactId?: string
+  contactName?: string
+}
+
+interface TeamMemberImpersonationData {
+  type: 'team_member'
+  teamMemberId: string
+  teamMemberName: string
+  accessRules: TeamMemberAccessRule[]
+}
+
+type ImpersonationData = ClientImpersonationData | TeamMemberImpersonationData
+
+/** @deprecated Use the typed setClientImpersonation or setTeamMemberImpersonation instead */
+interface LegacyImpersonationData {
   orgId: string
   orgName: string
   contactId?: string
@@ -36,9 +63,27 @@ function getSnapshot(): ImpersonationData | null {
       cachedSnapshot = null
       return null
     }
-    const parsed = JSON.parse(stored) as ImpersonationData
-    cachedSnapshot = parsed.orgId ? parsed : null
-    return cachedSnapshot
+    const parsed = JSON.parse(stored) as ImpersonationData | LegacyImpersonationData
+    // Handle legacy format (no type field) - treat as client impersonation
+    if (!('type' in parsed) || !parsed.type) {
+      const legacy = parsed as LegacyImpersonationData
+      if (legacy.orgId) {
+        cachedSnapshot = { type: 'client', ...legacy }
+        return cachedSnapshot
+      }
+      cachedSnapshot = null
+      return null
+    }
+    if (parsed.type === 'client' && (parsed as ClientImpersonationData).orgId) {
+      cachedSnapshot = parsed as ClientImpersonationData
+      return cachedSnapshot
+    }
+    if (parsed.type === 'team_member' && (parsed as TeamMemberImpersonationData).teamMemberId) {
+      cachedSnapshot = parsed as TeamMemberImpersonationData
+      return cachedSnapshot
+    }
+    cachedSnapshot = null
+    return null
   } catch {
     cachedRaw = null
     cachedSnapshot = null
@@ -55,9 +100,21 @@ function notify() {
   listeners.forEach(cb => cb())
 }
 
-/** Set impersonation (call from client detail page) */
-export function setImpersonation(data: ImpersonationData) {
-  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+/** Set client impersonation (call from client detail page) */
+export function setImpersonation(data: LegacyImpersonationData) {
+  const typed: ClientImpersonationData = { type: 'client', ...data }
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(typed))
+  notify()
+}
+
+/** Set team member impersonation (call from team page) */
+export function setTeamMemberImpersonation(data: {
+  teamMemberId: string
+  teamMemberName: string
+  accessRules: TeamMemberAccessRule[]
+}) {
+  const typed: TeamMemberImpersonationData = { type: 'team_member', ...data }
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(typed))
   notify()
 }
 
@@ -68,7 +125,7 @@ export function clearImpersonation() {
 }
 
 /**
- * Banner shown when impersonating a client.
+ * Banner shown when impersonating a client or team member.
  * Uses useSyncExternalStore for immediate reactivity.
  */
 export function ImpersonationBanner() {
@@ -76,29 +133,55 @@ export function ImpersonationBanner() {
   const impersonation = useSyncExternalStore(subscribe, getSnapshot, () => null)
 
   const handleExit = useCallback(() => {
+    const isTeamMember = impersonation?.type === 'team_member'
     clearImpersonation()
-    router.push('/clients')
-  }, [router])
+    router.push(isTeamMember ? '/team' : '/clients')
+  }, [router, impersonation])
 
   if (!impersonation) return null
 
-  const displayName = impersonation.contactName
-    ? `${impersonation.contactName} at ${impersonation.orgName}`
-    : impersonation.orgName
+  const isTeamMember = impersonation.type === 'team_member'
+
+  let displayName: string
+  let bannerIcon: React.ReactNode
+  let bannerBg: string
+  let bannerBorder: string
+  let bannerColor: string
+
+  if (isTeamMember) {
+    displayName = impersonation.teamMemberName
+    bannerIcon = <UserCog className="w-4 h-4 flex-shrink-0" />
+    bannerBg = 'var(--color-info-bg, #eff6ff)'
+    bannerBorder = 'var(--color-info, #60a5fa)'
+    bannerColor = 'var(--color-info, #60a5fa)'
+  } else {
+    displayName = impersonation.contactName
+      ? `${impersonation.contactName} at ${impersonation.orgName}`
+      : impersonation.orgName
+    bannerIcon = <Eye className="w-4 h-4 flex-shrink-0" />
+    bannerBg = 'var(--color-warning-bg)'
+    bannerBorder = 'var(--color-warning)'
+    bannerColor = 'var(--color-warning)'
+  }
 
   return (
     <div
       className="flex items-center justify-center gap-3 flex-shrink-0"
       style={{
         padding: '0.5rem 1rem',
-        background: 'var(--color-warning-bg)',
-        borderBottom: '1px solid var(--color-warning)',
-        color: 'var(--color-warning)',
+        background: bannerBg,
+        borderBottom: `1px solid ${bannerBorder}`,
+        color: bannerColor,
       }}
     >
-      <Eye className="w-4 h-4 flex-shrink-0" />
+      {bannerIcon}
       <span className="text-sm font-medium">
-        Viewing as <strong>{displayName}</strong>
+        Viewing as {isTeamMember ? 'team member' : ''} <strong>{displayName}</strong>
+        {isTeamMember && impersonation.accessRules.length > 0 && (
+          <span className="font-normal opacity-75">
+            {' '}({impersonation.accessRules[0].role.replace(/_/g, ' ')})
+          </span>
+        )}
       </span>
       <button
         onClick={handleExit}
@@ -106,10 +189,10 @@ export function ImpersonationBanner() {
         style={{
           padding: '0.25rem 0.75rem',
           borderRadius: '0.375rem',
-          border: '1px solid var(--color-warning)',
+          border: `1px solid ${bannerBorder}`,
           background: 'transparent',
           cursor: 'pointer',
-          color: 'var(--color-warning)',
+          color: bannerColor,
         }}
       >
         <X className="w-3.5 h-3.5" />
@@ -126,11 +209,24 @@ export function ImpersonationBanner() {
 export function useImpersonation() {
   const data = useSyncExternalStore(subscribe, getSnapshot, () => null)
 
+  const isClient = data?.type === 'client'
+  const isTeamMember = data?.type === 'team_member'
+
   return {
     isImpersonating: data !== null,
-    impersonatedOrgId: data?.orgId ?? null,
-    impersonatedOrgName: data?.orgName ?? null,
-    impersonatedContactId: data?.contactId ?? null,
-    impersonatedContactName: data?.contactName ?? null,
+    /** True when impersonating a client (legacy "View as Client") */
+    isImpersonatingClient: isClient,
+    /** True when impersonating a team member ("View as Team Member") */
+    isImpersonatingTeamMember: isTeamMember,
+    impersonatedOrgId: isClient ? (data as ClientImpersonationData).orgId : null,
+    impersonatedOrgName: isClient ? (data as ClientImpersonationData).orgName : null,
+    impersonatedContactId: isClient ? ((data as ClientImpersonationData).contactId ?? null) : null,
+    impersonatedContactName: isClient ? ((data as ClientImpersonationData).contactName ?? null) : null,
+    /** Team member ID when impersonating a team member */
+    impersonatedTeamMemberId: isTeamMember ? (data as TeamMemberImpersonationData).teamMemberId : null,
+    /** Team member name when impersonating a team member */
+    impersonatedTeamMemberName: isTeamMember ? (data as TeamMemberImpersonationData).teamMemberName : null,
+    /** Access rules for the impersonated team member */
+    impersonatedAccessRules: isTeamMember ? (data as TeamMemberImpersonationData).accessRules : [],
   }
 }

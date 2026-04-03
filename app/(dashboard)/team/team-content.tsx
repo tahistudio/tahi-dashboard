@@ -2,13 +2,15 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useUser } from '@clerk/nextjs'
-import { Plus, UserCog, Mail, Shield, RefreshCw, X, ChevronRight, Clock, Trash2, Pencil, Link2, GitBranch } from 'lucide-react'
+import { Plus, UserCog, Mail, Shield, RefreshCw, X, ChevronRight, Clock, Trash2, Pencil, Link2, GitBranch, Eye } from 'lucide-react'
 import { OrgChart } from '@/components/tahi/org-chart'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
+import { setTeamMemberImpersonation, type TeamMemberAccessRule } from '@/components/tahi/impersonation-banner'
+import { useRouter } from 'next/navigation'
 
 // -- Types --
 
@@ -755,6 +757,7 @@ export function TeamContent() {
   const [linkingAccount, setLinkingAccount] = useState(false)
   const [view, setView] = useState<'members' | 'org-chart'>('members')
   const { user } = useUser()
+  const router = useRouter()
 
   const fetchTeam = useCallback(async () => {
     setLoading(true)
@@ -815,6 +818,41 @@ export function TeamContent() {
     setDeleteMember(null)
     fetchTeam()
   }, [deleteMember, fetchTeam])
+
+  const handleViewAs = useCallback(async (member: TeamMember) => {
+    try {
+      // Fetch the team member's access rules
+      const res = await fetch(apiPath(`/api/admin/team/${member.id}/access`))
+      let accessRules: TeamMemberAccessRule[] = []
+      if (res.ok) {
+        const data = await res.json() as { rules: AccessRule[] }
+        accessRules = (data.rules ?? []).map((r) => ({
+          role: r.role,
+          scopeType: r.scopeType,
+          planType: r.planType,
+          trackType: r.trackType,
+          orgIds: r.orgIds,
+        }))
+      }
+
+      setTeamMemberImpersonation({
+        teamMemberId: member.id,
+        teamMemberName: member.name,
+        accessRules,
+      })
+
+      // Navigate to overview so the admin can see the scoped view
+      router.push('/overview')
+    } catch {
+      // If access fetch fails, still impersonate but with no rules (most restrictive)
+      setTeamMemberImpersonation({
+        teamMemberId: member.id,
+        teamMemberName: member.name,
+        accessRules: [],
+      })
+      router.push('/overview')
+    }
+  }, [router])
 
   useEffect(() => {
     fetchTeam()
@@ -1022,6 +1060,14 @@ export function TeamContent() {
                       aria-label={`Edit ${member.name}`}
                     >
                       <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
+                    </button>
+                    <button
+                      onClick={() => handleViewAs(member)}
+                      className="p-2.5 rounded-lg border border-[var(--color-border-subtle)] hover:border-[var(--color-info)] hover:bg-[var(--color-info-bg)] text-[var(--color-text-subtle)] hover:text-[var(--color-info)] transition-colors"
+                      aria-label={`View as ${member.name}`}
+                      title={`View dashboard as ${member.name}`}
+                    >
+                      <Eye className="w-3.5 h-3.5" aria-hidden="true" />
                     </button>
                     <button
                       onClick={() => setAccessMember(member)}

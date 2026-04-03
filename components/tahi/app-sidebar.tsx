@@ -97,10 +97,16 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
-  const { isImpersonating } = useImpersonation()
+  const { isImpersonating, isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
 
   // When impersonating a client, show the client view instead of admin
-  const showAsAdmin = isAdmin && !isImpersonating
+  // When impersonating a team member, keep admin view but respect their role
+  const showAsAdmin = isAdmin && !isImpersonatingClient
+
+  // Determine if the impersonated team member is a viewer (hide edit-oriented pages)
+  const isViewerRole = isImpersonatingTeamMember &&
+    impersonatedAccessRules.length > 0 &&
+    impersonatedAccessRules.every(r => r.role === 'viewer')
 
   // Read sidebar + dark mode preferences from localStorage on mount
   useEffect(() => {
@@ -131,15 +137,20 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
+  // Pages hidden for viewer-role team members (management/config pages)
+  const VIEWER_HIDDEN_PAGES = new Set(['/team', '/settings', '/billing', '/contracts'])
+
   const visibleNav = NAV.map(group => ({
     ...group,
     items: group.items.filter(item => {
       if (showAsAdmin) {
         // Admin view: hide client-only items
         if (item.clientOnly) return false
+        // When impersonating a viewer team member, hide management pages
+        if (isViewerRole && VIEWER_HIDDEN_PAGES.has(item.href)) return false
         return true
       }
-      // Client view (or impersonating): only show items marked clientVisible
+      // Client view (or impersonating client): only show items marked clientVisible
       if (!item.clientVisible) return false
       return true
     }),

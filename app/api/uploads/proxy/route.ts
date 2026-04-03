@@ -7,44 +7,62 @@ export const dynamic = 'force-dynamic'
 /**
  * PUT /api/uploads/proxy?key=<storageKey>&token=<fileId>
  *
- * Proxy upload endpoint: streams the request body directly into R2.
- * Used when R2 presigned URLs aren't available via the Workers binding.
+ * Proxy upload endpoint: buffers the request body and writes it to R2.
+ * Used because R2 Workers bindings do not support presigned PUT URLs.
  *
  * The client sends a PUT request with the file body here.
- * This route validates auth, then streams to R2.
+ * This route validates auth, then writes to R2.
+ *
+ * Note: We consume the body as an ArrayBuffer rather than streaming
+ * because the NextRequest body ReadableStream from OpenNext on Cloudflare
+ * Workers is not directly compatible with R2's put() method. Buffering
+ * as ArrayBuffer is the reliable approach on this runtime.
  */
 export async function PUT(req: NextRequest) {
-  const { userId } = await getRequestAuth(req)
-  if (!userId) {
-    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
-  }
+  try {
+    const { userId } = await getRequestAuth(req)
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+    }
 
-  const url = new URL(req.url)
-  const key = url.searchParams.get('key')
+    const url = new URL(req.url)
+    const key = url.searchParams.get('key')
 
-  if (!key) {
-    return NextResponse.json({ error: 'Missing storage key' }, { status: 400 })
-  }
+    if (!key) {
+      return NextResponse.json({ error: 'Missing storage key' }, { status: 400 })
+    }
 
-  const { env } = await getCloudflareContext({ async: true })
+    const { env } = await getCloudflareContext({ async: true })
 
-  if (!env?.STORAGE) {
+    if (!env?.STORAGE) {
+      console.error('R2 STORAGE binding is not available on env:', Object.keys(env ?? {}))
+      return NextResponse.json(
+        { error: 'Object storage not configured' },
+        { status: 503 }
+      )
+    }
+
+    const contentType = req.headers.get('content-type') ?? 'application/octet-stream'
+
+    // Buffer the request body as ArrayBuffer. Streaming req.body directly to
+    // R2 put() fails on Cloudflare Workers via OpenNext because the
+    // ReadableStream wrapper is not a native Workers ReadableStream.
+    const arrayBuffer = await req.arrayBuffer()
+
+    if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+      return NextResponse.json({ error: 'No file body' }, { status: 400 })
+    }
+
+    await (env.STORAGE as R2Bucket).put(key, arrayBuffer, {
+      httpMetadata: { contentType },
+    })
+
+    return NextResponse.json({ ok: true, key })
+  } catch (err) {
+    console.error('Upload proxy error:', err)
     return NextResponse.json(
-      { error: 'Object storage not configured' },
-      { status: 503 }
+      { error: 'Upload failed' },
+      { status: 500 }
     )
   }
-
-  const contentType = req.headers.get('content-type') ?? 'application/octet-stream'
-  const body = req.body
-
-  if (!body) {
-    return NextResponse.json({ error: 'No file body' }, { status: 400 })
-  }
-
-  await (env.STORAGE as R2Bucket).put(key, body, {
-    httpMetadata: { contentType },
-  })
-
-  return NextResponse.json({ ok: true, key })
 }
