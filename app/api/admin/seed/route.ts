@@ -19,6 +19,21 @@ export async function POST(req: NextRequest) {
   const drizzle = database as DrizzleDB
   const now = new Date().toISOString()
 
+  // ── Capacity and currency settings ────────────────────────────────────────
+  const defaultSettings = [
+    { key: 'capacity_hours_maintain', value: '8', updatedAt: now },
+    { key: 'capacity_hours_scale', value: '16', updatedAt: now },
+    { key: 'base_currency', value: 'NZD', updatedAt: now },
+  ]
+
+  for (const s of defaultSettings) {
+    try {
+      await drizzle.insert(schema.settings).values(s).onConflictDoNothing()
+    } catch {
+      // Setting may already exist
+    }
+  }
+
   // ── Team members ──────────────────────────────────────────────────────────
   const teamMember1Id = crypto.randomUUID()
   const teamMember2Id = crypto.randomUUID()

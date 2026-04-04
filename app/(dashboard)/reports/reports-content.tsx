@@ -10,8 +10,14 @@ import {
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
+  LineChart, Line,
 } from 'recharts'
 import { apiPath } from '@/lib/api'
+
+// ── Currency options ─────────────────────────────────────────────────────────
+
+const CURRENCY_OPTIONS = ['NZD', 'USD', 'AUD', 'GBP', 'EUR'] as const
+type DisplayCurrency = typeof CURRENCY_OPTIONS[number]
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -75,6 +81,19 @@ export function ReportsContent() {
   const [data, setData] = useState<ReportData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+  const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>('NZD')
+  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({})
+
+  // Fetch exchange rates for currency conversion
+  useEffect(() => {
+    fetch(apiPath('/api/admin/exchange-rates'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<{ rates: Record<string, number> }>
+      })
+      .then(d => setExchangeRates(d.rates ?? {}))
+      .catch(() => setExchangeRates({}))
+  }, [])
 
   const fetchData = useCallback(async () => {
     setLoading(true)

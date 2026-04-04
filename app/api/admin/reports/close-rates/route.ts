@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { sql } from 'drizzle-orm'
+import { sql, eq } from 'drizzle-orm'
 
 // ── GET /api/admin/reports/close-rates ─────────────────────────────────────
 // Returns stage conversion rates, win/loss counts over time, and revenue per stage.
@@ -106,9 +106,94 @@ export async function GET(req: NextRequest) {
     }
   })
 
+  // 6. Compute stage velocity: avg days deals spend in each stage
+  // Uses activities of type 'stage_change' to compute transitions.
+  const stageChangeActivities = await database
+    .select({
+      dealId: schema.activities.dealId,
+      createdAt: schema.activities.createdAt,
+      description: schema.activities.description,
+    })
+    .from(schema.activities)
+    .where(eq(schema.activities.type, 'stage_change'))
+    .orderBy(schema.activities.createdAt)
+
+  // Group stage transitions by deal
+  const dealTransitions = new Map<string, Array<{ createdAt: string; description: string | null }>>()
+  for (const act of stageChangeActivities) {
+    if (!act.dealId) continue
+    const existing = dealTransitions.get(act.dealId) ?? []
+    existing.push({ createdAt: act.createdAt, description: act.description })
+    dealTransitions.set(act.dealId, existing)
+  }
+
+  // Also get deal creation dates for the first stage duration
+  const dealCreationMap = new Map<string, string>()
+  for (const deal of allDeals) {
+    dealCreationMap.set(deal.id, deal.createdAt ?? '')
+  }
+
+  // Compute avg days between consecutive stage transitions per stage
+  const stageDurations = new Map<string, number[]>()
+
+  for (const [dealId, transitions] of dealTransitions) {
+    const sortedTransitions = transitions.sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    )
+
+    // First transition: time from deal creation to first stage change
+    const createdAt = dealCreationMap.get(dealId)
+    if (createdAt && sortedTransitions.length > 0) {
+      const firstTransition = sortedTransitions[0]
+      const days = Math.max(0,
+        (new Date(firstTransition.createdAt).getTime() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24)
+      )
+      // Use the first stage name from the description if possible
+      const firstStageName = stages.length > 0 ? stages[0].name : 'Initial'
+      const existing = stageDurations.get(firstStageName) ?? []
+      existing.push(days)
+      stageDurations.set(firstStageName, existing)
+    }
+
+    // Subsequent transitions: time between each pair
+    for (let i = 0; i < sortedTransitions.length - 1; i++) {
+      const current = sortedTransitions[i]
+      const next = sortedTransitions[i + 1]
+      const days = Math.max(0,
+        (new Date(next.createdAt).getTime() - new Date(current.createdAt).getTime()) / (1000 * 60 * 60 * 24)
+      )
+      // Try to extract stage name from description (format: "Stage changed to X")
+      const match = current.description?.match(/moved to (.+)/i)
+        ?? current.description?.match(/changed to (.+)/i)
+      const stageName = match?.[1]?.trim() ?? `Stage ${i + 1}`
+      const existing = stageDurations.get(stageName) ?? []
+      existing.push(days)
+      stageDurations.set(stageName, existing)
+    }
+  }
+
+  // Build stageVelocity array aligned with pipeline stages
+  const stageVelocity = stages
+    .filter(s => !s.isClosedWon && !s.isClosedLost)
+    .map((stage) => {
+      const durations = stageDurations.get(stage.name) ?? []
+      const avgDays = durations.length > 0
+        ? Math.round((durations.reduce((a, b) => a + b, 0) / durations.length) * 10) / 10
+        : 0
+      return {
+        stageId: stage.id,
+        stageName: stage.name,
+        stageSlug: stage.slug,
+        position: stage.position,
+        avgDays,
+        dealCount: durations.length,
+      }
+    })
+
   return NextResponse.json({
     stageConversions,
     monthlyWinLoss,
     revenueByStage,
+    stageVelocity,
   })
 }

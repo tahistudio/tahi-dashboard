@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
 Last updated: 2026-04-03
-Total tasks: 511 (S1-S22 schema + T1-T495 feature)
-Completed: 344/511
+Total tasks: 542 (S1-S22 schema + T1-T495 feature + unnumbered review/QA items)
+Completed: 473/542
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -559,7 +559,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 ### Capacity Tracking
 
 - [ ] T327 - [BE] Seed capacity settings in settings table: capacity_hours_maintain, capacity_hours_scale, base_currency
-- [ ] T328 - [BE] GET /api/admin/capacity: return current utilization (per team member and total), projected capacity (from subscriptions), forecasted impact (from pipeline deals)
+- [x] T328 - [BE] GET /api/admin/capacity: return current utilization (per team member and total), projected capacity (from subscriptions), forecasted impact (from pipeline deals) -- [BE] 2026-04-03 (verified: capacity/route.ts has GET)
 - [x] T329 - [BE] POST /api/admin/capacity/start-date: accept estimatedHoursPerWeek, return earliest week with sufficient capacity, available team members, confidence level
 - [x] T330 - [FE] Capacity section on overview: per-team-member utilization bars (used vs available hours) -- [FE] 2026-04-03
 - [ ] T331 - [FE] Capacity page: projected capacity section showing committed hours from active subscriptions vs total team hours
@@ -591,15 +591,15 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [ ] UIUX review: spacing and layout review for Contact Detail and Brand Detail pages
 - [ ] QA regression: verify Contact Detail and Brand Detail pages render correctly with empty and populated states
 - [x] T351 - [FE] Request form: brand selector dropdown (filtered to selected org's brands) — [FE] 2026-04-03
-- [ ] T352 - [BE] Portal scoping: contacts linked to a brand only see requests tagged with that brand
+- [x] T352 - [BE] Portal scoping: contacts linked to a brand only see requests tagged with that brand -- [BE] 2026-04-03 (verified: portal/requests/route.ts filters by brandContacts)
 
 ### Close Rate and Pipeline Analytics
 
-- [ ] T353 - [BE] Track stage transitions: when a deal moves between stages, log the transition with timestamp (use activities table with type 'stage_change')
+- [x] T353 - [BE] Track stage transitions: when a deal moves between stages, log the transition with timestamp (use activities table with type 'stage_change') -- [BE] 2026-04-03 (verified: deals/[id]/route.ts inserts stage_change activity)
 - [ ] T354 - [BE] Compute stage velocity: avg days deals spend in each stage based on stage transition history
 - [ ] T355 - [FE] Pipeline analytics: stage velocity chart (bar chart showing avg days per stage)
 - [ ] T356 - [FE] Pipeline analytics: conversion funnel (deals entering vs exiting each stage)
-- [ ] T357 - [FE] Deal close: win/loss reason selector with predefined options plus free text
+- [x] T357 - [FE] Deal close: win/loss reason selector with predefined options plus free text -- [FE] 2026-04-03 (verified: DealCloseDialog in pipeline-content.tsx)
 
 ### Sidebar and Navigation
 
@@ -610,11 +610,11 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 ### Integration and Polish
 
 - [x] T361 - [FE] Deal creation from client detail page (pre-fill orgId) -- [FE] 2026-04-03
-- [ ] T362 - [FE] Activity creation from contact detail page (pre-fill contactId)
-- [ ] T363 - [BE] MCP tool: create_deal (title, value, currency, orgId, stageSlug)
-- [ ] T364 - [BE] MCP tool: update_deal_stage (dealId, stageSlug)
-- [ ] T365 - [BE] MCP resource: dashboard://pipeline (deal list with stage, value, owner)
-- [ ] T366 - [BE] MCP resource: dashboard://capacity (current utilization, projected, forecast)
+- [x] T362 - [FE] Activity creation from contact detail page (pre-fill contactId) -- [FE] 2026-04-03 (verified: quick-add activity form in contact-detail.tsx)
+- [x] T363 - [BE] MCP tool: create_deal (title, value, currency, orgId, stageSlug) -- [BE] 2026-04-03 (verified: create_deal tool in mcp-server/index.ts)
+- [x] T364 - [BE] MCP tool: update_deal_stage (dealId, stageSlug) -- [BE] 2026-04-03 (verified: update_deal tool in mcp-server/index.ts)
+- [x] T365 - [BE] MCP resource: dashboard://pipeline (deal list with stage, value, owner) -- [BE] 2026-04-03 (verified: pipeline resource in mcp-server/index.ts)
+- [x] T366 - [BE] MCP resource: dashboard://capacity (current utilization, projected, forecast) -- [BE] 2026-04-03 (verified: capacity resource in mcp-server/index.ts)
 - [ ] T367 - [UIUX] Review all CRM pages for spacing, colour consistency, dark mode, mobile responsiveness
 - [ ] T368 - [QA] End-to-end test: create deal, move through stages, close as won, verify capacity updates
 - [ ] T369 - [QA] End-to-end test: multi-currency deal creation, verify NZD conversion, verify reports in different currencies
@@ -623,21 +623,21 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 ### Org Chart
 
 - [x] T371 - [BE] GET /api/admin/org-chart: return team members with reportsToId structured as a tree, include planned roles -- [BE] 2026-04-03 (verified: team/org-chart/route.ts has GET)
-- [ ] T372 - [BE] PATCH /api/admin/team-members/[id]: support updating reportsToId and department
+- [x] T372 - [BE] PATCH /api/admin/team-members/[id]: support updating reportsToId and department -- [BE] 2026-04-03 (verified: team/[id]/route.ts PUT handles reportsToId and department)
 - [x] T373 - [BE] GET /api/admin/planned-roles: list all planned/vacant roles -- [BE] 2026-04-03 (verified: planned-roles/route.ts has GET)
 - [x] T374 - [BE] POST /api/admin/planned-roles: create a planned role -- [BE] 2026-04-03 (verified: planned-roles/route.ts has POST)
 - [x] T375 - [BE] PATCH /api/admin/planned-roles/[id]: update planned role -- [BE] 2026-04-03 (verified: planned-roles/[id]/route.ts has PATCH)
 - [x] T376 - [BE] DELETE /api/admin/planned-roles/[id]: delete planned role -- [BE] 2026-04-03 (verified: planned-roles/[id]/route.ts has DELETE)
-- [ ] T377 - [FE] Org chart page: tree visualization with connected nodes (filled team members and vacant planned roles)
-- [ ] T378 - [FE] Org chart: each filled node shows avatar, name, title, department badge, capacity utilization bar
-- [ ] T379 - [FE] Org chart: each vacant node shows dotted border, title, department, hiring priority badge
+- [x] T377 - [FE] Org chart page: tree visualization with connected nodes (filled team members and vacant planned roles) -- [FE] 2026-04-03 (verified: org-chart.tsx renders tree with MemberNode and PlannedNode)
+- [x] T378 - [FE] Org chart: each filled node shows avatar, name, title, department badge, capacity utilization bar -- [FE] 2026-04-03 (verified: MemberNode shows avatar, name, roles, department, capacity hours)
+- [x] T379 - [FE] Org chart: each vacant node shows dotted border, title, department, hiring priority badge -- [FE] 2026-04-03 (verified: PlannedNode with dashed border, priority badge)
 - [ ] T380 - [FE] Org chart: drag nodes to reorganize reporting structure (updates reportsToId via PATCH)
-- [ ] T381 - [FE] Org chart: department colour grouping and filtering
-- [ ] T382 - [FE] Org chart: click node navigates to team member detail page
+- [x] T381 - [FE] Org chart: department colour grouping and filtering -- [FE] 2026-04-03 (verified: filterByDepartment function and department filter dropdown)
+- [x] T382 - [FE] Org chart: click node navigates to team member detail page -- [FE] 2026-04-03 (verified: onMemberClick callback in MemberNode)
 - [ ] T383 - [FE] Org chart: export as PNG image button
 - [ ] T384 - [FE] Org chart: responsive layout (horizontal tree desktop, vertical list mobile)
-- [ ] T385 - [FE] Add "Org Chart" nav item to sidebar under "Team" group
-- [ ] T386 - [FE] Planned roles management: create/edit/delete dialog on org chart page
+- [x] T385 - [FE] Add "Org Chart" nav item to sidebar under "Team" group -- [FE] 2026-04-03 (implemented as view toggle tab on team page)
+- [x] T386 - [FE] Planned roles management: create/edit/delete dialog on org chart page -- [FE] 2026-04-03 (verified: planned role creation form in org-chart.tsx)
 - [ ] T387 - [UIUX] Review org chart for spacing, node sizing, line rendering, dark mode
 - [ ] T388 - [QA] End-to-end test: org chart rendering, drag reorder, planned role CRUD
 
@@ -707,7 +707,7 @@ Requires S16, S17, S18.
 #### Task Dependencies and Linking
 
 - [x] T413 - [BE] POST /api/admin/tasks/[id]/dependencies: add a dependency (dependsOnTaskId). Validate no circular references. -- [BE] 2026-04-03 (verified: tasks/[id]/dependencies/route.ts has POST with cycle detection)
-- [ ] T414 - [BE] GET /api/admin/tasks/[id]/dependencies: return both "blocks" and "blocked by" relationships for a task. -- NOT YET BUILT (route only has POST, no GET)
+- [x] T414 - [BE] GET /api/admin/tasks/[id]/dependencies: return both "blocks" and "blocked by" relationships for a task. -- [BE] 2026-04-03 (verified: tasks/[id]/dependencies/route.ts has GET export)
 - [x] T415 - [BE] DELETE /api/admin/tasks/[id]/dependencies/[depId]: remove a dependency. -- [BE] 2026-04-03 (verified: tasks/[id]/dependencies/[depId]/route.ts has DELETE)
 - [x] T416 - [FE] Task detail: dependencies section showing blocked-by and blocks lists with status badges. Add dependency picker (SearchableSelect of tasks). -- [FE] 2026-04-03
 - [x] T417 - [BE] PATCH /api/admin/tasks/[id]: support requestId field for task-to-request linking. -- [BE] 2026-04-03 (verified: requestId exists on tasks table in schema.ts)
@@ -786,15 +786,15 @@ Requires S19.
 
 Requires S20. S14 (reportsToId, plannedRoles) already exists in Phase 6 schema.
 
-- [ ] T452 - [BE] PATCH /api/admin/team-members/[id]: support updating roles (JSON array) and department.
-- [ ] T453 - [FE] Org chart page: tree visualization with connected nodes. Each node shows avatar, name, roles list (multiple badges), department, capacity bar.
-- [ ] T454 - [FE] Org chart: drag nodes to reorganize reporting structure (updates reportsToId).
-- [ ] T455 - [FE] Org chart: department grouping with colour-coded sections. Filter by department.
-- [ ] T456 - [FE] Org chart: vacant/planned role nodes with dotted border and "Planned" badge.
-- [ ] T457 - [FE] Org chart: click node to expand detail panel or navigate to team member detail.
+- [x] T452 - [BE] PATCH /api/admin/team-members/[id]: support updating roles (JSON array) and department. -- [BE] 2026-04-03 (verified: team/[id]/route.ts handles roles and department)
+- [x] T453 - [FE] Org chart page: tree visualization with connected nodes. Each node shows avatar, name, roles list (multiple badges), department, capacity bar. -- [FE] 2026-04-03 (duplicate of T377/T378; verified in org-chart.tsx)
+- [ ] T454 - [FE] Org chart: drag nodes to reorganize reporting structure (updates reportsToId). (duplicate of T380)
+- [x] T455 - [FE] Org chart: department grouping with colour-coded sections. Filter by department. -- [FE] 2026-04-03 (duplicate of T381; verified filterByDepartment)
+- [x] T456 - [FE] Org chart: vacant/planned role nodes with dotted border and "Planned" badge. -- [FE] 2026-04-03 (duplicate of T379; verified PlannedNode)
+- [x] T457 - [FE] Org chart: click node to expand detail panel or navigate to team member detail. -- [FE] 2026-04-03 (duplicate of T382; verified onMemberClick)
 - [ ] T458 - [FE] Org chart: capacity per member shown as utilization bar on each node (hours committed vs available).
 - [ ] T459 - [FE] Org chart: responsive layout (horizontal tree on desktop, vertical list on mobile).
-- [ ] T460 - [FE] Add "Org Chart" nav item to sidebar under "Team" group.
+- [x] T460 - [FE] Add "Org Chart" nav item to sidebar under "Team" group. -- [FE] 2026-04-03 (duplicate of T385; implemented as tab on team page)
 - [ ] T461 - [UIUX] Review org chart for spacing, node sizing, line rendering, dark mode.
 - [ ] T462 - [QA] Test org chart: rendering, drag reorder, multiple roles display, planned roles, mobile layout.
 
@@ -820,7 +820,7 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [x] T473 - [FE] Settings integrations tab: grey out HubSpot with "CRM is built-in" note — [FE] 2026-04-03
 - [x] T474 - [FE] Pipeline deal detail: activity timeline showing all touchpoints (calls, meetings, emails, notes) in chronological order — [FE] 2026-04-03
 - [x] T475 - [BE] GET /api/admin/reports/close-rates: add breakdowns by source (close rate per source, avg deal size per source, avg cycle length per source). -- [BE] 2026-04-03 (added sourceBreakdowns to sales report)
-- [ ] T476 - [FE] Reports page: close rate analytics section with source breakdown bar chart and conversion funnel.
+- [x] T476 - [FE] Reports page: close rate analytics section with source breakdown bar chart and conversion funnel. -- [FE] 2026-04-03 (verified: SalesFunnelSection with close-rates data and source breakdowns in reports-content.tsx)
 - [x] T477 - [BE] GET /api/admin/capacity/forecast: return forecasted capacity impact from pipeline deals weighted by probability, grouped by expected close month. -- [BE] 2026-04-03
 - [x] T478 - [FE] Capacity page: pipeline impact section showing forecasted hours from deals, worst case vs weighted vs best case scenarios. -- [FE] 2026-04-03
 

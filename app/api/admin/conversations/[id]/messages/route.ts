@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, ne } from 'drizzle-orm'
-import { createNotifications } from '@/lib/notifications'
+import { createNotifications, createNotification } from '@/lib/notifications'
+import { parseMentions } from '@/lib/parse-mentions'
 
 // ── GET /api/admin/conversations/[id]/messages ──────────────────────────────
 // Paginated messages for a conversation. Joins sender info.
@@ -256,6 +257,40 @@ export async function POST(
           eq(schema.conversationParticipants.participantId, participantId)
         )
       )
+
+    // Process @mentions and create mention rows + notifications
+    const mentionedPeople = parseMentions(body.content.trim())
+    if (mentionedPeople.length > 0) {
+      const mentionRows = mentionedPeople.map(m => ({
+        id: crypto.randomUUID(),
+        entityType: 'message' as const,
+        entityId: msgId,
+        mentionedId: m.id,
+        mentionedType: m.type,
+        mentionedById: participantId,
+        createdAt: now,
+      }))
+      try {
+        await database.insert(schema.mentions).values(mentionRows)
+      } catch {
+        // Mention insert failures should not block message sending
+      }
+
+      // Create notifications for mentioned people (skip the sender)
+      for (const m of mentionedPeople) {
+        if (m.id !== participantId) {
+          await createNotification(database, {
+            userId: m.id,
+            userType: m.type,
+            type: 'new_message',
+            title: `You were mentioned in a message`,
+            body: body.content.trim().slice(0, 200),
+            entityType: 'message',
+            entityId: conversationId,
+          })
+        }
+      }
+    }
 
     // Notify other participants about the new message
     const otherParticipants = await database

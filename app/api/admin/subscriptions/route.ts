@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
       status: schema.subscriptions.status,
       hasPrioritySupport: schema.subscriptions.hasPrioritySupport,
       currentPeriodEnd: schema.subscriptions.currentPeriodEnd,
+      billingInterval: schema.subscriptions.billingInterval,
       orgName: schema.organisations.name,
     })
     .from(schema.subscriptions)
@@ -39,6 +40,7 @@ export async function GET(req: NextRequest) {
     status: r.status ?? 'unknown',
     hasPrioritySupport: !!r.hasPrioritySupport,
     currentPeriodEnd: r.currentPeriodEnd,
+    billingInterval: r.billingInterval ?? 'monthly',
   }))
 
   return NextResponse.json({ items })

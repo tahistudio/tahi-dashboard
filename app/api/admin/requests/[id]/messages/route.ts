@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, asc } from 'drizzle-orm'
-import { createNotifications } from '@/lib/notifications'
+import { createNotifications, createNotification } from '@/lib/notifications'
+import { parseMentions } from '@/lib/parse-mentions'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -101,10 +102,45 @@ export async function POST(req: NextRequest, { params }: Params) {
     })
 
     // Update request updatedAt
+    const msgNow = new Date().toISOString()
     await drizzle
       .update(schema.requests)
-      .set({ updatedAt: new Date().toISOString() })
+      .set({ updatedAt: msgNow })
       .where(eq(schema.requests.id, id))
+
+    // Process @mentions and create mention rows + notifications
+    const mentionedPeople = parseMentions(body.body.trim())
+    if (mentionedPeople.length > 0) {
+      const mentionRows = mentionedPeople.map(m => ({
+        id: crypto.randomUUID(),
+        entityType: 'message' as const,
+        entityId: msgId,
+        mentionedId: m.id,
+        mentionedType: m.type,
+        mentionedById: member?.id ?? userId ?? 'unknown',
+        createdAt: msgNow,
+      }))
+      try {
+        await drizzle.insert(schema.mentions).values(mentionRows)
+      } catch {
+        // Mention insert failures should not block message sending
+      }
+
+      const authorId = member?.id ?? userId ?? 'unknown'
+      for (const m of mentionedPeople) {
+        if (m.id !== authorId) {
+          await createNotification(drizzle, {
+            userId: m.id,
+            userType: m.type,
+            type: 'new_message',
+            title: 'You were mentioned in a request message',
+            body: body.body.trim().slice(0, 200),
+            entityType: 'request',
+            entityId: id,
+          })
+        }
+      }
+    }
 
     // Notify client contacts about the new message (unless internal-only)
     if (!body.isInternal) {
