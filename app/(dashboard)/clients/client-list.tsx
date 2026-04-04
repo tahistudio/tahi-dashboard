@@ -26,6 +26,7 @@ interface Organisation {
   planType: string | null
   healthStatus: string | null
   industry: string | null
+  openRequestCount: number
   updatedAt: string | null
   createdAt: string | null
 }
@@ -41,7 +42,7 @@ export function ClientList() {
 
   const [orgs, setOrgs] = useState<Organisation[]>([])
   const [loading, setLoading] = useState(true)
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(() => searchParams.get('new') === '1')
 
   // Listen for keyboard shortcut events
   useEffect(() => {
@@ -224,6 +225,7 @@ export function ClientList() {
               status={org.status}
               planType={org.planType}
               healthStatus={org.healthStatus}
+              openRequestCount={org.openRequestCount}
               industry={org.industry}
               lastActivity={org.updatedAt ?? org.createdAt}
             />

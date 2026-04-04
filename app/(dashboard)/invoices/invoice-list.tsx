@@ -10,6 +10,7 @@ import { FilterBar, type DateRange } from '@/components/tahi/date-range-picker'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
+import { formatCurrency } from '@/lib/currency'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,13 +49,8 @@ const FILTER_TABS = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatCurrency(amount: number, currency: string | null): string {
-  const cur = currency ?? 'NZD'
-  return new Intl.NumberFormat('en-NZ', {
-    style: 'currency',
-    currency: cur,
-    minimumFractionDigits: 2,
-  }).format(amount)
+function formatInvoiceCurrency(amount: number, currency: string | null): string {
+  return formatCurrency(amount, currency ?? 'NZD')
 }
 
 function formatDate(dateStr: string | null): string {
@@ -561,7 +557,7 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
                       </td>
                     )}
                     <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
-                      {formatCurrency(inv.totalAmount, inv.currency)}
+                      {formatInvoiceCurrency(inv.totalAmount, inv.currency)}
                     </td>
                     <td style={{ padding: '0.875rem 1rem' }}>
                       <StatusBadge status={inv.status} dueDate={inv.dueDate} />

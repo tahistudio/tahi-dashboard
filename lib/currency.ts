@@ -7,8 +7,8 @@
  */
 
 export const SUPPORTED_CURRENCIES = [
-  { code: 'NZD', symbol: '$', name: 'New Zealand Dollar' },
-  { code: 'USD', symbol: '$', name: 'US Dollar' },
+  { code: 'NZD', symbol: 'NZ$', name: 'New Zealand Dollar' },
+  { code: 'USD', symbol: 'US$', name: 'US Dollar' },
   { code: 'AUD', symbol: 'A$', name: 'Australian Dollar' },
   { code: 'GBP', symbol: '£', name: 'British Pound' },
   { code: 'EUR', symbol: '€', name: 'Euro' },

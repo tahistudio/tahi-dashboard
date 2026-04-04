@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, like, or, and, ne, inArray } from 'drizzle-orm'
+import { eq, desc, like, or, and, ne, inArray, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 
 // ── GET /api/admin/clients ──────────────────────────────────────────────────
@@ -57,7 +57,9 @@ export async function GET(req: NextRequest) {
     conditions.push(ne(schema.organisations.status, 'archived'))
   }
 
-  const orgs = await (database as ReturnType<typeof import('drizzle-orm/d1').drizzle>)
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const orgs = await drizzle
     .select()
     .from(schema.organisations)
     .where(conditions.length ? and(...conditions) : undefined)
@@ -65,7 +67,35 @@ export async function GET(req: NextRequest) {
     .limit(limit)
     .offset(offset)
 
-  return NextResponse.json({ organisations: orgs, page, limit })
+  // Count open requests per org (status not delivered/archived/cancelled)
+  const orgIds = orgs.map(o => o.id)
+  const requestCounts: Record<string, number> = {}
+  if (orgIds.length > 0) {
+    const counts = await drizzle
+      .select({
+        orgId: schema.requests.orgId,
+        count: sql<number>`count(*)`.as('count'),
+      })
+      .from(schema.requests)
+      .where(
+        and(
+          inArray(schema.requests.orgId, orgIds),
+          sql`${schema.requests.status} NOT IN ('delivered', 'archived', 'cancelled')`
+        )
+      )
+      .groupBy(schema.requests.orgId)
+
+    for (const row of counts) {
+      requestCounts[row.orgId] = row.count
+    }
+  }
+
+  const orgsWithCounts = orgs.map(o => ({
+    ...o,
+    openRequestCount: requestCounts[o.id] ?? 0,
+  }))
+
+  return NextResponse.json({ organisations: orgsWithCounts, page, limit })
 }
 
 // ── POST /api/admin/clients ─────────────────────────────────────────────────

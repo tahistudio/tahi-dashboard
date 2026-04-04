@@ -6,6 +6,7 @@ import { ArrowLeft, RefreshCw, FileText } from 'lucide-react'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { apiPath } from '@/lib/api'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
+import { formatCurrency } from '@/lib/currency'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,13 +55,8 @@ const STATUS_CFG: Record<string, { label: string; bg: string; text: string }> = 
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatCurrency(amount: number, currency: string | null): string {
-  const cur = currency ?? 'NZD'
-  return new Intl.NumberFormat('en-NZ', {
-    style: 'currency',
-    currency: cur,
-    minimumFractionDigits: 2,
-  }).format(amount)
+function formatInvoiceCurrency(amount: number, currency: string | null): string {
+  return formatCurrency(amount, currency ?? 'NZD')
 }
 
 function formatDate(dateStr: string | null): string {
@@ -227,7 +223,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                 letterSpacing: '-0.02em',
               }}
             >
-              {formatCurrency(invoice.totalUsd, invoice.currency)}
+              {formatInvoiceCurrency(invoice.totalUsd, invoice.currency)}
             </p>
           </div>
           <span
@@ -369,10 +365,10 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                       {item.quantity ?? 1}
                     </td>
                     <td style={{ padding: '0.875rem 1.25rem', textAlign: 'right', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
-                      {formatCurrency(item.unitPriceUsd, invoice.currency)}
+                      {formatInvoiceCurrency(item.unitPriceUsd, invoice.currency)}
                     </td>
                     <td style={{ padding: '0.875rem 1.25rem', textAlign: 'right', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
-                      {formatCurrency(item.totalUsd, invoice.currency)}
+                      {formatInvoiceCurrency(item.totalUsd, invoice.currency)}
                     </td>
                   </tr>
                 ))}
@@ -394,18 +390,18 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', width: 240 }}>
             <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>Subtotal</span>
-            <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{formatCurrency(subtotal, invoice.currency)}</span>
+            <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{formatInvoiceCurrency(subtotal, invoice.currency)}</span>
           </div>
           {(invoice.taxAmountUsd ?? 0) > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', width: 240 }}>
               <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>Tax</span>
-              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{formatCurrency(invoice.taxAmountUsd ?? 0, invoice.currency)}</span>
+              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{formatInvoiceCurrency(invoice.taxAmountUsd ?? 0, invoice.currency)}</span>
             </div>
           )}
           {(invoice.discountAmountUsd ?? 0) > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', width: 240 }}>
               <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>Discount</span>
-              <span style={{ fontSize: '0.8125rem', color: 'var(--color-danger)' }}>-{formatCurrency(invoice.discountAmountUsd ?? 0, invoice.currency)}</span>
+              <span style={{ fontSize: '0.8125rem', color: 'var(--color-danger)' }}>-{formatInvoiceCurrency(invoice.discountAmountUsd ?? 0, invoice.currency)}</span>
             </div>
           )}
           <div
@@ -418,7 +414,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
             }}
           >
             <span style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-text)' }}>Total</span>
-            <span style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-text)' }}>{formatCurrency(invoice.totalUsd, invoice.currency)}</span>
+            <span style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-text)' }}>{formatInvoiceCurrency(invoice.totalUsd, invoice.currency)}</span>
           </div>
         </div>
       </div>
