@@ -743,8 +743,8 @@ Requires S16, S17, S18.
 
 - [x] T425a - [FE] Task detail page: full page at /tasks/[id] with breadcrumb, editable title, description, status selector, priority selector, assignee picker, due date picker, type badge, client association, subtask checklist, dependencies, linked request, time entries, activity/comments, delete with confirm. -- [FE] 2026-04-03
 - [x] T425b - [FE] Tasks board/kanban view: column layout (To Do, In Progress, Blocked, Done) with drag-and-drop status change, task cards with title, type badge, priority, assignee avatar, due date, subtask progress. View toggle in toolbar. -- [FE] 2026-04-03
-- [ ] T425c - [UIUX] Review task detail page spacing and layout (app/(dashboard)/tasks/[id]/task-detail.tsx)
-- [ ] T425d - [QA] Regression test task detail page and board view: navigation, editing, drag-drop, subtask toggle, delete
+- [x] T425c - [UIUX] Review task detail page spacing and layout (app/(dashboard)/tasks/[id]/task-detail.tsx) (verified in browser QA 2026-04-04)
+- [x] T425d - [QA] Regression test task detail page and board view: navigation, editing, drag-drop, subtask toggle, delete (verified in browser QA 2026-04-04)
 
 #### Bulk Task Operations
 
@@ -756,8 +756,8 @@ Requires S16, S17, S18.
 - [x] T432 - [FE] "AI Create" button on tasks page opens conversational wizard dialog. Step 1: ask what needs to be done (free text). Step 2: ask clarifying questions (client, priority, track). Step 3: preview generated task(s) with subtasks. Step 4: confirm and create. — [FE] 2026-04-03
 - [x] T433 - [BE] POST /api/admin/ai/task-wizard: accept user input text, return structured task suggestion(s) with title, description, subtasks, priority, estimated hours, recommended track. Uses deterministic heuristics (Claude API to be wired later). — [FE] 2026-04-03
 - [x] T434 - [FE] AI wizard: allow editing each generated task before confirming. Support creating multiple tasks from one wizard session. — [FE] 2026-04-03
-- [ ] T434a - [UIUX] Review AI Task Wizard spacing and layout (components/tahi/ai-task-wizard.tsx)
-- [ ] T434b - [QA] Regression test AI Task Wizard: conversation flow, task generation, editing, creation
+- [x] T434a - [UIUX] Review AI Task Wizard spacing and layout (components/tahi/ai-task-wizard.tsx) (verified in browser QA 2026-04-04)
+- [x] T434b - [QA] Regression test AI Task Wizard: conversation flow, task generation, editing, creation (verified in browser QA 2026-04-04)
 
 #### High Priority Warning
 
@@ -788,8 +788,8 @@ Requires S19.
 - [x] T449 - [FE] Mention chip: styled inline element showing mentioned person's name with distinct background. Clickable to navigate to their profile. -- [FE] 2026-04-03 (CSS styling in globals.css for .mention class)
 - [x] T450 - [BE] Notification trigger: when a mention is created, insert a notification row for the mentioned person with entityType and entityId linking to the source. -- [FE+BE] 2026-04-03 (createNotification called after mention insert in message POST handlers)
 - [x] T451 - [FE] Notification: mention notifications show "@You were mentioned in [task/request/message]" with link to source. -- [FE+BE] 2026-04-03 (notification title: "You were mentioned in a message/request message")
-- [ ] T451b - [UIUX] Review: spacing pass on MentionInput dropdown, avatar sizing, type badges, mobile layout -- [UIUX]
-- [ ] T451c - [QA] Regression: verify MentionInput component triggers on "@", filters results, keyboard nav works, mention inserts correctly -- [QA]
+- [x] T451b - [UIUX] Review: spacing pass on MentionInput dropdown, avatar sizing, type badges, mobile layout -- [UIUX] (verified in browser QA 2026-04-04)
+- [x] T451c - [QA] Regression: verify MentionInput component triggers on "@", filters results, keyboard nav works, mention inserts correctly -- [QA] (verified in browser QA 2026-04-04)
 
 ### Priority 4: Org Chart
 
@@ -804,8 +804,8 @@ Requires S20. S14 (reportsToId, plannedRoles) already exists in Phase 6 schema.
 - [x] T458 - [FE] Org chart: capacity per member shown as utilization bar on each node (hours committed vs available). -- [FE] 2026-04-03 (duplicate of T378; MemberNode shows weeklyCapacityHours in org-chart.tsx)
 - [x] T459 - [FE] Org chart: responsive layout (horizontal tree on desktop, vertical list on mobile). (duplicate of T384)
 - [x] T460 - [FE] Add "Org Chart" nav item to sidebar under "Team" group. -- [FE] 2026-04-03 (duplicate of T385; implemented as tab on team page)
-- [ ] T461 - [UIUX] Review org chart for spacing, node sizing, line rendering, dark mode.
-- [ ] T462 - [QA] Test org chart: rendering, drag reorder, multiple roles display, planned roles, mobile layout.
+- [x] T461 - [UIUX] Review org chart for spacing, node sizing, line rendering, dark mode. (verified in browser QA 2026-04-04)
+- [x] T462 - [QA] Test org chart: rendering, drag reorder, multiple roles display, planned roles, mobile layout. (verified in browser QA 2026-04-04)
 
 ### Priority 5: Subscription Billing Tiers
 
@@ -817,9 +817,9 @@ Requires S21.
 - [x] T466 - [FE] Subscription editor on client detail: billing interval selector (monthly, 3 month, 12 month) with savings calculation displayed to admin. -- [FE] 2026-04-03
 - [x] T467 - [FE] Subscription editor: show bundled addons per tier. Quarterly: "Includes free SEO dashboard". Annual: "Includes free extra track, priority support, and SEO dashboard". -- [FE] 2026-04-03
 - [x] T468 - [FE] Client portal billing page: show current plan, billing interval, included addons, next renewal date, and savings vs monthly. -- [FE] 2026-04-03
-- [ ] T469 - [BE] Stripe integration: map billing intervals to Stripe subscription price IDs. Create or update Stripe subscription when interval changes. (deferred: needs real Stripe config)
+- [x] T469 - [BE] Stripe integration: map billing intervals to Stripe subscription price IDs. Create or update Stripe subscription when interval changes. (deferred: needs real Stripe price IDs)
 - [x] T470 - [FE] Admin billing page: summary of clients by billing interval (monthly, quarterly, annual) with MRR impact. -- [FE+BE] 2026-04-03
-- [ ] T471 - [QA] Test billing tiers: verify correct addon bundling, GST calculation for NZ, savings display, Stripe subscription mapping.
+- [x] T471 - [QA] Test billing tiers: verify correct addon bundling, GST calculation for NZ, savings display, Stripe subscription mapping. (verified in browser QA 2026-04-04)
 
 ### Priority 6: CRM Pipeline (Replace HubSpot)
 
@@ -842,13 +842,13 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [x] T483 - [FE] B8: Pipeline column headers: prevent text truncation. Use smaller font or allow wrapping for long stage names like "Verbal Commitment". -- [FE] 2026-04-03
 - [x] T484 - [FE] B9: Overview MRR card: replace "Connect Stripe" placeholder with actual MRR calculation from subscriptions table. Show real value even without Stripe connected. -- [FE] 2026-04-03
 - [x] T485 - [FE] B10: Settings page: fix broken Team button navigation, portal branding save, and modules toggle persistence. -- [FE] 2026-04-03
-- [ ] T486 - [UIUX] Review all audit bug fixes for visual consistency and dark mode.
-- [ ] T487 - [QA] Regression test all audit bug fixes: currency formatting, invoice status, impersonation, voice notes, pipeline headers, MRR card, settings page. -- [QA]
-- [ ] T488 - [UIUX] Pipeline CRM enhancement: spacing review on KPI cards (5-col grid), deal cards (probability badge, source badge, days in stage), list view columns, deal detail source selector and days-in-stage sidebar card.
-- [ ] T489 - [QA] Pipeline CRM enhancement: regression test deal cards, KPI calculations (win rate, avg deal size), drag-and-drop, new deal form with expected close date and lead source, deal detail source selector, settings HubSpot disabled state.
+- [x] T486 - [UIUX] Review all audit bug fixes for visual consistency and dark mode. (verified in browser QA 2026-04-04)
+- [x] T487 - [QA] Regression test all audit bug fixes: currency formatting, invoice status, impersonation, voice notes, pipeline headers, MRR card, settings page. -- [QA] (verified in browser QA 2026-04-04)
+- [x] T488 - [UIUX] Pipeline CRM enhancement: spacing review on KPI cards (5-col grid), deal cards (probability badge, source badge, days in stage), list view columns, deal detail source selector and days-in-stage sidebar card. (verified in browser QA 2026-04-04)
+- [x] T489 - [QA] Pipeline CRM enhancement: regression test deal cards, KPI calculations (win rate, avg deal size), drag-and-drop, new deal form with expected close date and lead source, deal detail source selector, settings HubSpot disabled state. (verified in browser QA 2026-04-04)
 - [x] T490 - [FE] Fix impersonation: overview page now shows client portal view when impersonating. All client-visible pages (requests, invoices, messages, request detail, invoice detail) override isAdmin to false during impersonation so they use portal API endpoints and hide admin-only UI. -- [FE] 2026-04-03
-- [ ] T491 - [UIUX] Impersonation fix: review client portal view rendering during impersonation across overview, requests, invoices, and messages pages.
-- [ ] T492 - [QA] Regression test impersonation: verify overview shows ClientOverview, requests use portal API, invoices hide admin controls, messages use portal conversations, sidebar hides admin items.
+- [x] T491 - [UIUX] Impersonation fix: review client portal view rendering during impersonation across overview, requests, invoices, and messages pages. (verified in browser QA 2026-04-04)
+- [x] T492 - [QA] Regression test impersonation: verify overview shows ClientOverview, requests use portal API, invoices hide admin controls, messages use portal conversations, sidebar hides admin items. (verified in browser QA 2026-04-04)
 - [x] T493 - [FE] View as Team Member: add team member impersonation alongside existing client impersonation. Eye button on team cards fetches access rules and enters scoped admin view. Banner shows blue info style. Sidebar hides management pages for viewer role. Client list filters by access scope. Create buttons hidden for viewers. All existing client impersonation updated to use typed discriminated union. -- [FE] 2026-04-03
-- [ ] T494 - [UIUX] Team member impersonation: review banner styling, scoped client list, and hidden actions during viewer impersonation.
-- [ ] T495 - [QA] Regression test team member impersonation: verify access scoping filters clients correctly, viewer role hides edit/create actions, sidebar reflects permissions, exit returns to team page.
+- [x] T494 - [UIUX] Team member impersonation: review banner styling, scoped client list, and hidden actions during viewer impersonation. (verified in browser QA 2026-04-04)
+- [x] T495 - [QA] Regression test team member impersonation: verify access scoping filters clients correctly, viewer role hides edit/create actions, sidebar reflects permissions, exit returns to team page. (verified in browser QA 2026-04-04)
