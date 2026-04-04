@@ -23,8 +23,21 @@ interface InvoiceRow {
 interface SubscriptionRow {
   id: string
   planType: string
+  planLabel?: string
   status: string
+  billingInterval?: string
+  includedAddons?: string[]
+  addonDetails?: Array<{ key: string; label: string; monthlyValue: number }>
   currentPeriodEnd: string | null
+  commitmentEndDate?: string | null
+}
+
+interface PortalBilling {
+  monthlyRate: number
+  cycleMonths: number
+  cycleTotal: number
+  monthlySavings: number
+  cycleSavings: number
 }
 
 function formatCurrency(amount: number, currency: string): string {
@@ -41,9 +54,16 @@ function isOverdue(dueDate: string | null, status: string): boolean {
   return new Date(dueDate + 'T23:59:59') < new Date()
 }
 
+const INTERVAL_LABELS: Record<string, string> = {
+  monthly: 'Monthly',
+  quarterly: '3-Month',
+  annual: '12-Month',
+}
+
 export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([])
   const [subscription, setSubscription] = useState<SubscriptionRow | null>(null)
+  const [billing, setBilling] = useState<PortalBilling | null>(null)
   const [loading, setLoading] = useState(true)
   const [portalLoading, setPortalLoading] = useState(false)
 
@@ -58,7 +78,7 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
 
       const [invoicesRes, subRes] = await Promise.all([
         fetch(apiPath('/api/portal/invoices?status=all')),
-        fetch(apiPath('/api/portal/capacity')).catch(() => null),
+        fetch(apiPath('/api/portal/subscription')).catch(() => null),
       ])
 
       if (invoicesRes.ok) {
@@ -67,8 +87,9 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
       }
 
       if (subRes?.ok) {
-        const data = await subRes.json() as { subscription?: SubscriptionRow }
+        const data = await subRes.json() as { subscription?: SubscriptionRow; billing?: PortalBilling }
         setSubscription(data.subscription ?? null)
+        setBilling(data.billing ?? null)
       }
     } catch {
       // Failed to load
@@ -127,11 +148,13 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
               <div>
                 <h2 className="text-lg font-semibold text-[var(--color-text)] mb-1">Current Plan</h2>
                 {subscription ? (
-                  <div className="space-y-1">
-                    <p className="text-sm text-[var(--color-text)]">
-                      <span className="font-medium capitalize">{subscription.planType}</span>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-[var(--color-text)] capitalize">
+                        {subscription.planLabel ?? subscription.planType}
+                      </span>
                       <span
-                        className="ml-2 text-xs px-2 py-0.5 rounded-full font-medium"
+                        className="text-xs px-2 py-0.5 rounded-full font-medium"
                         style={{
                           background: subscription.status === 'active' ? 'var(--color-success-bg, #f0fdf4)' : 'var(--color-bg-tertiary)',
                           color: subscription.status === 'active' ? 'var(--color-success, #16a34a)' : 'var(--color-text-muted)',
@@ -139,11 +162,51 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                       >
                         {subscription.status}
                       </span>
-                    </p>
-                    {subscription.currentPeriodEnd && (
-                      <p className="text-xs text-[var(--color-text-muted)]">
-                        Next billing: {new Date(subscription.currentPeriodEnd).toLocaleDateString()}
-                      </p>
+                      {subscription.billingInterval && subscription.billingInterval !== 'monthly' && (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded-full font-medium"
+                          style={{ background: 'var(--color-brand-50, #f0f7ee)', color: '#5A824E' }}
+                        >
+                          {INTERVAL_LABELS[subscription.billingInterval] ?? subscription.billingInterval}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Billing details */}
+                    <div className="flex flex-col gap-1 text-xs text-[var(--color-text-muted)]">
+                      {subscription.currentPeriodEnd && (
+                        <p>
+                          Renewal date: <span className="text-[var(--color-text)]">{new Date(subscription.currentPeriodEnd).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                        </p>
+                      )}
+                      {billing && billing.monthlyRate > 0 && (
+                        <p>
+                          {billing.cycleMonths > 1 ? `${billing.cycleMonths}-month` : 'Monthly'} total: <span className="text-[var(--color-text)] font-medium">${billing.cycleTotal.toLocaleString()} NZD</span>
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Included add-ons */}
+                    {subscription.addonDetails && subscription.addonDetails.length > 0 && (
+                      <div
+                        className="rounded-lg p-3 mt-1"
+                        style={{ background: 'var(--color-brand-50, #f0f7ee)', border: '1px solid var(--color-brand-100, #dcefd8)' }}
+                      >
+                        <p className="text-xs font-medium mb-1.5" style={{ color: '#425F39' }}>Included with your plan</p>
+                        <div className="flex flex-col gap-1">
+                          {subscription.addonDetails.map(addon => (
+                            <div key={addon.key} className="flex items-center justify-between text-xs">
+                              <span style={{ color: '#5A824E' }}>{addon.label}</span>
+                              <span className="text-[var(--color-text-muted)]">${addon.monthlyValue}/mo value</span>
+                            </div>
+                          ))}
+                        </div>
+                        {billing && billing.monthlySavings > 0 && (
+                          <p className="text-xs font-medium mt-2" style={{ color: '#5A824E' }}>
+                            You save ${(billing.monthlySavings * 12).toLocaleString()}/yr vs paying monthly for add-ons
+                          </p>
+                        )}
+                      </div>
                     )}
                   </div>
                 ) : (

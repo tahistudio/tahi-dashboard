@@ -38,6 +38,7 @@ import {
   CalendarDays,
   Palette,
   Pencil,
+  ListOrdered,
 } from 'lucide-react'
 import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badge'
 import { TrackMeter } from '@/components/tahi/track-meter'
@@ -45,6 +46,16 @@ import { TahiButton } from '@/components/tahi/tahi-button'
 import { RequestCard } from '@/components/tahi/request-card'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { cn } from '@/lib/utils'
+import { TrackQueueView } from '@/components/tahi/track-queue-view'
+import type { TrackWithQueue, TrackActiveRequest } from '@/components/tahi/track-queue-view'
+import { trackCanHandle } from '@/lib/plan-utils'
+import {
+  CYCLE_BUNDLED_ADDONS,
+  CYCLE_MONTHS,
+  PLAN_MONTHLY_RATES,
+  calculateBundledSavings,
+  type BillingInterval,
+} from '@/lib/billing'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -63,6 +74,8 @@ interface Subscription {
   status: string
   hasPrioritySupport: boolean
   hasSeoAddon: boolean
+  billingInterval: string | null
+  includedAddons: string | null
   currentPeriodStart: string | null
   currentPeriodEnd: string | null
   createdAt: string
@@ -114,6 +127,7 @@ interface ClientData {
 const TABS = [
   { id: 'overview',   label: 'Overview',   icon: Building2 },
   { id: 'requests',   label: 'Requests',   icon: Layers },
+  { id: 'trackqueue', label: 'Track Queue', icon: ListOrdered },
   { id: 'files',      label: 'Files',      icon: File },
   { id: 'invoices',   label: 'Invoices',   icon: DollarSign },
   { id: 'contracts',  label: 'Contracts',  icon: ScrollText },
@@ -291,6 +305,9 @@ export function ClientDetail({ clientId }: { clientId: string }) {
         )}
         {activeTab === 'requests' && (
           <RequestsTab clientId={clientId} />
+        )}
+        {activeTab === 'trackqueue' && (
+          <TrackQueueTab clientId={clientId} />
         )}
         {activeTab === 'files' && (
           <FilesTab clientId={clientId} />
@@ -875,6 +892,9 @@ function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { subscrip
         </div>
       </div>
 
+      {/* Billing interval editor */}
+      <BillingIntervalEditor subscription={subscription} onUpdated={onUpdated} />
+
       <div className="pt-3 border-t border-[var(--color-border)]">
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs font-medium text-[var(--color-text-muted)]">Tracks ({tracks.length})</p>
@@ -893,6 +913,120 @@ function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { subscrip
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// ── Billing interval editor ──────────────────────────────────────────────────
+
+const INTERVAL_LABELS: Record<BillingInterval, string> = {
+  monthly: 'Monthly',
+  quarterly: '3-Month',
+  annual: '12-Month',
+}
+
+function BillingIntervalEditor({ subscription, onUpdated }: { subscription: Subscription; onUpdated: () => void }) {
+  const currentInterval = (subscription.billingInterval ?? 'monthly') as BillingInterval
+  const [selected, setSelected] = useState<BillingInterval>(currentInterval)
+  const [saving, setSaving] = useState(false)
+  const [hoveredBtn, setHoveredBtn] = useState<string | null>(null)
+
+  const hasChanged = selected !== currentInterval
+  const bundledAddons = CYCLE_BUNDLED_ADDONS[selected]
+  const monthlySavings = calculateBundledSavings(selected)
+  const monthlyRate = PLAN_MONTHLY_RATES[subscription.planType] ?? 0
+  const cycleMonths = CYCLE_MONTHS[selected]
+  const annualSavings = monthlySavings * 12
+
+  const saveInterval = async () => {
+    setSaving(true)
+    try {
+      await fetch(apiPath(`/api/admin/subscriptions/${subscription.id}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          billingInterval: selected,
+          includedAddons: bundledAddons,
+        }),
+      })
+      onUpdated()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="pt-3 border-t border-[var(--color-border)]">
+      <p className="text-xs font-medium text-[var(--color-text-muted)] mb-2">Billing interval</p>
+
+      {/* Button group */}
+      <div className="flex gap-1 mb-2">
+        {(['monthly', 'quarterly', 'annual'] as BillingInterval[]).map(interval => {
+          const isActive = selected === interval
+          const isHovered = hoveredBtn === interval
+          return (
+            <button
+              key={interval}
+              onClick={() => setSelected(interval)}
+              onMouseEnter={() => setHoveredBtn(interval)}
+              onMouseLeave={() => setHoveredBtn(null)}
+              className="flex-1 text-xs font-medium py-1.5 rounded-md transition-colors"
+              style={{
+                background: isActive ? '#5A824E' : isHovered ? 'var(--color-bg-tertiary)' : 'transparent',
+                color: isActive ? '#ffffff' : 'var(--color-text-muted)',
+                border: isActive ? '1px solid #5A824E' : '1px solid var(--color-border)',
+              }}
+            >
+              {INTERVAL_LABELS[interval]}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Bundled add-ons info */}
+      {bundledAddons.length > 0 && (
+        <div
+          className="rounded-lg p-2.5 mb-2"
+          style={{ background: 'var(--color-brand-50, #f0f7ee)', border: '1px solid var(--color-brand-100, #dcefd8)' }}
+        >
+          <p className="text-xs font-medium" style={{ color: '#425F39' }}>
+            {selected === 'quarterly' && 'Includes free SEO Dashboard ($150/mo value)'}
+            {selected === 'annual' && 'Includes free Extra Track + Priority Support + SEO Dashboard'}
+          </p>
+          {annualSavings > 0 && (
+            <p className="text-xs mt-1" style={{ color: '#5A824E' }}>
+              Annual value of bundled add-ons: ${annualSavings.toLocaleString()}/yr
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Current billing summary */}
+      {monthlyRate > 0 && (
+        <div className="flex justify-between text-xs text-[var(--color-text-muted)] mb-2">
+          <span>{cycleMonths}-month total</span>
+          <span className="text-[var(--color-text)] font-medium">
+            ${(monthlyRate * cycleMonths).toLocaleString()} NZD
+          </span>
+        </div>
+      )}
+
+      {/* Save button */}
+      {hasChanged && (
+        <button
+          onClick={saveInterval}
+          disabled={saving}
+          onMouseEnter={() => setHoveredBtn('save')}
+          onMouseLeave={() => setHoveredBtn(null)}
+          className="w-full text-xs font-medium py-1.5 rounded-md transition-colors disabled:opacity-50"
+          style={{
+            background: hoveredBtn === 'save' ? '#425F39' : '#5A824E',
+            color: '#ffffff',
+          }}
+        >
+          {saving ? 'Saving...' : 'Save billing interval'}
+        </button>
+      )}
     </div>
   )
 }
@@ -1464,6 +1598,155 @@ interface FileRow {
   requestTitle?: string | null
   storageKey: string
   createdAt: string
+}
+
+// ── Track Queue tab ───────────────────────────────────────────────────────────
+
+interface AdminTrackResponse {
+  id: string
+  type: 'small' | 'large'
+  isPriorityTrack: number | boolean | null
+  currentRequestId: string | null
+  currentRequestTitle?: string | null
+}
+
+interface AdminQueuedRequest {
+  id: string
+  title: string
+  type: string
+  status: string
+  priority: string
+  queueOrder: number | null
+  dueDate?: string | null
+}
+
+const TRACK_ACTIVE_STATUSES = new Set(['in_progress', 'in_review', 'client_review'])
+const TRACK_QUEUED_STATUSES = new Set(['submitted', 'queued'])
+
+function TrackQueueTab({ clientId }: { clientId: string }) {
+  const [tracks, setTracks] = useState<TrackWithQueue[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const fetchTracks = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/clients/${clientId}/tracks`))
+      if (!res.ok) { setTracks([]); return }
+      const data = await res.json() as {
+        tracks: AdminTrackResponse[]
+        queue: AdminQueuedRequest[]
+      }
+
+      const trackMap = new Map<string, TrackWithQueue>()
+
+      for (const t of data.tracks) {
+        const active: TrackActiveRequest | null = t.currentRequestId
+          ? {
+              id: t.currentRequestId,
+              title: t.currentRequestTitle ?? 'Untitled',
+              type: 'small_task',
+              status: 'in_progress',
+              priority: 'medium',
+            }
+          : null
+
+        trackMap.set(t.id, {
+          id: t.id,
+          type: t.type,
+          isPriorityTrack: t.isPriorityTrack === 1 || t.isPriorityTrack === true,
+          activeRequest: active,
+          queue: [],
+        })
+      }
+
+      // Distribute queued requests to eligible tracks
+      for (const req of data.queue) {
+        if (TRACK_QUEUED_STATUSES.has(req.status) || TRACK_ACTIVE_STATUSES.has(req.status)) {
+          for (const track of trackMap.values()) {
+            if (trackCanHandle(track.type, req.type)) {
+              if (TRACK_ACTIVE_STATUSES.has(req.status) && !track.activeRequest) {
+                track.activeRequest = {
+                  id: req.id,
+                  title: req.title,
+                  type: req.type,
+                  status: req.status,
+                  priority: req.priority,
+                  dueDate: req.dueDate,
+                }
+              } else {
+                track.queue.push({
+                  id: req.id,
+                  title: req.title,
+                  type: req.type,
+                  priority: req.priority,
+                  queueOrder: req.queueOrder,
+                  dueDate: req.dueDate,
+                })
+              }
+              break
+            }
+          }
+        }
+      }
+
+      // Sort queues
+      for (const track of trackMap.values()) {
+        track.queue.sort((a, b) => (a.queueOrder ?? 9999) - (b.queueOrder ?? 9999))
+      }
+
+      // Large tracks first
+      const sorted = [...trackMap.values()].sort((a, b) => {
+        if (a.type === 'large' && b.type === 'small') return -1
+        if (a.type === 'small' && b.type === 'large') return 1
+        return 0
+      })
+
+      setTracks(sorted)
+    } catch {
+      setTracks([])
+    } finally {
+      setLoading(false)
+    }
+  }, [clientId])
+
+  useEffect(() => { fetchTracks() }, [fetchTracks])
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        {[1, 2].map(i => (
+          <div key={i} className="animate-pulse bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-6">
+            <div className="h-5 w-32 rounded" style={{ background: '#f3f4f6' }} />
+            <div className="mt-4 h-16 rounded" style={{ background: '#f3f4f6' }} />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  if (tracks.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <div
+          className="mx-auto w-14 h-14 flex items-center justify-center mb-4"
+          style={{ borderRadius: '0 16px 0 16px', background: 'linear-gradient(135deg, #5A824E, #425F39)' }}
+        >
+          <ListOrdered className="w-7 h-7 text-white" />
+        </div>
+        <h3 className="text-base font-semibold text-[var(--color-text)] mb-1">No tracks found</h3>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          This client does not have any active tracks.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <TrackQueueView
+      tracks={tracks}
+      basePath="/requests"
+    />
+  )
 }
 
 function FilesTab({ clientId }: { clientId: string }) {
