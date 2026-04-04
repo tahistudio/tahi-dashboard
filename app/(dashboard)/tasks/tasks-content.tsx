@@ -5,9 +5,9 @@ import {
   Plus, Search, Inbox, RefreshCw,
   Calendar, Zap, AlertTriangle, X, Loader2,
   CheckCircle2, Circle, Link2, Clock,
-  ChevronRight, Trash2, GitBranch, Users,
+  ChevronRight, ChevronDown, Trash2, GitBranch, Users,
   Building2, Briefcase, Shield, Sparkles,
-  LayoutList, Columns3,
+  LayoutList, Columns3, CheckSquare, Square,
 } from 'lucide-react'
 import Link from 'next/link'
 import { apiPath } from '@/lib/api'
@@ -309,6 +309,7 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
   const [viewMode, setViewMode] = useState<'list' | 'board'>('list')
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const fetchTasks = useCallback(async () => {
     setLoading(true)
@@ -339,6 +340,18 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
 
   useEffect(() => { fetchTasks() }, [fetchTasks])
 
+  // Clear selection when tabs change
+  useEffect(() => { setSelectedIds(new Set()) }, [typeTab, statusTab])
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
   const teamMap = new Map(teamMembers.map(m => [m.id, m]))
 
   const filtered = tasks.filter(t => {
@@ -359,6 +372,13 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
   for (const t of tasks) {
     typeCounts[t.type] = (typeCounts[t.type] ?? 0) + 1
   }
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds(prev => {
+      if (prev.size === filtered.length) return new Set()
+      return new Set(filtered.map(t => t.id))
+    })
+  }, [filtered])
 
   const selectedTask = selectedTaskId ? tasks.find(t => t.id === selectedTaskId) ?? null : null
 

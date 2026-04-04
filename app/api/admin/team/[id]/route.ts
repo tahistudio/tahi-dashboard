@@ -27,6 +27,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     clerkUserId?: string | null
     department?: string | null
     reportsToId?: string | null
+    roles?: string[]
   }
 
   const database = await db()
@@ -56,6 +57,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (body.clerkUserId !== undefined) updates.clerkUserId = body.clerkUserId
   if (body.department !== undefined) updates.department = body.department
   if (body.reportsToId !== undefined) updates.reportsToId = body.reportsToId
+  if (body.roles !== undefined) updates.roles = JSON.stringify(body.roles)
 
   await drizzle
     .update(schema.teamMembers)
