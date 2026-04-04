@@ -519,7 +519,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [ ] T305 - [FE] Deal detail: notes tab with rich text editor (Tiptap)
 - [ ] T306 - [FE] Deal detail: associated requests tab (requests from the same org, linkable)
 - [ ] T307 - [FE] Deal detail: capacity impact card showing how closing this deal would affect team capacity
-- [ ] T308 - [FE] Deal close dialog: when moving to Won/Lost stage, prompt for wonSource or lostReason
+- [x] T308 - [FE] Deal close dialog: when moving to Won/Lost stage, prompt for wonSource or lostReason -- [FE] 2026-04-03
 
 ### Activities CRUD
 
@@ -557,7 +557,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 - [ ] T327 - [BE] Seed capacity settings in settings table: capacity_hours_maintain, capacity_hours_scale, base_currency
 - [ ] T328 - [BE] GET /api/admin/capacity: return current utilization (per team member and total), projected capacity (from subscriptions), forecasted impact (from pipeline deals)
-- [ ] T329 - [BE] POST /api/admin/capacity/start-date: accept estimatedHoursPerWeek, return earliest week with sufficient capacity, available team members, confidence level
+- [x] T329 - [BE] POST /api/admin/capacity/start-date: accept estimatedHoursPerWeek, return earliest week with sufficient capacity, available team members, confidence level
 - [ ] T330 - [FE] Capacity page: current utilization section with horizontal bars per team member (used vs available hours)
 - [ ] T331 - [FE] Capacity page: projected capacity section showing committed hours from active subscriptions vs total team hours
 - [ ] T332 - [FE] Capacity page: forecasted section showing weighted pipeline impact, worst case, if-all-close scenario

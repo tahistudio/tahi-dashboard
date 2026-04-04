@@ -137,6 +137,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     source?: string | null
     estimatedHoursPerWeek?: number
     expectedCloseDate?: string | null
+    wonSource?: string | null
+    lostReason?: string | null
+    status?: 'won' | 'lost'
   }
 
   const database = await db() as unknown as D1
@@ -189,6 +192,13 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.source !== undefined) updates.source = body.source
   if (body.estimatedHoursPerWeek !== undefined) updates.estimatedHoursPerWeek = body.estimatedHoursPerWeek
   if (body.expectedCloseDate !== undefined) updates.expectedCloseDate = body.expectedCloseDate
+  if (body.wonSource !== undefined) updates.wonSource = body.wonSource
+  if (body.lostReason !== undefined) updates.closeReason = body.lostReason
+
+  // When status is explicitly set to won or lost, auto-set closedAt
+  if (body.status === 'won' || body.status === 'lost') {
+    updates.closedAt = now
+  }
 
   await database
     .update(schema.deals)

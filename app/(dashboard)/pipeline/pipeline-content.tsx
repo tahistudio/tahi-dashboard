@@ -7,6 +7,7 @@ import {
   TrendingUp, DollarSign, Target,
   Calendar, User, Building2,
   ChevronDown, BarChart3, Award,
+  Trophy, XCircle,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 
@@ -448,6 +449,14 @@ function KanbanView({ deals, stages, onStageChange }: {
 }) {
   const byStage = (stageId: string) => deals.filter(d => d.stageId === stageId)
 
+  // State for the deal close dialog (shown when dropping onto Won/Lost)
+  const [pendingClose, setPendingClose] = useState<{
+    dealId: string
+    stageId: string
+    type: 'won' | 'lost'
+    dealTitle: string
+  } | null>(null)
+
   const handleDrop = async (e: React.DragEvent, newStageId: string) => {
     e.preventDefault()
     const el = e.currentTarget as HTMLElement
@@ -455,6 +464,19 @@ function KanbanView({ deals, stages, onStageChange }: {
     const dealId = e.dataTransfer.getData('dealId')
     const fromStageId = e.dataTransfer.getData('fromStageId')
     if (!dealId || fromStageId === newStageId) return
+
+    // Check if the target stage is a closed Won or Lost stage
+    const targetStage = stages.find(s => s.id === newStageId)
+    if (targetStage && (targetStage.isClosedWon || targetStage.isClosedLost)) {
+      const deal = deals.find(d => d.id === dealId)
+      setPendingClose({
+        dealId,
+        stageId: newStageId,
+        type: targetStage.isClosedWon ? 'won' : 'lost',
+        dealTitle: deal?.title ?? 'this deal',
+      })
+      return
+    }
 
     try {
       await fetch(apiPath(`/api/admin/deals/${dealId}`), {
@@ -468,7 +490,29 @@ function KanbanView({ deals, stages, onStageChange }: {
     }
   }
 
+  const handleCloseConfirm = async (payload: { wonSource?: string; lostReason?: string }) => {
+    if (!pendingClose) return
+    try {
+      await fetch(apiPath(`/api/admin/deals/${pendingClose.dealId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stageId: pendingClose.stageId,
+          status: pendingClose.type,
+          ...(payload.wonSource ? { wonSource: payload.wonSource } : {}),
+          ...(payload.lostReason ? { lostReason: payload.lostReason } : {}),
+        }),
+      })
+      onStageChange()
+    } catch {
+      // silent
+    } finally {
+      setPendingClose(null)
+    }
+  }
+
   return (
+    <>
     <div
       className="flex gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide"
       style={{ paddingBottom: '1.25rem', WebkitOverflowScrolling: 'touch', height: 'calc(100vh - 24rem)' }}
@@ -570,6 +614,210 @@ function KanbanView({ deals, stages, onStageChange }: {
           </div>
         )
       })}
+    </div>
+
+    {/* Deal close dialog */}
+    {pendingClose && (
+      <DealCloseDialog
+        type={pendingClose.type}
+        dealTitle={pendingClose.dealTitle}
+        onConfirm={handleCloseConfirm}
+        onCancel={() => setPendingClose(null)}
+      />
+    )}
+    </>
+  )
+}
+
+// ---- Deal Close Dialog ---------------------------------------------------
+
+const WON_SOURCE_OPTIONS = [
+  { value: 'referral', label: 'Referral' },
+  { value: 'linkedin', label: 'LinkedIn' },
+  { value: 'website', label: 'Website' },
+  { value: 'cold_outreach', label: 'Cold Outreach' },
+  { value: 'partner', label: 'Partner' },
+  { value: 'other', label: 'Other' },
+]
+
+function DealCloseDialog({ type, dealTitle, onConfirm, onCancel }: {
+  type: 'won' | 'lost'
+  dealTitle: string
+  onConfirm: (payload: { wonSource?: string; lostReason?: string }) => void
+  onCancel: () => void
+}) {
+  const [wonSource, setWonSource] = useState('')
+  const [lostReason, setLostReason] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const isWon = type === 'won'
+  const canConfirm = isWon ? wonSource !== '' : lostReason.trim() !== ''
+
+  const handleConfirm = async () => {
+    if (!canConfirm) return
+    setSubmitting(true)
+    await onConfirm(
+      isWon ? { wonSource } : { lostReason: lostReason.trim() }
+    )
+    setSubmitting(false)
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.5)' }}
+      onClick={e => { if (e.target === e.currentTarget) onCancel() }}
+    >
+      <div
+        className="rounded-xl shadow-lg w-full"
+        style={{
+          maxWidth: '26rem',
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        {/* Icon + title */}
+        <div className="flex items-center gap-3" style={{ marginBottom: '1.25rem' }}>
+          <div
+            className="flex items-center justify-center flex-shrink-0"
+            style={{
+              width: '2.75rem',
+              height: '2.75rem',
+              borderRadius: '0 0.75rem 0 0.75rem',
+              background: isWon
+                ? 'linear-gradient(135deg, #4ade80, #059669)'
+                : 'linear-gradient(135deg, #f87171, #dc2626)',
+            }}
+          >
+            {isWon
+              ? <Trophy style={{ width: '1.25rem', height: '1.25rem', color: 'white' }} />
+              : <XCircle style={{ width: '1.25rem', height: '1.25rem', color: 'white' }} />
+            }
+          </div>
+          <div>
+            <h2 className="font-bold" style={{ fontSize: '1.0625rem', color: 'var(--color-text)' }}>
+              {isWon ? 'Mark Deal as Won' : 'Mark Deal as Lost'}
+            </h2>
+            <p className="truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', maxWidth: '18rem' }}>
+              {dealTitle}
+            </p>
+          </div>
+        </div>
+
+        {/* Body */}
+        {isWon ? (
+          <div>
+            <label
+              className="block font-medium"
+              style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.75rem' }}
+            >
+              How was this deal won?
+            </label>
+            <div className="flex flex-col gap-2">
+              {WON_SOURCE_OPTIONS.map(opt => (
+                <label
+                  key={opt.value}
+                  className="flex items-center gap-3 rounded-lg cursor-pointer transition-colors"
+                  style={{
+                    padding: '0.625rem 0.75rem',
+                    border: `1px solid ${wonSource === opt.value ? 'var(--color-brand)' : 'var(--color-border)'}`,
+                    background: wonSource === opt.value ? 'var(--color-brand-50)' : 'var(--color-bg)',
+                    fontSize: '0.875rem',
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="wonSource"
+                    value={opt.value}
+                    checked={wonSource === opt.value}
+                    onChange={() => setWonSource(opt.value)}
+                    style={{ accentColor: '#5A824E' }}
+                  />
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div>
+            <label
+              className="block font-medium"
+              style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem' }}
+            >
+              Why was this deal lost?
+            </label>
+            <textarea
+              value={lostReason}
+              onChange={e => setLostReason(e.target.value)}
+              placeholder="e.g. Budget constraints, chose competitor, timing not right..."
+              rows={3}
+              className="w-full rounded-lg"
+              style={{
+                padding: '0.625rem 0.75rem',
+                fontSize: '0.875rem',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                resize: 'vertical',
+                minHeight: '5rem',
+              }}
+              onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
+              onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+              autoFocus
+            />
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex justify-end gap-3" style={{ marginTop: '1.25rem' }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="font-medium rounded-lg transition-colors"
+            style={{
+              padding: '0.5rem 1rem',
+              fontSize: '0.875rem',
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-bg)',
+              color: 'var(--color-text-muted)',
+              cursor: 'pointer',
+              minHeight: '2.75rem',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirm}
+            disabled={!canConfirm || submitting}
+            className="font-medium rounded-lg transition-colors"
+            style={{
+              padding: '0.5rem 1.25rem',
+              fontSize: '0.875rem',
+              background: isWon ? '#059669' : '#dc2626',
+              color: 'white',
+              border: 'none',
+              cursor: !canConfirm || submitting ? 'not-allowed' : 'pointer',
+              opacity: !canConfirm || submitting ? 0.6 : 1,
+              minHeight: '2.75rem',
+            }}
+            onMouseEnter={e => {
+              if (canConfirm && !submitting) {
+                e.currentTarget.style.background = isWon ? '#047857' : '#b91c1c'
+              }
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = isWon ? '#059669' : '#dc2626'
+            }}
+          >
+            {submitting ? 'Saving...' : 'Confirm'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
