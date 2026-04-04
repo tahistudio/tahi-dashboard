@@ -544,6 +544,9 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [ ] T321 - [BE] PATCH /api/admin/clients/[id]: support updating customFields, defaultHourlyRate, size, annualRevenue
 - [ ] UIUX review: spacing and layout review for Deals, CRM Activities, and Revenue tabs on client detail page
 - [ ] QA regression: verify Deals, CRM Activities, and Revenue tabs render correctly with empty and populated states
+- [ ] UIUX review: spacing review for Earliest Start Date widget in overview Team Capacity card
+- [ ] UIUX review: spacing and layout review for Sales Funnel section on Reports page
+- [ ] QA regression: verify Sales Funnel and Earliest Start Date features render correctly
 
 ### Sales Reports
 

@@ -73,6 +73,11 @@ export function NewRequestDialog({
   const [clientsLoading, setClientsLoading] = useState(false)
   const [clientOrgId, setClientOrgId] = useState('')
 
+  // Admin: brand picker (filtered by selected client)
+  const [brandOptions, setBrandOptions] = useState<{ id: string; name: string }[]>([])
+  const [brandsLoading, setBrandsLoading] = useState(false)
+  const [brandId, setBrandId] = useState('')
+
   // Derived: does the selected client use tracks (maintain/scale)?
   const selectedClient = clients.find(c => c.id === clientOrgId)
   const clientUsesTracks = isAdmin
@@ -134,6 +139,21 @@ export function NewRequestDialog({
       .finally(() => setClientsLoading(false))
   }, [open, isAdmin])
 
+  // Fetch brands when client changes (admin only)
+  useEffect(() => {
+    if (!isAdmin || !clientOrgId) {
+      setBrandOptions([])
+      setBrandId('')
+      return
+    }
+    setBrandsLoading(true)
+    fetch(apiPath(`/api/admin/brands?orgId=${clientOrgId}`))
+      .then(r => r.json() as Promise<{ items: Array<{ id: string; name: string }> }>)
+      .then(data => setBrandOptions((data.items ?? []).map(b => ({ id: b.id, name: b.name }))))
+      .catch(() => setBrandOptions([]))
+      .finally(() => setBrandsLoading(false))
+  }, [isAdmin, clientOrgId])
+
   // Reset on open
   useEffect(() => {
     if (open) {
@@ -149,6 +169,8 @@ export function NewRequestDialog({
       setDueDate('')
       setEstimatedHours('')
       setClientOrgId(defaultOrgId ?? '')
+      setBrandId('')
+      setBrandOptions([])
       setError(null)
       setSuccessMessage(null)
       setCreateAnother(false)
@@ -330,6 +352,32 @@ export function NewRequestDialog({
                     onChange={(v) => setClientOrgId(v ?? '')}
                     placeholder="Select a client..."
                     searchPlaceholder="Search clients..."
+                  />
+                )}
+              </FieldGroup>
+            )}
+
+            {/* Brand selector (admin only, shown when client has brands) */}
+            {isAdmin && clientOrgId && (brandOptions.length > 0 || brandsLoading) && (
+              <FieldGroup label="Brand" htmlFor="req-brand">
+                {brandsLoading ? (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    height: '2.625rem', padding: '0 0.75rem',
+                    border: '1px solid var(--color-border)', borderRadius: 'var(--radius-input)',
+                    fontSize: '0.8125rem', color: 'var(--color-text-subtle)',
+                  }}>
+                    <Loader2 size={13} className="animate-spin" />
+                    Loading brands...
+                  </div>
+                ) : (
+                  <SearchableSelect
+                    options={brandOptions.map(b => ({ value: b.id, label: b.name }))}
+                    value={brandId || null}
+                    onChange={(v) => setBrandId(v ?? '')}
+                    placeholder="Select a brand (optional)..."
+                    searchPlaceholder="Search brands..."
+                    allowClear
                   />
                 )}
               </FieldGroup>

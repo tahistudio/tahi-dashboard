@@ -36,6 +36,8 @@ import {
   TrendingUp,
   Handshake,
   CalendarDays,
+  Palette,
+  Pencil,
 } from 'lucide-react'
 import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badge'
 import { TrackMeter } from '@/components/tahi/track-meter'
@@ -118,6 +120,7 @@ const TABS = [
   { id: 'contacts',   label: 'Contacts',   icon: Users },
   { id: 'calls',      label: 'Calls',      icon: Phone },
   { id: 'messages',   label: 'Messages',   icon: MessageSquare },
+  { id: 'brands',     label: 'Brands',     icon: Palette },
   { id: 'deals',      label: 'Deals',      icon: Handshake },
   { id: 'time',       label: 'Time',       icon: Clock },
   { id: 'crm',        label: 'Activities', icon: CalendarDays },
@@ -298,6 +301,9 @@ export function ClientDetail({ clientId }: { clientId: string }) {
         )}
         {activeTab === 'messages' && (
           <MessagesTab clientId={clientId} orgName={org.name} />
+        )}
+        {activeTab === 'brands' && (
+          <BrandsTab clientId={clientId} />
         )}
         {activeTab === 'deals' && (
           <DealsTab clientId={clientId} orgName={org.name} />
@@ -1563,6 +1569,389 @@ function FilesTab({ clientId }: { clientId: string }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Brands tab ────────────────────────────────────────────────────────────────
+
+interface BrandRow {
+  id: string
+  name: string
+  logoUrl: string | null
+  website: string | null
+  primaryColour: string | null
+  notes: string | null
+  contactCount: number
+  requestCount: number
+  createdAt: string
+}
+
+function BrandsTab({ clientId }: { clientId: string }) {
+  const [brands, setBrands] = useState<BrandRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showCreate, setShowCreate] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+
+  // Create / Edit form state
+  const [formName, setFormName] = useState('')
+  const [formLogoUrl, setFormLogoUrl] = useState('')
+  const [formWebsite, setFormWebsite] = useState('')
+  const [formColour, setFormColour] = useState('#5A824E')
+  const [formSaving, setFormSaving] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/brands?orgId=${clientId}`))
+      if (!res.ok) throw new Error('Failed')
+      const json = await res.json() as { items: BrandRow[] }
+      setBrands(json.items ?? [])
+    } catch {
+      setBrands([])
+    } finally {
+      setLoading(false)
+    }
+  }, [clientId])
+
+  useEffect(() => { void load() }, [load])
+
+  const resetForm = () => {
+    setFormName('')
+    setFormLogoUrl('')
+    setFormWebsite('')
+    setFormColour('#5A824E')
+    setFormError(null)
+    setShowCreate(false)
+    setEditingId(null)
+  }
+
+  const openEdit = (brand: BrandRow) => {
+    setEditingId(brand.id)
+    setFormName(brand.name)
+    setFormLogoUrl(brand.logoUrl ?? '')
+    setFormWebsite(brand.website ?? '')
+    setFormColour(brand.primaryColour ?? '#5A824E')
+    setFormError(null)
+    setShowCreate(false)
+  }
+
+  const handleSave = async () => {
+    if (!formName.trim()) {
+      setFormError('Brand name is required')
+      return
+    }
+    setFormSaving(true)
+    setFormError(null)
+    try {
+      const body = {
+        name: formName.trim(),
+        logoUrl: formLogoUrl.trim() || null,
+        website: formWebsite.trim() || null,
+        primaryColour: formColour || null,
+        ...(editingId ? {} : { orgId: clientId }),
+      }
+
+      const url = editingId
+        ? apiPath(`/api/admin/brands/${editingId}`)
+        : apiPath('/api/admin/brands')
+      const method = editingId ? 'PATCH' : 'POST'
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+
+      if (!res.ok) {
+        const data = await res.json() as { error?: string }
+        setFormError(data.error ?? 'Failed to save brand')
+        return
+      }
+
+      resetForm()
+      void load()
+    } catch {
+      setFormError('Network error')
+    } finally {
+      setFormSaving(false)
+    }
+  }
+
+  const handleDelete = async (id: string) => {
+    setDeletingId(id)
+    try {
+      const res = await fetch(apiPath(`/api/admin/brands/${id}`), { method: 'DELETE' })
+      if (!res.ok) throw new Error('Failed')
+      void load()
+    } catch {
+      // silently fail
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading brands...
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-semibold text-[var(--color-text)]">Brands ({brands.length})</h2>
+        <TahiButton
+          size="sm"
+          onClick={() => { resetForm(); setShowCreate(true) }}
+        >
+          <Plus className="w-3.5 h-3.5 mr-1" />
+          Add Brand
+        </TahiButton>
+      </div>
+
+      {/* Create / Edit form */}
+      {(showCreate || editingId) && (
+        <div
+          className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl mb-4"
+          style={{ padding: '1.25rem' }}
+        >
+          <h3 className="text-sm font-semibold text-[var(--color-text)] mb-3">
+            {editingId ? 'Edit Brand' : 'New Brand'}
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">
+                Name <span className="text-[var(--color-danger)]">*</span>
+              </label>
+              <input
+                type="text"
+                value={formName}
+                onChange={e => setFormName(e.target.value)}
+                placeholder="Brand name"
+                className="w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 'var(--radius-input)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  minHeight: '2.375rem',
+                }}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Logo URL</label>
+              <input
+                type="url"
+                value={formLogoUrl}
+                onChange={e => setFormLogoUrl(e.target.value)}
+                placeholder="https://..."
+                className="w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 'var(--radius-input)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  minHeight: '2.375rem',
+                }}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Website</label>
+              <input
+                type="url"
+                value={formWebsite}
+                onChange={e => setFormWebsite(e.target.value)}
+                placeholder="https://example.com"
+                className="w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 'var(--radius-input)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  minHeight: '2.375rem',
+                }}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Primary Colour</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={formColour}
+                  onChange={e => setFormColour(e.target.value)}
+                  style={{
+                    width: '2.375rem',
+                    height: '2.375rem',
+                    padding: '0.125rem',
+                    borderRadius: 'var(--radius-input)',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    cursor: 'pointer',
+                  }}
+                />
+                <input
+                  type="text"
+                  value={formColour}
+                  onChange={e => setFormColour(e.target.value)}
+                  placeholder="#5A824E"
+                  className="flex-1 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: 'var(--radius-input)',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    minHeight: '2.375rem',
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {formError && (
+            <p className="text-xs mt-2" style={{ color: 'var(--color-danger)' }}>{formError}</p>
+          )}
+
+          <div className="flex items-center gap-2 mt-4">
+            <TahiButton size="sm" onClick={handleSave} disabled={formSaving}>
+              {formSaving ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
+              ) : (
+                <Check className="w-3.5 h-3.5 mr-1" />
+              )}
+              {editingId ? 'Save Changes' : 'Create Brand'}
+            </TahiButton>
+            <TahiButton variant="secondary" size="sm" onClick={resetForm}>
+              Cancel
+            </TahiButton>
+          </div>
+        </div>
+      )}
+
+      {brands.length === 0 && !showCreate ? (
+        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
+          <Palette className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
+          <p className="text-sm text-[var(--color-text-muted)]">No brands for this client yet</p>
+          <p className="text-xs text-[var(--color-text-subtle)] mt-1">
+            Add brands to organise requests by sub-brand or product line.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {brands.map(brand => (
+            <div
+              key={brand.id}
+              className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl transition-shadow"
+              style={{
+                padding: '1rem',
+                boxShadow: hoveredId === brand.id ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
+              }}
+              onMouseEnter={() => setHoveredId(brand.id)}
+              onMouseLeave={() => setHoveredId(null)}
+            >
+              {/* Logo + name row */}
+              <div className="flex items-start gap-3 mb-3">
+                {brand.logoUrl ? (
+                  <img
+                    src={brand.logoUrl}
+                    alt={`${brand.name} logo`}
+                    className="flex-shrink-0 rounded-lg object-contain"
+                    style={{ width: '2.5rem', height: '2.5rem', border: '1px solid var(--color-border-subtle)' }}
+                    onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                  />
+                ) : (
+                  <div
+                    className="flex-shrink-0 flex items-center justify-center rounded-lg"
+                    style={{
+                      width: '2.5rem',
+                      height: '2.5rem',
+                      background: brand.primaryColour ? `${brand.primaryColour}18` : 'var(--color-bg-tertiary)',
+                      color: brand.primaryColour ?? 'var(--color-text-muted)',
+                    }}
+                  >
+                    <Palette className="w-4 h-4" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-[var(--color-text)] truncate">{brand.name}</p>
+                  {brand.website && (
+                    <a
+                      href={brand.website.startsWith('http') ? brand.website : `https://${brand.website}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-brand)] truncate block"
+                    >
+                      {brand.website.replace(/^https?:\/\//, '')}
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              {/* Colour swatch */}
+              {brand.primaryColour && (
+                <div className="flex items-center gap-2 mb-3">
+                  <div
+                    className="rounded-full"
+                    style={{
+                      width: '1rem',
+                      height: '1rem',
+                      background: brand.primaryColour,
+                      border: '1px solid var(--color-border-subtle)',
+                    }}
+                  />
+                  <span className="text-xs text-[var(--color-text-muted)]">{brand.primaryColour}</span>
+                </div>
+              )}
+
+              {/* Stats row */}
+              <div className="flex items-center gap-3 text-xs text-[var(--color-text-subtle)] mb-3">
+                <span>{brand.requestCount} request{brand.requestCount !== 1 ? 's' : ''}</span>
+                <span>{brand.contactCount} contact{brand.contactCount !== 1 ? 's' : ''}</span>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => openEdit(brand)}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] transition-colors"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem 0' }}
+                >
+                  <Pencil className="w-3 h-3" />
+                  Edit
+                </button>
+                <button
+                  onClick={() => handleDelete(brand.id)}
+                  disabled={deletingId === brand.id}
+                  className="inline-flex items-center gap-1 text-xs font-medium transition-colors"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: deletingId === brand.id ? 'not-allowed' : 'pointer',
+                    padding: '0.25rem 0',
+                    color: 'var(--color-text-subtle)',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-danger, #f87171)' }}
+                  onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+                >
+                  {deletingId === brand.id ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-3 h-3" />
+                  )}
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

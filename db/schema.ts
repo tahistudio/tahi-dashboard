@@ -47,6 +47,13 @@ export const organisations = sqliteTable('organisations', {
   internalNotes: text('internal_notes'),
   // JSON array of brand names, e.g. ["Brand A", "Brand B"]
   brands: text('brands').default('[]'),
+  // S13 remaining: CRM extended fields
+  // JSON object for arbitrary custom fields, e.g. {"industry_vertical":"SaaS"}
+  customFields: text('custom_fields').default('{}'),
+  defaultHourlyRate: integer('default_hourly_rate'),
+  // micro | small | medium | large | enterprise
+  size: text('size'),
+  annualRevenue: integer('annual_revenue'),
   ...timestamps,
 }, (table) => [
   index('idx_orgs_status').on(table.status),
