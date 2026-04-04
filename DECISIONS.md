@@ -531,3 +531,11 @@ Escalated to Liam: No. Direct confirmation from Liam.
 - Cross-entity dependencies work: task blocks request, request blocks task
 - The task system needs full feature parity with requests
 - Tahi should be able to run the entire business on tasks alone (internal ops, client delivery, sales)
+
+---
+
+## #019 -- S13 remaining: CRM fields on organisations
+
+**Decision:** Add `custom_fields` (text, default '{}'), `default_hourly_rate` (integer), `size` (text), and `annual_revenue` (integer) columns to the `organisations` table as part of S13 batch 9 remaining work.
+
+**Rationale:** The CRM pipeline spec requires custom fields and company metadata (size, revenue, hourly rate) to be stored on organisations. These were approved in S13 but not yet added to the schema. Migration 0006 adds these four columns.

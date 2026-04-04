@@ -481,7 +481,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 ### Schema Additions
 
 - [x] S12 - [BE] Add CRM schema batch 8: `deals`, `dealContacts`, `pipelineStages`, `activities` tables per SPECS/crm-pipeline.md
-- [x] S13 - [BE] Add CRM schema batch 9: `brands`, `brandContacts` tables; add `brandId` column to `requests` table (brands/brandContacts/brandId done; remaining: phone/customFields on contacts, customFields/defaultHourlyRate/size/annualRevenue on organisations) -- [BE] 2026-04-03
+- [x] S13 - [BE] Add CRM schema batch 9: `brands`, `brandContacts` tables; add `brandId` column to `requests` table (brands/brandContacts/brandId done; remaining: phone/customFields on contacts; customFields/defaultHourlyRate/size/annualRevenue on organisations done) -- [BE] 2026-04-03
 
 ### Pipeline Stages and Configuration
 
@@ -500,7 +500,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [ ] T292 - [BE] GET /api/admin/deals/[id]: deal detail with contacts (via dealContacts), activities, associated requests, org info
 - [ ] T293 - [BE] PATCH /api/admin/deals/[id]: update deal fields including stage change; auto-compute valueNzd from exchange rates; set actualCloseDate when status changes to won/lost
 - [ ] T294 - [BE] DELETE /api/admin/deals/[id]: soft delete (set status to archived)
-- [ ] T295 - [BE] POST /api/admin/deals/[id]/contacts: add/remove contacts on a deal with role assignment
+- [x] T295 - [BE] POST /api/admin/deals/[id]/contacts: add/remove contacts on a deal with role assignment -- [BE] 2026-04-03
 
 ### Pipeline Board (FE)
 
@@ -527,7 +527,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [ ] T310 - [BE] POST /api/admin/activities: create activity (type, subject, body, contactId, orgId, dealId, activityDate, durationMinutes, attendees, actionItems)
 - [ ] T311 - [BE] PATCH /api/admin/activities/[id]: update activity
 - [ ] T312 - [BE] DELETE /api/admin/activities/[id]: delete activity
-- [ ] T313 - [BE] GET /api/admin/deals/[id]/activities: activities scoped to a specific deal
+- [x] T313 - [BE] GET /api/admin/deals/[id]/activities: activities scoped to a specific deal -- [BE] 2026-04-03
 
 ### Contact Detail Enhancements
 
@@ -541,7 +541,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T318 - [FE] Client detail: add Deals tab showing all deals for this org with stage, value, owner
 - [x] T319 - [FE] Client detail: add Activities tab showing all activities for this org (CRM activities with quick-add form)
 - [x] T320 - [FE] Client detail: add Revenue tab showing invoice totals, time cost, LTV
-- [ ] T321 - [BE] PATCH /api/admin/clients/[id]: support updating customFields, defaultHourlyRate, size, annualRevenue
+- [x] T321 - [BE] PATCH /api/admin/clients/[id]: support updating customFields, defaultHourlyRate, size, annualRevenue -- [BE] 2026-04-03
 - [ ] UIUX review: spacing and layout review for Deals, CRM Activities, and Revenue tabs on client detail page
 - [ ] QA regression: verify Deals, CRM Activities, and Revenue tabs render correctly with empty and populated states
 - [ ] UIUX review: spacing review for Earliest Start Date widget in overview Team Capacity card
@@ -586,9 +586,9 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T346 - [BE] PATCH /api/admin/brands/[id]: update brand -- [BE] 2026-04-03
 - [x] T347 - [BE] DELETE /api/admin/brands/[id]: delete brand (cascade brandContacts, clear brandId on requests) -- [BE] 2026-04-03
 - [ ] T348 - [BE] Migration: convert existing organisations.brands JSON arrays into brands table rows
-- [ ] T349 - [FE] Client detail: brands tab with card per brand, create/edit/delete brand
+- [x] T349 - [FE] Client detail: brands tab with card per brand, create/edit/delete brand — [FE] 2026-04-03
 - [ ] T350 - [FE] Brand detail page: contacts, requests, files filtered to that brand
-- [ ] T351 - [FE] Request form: brand selector dropdown (filtered to selected org's brands)
+- [x] T351 - [FE] Request form: brand selector dropdown (filtered to selected org's brands) — [FE] 2026-04-03
 - [ ] T352 - [BE] Portal scoping: contacts linked to a brand only see requests tagged with that brand
 
 ### Close Rate and Pipeline Analytics

@@ -204,6 +204,7 @@ export function NewRequestDialog({
             startDate: startDate || null,
             dueDate: dueDate || null,
             estimatedHours: estimatedHours ? Number(estimatedHours) : null,
+            brandId: brandId || null,
           }
         : {
             title: title.trim(), type, category, description, dueDate: dueDate || null,
