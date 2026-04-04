@@ -632,6 +632,17 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
           )}
         </div>
 
+        {/* Bulk action bar */}
+        {isAdmin && selectedIds.size > 0 && (
+          <TaskBulkActionBar
+            selectedCount={selectedIds.size}
+            selectedIds={selectedIds}
+            teamMembers={teamMembers}
+            onClear={() => setSelectedIds(new Set())}
+            onDone={() => { setSelectedIds(new Set()); fetchTasks() }}
+          />
+        )}
+
         {/* Content area */}
         <div style={{ background: viewMode === 'board' ? 'var(--color-bg-secondary)' : 'var(--color-bg)' }}>
           {loading ? (
@@ -641,7 +652,15 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
           ) : viewMode === 'board' ? (
             <TaskBoardView tasks={filtered} isAdmin={isAdmin} teamMap={teamMap} onStatusChange={fetchTasks} />
           ) : (
-            <TaskListView tasks={filtered} isAdmin={isAdmin} teamMap={teamMap} onSelect={setSelectedTaskId} />
+            <TaskListView
+              tasks={filtered}
+              isAdmin={isAdmin}
+              teamMap={teamMap}
+              onSelect={setSelectedTaskId}
+              selectedIds={selectedIds}
+              onToggleSelect={isAdmin ? toggleSelect : undefined}
+              onToggleAll={isAdmin ? toggleSelectAll : undefined}
+            />
           )}
         </div>
       </div>
@@ -658,27 +677,45 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
 
 // ── Task List View ───────────────────────────────────────────────────────────
 
-function TaskListView({ tasks, isAdmin, teamMap, onSelect }: {
+function TaskListView({ tasks, isAdmin, teamMap, onSelect, selectedIds, onToggleSelect, onToggleAll }: {
   tasks: Task[]
   isAdmin: boolean
   teamMap: Map<string, TeamMember>
   onSelect: (id: string) => void
+  selectedIds?: Set<string>
+  onToggleSelect?: (id: string) => void
+  onToggleAll?: () => void
 }) {
+  const showCheckboxes = isAdmin && onToggleSelect
+  const allSelected = showCheckboxes && selectedIds && selectedIds.size === tasks.length && tasks.length > 0
+
   return (
     <div>
       {/* Table header */}
       <div
         className="hidden md:grid text-xs font-semibold uppercase tracking-wide items-center"
         style={{
-          gridTemplateColumns: isAdmin
-            ? '1fr 8rem 7rem 7rem 5.5rem 5.5rem 6rem'
-            : '1fr 7rem 7rem 5.5rem 5.5rem',
+          gridTemplateColumns: showCheckboxes
+            ? (isAdmin ? '2rem 1fr 8rem 7rem 7rem 5.5rem 5.5rem 6rem' : '2rem 1fr 7rem 7rem 5.5rem 5.5rem')
+            : (isAdmin ? '1fr 8rem 7rem 7rem 5.5rem 5.5rem 6rem' : '1fr 7rem 7rem 5.5rem 5.5rem'),
           padding: '0.625rem 1rem',
           borderBottom: '1px solid var(--color-border-subtle)',
           color: 'var(--color-th-text)',
           background: 'var(--color-th-bg)',
         }}
       >
+        {showCheckboxes && (
+          <button
+            onClick={onToggleAll}
+            className="flex items-center justify-center"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            aria-label={allSelected ? 'Deselect all' : 'Select all'}
+          >
+            {allSelected
+              ? <CheckSquare className="w-4 h-4" style={{ color: 'var(--color-brand)' }} />
+              : <Square className="w-4 h-4" style={{ color: 'var(--color-text-subtle)' }} />}
+          </button>
+        )}
         <span>Title</span>
         {isAdmin && <span>Client</span>}
         <span>Type</span>
@@ -698,6 +735,8 @@ function TaskListView({ tasks, isAdmin, teamMap, onSelect }: {
             isLast={i === tasks.length - 1}
             teamMap={teamMap}
             onSelect={onSelect}
+            isSelected={selectedIds?.has(task.id)}
+            onToggleSelect={onToggleSelect}
           />
         ))}
       </div>
@@ -705,23 +744,26 @@ function TaskListView({ tasks, isAdmin, teamMap, onSelect }: {
   )
 }
 
-function TaskRow({ task, isAdmin, isLast, teamMap, onSelect }: {
+function TaskRow({ task, isAdmin, isLast, teamMap, onSelect, isSelected, onToggleSelect }: {
   task: Task
   isAdmin: boolean
   isLast: boolean
   teamMap: Map<string, TeamMember>
   onSelect: (id: string) => void
+  isSelected?: boolean
+  onToggleSelect?: (id: string) => void
 }) {
   const assignee = task.assigneeId ? teamMap.get(task.assigneeId) : null
   const hasSubtasks = (task.subtaskCount ?? 0) > 0
   const isBlocked = (task.blockedByCount ?? 0) > 0
+  const showCheckbox = isAdmin && onToggleSelect
 
   return (
     <div
       style={{ textDecoration: 'none', display: 'block', cursor: 'pointer' }}
       onClick={() => onSelect(task.id)}
       onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--color-row-hover)' }}
-      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--color-bg)' }}
+      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = isSelected ? 'var(--color-brand-50)' : 'var(--color-bg)' }}
     >
       {/* Mobile layout */}
       <div
@@ -767,13 +809,27 @@ function TaskRow({ task, isAdmin, isLast, teamMap, onSelect }: {
       <div
         className="hidden md:grid items-center"
         style={{
-          gridTemplateColumns: isAdmin
-            ? '1fr 8rem 7rem 7rem 5.5rem 5.5rem 6rem'
-            : '1fr 7rem 7rem 5.5rem 5.5rem',
+          gridTemplateColumns: showCheckbox
+            ? (isAdmin ? '2rem 1fr 8rem 7rem 7rem 5.5rem 5.5rem 6rem' : '2rem 1fr 7rem 7rem 5.5rem 5.5rem')
+            : (isAdmin ? '1fr 8rem 7rem 7rem 5.5rem 5.5rem 6rem' : '1fr 7rem 7rem 5.5rem 5.5rem'),
           padding: '0.75rem 1rem',
           borderBottom: isLast ? 'none' : '1px solid var(--color-row-border)',
+          background: isSelected ? 'var(--color-brand-50)' : 'inherit',
         }}
       >
+        {/* Checkbox */}
+        {showCheckbox && (
+          <button
+            onClick={e => { e.preventDefault(); e.stopPropagation(); onToggleSelect(task.id) }}
+            className="flex items-center justify-center"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            aria-label={isSelected ? 'Deselect' : 'Select'}
+          >
+            {isSelected
+              ? <CheckSquare className="w-4 h-4" style={{ color: 'var(--color-brand)' }} />
+              : <Square className="w-4 h-4" style={{ color: 'var(--color-text-subtle)' }} />}
+          </button>
+        )}
         {/* Title */}
         <div className="flex items-center gap-1.5 min-w-0">
           {isBlocked && <BlockedIndicator />}
@@ -1090,6 +1146,236 @@ function TaskKanbanCard({ task, teamMap }: { task: Task; teamMap: Map<string, Te
         </div>
       </div>
     </Link>
+  )
+}
+
+// ── Task Bulk Action Bar ─────────────────────────────────────────────────────
+
+function TaskBulkActionBar({
+  selectedCount,
+  selectedIds,
+  teamMembers,
+  onClear,
+  onDone,
+}: {
+  selectedCount: number
+  selectedIds: Set<string>
+  teamMembers: TeamMember[]
+  onClear: () => void
+  onDone: () => void
+}) {
+  const [actionLoading, setActionLoading] = useState(false)
+  const [statusDropdown, setStatusDropdown] = useState(false)
+  const [priorityDropdown, setPriorityDropdown] = useState(false)
+  const [assignDropdown, setAssignDropdown] = useState(false)
+  const { showToast } = useToast()
+
+  const handleBulkUpdate = async (updates: { status?: string; priority?: string; assigneeId?: string | null }) => {
+    setActionLoading(true)
+    setStatusDropdown(false)
+    setPriorityDropdown(false)
+    setAssignDropdown(false)
+    try {
+      const res = await fetch(apiPath('/api/admin/tasks/bulk'), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskIds: Array.from(selectedIds), updates }),
+      })
+      if (res.ok) {
+        showToast(`Updated ${selectedCount} task${selectedCount !== 1 ? 's' : ''}`, 'success')
+        onDone()
+      }
+    } catch {
+      showToast('Failed to update tasks', 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const statuses = [
+    { value: 'todo', label: 'To Do' },
+    { value: 'in_progress', label: 'In Progress' },
+    { value: 'blocked', label: 'Blocked' },
+    { value: 'done', label: 'Done' },
+  ]
+
+  const priorities = [
+    { value: 'standard', label: 'Standard' },
+    { value: 'high', label: 'High' },
+    { value: 'urgent', label: 'Urgent' },
+  ]
+
+  return (
+    <div
+      className="flex items-center gap-3 flex-wrap"
+      style={{
+        padding: '0.5rem 1rem',
+        background: 'var(--color-brand-50)',
+        borderBottom: '1px solid var(--color-border)',
+      }}
+    >
+      <span className="text-sm font-medium" style={{ color: 'var(--color-brand-dark)' }}>
+        {selectedCount} selected
+      </span>
+
+      {/* Change Status dropdown */}
+      <div className="relative">
+        <button
+          onClick={() => { setStatusDropdown(!statusDropdown); setPriorityDropdown(false); setAssignDropdown(false) }}
+          disabled={actionLoading}
+          className="flex items-center gap-1 text-sm font-medium transition-colors"
+          style={{
+            padding: '0.25rem 0.625rem',
+            borderRadius: '0.375rem',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg)',
+            cursor: 'pointer',
+            color: 'var(--color-text)',
+          }}
+        >
+          {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+          Change Status
+          <ChevronDown className="w-3 h-3" />
+        </button>
+        {statusDropdown && (
+          <div
+            className="absolute z-[70] mt-1"
+            style={{
+              background: 'var(--color-bg)',
+              border: '1px solid var(--color-border)',
+              borderRadius: '0.5rem',
+              boxShadow: 'var(--shadow-md)',
+              minWidth: '10rem',
+            }}
+          >
+            {statuses.map(s => (
+              <button
+                key={s.value}
+                onClick={() => handleBulkUpdate({ status: s.value })}
+                className="w-full text-left text-sm px-3 py-2 transition-colors"
+                style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--color-text)' }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Change Priority dropdown */}
+      <div className="relative">
+        <button
+          onClick={() => { setPriorityDropdown(!priorityDropdown); setStatusDropdown(false); setAssignDropdown(false) }}
+          disabled={actionLoading}
+          className="flex items-center gap-1 text-sm font-medium transition-colors"
+          style={{
+            padding: '0.25rem 0.625rem',
+            borderRadius: '0.375rem',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg)',
+            cursor: 'pointer',
+            color: 'var(--color-text)',
+          }}
+        >
+          Change Priority
+          <ChevronDown className="w-3 h-3" />
+        </button>
+        {priorityDropdown && (
+          <div
+            className="absolute z-[70] mt-1"
+            style={{
+              background: 'var(--color-bg)',
+              border: '1px solid var(--color-border)',
+              borderRadius: '0.5rem',
+              boxShadow: 'var(--shadow-md)',
+              minWidth: '10rem',
+            }}
+          >
+            {priorities.map(p => (
+              <button
+                key={p.value}
+                onClick={() => handleBulkUpdate({ priority: p.value })}
+                className="w-full text-left text-sm px-3 py-2 transition-colors"
+                style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--color-text)' }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Assign dropdown */}
+      <div className="relative">
+        <button
+          onClick={() => { setAssignDropdown(!assignDropdown); setStatusDropdown(false); setPriorityDropdown(false) }}
+          disabled={actionLoading}
+          className="flex items-center gap-1 text-sm font-medium transition-colors"
+          style={{
+            padding: '0.25rem 0.625rem',
+            borderRadius: '0.375rem',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg)',
+            cursor: 'pointer',
+            color: 'var(--color-text)',
+          }}
+        >
+          Assign
+          <ChevronDown className="w-3 h-3" />
+        </button>
+        {assignDropdown && (
+          <div
+            className="absolute z-[70] mt-1"
+            style={{
+              background: 'var(--color-bg)',
+              border: '1px solid var(--color-border)',
+              borderRadius: '0.5rem',
+              boxShadow: 'var(--shadow-md)',
+              minWidth: '12rem',
+              maxHeight: '15rem',
+              overflowY: 'auto',
+            }}
+          >
+            <button
+              onClick={() => handleBulkUpdate({ assigneeId: null })}
+              className="w-full text-left text-sm px-3 py-2 transition-colors"
+              style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', fontStyle: 'italic' }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+            >
+              Unassign
+            </button>
+            {teamMembers.map(m => (
+              <button
+                key={m.id}
+                onClick={() => handleBulkUpdate({ assigneeId: m.id })}
+                className="w-full text-left text-sm px-3 py-2 transition-colors flex items-center gap-2"
+                style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--color-text)' }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+              >
+                <AssigneeAvatar name={m.name} />
+                {m.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="flex-1" />
+
+      <button
+        onClick={onClear}
+        className="text-sm font-medium transition-colors"
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)' }}
+      >
+        Clear selection
+      </button>
+    </div>
   )
 }
 

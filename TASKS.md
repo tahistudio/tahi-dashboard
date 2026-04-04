@@ -554,7 +554,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T323 - [BE] GET /api/admin/reports/close-rates: conversion rate between each stage, win/loss over time, revenue per stage, stage velocity -- [BE] 2026-04-03 (verified: reports/close-rates/route.ts has GET)
 - [ ] T324 - [FE] Reports page: sales metrics section with pipeline value chart (stacked bar by stage), win rate trend, avg deal size, forecast chart
 - [x] T325 - [FE] Reports page: sales funnel visualization showing conversion between stages -- [FE] 2026-04-03
-- [ ] T326 - [FE] Reports page: revenue forecast chart (weighted pipeline value over next 3/6/12 months)
+- [x] T326 - [FE] Reports page: revenue forecast chart (weighted pipeline value over next 3/6/12 months) -- [FE] 2026-04-03
 
 ### Capacity Tracking
 
@@ -604,7 +604,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 ### Sidebar and Navigation
 
 - [x] T358 - [FE] Add "Pipeline" nav item to sidebar under a "Sales" group (above Clients) -- [FE] 2026-04-03 (verified: app-sidebar.tsx has Pipeline nav item)
-- [ ] T359 - [FE] Add "Capacity" nav item to sidebar under the "Sales" group
+- [x] T359 - [FE] Add "Capacity" nav item to sidebar under the "Sales" group -- [FE] 2026-04-03
 - [x] T360 - [FE] Overview page: add pipeline summary card (total pipeline value, deals closing this month, capacity utilization) -- [FE] 2026-04-03
 
 ### Integration and Polish
@@ -739,7 +739,7 @@ Requires S16, S17, S18.
 
 #### Bulk Task Operations
 
-- [ ] T430 - [FE] Tasks page: multi-select checkboxes on task rows. Bulk actions bar: change status, change priority, assign, delete.
+- [x] T430 - [FE] Tasks page: multi-select checkboxes on task rows. Bulk actions bar: change status, change priority, assign, delete. -- [FE] 2026-04-03
 - [x] T431 - [BE] PATCH /api/admin/tasks/bulk: accept array of task IDs and fields to update (status, priority, assigneeId). Validate all IDs exist. -- [BE] 2026-04-03
 
 #### AI Task Creation Wizard
@@ -822,7 +822,7 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [x] T475 - [BE] GET /api/admin/reports/close-rates: add breakdowns by source (close rate per source, avg deal size per source, avg cycle length per source). -- [BE] 2026-04-03 (added sourceBreakdowns to sales report)
 - [ ] T476 - [FE] Reports page: close rate analytics section with source breakdown bar chart and conversion funnel.
 - [x] T477 - [BE] GET /api/admin/capacity/forecast: return forecasted capacity impact from pipeline deals weighted by probability, grouped by expected close month. -- [BE] 2026-04-03
-- [ ] T478 - [FE] Capacity page: pipeline impact section showing forecasted hours from deals, worst case vs weighted vs best case scenarios.
+- [x] T478 - [FE] Capacity page: pipeline impact section showing forecasted hours from deals, worst case vs weighted vs best case scenarios. -- [FE] 2026-04-03
 
 ### Audit Bug Fixes (from AUDIT.md)
 

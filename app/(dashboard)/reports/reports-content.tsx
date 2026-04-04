@@ -425,6 +425,9 @@ export function ReportsContent() {
 
       {/* Source Breakdown (T390) */}
       <SourceBreakdownSection />
+
+      {/* Revenue Forecast (T326) */}
+      <RevenueForecastSection />
     </div>
   )
 }
@@ -1354,6 +1357,183 @@ function SourceBreakdownSection() {
             </table>
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Revenue Forecast Section (T326) ──────────────────────────────────────────
+
+interface ForecastMonth {
+  month: string
+  revenue: number
+  bestCase: number
+  worstCase: number
+}
+
+interface ForecastData {
+  months: ForecastMonth[]
+  totalWeightedValue: number
+  totalBestCase: number
+  totalWorstCase: number
+}
+
+function RevenueForecastSection() {
+  const [forecastData, setForecastData] = useState<ForecastData | null>(null)
+  const [forecastLoading, setForecastLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    const loadForecast = async () => {
+      try {
+        const res = await fetch(apiPath('/api/admin/capacity/forecast'))
+        if (!res.ok) throw new Error('Failed')
+        const d = await res.json() as ForecastData
+        if (!cancelled) setForecastData(d)
+      } catch {
+        // Fallback: build forecast from sales data
+        try {
+          const salesRes = await fetch(apiPath('/api/admin/reports/sales'))
+          if (!salesRes.ok) throw new Error('Failed')
+          const salesJson = await salesRes.json() as { weightedPipelineValue?: number }
+          const weighted = salesJson.weightedPipelineValue ?? 0
+          if (weighted > 0 && !cancelled) {
+            const monthlyWeighted = weighted / 6
+            const months: ForecastMonth[] = []
+            const now = new Date()
+            for (let i = 0; i < 6; i++) {
+              const d = new Date(now.getFullYear(), now.getMonth() + i + 1, 1)
+              const label = d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' })
+              months.push({
+                month: label,
+                revenue: Math.round(monthlyWeighted),
+                bestCase: Math.round(monthlyWeighted * 1.5),
+                worstCase: Math.round(monthlyWeighted * 0.5),
+              })
+            }
+            setForecastData({
+              months,
+              totalWeightedValue: weighted,
+              totalBestCase: Math.round(weighted * 1.5),
+              totalWorstCase: Math.round(weighted * 0.5),
+            })
+          }
+        } catch {
+          // silent
+        }
+      } finally {
+        if (!cancelled) setForecastLoading(false)
+      }
+    }
+    loadForecast()
+    return () => { cancelled = true }
+  }, [])
+
+  if (forecastLoading) {
+    return (
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Revenue Forecast
+        </h3>
+        <div className="space-y-2">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="animate-pulse rounded" style={{ height: '2.5rem', background: 'var(--color-bg-tertiary)' }} />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (!forecastData || forecastData.months.length === 0) {
+    return (
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Revenue Forecast
+        </h3>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          No forecast data available. Add deals to the pipeline to generate a revenue forecast.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-[var(--color-text)]">Revenue Forecast</h2>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+        <SummaryCard
+          icon={DollarSign}
+          label="Weighted Forecast (6mo)"
+          value={formatNzd(forecastData.totalWeightedValue)}
+          accent="emerald"
+        />
+        <SummaryCard
+          icon={TrendingUp}
+          label="Best Case"
+          value={formatNzd(forecastData.totalBestCase)}
+          accent="blue"
+        />
+        <SummaryCard
+          icon={Target}
+          label="Worst Case"
+          value={formatNzd(forecastData.totalWorstCase)}
+          accent="amber"
+        />
+      </div>
+
+      {/* Bar chart */}
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <BarChart2 className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Forecasted Revenue by Month (next 6 months)
+        </h3>
+        <ResponsiveContainer width="100%" height={260}>
+          <BarChart data={forecastData.months}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" />
+            <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+            <YAxis
+              allowDecimals={false}
+              tick={{ fontSize: 11 }}
+              tickFormatter={(v: number) => `$${Math.round(v / 1000)}k`}
+            />
+            <Tooltip
+              formatter={(value: number) => [formatNzd(value), '']}
+              contentStyle={{
+                fontSize: '0.75rem',
+                borderRadius: '0.5rem',
+                border: '1px solid var(--color-border)',
+              }}
+            />
+            <Bar dataKey="worstCase" fill="#fbbf24" radius={[4, 4, 0, 0]} name="Worst Case" />
+            <Bar dataKey="revenue" fill="#5A824E" radius={[4, 4, 0, 0]} name="Weighted" />
+            <Bar dataKey="bestCase" fill="#60a5fa" radius={[4, 4, 0, 0]} name="Best Case" />
+          </BarChart>
+        </ResponsiveContainer>
       </div>
     </div>
   )

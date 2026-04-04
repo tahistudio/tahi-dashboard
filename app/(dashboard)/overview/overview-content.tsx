@@ -511,8 +511,141 @@ function PipelineCapacityCard() {
 
         {/* Earliest Start Date calculator */}
         <EarliestStartDateWidget />
+
+        {/* Pipeline Impact (T478) */}
+        <PipelineImpactCard />
       </div>
     </SectionCard>
+  )
+}
+
+// ─── Pipeline Impact Card (T478) ────────────────────────────────────────────
+
+interface PipelineForecast {
+  totalWeightedHours: number
+  bestCaseHours: number
+  worstCaseHours: number
+  dealCount: number
+}
+
+function PipelineImpactCard() {
+  const [forecast, setForecast] = useState<PipelineForecast | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await fetch(apiPath('/api/admin/capacity/forecast'))
+        if (!res.ok) throw new Error('Failed')
+        const d = await res.json() as {
+          totalWeightedHours?: number
+          bestCaseHours?: number
+          worstCaseHours?: number
+          dealCount?: number
+        }
+        if (!cancelled && d.totalWeightedHours !== undefined) {
+          setForecast({
+            totalWeightedHours: d.totalWeightedHours ?? 0,
+            bestCaseHours: d.bestCaseHours ?? 0,
+            worstCaseHours: d.worstCaseHours ?? 0,
+            dealCount: d.dealCount ?? 0,
+          })
+        }
+      } catch {
+        // Fallback: derive from deals data
+        try {
+          const dealsRes = await fetch(apiPath('/api/admin/deals?limit=100'))
+          if (!dealsRes.ok) throw new Error('Failed')
+          const dealsJson = await dealsRes.json() as {
+            items: Array<{
+              stageIsClosedWon: number | null
+              stageIsClosedLost: number | null
+              stageProbability: number | null
+              estimatedHours?: number | null
+              valueNzd: number | null
+              value: number | null
+            }>
+          }
+          const openDeals = (dealsJson.items ?? []).filter(
+            d => !d.stageIsClosedWon && !d.stageIsClosedLost
+          )
+          // Estimate hours from deal value (rough: $100/hr assumed)
+          const hourlyRate = 100
+          let weightedHrs = 0
+          let bestHrs = 0
+          let worstHrs = 0
+          for (const deal of openDeals) {
+            const val = deal.valueNzd ?? deal.value ?? 0
+            const prob = deal.stageProbability ?? 0
+            const hrs = deal.estimatedHours ?? (val / hourlyRate)
+            weightedHrs += hrs * (prob / 100)
+            bestHrs += hrs
+            worstHrs += hrs * Math.max(prob - 20, 0) / 100
+          }
+          if (!cancelled) {
+            setForecast({
+              totalWeightedHours: Math.round(weightedHrs),
+              bestCaseHours: Math.round(bestHrs),
+              worstCaseHours: Math.round(worstHrs),
+              dealCount: openDeals.length,
+            })
+          }
+        } catch {
+          // silent
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [])
+
+  if (loading || !forecast) return null
+  if (forecast.dealCount === 0) return null
+
+  return (
+    <div id="capacity" style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: '1rem', marginTop: '0.25rem' }}>
+      <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.75rem' }}>
+        Pipeline Impact
+      </p>
+      <div className="grid grid-cols-3" style={{ gap: '0.75rem' }}>
+        <div style={{ padding: '0.625rem 0.75rem', background: 'var(--color-bg-secondary)', borderRadius: '0.5rem' }}>
+          <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.125rem' }}>
+            Weighted
+          </p>
+          <p style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-brand)' }}>
+            {forecast.totalWeightedHours}h
+          </p>
+          <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
+            {forecast.dealCount} deal{forecast.dealCount !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <div style={{ padding: '0.625rem 0.75rem', background: 'var(--color-bg-secondary)', borderRadius: '0.5rem' }}>
+          <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.125rem' }}>
+            Best Case
+          </p>
+          <p style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-info)' }}>
+            {forecast.bestCaseHours}h
+          </p>
+          <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
+            all deals close
+          </p>
+        </div>
+        <div style={{ padding: '0.625rem 0.75rem', background: 'var(--color-bg-secondary)', borderRadius: '0.5rem' }}>
+          <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.125rem' }}>
+            Worst Case
+          </p>
+          <p style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-warning)' }}>
+            {forecast.worstCaseHours}h
+          </p>
+          <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
+            conservative
+          </p>
+        </div>
+      </div>
+    </div>
   )
 }
 
