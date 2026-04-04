@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
 Last updated: 2026-04-03
-Total tasks: 542 (S1-S22 schema + T1-T495 feature + unnumbered review/QA items)
-Completed: 490/542
+Total tasks: 544 (S1-S22 schema + T1-T495 feature + unnumbered review/QA items)
+Completed: 500/544
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
