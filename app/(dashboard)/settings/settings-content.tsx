@@ -6,7 +6,7 @@ import {
   CreditCard, Link2, Bell, Building2,
   FileText, Plus, Trash2, GripVertical, ChevronDown, ChevronUp,
   Webhook, Loader2, User, Palette, ToggleLeft,
-  Target,
+  Target, ClipboardList, Pencil,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -382,6 +382,9 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
 
           {/* Kanban Columns (admin only) */}
           {isAdmin && <KanbanColumnsSection />}
+
+          {/* Task Templates (admin only) - T423 */}
+          {isAdmin && <TaskTemplatesSection />}
 
           {/* Pipeline Stages (admin only) - T289 */}
           {isAdmin && <PipelineStagesSection />}
@@ -965,6 +968,434 @@ function FormEditor({ form, onSaved }: { form: FormTemplate; onSaved: () => void
         </TahiButton>
       </div>
     </div>
+  )
+}
+
+// -- Task Templates Section (T423) --
+
+interface TaskTemplate {
+  id: string
+  name: string
+  type: string
+  category: string | null
+  defaultPriority: string | null
+  description: string | null
+}
+
+const TASK_TYPE_OPTIONS = [
+  { value: 'client_external', label: 'Client External' },
+  { value: 'internal_client', label: 'Internal Client' },
+  { value: 'tahi_internal', label: 'Tahi Internal' },
+]
+
+const PRIORITY_OPTIONS = [
+  { value: '', label: 'None' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'urgent', label: 'Urgent' },
+]
+
+const PRIORITY_STYLES: Record<string, { bg: string; text: string }> = {
+  low:    { bg: '#dbeafe', text: '#2563eb' },
+  medium: { bg: '#fef3c7', text: '#d97706' },
+  high:   { bg: '#fee2e2', text: '#dc2626' },
+  urgent: { bg: '#fce7f3', text: '#be185d' },
+}
+
+function TaskTemplatesSection() {
+  const [templates, setTemplates] = useState<TaskTemplate[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [formName, setFormName] = useState('')
+  const [formType, setFormType] = useState('tahi_internal')
+  const [formCategory, setFormCategory] = useState('')
+  const [formPriority, setFormPriority] = useState('')
+  const [formDescription, setFormDescription] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  const fetchTemplates = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/task-templates'))
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as { templates: TaskTemplate[] }
+      setTemplates(data.templates ?? [])
+    } catch {
+      setTemplates([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchTemplates() }, [fetchTemplates])
+
+  function resetForm() {
+    setFormName('')
+    setFormType('tahi_internal')
+    setFormCategory('')
+    setFormPriority('')
+    setFormDescription('')
+    setEditingId(null)
+    setShowForm(false)
+  }
+
+  function startEdit(t: TaskTemplate) {
+    setFormName(t.name)
+    setFormType(t.type)
+    setFormCategory(t.category ?? '')
+    setFormPriority(t.defaultPriority ?? '')
+    setFormDescription(t.description ?? '')
+    setEditingId(t.id)
+    setShowForm(true)
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!formName.trim()) return
+    setSaving(true)
+    try {
+      const body = {
+        name: formName.trim(),
+        type: formType,
+        category: formCategory || null,
+        defaultPriority: formPriority || null,
+        description: formDescription.trim() || null,
+      }
+      const url = editingId
+        ? apiPath(`/api/admin/task-templates/${editingId}`)
+        : apiPath('/api/admin/task-templates')
+      const method = editingId ? 'PATCH' : 'POST'
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (res.ok) {
+        resetForm()
+        await fetchTemplates()
+      }
+    } catch {
+      // silent
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete(id: string) {
+    setDeletingId(id)
+    try {
+      await fetch(apiPath(`/api/admin/task-templates/${id}`), { method: 'DELETE' })
+      await fetchTemplates()
+    } catch {
+      // silent
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <ClipboardList className="w-5 h-5" aria-hidden="true" />
+        Task Templates
+      </h2>
+      <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+        {/* Add button */}
+        <div className="flex items-center justify-between" style={{ marginBottom: '1rem' }}>
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Define reusable templates for tasks.
+          </p>
+          {!showForm && (
+            <button
+              onClick={() => { resetForm(); setShowForm(true) }}
+              className="inline-flex items-center gap-1.5 font-medium rounded-lg transition-colors"
+              style={{
+                padding: '0.375rem 0.75rem',
+                fontSize: '0.8125rem',
+                background: 'var(--color-brand)',
+                color: 'white',
+                border: 'none',
+                cursor: 'pointer',
+                minHeight: '2.25rem',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-dark)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-brand)' }}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add Template
+            </button>
+          )}
+        </div>
+
+        {/* Inline form */}
+        {showForm && (
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3 p-4 rounded-lg mb-4" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
+                  Name *
+                </label>
+                <input
+                  type="text"
+                  value={formName}
+                  onChange={e => setFormName(e.target.value)}
+                  className="w-full rounded-lg"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.875rem',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    minHeight: '2.5rem',
+                  }}
+                  autoFocus
+                  placeholder="e.g. Weekly status update"
+                />
+              </div>
+              <div>
+                <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
+                  Type
+                </label>
+                <select
+                  value={formType}
+                  onChange={e => setFormType(e.target.value)}
+                  className="w-full rounded-lg cursor-pointer"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.875rem',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    minHeight: '2.5rem',
+                  }}
+                >
+                  {TASK_TYPE_OPTIONS.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
+                  Category
+                </label>
+                <input
+                  type="text"
+                  value={formCategory}
+                  onChange={e => setFormCategory(e.target.value)}
+                  className="w-full rounded-lg"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.875rem',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    minHeight: '2.5rem',
+                  }}
+                  placeholder="e.g. design, development"
+                />
+              </div>
+              <div>
+                <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
+                  Default Priority
+                </label>
+                <select
+                  value={formPriority}
+                  onChange={e => setFormPriority(e.target.value)}
+                  className="w-full rounded-lg cursor-pointer"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.875rem',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    minHeight: '2.5rem',
+                  }}
+                >
+                  {PRIORITY_OPTIONS.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
+                Description
+              </label>
+              <textarea
+                value={formDescription}
+                onChange={e => setFormDescription(e.target.value)}
+                className="w-full rounded-lg resize-y"
+                rows={2}
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  fontSize: '0.875rem',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  color: 'var(--color-text)',
+                }}
+                placeholder="Optional description for this template"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={resetForm}
+                className="font-medium rounded-lg"
+                style={{
+                  padding: '0.375rem 0.75rem',
+                  fontSize: '0.8125rem',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  color: 'var(--color-text-muted)',
+                  cursor: 'pointer',
+                  minHeight: '2.25rem',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving || !formName.trim()}
+                className="font-medium rounded-lg"
+                style={{
+                  padding: '0.375rem 0.75rem',
+                  fontSize: '0.8125rem',
+                  background: 'var(--color-brand)',
+                  color: 'white',
+                  border: 'none',
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  opacity: saving || !formName.trim() ? 0.6 : 1,
+                  minHeight: '2.25rem',
+                }}
+              >
+                {saving ? 'Saving...' : editingId ? 'Update' : 'Create'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Template list */}
+        {loading ? (
+          <div className="space-y-2">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="animate-pulse rounded-lg" style={{ height: '3rem', background: 'var(--color-bg-tertiary)' }} />
+            ))}
+          </div>
+        ) : templates.length === 0 ? (
+          <p className="text-sm text-[var(--color-text-muted)] text-center" style={{ padding: '1.5rem 0' }}>
+            No task templates yet. Create one to get started.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {templates.map(t => {
+              const typeLabel = TASK_TYPE_OPTIONS.find(o => o.value === t.type)?.label ?? t.type
+              const priStyle = PRIORITY_STYLES[t.defaultPriority ?? '']
+              return (
+                <div
+                  key={t.id}
+                  className="flex items-center justify-between rounded-lg"
+                  style={{
+                    padding: '0.625rem 0.75rem',
+                    background: 'var(--color-bg-secondary)',
+                    border: '1px solid var(--color-border-subtle)',
+                  }}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium truncate" style={{ fontSize: '0.875rem', color: 'var(--color-text)' }}>
+                        {t.name}
+                      </span>
+                      <span
+                        className="rounded-full font-medium"
+                        style={{
+                          padding: '0.0625rem 0.375rem',
+                          fontSize: '0.625rem',
+                          background: 'var(--color-bg-tertiary)',
+                          color: 'var(--color-text-subtle)',
+                        }}
+                      >
+                        {typeLabel}
+                      </span>
+                      {t.category && (
+                        <span
+                          className="rounded-full font-medium"
+                          style={{
+                            padding: '0.0625rem 0.375rem',
+                            fontSize: '0.625rem',
+                            background: 'var(--color-bg-tertiary)',
+                            color: 'var(--color-text-muted)',
+                          }}
+                        >
+                          {t.category}
+                        </span>
+                      )}
+                      {priStyle && (
+                        <span
+                          className="rounded-full font-medium"
+                          style={{
+                            padding: '0.0625rem 0.375rem',
+                            fontSize: '0.625rem',
+                            background: priStyle.bg,
+                            color: priStyle.text,
+                          }}
+                        >
+                          {t.defaultPriority}
+                        </span>
+                      )}
+                    </div>
+                    {t.description && (
+                      <p className="truncate" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
+                        {t.description}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0" style={{ marginLeft: '0.75rem' }}>
+                    <button
+                      onClick={() => startEdit(t)}
+                      className="rounded-lg transition-colors"
+                      style={{
+                        padding: '0.375rem',
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: 'var(--color-text-subtle)',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand)' }}
+                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+                      aria-label="Edit template"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(t.id)}
+                      disabled={deletingId === t.id}
+                      className="rounded-lg transition-colors"
+                      style={{
+                        padding: '0.375rem',
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: deletingId === t.id ? 'not-allowed' : 'pointer',
+                        color: 'var(--color-text-subtle)',
+                        opacity: deletingId === t.id ? 0.5 : 1,
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-danger)' }}
+                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+                      aria-label="Delete template"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 

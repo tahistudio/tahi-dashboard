@@ -5,9 +5,10 @@ import Link from 'next/link'
 import {
   ArrowLeft, Building2, Calendar, Clock,
   Phone, Mail, FileText, MessageSquare,
-  Plus, Loader2, Check, ChevronDown,
+  Plus, Loader2, Check, ChevronDown, Inbox,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { REQUEST_STATUS_CONFIG } from '@/lib/status-config'
 
 // ---- Types ---------------------------------------------------------------
 
@@ -342,6 +343,11 @@ export function DealDetail({ dealId }: { dealId: string }) {
 
           {/* Notes */}
           <NotesSection dealId={dealId} initialNotes={deal.notes} onUpdated={fetchDeal} />
+
+          {/* Associated Requests (T306) */}
+          {deal.orgId && (
+            <AssociatedRequests orgId={deal.orgId} />
+          )}
         </div>
 
         {/* Right column (1/3) - sidebar */}
@@ -1259,6 +1265,110 @@ function ActivityFormDialog({ dealId, onClose, onCreated }: {
           </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+// ---- Associated Requests (T306) -----------------------------------------
+
+interface AssociatedRequest {
+  id: string
+  title: string
+  status: string
+}
+
+function AssociatedRequests({ orgId }: { orgId: string }) {
+  const [requests, setRequests] = useState<AssociatedRequest[]>([])
+  const [loading, setLoading] = useState(true)
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch(apiPath(`/api/admin/requests?orgId=${encodeURIComponent(orgId)}&limit=20`))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<{ items: AssociatedRequest[] }>
+      })
+      .then(d => setRequests(d.items ?? []))
+      .catch(() => setRequests([]))
+      .finally(() => setLoading(false))
+  }, [orgId])
+
+  return (
+    <div
+      className="rounded-xl border shadow-sm"
+      style={{ padding: '1.5rem', background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+    >
+      <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
+        <h2 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)' }}>
+          Associated Requests
+        </h2>
+        <span
+          className="rounded-full font-medium"
+          style={{
+            padding: '0.125rem 0.5rem',
+            fontSize: '0.6875rem',
+            background: 'var(--color-bg-tertiary)',
+            color: 'var(--color-text-subtle)',
+          }}
+        >
+          {loading ? '...' : requests.length}
+        </span>
+      </div>
+
+      {loading ? (
+        <div className="flex flex-col gap-2">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="animate-pulse rounded-lg" style={{ height: '2.5rem', background: 'var(--color-bg-tertiary)' }} />
+          ))}
+        </div>
+      ) : requests.length === 0 ? (
+        <div
+          className="flex flex-col items-center justify-center rounded-lg"
+          style={{ padding: '2rem', border: '1px dashed var(--color-border)' }}
+        >
+          <Inbox style={{ width: '2rem', height: '2rem', color: 'var(--color-text-subtle)', marginBottom: '0.5rem' }} />
+          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>No requests from this company</p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1">
+          {requests.map(req => {
+            const cfg = REQUEST_STATUS_CONFIG[req.status] ?? REQUEST_STATUS_CONFIG.submitted
+            return (
+              <Link
+                key={req.id}
+                href={`/requests/${req.id}`}
+                className="flex items-center justify-between rounded-lg transition-colors"
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  textDecoration: 'none',
+                  background: hoveredId === req.id ? 'var(--color-bg-secondary)' : 'transparent',
+                }}
+                onMouseEnter={() => setHoveredId(req.id)}
+                onMouseLeave={() => setHoveredId(null)}
+              >
+                <span
+                  className="truncate font-medium"
+                  style={{ fontSize: '0.8125rem', color: 'var(--color-text)', maxWidth: '70%' }}
+                >
+                  {req.title}
+                </span>
+                <span
+                  className="rounded-full font-medium flex-shrink-0"
+                  style={{
+                    padding: '0.125rem 0.5rem',
+                    fontSize: '0.6875rem',
+                    background: cfg.bg,
+                    color: cfg.text,
+                    border: cfg.border ? `1px solid ${cfg.border}` : undefined,
+                  }}
+                >
+                  {cfg.label}
+                </span>
+              </Link>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

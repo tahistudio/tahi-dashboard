@@ -106,6 +106,60 @@ export async function GET(req: NextRequest) {
     totalValue: Number(s.totalValue ?? 0),
   }))
 
+  // Per-source breakdowns: avg deal size by source and close rate by source
+  const allDealsWithSource = await database
+    .select({
+      source: schema.deals.source,
+      valueNzd: schema.deals.valueNzd,
+      stageId: schema.deals.stageId,
+    })
+    .from(schema.deals)
+
+  // Get closed-won and closed-lost stage IDs for close rate calc
+  const closedWonStageIds = new Set(
+    pipelineByStage.filter(s => s.isClosedWon).map(s => s.stageId)
+  )
+  const closedLostStageIds = new Set(
+    pipelineByStage.filter(s => s.isClosedLost).map(s => s.stageId)
+  )
+
+  const sourceMap: Record<string, { totalValue: number; dealCount: number; wonCount: number; lostCount: number }> = {}
+
+  for (const deal of allDealsWithSource) {
+    const src = deal.source ?? 'unknown'
+    if (!sourceMap[src]) {
+      sourceMap[src] = { totalValue: 0, dealCount: 0, wonCount: 0, lostCount: 0 }
+    }
+    sourceMap[src].dealCount++
+    sourceMap[src].totalValue += Number(deal.valueNzd ?? 0)
+    if (closedWonStageIds.has(deal.stageId)) {
+      sourceMap[src].wonCount++
+    }
+    if (closedLostStageIds.has(deal.stageId)) {
+      sourceMap[src].lostCount++
+    }
+  }
+
+  const sourceBreakdowns = Object.entries(sourceMap).map(([source, data]) => {
+    const closedCount = data.wonCount + data.lostCount
+    const closeRate = closedCount > 0
+      ? Math.round((data.wonCount / closedCount) * 10000) / 100
+      : 0
+    const avgDealSizeBySource = data.dealCount > 0
+      ? Math.round(data.totalValue / data.dealCount)
+      : 0
+
+    return {
+      source,
+      dealCount: data.dealCount,
+      totalValue: data.totalValue,
+      avgDealSize: avgDealSizeBySource,
+      wonCount: data.wonCount,
+      lostCount: data.lostCount,
+      closeRate,
+    }
+  }).sort((a, b) => b.totalValue - a.totalValue)
+
   return NextResponse.json({
     stages,
     totalPipelineValue,
@@ -116,5 +170,6 @@ export async function GET(req: NextRequest) {
     totalDeals: totalDealCount,
     wonCount,
     lostCount,
+    sourceBreakdowns,
   })
 }

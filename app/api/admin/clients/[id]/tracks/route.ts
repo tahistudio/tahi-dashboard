@@ -2,12 +2,13 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { eq, and, ne, asc } from 'drizzle-orm'
 
 type Params = { params: Promise<{ id: string }> }
 
 // ── GET /api/admin/clients/[id]/tracks ───────────────────────────────────────
-// Returns all tracks for a client org (via their active subscription).
+// Returns all tracks for a client org (via their active subscription),
+// including the active request per track and the queued requests.
 export async function GET(req: NextRequest, { params }: Params) {
   const { orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
@@ -43,7 +44,31 @@ export async function GET(req: NextRequest, { params }: Params) {
     .leftJoin(schema.requests, eq(schema.tracks.currentRequestId, schema.requests.id))
     .where(eq(schema.tracks.subscriptionId, sub.id))
 
-  return NextResponse.json({ tracks, subscriptionId: sub.id, planType: sub.planType })
+  // Get queued (non-delivered, non-archived) requests for this org
+  const queuedRequests = await drizzle
+    .select({
+      id: schema.requests.id,
+      title: schema.requests.title,
+      type: schema.requests.type,
+      status: schema.requests.status,
+      priority: schema.requests.priority,
+      assigneeId: schema.requests.assigneeId,
+      queueOrder: schema.requests.queueOrder,
+      dueDate: schema.requests.dueDate,
+      createdAt: schema.requests.createdAt,
+    })
+    .from(schema.requests)
+    .where(and(
+      eq(schema.requests.orgId, clientOrgId),
+      ne(schema.requests.status, 'delivered'),
+      ne(schema.requests.status, 'archived'),
+    ))
+    .orderBy(asc(schema.requests.queueOrder), asc(schema.requests.createdAt))
+
+  const currentIds = tracks.map(t => t.currentRequestId).filter(Boolean) as string[]
+  const queue = queuedRequests.filter(r => !currentIds.includes(r.id))
+
+  return NextResponse.json({ tracks, queue, subscriptionId: sub.id, planType: sub.planType })
 }
 
 // ── POST /api/admin/clients/[id]/tracks ──────────────────────────────────────

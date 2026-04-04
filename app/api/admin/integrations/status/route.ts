@@ -27,9 +27,6 @@ export async function GET(req: NextRequest) {
     slack: {
       configured: !!process.env.SLACK_BOT_TOKEN,
     },
-    hubspot: {
-      configured: !!process.env.HUBSPOT_API_KEY,
-    },
     mailerlite: {
       configured: !!process.env.MAILERLITE_API_KEY,
     },

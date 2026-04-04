@@ -48,3 +48,41 @@ export async function PATCH(
 
   return NextResponse.json({ success: true })
 }
+
+// ── DELETE /api/admin/tasks/[id]/subtasks/[subId] ─────────────────────────
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string; subId: string }> }
+) {
+  const { orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const { id: taskId, subId } = await params
+
+  const database = await db()
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Verify subtask exists and belongs to this task
+  const [existing] = await drizzle
+    .select({ id: schema.taskSubtasks.id })
+    .from(schema.taskSubtasks)
+    .where(
+      and(
+        eq(schema.taskSubtasks.id, subId),
+        eq(schema.taskSubtasks.taskId, taskId)
+      )
+    )
+    .limit(1)
+
+  if (!existing) {
+    return NextResponse.json({ error: 'Subtask not found' }, { status: 404 })
+  }
+
+  await drizzle
+    .delete(schema.taskSubtasks)
+    .where(eq(schema.taskSubtasks.id, subId))
+
+  return NextResponse.json({ success: true })
+}

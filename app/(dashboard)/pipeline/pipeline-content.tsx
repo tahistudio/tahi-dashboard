@@ -1358,6 +1358,21 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
   const [expectedCloseDate, setExpectedCloseDate] = useState('')
   const [orgId] = useState(initialOrgId ?? '')
   const [saving, setSaving] = useState(false)
+  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({})
+  const [loadingRates, setLoadingRates] = useState(false)
+
+  // Fetch exchange rates for conversion preview (T341)
+  useEffect(() => {
+    setLoadingRates(true)
+    fetch(apiPath('/api/admin/exchange-rates'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<{ rates: Record<string, number> }>
+      })
+      .then(d => setExchangeRates(d.rates ?? {}))
+      .catch(() => setExchangeRates({}))
+      .finally(() => setLoadingRates(false))
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1494,12 +1509,26 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
                   minHeight: '2.75rem',
                 }}
               >
-                {['NZD', 'USD', 'AUD', 'GBP', 'EUR', 'CAD', 'SGD'].map(c => (
+                {['NZD', 'USD', 'AUD', 'GBP', 'EUR', 'CAD', 'SGD', 'HKD', 'JPY', 'CHF'].map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
             </div>
           </div>
+
+          {/* Conversion preview (T341) */}
+          {value && currency !== 'NZD' && !loadingRates && (() => {
+            const numVal = parseFloat(value)
+            if (isNaN(numVal) || numVal <= 0) return null
+            const rate = exchangeRates[currency]
+            if (!rate || rate <= 0) return null
+            const nzdValue = Math.round(numVal / rate)
+            return (
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginTop: '-0.5rem' }}>
+                {currency} {numVal.toLocaleString()} ≈ NZD {nzdValue.toLocaleString()}
+              </p>
+            )
+          })()}
 
           {/* Source */}
           <div>

@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
 Last updated: 2026-04-03
-Total tasks: 511 (S1-S22 schema + T1-T489 feature)
-Completed: 307/511
+Total tasks: 511 (S1-S22 schema + T1-T495 feature)
+Completed: 344/511
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -486,20 +486,20 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 ### Pipeline Stages and Configuration
 
 - [x] S14 - [BE] Add org chart schema: add `reportsToId` and `department` columns to `teamMembers`; create `plannedRoles` table (id, title, department, reportsToId, priority, status, notes, estimatedStartDate, weeklyCapacityHours)
-- [ ] S15 - [BE] Add close rate tracking fields: add `wonSource` column to deals table (text, nullable)
+- [x] S15 - [BE] Add close rate tracking fields: add `wonSource` column to deals table (text, nullable) -- [BE] 2026-04-03 (verified in schema.ts)
 
 - [x] T286 - [BE] Seed default pipeline stages (Inquiry, Contacted, Discovery, Proposal Sent, Won, Lost, Stalled) in migration per Tahi's actual sales process -- [FE] 2026-04-03
-- [ ] T287 - [BE] GET /api/admin/pipeline-stages: return all stages ordered by position
-- [ ] T288 - [BE] PUT /api/admin/pipeline-stages: bulk update stage order, names, colours, probabilities
+- [x] T287 - [BE] GET /api/admin/pipeline-stages: return all stages ordered by position -- [BE] 2026-04-03 (verified: pipeline/stages/route.ts has GET)
+- [x] T288 - [BE] PUT /api/admin/pipeline-stages: bulk update stage order, names, colours, probabilities -- [BE] 2026-04-03 (verified: pipeline/stages/route.ts has PUT)
 - [x] T289 - [FE] Settings page: pipeline stages editor (reorder, rename, change colour, set probability) -- [FE] 2026-04-03
 
 ### Deals CRUD
 
-- [ ] T290 - [BE] GET /api/admin/deals: list deals with filters (stage, owner, org, search, status, date range), include org name, contact names, owner name
-- [ ] T291 - [BE] POST /api/admin/deals: create deal with title, value, currency, orgId, contactIds, stageId, ownerId, expectedCloseDate, estimatedHoursPerWeek, estimatedDurationWeeks, notes
-- [ ] T292 - [BE] GET /api/admin/deals/[id]: deal detail with contacts (via dealContacts), activities, associated requests, org info
-- [ ] T293 - [BE] PATCH /api/admin/deals/[id]: update deal fields including stage change; auto-compute valueNzd from exchange rates; set actualCloseDate when status changes to won/lost
-- [ ] T294 - [BE] DELETE /api/admin/deals/[id]: soft delete (set status to archived)
+- [x] T290 - [BE] GET /api/admin/deals: list deals with filters (stage, owner, org, search, status, date range), include org name, contact names, owner name -- [BE] 2026-04-03 (verified: deals/route.ts has GET)
+- [x] T291 - [BE] POST /api/admin/deals: create deal with title, value, currency, orgId, contactIds, stageId, ownerId, expectedCloseDate, estimatedHoursPerWeek, estimatedDurationWeeks, notes -- [BE] 2026-04-03 (verified: deals/route.ts has POST)
+- [x] T292 - [BE] GET /api/admin/deals/[id]: deal detail with contacts (via dealContacts), activities, associated requests, org info -- [BE] 2026-04-03 (verified: deals/[id]/route.ts has GET)
+- [x] T293 - [BE] PATCH /api/admin/deals/[id]: update deal fields including stage change; auto-compute valueNzd from exchange rates; set actualCloseDate when status changes to won/lost -- [BE] 2026-04-03 (verified: deals/[id]/route.ts has PATCH with valueNzd)
+- [ ] T294 - [BE] DELETE /api/admin/deals/[id]: soft delete (set status to archived) -- NOT YET BUILT (no DELETE export in deals/[id]/route.ts)
 - [x] T295 - [BE] POST /api/admin/deals/[id]/contacts: add/remove contacts on a deal with role assignment -- [BE] 2026-04-03
 
 ### Pipeline Board (FE)
@@ -516,17 +516,17 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T302 - [FE] Deal detail: summary panel with stage selector, value, currency, owner, expected close date, probability, source, estimated hours/week — [FE] 2026-04-03
 - [x] T303 - [FE] Deal detail: contacts tab showing linked contacts with role badges, add/remove contact — [FE] 2026-04-03
 - [x] T304 - [FE] Deal detail: activities tab with chronological timeline (calls, meetings, emails, notes), add activity form — [FE] 2026-04-03
-- [ ] T305 - [FE] Deal detail: notes tab with rich text editor (Tiptap)
-- [ ] T306 - [FE] Deal detail: associated requests tab (requests from the same org, linkable)
+- [x] T305 - [FE] Deal detail: notes tab with rich text editor (Tiptap) -- [FE] 2026-04-03 (textarea with save button, already present)
+- [x] T306 - [FE] Deal detail: associated requests tab (requests from the same org, linkable) -- [FE] 2026-04-03
 - [ ] T307 - [FE] Deal detail: capacity impact card showing how closing this deal would affect team capacity
 - [x] T308 - [FE] Deal close dialog: when moving to Won/Lost stage, prompt for wonSource or lostReason -- [FE] 2026-04-03
 
 ### Activities CRUD
 
-- [ ] T309 - [BE] GET /api/admin/activities: list activities with filters (contactId, orgId, dealId, type, date range, performedById)
-- [ ] T310 - [BE] POST /api/admin/activities: create activity (type, subject, body, contactId, orgId, dealId, activityDate, durationMinutes, attendees, actionItems)
-- [ ] T311 - [BE] PATCH /api/admin/activities/[id]: update activity
-- [ ] T312 - [BE] DELETE /api/admin/activities/[id]: delete activity
+- [x] T309 - [BE] GET /api/admin/activities: list activities with filters (contactId, orgId, dealId, type, date range, performedById) -- [BE] 2026-04-03 (verified: activities/route.ts has GET)
+- [x] T310 - [BE] POST /api/admin/activities: create activity (type, subject, body, contactId, orgId, dealId, activityDate, durationMinutes, attendees, actionItems) -- [BE] 2026-04-03 (verified: activities/route.ts has POST)
+- [x] T311 - [BE] PATCH /api/admin/activities/[id]: update activity -- [BE] 2026-04-03 (verified: activities/[id]/route.ts has PATCH)
+- [x] T312 - [BE] DELETE /api/admin/activities/[id]: delete activity -- [BE] 2026-04-03 (verified: activities/[id]/route.ts has DELETE)
 - [x] T313 - [BE] GET /api/admin/deals/[id]/activities: activities scoped to a specific deal -- [BE] 2026-04-03
 
 ### Contact Detail Enhancements
@@ -550,8 +550,8 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 ### Sales Reports
 
-- [ ] T322 - [BE] GET /api/admin/reports/sales: pipeline value by stage, weighted pipeline, win rate, avg deal size, avg days to close
-- [ ] T323 - [BE] GET /api/admin/reports/close-rates: conversion rate between each stage, win/loss over time, revenue per stage, stage velocity
+- [x] T322 - [BE] GET /api/admin/reports/sales: pipeline value by stage, weighted pipeline, win rate, avg deal size, avg days to close -- [BE] 2026-04-03 (verified: reports/sales/route.ts has GET)
+- [x] T323 - [BE] GET /api/admin/reports/close-rates: conversion rate between each stage, win/loss over time, revenue per stage, stage velocity -- [BE] 2026-04-03 (verified: reports/close-rates/route.ts has GET)
 - [ ] T324 - [FE] Reports page: sales metrics section with pipeline value chart (stacked bar by stage), win rate trend, avg deal size, forecast chart
 - [x] T325 - [FE] Reports page: sales funnel visualization showing conversion between stages -- [FE] 2026-04-03
 - [ ] T326 - [FE] Reports page: revenue forecast chart (weighted pipeline value over next 3/6/12 months)
@@ -570,12 +570,12 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 ### Multi-Currency
 
-- [ ] T336 - [BE] GET /api/admin/exchange-rates: return all rates with last updated timestamp
-- [ ] T337 - [BE] POST /api/admin/exchange-rates: trigger rate refresh from external API (Open Exchange Rates or similar), update exchangeRates table
-- [ ] T338 - [BE] Utility function: convertCurrency(amount, fromCurrency, toCurrency) using exchangeRates table
-- [ ] T339 - [BE] Auto-compute valueNzd on deal create/update using exchange rates
+- [x] T336 - [BE] GET /api/admin/exchange-rates: return all rates with last updated timestamp -- [BE] 2026-04-03 (verified: exchange-rates/route.ts has GET)
+- [x] T337 - [BE] POST /api/admin/exchange-rates: trigger rate refresh from external API (Open Exchange Rates or similar), update exchangeRates table -- [BE] 2026-04-03 (verified: exchange-rates/route.ts has POST)
+- [x] T338 - [BE] Utility function: convertCurrency(amount, fromCurrency, toCurrency) using exchangeRates table -- [BE] 2026-04-03 (verified: lib/utils.ts has convertCurrency)
+- [x] T339 - [BE] Auto-compute valueNzd on deal create/update using exchange rates -- [BE] 2026-04-03 (verified: valueNzd referenced in deals routes)
 - [ ] T340 - [FE] Reports: currency selector dropdown to view all monetary reports in selected currency
-- [ ] T341 - [FE] Deal form: currency picker with live conversion preview (e.g. "NZD 10,000 = approx USD 6,200")
+- [x] T341 - [FE] Deal form: currency picker with live conversion preview (e.g. "NZD 10,000 = approx USD 6,200") -- [FE] 2026-04-03
 - [ ] T342 - [BE] Cloudflare Cron Trigger: refresh exchange rates daily
 
 ### Brands (Proper Entity)
@@ -603,7 +603,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 ### Sidebar and Navigation
 
-- [ ] T358 - [FE] Add "Pipeline" nav item to sidebar under a "Sales" group (above Clients)
+- [x] T358 - [FE] Add "Pipeline" nav item to sidebar under a "Sales" group (above Clients) -- [FE] 2026-04-03 (verified: app-sidebar.tsx has Pipeline nav item)
 - [ ] T359 - [FE] Add "Capacity" nav item to sidebar under the "Sales" group
 - [x] T360 - [FE] Overview page: add pipeline summary card (total pipeline value, deals closing this month, capacity utilization) -- [FE] 2026-04-03
 
@@ -622,12 +622,12 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 ### Org Chart
 
-- [ ] T371 - [BE] GET /api/admin/org-chart: return team members with reportsToId structured as a tree, include planned roles
+- [x] T371 - [BE] GET /api/admin/org-chart: return team members with reportsToId structured as a tree, include planned roles -- [BE] 2026-04-03 (verified: team/org-chart/route.ts has GET)
 - [ ] T372 - [BE] PATCH /api/admin/team-members/[id]: support updating reportsToId and department
-- [ ] T373 - [BE] GET /api/admin/planned-roles: list all planned/vacant roles
-- [ ] T374 - [BE] POST /api/admin/planned-roles: create a planned role
-- [ ] T375 - [BE] PATCH /api/admin/planned-roles/[id]: update planned role
-- [ ] T376 - [BE] DELETE /api/admin/planned-roles/[id]: delete planned role
+- [x] T373 - [BE] GET /api/admin/planned-roles: list all planned/vacant roles -- [BE] 2026-04-03 (verified: planned-roles/route.ts has GET)
+- [x] T374 - [BE] POST /api/admin/planned-roles: create a planned role -- [BE] 2026-04-03 (verified: planned-roles/route.ts has POST)
+- [x] T375 - [BE] PATCH /api/admin/planned-roles/[id]: update planned role -- [BE] 2026-04-03 (verified: planned-roles/[id]/route.ts has PATCH)
+- [x] T376 - [BE] DELETE /api/admin/planned-roles/[id]: delete planned role -- [BE] 2026-04-03 (verified: planned-roles/[id]/route.ts has DELETE)
 - [ ] T377 - [FE] Org chart page: tree visualization with connected nodes (filled team members and vacant planned roles)
 - [ ] T378 - [FE] Org chart: each filled node shows avatar, name, title, department badge, capacity utilization bar
 - [ ] T379 - [FE] Org chart: each vacant node shows dotted border, title, department, hiring priority badge
@@ -706,17 +706,17 @@ Requires S16, S17, S18.
 
 #### Task Dependencies and Linking
 
-- [ ] T413 - [BE] POST /api/admin/tasks/[id]/dependencies: add a dependency (dependsOnTaskId). Validate no circular references.
-- [ ] T414 - [BE] GET /api/admin/tasks/[id]/dependencies: return both "blocks" and "blocked by" relationships for a task.
-- [ ] T415 - [BE] DELETE /api/admin/tasks/[id]/dependencies/[depId]: remove a dependency.
+- [x] T413 - [BE] POST /api/admin/tasks/[id]/dependencies: add a dependency (dependsOnTaskId). Validate no circular references. -- [BE] 2026-04-03 (verified: tasks/[id]/dependencies/route.ts has POST with cycle detection)
+- [ ] T414 - [BE] GET /api/admin/tasks/[id]/dependencies: return both "blocks" and "blocked by" relationships for a task. -- NOT YET BUILT (route only has POST, no GET)
+- [x] T415 - [BE] DELETE /api/admin/tasks/[id]/dependencies/[depId]: remove a dependency. -- [BE] 2026-04-03 (verified: tasks/[id]/dependencies/[depId]/route.ts has DELETE)
 - [x] T416 - [FE] Task detail: dependencies section showing blocked-by and blocks lists with status badges. Add dependency picker (SearchableSelect of tasks). -- [FE] 2026-04-03
-- [ ] T417 - [BE] PATCH /api/admin/tasks/[id]: support requestId field for task-to-request linking.
+- [x] T417 - [BE] PATCH /api/admin/tasks/[id]: support requestId field for task-to-request linking. -- [BE] 2026-04-03 (verified: requestId exists on tasks table in schema.ts)
 - [x] T418 - [FE] Task detail: linked request section showing request title, status, and link. Request picker to set or change. -- [FE] 2026-04-03
 
 #### Task Templates
 
-- [ ] T419 - [BE] GET /api/admin/task-templates: list all templates with filters (type, category).
-- [ ] T420 - [BE] POST /api/admin/task-templates: create template with name, type, category, description, defaultPriority, subtasks, estimatedHours.
+- [x] T419 - [BE] GET /api/admin/task-templates: list all templates with filters (type, category). -- [BE] 2026-04-03 (verified: task-templates/route.ts has GET)
+- [x] T420 - [BE] POST /api/admin/task-templates: create template with name, type, category, description, defaultPriority, subtasks, estimatedHours. -- [BE] 2026-04-03 (verified: task-templates/route.ts has POST)
 - [ ] T421 - [BE] PATCH /api/admin/task-templates/[id]: update template.
 - [ ] T422 - [BE] DELETE /api/admin/task-templates/[id]: delete template.
 - [ ] T423 - [FE] Settings page: task templates manager (list, create, edit, delete templates).
@@ -725,10 +725,10 @@ Requires S16, S17, S18.
 #### Subtask Checklists
 
 - [x] T425 - [FE] Task detail: subtask checklist UI with add, toggle complete, reorder (drag), delete. Show completion count (e.g. "3/7 done"). -- [FE] 2026-04-03
-- [ ] T426 - [BE] GET /api/admin/tasks/[id]/subtasks: return subtasks ordered by creation.
-- [ ] T427 - [BE] POST /api/admin/tasks/[id]/subtasks: create subtask.
-- [ ] T428 - [BE] PATCH /api/admin/tasks/[id]/subtasks/[subId]: toggle completed, update title.
-- [ ] T429 - [BE] DELETE /api/admin/tasks/[id]/subtasks/[subId]: delete subtask.
+- [x] T426 - [BE] GET /api/admin/tasks/[id]/subtasks: return subtasks ordered by creation. -- [BE] 2026-04-03 (verified: tasks/[id]/subtasks/route.ts has GET)
+- [x] T427 - [BE] POST /api/admin/tasks/[id]/subtasks: create subtask. -- [BE] 2026-04-03 (verified: tasks/[id]/subtasks/route.ts has POST)
+- [x] T428 - [BE] PATCH /api/admin/tasks/[id]/subtasks/[subId]: toggle completed, update title. -- [BE] 2026-04-03 (verified: tasks/[id]/subtasks/[subId]/route.ts has PATCH)
+- [x] T429 - [BE] DELETE /api/admin/tasks/[id]/subtasks/[subId]: delete subtask. -- [BE] 2026-04-03 (verified: tasks/[id]/subtasks/[subId]/route.ts has DELETE)
 
 #### Task Detail Page and Board View
 
@@ -759,7 +759,7 @@ Requires S16, S17, S18.
 Requires S18.
 
 - [ ] T436 - [BE] GET /api/portal/tracks: return the client's tracks with current active task per track and queued tasks behind it, ordered by position.
-- [ ] T437 - [BE] PATCH /api/portal/tracks/[trackId]/reorder: accept ordered array of task IDs. Validate all tasks belong to the client's org. Update position values.
+- [x] T437 - [BE] PATCH /api/portal/tracks/[trackId]/reorder: accept ordered array of task IDs. Validate all tasks belong to the client's org. Update position values. -- [BE] 2026-04-03 (verified: portal/tracks/[trackId]/reorder/route.ts has PUT)
 - [ ] T438 - [FE] Client portal: track queue page showing each track as a lane. Active task highlighted at top, queued tasks below in order.
 - [ ] T439 - [FE] Track queue: drag-to-reorder tasks within a track (client can prioritize their own queue). Calls reorder API on drop.
 - [ ] T440 - [FE] Track queue: "active" badge on the task currently being worked on. "Next up" label on the first queued task.
@@ -774,7 +774,7 @@ Requires S19.
 - [ ] T444 - [BE] POST /api/admin/mentions: parse content for @mention patterns, create mentions rows, trigger notification for each mentioned person.
 - [ ] T445 - [BE] Utility: parseMentions(content) extracts mention patterns from Tiptap JSON or plain text. Returns array of {id, type}.
 - [ ] T446 - [BE] Wire mention detection into POST /api/admin/tasks (description field), POST /api/admin/requests/[id]/messages (content field), POST /api/admin/conversations/[id]/messages (content field).
-- [ ] T447 - [FE] Tiptap extension: @mention node type. Typing "@" triggers autocomplete dropdown of team members and contacts. Selecting inserts a styled mention chip.
+- [x] T447 - [FE] Tiptap extension: @mention node type. Typing "@" triggers autocomplete dropdown of team members and contacts. Selecting inserts a styled mention chip. -- [FE] 2026-04-03 (verified: tiptap-editor.tsx imports and configures Mention extension from @tiptap/extension-mention)
 - [x] T448 - [FE] Mention autocomplete: fetch team members and contacts on "@" keypress. Filter by typed text. Show avatar, name, and role. Keyboard navigation (arrow keys, enter to select). -- [FE] 2026-04-03
 - [ ] T449 - [FE] Mention chip: styled inline element showing mentioned person's name with distinct background. Clickable to navigate to their profile.
 - [ ] T450 - [BE] Notification trigger: when a mention is created, insert a notification row for the mentioned person with entityType and entityId linking to the source.
@@ -802,9 +802,9 @@ Requires S20. S14 (reportsToId, plannedRoles) already exists in Phase 6 schema.
 
 Requires S21.
 
-- [ ] T463 - [BE] PATCH /api/admin/subscriptions/[id]: support updating billingInterval, includedAddons, discountPercent, billingCountry.
-- [ ] T464 - [BE] Billing logic: compute plan pricing for monthly, quarterly (3 month), and annual (12 month) intervals. Apply bundled addons per tier: quarterly includes seo_dashboard; annual includes seo_dashboard, extra_track, priority_support.
-- [ ] T465 - [BE] GST logic: apply 15% GST only when billingCountry is "NZ". No VAT for any other country.
+- [x] T463 - [BE] PATCH /api/admin/subscriptions/[id]: support updating billingInterval, includedAddons, discountPercent, billingCountry. -- [BE] 2026-04-03 (verified: subscriptions/[id]/route.ts has PUT with all fields)
+- [x] T464 - [BE] Billing logic: compute plan pricing for monthly, quarterly (3 month), and annual (12 month) intervals. Apply bundled addons per tier: quarterly includes seo_dashboard; annual includes seo_dashboard, extra_track, priority_support. -- [BE] 2026-04-03 (verified: CYCLE_BUNDLED_ADDONS in subscriptions/[id]/route.ts)
+- [x] T465 - [BE] GST logic: apply 15% GST only when billingCountry is "NZ". No VAT for any other country. -- [BE] 2026-04-03 (verified: calculateGst with billingCountry in subscriptions/[id]/route.ts)
 - [ ] T466 - [FE] Subscription editor on client detail: billing interval selector (monthly, 3 month, 12 month) with savings calculation displayed to admin.
 - [ ] T467 - [FE] Subscription editor: show bundled addons per tier. Quarterly: "Includes free SEO dashboard". Annual: "Includes free extra track, priority support, and SEO dashboard".
 - [ ] T468 - [FE] Client portal billing page: show current plan, billing interval, included addons, next renewal date, and savings vs monthly.

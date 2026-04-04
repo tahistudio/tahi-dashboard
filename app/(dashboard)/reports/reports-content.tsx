@@ -422,6 +422,9 @@ export function ReportsContent() {
 
       {/* Sales Funnel / Close Rates */}
       <SalesFunnelSection />
+
+      {/* Source Breakdown (T390) */}
+      <SourceBreakdownSection />
     </div>
   )
 }
@@ -1124,6 +1127,234 @@ function StatCard({
         <span className="text-xs font-medium text-[var(--color-text-muted)]">{label}</span>
       </div>
       <p className="text-lg font-bold text-[var(--color-text)]">{value}</p>
+    </div>
+  )
+}
+
+// ── Source Breakdown Section (T390) ──────────────────────────────────────────
+
+const SOURCE_LABELS: Record<string, string> = {
+  referral: 'Referral',
+  linkedin: 'LinkedIn',
+  website: 'Website',
+  cold: 'Cold Outreach',
+  cold_outreach: 'Cold Outreach',
+  partner: 'Partner',
+  webflow: 'Webflow',
+  existing_client: 'Existing Client',
+  other: 'Other',
+}
+
+const SOURCE_CHART_COLORS = [
+  '#5A824E', '#60a5fa', '#fbbf24', '#a78bfa', '#fb923c',
+  '#4ade80', '#f87171', '#22d3ee', '#e879f9',
+]
+
+interface SourceDeal {
+  source: string | null
+  valueNzd: number
+}
+
+function SourceBreakdownSection() {
+  const [deals, setDeals] = useState<SourceDeal[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    // Fetch all deals to group by source
+    fetch(apiPath('/api/admin/deals?limit=500'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<{ items: Array<{ source: string | null; valueNzd: number; value: number }> }>
+      })
+      .then(d => {
+        const items = (d.items ?? []).map(deal => ({
+          source: deal.source,
+          valueNzd: deal.valueNzd ?? deal.value,
+        }))
+        setDeals(items)
+      })
+      .catch(() => setDeals([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return (
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <BarChart2 className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Deals by Source
+        </h3>
+        <div className="space-y-2">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="animate-pulse rounded" style={{ height: '2.5rem', background: 'var(--color-bg-tertiary)' }} />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  // Group by source
+  const sourceMap = new Map<string, { count: number; revenue: number }>()
+  for (const deal of deals) {
+    const key = deal.source ?? 'unknown'
+    const existing = sourceMap.get(key) ?? { count: 0, revenue: 0 }
+    existing.count += 1
+    existing.revenue += deal.valueNzd
+    sourceMap.set(key, existing)
+  }
+
+  const sourceData = Array.from(sourceMap.entries())
+    .map(([source, data]) => ({
+      name: SOURCE_LABELS[source] ?? (source === 'unknown' ? 'Unknown' : source),
+      deals: data.count,
+      revenue: data.revenue,
+    }))
+    .sort((a, b) => b.deals - a.deals)
+
+  if (sourceData.length === 0) {
+    return (
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <BarChart2 className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Deals by Source
+        </h3>
+        <p className="text-sm text-[var(--color-text-muted)]">No deal source data available yet.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-[var(--color-text)]">Source Breakdown</h2>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Deal count by source bar chart */}
+        <div
+          style={{
+            background: 'var(--color-bg)',
+            borderRadius: 'var(--radius-card)',
+            border: '1px solid var(--color-border)',
+            padding: '1.5rem',
+          }}
+        >
+          <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+            <BarChart2 className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+            Deals by Source
+          </h3>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={sourceData} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" horizontal={false} />
+              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+              <YAxis
+                type="category"
+                dataKey="name"
+                tick={{ fontSize: 11 }}
+                width={100}
+              />
+              <Tooltip />
+              <Bar dataKey="deals" radius={[0, 4, 4, 0]}>
+                {sourceData.map((_, index) => (
+                  <Cell key={`cell-${index}`} fill={SOURCE_CHART_COLORS[index % SOURCE_CHART_COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Revenue by source */}
+        <div
+          style={{
+            background: 'var(--color-bg)',
+            borderRadius: 'var(--radius-card)',
+            border: '1px solid var(--color-border)',
+            padding: '1.5rem',
+          }}
+        >
+          <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+            <DollarSign className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+            Revenue by Source
+          </h3>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th
+                    className="text-left text-xs font-medium text-[var(--color-text-muted)]"
+                    style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                  >
+                    Source
+                  </th>
+                  <th
+                    className="text-right text-xs font-medium text-[var(--color-text-muted)]"
+                    style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                  >
+                    Deals
+                  </th>
+                  <th
+                    className="text-right text-xs font-medium text-[var(--color-text-muted)]"
+                    style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                  >
+                    Revenue (NZD)
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sourceData.map((row, idx) => (
+                  <tr key={row.name}>
+                    <td
+                      className="text-sm font-medium"
+                      style={{
+                        padding: '0.5rem 0.75rem',
+                        borderBottom: '1px solid var(--color-border-subtle)',
+                        color: 'var(--color-text)',
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div
+                          style={{
+                            width: '0.625rem',
+                            height: '0.625rem',
+                            borderRadius: '50%',
+                            background: SOURCE_CHART_COLORS[idx % SOURCE_CHART_COLORS.length],
+                            flexShrink: 0,
+                          }}
+                        />
+                        {row.name}
+                      </div>
+                    </td>
+                    <td
+                      className="text-sm text-[var(--color-text-muted)] text-right"
+                      style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                    >
+                      {row.deals}
+                    </td>
+                    <td
+                      className="text-sm text-[var(--color-text)] text-right font-medium"
+                      style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                    >
+                      {formatNzd(row.revenue)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
