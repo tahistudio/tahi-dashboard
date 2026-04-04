@@ -499,7 +499,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T291 - [BE] POST /api/admin/deals: create deal with title, value, currency, orgId, contactIds, stageId, ownerId, expectedCloseDate, estimatedHoursPerWeek, estimatedDurationWeeks, notes -- [BE] 2026-04-03 (verified: deals/route.ts has POST)
 - [x] T292 - [BE] GET /api/admin/deals/[id]: deal detail with contacts (via dealContacts), activities, associated requests, org info -- [BE] 2026-04-03 (verified: deals/[id]/route.ts has GET)
 - [x] T293 - [BE] PATCH /api/admin/deals/[id]: update deal fields including stage change; auto-compute valueNzd from exchange rates; set actualCloseDate when status changes to won/lost -- [BE] 2026-04-03 (verified: deals/[id]/route.ts has PATCH with valueNzd)
-- [ ] T294 - [BE] DELETE /api/admin/deals/[id]: soft delete (set status to archived) -- NOT YET BUILT (no DELETE export in deals/[id]/route.ts)
+- [x] T294 - [BE] DELETE /api/admin/deals/[id]: soft delete (set status to archived) -- [BE] 2026-04-03 (verified: deals/[id]/route.ts has DELETE export)
 - [x] T295 - [BE] POST /api/admin/deals/[id]/contacts: add/remove contacts on a deal with role assignment -- [BE] 2026-04-03
 
 ### Pipeline Board (FE)
@@ -552,7 +552,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 - [x] T322 - [BE] GET /api/admin/reports/sales: pipeline value by stage, weighted pipeline, win rate, avg deal size, avg days to close -- [BE] 2026-04-03 (verified: reports/sales/route.ts has GET)
 - [x] T323 - [BE] GET /api/admin/reports/close-rates: conversion rate between each stage, win/loss over time, revenue per stage, stage velocity -- [BE] 2026-04-03 (verified: reports/close-rates/route.ts has GET)
-- [ ] T324 - [FE] Reports page: sales metrics section with pipeline value chart (stacked bar by stage), win rate trend, avg deal size, forecast chart
+- [x] T324 - [FE] Reports page: sales metrics section with pipeline value chart (stacked bar by stage), win rate trend, avg deal size, forecast chart -- [FE] 2026-04-03 (verified: SalesPipelineSection in reports-content.tsx)
 - [x] T325 - [FE] Reports page: sales funnel visualization showing conversion between stages -- [FE] 2026-04-03
 - [x] T326 - [FE] Reports page: revenue forecast chart (weighted pipeline value over next 3/6/12 months) -- [FE] 2026-04-03
 
@@ -765,7 +765,7 @@ Requires S18.
 - [ ] T440 - [FE] Track queue: "active" badge on the task currently being worked on. "Next up" label on the first queued task.
 - [ ] T441 - [FE] Track queue: upsell card when all tracks are occupied. Show plan name, current track count, and "Upgrade to get more tracks" CTA with link to billing.
 - [x] T442 - [BE] GET /api/admin/clients/[id]/tracks: return track queue visualization data for admin view of a client's tracks. -- [BE] 2026-04-03 (enhanced existing route with queue data)
-- [ ] T443 - [FE] Client detail page: track queue tab showing admin view of the client's track lanes with active and queued tasks.
+- [x] T443 - [FE] Client detail page: track queue tab showing admin view of the client's track lanes with active and queued tasks. -- [FE] 2026-04-03
 
 ### Priority 3: @mentions System
 
@@ -805,9 +805,9 @@ Requires S21.
 - [x] T463 - [BE] PATCH /api/admin/subscriptions/[id]: support updating billingInterval, includedAddons, discountPercent, billingCountry. -- [BE] 2026-04-03 (verified: subscriptions/[id]/route.ts has PUT with all fields)
 - [x] T464 - [BE] Billing logic: compute plan pricing for monthly, quarterly (3 month), and annual (12 month) intervals. Apply bundled addons per tier: quarterly includes seo_dashboard; annual includes seo_dashboard, extra_track, priority_support. -- [BE] 2026-04-03 (verified: CYCLE_BUNDLED_ADDONS in subscriptions/[id]/route.ts)
 - [x] T465 - [BE] GST logic: apply 15% GST only when billingCountry is "NZ". No VAT for any other country. -- [BE] 2026-04-03 (verified: calculateGst with billingCountry in subscriptions/[id]/route.ts)
-- [ ] T466 - [FE] Subscription editor on client detail: billing interval selector (monthly, 3 month, 12 month) with savings calculation displayed to admin.
-- [ ] T467 - [FE] Subscription editor: show bundled addons per tier. Quarterly: "Includes free SEO dashboard". Annual: "Includes free extra track, priority support, and SEO dashboard".
-- [ ] T468 - [FE] Client portal billing page: show current plan, billing interval, included addons, next renewal date, and savings vs monthly.
+- [x] T466 - [FE] Subscription editor on client detail: billing interval selector (monthly, 3 month, 12 month) with savings calculation displayed to admin. -- [FE] 2026-04-03
+- [x] T467 - [FE] Subscription editor: show bundled addons per tier. Quarterly: "Includes free SEO dashboard". Annual: "Includes free extra track, priority support, and SEO dashboard". -- [FE] 2026-04-03
+- [x] T468 - [FE] Client portal billing page: show current plan, billing interval, included addons, next renewal date, and savings vs monthly. -- [FE] 2026-04-03
 - [ ] T469 - [BE] Stripe integration: map billing intervals to Stripe subscription price IDs. Create or update Stripe subscription when interval changes.
 - [ ] T470 - [FE] Admin billing page: summary of clients by billing interval (monthly, quarterly, annual) with MRR impact.
 - [ ] T471 - [QA] Test billing tiers: verify correct addon bundling, GST calculation for NZ, savings display, Stripe subscription mapping.
