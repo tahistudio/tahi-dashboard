@@ -118,7 +118,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
 
 // PATCH /api/admin/deals/[id]
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -200,10 +200,84 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     updates.closedAt = now
   }
 
+  // Stage transition logging (T353): when stageId changes, create an activity
+  if (body.stageId !== undefined) {
+    // Fetch the old deal stage and the new stage name for the activity description
+    const [oldDeal] = await database
+      .select({ stageId: schema.deals.stageId })
+      .from(schema.deals)
+      .where(eq(schema.deals.id, id))
+      .limit(1)
+
+    if (oldDeal && oldDeal.stageId !== body.stageId) {
+      // Fetch both stage names
+      const stages = await database
+        .select({ id: schema.pipelineStages.id, name: schema.pipelineStages.name })
+        .from(schema.pipelineStages)
+        .where(
+          eq(schema.pipelineStages.id, oldDeal.stageId)
+        )
+
+      const [newStage] = await database
+        .select({ name: schema.pipelineStages.name })
+        .from(schema.pipelineStages)
+        .where(eq(schema.pipelineStages.id, body.stageId))
+        .limit(1)
+
+      const oldStageName = stages[0]?.name ?? 'Unknown'
+      const newStageName = newStage?.name ?? 'Unknown'
+
+      await database.insert(schema.activities).values({
+        id: crypto.randomUUID(),
+        type: 'stage_change',
+        title: `Stage changed from ${oldStageName} to ${newStageName}`,
+        dealId: id,
+        createdById: userId ?? 'system',
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+  }
+
   await database
     .update(schema.deals)
     .set(updates)
     .where(eq(schema.deals.id, id))
 
   return NextResponse.json({ ok: true })
+}
+
+// DELETE /api/admin/deals/[id] -- Soft delete (archives the deal)
+export async function DELETE(req: NextRequest, ctx: RouteContext) {
+  const { orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const { id } = await ctx.params
+  const database = await db() as unknown as D1
+  const now = new Date().toISOString()
+
+  // Verify deal exists
+  const [deal] = await database
+    .select({ id: schema.deals.id })
+    .from(schema.deals)
+    .where(eq(schema.deals.id, id))
+    .limit(1)
+
+  if (!deal) {
+    return NextResponse.json({ error: 'Deal not found' }, { status: 404 })
+  }
+
+  // Soft delete: set closedAt and closeReason to 'archived'
+  await database
+    .update(schema.deals)
+    .set({
+      closedAt: now,
+      closeReason: 'archived',
+      updatedAt: now,
+    })
+    .where(eq(schema.deals.id, id))
+
+  return NextResponse.json({ success: true })
 }

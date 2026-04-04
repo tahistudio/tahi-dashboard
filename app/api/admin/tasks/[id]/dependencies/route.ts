@@ -4,6 +4,64 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
 
+// ── GET /api/admin/tasks/[id]/dependencies ─────────────────────────────────
+// Returns both "blocks" (tasks this task blocks) and "blockedBy" (tasks blocking this one)
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const { id: taskId } = await params
+  const database = await db()
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Verify task exists
+  const [task] = await drizzle
+    .select({ id: schema.tasks.id })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.id, taskId))
+    .limit(1)
+
+  if (!task) {
+    return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+  }
+
+  // "blockedBy": tasks that this task depends on (this task is blocked by them)
+  const blockedByRows = await drizzle
+    .select({
+      depId: schema.taskDependencies.id,
+      taskId: schema.taskDependencies.dependsOnTaskId,
+      taskTitle: schema.tasks.title,
+      taskStatus: schema.tasks.status,
+      createdAt: schema.taskDependencies.createdAt,
+    })
+    .from(schema.taskDependencies)
+    .leftJoin(schema.tasks, eq(schema.taskDependencies.dependsOnTaskId, schema.tasks.id))
+    .where(eq(schema.taskDependencies.taskId, taskId))
+
+  // "blocks": tasks that depend on this task (this task blocks them)
+  const blocksRows = await drizzle
+    .select({
+      depId: schema.taskDependencies.id,
+      taskId: schema.taskDependencies.taskId,
+      taskTitle: schema.tasks.title,
+      taskStatus: schema.tasks.status,
+      createdAt: schema.taskDependencies.createdAt,
+    })
+    .from(schema.taskDependencies)
+    .leftJoin(schema.tasks, eq(schema.taskDependencies.taskId, schema.tasks.id))
+    .where(eq(schema.taskDependencies.dependsOnTaskId, taskId))
+
+  return NextResponse.json({
+    blockedBy: blockedByRows,
+    blocks: blocksRows,
+  })
+}
+
 // ── POST /api/admin/tasks/[id]/dependencies ────────────────────────────────
 // Add a dependency: this task depends on another task
 export async function POST(

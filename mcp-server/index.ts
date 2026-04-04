@@ -200,6 +200,30 @@ server.resource(
   }
 )
 
+server.resource(
+  'pipeline',
+  'dashboard://pipeline',
+  'Sales pipeline: list of deals with stage, value, owner, and company',
+  async () => {
+    const data = await apiFetch('/api/admin/deals')
+    return {
+      contents: [{ uri: 'dashboard://pipeline', mimeType: 'application/json', text: JSON.stringify(data, null, 2) }],
+    }
+  }
+)
+
+server.resource(
+  'capacity',
+  'dashboard://capacity',
+  'Team capacity: current utilization per member, available hours, and forecast',
+  async () => {
+    const data = await apiFetch('/api/admin/capacity')
+    return {
+      contents: [{ uri: 'dashboard://capacity', mimeType: 'application/json', text: JSON.stringify(data, null, 2) }],
+    }
+  }
+)
+
 // ---------------------------------------------------------------------------
 // Read Tools (so clients that don't support resources can still read data)
 // ---------------------------------------------------------------------------

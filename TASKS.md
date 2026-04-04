@@ -643,8 +643,8 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 ### Sales Analytics (per-source breakdowns)
 
-- [ ] T389 - [BE] GET /api/admin/reports/sales: add per-source breakdowns (avg deal size by source, close rate by source, avg cycle length by source)
-- [ ] T390 - [FE] Reports: source breakdown charts (bar chart of deal count by source, pie chart of revenue by source)
+- [x] T389 - [BE] GET /api/admin/reports/sales: add per-source breakdowns (avg deal size by source, close rate by source, avg cycle length by source) -- [BE] 2026-04-03
+- [x] T390 - [FE] Reports: source breakdown charts (bar chart of deal count by source, pie chart of revenue by source) -- [FE] 2026-04-03
 - [ ] T391 - [FE] Reports: sales cycle length chart (avg days from Inquiry to Won, trended over time)
 
 ---
@@ -717,9 +717,9 @@ Requires S16, S17, S18.
 
 - [x] T419 - [BE] GET /api/admin/task-templates: list all templates with filters (type, category). -- [BE] 2026-04-03 (verified: task-templates/route.ts has GET)
 - [x] T420 - [BE] POST /api/admin/task-templates: create template with name, type, category, description, defaultPriority, subtasks, estimatedHours. -- [BE] 2026-04-03 (verified: task-templates/route.ts has POST)
-- [ ] T421 - [BE] PATCH /api/admin/task-templates/[id]: update template.
-- [ ] T422 - [BE] DELETE /api/admin/task-templates/[id]: delete template.
-- [ ] T423 - [FE] Settings page: task templates manager (list, create, edit, delete templates).
+- [x] T421 - [BE] PATCH /api/admin/task-templates/[id]: update template. -- [BE] 2026-04-03
+- [x] T422 - [BE] DELETE /api/admin/task-templates/[id]: delete template. -- [BE] 2026-04-03
+- [x] T423 - [FE] Settings page: task templates manager (list, create, edit, delete templates). -- [FE] 2026-04-03
 - [x] T424 - [FE] New task dialog: "Use template" dropdown that pre-fills fields and subtasks from selected template. -- [FE] 2026-04-03
 
 #### Subtask Checklists
@@ -740,7 +740,7 @@ Requires S16, S17, S18.
 #### Bulk Task Operations
 
 - [ ] T430 - [FE] Tasks page: multi-select checkboxes on task rows. Bulk actions bar: change status, change priority, assign, delete.
-- [ ] T431 - [BE] PATCH /api/admin/tasks/bulk: accept array of task IDs and fields to update (status, priority, assigneeId). Validate all IDs exist.
+- [x] T431 - [BE] PATCH /api/admin/tasks/bulk: accept array of task IDs and fields to update (status, priority, assigneeId). Validate all IDs exist. -- [BE] 2026-04-03
 
 #### AI Task Creation Wizard
 
@@ -758,13 +758,13 @@ Requires S16, S17, S18.
 
 Requires S18.
 
-- [ ] T436 - [BE] GET /api/portal/tracks: return the client's tracks with current active task per track and queued tasks behind it, ordered by position.
+- [x] T436 - [BE] GET /api/portal/tracks: return the client's tracks with current active task per track and queued tasks behind it, ordered by position. -- [BE] 2026-04-03
 - [x] T437 - [BE] PATCH /api/portal/tracks/[trackId]/reorder: accept ordered array of task IDs. Validate all tasks belong to the client's org. Update position values. -- [BE] 2026-04-03 (verified: portal/tracks/[trackId]/reorder/route.ts has PUT)
 - [ ] T438 - [FE] Client portal: track queue page showing each track as a lane. Active task highlighted at top, queued tasks below in order.
 - [ ] T439 - [FE] Track queue: drag-to-reorder tasks within a track (client can prioritize their own queue). Calls reorder API on drop.
 - [ ] T440 - [FE] Track queue: "active" badge on the task currently being worked on. "Next up" label on the first queued task.
 - [ ] T441 - [FE] Track queue: upsell card when all tracks are occupied. Show plan name, current track count, and "Upgrade to get more tracks" CTA with link to billing.
-- [ ] T442 - [BE] GET /api/admin/clients/[id]/tracks: return track queue visualization data for admin view of a client's tracks.
+- [x] T442 - [BE] GET /api/admin/clients/[id]/tracks: return track queue visualization data for admin view of a client's tracks. -- [BE] 2026-04-03 (enhanced existing route with queue data)
 - [ ] T443 - [FE] Client detail page: track queue tab showing admin view of the client's track lanes with active and queued tasks.
 
 ### Priority 3: @mentions System
@@ -816,12 +816,12 @@ Requires S21.
 
 Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover the specific gaps Liam identified: removing HubSpot entirely, adding close rate analytics by source, and capacity forecasting from pipeline.
 
-- [ ] T472 - [BE] Remove HubSpot integration: delete HubSpot OAuth route, sync endpoints, and webhook receiver. Remove HubSpot from integration settings seed data and UI.
+- [x] T472 - [BE] Remove HubSpot integration: delete HubSpot OAuth route, sync endpoints, and webhook receiver. Remove HubSpot from integration settings seed data and UI. -- [BE] 2026-04-03
 - [x] T473 - [FE] Settings integrations tab: grey out HubSpot with "CRM is built-in" note — [FE] 2026-04-03
 - [x] T474 - [FE] Pipeline deal detail: activity timeline showing all touchpoints (calls, meetings, emails, notes) in chronological order — [FE] 2026-04-03
-- [ ] T475 - [BE] GET /api/admin/reports/close-rates: add breakdowns by source (close rate per source, avg deal size per source, avg cycle length per source).
+- [x] T475 - [BE] GET /api/admin/reports/close-rates: add breakdowns by source (close rate per source, avg deal size per source, avg cycle length per source). -- [BE] 2026-04-03 (added sourceBreakdowns to sales report)
 - [ ] T476 - [FE] Reports page: close rate analytics section with source breakdown bar chart and conversion funnel.
-- [ ] T477 - [BE] GET /api/admin/capacity/forecast: return forecasted capacity impact from pipeline deals weighted by probability, grouped by expected close month.
+- [x] T477 - [BE] GET /api/admin/capacity/forecast: return forecasted capacity impact from pipeline deals weighted by probability, grouped by expected close month. -- [BE] 2026-04-03
 - [ ] T478 - [FE] Capacity page: pipeline impact section showing forecasted hours from deals, worst case vs weighted vs best case scenarios.
 
 ### Audit Bug Fixes (from AUDIT.md)

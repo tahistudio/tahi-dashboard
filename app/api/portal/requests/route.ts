@@ -2,7 +2,7 @@ import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, ne, sql } from 'drizzle-orm'
+import { eq, desc, and, ne, sql, inArray } from 'drizzle-orm'
 
 // ── GET /api/portal/requests ─────────────────────────────────────────────────
 // Returns requests scoped to the client's own org.
@@ -21,8 +21,34 @@ export async function GET(req: NextRequest) {
   const offset = (page - 1) * limit
 
   const database = await db()
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Brand portal scoping (T352): if the contact is linked to specific brands,
+  // only show requests for those brands
+  const [contact] = await drizzle
+    .select({ id: schema.contacts.id })
+    .from(schema.contacts)
+    .where(eq(schema.contacts.clerkUserId, userId))
+    .limit(1)
+
+  let brandIds: string[] | null = null
+  if (contact) {
+    const brandLinks = await drizzle
+      .select({ brandId: schema.brandContacts.brandId })
+      .from(schema.brandContacts)
+      .where(eq(schema.brandContacts.contactId, contact.id))
+
+    if (brandLinks.length > 0) {
+      brandIds = brandLinks.map(b => b.brandId)
+    }
+  }
 
   const conditions = [eq(schema.requests.orgId, orgId)]
+
+  // If contact is linked to brands, scope requests to those brands
+  if (brandIds !== null) {
+    conditions.push(inArray(schema.requests.brandId, brandIds))
+  }
   if (status === 'active') {
     conditions.push(ne(schema.requests.status, 'archived'))
   } else if (status !== 'all') {
@@ -31,7 +57,7 @@ export async function GET(req: NextRequest) {
   // Clients never see internal-only requests
   conditions.push(eq(schema.requests.isInternal, false))
 
-  const requests = await (database as ReturnType<typeof import('drizzle-orm/d1').drizzle>)
+  const requests = await drizzle
     .select({
       id: schema.requests.id,
       type: schema.requests.type,
@@ -76,14 +102,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Request title is required' }, { status: 400 })
   }
 
-  const database = await db()
-  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  const database2 = await db()
+  const drizzle2 = database2 as ReturnType<typeof import('drizzle-orm/d1').drizzle>
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
   // Atomically assign the next request number via a subquery in the INSERT
   // to avoid race conditions between concurrent request creations.
-  await drizzle.run(sql`
+  await drizzle2.run(sql`
     INSERT INTO requests (
       id, org_id, title, type, category, description, due_date, form_responses,
       status, priority, submitted_by_id, is_internal,
