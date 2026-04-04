@@ -637,7 +637,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T381 - [FE] Org chart: department colour grouping and filtering -- [FE] 2026-04-03 (verified: filterByDepartment function and department filter dropdown)
 - [x] T382 - [FE] Org chart: click node navigates to team member detail page -- [FE] 2026-04-03 (verified: onMemberClick callback in MemberNode)
 - [ ] T383 - [FE] Org chart: export as PNG image button
-- [ ] T384 - [FE] Org chart: responsive layout (horizontal tree desktop, vertical list mobile)
+- [x] T384 - [FE] Org chart: responsive layout (horizontal tree desktop, vertical list mobile) -- [FE] 2026-04-03
 - [x] T385 - [FE] Add "Org Chart" nav item to sidebar under "Team" group -- [FE] 2026-04-03 (implemented as view toggle tab on team page)
 - [x] T386 - [FE] Planned roles management: create/edit/delete dialog on org chart page -- [FE] 2026-04-03 (verified: planned role creation form in org-chart.tsx)
 - [ ] T387 - [UIUX] Review org chart for spacing, node sizing, line rendering, dark mode
