@@ -60,14 +60,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
+// formatCurrency removed (replaced by formatInCurrency using selected display currency)
 
 function formatMonthLabel(key: string): string {
   const [year, month] = key.split('-')

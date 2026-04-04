@@ -64,7 +64,7 @@ const NAV: NavGroup[] = [
     group: 'Sales',
     items: [
       { label: 'Pipeline',  href: '/pipeline', icon: TrendingUp, adminOnly: true },
-      { label: 'Capacity',  href: '/overview#capacity', icon: Gauge, adminOnly: true },
+      { label: 'Capacity',  href: '/capacity', icon: Gauge, adminOnly: true },
     ],
   },
   {

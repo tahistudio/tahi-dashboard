@@ -66,11 +66,11 @@ function MemberNode({ node, depth = 0, onMemberClick }: { node: OrgMember & { ty
   const deptStyle = getDeptStyle(node.department)
 
   return (
-    <div style={{ marginLeft: depth > 0 ? '2rem' : '0' }}>
+    <div style={{ marginLeft: depth > 0 ? 'clamp(0.75rem, 3vw, 2rem)' : '0' }}>
       {/* Connector line */}
       {depth > 0 && (
         <div
-          className="border-l-2"
+          className="border-l-2 hidden sm:block"
           style={{
             borderColor: 'var(--color-border-subtle)',
             height: '1.5rem',
@@ -80,10 +80,10 @@ function MemberNode({ node, depth = 0, onMemberClick }: { node: OrgMember & { ty
       )}
 
       <div
-        className="rounded-xl border bg-[var(--color-bg)] p-4 transition-shadow cursor-pointer"
+        className="rounded-xl border bg-[var(--color-bg)] p-3 sm:p-4 transition-shadow cursor-pointer"
         style={{
           borderColor: hovered ? 'var(--color-brand)' : 'var(--color-border)',
-          maxWidth: '20rem',
+          maxWidth: '100%',
           boxShadow: hovered ? '0 4px 12px rgba(90, 130, 78, 0.15)' : 'none',
         }}
         onMouseEnter={() => setHovered(true)}
@@ -177,13 +177,26 @@ function MemberNode({ node, depth = 0, onMemberClick }: { node: OrgMember & { ty
           </div>
         </div>
 
-        {/* Capacity */}
-        {node.weeklyCapacityHours && (
-          <div className="flex items-center gap-1.5 mt-2">
-            <Clock style={{ width: '0.625rem', height: '0.625rem', color: 'var(--color-text-subtle)' }} />
-            <span className="text-xs text-[var(--color-text-subtle)]">
-              {node.weeklyCapacityHours}h/week
-            </span>
+        {/* Capacity utilization bar (T458) */}
+        {node.weeklyCapacityHours != null && node.weeklyCapacityHours > 0 && (
+          <div className="mt-2">
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-1">
+                <Clock style={{ width: '0.625rem', height: '0.625rem', color: 'var(--color-text-subtle)' }} />
+                <span className="text-xs text-[var(--color-text-subtle)]">{node.weeklyCapacityHours}h/week</span>
+              </div>
+            </div>
+            <div style={{ width: '100%', height: '0.375rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }}>
+              <div
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  background: 'var(--color-brand)',
+                  borderRadius: '0.25rem',
+                  opacity: 0.7,
+                }}
+              />
+            </div>
           </div>
         )}
 
@@ -224,10 +237,10 @@ function PlannedNode({ node, depth = 0 }: { node: PlannedRole & { type: 'planned
   const priorityColor = node.priority === 'high' ? 'var(--color-danger)' : node.priority === 'medium' ? 'var(--color-warning)' : 'var(--color-text-subtle)'
 
   return (
-    <div style={{ marginLeft: depth > 0 ? '2rem' : '0' }}>
+    <div style={{ marginLeft: depth > 0 ? 'clamp(0.75rem, 3vw, 2rem)' : '0' }}>
       {depth > 0 && (
         <div
-          className="border-l-2"
+          className="border-l-2 hidden sm:block"
           style={{
             borderColor: 'var(--color-border-subtle)',
             borderStyle: 'dashed',
@@ -238,8 +251,8 @@ function PlannedNode({ node, depth = 0 }: { node: PlannedRole & { type: 'planned
       )}
 
       <div
-        className="rounded-xl border-2 border-dashed p-4"
-        style={{ borderColor: 'var(--color-border)', maxWidth: '20rem', background: 'var(--color-bg-secondary)' }}
+        className="rounded-xl border-2 border-dashed p-3 sm:p-4"
+        style={{ borderColor: 'var(--color-border)', maxWidth: '100%', background: 'var(--color-bg-secondary)' }}
       >
         <div className="flex items-center gap-3">
           <div
@@ -531,8 +544,8 @@ export function OrgChart() {
   const displayTree = deptFilter ? filterByDepartment(tree, deptFilter) : tree
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+    <div className="p-3 sm:p-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
         <div>
           <h2 className="text-lg font-semibold text-[var(--color-text)]">Organisation Chart</h2>
           <p className="text-sm text-[var(--color-text-muted)] mt-0.5">

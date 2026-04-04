@@ -547,6 +547,8 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [ ] UIUX review: spacing review for Earliest Start Date widget in overview Team Capacity card
 - [ ] UIUX review: spacing and layout review for Sales Funnel section on Reports page
 - [ ] QA regression: verify Sales Funnel and Earliest Start Date features render correctly
+- [ ] UIUX review: spacing and layout review for Capacity page enhancements (projected capacity, forecasted impact, timeline chart, sales call helper)
+- [ ] QA regression: verify Capacity page sections render correctly with empty and populated pipeline states
 
 ### Sales Reports
 
@@ -562,11 +564,11 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T328 - [BE] GET /api/admin/capacity: return current utilization (per team member and total), projected capacity (from subscriptions), forecasted impact (from pipeline deals) -- [BE] 2026-04-03 (verified: capacity/route.ts has GET)
 - [x] T329 - [BE] POST /api/admin/capacity/start-date: accept estimatedHoursPerWeek, return earliest week with sufficient capacity, available team members, confidence level
 - [x] T330 - [FE] Capacity section on overview: per-team-member utilization bars (used vs available hours) -- [FE] 2026-04-03
-- [ ] T331 - [FE] Capacity page: projected capacity section showing committed hours from active subscriptions vs total team hours
-- [ ] T332 - [FE] Capacity page: forecasted section showing weighted pipeline impact, worst case, if-all-close scenario
-- [ ] T333 - [FE] Capacity page: timeline chart showing capacity over next 8 weeks (line chart: total, committed, forecasted)
+- [x] T331 - [FE] Capacity page: projected capacity section showing committed hours from active subscriptions vs total team hours -- [FE] 2026-04-03
+- [x] T332 - [FE] Capacity page: forecasted section showing weighted pipeline impact, worst case, if-all-close scenario -- [FE] 2026-04-03
+- [x] T333 - [FE] Capacity page: timeline chart showing capacity over next 8 weeks (line chart: total, committed, forecasted) -- [FE] 2026-04-03
 - [x] T334 - [FE] Capacity section on overview: "Earliest Start Date" calculator widget (input hours/week, output date) -- [FE] 2026-04-03
-- [ ] T335 - [FE] Capacity page: "Sales Call Helper" card showing utilization, free capacity, next capacity opening, deal impact selector
+- [x] T335 - [FE] Capacity page: "Sales Call Helper" card showing utilization, free capacity, next capacity opening, deal impact selector -- [FE] 2026-04-03
 
 ### Multi-Currency
 
@@ -788,12 +790,12 @@ Requires S20. S14 (reportsToId, plannedRoles) already exists in Phase 6 schema.
 
 - [x] T452 - [BE] PATCH /api/admin/team-members/[id]: support updating roles (JSON array) and department. -- [BE] 2026-04-03 (verified: team/[id]/route.ts handles roles and department)
 - [x] T453 - [FE] Org chart page: tree visualization with connected nodes. Each node shows avatar, name, roles list (multiple badges), department, capacity bar. -- [FE] 2026-04-03 (duplicate of T377/T378; verified in org-chart.tsx)
-- [ ] T454 - [FE] Org chart: drag nodes to reorganize reporting structure (updates reportsToId). (duplicate of T380)
+- [x] T454 - [FE] Org chart: drag nodes to reorganize reporting structure (updates reportsToId). (duplicate of T380)
 - [x] T455 - [FE] Org chart: department grouping with colour-coded sections. Filter by department. -- [FE] 2026-04-03 (duplicate of T381; verified filterByDepartment)
 - [x] T456 - [FE] Org chart: vacant/planned role nodes with dotted border and "Planned" badge. -- [FE] 2026-04-03 (duplicate of T379; verified PlannedNode)
 - [x] T457 - [FE] Org chart: click node to expand detail panel or navigate to team member detail. -- [FE] 2026-04-03 (duplicate of T382; verified onMemberClick)
 - [x] T458 - [FE] Org chart: capacity per member shown as utilization bar on each node (hours committed vs available). -- [FE] 2026-04-03 (duplicate of T378; MemberNode shows weeklyCapacityHours in org-chart.tsx)
-- [ ] T459 - [FE] Org chart: responsive layout (horizontal tree on desktop, vertical list on mobile).
+- [x] T459 - [FE] Org chart: responsive layout (horizontal tree on desktop, vertical list on mobile). (duplicate of T384)
 - [x] T460 - [FE] Add "Org Chart" nav item to sidebar under "Team" group. -- [FE] 2026-04-03 (duplicate of T385; implemented as tab on team page)
 - [ ] T461 - [UIUX] Review org chart for spacing, node sizing, line rendering, dark mode.
 - [ ] T462 - [QA] Test org chart: rendering, drag reorder, multiple roles display, planned roles, mobile layout.
