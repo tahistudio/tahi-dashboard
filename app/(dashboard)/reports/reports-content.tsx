@@ -5,6 +5,7 @@ import {
   Users, Inbox, Clock, CreditCard, BarChart2,
   TrendingUp, RefreshCw, Calendar, Download, DollarSign,
   Target, Percent, PieChart as PieChartIcon,
+  Filter, ArrowDown,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -418,6 +419,9 @@ export function ReportsContent() {
 
       {/* Sales Pipeline */}
       <SalesPipelineSection />
+
+      {/* Sales Funnel / Close Rates */}
+      <SalesFunnelSection />
     </div>
   )
 }
@@ -740,6 +744,306 @@ function SalesPipelineSection() {
           </ResponsiveContainer>
         )}
       </div>
+    </div>
+  )
+}
+
+// ── Sales Funnel Section ─────────────────────────────────────────────────────
+
+interface StageConversion {
+  fromStage: string
+  fromSlug: string
+  toStage: string
+  toSlug: string
+  entered: number
+  converted: number
+  conversionRate: number
+}
+
+interface CloseRateData {
+  stageConversions: StageConversion[]
+  monthlyWinLoss: Array<{
+    month: string
+    won: number
+    lost: number
+    wonValue: number
+    lostValue: number
+  }>
+  revenueByStage: Array<{
+    stageId: string
+    stageName: string
+    stageSlug: string
+    position: number
+    dealCount: number
+    totalValue: number
+  }>
+}
+
+const FUNNEL_COLORS = [
+  '#5A824E', '#4a9b3f', '#60a5fa', '#a78bfa', '#fbbf24', '#f87171', '#9ca3af',
+]
+
+function SalesFunnelSection() {
+  const [data, setData] = useState<CloseRateData | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/reports/close-rates'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<CloseRateData>
+      })
+      .then(d => setData(d))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return (
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <Filter className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Sales Funnel
+        </h3>
+        <div className="space-y-3">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className="animate-pulse rounded" style={{ height: '3.5rem', background: 'var(--color-bg-tertiary)' }} />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (!data || data.stageConversions.length === 0) {
+    return (
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <Filter className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Sales Funnel
+        </h3>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          No funnel data available yet. Add deals to your pipeline to see conversion rates.
+        </p>
+      </div>
+    )
+  }
+
+  // Build funnel stages: first stage entry count + each subsequent stage
+  const funnelStages: Array<{ name: string; count: number; color: string }> = []
+  if (data.stageConversions.length > 0) {
+    funnelStages.push({
+      name: data.stageConversions[0].fromStage,
+      count: data.stageConversions[0].entered,
+      color: FUNNEL_COLORS[0],
+    })
+    for (let i = 0; i < data.stageConversions.length; i++) {
+      funnelStages.push({
+        name: data.stageConversions[i].toStage,
+        count: data.stageConversions[i].converted,
+        color: FUNNEL_COLORS[(i + 1) % FUNNEL_COLORS.length],
+      })
+    }
+  }
+
+  const maxCount = Math.max(...funnelStages.map(s => s.count), 1)
+
+  return (
+    <div className="space-y-6">
+      {/* Funnel visualization */}
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <Filter className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Sales Funnel
+        </h3>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          {funnelStages.map((stage, idx) => {
+            const widthPct = maxCount > 0 ? Math.max((stage.count / maxCount) * 100, 8) : 8
+            return (
+              <div key={stage.name} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <span
+                  className="flex-shrink-0 text-right truncate"
+                  style={{
+                    width: '7.5rem',
+                    fontSize: '0.75rem',
+                    fontWeight: 500,
+                    color: 'var(--color-text-muted)',
+                  }}
+                >
+                  {stage.name}
+                </span>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <div
+                    className="transition-all"
+                    style={{
+                      height: '2rem',
+                      width: `${widthPct}%`,
+                      background: stage.color,
+                      borderRadius: '0.25rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      minWidth: '2rem',
+                      opacity: 0.85 + (0.15 * (1 - idx / Math.max(funnelStages.length - 1, 1))),
+                    }}
+                  >
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#ffffff' }}>
+                      {stage.count}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Stage-to-stage conversion rates */}
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <ArrowDown className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Stage Conversion Rates
+        </h3>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {data.stageConversions.map(conv => {
+            const rateColor = conv.conversionRate >= 70
+              ? 'var(--color-success)'
+              : conv.conversionRate >= 40
+                ? 'var(--color-warning)'
+                : 'var(--color-danger)'
+            return (
+              <div
+                key={`${conv.fromSlug}-${conv.toSlug}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.625rem 0.75rem',
+                  background: 'var(--color-bg-secondary)',
+                  borderRadius: '0.5rem',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0 }}>
+                  <span className="truncate" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
+                    {conv.fromStage}
+                  </span>
+                  <ArrowDown style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0, transform: 'rotate(-90deg)' }} />
+                  <span className="truncate" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
+                    {conv.toStage}
+                  </span>
+                </div>
+                <div className="flex items-center flex-shrink-0" style={{ gap: '0.75rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                    {conv.converted}/{conv.entered}
+                  </span>
+                  <span style={{ fontSize: '0.875rem', fontWeight: 700, color: rateColor, minWidth: '3.5rem', textAlign: 'right' }}>
+                    {conv.conversionRate}%
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Revenue by stage */}
+      {data.revenueByStage.some(s => s.totalValue > 0) && (
+        <div
+          style={{
+            background: 'var(--color-bg)',
+            borderRadius: 'var(--radius-card)',
+            border: '1px solid var(--color-border)',
+            padding: '1.5rem',
+          }}
+        >
+          <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+            <DollarSign className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+            Revenue by Stage
+          </h3>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th
+                    className="text-left text-xs font-medium text-[var(--color-text-muted)]"
+                    style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                  >
+                    Stage
+                  </th>
+                  <th
+                    className="text-right text-xs font-medium text-[var(--color-text-muted)]"
+                    style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                  >
+                    Deals
+                  </th>
+                  <th
+                    className="text-right text-xs font-medium text-[var(--color-text-muted)]"
+                    style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                  >
+                    Total Value
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.revenueByStage
+                  .filter(s => s.dealCount > 0)
+                  .sort((a, b) => a.position - b.position)
+                  .map(stage => (
+                    <tr key={stage.stageId}>
+                      <td
+                        className="text-sm text-[var(--color-text)] font-medium"
+                        style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                      >
+                        {stage.stageName}
+                      </td>
+                      <td
+                        className="text-sm text-[var(--color-text-muted)] text-right"
+                        style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                      >
+                        {stage.dealCount}
+                      </td>
+                      <td
+                        className="text-sm text-[var(--color-text)] text-right font-medium"
+                        style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                      >
+                        {formatCurrency(stage.totalValue)}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

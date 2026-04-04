@@ -481,7 +481,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 ### Schema Additions
 
 - [x] S12 - [BE] Add CRM schema batch 8: `deals`, `dealContacts`, `pipelineStages`, `activities` tables per SPECS/crm-pipeline.md
-- [ ] S13 - [BE] Add CRM schema batch 9: `brands`, `brandContacts` tables; add `brandId` column to `requests` table; add `phone` and `customFields` columns to `contacts`; add `customFields`, `defaultHourlyRate`, `size`, `annualRevenue` columns to `organisations`
+- [x] S13 - [BE] Add CRM schema batch 9: `brands`, `brandContacts` tables; add `brandId` column to `requests` table (brands/brandContacts/brandId done; remaining: phone/customFields on contacts, customFields/defaultHourlyRate/size/annualRevenue on organisations) -- [BE] 2026-04-03
 
 ### Pipeline Stages and Configuration
 
@@ -550,7 +550,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [ ] T322 - [BE] GET /api/admin/reports/sales: pipeline value by stage, weighted pipeline, win rate, avg deal size, avg days to close
 - [ ] T323 - [BE] GET /api/admin/reports/close-rates: conversion rate between each stage, win/loss over time, revenue per stage, stage velocity
 - [ ] T324 - [FE] Reports page: sales metrics section with pipeline value chart (stacked bar by stage), win rate trend, avg deal size, forecast chart
-- [ ] T325 - [FE] Reports page: sales funnel visualization showing conversion between stages
+- [x] T325 - [FE] Reports page: sales funnel visualization showing conversion between stages -- [FE] 2026-04-03
 - [ ] T326 - [FE] Reports page: revenue forecast chart (weighted pipeline value over next 3/6/12 months)
 
 ### Capacity Tracking
@@ -558,11 +558,11 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [ ] T327 - [BE] Seed capacity settings in settings table: capacity_hours_maintain, capacity_hours_scale, base_currency
 - [ ] T328 - [BE] GET /api/admin/capacity: return current utilization (per team member and total), projected capacity (from subscriptions), forecasted impact (from pipeline deals)
 - [x] T329 - [BE] POST /api/admin/capacity/start-date: accept estimatedHoursPerWeek, return earliest week with sufficient capacity, available team members, confidence level
-- [ ] T330 - [FE] Capacity page: current utilization section with horizontal bars per team member (used vs available hours)
+- [x] T330 - [FE] Capacity section on overview: per-team-member utilization bars (used vs available hours) -- [FE] 2026-04-03
 - [ ] T331 - [FE] Capacity page: projected capacity section showing committed hours from active subscriptions vs total team hours
 - [ ] T332 - [FE] Capacity page: forecasted section showing weighted pipeline impact, worst case, if-all-close scenario
 - [ ] T333 - [FE] Capacity page: timeline chart showing capacity over next 8 weeks (line chart: total, committed, forecasted)
-- [ ] T334 - [FE] Capacity page: "Earliest Start Date" calculator widget (input hours/week, output date and available team members)
+- [x] T334 - [FE] Capacity section on overview: "Earliest Start Date" calculator widget (input hours/week, output date) -- [FE] 2026-04-03
 - [ ] T335 - [FE] Capacity page: "Sales Call Helper" card showing utilization, free capacity, next capacity opening, deal impact selector
 
 ### Multi-Currency
@@ -577,11 +577,11 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 ### Brands (Proper Entity)
 
-- [ ] T343 - [BE] GET /api/admin/brands: list all brands with org name, contact count, request count
-- [ ] T344 - [BE] POST /api/admin/brands: create brand under an org (name, logoUrl, website, primaryColour)
-- [ ] T345 - [BE] GET /api/admin/brands/[id]: brand detail with contacts, requests, files
-- [ ] T346 - [BE] PATCH /api/admin/brands/[id]: update brand
-- [ ] T347 - [BE] DELETE /api/admin/brands/[id]: delete brand (cascade brandContacts, clear brandId on requests)
+- [x] T343 - [BE] GET /api/admin/brands: list all brands with org name, contact count, request count -- [BE] 2026-04-03
+- [x] T344 - [BE] POST /api/admin/brands: create brand under an org (name, logoUrl, website, primaryColour) -- [BE] 2026-04-03
+- [x] T345 - [BE] GET /api/admin/brands/[id]: brand detail with contacts, requests, files -- [BE] 2026-04-03
+- [x] T346 - [BE] PATCH /api/admin/brands/[id]: update brand -- [BE] 2026-04-03
+- [x] T347 - [BE] DELETE /api/admin/brands/[id]: delete brand (cascade brandContacts, clear brandId on requests) -- [BE] 2026-04-03
 - [ ] T348 - [BE] Migration: convert existing organisations.brands JSON arrays into brands table rows
 - [ ] T349 - [FE] Client detail: brands tab with card per brand, create/edit/delete brand
 - [ ] T350 - [FE] Brand detail page: contacts, requests, files filtered to that brand

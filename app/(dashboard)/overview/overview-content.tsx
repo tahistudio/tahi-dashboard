@@ -6,6 +6,7 @@ import {
   Users, Inbox, FileText, TrendingUp,
   Plus, Clock, UserPlus,
   ArrowRight, AlertTriangle, RefreshCw, Video, ExternalLink,
+  CalendarClock, Loader2,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { OnboardingChecklist, type OnboardingState } from '@/components/tahi/onboarding-checklist'
@@ -507,8 +508,152 @@ function PipelineCapacityCard() {
             </div>
           </>
         )}
+
+        {/* Earliest Start Date calculator */}
+        <EarliestStartDateWidget />
       </div>
     </SectionCard>
+  )
+}
+
+// ─── Earliest Start Date Widget ──────────────────────────────────────────────
+
+interface StartDateResult {
+  earliestDate: string | null
+  availableHoursPerWeek: number
+  totalTeamCapacity: number
+  committedHours: number
+  weeksOut: number
+}
+
+function EarliestStartDateWidget() {
+  const [hoursPerWeek, setHoursPerWeek] = useState('')
+  const [result, setResult] = useState<StartDateResult | null>(null)
+  const [calculating, setCalculating] = useState(false)
+  const [hovered, setHovered] = useState(false)
+
+  const calculate = async () => {
+    const hours = parseFloat(hoursPerWeek)
+    if (!hours || hours <= 0) return
+    setCalculating(true)
+    setResult(null)
+    try {
+      const res = await fetch(apiPath('/api/admin/capacity/start-date'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estimatedHoursPerWeek: hours }),
+      })
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as StartDateResult
+      setResult(data)
+    } catch {
+      setResult(null)
+    } finally {
+      setCalculating(false)
+    }
+  }
+
+  const formatDate = (iso: string) => {
+    const d = new Date(iso)
+    return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
+  }
+
+  return (
+    <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: '1rem', marginTop: '0.25rem' }}>
+      <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.75rem' }}>
+        Earliest Start Date
+      </p>
+      <div className="flex items-center" style={{ gap: '0.5rem' }}>
+        <div style={{ position: 'relative', flex: 1 }}>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            placeholder="Hours/week needed"
+            value={hoursPerWeek}
+            onChange={e => { setHoursPerWeek(e.target.value); setResult(null) }}
+            onKeyDown={e => { if (e.key === 'Enter') calculate() }}
+            style={{
+              width: '100%',
+              fontSize: '0.8125rem',
+              padding: '0.5rem 0.75rem',
+              borderRadius: 'var(--radius-button)',
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-bg)',
+              color: 'var(--color-text)',
+              outline: 'none',
+              minHeight: '2.25rem',
+            }}
+          />
+        </div>
+        <button
+          onClick={calculate}
+          disabled={calculating || !hoursPerWeek || parseFloat(hoursPerWeek) <= 0}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.375rem',
+            padding: '0.5rem 0.75rem',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            color: '#ffffff',
+            background: hovered ? 'var(--color-brand-dark)' : 'var(--color-brand)',
+            border: 'none',
+            borderRadius: 'var(--radius-button)',
+            cursor: calculating || !hoursPerWeek ? 'not-allowed' : 'pointer',
+            opacity: calculating || !hoursPerWeek ? 0.6 : 1,
+            minHeight: '2.25rem',
+            whiteSpace: 'nowrap',
+            transition: 'background 150ms ease',
+          }}
+        >
+          {calculating ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <CalendarClock className="w-3.5 h-3.5" />
+          )}
+          Calculate
+        </button>
+      </div>
+
+      {result && (
+        <div
+          style={{
+            marginTop: '0.75rem',
+            padding: '0.75rem',
+            background: result.earliestDate ? 'var(--color-brand-50)' : 'var(--status-in-review-bg)',
+            borderRadius: '0.5rem',
+          }}
+        >
+          {result.earliestDate ? (
+            <div>
+              <div className="flex items-center" style={{ gap: '0.375rem', marginBottom: '0.25rem' }}>
+                <CalendarClock style={{ width: '0.875rem', height: '0.875rem', color: 'var(--color-brand)' }} />
+                <span style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-brand-dark)' }}>
+                  {formatDate(result.earliestDate)}
+                </span>
+              </div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: 0 }}>
+                {result.weeksOut === 1 ? 'Next week' : `${result.weeksOut} weeks out`}
+                {' -- '}
+                {result.availableHoursPerWeek}h/week available of {result.totalTeamCapacity}h total
+              </p>
+            </div>
+          ) : (
+            <div>
+              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-danger)' }}>
+                No capacity available in the next 12 weeks
+              </span>
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: '0.25rem 0 0' }}>
+                {result.availableHoursPerWeek}h/week available, {parseFloat(hoursPerWeek)}h/week needed
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 

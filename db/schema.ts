@@ -183,6 +183,7 @@ export const requests = sqliteTable('requests', {
   orgId: text('org_id').notNull().references(() => organisations.id, { onDelete: 'cascade' }),
   trackId: text('track_id').references(() => tracks.id),
   projectId: text('project_id'),
+  brandId: text('brand_id'),
   // small_task | large_task | bug_fix | content_update | new_feature | consultation | custom
   type: text('type').notNull().default('small_task'),
   // design | development | content | strategy | admin | bug
@@ -972,6 +973,39 @@ export const activities = sqliteTable('activities', {
 ])
 
 // ============================================================
+// BRANDS (Sub-brands under a client org)
+// ============================================================
+
+export const brands = sqliteTable('brands', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  orgId: text('org_id').notNull().references(() => organisations.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  logoUrl: text('logo_url'),
+  website: text('website'),
+  primaryColour: text('primary_colour'),
+  notes: text('notes'),
+  ...timestamps,
+}, (table) => [
+  index('idx_brands_org').on(table.orgId),
+])
+
+// ============================================================
+// BRAND CONTACTS (Junction: brands <-> contacts)
+// ============================================================
+
+export const brandContacts = sqliteTable('brand_contacts', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  brandId: text('brand_id').notNull().references(() => brands.id, { onDelete: 'cascade' }),
+  contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_brand_contacts_brand').on(table.brandId),
+  index('idx_brand_contacts_contact').on(table.contactId),
+])
+
+// ============================================================
 // PLANNED ROLES (Hiring pipeline)
 // ============================================================
 
@@ -1045,6 +1079,10 @@ export type PlannedRole = typeof plannedRoles.$inferSelect
 export type NewPlannedRole = typeof plannedRoles.$inferInsert
 export type TaskDependency = typeof taskDependencies.$inferSelect
 export type NewTaskDependency = typeof taskDependencies.$inferInsert
+export type Brand = typeof brands.$inferSelect
+export type NewBrand = typeof brands.$inferInsert
+export type BrandContact = typeof brandContacts.$inferSelect
+export type NewBrandContact = typeof brandContacts.$inferInsert
 export type TaskTemplate = typeof taskTemplates.$inferSelect
 export type NewTaskTemplate = typeof taskTemplates.$inferInsert
 export type Mention = typeof mentions.$inferSelect
