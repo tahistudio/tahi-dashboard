@@ -318,6 +318,25 @@ body {
   cursor: pointer;
 }
 
+/* Mention chip styling (T449) */
+.mention,
+[data-type="mention"] {
+  background: var(--color-brand-50, #f0f7ee);
+  color: var(--color-brand, #5A824E);
+  font-weight: 600;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  cursor: default;
+  white-space: nowrap;
+  font-size: inherit;
+}
+
+.dark .mention,
+.dark [data-type="mention"] {
+  background: rgba(90, 130, 78, 0.2);
+  color: var(--color-brand-light, #7aab6b);
+}
+
 /* ============================================================
    REDUCED MOTION
    ============================================================ */

@@ -1934,6 +1934,8 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
   const [subtaskTitles, setSubtaskTitles] = useState<string[]>([])
   const [newSubtask, setNewSubtask] = useState('')
   const [templateId, setTemplateId] = useState('')
+  const [showPriorityWarning, setShowPriorityWarning] = useState(false)
+  const [pendingPriority, setPendingPriority] = useState<string | null>(null)
 
   // Data for selectors
   const [clients, setClients] = useState<OrgOption[]>([])
@@ -2253,7 +2255,14 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
                     <button
                       key={p}
                       type="button"
-                      onClick={() => setPriority(p)}
+                      onClick={() => {
+                        if ((p === 'high' || p === 'urgent') && priority !== p) {
+                          setPendingPriority(p)
+                          setShowPriorityWarning(true)
+                        } else {
+                          setPriority(p)
+                        }
+                      }}
                       style={{
                         flex: 1,
                         height: '2.625rem',
@@ -2471,6 +2480,111 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </div>
+
+      {/* Priority Warning Dialog (T435) */}
+      {showPriorityWarning && pendingPriority && (
+        <>
+          <div
+            style={{
+              position: 'fixed', inset: 0,
+              background: 'rgba(0,0,0,0.5)',
+              zIndex: 80,
+            }}
+            onClick={() => {
+              setShowPriorityWarning(false)
+              setPendingPriority(null)
+            }}
+          />
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="priority-warning-title"
+            style={{
+              position: 'fixed',
+              top: '50%', left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '100%',
+              maxWidth: '26rem',
+              background: 'var(--color-bg)',
+              borderRadius: 'var(--radius-card)',
+              boxShadow: 'var(--shadow-lg)',
+              zIndex: 90,
+              padding: '1.5rem',
+            }}
+          >
+            <div className="flex items-start gap-3 mb-4">
+              <div
+                className="flex-shrink-0 flex items-center justify-center"
+                style={{
+                  width: '2.5rem',
+                  height: '2.5rem',
+                  borderRadius: 'var(--radius-leaf-sm)',
+                  background: pendingPriority === 'urgent' ? 'var(--color-danger-bg)' : 'var(--status-in-review-bg)',
+                }}
+              >
+                <AlertTriangle
+                  className="w-5 h-5"
+                  style={{
+                    color: pendingPriority === 'urgent' ? 'var(--color-danger)' : 'var(--status-in-review-dot)',
+                  }}
+                  aria-hidden="true"
+                />
+              </div>
+              <div>
+                <h3 id="priority-warning-title" className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                  Set {pendingPriority} priority?
+                </h3>
+                <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+                  {pendingPriority === 'urgent'
+                    ? 'Urgent tasks will jump to the top of the queue and may displace the currently active task in the assigned track. The team will be notified immediately.'
+                    : 'High priority tasks will be prioritized over standard tasks in the queue. This may affect the order of other queued work.'}
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPriorityWarning(false)
+                  setPendingPriority(null)
+                }}
+                style={{
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.8125rem',
+                  fontWeight: 500,
+                  borderRadius: 'var(--radius-button)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  color: 'var(--color-text)',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPriority(pendingPriority)
+                  setShowPriorityWarning(false)
+                  setPendingPriority(null)
+                }}
+                style={{
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.8125rem',
+                  fontWeight: 600,
+                  borderRadius: 'var(--radius-button)',
+                  border: 'none',
+                  background: pendingPriority === 'urgent' ? 'var(--color-danger)' : 'var(--status-in-review-dot)',
+                  color: 'white',
+                  cursor: 'pointer',
+                }}
+              >
+                Set {pendingPriority}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </>
   )
 }

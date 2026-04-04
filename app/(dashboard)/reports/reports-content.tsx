@@ -199,13 +199,59 @@ export function ReportsContent() {
     requests: count,
   }))
 
+  // Convert NZD amount to display currency
+  const convertAmount = (nzdAmount: number): number => {
+    if (displayCurrency === 'NZD') return nzdAmount
+    const nzdRate = exchangeRates['NZD'] ?? 1
+    const targetRate = exchangeRates[displayCurrency] ?? 1
+    return Math.round(nzdAmount * (targetRate / nzdRate))
+  }
+
+  const formatInCurrency = (amount: number): string => {
+    try {
+      return new Intl.NumberFormat('en-NZ', {
+        style: 'currency',
+        currency: displayCurrency,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }).format(convertAmount(amount))
+    } catch {
+      return `${displayCurrency} ${convertAmount(amount).toLocaleString()}`
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--color-text)]">Reports</h1>
-        <p className="text-sm text-[var(--color-text-muted)] mt-1">
-          Revenue, request throughput, and client overview.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-[var(--color-text)]">Reports</h1>
+          <p className="text-sm text-[var(--color-text-muted)] mt-1">
+            Revenue, request throughput, and client overview.
+          </p>
+        </div>
+        {/* Currency selector (T340) */}
+        <div className="flex items-center gap-2">
+          <DollarSign className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          <select
+            value={displayCurrency}
+            onChange={(e) => setDisplayCurrency(e.target.value as DisplayCurrency)}
+            className="text-sm font-medium"
+            style={{
+              background: 'var(--color-bg)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-button)',
+              padding: '0.375rem 0.75rem',
+              color: 'var(--color-text)',
+              cursor: 'pointer',
+              minHeight: '2.25rem',
+            }}
+            aria-label="Display currency"
+          >
+            {CURRENCY_OPTIONS.map(c => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Summary cards */}
@@ -231,7 +277,7 @@ export function ReportsContent() {
         <SummaryCard
           icon={CreditCard}
           label="Outstanding"
-          value={formatCurrency(data.outstandingInvoiceAmount)}
+          value={formatInCurrency(data.outstandingInvoiceAmount)}
           accent="violet"
         />
       </div>
@@ -437,18 +483,55 @@ export function ReportsContent() {
       <ResponseTimeSection />
 
       {/* Sales Pipeline */}
-      <SalesPipelineSection />
+      <SalesPipelineSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
 
       {/* Sales Funnel / Close Rates */}
-      <SalesFunnelSection />
+      <SalesFunnelSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+
+      {/* Stage Velocity (T355) */}
+      <StageVelocitySection />
+
+      {/* Close Rate Source Breakdown (T476) */}
+      <CloseRateSourceBreakdownSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
 
       {/* Source Breakdown (T390) */}
-      <SourceBreakdownSection />
+      <SourceBreakdownSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+
+      {/* Sales Cycle Length (T391) */}
+      <SalesCycleLengthSection />
 
       {/* Revenue Forecast (T326) */}
-      <RevenueForecastSection />
+      <RevenueForecastSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
     </div>
   )
+}
+
+// ── Currency conversion helper ────────────────────────────────────────────
+
+interface CurrencyProps {
+  displayCurrency: DisplayCurrency
+  exchangeRates: Record<string, number>
+}
+
+function convertNzd(amount: number, displayCurrency: DisplayCurrency, exchangeRates: Record<string, number>): number {
+  if (displayCurrency === 'NZD') return amount
+  const nzdRate = exchangeRates['NZD'] ?? 1
+  const targetRate = exchangeRates[displayCurrency] ?? 1
+  return Math.round(amount * (targetRate / nzdRate))
+}
+
+function formatInCur(amount: number, currency: DisplayCurrency, rates: Record<string, number>): string {
+  const converted = convertNzd(amount, currency, rates)
+  try {
+    return new Intl.NumberFormat('en-NZ', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(converted)
+  } catch {
+    return `${currency} ${converted.toLocaleString()}`
+  }
 }
 
 // ── Response Time Section ──────────────────────────────────────────────────
@@ -644,9 +727,10 @@ function formatNzd(amount: number): string {
   }).format(amount)
 }
 
-function SalesPipelineSection() {
+function SalesPipelineSection({ displayCurrency, exchangeRates }: CurrencyProps) {
   const [data, setData] = useState<SalesData | null>(null)
   const [loading, setLoading] = useState(true)
+  const fmtCur = (v: number) => formatInCur(v, displayCurrency, exchangeRates)
 
   useEffect(() => {
     fetch(apiPath('/api/admin/reports/sales'))
@@ -719,13 +803,13 @@ function SalesPipelineSection() {
         <SummaryCard
           icon={DollarSign}
           label="Total Pipeline Value"
-          value={formatNzd(data.totalPipelineValue)}
+          value={fmtCur(data.totalPipelineValue)}
           accent="emerald"
         />
         <SummaryCard
           icon={Target}
           label="Weighted Forecast"
-          value={formatNzd(data.weightedPipelineValue)}
+          value={fmtCur(data.weightedPipelineValue)}
           accent="blue"
         />
         <SummaryCard
@@ -737,7 +821,7 @@ function SalesPipelineSection() {
         <SummaryCard
           icon={PieChartIcon}
           label="Avg Deal Size"
-          value={data.avgDealSize > 0 ? formatNzd(data.avgDealSize) : 'N/A'}
+          value={data.avgDealSize > 0 ? fmtCur(data.avgDealSize) : 'N/A'}
           accent="violet"
         />
       </div>
@@ -808,7 +892,7 @@ const FUNNEL_COLORS = [
   '#5A824E', '#4a9b3f', '#60a5fa', '#a78bfa', '#fbbf24', '#f87171', '#9ca3af',
 ]
 
-function SalesFunnelSection() {
+function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
   const [data, setData] = useState<CloseRateData | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -1060,7 +1144,7 @@ function SalesFunnelSection() {
                         className="text-sm text-[var(--color-text)] text-right font-medium"
                         style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
                       >
-                        {formatCurrency(stage.totalValue)}
+                        {formatInCur(stage.totalValue, displayCurrency, exchangeRates)}
                       </td>
                     </tr>
                   ))}
@@ -1177,7 +1261,7 @@ interface SourceDeal {
   valueNzd: number
 }
 
-function SourceBreakdownSection() {
+function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProps) {
   const [deals, setDeals] = useState<SourceDeal[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -1330,7 +1414,7 @@ function SourceBreakdownSection() {
                     className="text-right text-xs font-medium text-[var(--color-text-muted)]"
                     style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
                   >
-                    Revenue (NZD)
+                    Revenue ({displayCurrency})
                   </th>
                 </tr>
               </thead>
@@ -1368,7 +1452,7 @@ function SourceBreakdownSection() {
                       className="text-sm text-[var(--color-text)] text-right font-medium"
                       style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
                     >
-                      {formatNzd(row.revenue)}
+                      {formatInCur(row.revenue, displayCurrency, exchangeRates)}
                     </td>
                   </tr>
                 ))}
@@ -1377,6 +1461,443 @@ function SourceBreakdownSection() {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Stage Velocity Section (T355) ────────────────────────────────────────────
+
+interface StageVelocityItem {
+  stageId: string
+  stageName: string
+  stageSlug: string
+  position: number
+  avgDays: number
+  dealCount: number
+}
+
+function StageVelocitySection() {
+  const [data, setData] = useState<StageVelocityItem[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/reports/close-rates'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<{ stageVelocity?: StageVelocityItem[] }>
+      })
+      .then(d => setData(d.stageVelocity ?? []))
+      .catch(() => setData([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return (
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <Clock className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Stage Velocity
+        </h3>
+        <div className="space-y-2">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="animate-pulse rounded" style={{ height: '2.5rem', background: 'var(--color-bg-tertiary)' }} />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  const filtered = data.filter(s => s.avgDays > 0 || s.dealCount > 0)
+
+  if (filtered.length === 0) {
+    return (
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <Clock className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Stage Velocity
+        </h3>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Not enough stage transition data yet. Move deals through your pipeline to see velocity.
+        </p>
+      </div>
+    )
+  }
+
+  const VELOCITY_COLORS = ['#5A824E', '#60a5fa', '#fbbf24', '#a78bfa', '#fb923c', '#4ade80', '#f87171']
+
+  return (
+    <div
+      style={{
+        background: 'var(--color-bg)',
+        borderRadius: 'var(--radius-card)',
+        border: '1px solid var(--color-border)',
+        padding: '1.5rem',
+      }}
+    >
+      <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <Clock className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+        Stage Velocity (avg days per stage)
+      </h3>
+      <ResponsiveContainer width="100%" height={240}>
+        <BarChart data={filtered} layout="vertical">
+          <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" horizontal={false} />
+          <XAxis type="number" tick={{ fontSize: 11 }} unit=" days" />
+          <YAxis type="category" dataKey="stageName" tick={{ fontSize: 11 }} width={110} />
+          <Tooltip
+            formatter={(value: number) => [`${value} days`, 'Avg Duration']}
+            contentStyle={{
+              fontSize: '0.75rem',
+              borderRadius: '0.5rem',
+              border: '1px solid var(--color-border)',
+            }}
+          />
+          <Bar dataKey="avgDays" radius={[0, 4, 4, 0]}>
+            {filtered.map((_, index) => (
+              <Cell key={`vel-${index}`} fill={VELOCITY_COLORS[index % VELOCITY_COLORS.length]} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+// ── Close Rate Source Breakdown (T476) ────────────────────────────────────────
+
+interface CloseRateSourceData {
+  source: string
+  wonCount: number
+  lostCount: number
+  totalCount: number
+  closeRate: number
+  avgDealSize: number
+  avgCycleDays: number
+}
+
+function CloseRateSourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProps) {
+  const [sourceData, setSourceData] = useState<CloseRateSourceData[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    // Fetch deals and compute close rates by source
+    fetch(apiPath('/api/admin/deals?limit=500'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<{
+          items: Array<{
+            source: string | null
+            valueNzd: number
+            value: number
+            stageIsClosedWon: number | null
+            stageIsClosedLost: number | null
+            createdAt: string
+            closedAt: string | null
+          }>
+        }>
+      })
+      .then(d => {
+        const items = d.items ?? []
+        const sourceMap = new Map<string, {
+          won: number; lost: number; total: number; totalValue: number; totalDays: number; closedCount: number
+        }>()
+
+        for (const deal of items) {
+          const key = deal.source ?? 'unknown'
+          const existing = sourceMap.get(key) ?? { won: 0, lost: 0, total: 0, totalValue: 0, totalDays: 0, closedCount: 0 }
+          existing.total++
+
+          if (deal.stageIsClosedWon) {
+            existing.won++
+            existing.totalValue += deal.valueNzd ?? deal.value
+          } else if (deal.stageIsClosedLost) {
+            existing.lost++
+          }
+
+          if (deal.closedAt && deal.createdAt) {
+            const days = Math.max(0, (new Date(deal.closedAt).getTime() - new Date(deal.createdAt).getTime()) / (1000 * 60 * 60 * 24))
+            existing.totalDays += days
+            existing.closedCount++
+          }
+
+          sourceMap.set(key, existing)
+        }
+
+        const result: CloseRateSourceData[] = Array.from(sourceMap.entries())
+          .map(([source, data]) => ({
+            source: SOURCE_LABELS[source] ?? (source === 'unknown' ? 'Unknown' : source),
+            wonCount: data.won,
+            lostCount: data.lost,
+            totalCount: data.total,
+            closeRate: data.total > 0 ? Math.round((data.won / data.total) * 100) : 0,
+            avgDealSize: data.won > 0 ? Math.round(data.totalValue / data.won) : 0,
+            avgCycleDays: data.closedCount > 0 ? Math.round(data.totalDays / data.closedCount) : 0,
+          }))
+          .filter(s => s.totalCount > 0)
+          .sort((a, b) => b.closeRate - a.closeRate)
+
+        setSourceData(result)
+      })
+      .catch(() => setSourceData([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return (
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <Target className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Close Rate by Source
+        </h3>
+        <div className="space-y-2">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="animate-pulse rounded" style={{ height: '2.5rem', background: 'var(--color-bg-tertiary)' }} />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (sourceData.length === 0) {
+    return (
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <Target className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Close Rate by Source
+        </h3>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          No close rate data available yet. Close some deals to see source analytics.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      style={{
+        background: 'var(--color-bg)',
+        borderRadius: 'var(--radius-card)',
+        border: '1px solid var(--color-border)',
+        padding: '1.5rem',
+      }}
+    >
+      <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <Target className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+        Close Rate by Source
+      </h3>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              {['Source', 'Won', 'Lost', 'Total', 'Close Rate', `Avg Size (${displayCurrency})`, 'Avg Cycle'].map(h => (
+                <th
+                  key={h}
+                  className={`text-xs font-medium text-[var(--color-text-muted)] ${h === 'Source' ? 'text-left' : 'text-right'}`}
+                  style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sourceData.map(row => {
+              const rateColor = row.closeRate >= 50
+                ? 'var(--color-success)'
+                : row.closeRate >= 25
+                  ? 'var(--color-warning)'
+                  : 'var(--color-danger)'
+              return (
+                <tr key={row.source}>
+                  <td className="text-sm font-medium text-[var(--color-text)]" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}>
+                    {row.source}
+                  </td>
+                  <td className="text-sm text-right" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)', color: 'var(--color-success)' }}>
+                    {row.wonCount}
+                  </td>
+                  <td className="text-sm text-right" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)', color: 'var(--color-danger)' }}>
+                    {row.lostCount}
+                  </td>
+                  <td className="text-sm text-right text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}>
+                    {row.totalCount}
+                  </td>
+                  <td className="text-sm text-right font-semibold" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)', color: rateColor }}>
+                    {row.closeRate}%
+                  </td>
+                  <td className="text-sm text-right text-[var(--color-text)]" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}>
+                    {row.avgDealSize > 0 ? formatInCur(row.avgDealSize, displayCurrency, exchangeRates) : '--'}
+                  </td>
+                  <td className="text-sm text-right text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}>
+                    {row.avgCycleDays > 0 ? `${row.avgCycleDays}d` : '--'}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ── Sales Cycle Length Section (T391) ─────────────────────────────────────────
+
+function SalesCycleLengthSection() {
+  const [monthlyData, setMonthlyData] = useState<Array<{ month: string; avgDays: number; count: number }>>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/deals?limit=500'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<{
+          items: Array<{
+            createdAt: string
+            closedAt: string | null
+            stageIsClosedWon: number | null
+          }>
+        }>
+      })
+      .then(d => {
+        const items = d.items ?? []
+        const monthMap = new Map<string, { totalDays: number; count: number }>()
+
+        for (const deal of items) {
+          if (!deal.stageIsClosedWon || !deal.closedAt) continue
+          const closed = new Date(deal.closedAt)
+          const created = new Date(deal.createdAt)
+          const days = Math.max(0, (closed.getTime() - created.getTime()) / (1000 * 60 * 60 * 24))
+          const key = `${closed.getFullYear()}-${String(closed.getMonth() + 1).padStart(2, '0')}`
+          const existing = monthMap.get(key) ?? { totalDays: 0, count: 0 }
+          existing.totalDays += days
+          existing.count++
+          monthMap.set(key, existing)
+        }
+
+        const result = Array.from(monthMap.entries())
+          .map(([month, data]) => ({
+            month: formatMonthLabel(month),
+            avgDays: Math.round(data.totalDays / data.count),
+            count: data.count,
+          }))
+          .sort((a, b) => a.month.localeCompare(b.month))
+
+        setMonthlyData(result)
+      })
+      .catch(() => setMonthlyData([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return (
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <Calendar className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Sales Cycle Length
+        </h3>
+        <div className="space-y-2">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="animate-pulse rounded" style={{ height: '2.5rem', background: 'var(--color-bg-tertiary)' }} />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (monthlyData.length === 0) {
+    return (
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <Calendar className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Sales Cycle Length
+        </h3>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          No won deals yet. Close deals to see sales cycle trends over time.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      style={{
+        background: 'var(--color-bg)',
+        borderRadius: 'var(--radius-card)',
+        border: '1px solid var(--color-border)',
+        padding: '1.5rem',
+      }}
+    >
+      <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <Calendar className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+        Sales Cycle Length (avg days from Inquiry to Won)
+      </h3>
+      <ResponsiveContainer width="100%" height={240}>
+        <LineChart data={monthlyData}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" />
+          <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+          <YAxis tick={{ fontSize: 11 }} unit=" days" />
+          <Tooltip
+            formatter={(value: number, name: string) => [
+              `${value} days${name === 'count' ? '' : ''}`,
+              name === 'avgDays' ? 'Avg Cycle' : 'Deals Won',
+            ]}
+            contentStyle={{
+              fontSize: '0.75rem',
+              borderRadius: '0.5rem',
+              border: '1px solid var(--color-border)',
+            }}
+          />
+          <Line
+            type="monotone"
+            dataKey="avgDays"
+            stroke="#5A824E"
+            strokeWidth={2}
+            dot={{ fill: '#5A824E', r: 4 }}
+            name="Avg Cycle"
+          />
+        </LineChart>
+      </ResponsiveContainer>
     </div>
   )
 }
@@ -1397,9 +1918,10 @@ interface ForecastData {
   totalWorstCase: number
 }
 
-function RevenueForecastSection() {
+function RevenueForecastSection({ displayCurrency, exchangeRates }: CurrencyProps) {
   const [forecastData, setForecastData] = useState<ForecastData | null>(null)
   const [forecastLoading, setForecastLoading] = useState(true)
+  const fmtCur = (v: number) => formatInCur(v, displayCurrency, exchangeRates)
 
   useEffect(() => {
     let cancelled = false
@@ -1501,19 +2023,19 @@ function RevenueForecastSection() {
         <SummaryCard
           icon={DollarSign}
           label="Weighted Forecast (6mo)"
-          value={formatNzd(forecastData.totalWeightedValue)}
+          value={fmtCur(forecastData.totalWeightedValue)}
           accent="emerald"
         />
         <SummaryCard
           icon={TrendingUp}
           label="Best Case"
-          value={formatNzd(forecastData.totalBestCase)}
+          value={fmtCur(forecastData.totalBestCase)}
           accent="blue"
         />
         <SummaryCard
           icon={Target}
           label="Worst Case"
-          value={formatNzd(forecastData.totalWorstCase)}
+          value={fmtCur(forecastData.totalWorstCase)}
           accent="amber"
         />
       </div>

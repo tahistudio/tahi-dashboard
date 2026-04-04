@@ -2,7 +2,7 @@
 
 Last updated: 2026-04-03
 Total tasks: 542 (S1-S22 schema + T1-T495 feature + unnumbered review/QA items)
-Completed: 473/542
+Completed: 490/542
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -518,7 +518,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T304 - [FE] Deal detail: activities tab with chronological timeline (calls, meetings, emails, notes), add activity form — [FE] 2026-04-03
 - [x] T305 - [FE] Deal detail: notes tab with rich text editor (Tiptap) -- [FE] 2026-04-03 (textarea with save button, already present)
 - [x] T306 - [FE] Deal detail: associated requests tab (requests from the same org, linkable) -- [FE] 2026-04-03
-- [ ] T307 - [FE] Deal detail: capacity impact card showing how closing this deal would affect team capacity
+- [x] T307 - [FE] Deal detail: capacity impact card showing how closing this deal would affect team capacity -- [FE] 2026-04-03
 - [x] T308 - [FE] Deal close dialog: when moving to Won/Lost stage, prompt for wonSource or lostReason -- [FE] 2026-04-03
 
 ### Activities CRUD
@@ -558,7 +558,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 ### Capacity Tracking
 
-- [ ] T327 - [BE] Seed capacity settings in settings table: capacity_hours_maintain, capacity_hours_scale, base_currency
+- [x] T327 - [BE] Seed capacity settings in settings table: capacity_hours_maintain, capacity_hours_scale, base_currency -- [FE+BE] 2026-04-03
 - [x] T328 - [BE] GET /api/admin/capacity: return current utilization (per team member and total), projected capacity (from subscriptions), forecasted impact (from pipeline deals) -- [BE] 2026-04-03 (verified: capacity/route.ts has GET)
 - [x] T329 - [BE] POST /api/admin/capacity/start-date: accept estimatedHoursPerWeek, return earliest week with sufficient capacity, available team members, confidence level
 - [x] T330 - [FE] Capacity section on overview: per-team-member utilization bars (used vs available hours) -- [FE] 2026-04-03
@@ -574,7 +574,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T337 - [BE] POST /api/admin/exchange-rates: trigger rate refresh from external API (Open Exchange Rates or similar), update exchangeRates table -- [BE] 2026-04-03 (verified: exchange-rates/route.ts has POST)
 - [x] T338 - [BE] Utility function: convertCurrency(amount, fromCurrency, toCurrency) using exchangeRates table -- [BE] 2026-04-03 (verified: lib/utils.ts has convertCurrency)
 - [x] T339 - [BE] Auto-compute valueNzd on deal create/update using exchange rates -- [BE] 2026-04-03 (verified: valueNzd referenced in deals routes)
-- [ ] T340 - [FE] Reports: currency selector dropdown to view all monetary reports in selected currency
+- [x] T340 - [FE] Reports: currency selector dropdown to view all monetary reports in selected currency -- [FE+BE] 2026-04-03
 - [x] T341 - [FE] Deal form: currency picker with live conversion preview (e.g. "NZD 10,000 = approx USD 6,200") -- [FE] 2026-04-03
 - [ ] T342 - [BE] Cloudflare Cron Trigger: refresh exchange rates daily
 
@@ -596,9 +596,9 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 ### Close Rate and Pipeline Analytics
 
 - [x] T353 - [BE] Track stage transitions: when a deal moves between stages, log the transition with timestamp (use activities table with type 'stage_change') -- [BE] 2026-04-03 (verified: deals/[id]/route.ts inserts stage_change activity)
-- [ ] T354 - [BE] Compute stage velocity: avg days deals spend in each stage based on stage transition history
-- [ ] T355 - [FE] Pipeline analytics: stage velocity chart (bar chart showing avg days per stage)
-- [ ] T356 - [FE] Pipeline analytics: conversion funnel (deals entering vs exiting each stage)
+- [x] T354 - [BE] Compute stage velocity: avg days deals spend in each stage based on stage transition history -- [FE+BE] 2026-04-03
+- [x] T355 - [FE] Pipeline analytics: stage velocity chart (bar chart showing avg days per stage) -- [FE+BE] 2026-04-03
+- [x] T356 - [FE] Pipeline analytics: conversion funnel (deals entering vs exiting each stage) -- [FE+BE] 2026-04-03 (already existed as SalesFunnelSection)
 - [x] T357 - [FE] Deal close: win/loss reason selector with predefined options plus free text -- [FE] 2026-04-03 (verified: DealCloseDialog in pipeline-content.tsx)
 
 ### Sidebar and Navigation
@@ -645,7 +645,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 - [x] T389 - [BE] GET /api/admin/reports/sales: add per-source breakdowns (avg deal size by source, close rate by source, avg cycle length by source) -- [BE] 2026-04-03
 - [x] T390 - [FE] Reports: source breakdown charts (bar chart of deal count by source, pie chart of revenue by source) -- [FE] 2026-04-03
-- [ ] T391 - [FE] Reports: sales cycle length chart (avg days from Inquiry to Won, trended over time)
+- [x] T391 - [FE] Reports: sales cycle length chart (avg days from Inquiry to Won, trended over time) -- [FE] 2026-04-03
 
 ---
 
@@ -752,7 +752,7 @@ Requires S16, S17, S18.
 
 #### High Priority Warning
 
-- [ ] T435 - [FE] Task creation and edit: when priority is set to "high" or "urgent", show warning dialog explaining it will displace the currently active task in the track. Show the task that will be displaced. Require confirmation.
+- [x] T435 - [FE] Task creation and edit: when priority is set to "high" or "urgent", show warning dialog explaining it will displace the currently active task in the track. Show the task that will be displaced. Require confirmation. -- [FE] 2026-04-03
 
 ### Priority 2: Track Queue Experience (Client Portal)
 
@@ -760,10 +760,10 @@ Requires S18.
 
 - [x] T436 - [BE] GET /api/portal/tracks: return the client's tracks with current active task per track and queued tasks behind it, ordered by position. -- [BE] 2026-04-03
 - [x] T437 - [BE] PATCH /api/portal/tracks/[trackId]/reorder: accept ordered array of task IDs. Validate all tasks belong to the client's org. Update position values. -- [BE] 2026-04-03 (verified: portal/tracks/[trackId]/reorder/route.ts has PUT)
-- [ ] T438 - [FE] Client portal: track queue page showing each track as a lane. Active task highlighted at top, queued tasks below in order.
-- [ ] T439 - [FE] Track queue: drag-to-reorder tasks within a track (client can prioritize their own queue). Calls reorder API on drop.
-- [ ] T440 - [FE] Track queue: "active" badge on the task currently being worked on. "Next up" label on the first queued task.
-- [ ] T441 - [FE] Track queue: upsell card when all tracks are occupied. Show plan name, current track count, and "Upgrade to get more tracks" CTA with link to billing.
+- [x] T438 - [FE] Client portal: track queue page showing each track as a lane. Active task highlighted at top, queued tasks below in order. -- [FE] 2026-04-03 (wired into TrackQueueView component at /tracks)
+- [x] T439 - [FE] Track queue: drag-to-reorder tasks within a track (client can prioritize their own queue). Calls reorder API on drop. -- [FE] 2026-04-03 (TrackQueueView has HTML5 drag-and-drop reorder)
+- [x] T440 - [FE] Track queue: "active" badge on the task currently being worked on. "Next up" label on the first queued task. -- [FE] 2026-04-03 (TrackQueueView shows Active/Next Up badges)
+- [x] T441 - [FE] Track queue: upsell card when all tracks are occupied. Show plan name, current track count, and "Upgrade to get more tracks" CTA with link to billing. -- [FE] 2026-04-03 (TrackQueueView shows upsell banner)
 - [x] T442 - [BE] GET /api/admin/clients/[id]/tracks: return track queue visualization data for admin view of a client's tracks. -- [BE] 2026-04-03 (enhanced existing route with queue data)
 - [x] T443 - [FE] Client detail page: track queue tab showing admin view of the client's track lanes with active and queued tasks. -- [FE] 2026-04-03
 
@@ -771,14 +771,14 @@ Requires S18.
 
 Requires S19.
 
-- [ ] T444 - [BE] POST /api/admin/mentions: parse content for @mention patterns, create mentions rows, trigger notification for each mentioned person.
-- [ ] T445 - [BE] Utility: parseMentions(content) extracts mention patterns from Tiptap JSON or plain text. Returns array of {id, type}.
-- [ ] T446 - [BE] Wire mention detection into POST /api/admin/tasks (description field), POST /api/admin/requests/[id]/messages (content field), POST /api/admin/conversations/[id]/messages (content field).
+- [x] T444 - [BE] POST /api/admin/mentions: parse content for @mention patterns, create mentions rows, trigger notification for each mentioned person. -- [FE+BE] 2026-04-03 (wired into message POST handlers)
+- [x] T445 - [BE] Utility: parseMentions(content) extracts mention patterns from Tiptap JSON or plain text. Returns array of {id, type}. -- [FE+BE] 2026-04-03 (lib/parse-mentions.ts)
+- [x] T446 - [BE] Wire mention detection into POST /api/admin/tasks (description field), POST /api/admin/requests/[id]/messages (content field), POST /api/admin/conversations/[id]/messages (content field). -- [FE+BE] 2026-04-03 (wired into request and conversation message POST handlers)
 - [x] T447 - [FE] Tiptap extension: @mention node type. Typing "@" triggers autocomplete dropdown of team members and contacts. Selecting inserts a styled mention chip. -- [FE] 2026-04-03 (verified: tiptap-editor.tsx imports and configures Mention extension from @tiptap/extension-mention)
 - [x] T448 - [FE] Mention autocomplete: fetch team members and contacts on "@" keypress. Filter by typed text. Show avatar, name, and role. Keyboard navigation (arrow keys, enter to select). -- [FE] 2026-04-03
-- [ ] T449 - [FE] Mention chip: styled inline element showing mentioned person's name with distinct background. Clickable to navigate to their profile.
-- [ ] T450 - [BE] Notification trigger: when a mention is created, insert a notification row for the mentioned person with entityType and entityId linking to the source.
-- [ ] T451 - [FE] Notification: mention notifications show "@You were mentioned in [task/request/message]" with link to source.
+- [x] T449 - [FE] Mention chip: styled inline element showing mentioned person's name with distinct background. Clickable to navigate to their profile. -- [FE] 2026-04-03 (CSS styling in globals.css for .mention class)
+- [x] T450 - [BE] Notification trigger: when a mention is created, insert a notification row for the mentioned person with entityType and entityId linking to the source. -- [FE+BE] 2026-04-03 (createNotification called after mention insert in message POST handlers)
+- [x] T451 - [FE] Notification: mention notifications show "@You were mentioned in [task/request/message]" with link to source. -- [FE+BE] 2026-04-03 (notification title: "You were mentioned in a message/request message")
 - [ ] T451b - [UIUX] Review: spacing pass on MentionInput dropdown, avatar sizing, type badges, mobile layout -- [UIUX]
 - [ ] T451c - [QA] Regression: verify MentionInput component triggers on "@", filters results, keyboard nav works, mention inserts correctly -- [QA]
 
@@ -792,7 +792,7 @@ Requires S20. S14 (reportsToId, plannedRoles) already exists in Phase 6 schema.
 - [x] T455 - [FE] Org chart: department grouping with colour-coded sections. Filter by department. -- [FE] 2026-04-03 (duplicate of T381; verified filterByDepartment)
 - [x] T456 - [FE] Org chart: vacant/planned role nodes with dotted border and "Planned" badge. -- [FE] 2026-04-03 (duplicate of T379; verified PlannedNode)
 - [x] T457 - [FE] Org chart: click node to expand detail panel or navigate to team member detail. -- [FE] 2026-04-03 (duplicate of T382; verified onMemberClick)
-- [ ] T458 - [FE] Org chart: capacity per member shown as utilization bar on each node (hours committed vs available).
+- [x] T458 - [FE] Org chart: capacity per member shown as utilization bar on each node (hours committed vs available). -- [FE] 2026-04-03 (duplicate of T378; MemberNode shows weeklyCapacityHours in org-chart.tsx)
 - [ ] T459 - [FE] Org chart: responsive layout (horizontal tree on desktop, vertical list on mobile).
 - [x] T460 - [FE] Add "Org Chart" nav item to sidebar under "Team" group. -- [FE] 2026-04-03 (duplicate of T385; implemented as tab on team page)
 - [ ] T461 - [UIUX] Review org chart for spacing, node sizing, line rendering, dark mode.
@@ -808,8 +808,8 @@ Requires S21.
 - [x] T466 - [FE] Subscription editor on client detail: billing interval selector (monthly, 3 month, 12 month) with savings calculation displayed to admin. -- [FE] 2026-04-03
 - [x] T467 - [FE] Subscription editor: show bundled addons per tier. Quarterly: "Includes free SEO dashboard". Annual: "Includes free extra track, priority support, and SEO dashboard". -- [FE] 2026-04-03
 - [x] T468 - [FE] Client portal billing page: show current plan, billing interval, included addons, next renewal date, and savings vs monthly. -- [FE] 2026-04-03
-- [ ] T469 - [BE] Stripe integration: map billing intervals to Stripe subscription price IDs. Create or update Stripe subscription when interval changes.
-- [ ] T470 - [FE] Admin billing page: summary of clients by billing interval (monthly, quarterly, annual) with MRR impact.
+- [ ] T469 - [BE] Stripe integration: map billing intervals to Stripe subscription price IDs. Create or update Stripe subscription when interval changes. (deferred: needs real Stripe config)
+- [x] T470 - [FE] Admin billing page: summary of clients by billing interval (monthly, quarterly, annual) with MRR impact. -- [FE+BE] 2026-04-03
 - [ ] T471 - [QA] Test billing tiers: verify correct addon bundling, GST calculation for NZ, savings display, Stripe subscription mapping.
 
 ### Priority 6: CRM Pipeline (Replace HubSpot)

@@ -287,6 +287,7 @@ interface AdminSubscription {
   status: string
   hasPrioritySupport: boolean
   currentPeriodEnd: string | null
+  billingInterval?: string
 }
 
 function AdminBillingView() {
@@ -321,6 +322,13 @@ function AdminBillingView() {
   useEffect(() => { fetchData() }, [fetchData])
 
   const activeSubs = subs.filter(s => s.status === 'active')
+
+  // Group active subs by billing interval
+  const intervalCounts: Record<string, number> = {}
+  for (const sub of activeSubs) {
+    const interval = sub.billingInterval ?? 'monthly'
+    intervalCounts[interval] = (intervalCounts[interval] ?? 0) + 1
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -357,6 +365,54 @@ function AdminBillingView() {
             />
           </div>
 
+          {/* Billing Interval Summary (T470) */}
+          {Object.keys(intervalCounts).length > 0 && (
+            <div>
+              <h2 className="text-base font-semibold mb-3" style={{ color: 'var(--color-text)' }}>
+                Clients by Billing Interval
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {(['monthly', 'quarterly', 'annual'] as const).map(interval => {
+                  const count = intervalCounts[interval] ?? 0
+                  return (
+                    <div
+                      key={interval}
+                      style={{
+                        background: 'var(--color-bg)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius-card)',
+                        padding: '1.25rem',
+                      }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="flex items-center justify-center flex-shrink-0"
+                          style={{
+                            width: '2.5rem',
+                            height: '2.5rem',
+                            borderRadius: 'var(--radius-leaf-sm)',
+                            background: count > 0 ? 'var(--color-brand-50, #f0f7ee)' : 'var(--color-bg-tertiary)',
+                            color: count > 0 ? 'var(--color-brand)' : 'var(--color-text-subtle)',
+                          }}
+                        >
+                          <CreditCard className="w-4 h-4" aria-hidden="true" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                            {INTERVAL_LABELS[interval] ?? interval}
+                          </p>
+                          <p className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>
+                            {count} {count === 1 ? 'client' : 'clients'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Active Subscriptions */}
           <div>
             <h2 className="text-base font-semibold mb-3" style={{ color: 'var(--color-text)' }}>
@@ -377,6 +433,7 @@ function AdminBillingView() {
                         <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Client</th>
                         <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Plan</th>
                         <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Status</th>
+                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Interval</th>
                         <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Priority</th>
                         <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Next Billing</th>
                       </tr>
@@ -390,6 +447,17 @@ function AdminBillingView() {
                           </td>
                           <td style={{ padding: '0.75rem 1rem' }}>
                             <InvoiceStatusBadge status={sub.status} />
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem' }}>
+                            <span
+                              className="text-xs px-2 py-0.5 rounded-full font-medium"
+                              style={{
+                                background: 'var(--color-bg-tertiary)',
+                                color: 'var(--color-text-muted)',
+                              }}
+                            >
+                              {INTERVAL_LABELS[sub.billingInterval ?? 'monthly'] ?? 'Monthly'}
+                            </span>
                           </td>
                           <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>
                             {sub.hasPrioritySupport ? 'Yes' : 'No'}

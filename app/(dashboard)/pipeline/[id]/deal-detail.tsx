@@ -440,18 +440,59 @@ export function DealDetail({ dealId }: { dealId: string }) {
             />
           </SidebarCard>
 
-          {/* Capacity Impact */}
-          {deal.estimatedHoursPerWeek && deal.stageProbability !== null && (
+          {/* Capacity Impact (T307) */}
+          {deal.estimatedHoursPerWeek != null && deal.estimatedHoursPerWeek > 0 && (
             <SidebarCard title="Capacity Impact">
-              <div style={{ fontSize: '0.875rem', color: 'var(--color-text)' }}>
-                <span className="font-semibold">
-                  {((deal.estimatedHoursPerWeek * (deal.stageProbability ?? 0)) / 100).toFixed(1)}
-                </span>
-                <span style={{ color: 'var(--color-text-muted)' }}> weighted hrs/wk</span>
+              {/* Main impact line */}
+              <div style={{
+                padding: '0.625rem 0.75rem',
+                background: 'var(--color-brand-50, #f0f7ee)',
+                borderRadius: '0.5rem',
+                marginBottom: '0.5rem',
+              }}>
+                <div style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--color-brand, #5A824E)' }}>
+                  ~{deal.estimatedHoursPerWeek} hrs/week
+                  {deal.expectedCloseDate ? (() => {
+                    const weeksUntilClose = Math.max(1, Math.ceil(
+                      (new Date(deal.expectedCloseDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24 * 7)
+                    ))
+                    return <span style={{ fontWeight: 500 }}> for ~{weeksUntilClose} weeks</span>
+                  })() : null}
+                </div>
               </div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>
-                {deal.estimatedHoursPerWeek} hrs @ {deal.stageProbability}% probability
-              </div>
+
+              {/* Weighted impact */}
+              {deal.stageProbability !== null && deal.stageProbability > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
+                  <span style={{ color: 'var(--color-text-subtle)' }}>Weighted impact</span>
+                  <span style={{ color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                    {((deal.estimatedHoursPerWeek * (deal.stageProbability ?? 0)) / 100).toFixed(1)} hrs/wk
+                  </span>
+                </div>
+              )}
+
+              {/* Probability context */}
+              {deal.stageProbability !== null && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                  <span style={{ color: 'var(--color-text-subtle)' }}>Probability</span>
+                  <span style={{ color: 'var(--color-text-muted)' }}>{deal.stageProbability}%</span>
+                </div>
+              )}
+
+              {/* Total estimated hours */}
+              {deal.expectedCloseDate && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                  <span style={{ color: 'var(--color-text-subtle)' }}>Total estimate</span>
+                  <span style={{ color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                    {(() => {
+                      const weeks = Math.max(1, Math.ceil(
+                        (new Date(deal.expectedCloseDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24 * 7)
+                      ))
+                      return `~${deal.estimatedHoursPerWeek * weeks} hrs total`
+                    })()}
+                  </span>
+                </div>
+              )}
             </SidebarCard>
           )}
 
