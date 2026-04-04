@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   Users, Inbox, Clock, CreditCard, BarChart2,
-  TrendingUp, RefreshCw, Calendar, Download,
+  TrendingUp, RefreshCw, Calendar, Download, DollarSign,
+  Target, Percent, PieChart as PieChartIcon,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -414,6 +415,9 @@ export function ReportsContent() {
 
       {/* Response Time per Team Member */}
       <ResponseTimeSection />
+
+      {/* Sales Pipeline */}
+      <SalesPipelineSection />
     </div>
   )
 }
@@ -571,6 +575,171 @@ function ResponseTimeSection() {
           </table>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Sales Pipeline Section ─────────────────────────────────────────────────
+
+interface SalesStage {
+  id: string
+  name: string
+  slug: string
+  probability: number
+  position: number
+  colour: string | null
+  isClosedWon: number
+  isClosedLost: number
+  dealCount: number
+  totalValue: number
+}
+
+interface SalesData {
+  stages: SalesStage[]
+  totalPipelineValue: number
+  weightedPipelineValue: number
+  winRate: number
+  avgDealSize: number
+  avgDaysToClose: number
+  totalDeals: number
+  wonCount: number
+  lostCount: number
+}
+
+function formatNzd(amount: number): string {
+  return new Intl.NumberFormat('en-NZ', {
+    style: 'currency',
+    currency: 'NZD',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount)
+}
+
+function SalesPipelineSection() {
+  const [data, setData] = useState<SalesData | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/reports/sales'))
+      .then(r => {
+        if (!r.ok) throw new Error('Failed')
+        return r.json() as Promise<SalesData>
+      })
+      .then(d => setData(d))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <h2 className="text-lg font-semibold text-[var(--color-text)]">Sales Pipeline</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {[1, 2, 3, 4].map(i => (
+            <div
+              key={i}
+              className="animate-pulse"
+              style={{
+                background: 'var(--color-bg)',
+                borderRadius: 'var(--radius-card)',
+                border: '1px solid var(--color-border)',
+                padding: '1.5rem',
+                height: '6rem',
+              }}
+            >
+              <div className="h-4 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '60%' }} />
+              <div className="h-8 rounded mt-3" style={{ background: 'var(--color-bg-tertiary)', width: '40%' }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (!data) {
+    return (
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h2 className="text-lg font-semibold text-[var(--color-text)] mb-2">Sales Pipeline</h2>
+        <p className="text-sm text-[var(--color-text-muted)]">Unable to load sales data.</p>
+      </div>
+    )
+  }
+
+  // Chart data: deal count by stage, excluding closed stages with 0 deals for cleaner chart
+  const stageChartData = data.stages
+    .filter(s => s.dealCount > 0 || (!s.isClosedWon && !s.isClosedLost))
+    .map(s => ({
+      name: s.name,
+      deals: s.dealCount,
+      fill: s.colour ?? '#5A824E',
+    }))
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-[var(--color-text)]">Sales Pipeline</h2>
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <SummaryCard
+          icon={DollarSign}
+          label="Total Pipeline Value"
+          value={formatNzd(data.totalPipelineValue)}
+          accent="emerald"
+        />
+        <SummaryCard
+          icon={Target}
+          label="Weighted Forecast"
+          value={formatNzd(data.weightedPipelineValue)}
+          accent="blue"
+        />
+        <SummaryCard
+          icon={Percent}
+          label="Win Rate"
+          value={data.winRate > 0 ? `${data.winRate}%` : 'N/A'}
+          accent="amber"
+        />
+        <SummaryCard
+          icon={PieChartIcon}
+          label="Avg Deal Size"
+          value={data.avgDealSize > 0 ? formatNzd(data.avgDealSize) : 'N/A'}
+          accent="violet"
+        />
+      </div>
+
+      {/* Deal count by stage bar chart */}
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-card)',
+          border: '1px solid var(--color-border)',
+          padding: '1.5rem',
+        }}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+          <BarChart2 className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          Deals by Stage
+        </h3>
+        {stageChartData.length === 0 ? (
+          <p className="text-sm text-[var(--color-text-muted)]">No deals in the pipeline yet.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={stageChartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" />
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+              <Tooltip />
+              <Bar dataKey="deals" fill="#5A824E" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
     </div>
   )
 }

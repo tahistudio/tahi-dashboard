@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, inArray, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
+import { convertToNzd } from '@/lib/currency'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -135,15 +136,29 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
+  const dealValue = body.value ?? 0
+  const dealCurrency = body.currency ?? 'NZD'
+
+  // Convert value to NZD using exchange rates
+  let valueNzd = dealValue
+  if (dealCurrency !== 'NZD' && dealValue > 0) {
+    const rates = await database
+      .select({ currency: schema.exchangeRates.currency, rateToUsd: schema.exchangeRates.rateToUsd })
+      .from(schema.exchangeRates)
+    if (rates.length > 0) {
+      valueNzd = Math.round(convertToNzd(dealValue, dealCurrency, rates))
+    }
+  }
+
   await database.insert(schema.deals).values({
     id,
     title: body.title.trim(),
     orgId: body.orgId ?? null,
     stageId: body.stageId,
     ownerId: body.ownerId ?? null,
-    value: body.value ?? 0,
-    currency: body.currency ?? 'NZD',
-    valueNzd: body.value ?? 0,
+    value: dealValue,
+    currency: dealCurrency,
+    valueNzd,
     source: body.source ?? null,
     estimatedHoursPerWeek: body.estimatedHoursPerWeek ?? 0,
     expectedCloseDate: body.expectedCloseDate ?? null,

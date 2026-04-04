@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc } from 'drizzle-orm'
+import { convertToNzd } from '@/lib/currency'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -145,11 +146,41 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
   if (body.title !== undefined) updates.title = body.title.trim()
   if (body.stageId !== undefined) updates.stageId = body.stageId
-  if (body.value !== undefined) {
-    updates.value = body.value
-    updates.valueNzd = body.value // TODO: convert via exchange rates
-  }
+  if (body.value !== undefined) updates.value = body.value
   if (body.currency !== undefined) updates.currency = body.currency
+
+  // Re-compute valueNzd when value or currency changes
+  if (body.value !== undefined || body.currency !== undefined) {
+    // We need to know the final value and currency to convert.
+    // If only one changed, fetch the current deal for the other field.
+    let finalValue = body.value
+    let finalCurrency = body.currency
+    if (finalValue === undefined || finalCurrency === undefined) {
+      const [existing] = await database
+        .select({ value: schema.deals.value, currency: schema.deals.currency })
+        .from(schema.deals)
+        .where(eq(schema.deals.id, id))
+        .limit(1)
+      if (existing) {
+        if (finalValue === undefined) finalValue = existing.value
+        if (finalCurrency === undefined) finalCurrency = existing.currency
+      }
+    }
+    const val = finalValue ?? 0
+    const cur = finalCurrency ?? 'NZD'
+    if (cur === 'NZD' || val === 0) {
+      updates.valueNzd = val
+    } else {
+      const rates = await database
+        .select({ currency: schema.exchangeRates.currency, rateToUsd: schema.exchangeRates.rateToUsd })
+        .from(schema.exchangeRates)
+      if (rates.length > 0) {
+        updates.valueNzd = Math.round(convertToNzd(val, cur, rates))
+      } else {
+        updates.valueNzd = val
+      }
+    }
+  }
   if (body.ownerId !== undefined) updates.ownerId = body.ownerId
   if (body.orgId !== undefined) updates.orgId = body.orgId
   if (body.notes !== undefined) updates.notes = body.notes
