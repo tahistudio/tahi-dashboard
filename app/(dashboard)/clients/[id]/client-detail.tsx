@@ -229,6 +229,14 @@ export function ClientDetail({ clientId }: { clientId: string }) {
                 <Mail className="w-3.5 h-3.5 sm:mr-1.5" />
                 <span className="hidden sm:inline">Welcome Email</span>
               </TahiButton>
+              <TahiButton
+                variant="secondary"
+                size="sm"
+                onClick={() => router.push(`/pipeline?new=1&orgId=${clientId}`)}
+              >
+                <Handshake className="w-3.5 h-3.5 sm:mr-1.5" />
+                <span className="hidden sm:inline">New Deal</span>
+              </TahiButton>
               <TahiButton variant="secondary" size="sm" onClick={load}>
                 <RefreshCw className="w-3.5 h-3.5 sm:mr-1.5" />
                 <span className="hidden sm:inline">Refresh</span>

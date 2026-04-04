@@ -491,7 +491,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T286 - [BE] Seed default pipeline stages (Inquiry, Contacted, Discovery, Proposal Sent, Won, Lost, Stalled) in migration per Tahi's actual sales process -- [FE] 2026-04-03
 - [ ] T287 - [BE] GET /api/admin/pipeline-stages: return all stages ordered by position
 - [ ] T288 - [BE] PUT /api/admin/pipeline-stages: bulk update stage order, names, colours, probabilities
-- [ ] T289 - [FE] Settings page: pipeline stages editor (reorder, rename, change colour, set probability)
+- [x] T289 - [FE] Settings page: pipeline stages editor (reorder, rename, change colour, set probability) -- [FE] 2026-04-03
 
 ### Deals CRUD
 
@@ -507,7 +507,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T296 - [FE] Pipeline page: Kanban board with columns per stage, deal cards showing title, org, value, currency, expected close date, owner avatar — [FE] 2026-04-03
 - [x] T297 - [FE] Pipeline board: drag and drop deals between stages (updates deal stageId and probability via PATCH) — [FE] 2026-04-03
 - [x] T298 - [FE] Pipeline board: list view toggle (table with sortable columns) — [FE] 2026-04-03
-- [ ] T299 - [FE] Pipeline board: filters panel (stage, owner, org, value range, date range)
+- [x] T299 - [FE] Pipeline board: filters panel (stage, owner, org, value range, date range) -- [FE] 2026-04-03
 - [x] T300 - [FE] Pipeline board: summary bar at top showing total pipeline value, weighted value, deal count per stage — [FE] 2026-04-03
 
 ### Deal Detail Page (FE)
@@ -531,10 +531,10 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 ### Contact Detail Enhancements
 
-- [ ] T314 - [FE] Contact detail page: full page with activity timeline, deals, messages, requests, files
+- [x] T314 - [FE] Contact detail page: full page with activity timeline, deals, messages, requests, files -- [FE] 2026-04-03
 - [x] T315 - [BE] GET /api/admin/contacts/[id]: return contact detail with activity timeline, deals (via dealContacts), org info, messages
 - [x] T316 - [BE] PATCH /api/admin/contacts/[id]: update contact fields (name, email, role, isPrimary)
-- [ ] T317 - [FE] Contact detail: activity log form (quick-add call, meeting, email, note inline)
+- [x] T317 - [FE] Contact detail: activity log form (quick-add call, meeting, email, note inline) -- [FE] 2026-04-03
 
 ### Company/Organisation Enhancements
 
@@ -587,7 +587,9 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 - [x] T347 - [BE] DELETE /api/admin/brands/[id]: delete brand (cascade brandContacts, clear brandId on requests) -- [BE] 2026-04-03
 - [ ] T348 - [BE] Migration: convert existing organisations.brands JSON arrays into brands table rows
 - [x] T349 - [FE] Client detail: brands tab with card per brand, create/edit/delete brand — [FE] 2026-04-03
-- [ ] T350 - [FE] Brand detail page: contacts, requests, files filtered to that brand
+- [x] T350 - [FE] Brand detail page: contacts, requests, files filtered to that brand -- [FE] 2026-04-03
+- [ ] UIUX review: spacing and layout review for Contact Detail and Brand Detail pages
+- [ ] QA regression: verify Contact Detail and Brand Detail pages render correctly with empty and populated states
 - [x] T351 - [FE] Request form: brand selector dropdown (filtered to selected org's brands) — [FE] 2026-04-03
 - [ ] T352 - [BE] Portal scoping: contacts linked to a brand only see requests tagged with that brand
 
@@ -607,7 +609,7 @@ Findings from UIUX, QA, FE, BE, and Accessibility audits. Duplicates across agen
 
 ### Integration and Polish
 
-- [ ] T361 - [FE] Deal creation from client detail page (pre-fill orgId)
+- [x] T361 - [FE] Deal creation from client detail page (pre-fill orgId) -- [FE] 2026-04-03
 - [ ] T362 - [FE] Activity creation from contact detail page (pre-fill contactId)
 - [ ] T363 - [BE] MCP tool: create_deal (title, value, currency, orgId, stageSlug)
 - [ ] T364 - [BE] MCP tool: update_deal_stage (dealId, stageSlug)

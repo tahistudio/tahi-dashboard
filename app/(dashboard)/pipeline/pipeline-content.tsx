@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   Plus, Search, LayoutList, Columns3,
   TrendingUp, DollarSign, Target,
   Calendar, User, Building2,
   ChevronDown, BarChart3, Award,
-  Trophy, XCircle,
+  Trophy, XCircle, Filter, X,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 
@@ -119,7 +120,13 @@ const SOURCE_LABELS: Record<string, { label: string; bg: string; text: string }>
 
 // ---- Main component ------------------------------------------------------
 
+interface TeamMemberOption {
+  id: string
+  name: string
+}
+
 export function PipelineContent() {
+  const searchParams = useSearchParams()
   const [view, setView] = useState<ViewMode>('kanban')
   const [search, setSearch] = useState('')
   const [stages, setStages] = useState<PipelineStage[]>([])
@@ -127,6 +134,38 @@ export function PipelineContent() {
   const [loading, setLoading] = useState(true)
   const [sortKey, setSortKey] = useState<SortKey>('updatedAt')
   const [showNewDeal, setShowNewDeal] = useState(false)
+  const [initialOrgId, setInitialOrgId] = useState<string | null>(null)
+
+  // Filter state (T299)
+  const [filterOwner, setFilterOwner] = useState('')
+  const [filterSource, setFilterSource] = useState('')
+  const [filterValueMin, setFilterValueMin] = useState('')
+  const [filterValueMax, setFilterValueMax] = useState('')
+  const [showFilters, setShowFilters] = useState(false)
+  const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([])
+
+  // Open new deal dialog from query params (T361)
+  useEffect(() => {
+    if (searchParams.get('new') === '1') {
+      setInitialOrgId(searchParams.get('orgId'))
+      setShowNewDeal(true)
+    }
+  }, [searchParams])
+
+  // Fetch team members for filter
+  useEffect(() => {
+    async function loadTeam() {
+      try {
+        const res = await fetch(apiPath('/api/admin/team'))
+        if (!res.ok) return
+        const data = await res.json() as { members?: TeamMemberOption[] }
+        setTeamMembers(data.members ?? [])
+      } catch {
+        // silent
+      }
+    }
+    void loadTeam()
+  }, [])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -155,13 +194,33 @@ export function PipelineContent() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  // Filter by search
-  const filtered = search.trim()
-    ? deals.filter(d =>
-        d.title.toLowerCase().includes(search.toLowerCase()) ||
-        (d.orgName ?? '').toLowerCase().includes(search.toLowerCase())
-      )
-    : deals
+  // Filter by search + filters (T299)
+  const filtered = deals.filter(d => {
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      if (!d.title.toLowerCase().includes(q) && !(d.orgName ?? '').toLowerCase().includes(q)) return false
+    }
+    if (filterOwner && d.ownerId !== filterOwner) return false
+    if (filterSource && d.source !== filterSource) return false
+    if (filterValueMin) {
+      const min = parseFloat(filterValueMin)
+      if (!isNaN(min) && d.value < min) return false
+    }
+    if (filterValueMax) {
+      const max = parseFloat(filterValueMax)
+      if (!isNaN(max) && d.value > max) return false
+    }
+    return true
+  })
+
+  const hasActiveFilters = !!(filterOwner || filterSource || filterValueMin || filterValueMax)
+
+  function clearFilters() {
+    setFilterOwner('')
+    setFilterSource('')
+    setFilterValueMin('')
+    setFilterValueMax('')
+  }
 
   // Non-closed deals for summary
   const openDeals = filtered.filter(d => !d.stageIsClosedWon && !d.stageIsClosedLost)
@@ -345,7 +404,173 @@ export function PipelineContent() {
             />
           </div>
         )}
+
+        {/* Filter toggle */}
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className="inline-flex items-center gap-1.5 transition-colors rounded-lg"
+          style={{
+            padding: '0.5rem 0.75rem',
+            fontSize: '0.8125rem',
+            fontWeight: 500,
+            border: `1px solid ${showFilters || hasActiveFilters ? 'var(--color-brand)' : 'var(--color-border)'}`,
+            background: showFilters || hasActiveFilters ? 'var(--color-brand-50)' : 'var(--color-bg)',
+            color: showFilters || hasActiveFilters ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+            cursor: 'pointer',
+            minHeight: '2.75rem',
+          }}
+        >
+          <Filter className="w-4 h-4" />
+          Filters
+          {hasActiveFilters && (
+            <span
+              className="inline-flex items-center justify-center rounded-full text-white font-semibold"
+              style={{
+                width: '1.125rem',
+                height: '1.125rem',
+                fontSize: '0.625rem',
+                background: 'var(--color-brand)',
+              }}
+            >
+              {[filterOwner, filterSource, filterValueMin, filterValueMax].filter(Boolean).length}
+            </span>
+          )}
+        </button>
       </div>
+
+      {/* Filter panel (T299) */}
+      {showFilters && (
+        <div
+          className="flex flex-col sm:flex-row sm:items-end gap-3 rounded-xl"
+          style={{
+            padding: '1rem',
+            marginBottom: '1rem',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+          }}
+        >
+          {/* Owner filter */}
+          <div className="flex-1" style={{ minWidth: '10rem' }}>
+            <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
+              Owner
+            </label>
+            <select
+              value={filterOwner}
+              onChange={e => setFilterOwner(e.target.value)}
+              className="w-full rounded-lg cursor-pointer"
+              style={{
+                padding: '0.5rem 0.75rem',
+                fontSize: '0.8125rem',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                minHeight: '2.5rem',
+              }}
+            >
+              <option value="">All owners</option>
+              {teamMembers.map(m => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Source filter */}
+          <div className="flex-1" style={{ minWidth: '10rem' }}>
+            <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
+              Source
+            </label>
+            <select
+              value={filterSource}
+              onChange={e => setFilterSource(e.target.value)}
+              className="w-full rounded-lg cursor-pointer"
+              style={{
+                padding: '0.5rem 0.75rem',
+                fontSize: '0.8125rem',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                minHeight: '2.5rem',
+              }}
+            >
+              <option value="">All sources</option>
+              <option value="referral">Referral</option>
+              <option value="linkedin">LinkedIn</option>
+              <option value="website">Website</option>
+              <option value="cold">Cold Outreach</option>
+              <option value="cold_outreach">Cold Outreach</option>
+              <option value="partner">Partner</option>
+              <option value="webflow">Webflow</option>
+              <option value="existing_client">Existing Client</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+
+          {/* Value min */}
+          <div style={{ minWidth: '7rem' }}>
+            <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
+              Min Value
+            </label>
+            <input
+              type="number"
+              value={filterValueMin}
+              onChange={e => setFilterValueMin(e.target.value)}
+              placeholder="0"
+              className="w-full rounded-lg"
+              style={{
+                padding: '0.5rem 0.75rem',
+                fontSize: '0.8125rem',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                minHeight: '2.5rem',
+              }}
+            />
+          </div>
+
+          {/* Value max */}
+          <div style={{ minWidth: '7rem' }}>
+            <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
+              Max Value
+            </label>
+            <input
+              type="number"
+              value={filterValueMax}
+              onChange={e => setFilterValueMax(e.target.value)}
+              placeholder="No limit"
+              className="w-full rounded-lg"
+              style={{
+                padding: '0.5rem 0.75rem',
+                fontSize: '0.8125rem',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                minHeight: '2.5rem',
+              }}
+            />
+          </div>
+
+          {/* Clear button */}
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="inline-flex items-center gap-1 rounded-lg transition-colors self-end"
+              style={{
+                padding: '0.5rem 0.75rem',
+                fontSize: '0.8125rem',
+                fontWeight: 500,
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--color-text-muted)',
+                cursor: 'pointer',
+                minHeight: '2.5rem',
+              }}
+            >
+              <X className="w-3.5 h-3.5" />
+              Clear
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Content */}
       {loading ? (
@@ -368,9 +593,11 @@ export function PipelineContent() {
       {showNewDeal && (
         <NewDealDialog
           stages={stages}
-          onClose={() => setShowNewDeal(false)}
+          initialOrgId={initialOrgId}
+          onClose={() => { setShowNewDeal(false); setInitialOrgId(null) }}
           onCreated={() => {
             setShowNewDeal(false)
+            setInitialOrgId(null)
             fetchData()
           }}
         />
@@ -1114,8 +1341,9 @@ function ListView({ deals, stages, sortKey }: {
 
 // ---- New Deal Dialog -----------------------------------------------------
 
-function NewDealDialog({ stages, onClose, onCreated }: {
+function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
   stages: PipelineStage[]
+  initialOrgId?: string | null
   onClose: () => void
   onCreated: () => void
 }) {
@@ -1128,6 +1356,7 @@ function NewDealDialog({ stages, onClose, onCreated }: {
   const [currency, setCurrency] = useState('NZD')
   const [source, setSource] = useState('')
   const [expectedCloseDate, setExpectedCloseDate] = useState('')
+  const [orgId] = useState(initialOrgId ?? '')
   const [saving, setSaving] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1146,6 +1375,7 @@ function NewDealDialog({ stages, onClose, onCreated }: {
           currency,
           source: source || undefined,
           expectedCloseDate: expectedCloseDate || undefined,
+          orgId: orgId || undefined,
         }),
       })
       if (res.ok) {

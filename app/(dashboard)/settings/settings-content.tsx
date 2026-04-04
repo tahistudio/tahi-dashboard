@@ -6,6 +6,7 @@ import {
   CreditCard, Link2, Bell, Building2,
   FileText, Plus, Trash2, GripVertical, ChevronDown, ChevronUp,
   Webhook, Loader2, User, Palette, ToggleLeft,
+  Target,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -381,6 +382,9 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
 
           {/* Kanban Columns (admin only) */}
           {isAdmin && <KanbanColumnsSection />}
+
+          {/* Pipeline Stages (admin only) - T289 */}
+          {isAdmin && <PipelineStagesSection />}
 
           {/* Google Calendar Booking (admin only) - T87 */}
           {isAdmin && <BookingLinkSection settings={settings} onSave={saveSetting} savingKey={savingKey} />}
@@ -961,6 +965,257 @@ function FormEditor({ form, onSaved }: { form: FormTemplate; onSaved: () => void
         </TahiButton>
       </div>
     </div>
+  )
+}
+
+// -- Pipeline Stages Section (T289) --
+
+interface PipelineStageData {
+  id: string
+  name: string
+  slug: string
+  probability: number
+  position: number
+  colour: string | null
+  isDefault: number
+  isClosedWon: number
+  isClosedLost: number
+}
+
+function PipelineStagesSection() {
+  const [stages, setStages] = useState<PipelineStageData[]>([])
+  const [loadingStages, setLoadingStages] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  const [showAdd, setShowAdd] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newColour, setNewColour] = useState('#5A824E')
+  const [newProbability, setNewProbability] = useState('50')
+  const { showToast } = useToast()
+
+  const fetchStages = useCallback(async () => {
+    setLoadingStages(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/pipeline/stages'))
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as { stages: PipelineStageData[] }
+      setStages((data.stages ?? []).sort((a, b) => a.position - b.position))
+      setDirty(false)
+    } catch {
+      setStages([])
+    } finally {
+      setLoadingStages(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchStages() }, [fetchStages])
+
+  function updateStage(idx: number, updates: Partial<PipelineStageData>) {
+    setStages(prev => prev.map((s, i) => i === idx ? { ...s, ...updates } : s))
+    setDirty(true)
+  }
+
+  function moveStage(idx: number, direction: -1 | 1) {
+    const targetIdx = idx + direction
+    if (targetIdx < 0 || targetIdx >= stages.length) return
+    setStages(prev => {
+      const next = [...prev]
+      const currentPos = next[idx].position
+      next[idx] = { ...next[idx], position: next[targetIdx].position }
+      next[targetIdx] = { ...next[targetIdx], position: currentPos }
+      return next.sort((a, b) => a.position - b.position)
+    })
+    setDirty(true)
+  }
+
+  function removeStage(idx: number) {
+    setStages(prev => {
+      const next = prev.filter((_, i) => i !== idx)
+      return next.map((s, i) => ({ ...s, position: i }))
+    })
+    setDirty(true)
+  }
+
+  function addStage() {
+    if (!newName.trim()) return
+    const slug = newName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+    setStages(prev => [
+      ...prev,
+      {
+        id: `_new_${Date.now()}`,
+        name: newName.trim(),
+        slug,
+        probability: parseInt(newProbability, 10) || 0,
+        position: prev.length,
+        colour: newColour,
+        isDefault: 0,
+        isClosedWon: 0,
+        isClosedLost: 0,
+      },
+    ])
+    setShowAdd(false)
+    setNewName('')
+    setNewColour('#5A824E')
+    setNewProbability('50')
+    setDirty(true)
+  }
+
+  async function saveAll() {
+    setSaving(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/pipeline/stages'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stages }),
+      })
+      if (!res.ok) throw new Error('Failed to save')
+      showToast('Pipeline stages saved', 'success')
+      await fetchStages()
+    } catch {
+      showToast('Failed to save pipeline stages', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <Target className="w-5 h-5" />
+        Pipeline Stages
+      </h2>
+
+      {loadingStages ? (
+        <LoadingSkeleton rows={4} />
+      ) : (
+        <div className="space-y-2">
+          {stages.map((stage, idx) => (
+            <div key={stage.id} className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl px-4 py-3 flex items-center gap-3">
+              <div
+                className="w-3 h-3 rounded-full flex-shrink-0"
+                style={{ background: stage.colour ?? 'var(--color-text-subtle)' }}
+              />
+              <InlineEditText
+                value={stage.name}
+                onSave={name => updateStage(idx, { name })}
+                className="flex-1 text-sm font-medium text-[var(--color-text)]"
+              />
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <label className="text-xs text-[var(--color-text-subtle)]" htmlFor={`prob-${stage.id}`}>
+                  Prob:
+                </label>
+                <input
+                  id={`prob-${stage.id}`}
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={stage.probability}
+                  onChange={e => updateStage(idx, { probability: parseInt(e.target.value, 10) || 0 })}
+                  className="text-sm rounded border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-1.5 py-0.5 text-[var(--color-text)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand)]"
+                  style={{ width: '3.5rem' }}
+                />
+                <span className="text-xs text-[var(--color-text-subtle)]">%</span>
+              </div>
+              <input
+                type="color"
+                value={stage.colour ?? '#5A824E'}
+                onChange={e => updateStage(idx, { colour: e.target.value })}
+                className="w-6 h-6 rounded border border-[var(--color-border)] cursor-pointer flex-shrink-0"
+                aria-label={`Change color for ${stage.name}`}
+              />
+              <div className="flex items-center gap-0.5 flex-shrink-0">
+                <button
+                  onClick={() => moveStage(idx, -1)}
+                  disabled={idx === 0}
+                  className="p-1 rounded text-[var(--color-text-subtle)] hover:bg-[var(--color-bg-secondary)] disabled:opacity-30 transition-colors"
+                  aria-label="Move up"
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => moveStage(idx, 1)}
+                  disabled={idx === stages.length - 1}
+                  className="p-1 rounded text-[var(--color-text-subtle)] hover:bg-[var(--color-bg-secondary)] disabled:opacity-30 transition-colors"
+                  aria-label="Move down"
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <button
+                onClick={() => removeStage(idx)}
+                className="p-1 rounded text-[var(--color-text-subtle)] hover:text-[var(--color-danger)] hover:bg-[var(--color-bg-secondary)] transition-colors flex-shrink-0"
+                aria-label="Remove stage"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+
+          {showAdd ? (
+            <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-4 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label htmlFor="new-stage-name" className="block text-xs font-medium text-[var(--color-text)] mb-1">Name</label>
+                  <input
+                    id="new-stage-name"
+                    type="text"
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    placeholder="Discovery"
+                    className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-1.5 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="new-stage-prob" className="block text-xs font-medium text-[var(--color-text)] mb-1">Probability %</label>
+                  <input
+                    id="new-stage-prob"
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={newProbability}
+                    onChange={e => setNewProbability(e.target.value)}
+                    className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-1.5 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="new-stage-colour" className="block text-xs font-medium text-[var(--color-text)] mb-1">Colour</label>
+                  <input
+                    id="new-stage-colour"
+                    type="color"
+                    value={newColour}
+                    onChange={e => setNewColour(e.target.value)}
+                    className="w-full h-8 rounded-lg border border-[var(--color-border)] cursor-pointer"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <TahiButton variant="secondary" size="sm" onClick={() => setShowAdd(false)}>Cancel</TahiButton>
+                <TahiButton size="sm" onClick={addStage} disabled={!newName.trim()}>
+                  Add Stage
+                </TahiButton>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <TahiButton variant="secondary" size="sm" onClick={() => setShowAdd(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+                Add Stage
+              </TahiButton>
+              {dirty && (
+                <TahiButton size="sm" onClick={saveAll} disabled={saving}>
+                  {saving ? 'Saving...' : 'Save Changes'}
+                </TahiButton>
+              )}
+            </div>
+          )}
+
+          {dirty && !showAdd && (
+            <p className="text-xs text-[var(--color-warning, #fb923c)]">
+              You have unsaved changes. Click &quot;Save Changes&quot; to apply.
+            </p>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
 
