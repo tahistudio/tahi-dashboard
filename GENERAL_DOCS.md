@@ -150,9 +150,15 @@ Dashboard MCP Server
 
 ### Endpoint Details
 
-**Base URL:** `https://tahi-test-dashboard.webflow.io/api/mcp`
+**Base URL:** `https://fdd08ec9-43a5-4c62-aa6d-309da23e3d0f.wf-app-prod.cosmic.webflow.services/dashboard/api/mcp`
 
-**GET /api/mcp**
+**⚠️ Routing Issue (Phase 8 Fix Needed)**
+
+The custom domain `tahi-test-dashboard.webflow.io` does NOT expose the MCP endpoint due to `basePath: '/dashboard'` in next.config.ts. This causes Next.js to break API route routing.
+
+**Temporary workaround**: Use the Cloudflare Workers domain with /dashboard prefix in the path. For production, remove `basePath: '/dashboard'` from next.config.ts and configure Webflow routing separately.
+
+**GET /dashboard/api/mcp** (temporary)
 Returns server info and available tools:
 ```json
 {

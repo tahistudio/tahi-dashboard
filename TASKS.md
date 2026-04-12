@@ -870,16 +870,17 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [x] T551 - [BE] MCP HTTP transport handler: implement `app/api/mcp/route.ts` with POST and GET endpoints. POST handles JSON-RPC 2.0 protocol: initialize, tools/list, tools/call methods. GET returns server info with tool list and capabilities. — [BE] 2026-04-12
 - [x] T552 - [BE] MCP tools implementation: expose 7 dashboard tools via HTTP: get_overview_stats, list_clients, get_client_detail, list_requests, get_billing_summary, get_capacity, get_reports. Each tool proxies through authenticated backend API routes using TAHI_API_TOKEN. — [BE] 2026-04-12
 - [x] T553 - [PM] MCP HTTP setup documentation: create `MCP_HTTP_SETUP.md` with architecture diagram, step-by-step configuration, security notes, and testing examples. Covers adding MCP as custom connector in Claude. — [PM] 2026-04-12
-- [x] T554 - [QA] Test MCP HTTP endpoint: verify GET /api/mcp returns server info with tool list, POST with initialize/tools/list/tools/call methods work correctly, tools proxy to backend routes successfully. — [QA] 2026-04-12
-- [x] T555 - [PM] Documentation cleanup: consolidate launch documentation into focused files (LAUNCH_CHECKLIST.md, XERO_INTEGRATION_COMPLETE.md, MCP_HTTP_SETUP.md, TEST_SUITE_COMPREHENSIVE.md). Remove redundant status files. Update LAUNCH_READY_STATUS.md with final checklist. — [PM] 2026-04-12
+- [ ] T554 - [QA] Test MCP HTTP endpoint: verify GET /api/mcp returns server info with tool list, POST with initialize/tools/list/tools/call methods work correctly, tools proxy to backend routes successfully. **BLOCKED: basePath: '/dashboard' in next.config.ts breaks API route routing on Cloudflare Workers. All /api/* routes return 404. Phase 8 fix: remove basePath or configure separate MCP endpoint outside Next.js app.** — [QA] 2026-04-12
+- [x] T555 - [PM] Documentation cleanup: consolidate launch documentation into focused files (LAUNCH_CHECKLIST.md, XERO_INTEGRATION_COMPLETE.md, MCP_HTTP_SETUP.md, TEST_SUITE_COMPREHENSIVE.md). Remove redundant status files. Update LAUNCH_READY_STATUS.md with final checklist. Updated GENERAL_DOCS.md with basePath routing issue. — [PM] 2026-04-12
 
 ---
 
 ## Post-Launch (Future Phases)
 
-### Phase 8: Advanced MCP Resources and Tools
+### Phase 8: Fix basePath Routing & Advanced MCP Resources and Tools
 
-- [ ] T556 - [BE] MCP resources: implement dashboard://clients, dashboard://requests, dashboard://invoices, dashboard://time-entries, dashboard://reports resources for rich data context — [BE]
+- [ ] T556 - [BE] **FIX BLOCKER: basePath routing** - Remove `basePath: '/dashboard'` from next.config.ts and configure Webflow routing to serve dashboard pages separately, OR move MCP endpoint outside Next.js app as standalone Cloudflare Worker route. Currently all /api/* routes return 404 because basePath breaks routing. This blocks T554 (MCP endpoint testing). — [BE]
+- [ ] T557 - [BE] MCP resources: implement dashboard://clients, dashboard://requests, dashboard://invoices, dashboard://time-entries, dashboard://reports resources for rich data context — [BE]
 - [ ] T557 - [BE] MCP tools: implement create_request, update_request, assign_request, create_invoice, log_time tools for data mutations — [BE]
 - [ ] T558 - [BE] MCP OAuth: add OAuth authentication for MCP endpoint (optional, currently uses TAHI_API_TOKEN header) — [BE]
 - [ ] T559 - [FE] Google Calendar integration: auto-generate booking links for scheduled calls (currently manual URL entry) — [FE]
