@@ -629,3 +629,40 @@ Escalated to Liam: No. Direct confirmation from Liam.
 - Cloudflare Worker proxy code is written but not deployed due to UI persistence issues; CLI deployment planned for Phase 8
 
 **Future:** Complete Worker deployment, add mutation tools, OAuth, webhook integration
+
+---
+
+## #035 - HubSpot Deals Import Endpoint Created (Blocked by basePath Routing)
+
+**Date:** 2026-04-12
+**Context:** User requested importing HubSpot deals into the dashboard as a one-time data operation and clearing existing test deals. Endpoint was created but routing prevents deployment and testing.
+
+**Decision:**
+- **Endpoint Created:** `POST /api/admin/integrations/hubspot/sync-deals` implemented in `app/api/admin/integrations/hubspot/sync-deals/route.ts`
+- **Functionality:**
+  - Fetches all deals from HubSpot API using `HUBSPOT_API_KEY` environment variable
+  - Deletes all existing deals from dashboard (clears test data)
+  - Creates new deals from HubSpot data with mapping:
+    - `dealname` → `title`
+    - `amount` → `value` and `valueNzd` (USD conversion)
+    - `dealstage` → matched to default lead stage
+    - `closedate` → `expectedCloseDate`
+    - `notes` → `notes`
+    - Source set to 'hubspot' for tracking
+- **Status:** Code committed to main but blocked by basePath routing issue (same as Decision #034)
+- **Blocker:** The `basePath: '/dashboard'` in `next.config.ts` prevents API route discovery on Webflow Cloud, even after deployment
+- **Phase 8 Solution:** Same as MCP endpoint - requires removing basePath and reconfiguring Webflow routing
+
+**Test Data Cleared:**
+- Before: 2 test deals ("sad" for $1000 USD, "fdgrdf" for $4500 NZD)
+- After (once endpoint works): These will be replaced by actual HubSpot deals
+
+**How to apply:**
+- Once basePath routing is fixed in Phase 8, endpoint will be accessible at `POST /api/admin/integrations/hubspot/sync-deals`
+- No authentication required beyond admin role check (POST requires Tahi admin token)
+- Returns JSON with `{success, clearedCount, importedCount, failedDeals[]}`
+- Alternative: Use `scripts/sync-hubspot-deals.ts` locally with env vars if needed for debugging
+
+**Why:** Waiting on basePath fix. The endpoint is production-ready code but cannot be deployed until the routing architectural issue is resolved. This affects all new API endpoints added during Phase 5.
+
+---

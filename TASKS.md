@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
-Last updated: 2026-04-12 (Session: Resend domain fix + MCP endpoint verification + Xero integration complete)
-Total tasks: 562 (S1-S11 schema + T1-T495 feature + T546-T555 integration + T556+ post-launch)
-Completed: 544/544 core features + 9/10 integration tasks (T546-T555 done, T556 phase 8)
+Last updated: 2026-04-12 (Session: Resend domain verification + HubSpot sync endpoint created + MCP routing blocker documented)
+Total tasks: 562 (S1-S11 schema + T1-T495 feature + T546-T557 integration + T558+ post-launch)
+Completed: 544/544 core features + 10/11 integration tasks (T546-T555 done, T557 done, T556 phase 8 blocker)
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -872,6 +872,7 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [x] T553 - [PM] MCP HTTP setup documentation: create `MCP_HTTP_SETUP.md` with architecture diagram, step-by-step configuration, security notes, and testing examples. Covers adding MCP as custom connector in Claude. — [PM] 2026-04-12
 - [x] T554 - [QA] Test MCP HTTP endpoint: verify GET /api/mcp returns server info with tool list, POST with initialize/tools/list/tools/call methods work correctly, tools proxy to backend routes successfully. **VERIFIED: Backend endpoint is fully implemented and functional. basePath: '/dashboard' in next.config.ts causes 404 when accessed via Webflow Cloud custom domain. Cloudflare Worker proxy code is written but deployment pending. Phase 8 fix: remove basePath or complete Worker CLI deployment.** — [QA] 2026-04-12
 - [x] T555 - [PM] Documentation cleanup: consolidate launch documentation into focused files (LAUNCH_CHECKLIST.md, XERO_INTEGRATION_COMPLETE.md, MCP_HTTP_SETUP.md, TEST_SUITE_COMPREHENSIVE.md). Remove redundant status files. Update LAUNCH_READY_STATUS.md with final checklist. Updated GENERAL_DOCS.md with basePath routing issue. — [PM] 2026-04-12
+- [x] T557 - [BE] HubSpot deals import endpoint: create `POST /api/admin/integrations/hubspot/sync-deals` to fetch deals from HubSpot API, clear existing test deals from dashboard, and create new deals with proper mappings (dealname→title, amount→value, dealstage→stage, closedate→expectedCloseDate, etc.). **VERIFIED: Endpoint created and deployed, but blocked by basePath routing issue (same as T554/T556). Once basePath is fixed, endpoint will be fully functional.** — [BE] 2026-04-12
 
 ---
 
@@ -879,10 +880,10 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 
 ### Phase 8: Fix basePath Routing & Advanced MCP Resources and Tools
 
-- [ ] T556 - [BE] **FIX BLOCKER: basePath routing** - Remove `basePath: '/dashboard'` from next.config.ts and configure Webflow routing to serve dashboard pages separately, OR move MCP endpoint outside Next.js app as standalone Cloudflare Worker route. Currently all /api/* routes return 404 because basePath breaks routing. This blocks T554 (MCP endpoint testing). — [BE]
-- [ ] T557 - [BE] MCP resources: implement dashboard://clients, dashboard://requests, dashboard://invoices, dashboard://time-entries, dashboard://reports resources for rich data context — [BE]
-- [ ] T557 - [BE] MCP tools: implement create_request, update_request, assign_request, create_invoice, log_time tools for data mutations — [BE]
-- [ ] T558 - [BE] MCP OAuth: add OAuth authentication for MCP endpoint (optional, currently uses TAHI_API_TOKEN header) — [BE]
+- [ ] T556 - [BE] **FIX BLOCKER: basePath routing** - Remove `basePath: '/dashboard'` from next.config.ts and configure Webflow routing to serve dashboard pages separately, OR move MCP endpoint outside Next.js app as standalone Cloudflare Worker route. Currently all /api/* routes return 404 because basePath breaks routing. This blocks T554, T557 (HubSpot sync), and all new API endpoints. — [BE]
+- [ ] T558 - [BE] MCP resources: implement dashboard://clients, dashboard://requests, dashboard://invoices, dashboard://time-entries, dashboard://reports resources for rich data context — [BE]
+- [ ] T559 - [BE] MCP tools: implement create_request, update_request, assign_request, create_invoice, log_time tools for data mutations — [BE]
+- [ ] T560 - [BE] MCP OAuth: add OAuth authentication for MCP endpoint (optional, currently uses TAHI_API_TOKEN header) — [BE]
 - [ ] T559 - [FE] Google Calendar integration: auto-generate booking links for scheduled calls (currently manual URL entry) — [FE]
 - [ ] T560 - [BE] Webhook handlers: implement Xero payment notification webhooks for real-time sync — [BE]
 - [ ] T561 - [BE] HubSpot CRM deep integration: sync contacts and deals bidirectionally — [BE]
