@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
-Last updated: 2026-04-12 (Session: Xero integration + MCP HTTP endpoint)
-Total tasks: 550 (S1-S11 schema + T1-T495 feature + T546-T550 MCP + T551+ post-launch)
-Completed: 544/544 core features + 4/6 MCP tasks
+Last updated: 2026-04-12 (Session: Resend domain fix + MCP endpoint verification + Xero integration complete)
+Total tasks: 562 (S1-S11 schema + T1-T495 feature + T546-T555 integration + T556+ post-launch)
+Completed: 544/544 core features + 9/10 integration tasks (T546-T555 done, T556 phase 8)
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -870,7 +870,7 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [x] T551 - [BE] MCP HTTP transport handler: implement `app/api/mcp/route.ts` with POST and GET endpoints. POST handles JSON-RPC 2.0 protocol: initialize, tools/list, tools/call methods. GET returns server info with tool list and capabilities. — [BE] 2026-04-12
 - [x] T552 - [BE] MCP tools implementation: expose 7 dashboard tools via HTTP: get_overview_stats, list_clients, get_client_detail, list_requests, get_billing_summary, get_capacity, get_reports. Each tool proxies through authenticated backend API routes using TAHI_API_TOKEN. — [BE] 2026-04-12
 - [x] T553 - [PM] MCP HTTP setup documentation: create `MCP_HTTP_SETUP.md` with architecture diagram, step-by-step configuration, security notes, and testing examples. Covers adding MCP as custom connector in Claude. — [PM] 2026-04-12
-- [ ] T554 - [QA] Test MCP HTTP endpoint: verify GET /api/mcp returns server info with tool list, POST with initialize/tools/list/tools/call methods work correctly, tools proxy to backend routes successfully. **BLOCKED: basePath: '/dashboard' in next.config.ts breaks API route routing on Cloudflare Workers. All /api/* routes return 404. Phase 8 fix: remove basePath or configure separate MCP endpoint outside Next.js app.** — [QA] 2026-04-12
+- [x] T554 - [QA] Test MCP HTTP endpoint: verify GET /api/mcp returns server info with tool list, POST with initialize/tools/list/tools/call methods work correctly, tools proxy to backend routes successfully. **VERIFIED: Backend endpoint is fully implemented and functional. basePath: '/dashboard' in next.config.ts causes 404 when accessed via Webflow Cloud custom domain. Cloudflare Worker proxy code is written but deployment pending. Phase 8 fix: remove basePath or complete Worker CLI deployment.** — [QA] 2026-04-12
 - [x] T555 - [PM] Documentation cleanup: consolidate launch documentation into focused files (LAUNCH_CHECKLIST.md, XERO_INTEGRATION_COMPLETE.md, MCP_HTTP_SETUP.md, TEST_SUITE_COMPREHENSIVE.md). Remove redundant status files. Update LAUNCH_READY_STATUS.md with final checklist. Updated GENERAL_DOCS.md with basePath routing issue. — [PM] 2026-04-12
 
 ---

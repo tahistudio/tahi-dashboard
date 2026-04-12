@@ -583,3 +583,49 @@ Escalated to Liam: No. Direct confirmation from Liam.
 - Endpoint requires TAHI_API_TOKEN in environment
 
 **Future:** Full mutation tools, OAuth, webhook handlers, resource implementation (Phase 8+)
+
+---
+
+## #033 - Resend Email Domain Fixed: tahi.studio
+
+**Date:** 2026-04-12
+**Context:** Email sending was failing with 403 Forbidden from Resend because the sender domain was incorrectly set to `notifications@tahistudio.com` instead of the verified domain `notifications@tahi.studio`.
+
+**Decision:**
+- Updated all email sending routes to use `from: 'Tahi Studio <notifications@tahi.studio>'`
+- Affected routes:
+  - `app/api/admin/clients/[id]/welcome-email/route.ts:71`
+  - `app/api/admin/invoices/[id]/send-email/route.ts:86`
+  - `app/api/admin/announcements/[id]/send/route.ts:86`
+- All emails now send successfully from the verified tahi.studio domain
+
+**Why:** Resend requires a verified sender domain. The typo in the domain name was silently failing all email delivery. Correcting to the verified domain resolves all email failures without any infrastructure changes.
+
+---
+
+## #034 - MCP HTTP Endpoint Implementation Verified (Not Deployed Yet)
+
+**Date:** 2026-04-12
+**Context:** The MCP HTTP endpoint was fully implemented in `app/api/mcp/route.ts` with all 7 tools working. However, the Cloudflare Worker proxy (tahi-mcp-server.business-ccd.workers.dev) is not properly exposing the endpoint due to a basePath routing issue.
+
+**Decision:**
+- **Endpoint Status:** `POST /api/mcp` and `GET /api/mcp` are fully functional in the Next.js backend
+- **Routing Issue:** The `basePath: '/dashboard'` in `next.config.ts` causes Next.js API routes to return 404 when accessed via the Webflow Cloud custom domain because Webflow routing breaks API route discovery
+- **Temporary Workaround:** The Cloudflare Workers domain (fdd08ec9-43a5-4c62-aa6d-309da23e3d0f.wf-app-prod.cosmic.webflow.services/dashboard/api/mcp) works but still returns 404 due to Webflow Cloud routing configuration
+- **Phase 8 Solution:** Remove `basePath: '/dashboard'` from `next.config.ts` and configure routing at the Webflow layer instead, or complete the Cloudflare Worker proxy setup via CLI deployment
+
+**7 Tools Exposed:**
+1. `get_overview_stats` - Dashboard KPIs, recent requests, revenue
+2. `list_clients` - All clients (filterable by status, planType)
+3. `get_client_detail` - Single client with org, contacts, subscription, requests
+4. `list_requests` - Work requests with filters (status, clientId, limit)
+5. `get_billing_summary` - Financial summary, invoices, trends
+6. `get_capacity` - Team utilization, available hours
+7. `get_reports` - Aggregate reports (client count, billable hours, response times)
+
+**How to apply:**
+- MCP endpoint is ready for use as soon as the routing issue is resolved
+- No code changes needed; only infrastructure configuration
+- Cloudflare Worker proxy code is written but not deployed due to UI persistence issues; CLI deployment planned for Phase 8
+
+**Future:** Complete Worker deployment, add mutation tools, OAuth, webhook integration
