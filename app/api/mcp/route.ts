@@ -7,11 +7,6 @@ interface MCPRequest {
   params?: Record<string, unknown>
 }
 
-interface MCPToolCall {
-  name: string
-  arguments?: Record<string, unknown>
-}
-
 /**
  * POST /api/mcp
  * MCP (Model Context Protocol) HTTP transport handler
@@ -166,7 +161,6 @@ export async function POST(req: NextRequest) {
 
       try {
         let result: string
-        let status = 200
 
         switch (name) {
           case 'get_overview_stats': {
