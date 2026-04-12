@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
-Last updated: 2026-04-04
-Total tasks: 544 (S1-S22 schema + T1-T495 feature + unnumbered review/QA items)
-Completed: 544/544
+Last updated: 2026-04-12 (Session: Xero integration + MCP HTTP endpoint)
+Total tasks: 550 (S1-S11 schema + T1-T495 feature + T546-T550 MCP + T551+ post-launch)
+Completed: 544/544 core features + 4/6 MCP tasks
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -852,3 +852,37 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [x] T493 - [FE] View as Team Member: add team member impersonation alongside existing client impersonation. Eye button on team cards fetches access rules and enters scoped admin view. Banner shows blue info style. Sidebar hides management pages for viewer role. Client list filters by access scope. Create buttons hidden for viewers. All existing client impersonation updated to use typed discriminated union. -- [FE] 2026-04-03
 - [x] T494 - [UIUX] Team member impersonation: review banner styling, scoped client list, and hidden actions during viewer impersonation. (verified in browser QA 2026-04-04)
 - [x] T495 - [QA] Regression test team member impersonation: verify access scoping filters clients correctly, viewer role hides edit/create actions, sidebar reflects permissions, exit returns to team page. (verified in browser QA 2026-04-04)
+
+---
+
+## Phase 7: Xero Bidirectional Sync + MCP HTTP Endpoint (2026-04-12)
+
+### Xero Integration (OAuth and Invoice Sync)
+
+- [x] T546 - [BE] Xero OAuth token exchange: implement callback route `/api/admin/integrations/xero/callback` to exchange authorization code for tokens. Store access token, refresh token, token type, and expiry time in integrations table. Handle error cases and redirect to settings. — [BE] 2026-04-12
+- [x] T547 - [BE] Xero token utilities: create `lib/xero.ts` with functions `getXeroIntegration()`, `isTokenExpired()`, `refreshXeroToken()`, `getValidXeroToken()`, and `callXeroAPI()`. Automatic refresh before API calls when token is expired. — [BE] 2026-04-12
+- [x] T548 - [BE] Xero invoice push API: implement `POST /api/admin/invoices/xero-sync` to push invoices to Xero. Creates or finds contacts in Xero first, then creates invoices with line items. Stores Xero invoice ID for reconciliation. Supports batch sync by invoiceId or orgId. — [BE] 2026-04-12
+- [x] T549 - [BE] Xero payment sync API: implement `POST /api/admin/integrations/xero/sync-payments` to pull payment statuses from Xero. Maps Xero status codes to local status values. Updates invoice status and paidAt timestamps in local database. Returns sync summary with updated counts. — [BE] 2026-04-12
+- [x] T550 - [FE] Xero integration settings page: wire OAuth login button, show token expiry, add manual sync buttons for invoices and payments, display last sync timestamp. — [FE] 2026-04-12
+
+### MCP HTTP Endpoint for Claude Custom Connectors
+
+- [x] T551 - [BE] MCP HTTP transport handler: implement `app/api/mcp/route.ts` with POST and GET endpoints. POST handles JSON-RPC 2.0 protocol: initialize, tools/list, tools/call methods. GET returns server info with tool list and capabilities. — [BE] 2026-04-12
+- [x] T552 - [BE] MCP tools implementation: expose 7 dashboard tools via HTTP: get_overview_stats, list_clients, get_client_detail, list_requests, get_billing_summary, get_capacity, get_reports. Each tool proxies through authenticated backend API routes using TAHI_API_TOKEN. — [BE] 2026-04-12
+- [x] T553 - [PM] MCP HTTP setup documentation: create `MCP_HTTP_SETUP.md` with architecture diagram, step-by-step configuration, security notes, and testing examples. Covers adding MCP as custom connector in Claude. — [PM] 2026-04-12
+- [x] T554 - [QA] Test MCP HTTP endpoint: verify GET /api/mcp returns server info with tool list, POST with initialize/tools/list/tools/call methods work correctly, tools proxy to backend routes successfully. — [QA] 2026-04-12
+- [x] T555 - [PM] Documentation cleanup: consolidate launch documentation into focused files (LAUNCH_CHECKLIST.md, XERO_INTEGRATION_COMPLETE.md, MCP_HTTP_SETUP.md, TEST_SUITE_COMPREHENSIVE.md). Remove redundant status files. Update LAUNCH_READY_STATUS.md with final checklist. — [PM] 2026-04-12
+
+---
+
+## Post-Launch (Future Phases)
+
+### Phase 8: Advanced MCP Resources and Tools
+
+- [ ] T556 - [BE] MCP resources: implement dashboard://clients, dashboard://requests, dashboard://invoices, dashboard://time-entries, dashboard://reports resources for rich data context — [BE]
+- [ ] T557 - [BE] MCP tools: implement create_request, update_request, assign_request, create_invoice, log_time tools for data mutations — [BE]
+- [ ] T558 - [BE] MCP OAuth: add OAuth authentication for MCP endpoint (optional, currently uses TAHI_API_TOKEN header) — [BE]
+- [ ] T559 - [FE] Google Calendar integration: auto-generate booking links for scheduled calls (currently manual URL entry) — [FE]
+- [ ] T560 - [BE] Webhook handlers: implement Xero payment notification webhooks for real-time sync — [BE]
+- [ ] T561 - [BE] HubSpot CRM deep integration: sync contacts and deals bidirectionally — [BE]
+- [ ] T562 - [BE] Zapier outgoing webhooks: enable external automation triggers for rule-based actions — [BE]

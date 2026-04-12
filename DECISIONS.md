@@ -539,3 +539,47 @@ Escalated to Liam: No. Direct confirmation from Liam.
 **Decision:** Add `custom_fields` (text, default '{}'), `default_hourly_rate` (integer), `size` (text), and `annual_revenue` (integer) columns to the `organisations` table as part of S13 batch 9 remaining work.
 
 **Rationale:** The CRM pipeline spec requires custom fields and company metadata (size, revenue, hourly rate) to be stored on organisations. These were approved in S13 but not yet added to the schema. Migration 0006 adds these four columns.
+
+---
+
+## #031 - Xero Bidirectional Sync Strategy
+
+**Date:** 2026-04-12
+**Context:** Tahi generates invoices locally and needs to keep Xero in sync for payment reconciliation. Xero handles retainer invoice generation and payment processing.
+
+**Decision:**
+- **Token Management:** Store Xero OAuth tokens (access_token, refresh_token, expires_at) in the `integrations` table with type='xero'. Implement automatic token refresh before each API call.
+- **Invoice Push:** When an admin manually creates or edits an invoice in Tahi, push it to Xero. Create contacts in Xero first if they don't exist, then create invoices with line items. Store the Xero invoice ID locally for reconciliation.
+- **Payment Pull:** Periodically (or on-demand) pull invoice statuses from Xero to sync payment statuses back to the Tahi dashboard. Map Xero status codes to local status enum values.
+- **No bidirectional pull:** Tahi is the source of truth for invoices. We do not pull invoice data from Xero back to Tahi (too complex for MVP). Invoice creation happens locally only.
+
+**How to apply:**
+- BE implements `lib/xero.ts` with token management utilities
+- `POST /api/admin/invoices/xero-sync` pushes invoices to Xero
+- `POST /api/admin/integrations/xero/sync-payments` pulls payment statuses from Xero
+- FE wires sync buttons to settings integrations page
+
+**Future:** Webhook handlers for Xero payment notifications (Phase 8+)
+
+---
+
+## #032 - MCP HTTP Endpoint for Claude Custom Connectors
+
+**Date:** 2026-04-12
+**Context:** Tahi dashboard is powerful (clients, requests, invoicing, capacity tracking) but users currently need to log in to the web UI. Exposing the dashboard as an MCP server allows Claude to query and act on Tahi data directly from conversations.
+
+**Decision:**
+- **HTTP Transport:** Implement MCP (Model Context Protocol) over HTTP via `app/api/mcp/route.ts`. This allows the MCP server to be called from Claude as a custom connector, without needing a separate process or Stdio transport.
+- **Protocol Compliance:** Full JSON-RPC 2.0 support for initialize, tools/list, tools/call methods. GET endpoint returns server info with capabilities.
+- **Tool Exposure:** Initially expose 7 read-only dashboard tools: get_overview_stats, list_clients, get_client_detail, list_requests, get_billing_summary, get_capacity, get_reports. Each tool proxies through authenticated backend API routes using TAHI_API_TOKEN.
+- **Authentication:** Tools require valid TAHI_API_TOKEN header. Token is set in Webflow Cloud environment. Optional OAuth implementation for production (Phase 8+).
+- **No mutations initially:** Phase 1 MCP endpoint is read-only (GET operations only). Mutation tools (create_request, update_status, create_invoice, etc.) deferred to Phase 8.
+
+**How to apply:**
+- POST /api/mcp handles JSON-RPC protocol
+- GET /api/mcp returns server metadata
+- Deploy to Webflow Cloud via main branch push (auto-deploys)
+- Add to Claude as custom connector: https://tahi-test-dashboard.webflow.io/api/mcp
+- Endpoint requires TAHI_API_TOKEN in environment
+
+**Future:** Full mutation tools, OAuth, webhook handlers, resource implementation (Phase 8+)
