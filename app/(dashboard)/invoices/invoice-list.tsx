@@ -104,7 +104,22 @@ function CreateInvoiceModal({
 }) {
   const { showToast } = useToast()
   const [orgId, setOrgId] = useState('')
+  const [orgSearch, setOrgSearch] = useState('')
+  const [orgOptions, setOrgOptions] = useState<{ id: string; name: string }[]>([])
+  const [showOrgDropdown, setShowOrgDropdown] = useState(false)
+  const [selectedOrgName, setSelectedOrgName] = useState('')
   const [description, setDescription] = useState('')
+
+  // Fetch clients on mount
+  useEffect(() => {
+    fetch(apiPath('/api/admin/clients'))
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        const data = d as { organisations?: { id: string; name: string }[] }
+        setOrgOptions(data.organisations ?? [])
+      })
+      .catch(() => setOrgOptions([]))
+  }, [])
   const [quantity, setQuantity] = useState('1')
   const [unitAmount, setUnitAmount] = useState('')
   const [currency, setCurrency] = useState('NZD')
@@ -179,23 +194,69 @@ function CreateInvoiceModal({
           </div>
         )}
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            <label htmlFor="ci-org-id" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
-              Client ID
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', position: 'relative' }}>
+            <label htmlFor="ci-org-search" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
+              Client
             </label>
-            <input
-              id="ci-org-id"
-              type="text"
-              placeholder="Client organisation ID"
-              value={orgId}
-              onChange={e => setOrgId(e.target.value)}
-              required
-              style={{
+            {selectedOrgName ? (
+              <div className="flex items-center justify-between" style={{
                 padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
-                border: '1px solid var(--color-border)', outline: 'none',
-                color: 'var(--color-text)', background: 'var(--color-bg)',
-              }}
-            />
+                border: '1px solid var(--color-brand)', background: 'var(--color-brand-50)',
+                color: 'var(--color-brand)',
+              }}>
+                <span className="font-medium">{selectedOrgName}</span>
+                <button
+                  type="button"
+                  onClick={() => { setOrgId(''); setSelectedOrgName(''); setOrgSearch('') }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-brand)', fontSize: '1rem' }}
+                >
+                  x
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  id="ci-org-search"
+                  type="text"
+                  placeholder="Search clients..."
+                  value={orgSearch}
+                  onChange={e => { setOrgSearch(e.target.value); setShowOrgDropdown(true) }}
+                  onFocus={() => setShowOrgDropdown(true)}
+                  style={{
+                    padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
+                    border: '1px solid var(--color-border)', outline: 'none',
+                    color: 'var(--color-text)', background: 'var(--color-bg)',
+                  }}
+                />
+                {showOrgDropdown && (
+                  <div style={{
+                    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                    background: 'var(--color-bg)', border: '1px solid var(--color-border)',
+                    borderRadius: '0.5rem', maxHeight: '10rem', overflowY: 'auto',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)', marginTop: '0.25rem',
+                  }}>
+                    {orgOptions
+                      .filter(o => !orgSearch || o.name.toLowerCase().includes(orgSearch.toLowerCase()))
+                      .map(o => (
+                        <button
+                          key={o.id}
+                          type="button"
+                          onClick={() => { setOrgId(o.id); setSelectedOrgName(o.name); setShowOrgDropdown(false); setOrgSearch('') }}
+                          className="w-full text-left transition-colors"
+                          style={{ padding: '0.5rem 0.75rem', fontSize: '0.8125rem', color: 'var(--color-text)', background: 'none', border: 'none', cursor: 'pointer', display: 'block' }}
+                          onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                          onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+                        >
+                          {o.name}
+                        </button>
+                      ))}
+                    {orgOptions.filter(o => !orgSearch || o.name.toLowerCase().includes(orgSearch.toLowerCase())).length === 0 && (
+                      <p style={{ padding: '0.5rem 0.75rem', fontSize: '0.8125rem', color: 'var(--color-text-subtle)' }}>No clients found</p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
             <label htmlFor="ci-description" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>

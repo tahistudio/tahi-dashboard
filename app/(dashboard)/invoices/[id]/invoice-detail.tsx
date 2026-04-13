@@ -302,9 +302,9 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                 variant="ghost"
               />
             )}
-            {!invoice.xeroInvoiceId && (
+            {!invoice.xeroInvoiceId && invoice.status !== 'paid' && (
               <ActionButton
-                label="Push to Xero"
+                label="Sync to Xero"
                 disabled={patching !== null}
                 onClick={async () => {
                   try {
@@ -313,8 +313,36 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ invoiceIds: [invoice.id] }),
                     })
-                    if (res.ok) fetchInvoice()
-                  } catch { /* silent */ }
+                    if (res.ok) {
+                      fetchInvoice()
+                    } else {
+                      const err = await res.json() as { error?: string }
+                      alert(err.error ?? 'Xero sync failed. Reconnect Xero in Settings.')
+                    }
+                  } catch { alert('Xero sync failed. Check connection in Settings.') }
+                }}
+                variant="ghost"
+              />
+            )}
+            {invoice.status !== 'paid' && invoice.status !== 'draft' && (
+              <ActionButton
+                label="Get Stripe Payment Link"
+                disabled={patching !== null}
+                onClick={async () => {
+                  try {
+                    const res = await fetch(apiPath(`/api/admin/integrations/stripe/provision?invoiceId=${invoice.id}`))
+                    if (res.ok) {
+                      const data = await res.json() as { payUrl?: string; error?: string }
+                      if (data.payUrl) {
+                        await navigator.clipboard.writeText(data.payUrl)
+                        alert('Payment link copied to clipboard!')
+                      } else {
+                        alert(data.error ?? 'Could not generate payment link')
+                      }
+                    } else {
+                      alert('Stripe not configured. Add STRIPE_SECRET_KEY in Settings.')
+                    }
+                  } catch { alert('Failed to get payment link') }
                 }}
                 variant="ghost"
               />
