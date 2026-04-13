@@ -176,6 +176,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
   const [activities, setActivities] = useState<DealActivity[]>([])
   const [stages, setStages] = useState<Stage[]>([])
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
+  const [ltv, setLtv] = useState<{ total: number; wonDealCount: number; paidInvoiceCount: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [showActivityForm, setShowActivityForm] = useState(false)
 
@@ -193,10 +194,12 @@ export function DealDetail({ dealId }: { dealId: string }) {
           contacts: DealContact[]
           activities: DealActivity[]
           stages: Stage[]
+          ltv?: { total: number; wonDealCount: number; paidInvoiceCount: number } | null
         }
         setDeal(data.deal)
         setContacts(data.contacts ?? [])
         setActivities(data.activities ?? [])
+        setLtv(data.ltv ?? null)
         setStages(data.stages ?? [])
       }
 
@@ -412,6 +415,21 @@ export function DealDetail({ dealId }: { dealId: string }) {
           </SidebarCard>
 
           {/* Source */}
+          {/* Client LTV */}
+          {ltv && ltv.total > 0 && (
+            <SidebarCard title="Client Lifetime Value">
+              <div className="flex flex-col gap-1.5">
+                <p className="font-bold" style={{ fontSize: '1.125rem', color: 'var(--color-brand)' }}>
+                  {formatCurrency(ltv.total, 'NZD')}
+                </p>
+                <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+                  {ltv.wonDealCount} won deal{ltv.wonDealCount !== 1 ? 's' : ''}
+                  {ltv.paidInvoiceCount > 0 && <> + {ltv.paidInvoiceCount} paid invoice{ltv.paidInvoiceCount !== 1 ? 's' : ''}</>}
+                </p>
+              </div>
+            </SidebarCard>
+          )}
+
           <SidebarCard title="Lead Source">
             <SourceSelector
               dealId={dealId}

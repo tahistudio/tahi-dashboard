@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, sql, and } from 'drizzle-orm'
 import { convertToNzd } from '@/lib/currency'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -113,11 +113,52 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     .from(schema.pipelineStages)
     .orderBy(schema.pipelineStages.position)
 
+  // Compute LTV when deal is linked to an org
+  let ltv = null
+  if (deal.orgId) {
+    const [invoiceTotal] = await database
+      .select({ total: sql<number>`COALESCE(SUM(${schema.invoices.totalUsd}), 0)` })
+      .from(schema.invoices)
+      .where(and(
+        eq(schema.invoices.orgId, deal.orgId),
+        eq(schema.invoices.status, 'paid'),
+      ))
+
+    const [wonDealTotal] = await database
+      .select({
+        total: sql<number>`COALESCE(SUM(${schema.deals.valueNzd}), 0)`,
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(schema.deals)
+      .innerJoin(schema.pipelineStages, eq(schema.deals.stageId, schema.pipelineStages.id))
+      .where(and(
+        eq(schema.deals.orgId, deal.orgId),
+        eq(schema.pipelineStages.isClosedWon, 1),
+      ))
+
+    const [invoiceCount] = await database
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(schema.invoices)
+      .where(and(
+        eq(schema.invoices.orgId, deal.orgId),
+        eq(schema.invoices.status, 'paid'),
+      ))
+
+    ltv = {
+      totalPaidInvoices: invoiceTotal?.total ?? 0,
+      totalWonDeals: wonDealTotal?.total ?? 0,
+      wonDealCount: wonDealTotal?.count ?? 0,
+      paidInvoiceCount: invoiceCount?.count ?? 0,
+      total: (invoiceTotal?.total ?? 0) + (wonDealTotal?.total ?? 0),
+    }
+  }
+
   return NextResponse.json({
     deal,
     contacts,
     activities: dealActivities,
     stages,
+    ltv,
   })
 }
 
