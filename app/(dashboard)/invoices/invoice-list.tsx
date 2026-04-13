@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Plus, FileText, RefreshCw, Download } from 'lucide-react'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
-import { FilterBar, type DateRange } from '@/components/tahi/date-range-picker'
+import { type DateRange } from '@/components/tahi/date-range-picker'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
@@ -409,57 +409,7 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
           </p>
         </div>
         {isAdmin && (
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            <button
-              onClick={async () => {
-                try {
-                  const res = await fetch(apiPath('/api/admin/integrations/xero/import-invoices'), { method: 'POST' })
-                  if (res.ok) {
-                    const d = await res.json() as { imported: number; skipped: number }
-                    alert(`Imported ${d.imported} invoices (${d.skipped} already existed)`)
-                    fetchInvoices(activeTab)
-                  } else {
-                    alert('Xero import failed. Check Xero connection in Settings.')
-                  }
-                } catch { alert('Xero import failed') }
-              }}
-              className="flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
-              style={{
-                padding: '0.625rem 1.125rem',
-                background: '#13b5ea15',
-                border: '1px solid #13b5ea40',
-                borderRadius: '0.5rem',
-                cursor: 'pointer',
-                color: '#13b5ea',
-                minHeight: 44,
-              }}
-            >
-              Import Xero
-            </button>
-            <button
-              onClick={async () => {
-                try {
-                  const res = await fetch(apiPath('/api/admin/integrations/xero/sync-payments'), { method: 'POST' })
-                  if (res.ok) {
-                    const d = await res.json() as { updated: number }
-                    alert(`Synced payment status for ${d.updated} invoices`)
-                    fetchInvoices(activeTab)
-                  }
-                } catch { alert('Sync failed') }
-              }}
-              className="flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
-              style={{
-                padding: '0.625rem 1.125rem',
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
-                borderRadius: '0.5rem',
-                cursor: 'pointer',
-                color: 'var(--color-text-muted)',
-                minHeight: 44,
-              }}
-            >
-              Sync Payments
-            </button>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <button
               onClick={() => {
                 const link = document.createElement('a')
@@ -529,11 +479,32 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
       )}
 
       {/* Date filter */}
-      <FilterBar
-        dateRange={dateRange}
-        onDateRangeChange={setDateRange}
-        dateLabel="Due date"
-      />
+      <div className="flex items-center gap-2" style={{ marginBottom: '0.75rem' }}>
+        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>Due date:</span>
+        <input
+          type="date"
+          value={dateRange.from ? dateRange.from.toISOString().split('T')[0] : ''}
+          onChange={e => setDateRange(prev => ({ ...prev, from: e.target.value ? new Date(e.target.value) : null }))}
+          className="rounded-md"
+          style={{ padding: '0.375rem 0.5rem', fontSize: '0.75rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+        />
+        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>to</span>
+        <input
+          type="date"
+          value={dateRange.to ? dateRange.to.toISOString().split('T')[0] : ''}
+          onChange={e => setDateRange(prev => ({ ...prev, to: e.target.value ? new Date(e.target.value) : null }))}
+          className="rounded-md"
+          style={{ padding: '0.375rem 0.5rem', fontSize: '0.75rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+        />
+        {(dateRange.from || dateRange.to) && (
+          <button
+            onClick={() => setDateRange({ from: null, to: null })}
+            style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+          >
+            Clear
+          </button>
+        )}
+      </div>
 
       {/* Table */}
       <div
