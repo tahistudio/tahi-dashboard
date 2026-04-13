@@ -37,6 +37,9 @@ export async function GET(req: NextRequest) {
     }
     conditions.push(inArray(schema.deals.orgId, scopedOrgIds))
   }
+  // Exclude archived (soft-deleted) deals
+  conditions.push(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)
+
   if (filterOrgId) conditions.push(eq(schema.deals.orgId, filterOrgId))
   if (stageId) conditions.push(eq(schema.deals.stageId, stageId))
   if (ownerId) conditions.push(eq(schema.deals.ownerId, ownerId))

@@ -121,24 +121,38 @@ const ACTIVITY_COLORS: Record<string, string> = {
 }
 
 const SOURCE_STYLES: Record<string, { label: string; bg: string; text: string }> = {
-  referral:       { label: 'Referral',        bg: '#fef3c7', text: '#d97706' },
-  linkedin:       { label: 'LinkedIn',        bg: '#dbeafe', text: '#1d4ed8' },
-  website:        { label: 'Website',         bg: '#d1fae5', text: '#059669' },
-  cold:           { label: 'Cold Outreach',   bg: '#e0e7ff', text: '#4338ca' },
-  cold_outreach:  { label: 'Cold Outreach',   bg: '#e0e7ff', text: '#4338ca' },
-  partner:        { label: 'Partner',         bg: '#fce7f3', text: '#be185d' },
-  webflow:        { label: 'Webflow',         bg: '#dbeafe', text: '#2563eb' },
-  existing_client:{ label: 'Existing Client', bg: '#fef3c7', text: '#d97706' },
-  other:          { label: 'Other',           bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-subtle)' },
+  referral:        { label: 'Referral',         bg: '#fef3c7', text: '#d97706' },
+  webflow_partner: { label: 'Webflow Partner',  bg: '#4353ff1a', text: '#4353ff' },
+  straightin:      { label: 'StraightIn',       bg: '#c7d2fe', text: '#3730a3' },
+  linkedin:        { label: 'LinkedIn',         bg: '#dbeafe', text: '#1d4ed8' },
+  website:         { label: 'Website',          bg: '#d1fae5', text: '#059669' },
+  cold:            { label: 'Cold Outreach',    bg: '#e0e7ff', text: '#4338ca' },
+  cold_outreach:   { label: 'Cold Outreach',    bg: '#e0e7ff', text: '#4338ca' },
+  inbound:         { label: 'Inbound',          bg: '#d1fae5', text: '#059669' },
+  direct:          { label: 'Direct',           bg: '#f0fdf4', text: '#16a34a' },
+  social:          { label: 'Social',           bg: '#fce7f3', text: '#db2777' },
+  partner:         { label: 'Partner',          bg: '#fce7f3', text: '#be185d' },
+  webflow:         { label: 'Webflow',          bg: '#dbeafe', text: '#2563eb' },
+  existing_client: { label: 'Existing Client',  bg: '#fef3c7', text: '#d97706' },
+  integration:     { label: 'Integration',      bg: '#e0e7ff', text: '#6366f1' },
+  outbound:        { label: 'Outbound',         bg: '#e0e7ff', text: '#4338ca' },
+  other:           { label: 'Other',            bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-subtle)' },
 }
 
 const SOURCE_OPTIONS = [
   { value: '', label: 'None' },
   { value: 'referral', label: 'Referral' },
+  { value: 'webflow_partner', label: 'Webflow Partner' },
+  { value: 'straightin', label: 'StraightIn Agency' },
   { value: 'linkedin', label: 'LinkedIn' },
   { value: 'website', label: 'Website' },
+  { value: 'inbound', label: 'Inbound' },
+  { value: 'outbound', label: 'Outbound' },
+  { value: 'direct', label: 'Direct' },
+  { value: 'social', label: 'Social' },
   { value: 'cold', label: 'Cold Outreach' },
   { value: 'partner', label: 'Partner' },
+  { value: 'existing_client', label: 'Existing Client' },
   { value: 'other', label: 'Other' },
 ]
 

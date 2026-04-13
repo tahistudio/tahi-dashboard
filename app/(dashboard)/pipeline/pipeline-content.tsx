@@ -1168,8 +1168,10 @@ function DealCard({ deal, stages, displayCurrency, toDisplay }: { deal: Deal; st
 
       {/* Value + Probability row */}
       <div className="flex items-center gap-2" style={{ marginBottom: '0.375rem' }}>
-        <p className="font-semibold" style={{ fontSize: '0.875rem', color: 'var(--color-brand)' }}>
-          {formatCurrency(toDisplay(deal.valueNzd ?? deal.value), displayCurrency)}
+        <p className="font-semibold" style={{ fontSize: '0.875rem', color: (deal.valueNzd ?? deal.value) > 0 ? 'var(--color-brand)' : 'var(--color-text-subtle)' }}>
+          {(deal.valueNzd ?? deal.value) > 0
+            ? formatCurrency(toDisplay(deal.valueNzd ?? deal.value), displayCurrency)
+            : 'TBD'}
         </p>
         <span
           className="inline-flex items-center rounded-full font-medium"
