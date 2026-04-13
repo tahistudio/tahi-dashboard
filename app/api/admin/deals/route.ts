@@ -57,6 +57,7 @@ export async function GET(req: NextRequest) {
       valueNzd: schema.deals.valueNzd,
       source: schema.deals.source,
       estimatedHoursPerWeek: schema.deals.estimatedHoursPerWeek,
+      autoNudgesDisabled: schema.deals.autoNudgesDisabled,
       expectedCloseDate: schema.deals.expectedCloseDate,
       closedAt: schema.deals.closedAt,
       closeReason: schema.deals.closeReason,

@@ -8,7 +8,7 @@ import {
   TrendingUp, DollarSign, Target,
   Calendar, User, Building2,
   ChevronDown, BarChart3, Award,
-  Trophy, XCircle, Filter, X,
+  Trophy, XCircle, Filter, X, Bell, BellOff,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { convertFromNzd } from '@/lib/currency'
@@ -68,6 +68,7 @@ interface Deal {
   ownerName: string | null
   ownerAvatarUrl: string | null
   contactCount: number
+  autoNudgesDisabled: number | null
 }
 
 type ViewMode = 'kanban' | 'list'
@@ -1258,6 +1259,14 @@ function DealCard({ deal, stages, displayCurrency, toDisplay }: { deal: Deal; st
           {days > 0 && (
             <span style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', opacity: 0.8 }}>
               {days}d
+            </span>
+          )}
+          {deal.stageName === 'Stalled' && (
+            <span title={deal.autoNudgesDisabled ? 'Auto-nudges paused' : 'Auto-nudges active'}>
+              {deal.autoNudgesDisabled
+                ? <BellOff style={{ width: '0.625rem', height: '0.625rem', color: 'var(--color-text-subtle)', opacity: 0.5 }} />
+                : <Bell style={{ width: '0.625rem', height: '0.625rem', color: 'var(--color-brand)' }} />
+              }
             </span>
           )}
         </div>

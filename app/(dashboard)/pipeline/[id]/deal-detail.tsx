@@ -485,39 +485,41 @@ export function DealDetail({ dealId }: { dealId: string }) {
             <EngagementEditor dealId={dealId} deal={deal} onUpdated={fetchDeal} />
           </SidebarCard>
 
-          {/* Auto-nudge toggle */}
-          <SidebarCard title="Auto Nudges">
-            <div className="flex items-center justify-between">
-              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-                {deal.autoNudgesDisabled ? 'Paused' : 'Active'}
-              </span>
-              <button
-                onClick={async () => {
-                  await fetch(apiPath(`/api/admin/deals/${dealId}`), {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ autoNudgesDisabled: !deal.autoNudgesDisabled }),
-                  })
-                  fetchDeal()
-                }}
-                className="inline-flex items-center gap-1.5 font-medium transition-colors rounded-full"
-                style={{
-                  padding: '0.25rem 0.625rem',
-                  fontSize: '0.6875rem',
-                  background: deal.autoNudgesDisabled ? 'var(--color-bg-tertiary)' : 'var(--color-brand-50)',
-                  color: deal.autoNudgesDisabled ? 'var(--color-text-subtle)' : 'var(--color-brand)',
-                  border: `1px solid ${deal.autoNudgesDisabled ? 'var(--color-border)' : 'var(--color-brand-light)'}`,
-                  cursor: 'pointer',
-                }}
-              >
-                {deal.autoNudgesDisabled ? (
-                  <><BellOff style={{ width: '0.625rem', height: '0.625rem' }} /> Enable</>
-                ) : (
-                  <><BellOff style={{ width: '0.625rem', height: '0.625rem' }} /> Pause</>
-                )}
-              </button>
-            </div>
-          </SidebarCard>
+          {/* Auto-nudge toggle (only in Stalled stage) */}
+          {deal.stageName === 'Stalled' && (
+            <SidebarCard title="Auto Nudges">
+              <div className="flex items-center justify-between">
+                <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+                  {deal.autoNudgesDisabled ? 'Paused' : 'Active'}
+                </span>
+                <button
+                  onClick={async () => {
+                    await fetch(apiPath(`/api/admin/deals/${dealId}`), {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ autoNudgesDisabled: !deal.autoNudgesDisabled }),
+                    })
+                    fetchDeal()
+                  }}
+                  className="inline-flex items-center gap-1.5 font-medium transition-colors rounded-full"
+                  style={{
+                    padding: '0.25rem 0.625rem',
+                    fontSize: '0.6875rem',
+                    background: deal.autoNudgesDisabled ? 'var(--color-bg-tertiary)' : 'var(--color-brand-50)',
+                    color: deal.autoNudgesDisabled ? 'var(--color-text-subtle)' : 'var(--color-brand)',
+                    border: `1px solid ${deal.autoNudgesDisabled ? 'var(--color-border)' : 'var(--color-brand-light)'}`,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {deal.autoNudgesDisabled ? (
+                    <><BellOff style={{ width: '0.625rem', height: '0.625rem' }} /> Enable</>
+                  ) : (
+                    <><BellOff style={{ width: '0.625rem', height: '0.625rem' }} /> Pause</>
+                  )}
+                </button>
+              </div>
+            </SidebarCard>
+          )}
 
           {/* Capacity Impact */}
           {(
