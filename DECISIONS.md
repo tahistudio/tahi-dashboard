@@ -666,3 +666,60 @@ Escalated to Liam: No. Direct confirmation from Liam.
 **Why:** Waiting on basePath fix. The endpoint is production-ready code but cannot be deployed until the routing architectural issue is resolved. This affects all new API endpoints added during Phase 5.
 
 ---
+
+### Decision #036 (2026-04-13): Standalone Cloudflare Worker MCP Server
+
+**Decision:** Deploy the MCP HTTP server as a standalone Cloudflare Worker (`tahi-mcp-server`) at `tahi-mcp-server.business-ccd.workers.dev`, independent of the Webflow Cloud Next.js app. This bypasses the basePath `/dashboard` routing blocker entirely.
+
+**How to apply:**
+- Worker code lives at `workers/mcp-server/` with its own `package.json`, `wrangler.jsonc`, and `tsconfig.json`
+- 77 tools covering all dashboard operations (read + write), matching the stdio server
+- OAuth 2.1 authorization code flow with PKCE for Claude custom connectors
+- Client credentials grant also supported for direct API access
+- Secrets `TAHI_API_TOKEN`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` stored in CF Worker secrets
+- Deploy via `cd workers/mcp-server && npx wrangler deploy`
+- Worker proxies all calls to the Webflow Cloud dashboard API using the internal token
+
+**Why:** The basePath routing issue in Webflow Cloud made it impossible to serve MCP at `/api/mcp`. A standalone worker avoids this entirely, has its own domain, and can be updated independently of the main app deploy cycle.
+
+---
+
+### Decision #037 (2026-04-13): HubSpot sync endpoint removed, replaced by MCP-based import
+
+**Decision:** Remove the `/api/admin/integrations/hubspot/sync-deals` API route. Deal imports from HubSpot are now done via CSV export + MCP tools (or direct API calls). The built-in CRM pipeline fully replaces HubSpot.
+
+**How to apply:**
+- HubSpot CSV exports are imported using the MCP `create_deal` tool or direct dashboard API
+- Deal enrichment (contacts, notes, sources) done via cross-referencing HubSpot, Gmail, and Calendar data
+- No HubSpot API integration needed going forward
+
+**Why:** Decision #028 replaced HubSpot with built-in CRM. Maintaining a sync endpoint for a service being phased out adds complexity. One-time imports via MCP are simpler and more flexible.
+
+---
+
+### Decision #038 (2026-04-13): Pipeline currency switcher with OpenExchangeRates
+
+**Decision:** Add NZD/USD/AUD/GBP/EUR currency switcher to the pipeline page. All deal values (KPIs, stage totals, deal cards, list view) convert via exchange rates from the OpenExchangeRates API.
+
+**How to apply:**
+- Currency toggle buttons appear above the KPI cards row
+- Uses `convertFromNzd()` from `lib/currency.ts` with rates from `/api/admin/exchange-rates`
+- All deals store `valueNzd` (normalized) and display in the selected currency
+- `OPEN_EXCHANGE_RATES_APP_ID` env var required for rate refresh
+
+**Why:** Tahi operates internationally (NZ, UK, US, AU clients). Seeing pipeline value in local currencies helps with forecasting and client conversations.
+
+---
+
+### Decision #039 (2026-04-13): Pipeline lead sources expanded
+
+**Decision:** Add `webflow_partner` (Webflow Partner Program) and `straightin` (StraightIn LinkedIn agency) as pipeline lead sources. Remove duplicate `cold_outreach` option. Remove `call` from deal activity types (keep meeting, email, note, task).
+
+**How to apply:**
+- Source labels, filter dropdowns, new deal form, and won source options all updated in `pipeline-content.tsx`
+- `straightin` distinguishes StraightIn agency outreach from Liam's own LinkedIn work
+- `webflow_partner` covers Webflow Partner Matchmaking referrals (distinct from generic `partner`)
+
+**Why:** Accurate source attribution matters for ROI tracking. StraightIn is a paid agency vs organic LinkedIn. Webflow Partner is a specific referral channel. Call and meeting were redundant as activity types.
+
+---
