@@ -35,6 +35,7 @@ export const organisations = sqliteTable('organisations', {
   // maintain | scale | tune | launch | hourly | custom | none
   planType: text('plan_type').default('none'),
   stripeCustomerId: text('stripe_customer_id'),
+  xeroContactId: text('xero_contact_id'),
   // green | amber | red
   healthStatus: text('health_status').default('green'),
   healthNote: text('health_note'),
@@ -381,6 +382,7 @@ export const invoices = sqliteTable('invoices', {
   subscriptionId: text('subscription_id'),
   stripeInvoiceId: text('stripe_invoice_id'),
   xeroInvoiceId: text('xero_invoice_id'),
+  source: text('source').default('manual'), // 'manual' | 'xero' | 'stripe'
   // draft | sent | viewed | paid | overdue | written_off
   status: text('status').notNull().default('draft'),
   amountUsd: real('amount_usd').notNull(),
