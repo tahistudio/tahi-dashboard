@@ -18,6 +18,7 @@ interface InvoiceRow {
   subscriptionId: string | null
   stripeInvoiceId: string | null
   xeroInvoiceId: string | null
+  source: string | null
   status: string
   amountUsd: number
   taxAmountUsd: number | null
@@ -258,6 +259,11 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
           {invoice.sentAt && <MetaField label="Sent" value={formatDate(invoice.sentAt)} />}
           {invoice.paidAt && <MetaField label="Paid" value={formatDate(invoice.paidAt)} />}
           {invoice.stripeInvoiceId && <MetaField label="Stripe ID" value={invoice.stripeInvoiceId} />}
+          {invoice.xeroInvoiceId && <MetaField label="Xero ID" value={invoice.xeroInvoiceId.slice(0, 8)} />}
+          <MetaField
+            label="Source"
+            value={invoice.source === 'xero' ? 'Xero' : invoice.source === 'stripe' ? 'Stripe' : 'Manual'}
+          />
         </div>
 
         {/* Admin actions */}
@@ -293,6 +299,23 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                 label="Revert to Draft"
                 disabled={patching !== null}
                 onClick={() => patchStatus('draft')}
+                variant="ghost"
+              />
+            )}
+            {!invoice.xeroInvoiceId && (
+              <ActionButton
+                label="Push to Xero"
+                disabled={patching !== null}
+                onClick={async () => {
+                  try {
+                    const res = await fetch(apiPath('/api/admin/invoices/xero-sync'), {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ invoiceIds: [invoice.id] }),
+                    })
+                    if (res.ok) fetchInvoice()
+                  } catch { /* silent */ }
+                }}
                 variant="ghost"
               />
             )}

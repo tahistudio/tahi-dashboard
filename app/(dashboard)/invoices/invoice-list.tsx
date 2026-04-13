@@ -19,6 +19,9 @@ interface Invoice {
   orgId: string
   orgName: string | null
   status: string
+  source: string | null
+  stripeInvoiceId: string | null
+  xeroInvoiceId: string | null
   totalAmount: number
   currency: string | null
   dueDate: string | null
@@ -406,7 +409,57 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
           </p>
         </div>
         {isAdmin && (
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={async () => {
+                try {
+                  const res = await fetch(apiPath('/api/admin/integrations/xero/import-invoices'), { method: 'POST' })
+                  if (res.ok) {
+                    const d = await res.json() as { imported: number; skipped: number }
+                    alert(`Imported ${d.imported} invoices (${d.skipped} already existed)`)
+                    fetchInvoices(activeTab)
+                  } else {
+                    alert('Xero import failed. Check Xero connection in Settings.')
+                  }
+                } catch { alert('Xero import failed') }
+              }}
+              className="flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
+              style={{
+                padding: '0.625rem 1.125rem',
+                background: '#13b5ea15',
+                border: '1px solid #13b5ea40',
+                borderRadius: '0.5rem',
+                cursor: 'pointer',
+                color: '#13b5ea',
+                minHeight: 44,
+              }}
+            >
+              Import Xero
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  const res = await fetch(apiPath('/api/admin/integrations/xero/sync-payments'), { method: 'POST' })
+                  if (res.ok) {
+                    const d = await res.json() as { updated: number }
+                    alert(`Synced payment status for ${d.updated} invoices`)
+                    fetchInvoices(activeTab)
+                  }
+                } catch { alert('Sync failed') }
+              }}
+              className="flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
+              style={{
+                padding: '0.625rem 1.125rem',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                borderRadius: '0.5rem',
+                cursor: 'pointer',
+                color: 'var(--color-text-muted)',
+                minHeight: 44,
+              }}
+            >
+              Sync Payments
+            </button>
             <button
               onClick={() => {
                 const link = document.createElement('a')
@@ -531,6 +584,11 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
                   <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                     Status
                   </th>
+                  {isAdmin && (
+                    <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Source
+                    </th>
+                  )}
                   <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                     Due Date
                   </th>
@@ -562,6 +620,21 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
                     <td style={{ padding: '0.875rem 1rem' }}>
                       <StatusBadge status={inv.status} dueDate={inv.dueDate} />
                     </td>
+                    {isAdmin && (
+                      <td style={{ padding: '0.875rem 1rem' }}>
+                        <span
+                          className="inline-flex items-center rounded-full font-medium"
+                          style={{
+                            padding: '0.125rem 0.5rem',
+                            fontSize: '0.6875rem',
+                            background: inv.source === 'xero' ? '#13b5ea15' : inv.source === 'stripe' ? '#635bff15' : 'var(--color-bg-tertiary)',
+                            color: inv.source === 'xero' ? '#13b5ea' : inv.source === 'stripe' ? '#635bff' : 'var(--color-text-subtle)',
+                          }}
+                        >
+                          {inv.source === 'xero' ? 'Xero' : inv.source === 'stripe' ? 'Stripe' : 'Manual'}
+                        </span>
+                      </td>
+                    )}
                     <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: isOverdue(inv.dueDate, inv.status) ? 'var(--color-danger)' : 'var(--color-text-muted)' }}>
                       {formatDate(inv.dueDate)}
                     </td>
