@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   ArrowLeft, Building2, Calendar, Clock,
   Phone, Mail, FileText, MessageSquare,
-  Plus, Loader2, Check, ChevronDown, Inbox,
+  Plus, Loader2, Check, ChevronDown, Inbox, X, Search, UserPlus,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { REQUEST_STATUS_CONFIG } from '@/lib/status-config'
@@ -398,20 +398,12 @@ export function DealDetail({ dealId }: { dealId: string }) {
 
           {/* Company */}
           <SidebarCard title="Company">
-            {deal.orgId ? (
-              <Link
-                href={`/clients/${deal.orgId}`}
-                className="inline-flex items-center gap-2 font-medium transition-colors"
-                style={{ fontSize: '0.875rem', color: 'var(--color-brand)', textDecoration: 'none' }}
-                onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark)' }}
-                onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-brand)' }}
-              >
-                <Building2 className="w-4 h-4" />
-                {deal.orgName ?? 'View Company'}
-              </Link>
-            ) : (
-              <span style={{ fontSize: '0.875rem', color: 'var(--color-text-subtle)' }}>No company linked</span>
-            )}
+            <OrgSelector
+              dealId={dealId}
+              currentOrgId={deal.orgId}
+              currentOrgName={deal.orgName}
+              onUpdated={fetchDeal}
+            />
           </SidebarCard>
 
           {/* Source */}
@@ -512,30 +504,11 @@ export function DealDetail({ dealId }: { dealId: string }) {
 
           {/* Contacts */}
           <SidebarCard title="Contacts">
-            {contacts.length === 0 ? (
-              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)' }}>No contacts linked</span>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {contacts.map(c => (
-                  <div key={c.id} className="flex items-center gap-2">
-                    <div
-                      className="rounded-full flex items-center justify-center font-semibold flex-shrink-0"
-                      style={{ width: '1.5rem', height: '1.5rem', fontSize: '0.5625rem', background: 'var(--color-brand-50)', color: 'var(--color-brand)' }}
-                    >
-                      {getInitials(c.contactName ?? '?')}
-                    </div>
-                    <div>
-                      <p className="font-medium" style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>
-                        {c.contactName}
-                      </p>
-                      {c.role && (
-                        <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>{c.role}</p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <ContactLinker
+              dealId={dealId}
+              contacts={contacts}
+              onUpdated={fetchDeal}
+            />
           </SidebarCard>
 
           {/* Dates */}
@@ -785,6 +758,305 @@ function EditableValue({ dealId, value, currency, onUpdated }: {
 }
 
 // ---- Owner Selector -----------------------------------------------------
+
+// ---- Contact Linker -------------------------------------------------------
+
+function ContactLinker({ dealId, contacts, onUpdated }: {
+  dealId: string
+  contacts: DealContact[]
+  onUpdated: () => void
+}) {
+  const [showSearch, setShowSearch] = useState(false)
+  const [allContacts, setAllContacts] = useState<{ id: string; name: string; email: string; orgName?: string }[]>([])
+  const [search, setSearch] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!showSearch) return
+    fetch(apiPath('/api/admin/contacts'))
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        const data = d as { items?: { id: string; name: string; email: string; orgName?: string }[] }
+        setAllContacts(data.items ?? [])
+      })
+      .catch(() => setAllContacts([]))
+  }, [showSearch])
+
+  const linkedIds = new Set(contacts.map(c => c.contactId))
+  const filtered = allContacts
+    .filter(c => !linkedIds.has(c.id))
+    .filter(c => {
+      if (!search.trim()) return true
+      const q = search.toLowerCase()
+      return c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q)
+    })
+
+  const handleLink = async (contactId: string) => {
+    setSaving(true)
+    try {
+      await fetch(apiPath(`/api/admin/deals/${dealId}/contacts`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contactId }),
+      })
+      onUpdated()
+    } catch { /* silent */ } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleUnlink = async (contactId: string) => {
+    setSaving(true)
+    try {
+      await fetch(apiPath(`/api/admin/deals/${dealId}/contacts`), {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contactId }),
+      })
+      onUpdated()
+    } catch { /* silent */ } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {contacts.length === 0 && !showSearch && (
+        <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)' }}>No contacts linked</span>
+      )}
+      {contacts.map(c => (
+        <div key={c.id} className="flex items-center gap-2 group">
+          <div
+            className="rounded-full flex items-center justify-center font-semibold flex-shrink-0"
+            style={{ width: '1.5rem', height: '1.5rem', fontSize: '0.5625rem', background: 'var(--color-brand-50)', color: 'var(--color-brand)' }}
+          >
+            {getInitials(c.contactName ?? '?')}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>
+              {c.contactName}
+            </p>
+            {c.contactEmail && (
+              <p className="truncate" style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>{c.contactEmail}</p>
+            )}
+          </div>
+          <button
+            onClick={() => handleUnlink(c.contactId)}
+            disabled={saving}
+            className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.125rem', color: 'var(--color-text-subtle)' }}
+            title="Unlink contact"
+          >
+            <X style={{ width: '0.75rem', height: '0.75rem' }} />
+          </button>
+        </div>
+      ))}
+
+      {showSearch ? (
+        <div className="flex flex-col gap-1.5" style={{ marginTop: '0.25rem' }}>
+          <div className="relative">
+            <Search className="absolute pointer-events-none" style={{ width: '0.75rem', height: '0.75rem', left: '0.5rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)' }} />
+            <input
+              type="text"
+              placeholder="Search contacts..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              autoFocus
+              className="w-full rounded-md"
+              style={{ padding: '0.375rem 0.375rem 0.375rem 1.75rem', fontSize: '0.75rem', border: '1px solid var(--color-brand)', background: 'var(--color-bg)', color: 'var(--color-text)', outline: 'none' }}
+            />
+          </div>
+          <div className="flex flex-col overflow-y-auto rounded-md border" style={{ maxHeight: '8rem', borderColor: 'var(--color-border)' }}>
+            {filtered.map(c => (
+              <button
+                key={c.id}
+                onClick={() => handleLink(c.id)}
+                disabled={saving}
+                className="text-left transition-colors flex items-center gap-2"
+                style={{ padding: '0.375rem 0.5rem', fontSize: '0.75rem', color: 'var(--color-text)', background: 'none', border: 'none', cursor: 'pointer' }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+              >
+                <span className="font-medium">{c.name}</span>
+                <span style={{ color: 'var(--color-text-subtle)' }}>{c.email}</span>
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <p style={{ padding: '0.5rem', fontSize: '0.75rem', color: 'var(--color-text-subtle)', textAlign: 'center' }}>
+                No contacts found
+              </p>
+            )}
+          </div>
+          <button
+            onClick={() => { setShowSearch(false); setSearch('') }}
+            className="self-end"
+            style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setShowSearch(true)}
+          className="inline-flex items-center gap-1.5 font-medium transition-colors self-start"
+          style={{ fontSize: '0.75rem', color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginTop: '0.25rem' }}
+        >
+          <UserPlus style={{ width: '0.75rem', height: '0.75rem' }} />
+          Link contact
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ---- Org/Company Selector ------------------------------------------------
+
+function OrgSelector({ dealId, currentOrgId, currentOrgName, onUpdated }: {
+  dealId: string
+  currentOrgId: string | null
+  currentOrgName: string | null
+  onUpdated: () => void
+}) {
+  const [orgs, setOrgs] = useState<{ id: string; name: string }[]>([])
+  const [search, setSearch] = useState('')
+  const [open, setOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    fetch(apiPath('/api/admin/clients'))
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        const data = d as { organisations?: { id: string; name: string }[] }
+        setOrgs(data.organisations ?? [])
+      })
+      .catch(() => setOrgs([]))
+  }, [open])
+
+  const filtered = orgs.filter(o =>
+    o.name.toLowerCase().includes(search.toLowerCase())
+  )
+
+  const handleSelect = async (orgId: string | null) => {
+    setSaving(true)
+    try {
+      await fetch(apiPath(`/api/admin/deals/${dealId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orgId }),
+      })
+      onUpdated()
+    } catch { /* silent */ } finally {
+      setSaving(false)
+      setOpen(false)
+      setSearch('')
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="flex flex-col gap-2">
+        {currentOrgId ? (
+          <div className="flex items-center justify-between">
+            <Link
+              href={`/clients/${currentOrgId}`}
+              className="inline-flex items-center gap-2 font-medium transition-colors"
+              style={{ fontSize: '0.875rem', color: 'var(--color-brand)', textDecoration: 'none' }}
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark)' }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-brand)' }}
+            >
+              <Building2 className="w-4 h-4" />
+              {currentOrgName ?? 'View Company'}
+            </Link>
+            <button
+              onClick={() => setOpen(true)}
+              className="transition-colors"
+              style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              Change
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setOpen(true)}
+            className="inline-flex items-center gap-2 font-medium transition-colors"
+            style={{ fontSize: '0.875rem', color: 'var(--color-text-subtle)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+          >
+            <Building2 className="w-4 h-4" />
+            Link a company...
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="relative">
+        <Search className="absolute pointer-events-none" style={{ width: '0.875rem', height: '0.875rem', left: '0.625rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)' }} />
+        <input
+          type="text"
+          placeholder="Search companies..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          autoFocus
+          className="w-full rounded-lg"
+          style={{ padding: '0.5rem 0.5rem 0.5rem 2rem', fontSize: '0.8125rem', border: '1px solid var(--color-brand)', background: 'var(--color-bg)', color: 'var(--color-text)', outline: 'none' }}
+        />
+      </div>
+      <div
+        className="flex flex-col overflow-y-auto rounded-lg border"
+        style={{ maxHeight: '10rem', borderColor: 'var(--color-border)', background: 'var(--color-bg)' }}
+      >
+        {currentOrgId && (
+          <button
+            onClick={() => handleSelect(null)}
+            disabled={saving}
+            className="text-left transition-colors"
+            style={{ padding: '0.5rem 0.75rem', fontSize: '0.8125rem', color: 'var(--color-text-subtle)', borderBottom: '1px solid var(--color-border-subtle)', background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            Unlink company
+          </button>
+        )}
+        {filtered.map(o => (
+          <button
+            key={o.id}
+            onClick={() => handleSelect(o.id)}
+            disabled={saving}
+            className="text-left transition-colors"
+            style={{
+              padding: '0.5rem 0.75rem',
+              fontSize: '0.8125rem',
+              color: o.id === currentOrgId ? 'var(--color-brand)' : 'var(--color-text)',
+              fontWeight: o.id === currentOrgId ? 600 : 400,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+          >
+            {o.name}
+          </button>
+        ))}
+        {filtered.length === 0 && (
+          <p style={{ padding: '0.75rem', fontSize: '0.8125rem', color: 'var(--color-text-subtle)', textAlign: 'center' }}>
+            No companies found
+          </p>
+        )}
+      </div>
+      <button
+        onClick={() => { setOpen(false); setSearch('') }}
+        className="self-end transition-colors"
+        style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', background: 'none', border: 'none', cursor: 'pointer' }}
+      >
+        Cancel
+      </button>
+    </div>
+  )
+}
+
+// ---- Owner Selector --------------------------------------------------------
 
 function OwnerSelector({ dealId, currentOwnerId, teamMembers, onUpdated }: {
   dealId: string
