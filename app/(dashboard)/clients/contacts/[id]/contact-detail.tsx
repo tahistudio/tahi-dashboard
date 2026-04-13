@@ -14,7 +14,6 @@ import {
   Activity,
   Plus,
   ChevronRight,
-  Loader2,
   ExternalLink,
   Clock,
   CheckCircle2,

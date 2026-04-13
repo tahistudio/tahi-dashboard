@@ -38,7 +38,7 @@ vi.mock('@/db/d1', () => ({
 
 // Mock drizzle-orm eq function
 vi.mock('drizzle-orm', () => ({
-  eq: vi.fn((_col: unknown, _val: unknown) => ({})),
+  eq: vi.fn(() => ({})),
 }))
 
 import { POST } from '@/app/api/uploads/confirm/route'
