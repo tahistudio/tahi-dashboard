@@ -480,6 +480,23 @@ const TOOLS: ToolDef[] = [
   }, ['key', 'value']),
 
   // ── AI ────────────────────────────────────────────────────────────────
+  // ── Financial / Xero ───────────────────────────────────────────────
+  tool('get_financial_health', 'Get financial health: invoice totals, pipeline projections, MRR, Xero P&L, bank balances'),
+  tool('import_xero_invoices', 'Import all ACCREC invoices from Xero into dashboard with auto-match to clients'),
+  tool('sync_xero_payments', 'Sync invoice payment statuses from Xero'),
+  tool('get_xero_profit_loss', 'Get Xero Profit and Loss report', {
+    fromDate: prop('string', 'Start date YYYY-MM-DD'),
+    toDate: prop('string', 'End date YYYY-MM-DD'),
+  }),
+  tool('get_xero_balance_sheet', 'Get Xero Balance Sheet report'),
+  tool('get_xero_bank_summary', 'Get Xero bank account balances'),
+  tool('auto_generate_invoices', 'Auto-generate draft invoices for hourly clients from billable time entries', {
+    month: prop('string', 'Month to invoice (YYYY-MM), defaults to previous month'),
+    dryRun: prop('boolean', 'Preview only without creating invoices'),
+  }),
+  tool('match_xero_contacts', 'List Xero contacts with suggested dashboard client matches'),
+
+  // ── AI ────────────────────────────────────────────────────────────
   tool('ai_task_wizard', 'Use AI to break down work into tasks, estimate effort, and suggest assignments', {
     messages: { type: 'array', items: { type: 'object', properties: { role: { type: 'string' }, content: { type: 'string' } } }, description: 'Conversation messages for the AI wizard' },
     context: prop('string', 'Additional context about the client or project'),
@@ -737,6 +754,28 @@ async function executeTool(
       return json(await apiGet('/api/admin/settings', token))
     case 'update_settings':
       return json(await apiWrite('/api/admin/settings', token, 'PATCH', args as Record<string, unknown>))
+
+    // ── Financial / Xero ──────────────────────────────────────────────
+    case 'get_financial_health':
+      return json(await apiGet('/api/admin/billing/financial-health', token))
+    case 'import_xero_invoices':
+      return json(await apiWrite('/api/admin/integrations/xero/import-invoices', token, 'POST'))
+    case 'sync_xero_payments':
+      return json(await apiWrite('/api/admin/integrations/xero/sync-payments', token, 'POST'))
+    case 'get_xero_profit_loss': {
+      const p: Record<string, string> = {}
+      if (s('fromDate')) p.fromDate = s('fromDate')!
+      if (s('toDate')) p.toDate = s('toDate')!
+      return json(await apiGet('/api/admin/integrations/xero/profit-loss', token, p))
+    }
+    case 'get_xero_balance_sheet':
+      return json(await apiGet('/api/admin/integrations/xero/balance-sheet', token))
+    case 'get_xero_bank_summary':
+      return json(await apiGet('/api/admin/integrations/xero/bank-summary', token))
+    case 'auto_generate_invoices':
+      return json(await apiWrite('/api/admin/billing/xero-export', token, 'POST', args as Record<string, unknown>))
+    case 'match_xero_contacts':
+      return json(await apiGet('/api/admin/integrations/xero/match-contacts', token))
 
     // ── AI ────────────────────────────────────────────────────────────
     case 'ai_task_wizard':

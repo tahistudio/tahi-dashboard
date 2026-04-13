@@ -3,15 +3,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, gte, lt } from 'drizzle-orm'
+import { callXeroAPI } from '@/lib/xero'
+
+type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 /**
  * POST /api/admin/billing/xero-export
- * T226: Xero hourly billing export stub.
- * At end of month, auto-creates draft invoices in Xero for each client
- * with billable hours. One line item per client:
- * "Design and development services - [Month] - [X] hours at $[rate]/hr"
+ * Auto-generates draft invoices for hourly clients based on billable time entries.
+ * Creates both local invoice + pushes to Xero as DRAFT.
  *
- * Body (optional): { month?: 'YYYY-MM' }
+ * Body (optional): { month?: 'YYYY-MM', dryRun?: boolean }
  */
 export async function POST(req: NextRequest) {
   const { orgId } = await getRequestAuth(req)
@@ -19,7 +20,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const body = await req.json().catch(() => ({})) as { month?: string }
+  const body = await req.json().catch(() => ({})) as { month?: string; dryRun?: boolean }
+  const dryRun = body.dryRun ?? false
 
   // Determine month
   const now = new Date()
@@ -44,7 +46,7 @@ export async function POST(req: NextRequest) {
     year: 'numeric',
   })
 
-  const database = await db()
+  const database = await db() as unknown as D1
 
   // Get billable time entries for the month
   const entries = await database
@@ -67,48 +69,116 @@ export async function POST(req: NextRequest) {
   for (const entry of entries) {
     const existing = orgTotals.get(entry.orgId) ?? { hours: 0, rate: entry.hourlyRate ?? 0 }
     existing.hours += entry.hours
-    // Use the latest non-zero rate
     if (entry.hourlyRate && entry.hourlyRate > 0) {
       existing.rate = entry.hourlyRate
     }
     orgTotals.set(entry.orgId, existing)
   }
 
-  // Get org names
-  const invoiceStubs = []
+  // Get org details (name + xeroContactId + defaultHourlyRate)
+  const results = []
   for (const [orgIdKey, totals] of orgTotals.entries()) {
-    const orgs = await database
-      .select({ name: schema.organisations.name })
+    const [org] = await database
+      .select({
+        name: schema.organisations.name,
+        xeroContactId: schema.organisations.xeroContactId,
+        defaultHourlyRate: schema.organisations.defaultHourlyRate,
+      })
       .from(schema.organisations)
       .where(eq(schema.organisations.id, orgIdKey))
       .limit(1)
 
-    const orgName = orgs.length > 0 ? orgs[0].name : orgIdKey
-    const lineItem = `Design and development services - ${monthLabel} - ${totals.hours.toFixed(1)} hours at $${totals.rate.toFixed(0)}/hr`
-    const amount = totals.hours * totals.rate
+    if (!org) continue
 
-    invoiceStubs.push({
+    // Use org default rate if time entries don't have one
+    const rate = totals.rate > 0 ? totals.rate : (org.defaultHourlyRate ?? 0)
+    if (rate === 0) continue // Skip if no rate
+
+    const lineItem = `Design and development services - ${monthLabel} - ${totals.hours.toFixed(1)} hours at $${rate.toFixed(0)}/hr`
+    const amount = Math.round(totals.hours * rate * 100) / 100
+
+    if (dryRun) {
+      results.push({ orgName: org.name, lineItem, hours: totals.hours, rate, amount, status: 'dry_run' })
+      continue
+    }
+
+    // Create local invoice
+    const invoiceId = crypto.randomUUID()
+    const invoiceNow = new Date().toISOString()
+    const dueDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]
+
+    await database.insert(schema.invoices).values({
+      id: invoiceId,
       orgId: orgIdKey,
-      orgName,
+      source: 'xero',
+      status: 'draft',
+      amountUsd: amount,
+      totalUsd: amount,
+      currency: 'NZD',
+      dueDate,
+      notes: `Auto-generated for ${monthLabel} billable hours`,
+      createdAt: invoiceNow,
+      updatedAt: invoiceNow,
+    })
+
+    await database.insert(schema.invoiceItems).values({
+      id: crypto.randomUUID(),
+      invoiceId,
+      description: lineItem,
+      quantity: totals.hours,
+      unitPriceUsd: rate,
+      totalUsd: amount,
+    })
+
+    // Push to Xero if org has xeroContactId
+    let xeroStatus = 'no_xero_contact'
+    if (org.xeroContactId) {
+      const xeroResult = await callXeroAPI<{ Invoices?: Array<{ InvoiceID: string; InvoiceNumber: string }> }>('POST', '/Invoices', {
+        Invoices: [{
+          Type: 'ACCREC',
+          Status: 'DRAFT',
+          Contact: { ContactID: org.xeroContactId },
+          DueDate: dueDate,
+          LineAmountTypes: 'Exclusive',
+          CurrencyCode: 'NZD',
+          LineItems: [{
+            Description: lineItem,
+            Quantity: totals.hours,
+            UnitAmount: rate,
+            AccountCode: '200',
+          }],
+        }],
+      })
+
+      if (xeroResult?.Invoices?.[0]) {
+        const xeroInv = xeroResult.Invoices[0]
+        await database.update(schema.invoices).set({
+          xeroInvoiceId: xeroInv.InvoiceID,
+          updatedAt: new Date().toISOString(),
+        }).where(eq(schema.invoices.id, invoiceId))
+        xeroStatus = 'synced'
+      } else {
+        xeroStatus = 'xero_failed'
+      }
+    }
+
+    results.push({
+      orgName: org.name,
       lineItem,
       hours: totals.hours,
-      rate: totals.rate,
+      rate,
       amount,
+      invoiceId,
+      status: 'created',
+      xeroStatus,
     })
   }
-
-  // Stub: In production this would call the Xero API to create draft invoices
-  // using XERO_CLIENT_ID and XERO_CLIENT_SECRET for OAuth
-  const xeroConfigured = !!(process.env.XERO_CLIENT_ID && process.env.XERO_CLIENT_SECRET)
 
   return NextResponse.json({
     success: true,
     month: monthLabel,
-    invoiceCount: invoiceStubs.length,
-    invoices: invoiceStubs,
-    xeroSynced: false,
-    message: xeroConfigured
-      ? 'Xero export stub: would create draft invoices in production'
-      : 'Xero not configured. Set XERO_CLIENT_ID and XERO_CLIENT_SECRET to enable.',
+    dryRun,
+    invoiceCount: results.length,
+    invoices: results,
   })
 }
