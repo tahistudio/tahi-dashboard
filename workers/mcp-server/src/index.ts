@@ -353,8 +353,37 @@ const TOOLS: ToolDef[] = [
     value: prop('number', 'Updated deal value'),
     status: prop('string', 'Updated status'),
     ownerId: prop('string', 'New owner team member ID'),
+    orgId: prop('string', 'Client organisation ID to link'),
+    source: prop('string', 'Lead source'),
+    notes: prop('string', 'Deal notes'),
+    engagementType: prop('string', 'Engagement type: project or retainer'),
+    totalHours: prop('number', 'Total project hours'),
+    hoursPerMonth: prop('number', 'Monthly retainer hours'),
+    engagementStartDate: prop('string', 'Engagement start date (YYYY-MM-DD)'),
+    engagementEndDate: prop('string', 'Engagement end date (YYYY-MM-DD)'),
+    autoNudgesDisabled: prop('boolean', 'Disable auto-nudges for this deal'),
   }, ['dealId']),
   tool('delete_deal', 'Delete a deal from the sales pipeline', {
+    dealId: prop('string', 'Deal ID'),
+  }, ['dealId']),
+
+  // ── Nudge Emails ──────────────────────────────────────────────────────
+  tool('list_nudge_templates', 'List all nudge email templates'),
+  tool('create_nudge_template', 'Create a nudge email template', {
+    name: prop('string', 'Template name'),
+    subject: prop('string', 'Email subject (supports {{dealTitle}} variable)'),
+    bodyHtml: prop('string', 'Email body HTML'),
+    category: prop('string', 'Category: follow_up, check_in, proposal, intro, custom'),
+  }, ['name', 'subject', 'bodyHtml']),
+  tool('send_nudge', 'Send a nudge email to deal contacts', {
+    dealId: prop('string', 'Deal ID'),
+    contactEmails: { type: 'array', items: { type: 'string' }, description: 'Recipient email addresses' },
+    subject: prop('string', 'Email subject'),
+    bodyHtml: prop('string', 'Email body HTML'),
+    sendNow: prop('boolean', 'Send immediately (true) or save as draft (false)'),
+    scheduledAt: prop('string', 'ISO timestamp to schedule send (alternative to sendNow)'),
+  }, ['dealId', 'contactEmails', 'subject', 'bodyHtml']),
+  tool('list_deal_nudges', 'List all nudges for a specific deal', {
     dealId: prop('string', 'Deal ID'),
   }, ['dealId']),
 
@@ -630,6 +659,18 @@ async function executeTool(
     }
     case 'delete_deal':
       return json(await apiWrite(`/api/admin/deals/${s('dealId')}`, token, 'DELETE'))
+
+    // ── Nudge Emails ──────────────────────────────────────────────────
+    case 'list_nudge_templates':
+      return json(await apiGet('/api/admin/nudge-templates', token))
+    case 'create_nudge_template':
+      return json(await apiWrite('/api/admin/nudge-templates', token, 'POST', args as Record<string, unknown>))
+    case 'send_nudge': {
+      const { dealId: nDealId, ...nudgeBody } = args
+      return json(await apiWrite(`/api/admin/deals/${nDealId}/nudges`, token, 'POST', nudgeBody))
+    }
+    case 'list_deal_nudges':
+      return json(await apiGet(`/api/admin/deals/${s('dealId')}/nudges`, token))
 
     // ── Calls ─────────────────────────────────────────────────────────
     case 'list_calls':
