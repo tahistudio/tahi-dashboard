@@ -280,6 +280,23 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
                           <p className="text-xs mt-0.5" style={{ color: isDisabled ? 'var(--color-text-subtle)' : 'var(--color-text-muted)' }}>
                             {integration.description}
                           </p>
+                          {integration.key === 'xero' && isConnected && (
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const res = await fetch(apiPath('/api/admin/integrations/xero/connect'))
+                                  if (res.ok) {
+                                    const data = await res.json() as { authorizationUrl?: string }
+                                    if (data.authorizationUrl) window.open(data.authorizationUrl, '_blank')
+                                  }
+                                } catch { /* silent */ }
+                              }}
+                              className="text-xs font-medium mt-1.5 transition-colors"
+                              style={{ color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}
+                            >
+                              Reconnect Xero
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>

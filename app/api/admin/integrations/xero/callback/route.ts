@@ -16,13 +16,13 @@ export async function GET(req: NextRequest) {
   if (error) {
     // Redirect to settings with error indicator
     return NextResponse.redirect(
-      new URL('/settings?xero=error', process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
+      new URL('/settings?xero=error', new URL(req.url).origin),
     )
   }
 
   if (!code) {
     return NextResponse.redirect(
-      new URL('/settings?xero=error', process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
+      new URL('/settings?xero=error', new URL(req.url).origin),
     )
   }
 
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
 
   if (!clientId || !clientSecret) {
     return NextResponse.redirect(
-      new URL('/settings?xero=error', process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
+      new URL('/settings?xero=error', new URL(req.url).origin),
     )
   }
 
@@ -50,14 +50,14 @@ export async function GET(req: NextRequest) {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code,
-        redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL}/api/admin/integrations/xero/callback`,
+        redirect_uri: `${new URL(req.url).origin}/api/admin/integrations/xero/callback`,
       }),
     })
 
     if (!tokenRes.ok) {
       console.error('Xero token exchange failed:', tokenRes.status, tokenRes.statusText)
       return NextResponse.redirect(
-        new URL('/settings?xero=error', process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
+        new URL('/settings?xero=error', new URL(req.url).origin),
       )
     }
 
@@ -74,13 +74,13 @@ export async function GET(req: NextRequest) {
     if (!accessToken) {
       console.error('No access token in Xero response')
       return NextResponse.redirect(
-        new URL('/settings?xero=error', process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
+        new URL('/settings?xero=error', new URL(req.url).origin),
       )
     }
   } catch (err) {
     console.error('Failed to exchange Xero authorization code:', err)
     return NextResponse.redirect(
-      new URL('/settings?xero=error', process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
+      new URL('/settings?xero=error', new URL(req.url).origin),
     )
   }
 
@@ -130,11 +130,11 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error('Failed to store Xero integration record:', err)
     return NextResponse.redirect(
-      new URL('/settings?xero=error', process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
+      new URL('/settings?xero=error', new URL(req.url).origin),
     )
   }
 
   return NextResponse.redirect(
-    new URL('/settings?xero=connected', process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
+    new URL('/settings?xero=connected', new URL(req.url).origin),
   )
 }

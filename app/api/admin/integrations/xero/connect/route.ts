@@ -19,8 +19,11 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'}/api/admin/integrations/xero/callback`
-  const scopes = 'openid profile email accounting.transactions accounting.contacts offline_access'
+  // Use the request origin to build the redirect URI dynamically
+  // This ensures it works on any deployment (Webflow Cloud, localhost, etc.)
+  const requestUrl = new URL(req.url)
+  const redirectUri = `${requestUrl.origin}/api/admin/integrations/xero/callback`
+  const scopes = 'openid profile email accounting.transactions accounting.contacts accounting.reports.read accounting.settings offline_access'
 
   const authUrl = new URL('https://login.xero.com/identity/connect/authorize')
   authUrl.searchParams.set('response_type', 'code')
