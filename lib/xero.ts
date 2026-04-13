@@ -3,7 +3,11 @@ import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 
 /**
- * Xero API utilities for OAuth token management and API calls
+ * Xero API utilities for Custom Connection token management and API calls.
+ *
+ * Custom Connections use client_credentials grant type (no user consent needed).
+ * Token is fetched with client_id + client_secret, cached in DB, and
+ * auto-refreshed when expired.
  */
 
 interface XeroTokenResponse {
@@ -36,17 +40,19 @@ export async function getXeroIntegration(): Promise<XeroIntegration | null> {
 }
 
 /**
- * Check if Xero token is expired
+ * Check if Xero token is expired (with 60s buffer)
  */
 export function isTokenExpired(tokenExpiresAt: string | null): boolean {
   if (!tokenExpiresAt) return true
-  return new Date(tokenExpiresAt) <= new Date()
+  return new Date(tokenExpiresAt).getTime() <= Date.now() + 60000
 }
 
 /**
- * Refresh the Xero access token using refresh token
+ * Get a fresh Xero access token using client_credentials grant.
+ * This works for Custom Connection apps (no user consent flow needed).
+ * Falls back to refresh_token grant if a refresh token exists.
  */
-export async function refreshXeroToken(): Promise<boolean> {
+export async function fetchXeroToken(): Promise<boolean> {
   const clientId = process.env.XERO_CLIENT_ID
   const clientSecret = process.env.XERO_CLIENT_SECRET
 
@@ -55,12 +61,7 @@ export async function refreshXeroToken(): Promise<boolean> {
     return false
   }
 
-  const integration = await getXeroIntegration()
-  if (!integration || !integration.refreshToken) {
-    console.error('No Xero refresh token available')
-    return false
-  }
-
+  // Try client_credentials first (Custom Connection)
   try {
     const tokenRes = await fetch('https://identity.xero.com/connect/token', {
       method: 'POST',
@@ -69,61 +70,107 @@ export async function refreshXeroToken(): Promise<boolean> {
         Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
       },
       body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: integration.refreshToken,
+        grant_type: 'client_credentials',
       }),
     })
 
-    if (!tokenRes.ok) {
-      console.error('Xero token refresh failed:', tokenRes.status, tokenRes.statusText)
-      return false
+    if (tokenRes.ok) {
+      const tokenData = (await tokenRes.json()) as XeroTokenResponse
+      await storeXeroToken(tokenData)
+      return true
     }
 
-    const tokenData = (await tokenRes.json()) as XeroTokenResponse
-
-    const database = await db()
-    const now = new Date().toISOString()
-    const tokenExpiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString()
-
-    await (database as ReturnType<typeof import('drizzle-orm/d1').drizzle>)
-      .update(schema.integrations)
-      .set({
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token ?? integration.refreshToken,
-        tokenExpiresAt,
-        updatedAt: now,
+    // If client_credentials fails, try refresh_token as fallback
+    const integration = await getXeroIntegration()
+    if (integration?.refreshToken) {
+      const refreshRes = await fetch('https://identity.xero.com/connect/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
+        },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: integration.refreshToken,
+        }),
       })
-      .where(eq(schema.integrations.service, 'xero'))
 
-    return true
+      if (refreshRes.ok) {
+        const tokenData = (await refreshRes.json()) as XeroTokenResponse
+        await storeXeroToken(tokenData, integration.refreshToken)
+        return true
+      }
+    }
+
+    console.error('Xero token fetch failed:', tokenRes.status, tokenRes.statusText)
+    return false
   } catch (err) {
-    console.error('Failed to refresh Xero token:', err)
+    console.error('Failed to fetch Xero token:', err)
     return false
   }
 }
 
+async function storeXeroToken(tokenData: XeroTokenResponse, existingRefreshToken?: string): Promise<void> {
+  const database = await db()
+  const now = new Date().toISOString()
+  const tokenExpiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString()
+
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Check if integration record exists
+  const existing = await drizzle
+    .select({ id: schema.integrations.id })
+    .from(schema.integrations)
+    .where(eq(schema.integrations.service, 'xero'))
+    .limit(1)
+
+  if (existing.length > 0) {
+    await drizzle
+      .update(schema.integrations)
+      .set({
+        accessToken: tokenData.access_token,
+        refreshToken: tokenData.refresh_token ?? existingRefreshToken ?? null,
+        tokenExpiresAt,
+        updatedAt: now,
+      })
+      .where(eq(schema.integrations.service, 'xero'))
+  } else {
+    await drizzle
+      .insert(schema.integrations)
+      .values({
+        id: crypto.randomUUID(),
+        service: 'xero',
+        accessToken: tokenData.access_token,
+        refreshToken: tokenData.refresh_token ?? null,
+        tokenExpiresAt,
+        createdAt: now,
+        updatedAt: now,
+      })
+  }
+}
+
+// Keep old name as alias for backward compatibility
+export const refreshXeroToken = fetchXeroToken
+
 /**
- * Get a valid Xero access token, refreshing if necessary
+ * Get a valid Xero access token, auto-fetching if expired
  */
 export async function getValidXeroToken(): Promise<string | null> {
   const integration = await getXeroIntegration()
 
-  if (!integration || !integration.accessToken) {
-    console.error('Xero not connected')
+  // If we have a valid cached token, use it
+  if (integration?.accessToken && !isTokenExpired(integration.tokenExpiresAt)) {
+    return integration.accessToken
+  }
+
+  // Token missing or expired - fetch a new one
+  const fetched = await fetchXeroToken()
+  if (!fetched) {
     return null
   }
 
-  if (isTokenExpired(integration.tokenExpiresAt)) {
-    const refreshed = await refreshXeroToken()
-    if (!refreshed) {
-      return null
-    }
-
-    const updated = await getXeroIntegration()
-    return updated?.accessToken ?? null
-  }
-
-  return integration.accessToken
+  const updated = await getXeroIntegration()
+  return updated?.accessToken ?? null
 }
 
 /**
