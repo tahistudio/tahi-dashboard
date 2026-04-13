@@ -34,6 +34,11 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       valueNzd: schema.deals.valueNzd,
       source: schema.deals.source,
       estimatedHoursPerWeek: schema.deals.estimatedHoursPerWeek,
+      engagementType: schema.deals.engagementType,
+      totalHours: schema.deals.totalHours,
+      hoursPerMonth: schema.deals.hoursPerMonth,
+      engagementStartDate: schema.deals.engagementStartDate,
+      engagementEndDate: schema.deals.engagementEndDate,
       expectedCloseDate: schema.deals.expectedCloseDate,
       closedAt: schema.deals.closedAt,
       closeReason: schema.deals.closeReason,
@@ -136,6 +141,11 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     closeReason?: string | null
     source?: string | null
     estimatedHoursPerWeek?: number
+    engagementType?: string | null
+    totalHours?: number | null
+    hoursPerMonth?: number | null
+    engagementStartDate?: string | null
+    engagementEndDate?: string | null
     expectedCloseDate?: string | null
     wonSource?: string | null
     lostReason?: string | null
@@ -191,6 +201,11 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.closeReason !== undefined) updates.closeReason = body.closeReason
   if (body.source !== undefined) updates.source = body.source
   if (body.estimatedHoursPerWeek !== undefined) updates.estimatedHoursPerWeek = body.estimatedHoursPerWeek
+  if (body.engagementType !== undefined) updates.engagementType = body.engagementType
+  if (body.totalHours !== undefined) updates.totalHours = body.totalHours
+  if (body.hoursPerMonth !== undefined) updates.hoursPerMonth = body.hoursPerMonth
+  if (body.engagementStartDate !== undefined) updates.engagementStartDate = body.engagementStartDate
+  if (body.engagementEndDate !== undefined) updates.engagementEndDate = body.engagementEndDate
   if (body.expectedCloseDate !== undefined) updates.expectedCloseDate = body.expectedCloseDate
   if (body.wonSource !== undefined) updates.wonSource = body.wonSource
   if (body.lostReason !== undefined) updates.closeReason = body.lostReason

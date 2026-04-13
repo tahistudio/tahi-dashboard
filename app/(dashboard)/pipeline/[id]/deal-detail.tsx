@@ -23,6 +23,11 @@ interface DealData {
   valueNzd: number
   source: string | null
   estimatedHoursPerWeek: number | null
+  engagementType: string | null
+  totalHours: number | null
+  hoursPerMonth: number | null
+  engagementStartDate: string | null
+  engagementEndDate: string | null
   expectedCloseDate: string | null
   closedAt: string | null
   closeReason: string | null
@@ -435,21 +440,18 @@ export function DealDetail({ dealId }: { dealId: string }) {
             />
           </SidebarCard>
 
-          {/* Estimated Hours */}
-          <SidebarCard title="Estimated Hours/Week">
-            <EditableNumber
-              dealId={dealId}
-              value={deal.estimatedHoursPerWeek}
-              field="estimatedHoursPerWeek"
-              onUpdated={fetchDeal}
-              suffix="hrs/wk"
-            />
+          {/* Engagement */}
+          <SidebarCard title="Engagement">
+            <EngagementEditor dealId={dealId} deal={deal} onUpdated={fetchDeal} />
           </SidebarCard>
 
-          {/* Capacity Impact (T307) */}
-          {deal.estimatedHoursPerWeek != null && deal.estimatedHoursPerWeek > 0 && (
+          {/* Capacity Impact */}
+          {(
+            (deal.engagementType === 'project' && deal.totalHours && deal.totalHours > 0) ||
+            (deal.engagementType === 'retainer' && ((deal.estimatedHoursPerWeek ?? 0) > 0 || (deal.hoursPerMonth ?? 0) > 0)) ||
+            (!deal.engagementType && deal.estimatedHoursPerWeek != null && deal.estimatedHoursPerWeek > 0)
+          ) && (
             <SidebarCard title="Capacity Impact">
-              {/* Main impact line */}
               <div style={{
                 padding: '0.625rem 0.75rem',
                 background: 'var(--color-brand-50, #f0f7ee)',
@@ -457,46 +459,32 @@ export function DealDetail({ dealId }: { dealId: string }) {
                 marginBottom: '0.5rem',
               }}>
                 <div style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--color-brand, #5A824E)' }}>
-                  ~{deal.estimatedHoursPerWeek} hrs/week
-                  {deal.expectedCloseDate ? (() => {
-                    const weeksUntilClose = Math.max(1, Math.ceil(
-                      (new Date(deal.expectedCloseDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24 * 7)
-                    ))
-                    return <span style={{ fontWeight: 500 }}> for ~{weeksUntilClose} weeks</span>
-                  })() : null}
+                  {deal.engagementType === 'project' ? (
+                    <>
+                      {deal.totalHours} hrs total
+                      {deal.engagementStartDate && deal.engagementEndDate && (
+                        <span style={{ fontWeight: 500 }}>
+                          {' '}over {Math.max(1, Math.ceil(
+                            (new Date(deal.engagementEndDate).getTime() - new Date(deal.engagementStartDate).getTime()) / (1000 * 60 * 60 * 24 * 7)
+                          ))} weeks
+                        </span>
+                      )}
+                    </>
+                  ) : deal.engagementType === 'retainer' ? (
+                    <>
+                      {deal.hoursPerMonth ? `${deal.hoursPerMonth} hrs/month` : `${deal.estimatedHoursPerWeek} hrs/week`}
+                      <span style={{ fontWeight: 500 }}> ongoing</span>
+                    </>
+                  ) : (
+                    <>~{deal.estimatedHoursPerWeek} hrs/week</>
+                  )}
                 </div>
               </div>
 
-              {/* Weighted impact */}
               {deal.stageProbability !== null && deal.stageProbability > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
-                  <span style={{ color: 'var(--color-text-subtle)' }}>Weighted impact</span>
-                  <span style={{ color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                    {((deal.estimatedHoursPerWeek * (deal.stageProbability ?? 0)) / 100).toFixed(1)} hrs/wk
-                  </span>
-                </div>
-              )}
-
-              {/* Probability context */}
-              {deal.stageProbability !== null && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginTop: '0.25rem' }}>
                   <span style={{ color: 'var(--color-text-subtle)' }}>Probability</span>
                   <span style={{ color: 'var(--color-text-muted)' }}>{deal.stageProbability}%</span>
-                </div>
-              )}
-
-              {/* Total estimated hours */}
-              {deal.expectedCloseDate && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginTop: '0.25rem' }}>
-                  <span style={{ color: 'var(--color-text-subtle)' }}>Total estimate</span>
-                  <span style={{ color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                    {(() => {
-                      const weeks = Math.max(1, Math.ceil(
-                        (new Date(deal.expectedCloseDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24 * 7)
-                      ))
-                      return `~${deal.estimatedHoursPerWeek * weeks} hrs total`
-                    })()}
-                  </span>
                 </div>
               )}
             </SidebarCard>
@@ -758,6 +746,162 @@ function EditableValue({ dealId, value, currency, onUpdated }: {
 }
 
 // ---- Owner Selector -----------------------------------------------------
+
+// ---- Engagement Editor ---------------------------------------------------
+
+function EngagementEditor({ dealId, deal, onUpdated }: {
+  dealId: string
+  deal: DealData
+  onUpdated: () => void
+}) {
+  const [saving, setSaving] = useState(false)
+  const engType = deal.engagementType ?? ''
+
+  const handleTypeChange = async (newType: string) => {
+    setSaving(true)
+    try {
+      await fetch(apiPath(`/api/admin/deals/${dealId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ engagementType: newType || null }),
+      })
+      onUpdated()
+    } catch { /* silent */ } finally { setSaving(false) }
+  }
+
+  const handleFieldSave = async (field: string, value: unknown) => {
+    setSaving(true)
+    try {
+      await fetch(apiPath(`/api/admin/deals/${dealId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: value }),
+      })
+      onUpdated()
+    } catch { /* silent */ } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Type toggle */}
+      <div className="flex gap-1.5">
+        {[
+          { value: 'project', label: 'Project' },
+          { value: 'retainer', label: 'Retainer' },
+        ].map(opt => (
+          <button
+            key={opt.value}
+            onClick={() => handleTypeChange(engType === opt.value ? '' : opt.value)}
+            disabled={saving}
+            className="rounded-full font-medium transition-colors"
+            style={{
+              padding: '0.25rem 0.625rem',
+              fontSize: '0.6875rem',
+              background: engType === opt.value ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
+              color: engType === opt.value ? 'white' : 'var(--color-text-muted)',
+              border: `1px solid ${engType === opt.value ? 'var(--color-brand)' : 'var(--color-border)'}`,
+              cursor: 'pointer',
+            }}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Project fields */}
+      {engType === 'project' && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>Total hours</span>
+            <input
+              type="number"
+              defaultValue={deal.totalHours ?? ''}
+              onBlur={e => {
+                const v = parseInt(e.target.value)
+                if (!isNaN(v) && v !== deal.totalHours) handleFieldSave('totalHours', v)
+              }}
+              className="rounded-md text-right"
+              style={{ width: '4rem', padding: '0.25rem 0.375rem', fontSize: '0.75rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>Start date</span>
+            <input
+              type="date"
+              defaultValue={deal.engagementStartDate?.split('T')[0] ?? ''}
+              onBlur={e => handleFieldSave('engagementStartDate', e.target.value || null)}
+              className="rounded-md"
+              style={{ padding: '0.25rem 0.375rem', fontSize: '0.75rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>End date</span>
+            <input
+              type="date"
+              defaultValue={deal.engagementEndDate?.split('T')[0] ?? ''}
+              onBlur={e => handleFieldSave('engagementEndDate', e.target.value || null)}
+              className="rounded-md"
+              style={{ padding: '0.25rem 0.375rem', fontSize: '0.75rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Retainer fields */}
+      {engType === 'retainer' && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>Hours/week</span>
+            <input
+              type="number"
+              defaultValue={deal.estimatedHoursPerWeek ?? ''}
+              onBlur={e => {
+                const v = parseInt(e.target.value)
+                if (!isNaN(v)) handleFieldSave('estimatedHoursPerWeek', v)
+              }}
+              className="rounded-md text-right"
+              style={{ width: '4rem', padding: '0.25rem 0.375rem', fontSize: '0.75rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>Hours/month</span>
+            <input
+              type="number"
+              defaultValue={deal.hoursPerMonth ?? ''}
+              onBlur={e => {
+                const v = parseInt(e.target.value)
+                if (!isNaN(v)) handleFieldSave('hoursPerMonth', v)
+              }}
+              className="rounded-md text-right"
+              style={{ width: '4rem', padding: '0.25rem 0.375rem', fontSize: '0.75rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>Start date</span>
+            <input
+              type="date"
+              defaultValue={deal.engagementStartDate?.split('T')[0] ?? ''}
+              onBlur={e => handleFieldSave('engagementStartDate', e.target.value || null)}
+              className="rounded-md"
+              style={{ padding: '0.25rem 0.375rem', fontSize: '0.75rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Legacy: if no type set but has hours, show old field */}
+      {!engType && (
+        <EditableNumber
+          dealId={dealId}
+          value={deal.estimatedHoursPerWeek}
+          field="estimatedHoursPerWeek"
+          onUpdated={onUpdated}
+          suffix="hrs/wk"
+        />
+      )}
+    </div>
+  )
+}
 
 // ---- Contact Linker -------------------------------------------------------
 

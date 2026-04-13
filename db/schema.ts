@@ -931,6 +931,12 @@ export const deals = sqliteTable('deals', {
   valueNzd: integer('value_nzd').notNull().default(0),
   source: text('source'),
   estimatedHoursPerWeek: integer('estimated_hours_per_week').default(0),
+  // Engagement model (project vs retainer)
+  engagementType: text('engagement_type'), // 'project' | 'retainer' | null
+  totalHours: integer('total_hours'),       // project: total hours (e.g. 30)
+  hoursPerMonth: integer('hours_per_month'), // retainer: monthly hours
+  engagementStartDate: text('engagement_start_date'),
+  engagementEndDate: text('engagement_end_date'),
   expectedCloseDate: text('expected_close_date'),
   closedAt: text('closed_at'),
   closeReason: text('close_reason'),
