@@ -941,6 +941,8 @@ export const deals = sqliteTable('deals', {
   closedAt: text('closed_at'),
   closeReason: text('close_reason'),
   notes: text('notes'),
+  // Nudge control: disable auto-nudges per deal
+  autoNudgesDisabled: integer('auto_nudges_disabled').default(0),
   // S22: Won source tracking for close rate analytics
   wonSource: text('won_source'),
   ...timestamps,
@@ -1100,3 +1102,35 @@ export type TaskTemplate = typeof taskTemplates.$inferSelect
 export type NewTaskTemplate = typeof taskTemplates.$inferInsert
 export type Mention = typeof mentions.$inferSelect
 export type NewMention = typeof mentions.$inferInsert
+
+// ============================================================
+// NUDGE EMAIL SYSTEM
+// ============================================================
+
+export const nudgeTemplates = sqliteTable('nudge_templates', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
+  subject: text('subject').notNull(),
+  bodyHtml: text('body_html').notNull(),
+  category: text('category'), // 'follow_up' | 'check_in' | 'proposal' | 'intro' | 'custom'
+  isDefault: integer('is_default').default(0),
+  ...timestamps,
+})
+
+export const dealNudges = sqliteTable('deal_nudges', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  dealId: text('deal_id').references(() => deals.id, { onDelete: 'cascade' }),
+  templateId: text('template_id').references(() => nudgeTemplates.id, { onDelete: 'set null' }),
+  contactEmails: text('contact_emails').notNull(), // JSON array
+  subject: text('subject').notNull(),
+  bodyHtml: text('body_html').notNull(),
+  status: text('status').notNull().default('draft'), // draft | scheduled | sent | failed | cancelled
+  scheduledAt: text('scheduled_at'), // ISO timestamp, null = instant
+  sentAt: text('sent_at'),
+  triggerRule: text('trigger_rule'), // JSON: { type, stage, days, unless }
+  createdById: text('created_by_id').notNull(),
+  ...timestamps,
+}, (table) => [
+  index('idx_nudges_deal').on(table.dealId),
+  index('idx_nudges_status').on(table.status),
+])

@@ -12,8 +12,9 @@ const DEFAULT_STAGES = [
   { name: 'Proposal',       slug: 'proposal',       probability: 40,  position: 2, colour: '#fbbf24', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
   { name: 'Negotiation',    slug: 'negotiation',    probability: 60,  position: 3, colour: '#fb923c', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
   { name: 'Verbal Commit',  slug: 'verbal_commit',  probability: 80,  position: 4, colour: '#4ade80', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
-  { name: 'Closed Won',     slug: 'closed_won',     probability: 100, position: 5, colour: '#22c55e', isDefault: 0, isClosedWon: 1, isClosedLost: 0 },
-  { name: 'Closed Lost',    slug: 'closed_lost',    probability: 0,   position: 6, colour: '#f87171', isDefault: 0, isClosedWon: 0, isClosedLost: 1 },
+  { name: 'Stalled',        slug: 'stalled',        probability: 5,   position: 5, colour: '#94a3b8', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
+  { name: 'Closed Won',     slug: 'closed_won',     probability: 100, position: 6, colour: '#22c55e', isDefault: 0, isClosedWon: 1, isClosedLost: 0 },
+  { name: 'Closed Lost',    slug: 'closed_lost',    probability: 0,   position: 7, colour: '#f87171', isDefault: 0, isClosedWon: 0, isClosedLost: 1 },
 ] as const
 
 async function seedDefaultStages(database: D1) {

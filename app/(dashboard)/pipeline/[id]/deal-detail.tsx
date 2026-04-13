@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   ArrowLeft, Building2, Calendar, Clock,
   Phone, Mail, FileText, MessageSquare,
-  Plus, Loader2, Check, ChevronDown, Inbox, X, Search, UserPlus,
+  Plus, Loader2, Check, ChevronDown, Inbox, X, Search, UserPlus, Send, BellOff,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { REQUEST_STATUS_CONFIG } from '@/lib/status-config'
@@ -29,6 +29,7 @@ interface DealData {
   engagementStartDate: string | null
   engagementEndDate: string | null
   expectedCloseDate: string | null
+  autoNudgesDisabled: number | null
   closedAt: string | null
   closeReason: string | null
   notes: string | null
@@ -179,6 +180,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
   const [ltv, setLtv] = useState<{ total: number; wonDealCount: number; paidInvoiceCount: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [showActivityForm, setShowActivityForm] = useState(false)
+  const [showNudgeDialog, setShowNudgeDialog] = useState(false)
 
   const fetchDeal = useCallback(async () => {
     setLoading(true)
@@ -276,24 +278,44 @@ export function DealDetail({ dealId }: { dealId: string }) {
               <h2 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)' }}>
                 Activity Timeline
               </h2>
-              <button
-                onClick={() => setShowActivityForm(true)}
-                className="inline-flex items-center gap-1.5 font-medium transition-colors rounded-lg"
-                style={{
-                  padding: '0.5rem 0.875rem',
-                  fontSize: '0.8125rem',
-                  background: 'var(--color-brand)',
-                  color: 'white',
-                  border: 'none',
-                  cursor: 'pointer',
-                  minHeight: '2.75rem',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-dark)' }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-brand)' }}
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Log Activity
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowNudgeDialog(true)}
+                  className="inline-flex items-center gap-1.5 font-medium transition-colors rounded-lg"
+                  style={{
+                    padding: '0.5rem 0.875rem',
+                    fontSize: '0.8125rem',
+                    background: 'var(--color-bg-tertiary)',
+                    color: 'var(--color-text-muted)',
+                    border: '1px solid var(--color-border)',
+                    cursor: 'pointer',
+                    minHeight: '2.75rem',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)' }}
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  Nudge
+                </button>
+                <button
+                  onClick={() => setShowActivityForm(true)}
+                  className="inline-flex items-center gap-1.5 font-medium transition-colors rounded-lg"
+                  style={{
+                    padding: '0.5rem 0.875rem',
+                    fontSize: '0.8125rem',
+                    background: 'var(--color-brand)',
+                    color: 'white',
+                    border: 'none',
+                    cursor: 'pointer',
+                    minHeight: '2.75rem',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-dark)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-brand)' }}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Log Activity
+                </button>
+              </div>
             </div>
 
             {activities.length === 0 ? (
@@ -463,6 +485,40 @@ export function DealDetail({ dealId }: { dealId: string }) {
             <EngagementEditor dealId={dealId} deal={deal} onUpdated={fetchDeal} />
           </SidebarCard>
 
+          {/* Auto-nudge toggle */}
+          <SidebarCard title="Auto Nudges">
+            <div className="flex items-center justify-between">
+              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+                {deal.autoNudgesDisabled ? 'Paused' : 'Active'}
+              </span>
+              <button
+                onClick={async () => {
+                  await fetch(apiPath(`/api/admin/deals/${dealId}`), {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ autoNudgesDisabled: !deal.autoNudgesDisabled }),
+                  })
+                  fetchDeal()
+                }}
+                className="inline-flex items-center gap-1.5 font-medium transition-colors rounded-full"
+                style={{
+                  padding: '0.25rem 0.625rem',
+                  fontSize: '0.6875rem',
+                  background: deal.autoNudgesDisabled ? 'var(--color-bg-tertiary)' : 'var(--color-brand-50)',
+                  color: deal.autoNudgesDisabled ? 'var(--color-text-subtle)' : 'var(--color-brand)',
+                  border: `1px solid ${deal.autoNudgesDisabled ? 'var(--color-border)' : 'var(--color-brand-light)'}`,
+                  cursor: 'pointer',
+                }}
+              >
+                {deal.autoNudgesDisabled ? (
+                  <><BellOff style={{ width: '0.625rem', height: '0.625rem' }} /> Enable</>
+                ) : (
+                  <><BellOff style={{ width: '0.625rem', height: '0.625rem' }} /> Pause</>
+                )}
+              </button>
+            </div>
+          </SidebarCard>
+
           {/* Capacity Impact */}
           {(
             (deal.engagementType === 'project' && deal.totalHours && deal.totalHours > 0) ||
@@ -546,6 +602,20 @@ export function DealDetail({ dealId }: { dealId: string }) {
           onClose={() => setShowActivityForm(false)}
           onCreated={() => {
             setShowActivityForm(false)
+            fetchDeal()
+          }}
+        />
+      )}
+
+      {/* Nudge dialog */}
+      {showNudgeDialog && (
+        <NudgeDialog
+          dealId={dealId}
+          dealTitle={deal.title}
+          contacts={contacts}
+          onClose={() => setShowNudgeDialog(false)}
+          onSent={() => {
+            setShowNudgeDialog(false)
             fetchDeal()
           }}
         />
@@ -1541,6 +1611,210 @@ function SourceSelector({ dealId, currentSource, onUpdated }: {
 }
 
 // ---- Activity Form Dialog -----------------------------------------------
+
+// ---- Nudge Dialog --------------------------------------------------------
+
+function NudgeDialog({ dealId, dealTitle, contacts, onClose, onSent }: {
+  dealId: string
+  dealTitle: string
+  contacts: DealContact[]
+  onClose: () => void
+  onSent: () => void
+}) {
+  const contactEmails = contacts.map(c => c.contactEmail).filter(Boolean) as string[]
+  const [to, setTo] = useState(contactEmails.join(', '))
+  const [subject, setSubject] = useState(`Following up: ${dealTitle}`)
+  const [body, setBody] = useState(
+    `Hi,\n\nJust wanted to check in on this. Happy to answer any questions or jump on a quick call if it helps.\n\nCheers,\nLiam`
+  )
+  const [templates, setTemplates] = useState<{ id: string; name: string; subject: string; bodyHtml: string }[]>([])
+  const [scheduleDate, setScheduleDate] = useState('')
+  const [sending, setSending] = useState(false)
+  const [mode, setMode] = useState<'now' | 'schedule'>('now')
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/nudge-templates'))
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        const data = d as { items?: { id: string; name: string; subject: string; bodyHtml: string }[] }
+        setTemplates(data.items ?? [])
+      })
+      .catch(() => setTemplates([]))
+  }, [])
+
+  const handleTemplate = (templateId: string) => {
+    const t = templates.find(tp => tp.id === templateId)
+    if (t) {
+      setSubject(t.subject.replace(/\{\{dealTitle\}\}/g, dealTitle))
+      setBody(t.bodyHtml.replace(/\{\{dealTitle\}\}/g, dealTitle))
+    }
+  }
+
+  const handleSend = async () => {
+    const emails = to.split(',').map(e => e.trim()).filter(Boolean)
+    if (!emails.length || !subject.trim() || !body.trim()) return
+
+    setSending(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/deals/${dealId}/nudges`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contactEmails: emails,
+          subject: subject.trim(),
+          bodyHtml: body.trim().replace(/\n/g, '<br>'),
+          sendNow: mode === 'now',
+          scheduledAt: mode === 'schedule' && scheduleDate ? new Date(scheduleDate).toISOString() : undefined,
+        }),
+      })
+      if (res.ok) onSent()
+    } catch { /* silent */ } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.4)' }}
+      onClick={onClose}
+    >
+      <div
+        className="rounded-xl shadow-lg border flex flex-col"
+        style={{
+          width: '32rem', maxWidth: '95vw', maxHeight: '90vh',
+          background: 'var(--color-bg)', borderColor: 'var(--color-border)',
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--color-border)' }}>
+          <h2 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)' }}>
+            <Send className="inline w-4 h-4" style={{ marginRight: '0.5rem', color: 'var(--color-brand)' }} />
+            Send Nudge
+          </h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-subtle)' }}>
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-3 overflow-y-auto" style={{ padding: '1.25rem' }}>
+          {/* Template picker */}
+          {templates.length > 0 && (
+            <div>
+              <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }}>
+                Template
+              </label>
+              <select
+                onChange={e => handleTemplate(e.target.value)}
+                className="w-full rounded-lg"
+                style={{ padding: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+              >
+                <option value="">Custom message</option>
+                {templates.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* To */}
+          <div>
+            <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }}>
+              To
+            </label>
+            <input
+              type="text"
+              value={to}
+              onChange={e => setTo(e.target.value)}
+              placeholder="email@example.com"
+              className="w-full rounded-lg"
+              style={{ padding: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+            />
+          </div>
+
+          {/* Subject */}
+          <div>
+            <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }}>
+              Subject
+            </label>
+            <input
+              type="text"
+              value={subject}
+              onChange={e => setSubject(e.target.value)}
+              className="w-full rounded-lg"
+              style={{ padding: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+            />
+          </div>
+
+          {/* Body */}
+          <div>
+            <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }}>
+              Message
+            </label>
+            <textarea
+              value={body}
+              onChange={e => setBody(e.target.value)}
+              rows={6}
+              className="w-full rounded-lg resize-none"
+              style={{ padding: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)', fontFamily: 'inherit' }}
+            />
+          </div>
+
+          {/* Send mode */}
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 cursor-pointer" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+              <input type="radio" name="nudgeMode" checked={mode === 'now'} onChange={() => setMode('now')} />
+              Send now
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+              <input type="radio" name="nudgeMode" checked={mode === 'schedule'} onChange={() => setMode('schedule')} />
+              Schedule
+            </label>
+          </div>
+
+          {mode === 'schedule' && (
+            <input
+              type="datetime-local"
+              value={scheduleDate}
+              onChange={e => setScheduleDate(e.target.value)}
+              className="rounded-lg"
+              style={{ padding: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+            />
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2" style={{ padding: '1rem 1.25rem', borderTop: '1px solid var(--color-border)' }}>
+          <button
+            onClick={onClose}
+            className="rounded-lg font-medium transition-colors"
+            style={{ padding: '0.5rem 1rem', fontSize: '0.8125rem', background: 'var(--color-bg-tertiary)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)', cursor: 'pointer' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSend}
+            disabled={sending || !to.trim() || !subject.trim() || !body.trim()}
+            className="rounded-lg font-medium transition-colors inline-flex items-center gap-1.5"
+            style={{
+              padding: '0.5rem 1rem',
+              fontSize: '0.8125rem',
+              background: sending ? 'var(--color-text-subtle)' : 'var(--color-brand)',
+              color: 'white',
+              border: 'none',
+              cursor: sending ? 'default' : 'pointer',
+              opacity: (!to.trim() || !subject.trim() || !body.trim()) ? 0.5 : 1,
+            }}
+          >
+            <Send className="w-3.5 h-3.5" />
+            {sending ? 'Sending...' : mode === 'now' ? 'Send Now' : 'Schedule'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---- Activity Form Dialog ------------------------------------------------
 
 function ActivityFormDialog({ dealId, onClose, onCreated }: {
   dealId: string

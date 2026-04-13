@@ -39,6 +39,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       hoursPerMonth: schema.deals.hoursPerMonth,
       engagementStartDate: schema.deals.engagementStartDate,
       engagementEndDate: schema.deals.engagementEndDate,
+      autoNudgesDisabled: schema.deals.autoNudgesDisabled,
       expectedCloseDate: schema.deals.expectedCloseDate,
       closedAt: schema.deals.closedAt,
       closeReason: schema.deals.closeReason,
@@ -190,6 +191,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     expectedCloseDate?: string | null
     wonSource?: string | null
     lostReason?: string | null
+    autoNudgesDisabled?: boolean
     status?: 'won' | 'lost'
   }
 
@@ -250,6 +252,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.expectedCloseDate !== undefined) updates.expectedCloseDate = body.expectedCloseDate
   if (body.wonSource !== undefined) updates.wonSource = body.wonSource
   if (body.lostReason !== undefined) updates.closeReason = body.lostReason
+  if (body.autoNudgesDisabled !== undefined) updates.autoNudgesDisabled = body.autoNudgesDisabled ? 1 : 0
 
   // When status is explicitly set to won or lost, auto-set closedAt
   if (body.status === 'won' || body.status === 'lost') {
