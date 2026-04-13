@@ -48,6 +48,7 @@ function mapXeroStatus(xeroStatus: string): string {
 
 // POST /api/admin/integrations/xero/import-invoices
 export async function POST(req: NextRequest) {
+  try {
   const { orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
@@ -108,53 +109,63 @@ export async function POST(req: NextRequest) {
       )
       if (nameMatch) {
         matchedOrgId = nameMatch.id
-        // Auto-link the xeroContactId for future matches
-        await database.update(schema.organisations).set({
-          xeroContactId: inv.Contact.ContactID,
-          updatedAt: now,
-        }).where(eq(schema.organisations.id, nameMatch.id))
+        // Auto-link the xeroContactId for future matches (may fail if column doesn't exist yet)
+        try {
+          await database.update(schema.organisations).set({
+            xeroContactId: inv.Contact.ContactID,
+            updatedAt: now,
+          }).where(eq(schema.organisations.id, nameMatch.id))
+        } catch { /* column may not exist yet */ }
       }
     }
 
     const localStatus = mapXeroStatus(inv.Status)
     const invoiceId = crypto.randomUUID()
 
-    await database.insert(schema.invoices).values({
-      id: invoiceId,
-      orgId: matchedOrgId ?? '',
-      xeroInvoiceId: inv.InvoiceID,
-      source: 'xero',
-      status: localStatus,
-      amountUsd: inv.SubTotal,
-      totalUsd: inv.Total,
-      currency: inv.CurrencyCode ?? 'NZD',
-      dueDate: inv.DueDateString?.split('T')[0] ?? null,
-      paidAt: inv.FullyPaidOnDate ?? null,
-      notes: `Imported from Xero: ${inv.InvoiceNumber}`,
-      createdAt: inv.DateString ?? now,
-      updatedAt: now,
-    })
+    try {
+      await database.insert(schema.invoices).values({
+        id: invoiceId,
+        orgId: matchedOrgId ?? '',
+        xeroInvoiceId: inv.InvoiceID,
+        source: 'xero',
+        status: localStatus,
+        amountUsd: inv.SubTotal,
+        totalUsd: inv.Total,
+        currency: inv.CurrencyCode ?? 'NZD',
+        dueDate: inv.DueDateString?.split('T')[0] ?? null,
+        paidAt: inv.FullyPaidOnDate ?? null,
+        notes: `Imported from Xero: ${inv.InvoiceNumber}`,
+        createdAt: inv.DateString ?? now,
+        updatedAt: now,
+      })
 
-    // Import line items if available
-    if (inv.LineItems?.length) {
-      for (const line of inv.LineItems) {
-        await database.insert(schema.invoiceItems).values({
-          id: crypto.randomUUID(),
-          invoiceId,
-          description: line.Description ?? 'Line item',
-          quantity: line.Quantity ?? 1,
-          unitPriceUsd: line.UnitAmount ?? 0,
-          totalUsd: line.LineAmount ?? 0,
-        })
+      // Import line items if available
+      if (inv.LineItems?.length) {
+        for (const line of inv.LineItems) {
+          await database.insert(schema.invoiceItems).values({
+            id: crypto.randomUUID(),
+            invoiceId,
+            description: line.Description ?? 'Line item',
+            quantity: line.Quantity ?? 1,
+            unitPriceUsd: line.UnitAmount ?? 0,
+            totalUsd: line.LineAmount ?? 0,
+          })
+        }
       }
-    }
 
-    imported++
-    results.push({
-      invoiceNumber: inv.InvoiceNumber,
-      status: 'imported',
-      orgMatch: matchedOrgId ? allOrgs.find(o => o.id === matchedOrgId)?.name : undefined,
-    })
+      imported++
+      results.push({
+        invoiceNumber: inv.InvoiceNumber,
+        status: 'imported',
+        orgMatch: matchedOrgId ? allOrgs.find(o => o.id === matchedOrgId)?.name : undefined,
+      })
+    } catch (insertErr) {
+      results.push({
+        invoiceNumber: inv.InvoiceNumber,
+        status: 'error',
+        orgMatch: insertErr instanceof Error ? insertErr.message : 'Insert failed',
+      })
+    }
   }
 
   return NextResponse.json({
@@ -166,4 +177,11 @@ export async function POST(req: NextRequest) {
     hasMore: data.Invoices.length >= 100, // Xero returns max 100 per page
     results,
   })
+  } catch (err) {
+    console.error('Xero import error:', err)
+    return NextResponse.json({
+      error: 'Import failed',
+      message: err instanceof Error ? err.message : 'Unknown error',
+    }, { status: 500 })
+  }
 }
