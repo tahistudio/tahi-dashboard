@@ -113,6 +113,7 @@ const SOURCE_LABELS: Record<string, { label: string; bg: string; text: string }>
   cold:             { label: 'Cold Outreach',   bg: '#e0e7ff', text: '#4338ca' },
   cold_outreach:    { label: 'Cold Outreach',   bg: '#e0e7ff', text: '#4338ca' },
   partner:          { label: 'Partner',         bg: '#fce7f3', text: '#be185d' },
+  webflow_partner:  { label: 'Webflow Partner', bg: '#4353ff1a', text: '#4353ff' },
   webflow:          { label: 'Webflow',         bg: '#dbeafe', text: '#2563eb' },
   existing_client:  { label: 'Existing Client', bg: '#fef3c7', text: '#d97706' },
   other:            { label: 'Other',           bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-subtle)' },
@@ -158,8 +159,8 @@ export function PipelineContent() {
       try {
         const res = await fetch(apiPath('/api/admin/team'))
         if (!res.ok) return
-        const data = await res.json() as { members?: TeamMemberOption[] }
-        setTeamMembers(data.members ?? [])
+        const data = await res.json() as { items?: TeamMemberOption[], members?: TeamMemberOption[] }
+        setTeamMembers(data.items ?? data.members ?? [])
       } catch {
         // silent
       }
@@ -494,6 +495,7 @@ export function PipelineContent() {
             >
               <option value="">All sources</option>
               <option value="referral">Referral</option>
+              <option value="webflow_partner">Webflow Partner</option>
               <option value="linkedin">LinkedIn</option>
               <option value="website">Website</option>
               <option value="cold">Cold Outreach</option>
@@ -860,6 +862,7 @@ function KanbanView({ deals, stages, onStageChange }: {
 
 const WON_SOURCE_OPTIONS = [
   { value: 'referral', label: 'Referral' },
+  { value: 'webflow_partner', label: 'Webflow Partner' },
   { value: 'linkedin', label: 'LinkedIn' },
   { value: 'website', label: 'Website' },
   { value: 'cold_outreach', label: 'Cold Outreach' },
@@ -1550,6 +1553,7 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
             >
               <option value="">Select source...</option>
               <option value="referral">Referral</option>
+              <option value="webflow_partner">Webflow Partner</option>
               <option value="linkedin">LinkedIn</option>
               <option value="website">Website</option>
               <option value="cold">Cold Outreach</option>

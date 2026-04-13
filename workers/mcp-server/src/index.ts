@@ -354,6 +354,9 @@ const TOOLS: ToolDef[] = [
     status: prop('string', 'Updated status'),
     ownerId: prop('string', 'New owner team member ID'),
   }, ['dealId']),
+  tool('delete_deal', 'Delete a deal from the sales pipeline', {
+    dealId: prop('string', 'Deal ID'),
+  }, ['dealId']),
 
   // ── Calls ─────────────────────────────────────────────────────────────
   tool('list_calls', 'List all scheduled calls'),
@@ -625,6 +628,8 @@ async function executeTool(
       const { dealId, ...body } = args
       return json(await apiWrite(`/api/admin/deals/${dealId}`, token, 'PATCH', body))
     }
+    case 'delete_deal':
+      return json(await apiWrite(`/api/admin/deals/${s('dealId')}`, token, 'DELETE'))
 
     // ── Calls ─────────────────────────────────────────────────────────
     case 'list_calls':

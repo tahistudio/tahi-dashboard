@@ -182,8 +182,8 @@ export function DealDetail({ dealId }: { dealId: string }) {
       }
 
       if (teamRes.ok) {
-        const tData = await teamRes.json() as { members: TeamMember[] }
-        setTeamMembers(tData.members ?? [])
+        const tData = await teamRes.json() as { items?: TeamMember[], members?: TeamMember[] }
+        setTeamMembers(tData.items ?? tData.members ?? [])
       }
     } catch {
       // silent
