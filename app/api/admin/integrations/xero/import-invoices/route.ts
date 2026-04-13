@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
       )
       if (nameMatch) {
         matchedOrgId = nameMatch.id
-        // Auto-link the xeroContactId for future matches (may fail if column doesn't exist yet)
+        // Auto-link the xeroContactId for future matches
         try {
           await database.update(schema.organisations).set({
             xeroContactId: inv.Contact.ContactID,
@@ -119,13 +119,52 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // If no org matched, auto-create one from the Xero contact
+    if (!matchedOrgId && inv.Contact?.Name) {
+      const newOrgId = crypto.randomUUID()
+      try {
+        await database.insert(schema.organisations).values({
+          id: newOrgId,
+          name: inv.Contact.Name,
+          status: 'active',
+          healthStatus: 'green',
+          onboardingState: '{}',
+          brands: '[]',
+          customFields: '{}',
+          preferredCurrency: inv.CurrencyCode ?? 'NZD',
+          createdAt: now,
+          updatedAt: now,
+        })
+        matchedOrgId = newOrgId
+        // Also add to allOrgs so subsequent invoices for same contact match
+        allOrgs.push({ id: newOrgId, name: inv.Contact.Name, xeroContactId: inv.Contact.ContactID })
+        // Link the xeroContactId
+        try {
+          await database.update(schema.organisations).set({
+            xeroContactId: inv.Contact.ContactID,
+            updatedAt: now,
+          }).where(eq(schema.organisations.id, newOrgId))
+        } catch { /* column may not exist */ }
+      } catch {
+        // Org creation failed, skip this invoice
+        results.push({ invoiceNumber: inv.InvoiceNumber, status: 'error', orgMatch: 'Failed to create org' })
+        continue
+      }
+    }
+
+    // Skip if we still have no org (shouldn't happen, but safety)
+    if (!matchedOrgId) {
+      results.push({ invoiceNumber: inv.InvoiceNumber, status: 'error', orgMatch: 'No Xero contact name' })
+      continue
+    }
+
     const localStatus = mapXeroStatus(inv.Status)
     const invoiceId = crypto.randomUUID()
 
     try {
       await database.insert(schema.invoices).values({
         id: invoiceId,
-        orgId: matchedOrgId ?? '',
+        orgId: matchedOrgId,
         xeroInvoiceId: inv.InvoiceID,
         source: 'xero',
         status: localStatus,
