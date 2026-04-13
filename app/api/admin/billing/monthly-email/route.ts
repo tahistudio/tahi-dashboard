@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          from: 'Tahi Dashboard <dashboard@tahi.studio>',
+          from: 'Tahi Studio <business@tahi.studio>',
           to: ['liam@tahi.studio'],
           subject: `Monthly Billing Summary - ${monthLabel}`,
           html: emailHtml,

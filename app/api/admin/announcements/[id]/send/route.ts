@@ -83,7 +83,7 @@ export async function POST(
         for (const contact of contacts) {
           try {
             await resend.emails.send({
-              from: 'Tahi Studio <notifications@tahi.studio>',
+              from: 'Tahi Studio <business@tahi.studio>',
               to: contact.email,
               subject: announcement.title,
               html: `<div style="font-family: Manrope, -apple-system, sans-serif; max-width: 560px; margin: 0 auto; padding: 2rem;">

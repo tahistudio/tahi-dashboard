@@ -68,7 +68,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const resend = new Resend(process.env.RESEND_API_KEY)
 
     await resend.emails.send({
-      from: 'Tahi Studio <notifications@tahi.studio>',
+      from: 'Tahi Studio <business@tahi.studio>',
       to: contact.email,
       subject: 'Welcome to Tahi Studio',
       html: `<div style="font-family: Manrope, -apple-system, BlinkMacSystemFont, sans-serif; max-width: 560px; margin: 0 auto; padding: 2rem; background: #ffffff;">

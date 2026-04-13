@@ -26,7 +26,7 @@ export async function sendEmail(
     return { success: false, error: 'RESEND_API_KEY not configured' }
   }
 
-  const from = process.env.RESEND_FROM_EMAIL ?? 'dashboard@tahi.studio'
+  const from = process.env.RESEND_FROM_EMAIL ?? 'business@tahi.studio'
 
   try {
     const { error } = await resend.emails.send({
