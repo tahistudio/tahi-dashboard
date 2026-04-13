@@ -553,7 +553,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
 function StageProgress({ stages, currentStageId }: { stages: Stage[]; currentStageId: string }) {
   const openStages = stages.filter(s => !s.isClosedWon && !s.isClosedLost)
   const currentStage = stages.find(s => s.id === currentStageId)
-  const isClosed = currentStage?.isClosedWon || currentStage?.isClosedLost
+  const isClosed = !!(currentStage?.isClosedWon || currentStage?.isClosedLost)
 
   return (
     <div className="flex items-center gap-1 flex-wrap" style={{ marginTop: '0.5rem' }}>
