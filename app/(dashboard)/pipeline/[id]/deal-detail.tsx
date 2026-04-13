@@ -1134,7 +1134,6 @@ function ActivityFormDialog({ dealId, onClose, onCreated }: {
 
   const activityTypes = [
     { value: 'note', label: 'Note' },
-    { value: 'call', label: 'Call' },
     { value: 'meeting', label: 'Meeting' },
     { value: 'email', label: 'Email' },
     { value: 'task', label: 'Task' },

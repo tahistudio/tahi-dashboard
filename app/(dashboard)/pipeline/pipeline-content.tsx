@@ -11,6 +11,16 @@ import {
   Trophy, XCircle, Filter, X,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { convertFromNzd } from '@/lib/currency'
+
+type DisplayCurrency = 'NZD' | 'USD' | 'AUD' | 'GBP' | 'EUR'
+const CURRENCY_OPTIONS: { code: DisplayCurrency; label: string }[] = [
+  { code: 'NZD', label: 'NZD' },
+  { code: 'USD', label: 'USD' },
+  { code: 'AUD', label: 'AUD' },
+  { code: 'GBP', label: 'GBP' },
+  { code: 'EUR', label: 'EUR' },
+]
 
 // ---- Types ---------------------------------------------------------------
 
@@ -112,6 +122,7 @@ const SOURCE_LABELS: Record<string, { label: string; bg: string; text: string }>
   website:          { label: 'Website',         bg: '#d1fae5', text: '#059669' },
   cold:             { label: 'Cold Outreach',   bg: '#e0e7ff', text: '#4338ca' },
   cold_outreach:    { label: 'Cold Outreach',   bg: '#e0e7ff', text: '#4338ca' },
+  straightin:       { label: 'StraightIn',      bg: '#c7d2fe', text: '#3730a3' },
   partner:          { label: 'Partner',         bg: '#fce7f3', text: '#be185d' },
   webflow_partner:  { label: 'Webflow Partner', bg: '#4353ff1a', text: '#4353ff' },
   webflow:          { label: 'Webflow',         bg: '#dbeafe', text: '#2563eb' },
@@ -144,6 +155,8 @@ export function PipelineContent() {
   const [filterValueMax, setFilterValueMax] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([])
+  const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>('NZD')
+  const [exchangeRates, setExchangeRates] = useState<{ currency: string; rateToUsd: number }[]>([])
 
   // Open new deal dialog from query params (T361)
   useEffect(() => {
@@ -167,6 +180,27 @@ export function PipelineContent() {
     }
     void loadTeam()
   }, [])
+
+  // Fetch exchange rates for currency conversion
+  useEffect(() => {
+    async function loadRates() {
+      try {
+        const res = await fetch(apiPath('/api/admin/exchange-rates'))
+        if (!res.ok) return
+        const data = await res.json() as { rates?: { currency: string; rateToUsd: number }[] }
+        setExchangeRates(data.rates ?? [])
+      } catch {
+        // silent - will show NZD values as fallback
+      }
+    }
+    void loadRates()
+  }, [])
+
+  /** Convert NZD amount to display currency */
+  function toDisplay(nzdAmount: number): number {
+    if (displayCurrency === 'NZD' || exchangeRates.length === 0) return nzdAmount
+    return convertFromNzd(nzdAmount, displayCurrency, exchangeRates)
+  }
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -271,41 +305,61 @@ export function PipelineContent() {
         </button>
       </div>
 
-      {/* KPI summary bar */}
-      <div
-        className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4"
-        style={{ marginBottom: '1.5rem' }}
-      >
-        <SummaryCard
-          icon={DollarSign}
-          label="Total Pipeline Value"
-          value={formatCurrency(totalValue, 'NZD')}
-          accent="emerald"
-        />
-        <SummaryCard
-          icon={Target}
-          label="Weighted Forecast"
-          value={formatCurrency(weightedForecast, 'NZD')}
-          accent="blue"
-        />
-        <SummaryCard
-          icon={TrendingUp}
-          label="Open Deals"
-          value={String(openDeals.length)}
-          accent="amber"
-        />
-        <SummaryCard
-          icon={Award}
-          label="Win Rate"
-          value={closedDeals.length > 0 ? `${winRate}%` : '--'}
-          accent="purple"
-        />
-        <SummaryCard
-          icon={BarChart3}
-          label="Avg Deal Size"
-          value={openDeals.length > 0 ? formatCurrency(avgDealSize, 'NZD') : '--'}
-          accent="rose"
-        />
+      {/* KPI summary bar with currency switcher */}
+      <div style={{ marginBottom: '1.5rem' }}>
+        <div className="flex items-center justify-end gap-1" style={{ marginBottom: '0.5rem' }}>
+          {CURRENCY_OPTIONS.map(opt => (
+            <button
+              key={opt.code}
+              onClick={() => setDisplayCurrency(opt.code)}
+              className="transition-colors font-medium"
+              style={{
+                padding: '0.25rem 0.5rem',
+                fontSize: '0.6875rem',
+                borderRadius: '0.375rem',
+                border: '1px solid',
+                borderColor: displayCurrency === opt.code ? 'var(--color-brand)' : 'var(--color-border)',
+                background: displayCurrency === opt.code ? 'var(--color-brand)' : 'var(--color-bg)',
+                color: displayCurrency === opt.code ? 'white' : 'var(--color-text-muted)',
+                cursor: 'pointer',
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+          <SummaryCard
+            icon={DollarSign}
+            label="Total Pipeline Value"
+            value={formatCurrency(toDisplay(totalValue), displayCurrency)}
+            accent="emerald"
+          />
+          <SummaryCard
+            icon={Target}
+            label="Weighted Forecast"
+            value={formatCurrency(toDisplay(weightedForecast), displayCurrency)}
+            accent="blue"
+          />
+          <SummaryCard
+            icon={TrendingUp}
+            label="Open Deals"
+            value={String(openDeals.length)}
+            accent="amber"
+          />
+          <SummaryCard
+            icon={Award}
+            label="Win Rate"
+            value={closedDeals.length > 0 ? `${winRate}%` : '--'}
+            accent="purple"
+          />
+          <SummaryCard
+            icon={BarChart3}
+            label="Avg Deal Size"
+            value={openDeals.length > 0 ? formatCurrency(toDisplay(avgDealSize), displayCurrency) : '--'}
+            accent="rose"
+          />
+        </div>
       </div>
 
       {/* Toolbar */}
@@ -496,12 +550,11 @@ export function PipelineContent() {
               <option value="">All sources</option>
               <option value="referral">Referral</option>
               <option value="webflow_partner">Webflow Partner</option>
+              <option value="straightin">StraightIn</option>
               <option value="linkedin">LinkedIn</option>
               <option value="website">Website</option>
               <option value="cold">Cold Outreach</option>
-              <option value="cold_outreach">Cold Outreach</option>
               <option value="partner">Partner</option>
-              <option value="webflow">Webflow</option>
               <option value="existing_client">Existing Client</option>
               <option value="other">Other</option>
             </select>
@@ -582,12 +635,16 @@ export function PipelineContent() {
           deals={filtered}
           stages={stages}
           onStageChange={fetchData}
+          displayCurrency={displayCurrency}
+          toDisplay={toDisplay}
         />
       ) : (
         <ListView
           deals={filtered}
           stages={stages}
           sortKey={sortKey}
+          displayCurrency={displayCurrency}
+          toDisplay={toDisplay}
         />
       )}
 
@@ -671,10 +728,12 @@ function SummaryCard({ icon: Icon, label, value, accent }: {
 
 // ---- Kanban View ---------------------------------------------------------
 
-function KanbanView({ deals, stages, onStageChange }: {
+function KanbanView({ deals, stages, onStageChange, displayCurrency, toDisplay }: {
   deals: Deal[]
   stages: PipelineStage[]
   onStageChange: () => void
+  displayCurrency: string
+  toDisplay: (nzd: number) => number
 }) {
   const byStage = (stageId: string) => deals.filter(d => d.stageId === stageId)
 
@@ -748,7 +807,7 @@ function KanbanView({ deals, stages, onStageChange }: {
     >
       {stages.map(stage => {
         const cards = byStage(stage.id)
-        const stageValue = cards.reduce((s, d) => s + d.value, 0)
+        const stageValue = cards.reduce((s, d) => s + (d.valueNzd ?? d.value), 0)
         const colour = stage.colour ?? 'var(--color-brand)'
 
         return (
@@ -795,7 +854,7 @@ function KanbanView({ deals, stages, onStageChange }: {
               </div>
               {stageValue > 0 && (
                 <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)' }}>
-                  {formatCurrency(stageValue, 'NZD')}
+                  {formatCurrency(toDisplay(stageValue), displayCurrency)}
                 </span>
               )}
             </div>
@@ -836,7 +895,7 @@ function KanbanView({ deals, stages, onStageChange }: {
                 </div>
               ) : (
                 cards.map(deal => (
-                  <DealCard key={deal.id} deal={deal} stages={stages} />
+                  <DealCard key={deal.id} deal={deal} stages={stages} displayCurrency={displayCurrency} toDisplay={toDisplay} />
                 ))
               )}
             </div>
@@ -863,9 +922,10 @@ function KanbanView({ deals, stages, onStageChange }: {
 const WON_SOURCE_OPTIONS = [
   { value: 'referral', label: 'Referral' },
   { value: 'webflow_partner', label: 'Webflow Partner' },
+  { value: 'straightin', label: 'StraightIn' },
   { value: 'linkedin', label: 'LinkedIn' },
   { value: 'website', label: 'Website' },
-  { value: 'cold_outreach', label: 'Cold Outreach' },
+  { value: 'cold', label: 'Cold Outreach' },
   { value: 'partner', label: 'Partner' },
   { value: 'other', label: 'Other' },
 ]
@@ -1054,7 +1114,7 @@ function DealCloseDialog({ type, dealTitle, onConfirm, onCancel }: {
 
 // ---- Deal Card -----------------------------------------------------------
 
-function DealCard({ deal, stages }: { deal: Deal; stages: PipelineStage[] }) {
+function DealCard({ deal, stages, displayCurrency, toDisplay }: { deal: Deal; stages: PipelineStage[]; displayCurrency: string; toDisplay: (nzd: number) => number }) {
   const stage = stages.find(s => s.id === deal.stageId)
   const probability = deal.stageProbability ?? stage?.probability ?? 0
   const days = daysInStage(deal.stageEnteredAt ?? null, deal.updatedAt)
@@ -1109,7 +1169,7 @@ function DealCard({ deal, stages }: { deal: Deal; stages: PipelineStage[] }) {
       {/* Value + Probability row */}
       <div className="flex items-center gap-2" style={{ marginBottom: '0.375rem' }}>
         <p className="font-semibold" style={{ fontSize: '0.875rem', color: 'var(--color-brand)' }}>
-          {formatCurrency(deal.value, deal.currency)}
+          {formatCurrency(toDisplay(deal.valueNzd ?? deal.value), displayCurrency)}
         </p>
         <span
           className="inline-flex items-center rounded-full font-medium"
@@ -1186,10 +1246,12 @@ function DealCard({ deal, stages }: { deal: Deal; stages: PipelineStage[] }) {
 
 // ---- List View -----------------------------------------------------------
 
-function ListView({ deals, stages, sortKey }: {
+function ListView({ deals, stages, sortKey, displayCurrency, toDisplay }: {
   deals: Deal[]
   stages: PipelineStage[]
   sortKey: SortKey
+  displayCurrency: string
+  toDisplay: (nzd: number) => number
 }) {
   const sorted = [...deals].sort((a, b) => {
     if (sortKey === 'value') return (b.value ?? 0) - (a.value ?? 0)
@@ -1296,7 +1358,7 @@ function ListView({ deals, stages, sortKey }: {
                     )}
                   </td>
                   <td className="font-semibold" style={{ padding: '0.75rem 1rem', color: 'var(--color-text)', whiteSpace: 'nowrap' }}>
-                    {formatCurrency(deal.value, deal.currency)}
+                    {formatCurrency(toDisplay(deal.valueNzd ?? deal.value), displayCurrency)}
                   </td>
                   <td style={{ padding: '0.75rem 1rem', whiteSpace: 'nowrap' }}>
                     <span
@@ -1554,6 +1616,7 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
               <option value="">Select source...</option>
               <option value="referral">Referral</option>
               <option value="webflow_partner">Webflow Partner</option>
+              <option value="straightin">StraightIn</option>
               <option value="linkedin">LinkedIn</option>
               <option value="website">Website</option>
               <option value="cold">Cold Outreach</option>
