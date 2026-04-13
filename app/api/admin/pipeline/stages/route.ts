@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, sql } from 'drizzle-orm'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -62,7 +62,36 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ stages })
+  // Compute historical conversion probabilities from deal data
+  const allDeals = await database
+    .select({
+      stagePosition: schema.pipelineStages.position,
+      isClosedWon: schema.pipelineStages.isClosedWon,
+      isClosedLost: schema.pipelineStages.isClosedLost,
+    })
+    .from(schema.deals)
+    .innerJoin(schema.pipelineStages, eq(schema.deals.stageId, schema.pipelineStages.id))
+    .where(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)
+
+  const wonCount = allDeals.filter(d => d.isClosedWon).length
+  const totalDeals = allDeals.length
+
+  // For each stage: deals that reached at least this position = those currently at this position or beyond
+  // Since deals move forward, current position >= stage position means they passed through it
+  const stagesWithHistory = stages.map(stage => {
+    const dealsAtOrPast = allDeals.filter(d => d.stagePosition >= stage.position).length
+    const historicalProbability = dealsAtOrPast >= 3
+      ? Math.round((wonCount / dealsAtOrPast) * 100)
+      : null // Not enough data, return null to use static probability
+    return {
+      ...stage,
+      historicalProbability,
+      dealsSampled: dealsAtOrPast,
+      totalDeals,
+    }
+  })
+
+  return NextResponse.json({ stages: stagesWithHistory })
 }
 
 // PUT /api/admin/pipeline/stages - bulk update (reorder, rename, change colors, probabilities)

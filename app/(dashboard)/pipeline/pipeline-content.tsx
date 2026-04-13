@@ -36,6 +36,9 @@ interface PipelineStage {
   isClosedLost: number
   isClosed?: number
   closedType?: string | null
+  historicalProbability?: number | null
+  dealsSampled?: number
+  totalDeals?: number
 }
 
 interface Deal {
@@ -262,8 +265,15 @@ export function PipelineContent() {
   const closedDeals = filtered.filter(d => d.stageIsClosedWon || d.stageIsClosedLost)
   const wonDeals = filtered.filter(d => d.stageIsClosedWon)
   const totalValue = openDeals.reduce((s, d) => s + (d.valueNzd ?? d.value), 0)
+  // Use historical probability when available, fallback to static
+  function getEffectiveProbability(deal: Deal): number {
+    const stage = stages.find(st => st.id === deal.stageId)
+    if (stage?.historicalProbability != null) return stage.historicalProbability
+    return deal.stageProbability ?? stage?.probability ?? 0
+  }
+
   const weightedForecast = openDeals.reduce((s, d) => {
-    const prob = d.stageProbability ?? 0
+    const prob = getEffectiveProbability(d)
     return s + ((d.valueNzd ?? d.value) * prob / 100)
   }, 0)
   const winRate = closedDeals.length > 0
@@ -851,6 +861,16 @@ function KanbanView({ deals, stages, onStageChange, displayCurrency, toDisplay }
                 >
                   {cards.length}
                 </span>
+                {!stage.isClosedWon && !stage.isClosedLost && (
+                  <span
+                    style={{ fontSize: '0.5625rem', color: 'var(--color-text-subtle)' }}
+                    title={stage.historicalProbability != null
+                      ? `${stage.historicalProbability}% historical win rate (${stage.dealsSampled} deals sampled)`
+                      : `${stage.probability}% static probability`}
+                  >
+                    {stage.historicalProbability != null ? stage.historicalProbability : stage.probability}%
+                  </span>
+                )}
               </div>
               {stageValue > 0 && (
                 <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)' }}>
