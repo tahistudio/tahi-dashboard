@@ -108,6 +108,7 @@ function CreateInvoiceModal({
   const [orgOptions, setOrgOptions] = useState<{ id: string; name: string }[]>([])
   const [showOrgDropdown, setShowOrgDropdown] = useState(false)
   const [selectedOrgName, setSelectedOrgName] = useState('')
+  const [destination, setDestination] = useState<'manual' | 'xero'>('manual')
   const [description, setDescription] = useState('')
 
   // Fetch clients on mount
@@ -131,7 +132,7 @@ function CreateInvoiceModal({
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
     if (!orgId.trim() || !description.trim() || !unitAmount) {
-      setError('Client ID, description, and amount are required.')
+      setError('Client, description, and amount are required.')
       return
     }
     setSaving(true)
@@ -143,6 +144,7 @@ function CreateInvoiceModal({
         body: JSON.stringify({
           orgId: orgId.trim(),
           currency,
+          source: destination,
           lineItems: [{ description: description.trim(), quantity: parseFloat(quantity) || 1, unitAmount: parseFloat(unitAmount) }],
           dueDate: dueDate || undefined,
           notes: notes || undefined,
@@ -154,14 +156,29 @@ function CreateInvoiceModal({
         return
       }
       const json = await res.json() as { id?: string }
-      showToast('Invoice created successfully')
+
+      // If Xero destination, also push to Xero
+      if (destination === 'xero' && json.id) {
+        try {
+          await fetch(apiPath('/api/admin/invoices/xero-sync'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ invoiceIds: [json.id] }),
+          })
+          showToast('Invoice created and synced to Xero')
+        } catch {
+          showToast('Invoice created (Xero sync failed)')
+        }
+      } else {
+        showToast('Invoice created successfully')
+      }
       onCreated(json.id)
     } catch {
       setError('Network error. Please try again.')
     } finally {
       setSaving(false)
     }
-  }, [orgId, description, quantity, unitAmount, currency, dueDate, notes, onCreated, showToast])
+  }, [orgId, description, quantity, unitAmount, currency, dueDate, notes, destination, onCreated, showToast])
 
   return (
     <div
@@ -194,6 +211,36 @@ function CreateInvoiceModal({
           </div>
         )}
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {/* Destination toggle */}
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            {[
+              { value: 'manual' as const, label: 'Dashboard Only' },
+              { value: 'xero' as const, label: 'Create in Xero' },
+            ].map(opt => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setDestination(opt.value)}
+                className="rounded-full font-medium transition-colors"
+                style={{
+                  padding: '0.375rem 0.75rem',
+                  fontSize: '0.75rem',
+                  background: destination === opt.value
+                    ? opt.value === 'xero' ? '#13b5ea15' : 'var(--color-brand-50)'
+                    : 'var(--color-bg-tertiary)',
+                  color: destination === opt.value
+                    ? opt.value === 'xero' ? '#13b5ea' : 'var(--color-brand)'
+                    : 'var(--color-text-muted)',
+                  border: `1px solid ${destination === opt.value
+                    ? opt.value === 'xero' ? '#13b5ea40' : 'var(--color-brand-light)'
+                    : 'var(--color-border)'}`,
+                  cursor: 'pointer',
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', position: 'relative' }}>
             <label htmlFor="ci-org-search" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
               Client
@@ -391,7 +438,7 @@ function CreateInvoiceModal({
                 color: 'white', cursor: saving ? 'not-allowed' : 'pointer', minHeight: '2.75rem',
               }}
             >
-              {saving ? 'Creating...' : 'Create Invoice'}
+              {saving ? 'Creating...' : destination === 'xero' ? 'Create + Push to Xero' : 'Create Invoice'}
             </button>
           </div>
         </form>
@@ -416,6 +463,7 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
   const [error, setError] = useState(false)
   const [activeTab, setActiveTab] = useState('all')
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [syncing, setSyncing] = useState('')
   const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
 
   // Client-side date filter
@@ -470,7 +518,72 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
           </p>
         </div>
         {isAdmin && (
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={async () => {
+                setSyncing('xero')
+                try {
+                  let page = 1
+                  let totalImported = 0
+                  let totalSkipped = 0
+                  let hasMore = true
+                  while (hasMore) {
+                    const res = await fetch(apiPath(`/api/admin/integrations/xero/import-invoices?page=${page}`), { method: 'POST' })
+                    if (!res.ok) { alert('Xero import failed. Check connection in Settings.'); break }
+                    const d = await res.json() as { imported: number; skipped: number; hasMore: boolean }
+                    totalImported += d.imported
+                    totalSkipped += d.skipped
+                    hasMore = d.hasMore
+                    page++
+                  }
+                  alert(`Imported ${totalImported} invoices from Xero (${totalSkipped} already existed)`)
+                  fetchInvoices(activeTab)
+                } catch { alert('Xero import failed') }
+                finally { setSyncing('') }
+              }}
+              disabled={!!syncing}
+              className="flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
+              style={{
+                padding: '0.5rem 0.875rem',
+                background: '#13b5ea10',
+                border: '1px solid #13b5ea30',
+                borderRadius: '0.5rem',
+                cursor: syncing ? 'default' : 'pointer',
+                color: '#13b5ea',
+                minHeight: 44,
+                opacity: syncing === 'xero' ? 0.6 : 1,
+              }}
+            >
+              {syncing === 'xero' ? 'Importing...' : 'Sync Xero'}
+            </button>
+            <button
+              onClick={async () => {
+                setSyncing('payments')
+                try {
+                  const res = await fetch(apiPath('/api/admin/integrations/xero/sync-payments'), { method: 'POST' })
+                  if (res.ok) {
+                    const d = await res.json() as { updated: number }
+                    if (d.updated > 0) alert(`Updated ${d.updated} invoice payment statuses`)
+                    fetchInvoices(activeTab)
+                  }
+                } catch { /* silent */ }
+                finally { setSyncing('') }
+              }}
+              disabled={!!syncing}
+              className="flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
+              style={{
+                padding: '0.5rem 0.875rem',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                borderRadius: '0.5rem',
+                cursor: syncing ? 'default' : 'pointer',
+                color: 'var(--color-text-muted)',
+                minHeight: 44,
+                opacity: syncing === 'payments' ? 0.6 : 1,
+              }}
+            >
+              {syncing === 'payments' ? 'Syncing...' : 'Sync Payments'}
+            </button>
             <button
               onClick={() => {
                 const link = document.createElement('a')

@@ -53,10 +53,13 @@ export async function POST(req: NextRequest) {
 
   const database = await db() as unknown as D1
 
-  // Fetch all ACCREC invoices from Xero
+  // Fetch ACCREC invoices from Xero (paginated, summaries only for speed)
+  const url = new URL(req.url)
+  const page = parseInt(url.searchParams.get('page') ?? '1')
+
   const data = await callXeroAPI<XeroInvoicesResponse>(
     'GET',
-    '/Invoices?where=Type%3D%3D%22ACCREC%22&order=DateString%20DESC',
+    `/Invoices?where=Type%3D%3D%22ACCREC%22&order=DateString%20DESC&page=${page}&summaryOnly=false`,
   )
 
   if (!data?.Invoices) {
@@ -159,6 +162,8 @@ export async function POST(req: NextRequest) {
     imported,
     skipped,
     total: data.Invoices.length,
+    page,
+    hasMore: data.Invoices.length >= 100, // Xero returns max 100 per page
     results,
   })
 }

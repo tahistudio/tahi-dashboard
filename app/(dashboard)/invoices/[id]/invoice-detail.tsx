@@ -324,23 +324,21 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                 variant="ghost"
               />
             )}
-            {invoice.status !== 'paid' && invoice.status !== 'draft' && (
+            {invoice.status !== 'paid' && invoice.status !== 'draft' && invoice.stripeInvoiceId && (
               <ActionButton
-                label="Get Stripe Payment Link"
+                label="Stripe Payment Link"
                 disabled={patching !== null}
                 onClick={async () => {
                   try {
                     const res = await fetch(apiPath(`/api/admin/integrations/stripe/provision?invoiceId=${invoice.id}`))
                     if (res.ok) {
-                      const data = await res.json() as { payUrl?: string; error?: string }
+                      const data = await res.json() as { payUrl?: string }
                       if (data.payUrl) {
                         await navigator.clipboard.writeText(data.payUrl)
                         alert('Payment link copied to clipboard!')
                       } else {
-                        alert(data.error ?? 'Could not generate payment link')
+                        alert('No Stripe payment link available for this invoice')
                       }
-                    } else {
-                      alert('Stripe not configured. Add STRIPE_SECRET_KEY in Settings.')
                     }
                   } catch { alert('Failed to get payment link') }
                 }}
