@@ -751,8 +751,19 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
                     onMouseLeave={e => { (e.currentTarget as HTMLTableRowElement).style.background = '' }}
                   >
                     {isAdmin && (
-                      <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-text)' }}>
-                        {inv.orgName ?? 'Unknown'}
+                      <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', fontWeight: 500 }}>
+                        {inv.orgId ? (
+                          <Link
+                            href={`/clients/${inv.orgId}`}
+                            style={{ color: 'var(--color-brand)', textDecoration: 'none' }}
+                            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline' }}
+                            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none' }}
+                          >
+                            {inv.orgName ?? 'Unknown'}
+                          </Link>
+                        ) : (
+                          <span style={{ color: 'var(--color-text)' }}>{inv.orgName ?? 'Unknown'}</span>
+                        )}
                       </td>
                     )}
                     <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>

@@ -40,6 +40,7 @@ interface KPIs {
   openRequests: number
   inProgress: number
   outstandingInvoicesUsd: number
+  mrr: number
 }
 
 interface RecentRequest {
@@ -148,7 +149,7 @@ export function AdminOverview({ userName }: { userName: string }) {
         />
         <StatCard
           label="Outstanding"
-          value={loading ? null : formatUsd(kpis?.outstandingInvoicesUsd ?? 0)}
+          value={loading ? null : formatNzd(kpis?.outstandingInvoicesUsd ?? 0)}
           icon={<FileText size={18} />}
           href="/invoices"
           accent={kpis && kpis.outstandingInvoicesUsd > 0 ? 'amber' : 'neutral'}
@@ -156,15 +157,11 @@ export function AdminOverview({ userName }: { userName: string }) {
         />
         <StatCard
           label="MRR"
-          value={loading ? null : (() => {
-            if (monthlyRevenue.length === 0) return '$0'
-            const latest = monthlyRevenue[monthlyRevenue.length - 1]
-            return formatUsd(latest.total)
-          })()}
+          value={loading ? null : formatNzd(kpis?.mrr ?? 0)}
           icon={<TrendingUp size={18} />}
           href="/reports"
           accent="emerald"
-          sub={monthlyRevenue.length > 0 ? 'from invoices' : 'no invoice data'}
+          sub="recurring retainers"
         />
       </div>
 
@@ -1696,7 +1693,7 @@ function RevenueChart({ data }: { data: MonthlyRevenue[] }) {
           return (
             <div key={d.month} className="flex-1 flex flex-col items-center gap-1">
               <span className="text-xs font-medium text-[var(--color-text)]">
-                {d.total > 0 ? formatUsd(d.total) : ''}
+                {d.total > 0 ? formatNzd(d.total) : ''}
               </span>
               <div
                 className="w-full rounded-t-md transition-all"
@@ -1723,9 +1720,4 @@ function RevenueChart({ data }: { data: MonthlyRevenue[] }) {
 function timeAgo(iso: string) {
   try { return formatDistanceToNow(new Date(iso), { addSuffix: true }) }
   catch { return '' }
-}
-
-function formatUsd(n: number) {
-  if (n === 0) return '$0'
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
 }

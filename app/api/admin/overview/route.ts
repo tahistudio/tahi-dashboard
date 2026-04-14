@@ -124,12 +124,24 @@ export async function GET(req: NextRequest) {
     total: Math.round(total * 100) / 100,
   }))
 
+  // MRR from custom_mrr field (raw SQL, column may not exist before migration 0011)
+  let mrr = 0
+  try {
+    const mrrResult = await drizzle.all<{ total_mrr: number }>(
+      sql`SELECT COALESCE(SUM(custom_mrr), 0) as total_mrr FROM organisations WHERE status = 'active' AND custom_mrr > 0`
+    )
+    mrr = mrrResult?.[0]?.total_mrr ?? 0
+  } catch {
+    // Column doesn't exist yet
+  }
+
   return NextResponse.json({
     kpis: {
       activeClients: activeClientsResult[0]?.count ?? 0,
       openRequests: openRequestsResult[0]?.count ?? 0,
       inProgress: inProgressResult[0]?.count ?? 0,
       outstandingInvoicesUsd: outstandingInvoices[0]?.total ?? 0,
+      mrr,
     },
     recentRequests,
     monthlyRevenue,

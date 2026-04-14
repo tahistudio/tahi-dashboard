@@ -82,10 +82,19 @@ export function ReportsContent() {
     fetch(apiPath('/api/admin/exchange-rates'))
       .then(r => {
         if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ rates: Record<string, number> }>
+        return r.json() as Promise<{ rates: Array<{ currency: string; rateToNzd: number }> }>
       })
-      .then(d => setExchangeRates(d.rates ?? {}))
-      .catch(() => setExchangeRates({}))
+      .then(d => {
+        // Convert array of {currency, rateToNzd} to Record<string, number>
+        const rateMap: Record<string, number> = { NZD: 1 }
+        if (Array.isArray(d.rates)) {
+          for (const r of d.rates) {
+            if (r.currency && r.rateToNzd) rateMap[r.currency] = r.rateToNzd
+          }
+        }
+        setExchangeRates(rateMap)
+      })
+      .catch(() => setExchangeRates({ NZD: 1 }))
   }, [])
 
   const fetchData = useCallback(async () => {

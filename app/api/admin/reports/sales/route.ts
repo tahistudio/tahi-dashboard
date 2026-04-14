@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { count, sum, sql } from 'drizzle-orm'
+import { count, sql } from 'drizzle-orm'
 
 // ── GET /api/admin/reports/sales ───────────────────────────────────────────
 // Returns pipeline value by stage, weighted pipeline, win rate, avg deal size,
@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
   const database = await db()
 
   // Pipeline value by stage (join deals with pipeline_stages)
+  // Exclude archived deals, and use COALESCE(valueNzd, value, 0) to match pipeline page logic
   const pipelineByStage = await database
     .select({
       stageId: schema.pipelineStages.id,
@@ -27,10 +28,10 @@ export async function GET(req: NextRequest) {
       isClosedWon: schema.pipelineStages.isClosedWon,
       isClosedLost: schema.pipelineStages.isClosedLost,
       dealCount: count(schema.deals.id),
-      totalValue: sum(schema.deals.valueNzd),
+      totalValue: sql<number>`sum(COALESCE(${schema.deals.valueNzd}, ${schema.deals.value}, 0))`,
     })
     .from(schema.pipelineStages)
-    .leftJoin(schema.deals, sql`${schema.deals.stageId} = ${schema.pipelineStages.id}`)
+    .leftJoin(schema.deals, sql`${schema.deals.stageId} = ${schema.pipelineStages.id} AND (${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)
     .groupBy(schema.pipelineStages.id)
     .orderBy(schema.pipelineStages.position)
 
@@ -67,7 +68,7 @@ export async function GET(req: NextRequest) {
     ? Math.round(totalPipelineValue / openDealCount)
     : 0
 
-  // Avg days to close for won deals
+  // Avg days to close for won deals (exclude archived)
   const wonDeals = await database
     .select({
       createdAt: schema.deals.createdAt,
@@ -75,7 +76,7 @@ export async function GET(req: NextRequest) {
     })
     .from(schema.deals)
     .innerJoin(schema.pipelineStages, sql`${schema.deals.stageId} = ${schema.pipelineStages.id}`)
-    .where(sql`${schema.pipelineStages.isClosedWon} = 1`)
+    .where(sql`${schema.pipelineStages.isClosedWon} = 1 AND (${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)
 
   let avgDaysToClose = 0
   if (wonDeals.length > 0) {
@@ -111,13 +112,16 @@ export async function GET(req: NextRequest) {
   }))
 
   // Per-source breakdowns: avg deal size by source and close rate by source
+  // Exclude archived deals
   const allDealsWithSource = await database
     .select({
       source: schema.deals.source,
       valueNzd: schema.deals.valueNzd,
+      value: schema.deals.value,
       stageId: schema.deals.stageId,
     })
     .from(schema.deals)
+    .where(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)
 
   // Get closed-won and closed-lost stage IDs for close rate calc
   const closedWonStageIds = new Set(
@@ -135,7 +139,7 @@ export async function GET(req: NextRequest) {
       sourceMap[src] = { totalValue: 0, dealCount: 0, wonCount: 0, lostCount: 0 }
     }
     sourceMap[src].dealCount++
-    sourceMap[src].totalValue += Number(deal.valueNzd ?? 0)
+    sourceMap[src].totalValue += Number(deal.valueNzd ?? deal.value ?? 0)
     if (closedWonStageIds.has(deal.stageId)) {
       sourceMap[src].wonCount++
     }
