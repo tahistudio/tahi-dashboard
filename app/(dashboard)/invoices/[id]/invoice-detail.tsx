@@ -499,12 +499,20 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
             <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>Subtotal</span>
             <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{formatInvoiceCurrency(subtotal, invoice.currency)}</span>
           </div>
-          {(invoice.taxAmountUsd ?? 0) > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', width: 240 }}>
-              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>Tax</span>
-              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{formatInvoiceCurrency(invoice.taxAmountUsd ?? 0, invoice.currency)}</span>
-            </div>
-          )}
+          {(() => {
+            // Show tax if stored, or if total > subtotal (e.g. GST from Xero)
+            const storedTax = invoice.taxAmountUsd ?? 0
+            const impliedTax = invoice.totalUsd - subtotal
+            const taxAmount = storedTax > 0 ? storedTax : (impliedTax > 0.01 ? impliedTax : 0)
+            if (taxAmount <= 0) return null
+            const isNzd = (invoice.currency ?? '').toUpperCase() === 'NZD'
+            return (
+              <div style={{ display: 'flex', justifyContent: 'space-between', width: 240 }}>
+                <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>{isNzd ? 'GST (15%)' : 'Tax'}</span>
+                <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{formatInvoiceCurrency(taxAmount, invoice.currency)}</span>
+              </div>
+            )
+          })()}
           {(invoice.discountAmountUsd ?? 0) > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', width: 240 }}>
               <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>Discount</span>
