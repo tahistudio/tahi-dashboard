@@ -938,10 +938,12 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [ ] T593 - [UIUX] Review expense dashboard layout, category colour coding, trend sparklines — [UIUX]
 
 ### Gross Margin Per Client
-- [ ] T594 - [BE] Client cost tracking: schema addition for `clientCosts` table (id, orgId, description, amount, currency, category [contractor|software|hours|other], date, recurring, createdAt). API routes for CRUD. — [BE]
+- [x] T594 - [BE] Client cost tracking: schema addition for `clientCosts` table (id, orgId, description, amount, currency, category [contractor|software|hours|other], date, recurring, createdAt). API routes for CRUD. — [BE] — done 2026-04-15. Schema in db/schema.ts, migration 0012_client_costs.sql, CRUD at /api/admin/clients/[id]/costs and /api/admin/clients/[id]/costs/[costId].
 - [ ] T595 - [FE] Client detail: Profitability tab showing revenue (invoices paid) vs costs (clientCosts + billable hours * hourly rate), gross margin %, trend over time — [FE]
-- [ ] T596 - [BE] Client profitability API: `GET /api/admin/clients/[id]/profitability` — aggregates invoice revenue, logged costs, time cost (hours * defaultHourlyRate), returns margin metrics — [BE]
+- [x] T596 - [BE] Client profitability API: `GET /api/admin/clients/[id]/profitability` — aggregates invoice revenue, logged costs, time cost (hours * defaultHourlyRate), returns margin metrics — [BE] — done 2026-04-15. Includes byCategory breakdown, byMonth trend, timeCost detail. All amounts in NZD via lib/currency.
 - [ ] T597 - [FE] Reports: Client Profitability Scorecard section — ranked table of all clients by gross margin %, revenue, cost, with traffic light indicators — [FE]
+- [ ] T594b - [BE] Apply migration 0012 (client_costs) to production D1 via `wrangler d1 execute` — [BE]
+- [ ] T594c - [BE] MCP parity for client costs: add list_client_costs, add_client_cost, update_client_cost, delete_client_cost, get_client_profitability tools to both mcp-server/index.ts and workers/mcp-server/src/index.ts per Decision #036. — [BE]
 
 ### Cash Flow Forecast
 - [ ] T598 - [BE] Cash flow forecast API: `GET /api/admin/reports/cash-flow-forecast` — projects 6 months forward: MRR (recurring revenue) + pipeline weighted deals (expected close dates) - recurring expenses (from Xero) = projected monthly cash position — [BE]
@@ -1000,4 +1002,4 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [ ] T626 - [BE] Apply access scoping to remaining admin detail routes: `/api/admin/conversations/[id]`, `/api/admin/conversations/[id]/messages`, `/api/admin/time-entries/[id]`, `/api/admin/contracts/[id]`, `/api/admin/calls/[id]`, `/api/admin/deals/[id]`, per-org sub-resources under `/api/admin/clients/[id]/*`. Use the same `requireAccessToOrg` helper. — [BE]
 - [ ] T627 - [QA] Playwright cross-org isolation e2e: seed two client orgs, log in as client A, verify every attempt to fetch client B's requests/clients/invoices/files by ID returns 403. Covers portal and admin paths. — [QA]
 - [ ] T628 - [BE] Rate limit portal API routes: 60 req/min per userId on `/api/portal/*`, 20 req/min on `/api/uploads/*`. **Blocked**: needs KV namespace provisioned in Webflow Cloud (currently only D1 + R2 are bound in wrangler.jsonc). Implementation plan once KV available: `lib/rate-limit.ts` with `rateLimit(userId, bucket, limit, windowSec)` helper using KV atomic counter (`put` w/ TTL, fallback to GET+increment). Wire into portal route layout / middleware equivalent. Interim workaround: add Cloudflare WAF rate rule at the edge (out-of-code, one-click in CF dashboard). — [BE]
-- [ ] T629 - [QA] Currency invariant vitest: seed 3 orgs in NZD/GBP/USD with known customMrr + invoices, call `/api/admin/overview` and `/api/admin/billing/financial-health`, assert returned NZD totals match hand-computed within 1¢. — [QA]
+- [x] T629 - [QA] Currency invariant vitest — done 2026-04-15. Extracted buildRateMap/toNzd/sumAsNzd into lib/currency.ts, de-duped from 3 API routes, covered by 17 unit tests including the actual April 2026 MRR scenario as a regression case.

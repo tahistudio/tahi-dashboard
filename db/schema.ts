@@ -655,6 +655,31 @@ export const exchangeRates = sqliteTable('exchange_rates', {
 })
 
 // ============================================================
+// CLIENT COSTS (gross margin tracking per client)
+// ============================================================
+// Captures the costs Tahi incurs to service a particular client so we
+// can compute gross margin: invoice revenue - (these costs + logged
+// billable hours * defaultHourlyRate).
+//
+// Category values:
+//   contractor — subcontracted work (freelancer, agency partner)
+//   software   — paid tools dedicated to this client (Webflow plan, plugins)
+//   hours      — generic labour cost entered manually (one-off bucket)
+//   other      — misc passthrough costs (stock imagery, domain, etc.)
+export const clientCosts = sqliteTable('client_costs', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  orgId: text('org_id').notNull().references(() => organisations.id, { onDelete: 'cascade' }),
+  description: text('description').notNull(),
+  amount: real('amount').notNull(),
+  currency: text('currency').notNull().default('NZD'),
+  category: text('category').notNull().default('other'),
+  date: text('date').notNull(),  // YYYY-MM-DD
+  recurring: integer('recurring', { mode: 'boolean' }).default(false),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+// ============================================================
 // CASE STUDY SUBMISSIONS
 // ============================================================
 
