@@ -43,11 +43,12 @@ const STATUS_CFG: Record<string, { label: string; bg: string; text: string }> = 
 const SUPPORTED_CURRENCIES = ['NZD', 'USD', 'AUD', 'GBP', 'EUR'] as const
 
 const FILTER_TABS = [
-  { label: 'All',     value: 'all'     },
-  { label: 'Draft',   value: 'draft'   },
-  { label: 'Sent',    value: 'sent'    },
-  { label: 'Overdue', value: 'overdue' },
-  { label: 'Paid',    value: 'paid'    },
+  { label: 'All',         value: 'all'         },
+  { label: 'Draft',       value: 'draft'       },
+  { label: 'Sent',        value: 'sent'        },
+  { label: 'Overdue',     value: 'overdue'     },
+  { label: 'Paid',        value: 'paid'        },
+  { label: 'Written Off', value: 'written_off' },
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -476,24 +477,17 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [activeTab, setActiveTab] = useState('all')
+  const [sourceFilter, setSourceFilter] = useState('all')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
 
-  // Client-side date filter
-  const filteredInvoices = useMemo(() => {
-    if (!dateRange.from || !dateRange.to) return invoices
-    return invoices.filter(inv => {
-      const d = new Date(inv.dueDate ?? inv.createdAt).getTime()
-      return d >= dateRange.from!.getTime() && d <= dateRange.to!.getTime()
-    })
-  }, [invoices, dateRange])
-
-  const fetchInvoices = useCallback(async (status: string) => {
+  // Fetch all invoices once, filter client-side for accurate overdue detection
+  const fetchInvoices = useCallback(async () => {
     setLoading(true)
     setError(false)
     try {
       const url = isAdmin
-        ? apiPath(`/api/admin/invoices?status=${status}`)
+        ? apiPath('/api/admin/invoices?status=all')
         : apiPath('/api/portal/invoices')
       const res = await fetch(url)
       if (!res.ok) throw new Error('Failed')
@@ -507,18 +501,43 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
     }
   }, [isAdmin])
 
+  // Client-side filtering: status tab + source filter + date range
+  const filteredInvoices = useMemo(() => {
+    return invoices.filter(inv => {
+      // Compute effective status (overdue = sent + past due date)
+      const effective = isOverdue(inv.dueDate, inv.status) && inv.status === 'sent' ? 'overdue' : inv.status
+
+      // Status tab filter
+      if (activeTab !== 'all' && effective !== activeTab) return false
+
+      // Source filter
+      if (sourceFilter !== 'all') {
+        const invSource = inv.source ?? 'manual'
+        if (invSource !== sourceFilter) return false
+      }
+
+      // Date range filter
+      if (dateRange.from && dateRange.to) {
+        const d = new Date(inv.dueDate ?? inv.createdAt).getTime()
+        if (d < dateRange.from.getTime() || d > dateRange.to.getTime()) return false
+      }
+
+      return true
+    })
+  }, [invoices, activeTab, sourceFilter, dateRange])
+
   useEffect(() => {
-    fetchInvoices(activeTab).catch(() => {})
-  }, [activeTab, fetchInvoices])
+    fetchInvoices().catch(() => {})
+  }, [fetchInvoices])
 
   const handleCreated = useCallback((invoiceId?: string) => {
     setShowCreateModal(false)
     if (invoiceId) {
       router.push(`/invoices/${invoiceId}`)
     } else {
-      fetchInvoices(activeTab).catch(() => {})
+      fetchInvoices().catch(() => {})
     }
-  }, [activeTab, fetchInvoices, router])
+  }, [fetchInvoices, router])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -600,6 +619,35 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
         </div>
       )}
 
+      {/* Source filter chips */}
+      {isAdmin && (
+        <div className="flex items-center gap-2" style={{ marginTop: '0.5rem' }}>
+          <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Source:</span>
+          {[
+            { value: 'all', label: 'All', color: 'var(--color-text-muted)' },
+            { value: 'manual', label: 'Manual', color: 'var(--color-text-muted)' },
+            { value: 'xero', label: 'Xero', color: '#13b5ea' },
+            { value: 'stripe', label: 'Stripe', color: '#635bff' },
+          ].map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => setSourceFilter(opt.value)}
+              className="rounded-full font-medium transition-colors"
+              style={{
+                padding: '0.1875rem 0.5rem',
+                fontSize: '0.6875rem',
+                background: sourceFilter === opt.value ? `${opt.color}15` : 'transparent',
+                color: sourceFilter === opt.value ? opt.color : 'var(--color-text-subtle)',
+                border: `1px solid ${sourceFilter === opt.value ? `${opt.color}40` : 'transparent'}`,
+                cursor: 'pointer',
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Date filter */}
       <div className="flex items-center gap-2" style={{ marginBottom: '0.75rem' }}>
         <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>Due date:</span>
@@ -645,7 +693,7 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
           >
             <p className="text-sm">Failed to load invoices.</p>
             <button
-              onClick={() => fetchInvoices(activeTab).catch(() => {})}
+              onClick={() => fetchInvoices().catch(() => {})}
               className="flex items-center gap-2 text-sm font-medium hover:opacity-80 transition-opacity"
               style={{ color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer' }}
             >
