@@ -116,12 +116,8 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
-  if (invoice.status !== 'draft') {
-    return NextResponse.json({ error: 'Only draft invoices can be deleted' }, { status: 400 })
-  }
-
   await drizzle.delete(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, id))
-  await drizzle.delete(schema.invoices).where(and(eq(schema.invoices.id, id), eq(schema.invoices.status, 'draft')))
+  await drizzle.delete(schema.invoices).where(eq(schema.invoices.id, id))
 
   return NextResponse.json({ success: true })
 }

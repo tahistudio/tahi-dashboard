@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, RefreshCw, FileText } from 'lucide-react'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
@@ -86,6 +87,7 @@ interface InvoiceDetailProps {
 }
 
 export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetailProps) {
+  const router = useRouter()
   const { isImpersonatingClient } = useImpersonation()
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
@@ -345,6 +347,23 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                 variant="ghost"
               />
             )}
+            <ActionButton
+              label="Delete Invoice"
+              disabled={patching !== null}
+              onClick={async () => {
+                if (!confirm('Are you sure you want to delete this invoice? This cannot be undone.')) return
+                try {
+                  const res = await fetch(apiPath(`/api/admin/invoices/${invoice.id}`), { method: 'DELETE' })
+                  if (res.ok) {
+                    router.push('/invoices')
+                  } else {
+                    const err = await res.json() as { error?: string }
+                    alert(err.error ?? 'Failed to delete invoice')
+                  }
+                } catch { alert('Failed to delete invoice') }
+              }}
+              variant="danger"
+            />
           </div>
         )}
       </div>
@@ -498,12 +517,13 @@ function ActionButton({
   label: string
   onClick: () => void
   disabled: boolean
-  variant: 'primary' | 'success' | 'ghost'
+  variant: 'primary' | 'success' | 'ghost' | 'danger'
 }) {
   const styles: Record<string, React.CSSProperties> = {
     primary: { background: 'var(--color-brand)', color: 'white', border: 'none' },
     success: { background: '#16a34a', color: 'white', border: 'none' },
     ghost:   { background: 'var(--color-bg)', color: 'var(--color-text)', border: '1px solid var(--color-border)' },
+    danger:  { background: 'var(--color-bg)', color: '#dc2626', border: '1px solid #fca5a5' },
   }
   return (
     <button
