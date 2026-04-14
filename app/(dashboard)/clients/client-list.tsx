@@ -16,6 +16,7 @@ const STATUS_FILTERS = [
   { label: 'Scale',    value: 'scale' },
   { label: 'Paused',   value: 'paused' },
   { label: 'Churned',  value: 'churned' },
+  { label: 'Archived', value: 'archived' },
 ]
 
 interface Organisation {
