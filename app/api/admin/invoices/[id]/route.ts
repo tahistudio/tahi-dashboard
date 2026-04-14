@@ -70,10 +70,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     status?: string
     dueDate?: string | null
     notes?: string | null
+    orgId?: string
   }
 
-  if (!('status' in body) && !('dueDate' in body) && !('notes' in body)) {
-    return NextResponse.json({ error: 'At least one field (status, dueDate, notes) is required' }, { status: 400 })
+  if (!('status' in body) && !('dueDate' in body) && !('notes' in body) && !('orgId' in body)) {
+    return NextResponse.json({ error: 'At least one field is required' }, { status: 400 })
   }
 
   const now = new Date().toISOString()
@@ -82,6 +83,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (body.status !== undefined) patch.status = body.status
   if ('dueDate' in body) patch.dueDate = body.dueDate ?? null
   if ('notes' in body) patch.notes = body.notes ?? null
+  if (body.orgId !== undefined) patch.orgId = body.orgId
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
