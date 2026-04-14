@@ -126,15 +126,46 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // Only allow deleting draft invoices
   const [invoice] = await drizzle
-    .select({ status: schema.invoices.status })
+    .select({
+      status: schema.invoices.status,
+      stripeInvoiceId: schema.invoices.stripeInvoiceId,
+      xeroInvoiceId: schema.invoices.xeroInvoiceId,
+    })
     .from(schema.invoices)
     .where(eq(schema.invoices.id, id))
     .limit(1)
 
   if (!invoice) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
+  // Void in Stripe if linked (draft = delete, finalized = void)
+  if (invoice.stripeInvoiceId && process.env.STRIPE_SECRET_KEY) {
+    try {
+      // Try to void first (for finalized invoices)
+      const voidRes = await fetch(`https://api.stripe.com/v1/invoices/${invoice.stripeInvoiceId}/void`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}` },
+      })
+      if (!voidRes.ok) {
+        // If void fails (e.g. draft), try delete
+        await fetch(`https://api.stripe.com/v1/invoices/${invoice.stripeInvoiceId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}` },
+        })
+      }
+    } catch { /* Stripe cleanup failed silently */ }
+  }
+
+  // Void in Xero if linked
+  if (invoice.xeroInvoiceId) {
+    try {
+      await callXeroAPI('POST', `/Invoices/${invoice.xeroInvoiceId}`, {
+        InvoiceID: invoice.xeroInvoiceId,
+        Status: 'VOIDED',
+      })
+    } catch { /* Xero cleanup failed silently */ }
   }
 
   await drizzle.delete(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, id))
