@@ -50,6 +50,41 @@
       "when": 1775267309899,
       "tag": "0006_zippy_firestar",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1776200000000,
+      "tag": "0007_deal_engagement_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1776200100000,
+      "tag": "0008_nudge_email_system",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1776200200000,
+      "tag": "0009_add_stalled_stage",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1776200300000,
+      "tag": "0010_invoice_source_xero_contact",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1776200400000,
+      "tag": "0011_add_custom_mrr",
+      "breakpoints": true
     }
   ]
 }

@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and } from 'drizzle-orm'
+import { eq, desc, and, sql } from 'drizzle-orm'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -25,6 +25,17 @@ export async function GET(req: NextRequest, { params }: Params) {
     .limit(1)
 
   if (!org) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  // Append customMrr via raw SQL (column may not exist before migration 0011)
+  let customMrr: number | null = null
+  try {
+    const mrrRows = await drizzle.all<{ custom_mrr: number | null }>(
+      sql`SELECT custom_mrr FROM organisations WHERE id = ${id} LIMIT 1`
+    )
+    customMrr = mrrRows?.[0]?.custom_mrr ?? null
+  } catch {
+    // Column doesn't exist yet
+  }
 
   const [contacts, subscription, recentRequests] = await Promise.all([
     drizzle
@@ -78,7 +89,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       .where(eq(schema.tracks.subscriptionId, subscription.id))
   }
 
-  return NextResponse.json({ org, contacts, subscription, tracks, recentRequests })
+  return NextResponse.json({ org: { ...org, customMrr: customMrr }, contacts, subscription, tracks, recentRequests })
 }
 
 // ── PATCH /api/admin/clients/[id] ────────────────────────────────────────────
@@ -111,17 +122,31 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const allowed = [
     'name', 'website', 'industry', 'planType', 'status',
     'healthStatus', 'healthNote', 'internalNotes', 'brands',
-    'customFields', 'defaultHourlyRate', 'size', 'annualRevenue', 'customMrr',
+    'customFields', 'defaultHourlyRate', 'size', 'annualRevenue',
   ] as const
   for (const key of allowed) {
     if (key in body) patch[key] = body[key] ?? null
   }
 
   const database = await db()
-  await (database as ReturnType<typeof import('drizzle-orm/d1').drizzle>)
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  await drizzle
     .update(schema.organisations)
     .set(patch)
     .where(eq(schema.organisations.id, id))
+
+  // Handle customMrr separately via raw SQL (column may not exist before migration 0011)
+  if ('customMrr' in body) {
+    try {
+      const mrrValue = body.customMrr ?? null
+      await drizzle.run(
+        sql`UPDATE organisations SET custom_mrr = ${mrrValue} WHERE id = ${id}`
+      )
+    } catch {
+      // Column doesn't exist yet, silently skip
+    }
+  }
 
   return NextResponse.json({ success: true })
 }

@@ -52,18 +52,16 @@ export async function GET(req: NextRequest) {
   }
 
   // 3. MRR from active organisations with custom MRR set
-  const orgsWithMrr = await database
-    .select({
-      customMrr: schema.organisations.customMrr,
-    })
-    .from(schema.organisations)
-    .where(eq(schema.organisations.status, 'active'))
-
+  // Use raw SQL with try-catch: column may not exist yet if migration 0011 hasn't been applied
   let mrr = 0
-  for (const org of orgsWithMrr) {
-    if (org.customMrr && org.customMrr > 0) {
-      mrr += org.customMrr
-    }
+  try {
+    const mrrResult = await database.all<{ total_mrr: number }>(
+      sql`SELECT COALESCE(SUM(custom_mrr), 0) as total_mrr FROM organisations WHERE status = 'active' AND custom_mrr > 0`
+    )
+    mrr = mrrResult?.[0]?.total_mrr ?? 0
+  } catch {
+    // Column doesn't exist yet, fall back to 0
+    mrr = 0
   }
 
   // 4. Xero P&L (best effort, may fail if not connected)

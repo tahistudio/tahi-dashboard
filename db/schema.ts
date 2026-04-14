@@ -55,7 +55,10 @@ export const organisations = sqliteTable('organisations', {
   // micro | small | medium | large | enterprise
   size: text('size'),
   annualRevenue: integer('annual_revenue'),
-  customMrr: real('custom_mrr'),
+  // customMrr lives in DB as custom_mrr (real) via migration 0011
+  // NOT in Drizzle schema to avoid breaking SELECT * before migration is applied
+  // Query via raw SQL: SELECT custom_mrr FROM organisations WHERE ...
+  // Update via raw SQL: UPDATE organisations SET custom_mrr = ? WHERE id = ?
   ...timestamps,
 }, (table) => [
   index('idx_orgs_status').on(table.status),
