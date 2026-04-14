@@ -753,3 +753,15 @@ Escalated to Liam: No. Direct confirmation from Liam.
 - Currency conversion applies based on org's `preferredCurrency`
 
 ---
+
+## #038 - Finance Feature Roadmap (Phase 10)
+
+**Decision:** Comprehensive finance and reporting roadmap logged as T590-T621. Covers: Xero P&L deep sync with expense categories, gross margin per client (costs tracking), cash flow forecast (MRR + pipeline - expenses), project calculator (ported from tahi.studio), utilization rate per team member, revenue per head, retainer health monitor with churn/upsell alerts, quote-to-invoice pipeline from closed deals, LTV improvements, and MCP parity for all finance tools.
+
+**Rationale:** Liam wants the dashboard to be the single source of truth for Tahi's finances. Current reporting shows revenue but not costs, margins, or projections. Xero has the expense data but it's not surfaced in the dashboard. The project calculator from the website should be available internally for deal estimation.
+
+**Priority order:** Xero invoice push fix (Phase 9) > Stripe invoicing > client archive > Xero P&L sync > gross margin > cash flow forecast > retainer health > LTV > project calculator > utilization > revenue per head.
+
+**Deprioritized:** Client expense allocation (Liam doesn't expense to clients directly).
+
+---

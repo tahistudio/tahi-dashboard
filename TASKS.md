@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
-Last updated: 2026-04-12 (Session: Resend domain verification + HubSpot sync endpoint created + MCP routing blocker documented)
-Total tasks: 562 (S1-S11 schema + T1-T495 feature + T546-T557 integration + T558+ post-launch)
-Completed: 544/544 core features + 10/11 integration tasks (T546-T555 done, T557 done, T556 phase 8 blocker)
+Last updated: 2026-04-14 (Session: Finance roadmap logged, Xero fix plan, Stripe invoicing, client archive, data cleanup tasks)
+Total tasks: 621 (S1-S11 schema + T1-T495 feature + T546-T557 integration + T558-T621 post-launch)
+Completed: 544/544 core features + 10/11 integration tasks + 4 phase-8 polish tasks done
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -901,3 +901,89 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [x] T576 - [FE] Client detail: add inline-editable Monthly Retainer (MRR) field to OrgDetailsCard, saves via PATCH customMrr, formats with org preferredCurrency — [FE] 2026-04-14
 - [ ] T577 - [UIUX] Review MRR inline edit field spacing and interaction on client detail page — [UIUX]
 - [ ] T578 - [QA] Regression test: Revenue Forecast chart loads with data, MRR field edits and saves on client detail — [QA]
+
+---
+
+## Phase 9: Xero Fix + Stripe Invoicing + Invoice Enhancements (2026-04-14)
+
+> Per active plan: fix Xero invoice push, add Stripe invoice creation, multi-line items, client archive UI.
+
+### Xero Invoice Push Fix
+- [ ] T579 - [BE] Fix Xero invoice push: add CurrencyCode from invoice currency, fetch branding themes from Xero API, use org xeroContactId for contact matching, allow re-sync (PUT update) for invoices already linked to Xero — [BE]
+- [ ] T580 - [BE] Xero branding themes API: create `GET /api/admin/integrations/xero/branding-themes` to fetch and cache branding themes from Xero, used for currency-specific invoice branding — [BE]
+- [ ] T581 - [QA] Test Xero push: create GBP invoice, sync to Xero, verify branding theme and currency code appear correctly — [QA]
+
+### Stripe Invoice Creation
+- [ ] T582 - [BE] Stripe invoice creation endpoint: `POST /api/admin/invoices/stripe-create` — creates Stripe customer if needed, creates invoice + line items via Stripe API, finalizes, returns hosted_invoice_url. Stores stripeInvoiceId on local invoice. — [BE]
+- [ ] T583 - [BE] Stripe invoice import endpoint: `POST /api/admin/integrations/stripe/import-invoices` — fetches all Stripe invoices, auto-matches by stripeCustomerId, creates local invoices with source='stripe', maps Stripe statuses — [BE]
+- [ ] T584 - [FE] Invoice creation dialog: multi-line items with Add/Remove Line Item buttons, destination toggle (Dashboard Only | Create in Xero | Create Stripe Link), currency selector — [FE]
+- [ ] T585 - [FE] Invoice detail: "Create Stripe Link" button for manual invoices, "Sync to Xero" updates existing linked Xero invoice, show payment link URL, editable line items — [FE]
+- [ ] T586 - [UIUX] Review multi-line invoice creation dialog and invoice detail enhancements — [UIUX]
+- [ ] T587 - [QA] Test: create invoice with 3 line items in USD with Stripe destination, verify payment link works — [QA]
+
+### Client Archive/Churn UI
+- [ ] T588 - [FE] Client list: add status filter tabs (Active | Archived | All), "Archive" button on client detail page, archived clients hidden from main views but data preserved — [FE]
+- [ ] T589 - [UIUX] Review client archive UI: tab styling, archive confirmation dialog, visual treatment of archived clients — [UIUX]
+
+---
+
+## Phase 10: Advanced Finance and Reporting (2026-04-14)
+
+> Finance features discussed with Liam. Combines Xero data, dashboard metrics, and projections.
+
+### Xero P&L Sync and Expense Tracking
+- [ ] T590 - [BE] Xero P&L deep sync: pull full Profit & Loss report from Xero with expense categories, store monthly snapshots locally for trend analysis. Pull account categories from Xero chart of accounts. — [BE]
+- [ ] T591 - [BE] Recurring expense detection: tag expenses that appear monthly in Xero P&L as recurring, allow admin to confirm/override. Store in local table for cash flow forecasting. — [BE]
+- [ ] T592 - [FE] Expense dashboard: show Xero expense categories with monthly trends, highlight recurring vs one-off, filter by category/date. Show as section on Reports page or standalone Finance page. — [FE]
+- [ ] T593 - [UIUX] Review expense dashboard layout, category colour coding, trend sparklines — [UIUX]
+
+### Gross Margin Per Client
+- [ ] T594 - [BE] Client cost tracking: schema addition for `clientCosts` table (id, orgId, description, amount, currency, category [contractor|software|hours|other], date, recurring, createdAt). API routes for CRUD. — [BE]
+- [ ] T595 - [FE] Client detail: Profitability tab showing revenue (invoices paid) vs costs (clientCosts + billable hours * hourly rate), gross margin %, trend over time — [FE]
+- [ ] T596 - [BE] Client profitability API: `GET /api/admin/clients/[id]/profitability` — aggregates invoice revenue, logged costs, time cost (hours * defaultHourlyRate), returns margin metrics — [BE]
+- [ ] T597 - [FE] Reports: Client Profitability Scorecard section — ranked table of all clients by gross margin %, revenue, cost, with traffic light indicators — [FE]
+
+### Cash Flow Forecast
+- [ ] T598 - [BE] Cash flow forecast API: `GET /api/admin/reports/cash-flow-forecast` — projects 6 months forward: MRR (recurring revenue) + pipeline weighted deals (expected close dates) - recurring expenses (from Xero) = projected monthly cash position — [BE]
+- [ ] T599 - [FE] Cash flow forecast chart: stacked area chart showing projected income vs expenses vs net position over 6 months, with best/worst case bands — [FE]
+- [ ] T600 - [FE] Cash flow: runway indicator (months of runway at current burn rate based on bank balance from Xero) — [FE]
+
+### Project Calculator
+- [ ] T601 - [BE] Project calculator API: `POST /api/admin/tools/project-calculator` — accepts project parameters (type, complexity, pages/screens, features, integrations) and returns estimated hours, cost range, timeline. Port logic from tahi.studio Webflow calculator. — [BE]
+- [ ] T602 - [FE] Project calculator page: interactive form matching tahi.studio calculator with sliders/selectors for project type, complexity, scope. Shows estimated price range, hours, timeline. Usable from deal detail to estimate deal value. — [FE]
+- [ ] T603 - [UIUX] Review project calculator UI: match premium dashboard feel, responsive at mobile — [UIUX]
+
+### Utilization Rate (Capacity Section)
+- [ ] T604 - [BE] Utilization rate API: `GET /api/admin/reports/utilization` — per team member: billable hours / available hours (configurable per member, default 40h/week). Returns weekly and monthly utilization %, trend, and team average. — [BE]
+- [ ] T605 - [FE] Capacity page: utilization rate section showing per-member utilization bars, team average, trend sparkline, target line (e.g. 80%). Colour code: green >= 70%, amber 50-70%, red < 50%. — [FE]
+- [ ] T606 - [BE] Team member: add `availableHoursPerWeek` field (default 40) for utilization calculation — [BE]
+
+### Revenue Per Head
+- [ ] T607 - [BE] Revenue per head API: `GET /api/admin/reports/revenue-per-head` — total revenue (paid invoices) / active team member count, by month. Includes trend and comparison to industry benchmarks. — [BE]
+- [ ] T608 - [FE] Reports: Revenue Per Head KPI card and trend chart, filterable by time period — [FE]
+
+### Retainer Health Monitor
+- [ ] T609 - [BE] Retainer health API: `GET /api/admin/reports/retainer-health` — per active retainer client: hours used vs included (from subscription plan), request velocity, response time, MRR value, months active, churn risk score — [BE]
+- [ ] T610 - [FE] Reports or Client list: Retainer Health Monitor section — table of retainer clients with health indicators: hours usage (bar), churn risk (traffic light), upsell opportunity flag, months since last request — [FE]
+- [ ] T611 - [BE] Retainer alerts: automation trigger when client hours usage drops below 30% for 2+ months (churn risk) or exceeds 120% for 2+ months (upsell opportunity). Creates notification for admin. — [BE]
+
+### Quote/Proposal to Invoice Pipeline
+- [ ] T612 - [BE] Deal-to-invoice conversion: `POST /api/admin/deals/[id]/create-invoice` — when a deal is closed-won, auto-generate a draft invoice from deal value, line items from deal description, linked to the client org. Supports deposit invoices (% of total). — [BE]
+- [ ] T613 - [FE] Deal detail: "Create Invoice" button appears when deal is closed-won. Options: full amount, deposit (configurable %), or custom line items. Creates local invoice and optionally pushes to Xero/Stripe. — [FE]
+- [ ] T614 - [FE] Pipeline: visual indicator on deal cards showing invoice status (no invoice, draft, sent, paid) — [FE]
+
+### Lifetime Value (LTV) Improvements
+- [ ] T615 - [BE] Client LTV API enhancement: `GET /api/admin/clients/[id]/ltv` — total paid invoices + active deal values + projected remaining retainer value (MRR * estimated remaining months). Include LTV:CAC ratio if acquisition cost tracked. — [BE]
+- [ ] T616 - [FE] Client detail: LTV summary card showing total LTV, breakdown (invoices paid, retainer projected, deal value), LTV trend chart — [FE]
+- [ ] T617 - [FE] Reports: Client LTV Leaderboard — ranked list of clients by LTV with segmentation by plan type — [FE]
+
+### MCP Parity for Finance Features
+- [ ] T618 - [BE] MCP tools: add finance tools to both local and CF Worker MCP servers — get_financial_health, get_invoice_aging, get_cash_flow_forecast, get_client_profitability, get_utilization, get_retainer_health, run_project_calculator — [BE]
+
+---
+
+## Pending Data Cleanup (2026-04-14)
+
+- [ ] T619 - [PM] Reassign 3 Fluvial invoices: move from org INV-2026000027 (f8b5f588) to Fluvial (4668ffd6) via MCP update_invoice with orgId — [PM]
+- [ ] T620 - [PM] Evan Kwan duplicate orgs: consolidate invoices across 4 org IDs (c79a6dcf, c4ed4811, 2859abca, fbab8478) into single active org — [PM]
+- [ ] T621 - [BE] Apply migration 0011 (add_custom_mrr) to production D1 — must be done manually via wrangler d1 execute — [BE]

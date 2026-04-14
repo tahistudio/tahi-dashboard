@@ -506,7 +506,7 @@ export function ReportsContent() {
 
 interface FinancialHealthData {
   invoices: { totalInvoiced: number; totalPaid: number; totalOutstanding: number; count: number }
-  pipeline: { totalValue: number; weightedForecast: number; openDealCount: number; monthlyProjections: Array<{ month: string; amount: number }> }
+  pipeline: { totalValue: number; weightedForecast: number; openDealCount: number; monthlyProjections: Record<string, number> }
   mrr: number
   xero: { profitAndLoss: unknown; bankSummary: unknown }
 }
@@ -520,12 +520,18 @@ interface AgingInvoice {
   daysPastDue: number
 }
 
+interface AgingBucket {
+  count: number
+  totalUsd: number
+  invoices: AgingInvoice[]
+}
+
 interface AgingData {
   aging: {
-    current: AgingInvoice[]
-    thirtyDays: AgingInvoice[]
-    sixtyDays: AgingInvoice[]
-    ninetyPlus: AgingInvoice[]
+    current: AgingBucket
+    thirtyDays: AgingBucket
+    sixtyDays: AgingBucket
+    ninetyPlus: AgingBucket
   }
 }
 
@@ -662,7 +668,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
           </div>
 
           {/* Pipeline Forecast Mini Chart */}
-          {healthData.pipeline.monthlyProjections && healthData.pipeline.monthlyProjections.length > 0 && (
+          {healthData.pipeline.monthlyProjections && Object.keys(healthData.pipeline.monthlyProjections).length > 0 && (
             <div
               style={{
                 background: 'var(--color-bg)',
@@ -676,9 +682,9 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                 Pipeline Forecast (Weighted)
               </h3>
               <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={healthData.pipeline.monthlyProjections.map(p => ({
-                  name: formatMonthLabel(p.month),
-                  amount: convertNzd(p.amount, displayCurrency, exchangeRates),
+                <BarChart data={Object.entries(healthData.pipeline.monthlyProjections).map(([month, amount]) => ({
+                  name: formatMonthLabel(month),
+                  amount: convertNzd(amount, displayCurrency, exchangeRates),
                 }))}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" />
                   <XAxis dataKey="name" tick={{ fontSize: 11 }} />
@@ -788,9 +794,10 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
           {/* Aging summary bars */}
           <div className="space-y-2">
             {AGING_BUCKETS.map(bucket => {
-              const invoices = agingData.aging[bucket.key]
-              const count = invoices.length
-              const total = invoices.reduce((sum, inv) => sum + inv.totalUsd, 0)
+              const agingBucket = agingData.aging[bucket.key]
+              const invoices = agingBucket.invoices ?? []
+              const count = agingBucket.count ?? invoices.length
+              const total = agingBucket.totalUsd ?? invoices.reduce((sum: number, inv: AgingInvoice) => sum + inv.totalUsd, 0)
               const isExpanded = expandedBucket === bucket.key
 
               return (
@@ -916,7 +923,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
           {(() => {
             const totals = AGING_BUCKETS.map(b => ({
               ...b,
-              total: agingData.aging[b.key].reduce((sum, inv) => sum + inv.totalUsd, 0),
+              total: agingData.aging[b.key].totalUsd ?? 0,
             }))
             const grandTotal = totals.reduce((sum, t) => sum + t.total, 0)
             if (grandTotal === 0) return null
