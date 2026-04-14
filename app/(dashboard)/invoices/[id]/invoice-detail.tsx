@@ -326,9 +326,36 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                 variant="ghost"
               />
             )}
-            {invoice.status !== 'paid' && invoice.status !== 'draft' && invoice.stripeInvoiceId && (
+            {invoice.status !== 'paid' && !invoice.stripeInvoiceId && (
               <ActionButton
-                label="Stripe Payment Link"
+                label="Create Stripe Link"
+                disabled={patching !== null}
+                onClick={async () => {
+                  try {
+                    const res = await fetch(apiPath('/api/admin/invoices/stripe-create'), {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ invoiceId: invoice.id }),
+                    })
+                    if (res.ok) {
+                      const data = await res.json() as { payUrl?: string }
+                      if (data.payUrl) {
+                        await navigator.clipboard.writeText(data.payUrl)
+                        alert('Stripe invoice created! Payment link copied to clipboard.')
+                      }
+                      fetchInvoice()
+                    } else {
+                      const err = await res.json() as { error?: string }
+                      alert(err.error ?? 'Failed to create Stripe invoice')
+                    }
+                  } catch { alert('Failed to create Stripe link') }
+                }}
+                variant="ghost"
+              />
+            )}
+            {invoice.stripeInvoiceId && (
+              <ActionButton
+                label="Copy Payment Link"
                 disabled={patching !== null}
                 onClick={async () => {
                   try {
@@ -337,12 +364,12 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                       const data = await res.json() as { payUrl?: string }
                       if (data.payUrl) {
                         await navigator.clipboard.writeText(data.payUrl)
-                        alert('Payment link copied to clipboard!')
+                        alert('Payment link copied!')
                       } else {
-                        alert('No Stripe payment link available for this invoice')
+                        alert('No payment link available')
                       }
                     }
-                  } catch { alert('Failed to get payment link') }
+                  } catch { alert('Failed') }
                 }}
                 variant="ghost"
               />

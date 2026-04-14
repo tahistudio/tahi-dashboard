@@ -108,8 +108,8 @@ function CreateInvoiceModal({
   const [orgOptions, setOrgOptions] = useState<{ id: string; name: string }[]>([])
   const [showOrgDropdown, setShowOrgDropdown] = useState(false)
   const [selectedOrgName, setSelectedOrgName] = useState('')
-  const [destination, setDestination] = useState<'manual' | 'xero'>('manual')
-  const [description, setDescription] = useState('')
+  const [destination, setDestination] = useState<'manual' | 'xero' | 'stripe'>('manual')
+  const [lineItems, setLineItems] = useState([{ description: '', quantity: '1', unitAmount: '' }])
 
   // Fetch clients on mount
   useEffect(() => {
@@ -121,8 +121,7 @@ function CreateInvoiceModal({
       })
       .catch(() => setOrgOptions([]))
   }, [])
-  const [quantity, setQuantity] = useState('1')
-  const [unitAmount, setUnitAmount] = useState('')
+  // quantity and unitAmount are now per-line-item in lineItems array
   const [currency, setCurrency] = useState('NZD')
   const [dueDate, setDueDate] = useState('')
   const [notes, setNotes] = useState('')
@@ -131,8 +130,9 @@ function CreateInvoiceModal({
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!orgId.trim() || !description.trim() || !unitAmount) {
-      setError('Client, description, and amount are required.')
+    const validItems = lineItems.filter(li => li.description.trim() && li.unitAmount)
+    if (!orgId.trim() || validItems.length === 0) {
+      setError('Client and at least one line item (description + amount) are required.')
       return
     }
     setSaving(true)
@@ -145,7 +145,11 @@ function CreateInvoiceModal({
           orgId: orgId.trim(),
           currency,
           source: destination,
-          lineItems: [{ description: description.trim(), quantity: parseFloat(quantity) || 1, unitAmount: parseFloat(unitAmount) }],
+          lineItems: validItems.map(li => ({
+            description: li.description.trim(),
+            quantity: parseFloat(li.quantity) || 1,
+            unitAmount: parseFloat(li.unitAmount),
+          })),
           dueDate: dueDate || undefined,
           notes: notes || undefined,
         }),
@@ -157,7 +161,7 @@ function CreateInvoiceModal({
       }
       const json = await res.json() as { id?: string }
 
-      // If Xero destination, also push to Xero
+      // Push to destination after local creation
       if (destination === 'xero' && json.id) {
         try {
           await fetch(apiPath('/api/admin/invoices/xero-sync'), {
@@ -165,9 +169,30 @@ function CreateInvoiceModal({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ invoiceIds: [json.id] }),
           })
-          showToast('Invoice created and synced to Xero')
+          showToast('Invoice created as Xero draft')
         } catch {
           showToast('Invoice created (Xero sync failed)')
+        }
+      } else if (destination === 'stripe' && json.id) {
+        try {
+          const stripeRes = await fetch(apiPath('/api/admin/invoices/stripe-create'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ invoiceId: json.id }),
+          })
+          if (stripeRes.ok) {
+            const stripeData = await stripeRes.json() as { payUrl?: string }
+            if (stripeData.payUrl) {
+              await navigator.clipboard.writeText(stripeData.payUrl)
+              showToast('Stripe invoice created! Payment link copied to clipboard')
+            } else {
+              showToast('Stripe invoice created')
+            }
+          } else {
+            showToast('Invoice created (Stripe link failed)')
+          }
+        } catch {
+          showToast('Invoice created (Stripe failed)')
         }
       } else {
         showToast('Invoice created successfully')
@@ -178,7 +203,7 @@ function CreateInvoiceModal({
     } finally {
       setSaving(false)
     }
-  }, [orgId, description, quantity, unitAmount, currency, dueDate, notes, destination, onCreated, showToast])
+  }, [orgId, lineItems, currency, dueDate, notes, destination, onCreated, showToast])
 
   return (
     <div
@@ -214,8 +239,9 @@ function CreateInvoiceModal({
           {/* Destination toggle */}
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             {[
-              { value: 'manual' as const, label: 'Dashboard Only' },
-              { value: 'xero' as const, label: 'Create in Xero' },
+              { value: 'manual' as const, label: 'Dashboard Only', color: 'var(--color-brand)' },
+              { value: 'xero' as const, label: 'Xero Draft', color: '#13b5ea' },
+              { value: 'stripe' as const, label: 'Stripe Link', color: '#635bff' },
             ].map(opt => (
               <button
                 key={opt.value}
@@ -225,15 +251,9 @@ function CreateInvoiceModal({
                 style={{
                   padding: '0.375rem 0.75rem',
                   fontSize: '0.75rem',
-                  background: destination === opt.value
-                    ? opt.value === 'xero' ? '#13b5ea15' : 'var(--color-brand-50)'
-                    : 'var(--color-bg-tertiary)',
-                  color: destination === opt.value
-                    ? opt.value === 'xero' ? '#13b5ea' : 'var(--color-brand)'
-                    : 'var(--color-text-muted)',
-                  border: `1px solid ${destination === opt.value
-                    ? opt.value === 'xero' ? '#13b5ea40' : 'var(--color-brand-light)'
-                    : 'var(--color-border)'}`,
+                  background: destination === opt.value ? `${opt.color}15` : 'var(--color-bg-tertiary)',
+                  color: destination === opt.value ? opt.color : 'var(--color-text-muted)',
+                  border: `1px solid ${destination === opt.value ? `${opt.color}40` : 'var(--color-border)'}`,
                   cursor: 'pointer',
                 }}
               >
@@ -305,83 +325,77 @@ function CreateInvoiceModal({
               </>
             )}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            <label htmlFor="ci-description" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
-              Description
-            </label>
-            <input
-              id="ci-description"
-              type="text"
-              placeholder="e.g. Monthly retainer - March 2026"
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              required
-              style={{
-                padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
-                border: '1px solid var(--color-border)', outline: 'none',
-                color: 'var(--color-text)', background: 'var(--color-bg)',
-              }}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: '1 1 5rem', minWidth: '5rem' }}>
-              <label htmlFor="ci-quantity" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
-                Quantity
-              </label>
-              <input
-                id="ci-quantity"
-                type="number"
-                min="0"
-                step="0.01"
-                value={quantity}
-                onChange={e => setQuantity(e.target.value)}
-                style={{
-                  padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
-                  border: '1px solid var(--color-border)', outline: 'none',
-                  color: 'var(--color-text)', background: 'var(--color-bg)',
-                }}
-              />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: '2 1 8rem', minWidth: '8rem' }}>
-              <label htmlFor="ci-amount" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
-                Unit Amount
-              </label>
-              <input
-                id="ci-amount"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="0.00"
-                value={unitAmount}
-                onChange={e => setUnitAmount(e.target.value)}
-                required
-                style={{
-                  padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
-                  border: '1px solid var(--color-border)', outline: 'none',
-                  color: 'var(--color-text)', background: 'var(--color-bg)',
-                }}
-              />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: '1 1 5rem', minWidth: '5rem' }}>
-              <label htmlFor="ci-currency" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
-                Currency
-              </label>
+          {/* Line Items */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Line Items</span>
               <select
-                id="ci-currency"
                 value={currency}
                 onChange={e => setCurrency(e.target.value)}
-                style={{
-                  padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
-                  border: '1px solid var(--color-border)', outline: 'none',
-                  color: 'var(--color-text)', background: 'var(--color-bg)',
-                  minHeight: '2.375rem',
-                }}
+                style={{ padding: '0.25rem 0.5rem', borderRadius: '0.375rem', fontSize: '0.75rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
               >
                 {SUPPORTED_CURRENCIES.map(cur => (
                   <option key={cur} value={cur}>{cur}</option>
                 ))}
               </select>
             </div>
+            {lineItems.map((item, i) => (
+              <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+                <input
+                  type="text"
+                  placeholder="Description"
+                  value={item.description}
+                  onChange={e => {
+                    const updated = [...lineItems]
+                    updated[i] = { ...updated[i], description: e.target.value }
+                    setLineItems(updated)
+                  }}
+                  style={{ flex: 3, padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', color: 'var(--color-text)', background: 'var(--color-bg)' }}
+                />
+                <input
+                  type="number"
+                  placeholder="Qty"
+                  min="0"
+                  step="0.01"
+                  value={item.quantity}
+                  onChange={e => {
+                    const updated = [...lineItems]
+                    updated[i] = { ...updated[i], quantity: e.target.value }
+                    setLineItems(updated)
+                  }}
+                  style={{ flex: 0.7, padding: '0.5rem', borderRadius: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', color: 'var(--color-text)', background: 'var(--color-bg)', minWidth: '3rem' }}
+                />
+                <input
+                  type="number"
+                  placeholder="Amount"
+                  min="0"
+                  step="0.01"
+                  value={item.unitAmount}
+                  onChange={e => {
+                    const updated = [...lineItems]
+                    updated[i] = { ...updated[i], unitAmount: e.target.value }
+                    setLineItems(updated)
+                  }}
+                  style={{ flex: 1, padding: '0.5rem', borderRadius: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', color: 'var(--color-text)', background: 'var(--color-bg)', minWidth: '4rem' }}
+                />
+                {lineItems.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setLineItems(lineItems.filter((_, j) => j !== i))}
+                    style={{ padding: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-subtle)', fontSize: '1rem' }}
+                  >
+                    x
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setLineItems([...lineItems, { description: '', quantity: '1', unitAmount: '' }])}
+              style={{ fontSize: '0.75rem', color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left', fontWeight: 500 }}
+            >
+              + Add Line Item
+            </button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
             <label htmlFor="ci-due-date" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
@@ -438,7 +452,7 @@ function CreateInvoiceModal({
                 color: 'white', cursor: saving ? 'not-allowed' : 'pointer', minHeight: '2.75rem',
               }}
             >
-              {saving ? 'Creating...' : destination === 'xero' ? 'Create + Push to Xero' : 'Create Invoice'}
+              {saving ? 'Creating...' : destination === 'xero' ? 'Create Xero Draft' : destination === 'stripe' ? 'Create + Get Payment Link' : 'Create Invoice'}
             </button>
           </div>
         </form>
@@ -583,6 +597,36 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
               }}
             >
               {syncing === 'payments' ? 'Syncing...' : 'Sync Payments'}
+            </button>
+            <button
+              onClick={async () => {
+                setSyncing('stripe')
+                try {
+                  const res = await fetch(apiPath('/api/admin/integrations/stripe/import-invoices'), { method: 'POST' })
+                  if (res.ok) {
+                    const d = await res.json() as { imported: number; skipped: number }
+                    alert(`Imported ${d.imported} invoices from Stripe (${d.skipped} already existed)`)
+                    fetchInvoices(activeTab)
+                  } else {
+                    alert('Stripe import failed. Check Stripe configuration.')
+                  }
+                } catch { alert('Stripe import failed') }
+                finally { setSyncing('') }
+              }}
+              disabled={!!syncing}
+              className="flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
+              style={{
+                padding: '0.5rem 0.875rem',
+                background: '#635bff10',
+                border: '1px solid #635bff30',
+                borderRadius: '0.5rem',
+                cursor: syncing ? 'default' : 'pointer',
+                color: '#635bff',
+                minHeight: 44,
+                opacity: syncing === 'stripe' ? 0.6 : 1,
+              }}
+            >
+              {syncing === 'stripe' ? 'Importing...' : 'Sync Stripe'}
             </button>
             <button
               onClick={() => {
