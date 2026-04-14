@@ -79,11 +79,13 @@ export async function GET(req: NextRequest, { params }: Params) {
     }
   }
 
-  // Client costs → cost in NZD
+  // Client costs → cost in NZD.
+  // Tolerate pre-migration environments (client_costs table may not exist yet).
   const costs = await drizzle
     .select()
     .from(schema.clientCosts)
     .where(eq(schema.clientCosts.orgId, id))
+    .catch(() => [] as Array<typeof schema.clientCosts.$inferSelect>)
 
   const byCategory: Record<string, number> = {
     contractor: 0, software: 0, hours: 0, other: 0, timeCost: 0,
