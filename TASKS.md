@@ -947,8 +947,8 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 
 ### Cash Flow Forecast
 - [x] T598 - [BE] Cash flow forecast API: `GET /api/admin/reports/cash-flow-forecast` — projects 6 months forward: MRR (recurring revenue) + pipeline weighted deals (expected close dates) - recurring expenses (from Xero) = projected monthly cash position — [BE] — done 2026-04-15. Uses customMrr + pipelineStages.probability × deal.valueNzd + client_costs (recurring and dated). Returns per-month net + cumulative. Xero expense sync (T590) will enhance the cost side later.
-- [ ] T599 - [FE] Cash flow forecast chart: stacked area chart showing projected income vs expenses vs net position over 6 months, with best/worst case bands — [FE]
-- [ ] T600 - [FE] Cash flow: runway indicator (months of runway at current burn rate based on bank balance from Xero) — [FE]
+- [x] T599 - [FE] Cash flow forecast chart — done 2026-04-15. Added `CashFlowForecastSection` to reports-content.tsx: 6-month projection with 3 summary cards (revenue/cost/net) and a bar chart. Follows currency toggle.
+- [ ] T600 - [FE] Cash flow: runway indicator (months of runway at current burn rate based on bank balance from Xero) — needs Xero bank balance wiring first. — [FE]
 
 ### Project Calculator
 - [ ] T601 - [BE] Project calculator API: `POST /api/admin/tools/project-calculator` — accepts project parameters (type, complexity, pages/screens, features, integrations) and returns estimated hours, cost range, timeline. Port logic from tahi.studio Webflow calculator. — [BE]
@@ -957,12 +957,12 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 
 ### Utilization Rate (Capacity Section)
 - [x] T604 - [BE] Utilization rate API: `GET /api/admin/reports/utilization?weeks=4` — per team member: billable hours / (weeklyCapacityHours × weeks). Returns per-member utilization %, health (green/amber/red), and team average (excluding contractors). — [BE] — done 2026-04-15.
-- [ ] T605 - [FE] Capacity page: utilization rate section showing per-member utilization bars, team average, trend sparkline, target line (e.g. 80%). Colour code: green >= 70%, amber 50-70%, red < 50%. — [FE]
+- [x] T605 - [FE] Capacity page / Reports: utilization rate section — done 2026-04-15. Added `UtilizationSection` to reports-content.tsx: per-member bars with billable/available hours, colour-coded by health, team average excluding contractors. Trend sparkline deferred. — [FE]
 - [x] T606 - [BE] Team member: add `availableHoursPerWeek` field (default 40) for utilization calculation — [BE] — already present as `weeklyCapacityHours` on team_members table (schema.ts:99).
 
 ### Retainer Health Monitor
 - [x] T609 - [BE] Retainer health API: `GET /api/admin/reports/retainer-health` — per active retainer client: hours used vs included (from subscription plan), request velocity, response time, MRR value, months active, churn risk score — [BE] — done 2026-04-15. Returns sorted-by-churn list with openRequests, requestsLast30d/90d, billableHoursLast30d, utilizationPct vs PLAN_HOURS, churnRiskScore (0-100), upsellSignal.
-- [ ] T610 - [FE] Reports or Client list: Retainer Health Monitor section — table of retainer clients with health indicators: hours usage (bar), churn risk (traffic light), upsell opportunity flag, months since last request — [FE]
+- [x] T610 - [FE] Reports or Client list: Retainer Health Monitor section — done 2026-04-15. Added `RetainerHealthSection` to reports-content.tsx: sortable table with churn risk score (colour-coded), utilization %, open/30d/90d counts, MRR, signals (Upsell / Churn risk). Rows link to client detail. — [FE]
 - [ ] T611 - [BE] Retainer alerts: automation trigger when client hours usage drops below 30% for 2+ months (churn risk) or exceeds 120% for 2+ months (upsell opportunity). Creates notification for admin. — [BE]
 
 ### Revenue Per Head

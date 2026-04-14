@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import {
   Users, Inbox, Clock, CreditCard, BarChart2,
   TrendingUp, RefreshCw, Calendar, Download, DollarSign,
@@ -507,6 +508,15 @@ export function ReportsContent() {
 
       {/* Revenue Forecast (T326) */}
       <RevenueForecastSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+
+      {/* Retainer Health Monitor (T610) */}
+      <RetainerHealthSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+
+      {/* Cash Flow Forecast (T599-T600) */}
+      <CashFlowForecastSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+
+      {/* Team Utilization (T605) */}
+      <UtilizationSection />
     </div>
   )
 }
@@ -2598,6 +2608,332 @@ function RevenueForecastSection({ displayCurrency, exchangeRates }: CurrencyProp
           </BarChart>
         </ResponsiveContainer>
       </div>
+    </div>
+  )
+}
+
+// ── Retainer Health Section (T610) ─────────────────────────────────────────
+
+interface RetainerHealthRow {
+  orgId: string
+  orgName: string
+  status: string
+  healthStatus: string | null
+  planType: string | null
+  mrrNzd: number
+  currency: string
+  monthsActive: number
+  openRequests: number
+  requestsLast30d: number
+  requestsLast90d: number
+  billableHoursLast30d: number
+  hoursPerMonth: number | null
+  utilizationPct: number | null
+  churnRiskScore: number
+  upsellSignal: boolean
+}
+
+function RetainerHealthSection({ displayCurrency, exchangeRates }: CurrencyProps) {
+  const [rows, setRows] = useState<RetainerHealthRow[] | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/reports/retainer-health'))
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => setRows((d as { clients?: RetainerHealthRow[] }).clients ?? []))
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border p-6 animate-pulse" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <div className="h-5 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '40%' }} />
+        <div className="h-24 rounded mt-4" style={{ background: 'var(--color-bg-tertiary)' }} />
+      </div>
+    )
+  }
+
+  if (!rows || rows.length === 0) {
+    return (
+      <div className="rounded-xl border p-6" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <h2 className="text-lg font-semibold text-[var(--color-text)] mb-1">Retainer Health Monitor</h2>
+        <p className="text-sm text-[var(--color-text-muted)]">No retainer clients yet. Set customMrr on a client to track them here.</p>
+      </div>
+    )
+  }
+
+  function riskColour(score: number) {
+    if (score >= 70) return { bg: 'var(--color-danger-bg)', fg: 'var(--color-danger)' }
+    if (score >= 50) return { bg: 'var(--color-warning-bg)', fg: 'var(--color-warning)' }
+    return { bg: 'var(--color-success-bg)', fg: 'var(--color-success)' }
+  }
+
+  return (
+    <div className="rounded-xl border p-6" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--color-text)]">Retainer Health Monitor</h2>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1">Sorted by churn risk. Red = needs a check-in, green = healthy.</p>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs font-medium text-[var(--color-text-muted)] border-b" style={{ borderColor: 'var(--color-border)' }}>
+              <th className="py-2 pr-3">Client</th>
+              <th className="py-2 pr-3">MRR</th>
+              <th className="py-2 pr-3">Hrs last 30d</th>
+              <th className="py-2 pr-3">Utilisation</th>
+              <th className="py-2 pr-3">Open / 30d / 90d</th>
+              <th className="py-2 pr-3">Churn risk</th>
+              <th className="py-2 pr-3">Signals</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => {
+              const risk = riskColour(r.churnRiskScore)
+              return (
+                <tr key={r.orgId} className="border-b" style={{ borderColor: 'var(--color-border-subtle)' }}>
+                  <td className="py-2 pr-3">
+                    <Link href={`/clients/${r.orgId}`} className="font-medium text-[var(--color-text)] hover:text-[var(--color-brand)]">
+                      {r.orgName}
+                    </Link>
+                    <div className="text-xs text-[var(--color-text-subtle)]">{r.monthsActive} mo · {r.planType ?? 'no plan'}</div>
+                  </td>
+                  <td className="py-2 pr-3 text-[var(--color-text)]">
+                    {formatInCur(r.mrrNzd, displayCurrency, exchangeRates)}
+                  </td>
+                  <td className="py-2 pr-3 text-[var(--color-text)]">{r.billableHoursLast30d.toFixed(1)}h</td>
+                  <td className="py-2 pr-3">
+                    {r.utilizationPct !== null ? (
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded`} style={{
+                        background: r.utilizationPct > 120 ? 'var(--color-warning-bg)' : r.utilizationPct < 30 ? 'var(--color-danger-bg)' : 'var(--color-success-bg)',
+                        color: r.utilizationPct > 120 ? 'var(--color-warning)' : r.utilizationPct < 30 ? 'var(--color-danger)' : 'var(--color-success)',
+                      }}>
+                        {r.utilizationPct.toFixed(0)}%
+                      </span>
+                    ) : (
+                      <span className="text-xs text-[var(--color-text-subtle)]">—</span>
+                    )}
+                  </td>
+                  <td className="py-2 pr-3 text-[var(--color-text-muted)] text-xs">
+                    {r.openRequests} / {r.requestsLast30d} / {r.requestsLast90d}
+                  </td>
+                  <td className="py-2 pr-3">
+                    <span className="text-xs font-medium px-2 py-0.5 rounded" style={{ background: risk.bg, color: risk.fg }}>
+                      {r.churnRiskScore}
+                    </span>
+                  </td>
+                  <td className="py-2 pr-3">
+                    {r.upsellSignal && (
+                      <span className="text-xs font-medium text-[var(--color-success)]">Upsell</span>
+                    )}
+                    {r.churnRiskScore >= 70 && (
+                      <span className="text-xs font-medium text-[var(--color-danger)] ml-2">Churn risk</span>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ── Cash Flow Forecast Section (T599-T600) ─────────────────────────────────
+
+interface CashFlowMonth {
+  month: string
+  revenue: number
+  cost: number
+  net: number
+  cumulative: number
+}
+interface CashFlowData {
+  months: CashFlowMonth[]
+  summary: { totalRevenue: number; totalCost: number; totalNet: number; recurringMrrNzd: number; recurringCostNzd: number }
+}
+
+function CashFlowForecastSection({ displayCurrency, exchangeRates }: CurrencyProps) {
+  const [data, setData] = useState<CashFlowData | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/reports/cash-flow-forecast?months=6'))
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => setData(d as CashFlowData))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border p-6 animate-pulse" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <div className="h-5 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '40%' }} />
+        <div className="h-48 rounded mt-4" style={{ background: 'var(--color-bg-tertiary)' }} />
+      </div>
+    )
+  }
+
+  if (!data || data.months.length === 0) {
+    return (
+      <div className="rounded-xl border p-6" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <h2 className="text-lg font-semibold text-[var(--color-text)] mb-1">Cash Flow Forecast</h2>
+        <p className="text-sm text-[var(--color-text-muted)]">No forecast data yet.</p>
+      </div>
+    )
+  }
+
+  const chartData = data.months.map(m => ({
+    name: formatMonthLabel(m.month),
+    revenue: convertNzd(m.revenue, displayCurrency, exchangeRates),
+    cost: convertNzd(m.cost, displayCurrency, exchangeRates),
+    net: convertNzd(m.net, displayCurrency, exchangeRates),
+    cumulative: convertNzd(m.cumulative, displayCurrency, exchangeRates),
+  }))
+
+  return (
+    <div className="rounded-xl border p-6" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--color-text)]">Cash Flow Forecast</h2>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1">6 months ahead. Revenue = recurring MRR + weighted pipeline. Cost = recurring and dated client costs.</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <MiniMetric label="Projected revenue" value={formatInCur(data.summary.totalRevenue, displayCurrency, exchangeRates)} colour="var(--color-success)" />
+        <MiniMetric label="Projected cost" value={formatInCur(data.summary.totalCost, displayCurrency, exchangeRates)} colour="var(--color-danger)" />
+        <MiniMetric label="Net position" value={formatInCur(data.summary.totalNet, displayCurrency, exchangeRates)} colour={data.summary.totalNet >= 0 ? 'var(--color-brand)' : 'var(--color-danger)'} />
+      </div>
+      <div style={{ height: '16rem' }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-subtle)" />
+            <XAxis dataKey="name" stroke="var(--color-text-muted)" tick={{ fontSize: 12 }} />
+            <YAxis stroke="var(--color-text-muted)" tick={{ fontSize: 12 }} />
+            <Tooltip
+              contentStyle={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: '0.5rem' }}
+              formatter={(v: number) => formatInCur(v, displayCurrency, exchangeRates)}
+            />
+            <Bar dataKey="revenue" fill="#5A824E" radius={[4, 4, 0, 0]} name="Revenue" />
+            <Bar dataKey="cost" fill="#f87171" radius={[4, 4, 0, 0]} name="Cost" />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  )
+}
+
+// ── Utilization Section (T605) ─────────────────────────────────────────────
+
+interface UtilMember {
+  id: string
+  name: string
+  title: string | null
+  isContractor: boolean
+  weeklyCapacityHours: number
+  availableHours: number
+  billableHours: number
+  utilizationPct: number
+  health: 'green' | 'amber' | 'red'
+}
+interface UtilData { weeks: number; members: UtilMember[]; teamAverage: number }
+
+function UtilizationSection() {
+  const [data, setData] = useState<UtilData | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/reports/utilization?weeks=4'))
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => setData(d as UtilData))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border p-6 animate-pulse" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <div className="h-5 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '40%' }} />
+        <div className="h-32 rounded mt-4" style={{ background: 'var(--color-bg-tertiary)' }} />
+      </div>
+    )
+  }
+
+  if (!data || data.members.length === 0) {
+    return (
+      <div className="rounded-xl border p-6" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <h2 className="text-lg font-semibold text-[var(--color-text)] mb-1">Team Utilisation</h2>
+        <p className="text-sm text-[var(--color-text-muted)]">No team members or time entries yet.</p>
+      </div>
+    )
+  }
+
+  function barColour(health: 'green' | 'amber' | 'red'): string {
+    return health === 'green' ? 'var(--color-success)'
+      : health === 'amber' ? 'var(--color-warning)'
+      : 'var(--color-danger)'
+  }
+
+  return (
+    <div className="rounded-xl border p-6" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--color-text)]">Team Utilisation</h2>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1">Billable hours ÷ capacity over the last {data.weeks} weeks. Team average: {data.teamAverage.toFixed(0)}% (excludes contractors).</p>
+        </div>
+      </div>
+      <div className="space-y-3">
+        {data.members.map(m => (
+          <div key={m.id} className="grid grid-cols-[1fr_auto] gap-3 items-center">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-sm font-medium text-[var(--color-text)]">
+                  {m.name}
+                  {m.isContractor && <span className="text-xs text-[var(--color-text-subtle)] ml-2">(contractor)</span>}
+                </div>
+                <div className="text-xs text-[var(--color-text-muted)]">
+                  {m.billableHours.toFixed(1)} / {m.availableHours.toFixed(0)}h
+                </div>
+              </div>
+              <div className="h-2 rounded overflow-hidden" style={{ background: 'var(--color-bg-tertiary)' }}>
+                <div
+                  style={{
+                    width: `${Math.min(100, m.utilizationPct)}%`,
+                    height: '100%',
+                    background: barColour(m.health),
+                    transition: 'width 0.3s',
+                  }}
+                />
+              </div>
+            </div>
+            <div className="text-sm font-semibold" style={{ color: barColour(m.health), minWidth: '3rem', textAlign: 'right' }}>
+              {m.utilizationPct.toFixed(0)}%
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Mini metric card (lighter alternative to SummaryCard, no icon) ────────
+
+function MiniMetric({ label, value, colour }: { label: string; value: string; colour: string }) {
+  return (
+    <div
+      style={{
+        background: 'var(--color-bg-secondary)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-card)',
+        padding: '1rem 1.25rem',
+      }}
+    >
+      <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">{label}</div>
+      <div className="text-xl font-semibold mt-1" style={{ color: colour }}>{value}</div>
     </div>
   )
 }
