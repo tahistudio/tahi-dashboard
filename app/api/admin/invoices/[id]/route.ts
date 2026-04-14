@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { callXeroAPI } from '@/lib/xero'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -89,6 +90,26 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .update(schema.invoices)
     .set(patch)
     .where(eq(schema.invoices.id, id))
+
+  // If voided/written_off and has xeroInvoiceId, void in Xero too
+  if (body.status === 'written_off') {
+    const [inv] = await drizzle
+      .select({ xeroInvoiceId: schema.invoices.xeroInvoiceId })
+      .from(schema.invoices)
+      .where(eq(schema.invoices.id, id))
+      .limit(1)
+
+    if (inv?.xeroInvoiceId) {
+      try {
+        await callXeroAPI('POST', `/Invoices/${inv.xeroInvoiceId}`, {
+          InvoiceID: inv.xeroInvoiceId,
+          Status: 'VOIDED',
+        })
+      } catch {
+        // Xero void failed silently, local status already updated
+      }
+    }
+  }
 
   return NextResponse.json({ success: true })
 }

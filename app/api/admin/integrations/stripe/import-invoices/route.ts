@@ -3,15 +3,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { sql } from 'drizzle-orm'
-import Stripe from 'stripe'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
-
-function getStripe(): Stripe | null {
-  const key = process.env.STRIPE_SECRET_KEY
-  if (!key) return null
-  return new Stripe(key, { apiVersion: '2025-02-24.acacia' as Stripe.LatestApiVersion })
-}
 
 function mapStripeStatus(status: string): string {
   switch (status) {
@@ -24,20 +17,47 @@ function mapStripeStatus(status: string): string {
   }
 }
 
+interface StripeInvoice {
+  id: string
+  number: string | null
+  status: string | null
+  customer: string | null
+  customer_name: string | null
+  currency: string | null
+  subtotal: number
+  total: number
+  due_date: number | null
+  created: number
+  status_transitions: { paid_at: number | null } | null
+  lines?: { data: Array<{ description: string | null; quantity: number | null; amount: number }> }
+}
+
 /**
  * POST /api/admin/integrations/stripe/import-invoices
- * Import invoices from Stripe into the dashboard.
+ * Import invoices from Stripe using fetch (no SDK, CF Workers compatible).
  */
 export async function POST(req: NextRequest) {
   const { orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const stripe = getStripe()
-  if (!stripe) return NextResponse.json({ error: 'Stripe not configured' }, { status: 503 })
+  const stripeKey = process.env.STRIPE_SECRET_KEY
+  if (!stripeKey) return NextResponse.json({ error: 'Stripe not configured' }, { status: 503 })
 
   const database = await db() as unknown as D1
 
   try {
+    // Fetch invoices from Stripe via REST API
+    const stripeRes = await fetch('https://api.stripe.com/v1/invoices?limit=100&expand[]=data.lines', {
+      headers: { Authorization: `Bearer ${stripeKey}` },
+    })
+
+    if (!stripeRes.ok) {
+      const errText = await stripeRes.text()
+      return NextResponse.json({ error: 'Stripe API error', message: errText }, { status: 502 })
+    }
+
+    const stripeData = await stripeRes.json() as { data: StripeInvoice[] }
+
     // Get existing stripeInvoiceIds to skip duplicates
     const existing = await database
       .select({ stripeInvoiceId: schema.invoices.stripeInvoiceId })
@@ -51,15 +71,12 @@ export async function POST(req: NextRequest) {
       .from(schema.organisations)
     const orgByCustomerId = new Map(orgs.filter(o => o.stripeCustomerId).map(o => [o.stripeCustomerId, o]))
 
-    // Fetch invoices from Stripe
-    const stripeInvoices = await stripe.invoices.list({ limit: 100, expand: ['data.lines'] })
-
     const now = new Date().toISOString()
     let imported = 0
     let skipped = 0
     const results: Array<{ number: string | null; status: string; orgMatch?: string }> = []
 
-    for (const inv of stripeInvoices.data) {
+    for (const inv of stripeData.data) {
       if (existingIds.has(inv.id)) {
         skipped++
         results.push({ number: inv.number, status: 'already_exists' })
@@ -68,12 +85,12 @@ export async function POST(req: NextRequest) {
 
       // Match to org by stripeCustomerId
       let matchedOrgId: string | null = null
-      if (inv.customer && typeof inv.customer === 'string') {
+      if (inv.customer) {
         const org = orgByCustomerId.get(inv.customer)
         if (org) matchedOrgId = org.id
       }
 
-      // If no org match, try to create from customer name
+      // If no match, auto-create org from customer name
       if (!matchedOrgId && inv.customer_name) {
         const newOrgId = crypto.randomUUID()
         try {
@@ -82,7 +99,7 @@ export async function POST(req: NextRequest) {
             name: inv.customer_name,
             status: 'active',
             healthStatus: 'green',
-            stripeCustomerId: typeof inv.customer === 'string' ? inv.customer : null,
+            stripeCustomerId: inv.customer,
             onboardingState: '{}',
             brands: '[]',
             customFields: '{}',
@@ -91,7 +108,6 @@ export async function POST(req: NextRequest) {
             updatedAt: now,
           })
           matchedOrgId = newOrgId
-          orgByCustomerId.set(typeof inv.customer === 'string' ? inv.customer : '', { id: newOrgId, name: inv.customer_name, stripeCustomerId: typeof inv.customer === 'string' ? inv.customer : null })
         } catch {
           results.push({ number: inv.number, status: 'error', orgMatch: 'Failed to create org' })
           continue
@@ -113,15 +129,15 @@ export async function POST(req: NextRequest) {
           stripeInvoiceId: inv.id,
           source: 'stripe',
           status: localStatus,
-          amountUsd: (inv.subtotal ?? 0) / 100,
-          totalUsd: (inv.total ?? 0) / 100,
+          amountUsd: inv.subtotal / 100,
+          totalUsd: inv.total / 100,
           currency: (inv.currency ?? 'nzd').toUpperCase(),
           dueDate: inv.due_date ? new Date(inv.due_date * 1000).toISOString().split('T')[0] : null,
           paidAt: inv.status === 'paid' && inv.status_transitions?.paid_at
             ? new Date(inv.status_transitions.paid_at * 1000).toISOString()
             : null,
           notes: `Imported from Stripe: ${inv.number ?? inv.id}`,
-          createdAt: inv.created ? new Date(inv.created * 1000).toISOString() : now,
+          createdAt: new Date(inv.created * 1000).toISOString(),
           updatedAt: now,
         })
 
@@ -133,18 +149,14 @@ export async function POST(req: NextRequest) {
               invoiceId,
               description: line.description ?? 'Line item',
               quantity: line.quantity ?? 1,
-              unitPriceUsd: (line.amount ?? 0) / 100 / (line.quantity ?? 1),
-              totalUsd: (line.amount ?? 0) / 100,
+              unitPriceUsd: (line.amount / 100) / (line.quantity ?? 1),
+              totalUsd: line.amount / 100,
             })
           }
         }
 
         imported++
-        results.push({
-          number: inv.number,
-          status: 'imported',
-          orgMatch: orgs.find(o => o.id === matchedOrgId)?.name,
-        })
+        results.push({ number: inv.number, status: 'imported', orgMatch: inv.customer_name ?? undefined })
       } catch (insertErr) {
         results.push({
           number: inv.number,
@@ -154,7 +166,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, imported, skipped, total: stripeInvoices.data.length, results })
+    return NextResponse.json({ success: true, imported, skipped, total: stripeData.data.length, results })
   } catch (err) {
     return NextResponse.json({
       error: 'Stripe import failed',

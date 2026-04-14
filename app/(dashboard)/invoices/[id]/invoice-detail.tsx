@@ -304,6 +304,18 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                 variant="ghost"
               />
             )}
+            {invoice.status !== 'written_off' && invoice.status !== 'paid' && (
+              <ActionButton
+                label="Void Invoice"
+                disabled={patching !== null}
+                onClick={() => {
+                  if (confirm('Void this invoice? This will also void it in Xero if linked.')) {
+                    patchStatus('written_off')
+                  }
+                }}
+                variant="danger"
+              />
+            )}
             {!invoice.xeroInvoiceId && invoice.status !== 'paid' && (
               <ActionButton
                 label="Sync to Xero"

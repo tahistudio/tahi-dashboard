@@ -162,6 +162,10 @@ export async function POST(req: NextRequest) {
 
       const currency = invoice.currency ?? 'NZD'
       const brandingThemeId = findThemeForCurrency(currency)
+      // GST (15%) only on NZD invoices, NoTax for all other currencies
+      const isNzd = currency.toUpperCase() === 'NZD'
+      const taxType = isNzd ? 'OUTPUT2' : 'NONE'
+      const lineAmountTypes = isNzd ? 'Exclusive' : 'NoTax'
 
       // Build Xero invoice payload
       const xeroPayload: Record<string, unknown> = {
@@ -170,12 +174,13 @@ export async function POST(req: NextRequest) {
         Contact: { ContactID: contactId },
         CurrencyCode: currency,
         DueDate: invoice.dueDate ?? undefined,
-        LineAmountTypes: 'Exclusive',
+        LineAmountTypes: lineAmountTypes,
         LineItems: items.map(item => ({
           Description: item.description,
           Quantity: item.quantity ?? 1,
           UnitAmount: item.unitPriceUsd,
           AccountCode: '200',
+          TaxType: taxType,
         })),
         Notes: invoice.notes ?? undefined,
       }
