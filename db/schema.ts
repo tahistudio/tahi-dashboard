@@ -55,6 +55,7 @@ export const organisations = sqliteTable('organisations', {
   // micro | small | medium | large | enterprise
   size: text('size'),
   annualRevenue: integer('annual_revenue'),
+  customMrr: real('custom_mrr'),
   ...timestamps,
 }, (table) => [
   index('idx_orgs_status').on(table.status),

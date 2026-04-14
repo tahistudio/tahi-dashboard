@@ -527,6 +527,7 @@ See `TASKS.md` for the full prioritised list. The high-level categories:
 11. All admin API routes that return requests, clients, or tasks must enforce team member access scoping.
 12. All portal API routes must scope queries to the authenticated user's `orgId`.
 13. All components using CSS tokens must use CSS var references, not hardcoded hex, so dark mode works correctly.
+14. MCP parity: any API capability used in the dashboard must also be exposed via MCP tools. Both MCP servers (`mcp-server/index.ts` and `workers/mcp-server/src/index.ts`) must stay in sync. See Decision #036.
 
 ---
 

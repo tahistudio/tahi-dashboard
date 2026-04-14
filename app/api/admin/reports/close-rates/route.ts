@@ -172,6 +172,35 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Also include current dwell time for deals sitting in stages with no transitions
+  for (const deal of allDeals) {
+    if (deal.isClosedWon || deal.isClosedLost) continue
+
+    // Find the stage this deal is in
+    const stage = stages.find(s => s.id === deal.stageId)
+    if (!stage) continue
+
+    // Check if this deal already has transitions recorded
+    const hasTransitions = dealTransitions.has(deal.id)
+
+    // Calculate time in current stage
+    const enteredAt = hasTransitions
+      ? (() => {
+          const transitions = dealTransitions.get(deal.id) ?? []
+          return transitions.length > 0 ? transitions[transitions.length - 1].createdAt : deal.createdAt
+        })()
+      : deal.createdAt
+
+    if (enteredAt) {
+      const days = Math.max(0,
+        (Date.now() - new Date(enteredAt).getTime()) / (1000 * 60 * 60 * 24)
+      )
+      const existing = stageDurations.get(stage.name) ?? []
+      existing.push(days)
+      stageDurations.set(stage.name, existing)
+    }
+  }
+
   // Build stageVelocity array aligned with pipeline stages
   const stageVelocity = stages
     .filter(s => !s.isClosedWon && !s.isClosedLost)

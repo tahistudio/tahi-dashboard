@@ -51,20 +51,19 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // 3. MRR from active subscriptions
-  const subscriptions = await database
+  // 3. MRR from active organisations with custom MRR set
+  const orgsWithMrr = await database
     .select({
-      planType: schema.subscriptions.planType,
-      status: schema.subscriptions.status,
+      customMrr: schema.organisations.customMrr,
     })
-    .from(schema.subscriptions)
-    .where(eq(schema.subscriptions.status, 'active'))
+    .from(schema.organisations)
+    .where(eq(schema.organisations.status, 'active'))
 
-  // Estimate MRR based on plan types (from billing tiers spec)
   let mrr = 0
-  for (const sub of subscriptions) {
-    if (sub.planType === 'maintain') mrr += 1500
-    else if (sub.planType === 'scale') mrr += 4000
+  for (const org of orgsWithMrr) {
+    if (org.customMrr && org.customMrr > 0) {
+      mrr += org.customMrr
+    }
   }
 
   // 4. Xero P&L (best effort, may fail if not connected)

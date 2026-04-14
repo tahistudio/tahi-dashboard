@@ -5,7 +5,7 @@ import {
   Users, Inbox, Clock, CreditCard, BarChart2,
   TrendingUp, RefreshCw, Calendar, Download, DollarSign,
   Target, Percent, PieChart as PieChartIcon,
-  Filter, ArrowDown,
+  Filter, ArrowDown, AlertTriangle, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -275,6 +275,9 @@ export function ReportsContent() {
         />
       </div>
 
+      {/* Financial Health */}
+      <FinancialHealthSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+
       {/* Two-column layout for charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Requests by status - Pie chart */}
@@ -499,6 +502,508 @@ export function ReportsContent() {
   )
 }
 
+// ── Financial Health Section ──────────────────────────────────────────────
+
+interface FinancialHealthData {
+  invoices: { totalInvoiced: number; totalPaid: number; totalOutstanding: number; count: number }
+  pipeline: { totalValue: number; weightedForecast: number; openDealCount: number; monthlyProjections: Array<{ month: string; amount: number }> }
+  mrr: number
+  xero: { profitAndLoss: unknown; bankSummary: unknown }
+}
+
+interface AgingInvoice {
+  id: string
+  orgName: string
+  totalUsd: number
+  currency: string
+  dueDate: string
+  daysPastDue: number
+}
+
+interface AgingData {
+  aging: {
+    current: AgingInvoice[]
+    thirtyDays: AgingInvoice[]
+    sixtyDays: AgingInvoice[]
+    ninetyPlus: AgingInvoice[]
+  }
+}
+
+const AGING_BUCKETS = [
+  { key: 'current' as const, label: 'Current (0-30d)', color: '#4ade80', bgColor: '#f0fdf4' },
+  { key: 'thirtyDays' as const, label: '30-60 days', color: '#fbbf24', bgColor: '#fefce8' },
+  { key: 'sixtyDays' as const, label: '60-90 days', color: '#fb923c', bgColor: '#fff7ed' },
+  { key: 'ninetyPlus' as const, label: '90+ days', color: '#f87171', bgColor: '#fef2f2' },
+]
+
+function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProps) {
+  const [healthData, setHealthData] = useState<FinancialHealthData | null>(null)
+  const [agingData, setAgingData] = useState<AgingData | null>(null)
+  const [healthLoading, setHealthLoading] = useState(true)
+  const [agingLoading, setAgingLoading] = useState(true)
+  const [healthError, setHealthError] = useState(false)
+  const [agingError, setAgingError] = useState(false)
+  const [expandedBucket, setExpandedBucket] = useState<string | null>(null)
+
+  const fmtCur = (v: number) => formatInCur(v, displayCurrency, exchangeRates)
+
+  const fetchHealth = useCallback(async () => {
+    setHealthLoading(true)
+    setHealthError(false)
+    try {
+      const res = await fetch(apiPath('/api/admin/billing/financial-health'))
+      if (!res.ok) throw new Error('Failed')
+      const json = await res.json() as FinancialHealthData
+      setHealthData(json)
+    } catch {
+      setHealthError(true)
+      setHealthData(null)
+    } finally {
+      setHealthLoading(false)
+    }
+  }, [])
+
+  const fetchAging = useCallback(async () => {
+    setAgingLoading(true)
+    setAgingError(false)
+    try {
+      const res = await fetch(apiPath('/api/admin/reports/invoice-aging'))
+      if (!res.ok) throw new Error('Failed')
+      const json = await res.json() as AgingData
+      setAgingData(json)
+    } catch {
+      setAgingError(true)
+      setAgingData(null)
+    } finally {
+      setAgingLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchHealth() }, [fetchHealth])
+  useEffect(() => { fetchAging() }, [fetchAging])
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-[var(--color-text)]">Financial Health</h2>
+
+      {/* KPI Cards */}
+      {healthLoading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {[1, 2, 3, 4].map(i => (
+            <div
+              key={i}
+              className="animate-pulse"
+              style={{
+                background: 'var(--color-bg)',
+                borderRadius: 'var(--radius-card)',
+                border: '1px solid var(--color-border)',
+                padding: '1.5rem',
+                height: '6rem',
+              }}
+            >
+              <div className="h-4 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '60%' }} />
+              <div className="h-8 rounded mt-3" style={{ background: 'var(--color-bg-tertiary)', width: '40%' }} />
+            </div>
+          ))}
+        </div>
+      ) : healthError || !healthData ? (
+        <div
+          style={{
+            background: 'var(--color-bg)',
+            borderRadius: 'var(--radius-card)',
+            border: '1px solid var(--color-border)',
+            padding: '1.5rem',
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-[var(--color-text-muted)]">Unable to load financial health data.</p>
+            <button
+              onClick={fetchHealth}
+              className="flex items-center gap-1.5 text-xs font-medium transition-colors"
+              style={{
+                color: 'var(--color-brand)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '0.375rem 0.5rem',
+                minHeight: '2rem',
+              }}
+            >
+              <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
+              Retry
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <SummaryCard
+              icon={TrendingUp}
+              label="MRR"
+              value={fmtCur(healthData.mrr)}
+              accent="emerald"
+            />
+            <SummaryCard
+              icon={DollarSign}
+              label="Total Invoiced"
+              value={fmtCur(healthData.invoices.totalInvoiced)}
+              accent="blue"
+            />
+            <SummaryCard
+              icon={CreditCard}
+              label="Total Paid"
+              value={fmtCur(healthData.invoices.totalPaid)}
+              accent="amber"
+            />
+            <FinancialOutstandingCard
+              value={fmtCur(healthData.invoices.totalOutstanding)}
+              isPositive={healthData.invoices.totalOutstanding > 0}
+            />
+          </div>
+
+          {/* Pipeline Forecast Mini Chart */}
+          {healthData.pipeline.monthlyProjections && healthData.pipeline.monthlyProjections.length > 0 && (
+            <div
+              style={{
+                background: 'var(--color-bg)',
+                borderRadius: 'var(--radius-card)',
+                border: '1px solid var(--color-border)',
+                padding: '1.5rem',
+              }}
+            >
+              <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+                <BarChart2 className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+                Pipeline Forecast (Weighted)
+              </h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={healthData.pipeline.monthlyProjections.map(p => ({
+                  name: formatMonthLabel(p.month),
+                  amount: convertNzd(p.amount, displayCurrency, exchangeRates),
+                }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" />
+                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                  <YAxis
+                    allowDecimals={false}
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v: number) => {
+                      if (v >= 1000) return `${Math.round(v / 1000)}k`
+                      return String(v)
+                    }}
+                  />
+                  <Tooltip
+                    formatter={(value: number) => {
+                      try {
+                        return [new Intl.NumberFormat('en-NZ', {
+                          style: 'currency',
+                          currency: displayCurrency,
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 0,
+                        }).format(value), 'Forecast']
+                      } catch {
+                        return [`${displayCurrency} ${value.toLocaleString()}`, 'Forecast']
+                      }
+                    }}
+                    contentStyle={{
+                      fontSize: '0.75rem',
+                      borderRadius: '0.5rem',
+                      border: '1px solid var(--color-border)',
+                    }}
+                  />
+                  <Bar dataKey="amount" fill="#5A824E" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Invoice Aging */}
+      {agingLoading ? (
+        <div
+          style={{
+            background: 'var(--color-bg)',
+            borderRadius: 'var(--radius-card)',
+            border: '1px solid var(--color-border)',
+            padding: '1.5rem',
+          }}
+        >
+          <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+            Invoice Aging
+          </h3>
+          <div className="space-y-2">
+            {[1, 2, 3, 4].map(i => (
+              <div key={i} className="animate-pulse rounded" style={{ height: '2.5rem', background: 'var(--color-bg-tertiary)' }} />
+            ))}
+          </div>
+        </div>
+      ) : agingError || !agingData ? (
+        <div
+          style={{
+            background: 'var(--color-bg)',
+            borderRadius: 'var(--radius-card)',
+            border: '1px solid var(--color-border)',
+            padding: '1.5rem',
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--color-text)] mb-1 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+                Invoice Aging
+              </h3>
+              <p className="text-sm text-[var(--color-text-muted)]">Unable to load invoice aging data.</p>
+            </div>
+            <button
+              onClick={fetchAging}
+              className="flex items-center gap-1.5 text-xs font-medium transition-colors"
+              style={{
+                color: 'var(--color-brand)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '0.375rem 0.5rem',
+                minHeight: '2rem',
+              }}
+            >
+              <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
+              Retry
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            background: 'var(--color-bg)',
+            borderRadius: 'var(--radius-card)',
+            border: '1px solid var(--color-border)',
+            padding: '1.5rem',
+          }}
+        >
+          <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+            Invoice Aging
+          </h3>
+
+          {/* Aging summary bars */}
+          <div className="space-y-2">
+            {AGING_BUCKETS.map(bucket => {
+              const invoices = agingData.aging[bucket.key]
+              const count = invoices.length
+              const total = invoices.reduce((sum, inv) => sum + inv.totalUsd, 0)
+              const isExpanded = expandedBucket === bucket.key
+
+              return (
+                <div key={bucket.key}>
+                  <button
+                    onClick={() => setExpandedBucket(isExpanded ? null : bucket.key)}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.625rem 0.75rem',
+                      background: bucket.bgColor,
+                      borderRadius: isExpanded ? '0.5rem 0.5rem 0 0' : '0.5rem',
+                      border: 'none',
+                      cursor: count > 0 ? 'pointer' : 'default',
+                      minHeight: '2.75rem',
+                      transition: 'background 0.15s',
+                    }}
+                    disabled={count === 0}
+                    type="button"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        style={{
+                          width: '0.625rem',
+                          height: '0.625rem',
+                          borderRadius: '50%',
+                          background: bucket.color,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
+                        {bucket.label}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                        {count} invoice{count !== 1 ? 's' : ''}
+                      </span>
+                      <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
+                        {fmtCur(total)}
+                      </span>
+                      {count > 0 && (
+                        isExpanded
+                          ? <ChevronUp style={{ width: '1rem', height: '1rem', color: 'var(--color-text-subtle)' }} />
+                          : <ChevronDown style={{ width: '1rem', height: '1rem', color: 'var(--color-text-subtle)' }} />
+                      )}
+                    </div>
+                  </button>
+
+                  {/* Expanded invoice list */}
+                  {isExpanded && count > 0 && (
+                    <div
+                      style={{
+                        background: 'var(--color-bg-secondary)',
+                        borderRadius: '0 0 0.5rem 0.5rem',
+                        borderTop: `2px solid ${bucket.color}`,
+                        padding: '0.5rem 0',
+                      }}
+                    >
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr>
+                            {['Client', 'Amount', 'Due Date', 'Days Past Due'].map(h => (
+                              <th
+                                key={h}
+                                className={`text-xs font-medium text-[var(--color-text-muted)] ${h === 'Client' ? 'text-left' : 'text-right'}`}
+                                style={{ padding: '0.375rem 0.75rem' }}
+                              >
+                                {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {invoices.map(inv => (
+                            <tr key={inv.id}>
+                              <td
+                                className="text-sm font-medium text-[var(--color-text)]"
+                                style={{ padding: '0.375rem 0.75rem' }}
+                              >
+                                {inv.orgName}
+                              </td>
+                              <td
+                                className="text-sm text-[var(--color-text)] text-right"
+                                style={{ padding: '0.375rem 0.75rem' }}
+                              >
+                                {fmtCur(inv.totalUsd)}
+                              </td>
+                              <td
+                                className="text-sm text-[var(--color-text-muted)] text-right"
+                                style={{ padding: '0.375rem 0.75rem' }}
+                              >
+                                {inv.dueDate
+                                  ? new Date(inv.dueDate).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
+                                  : 'No due date'}
+                              </td>
+                              <td
+                                className="text-sm text-right font-medium"
+                                style={{
+                                  padding: '0.375rem 0.75rem',
+                                  color: inv.daysPastDue > 90 ? '#f87171'
+                                    : inv.daysPastDue > 60 ? '#fb923c'
+                                    : inv.daysPastDue > 30 ? '#fbbf24'
+                                    : 'var(--color-text-muted)',
+                                }}
+                              >
+                                {inv.daysPastDue > 0 ? `${inv.daysPastDue}d` : 'Current'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Total aging bar visualization */}
+          {(() => {
+            const totals = AGING_BUCKETS.map(b => ({
+              ...b,
+              total: agingData.aging[b.key].reduce((sum, inv) => sum + inv.totalUsd, 0),
+            }))
+            const grandTotal = totals.reduce((sum, t) => sum + t.total, 0)
+            if (grandTotal === 0) return null
+
+            return (
+              <div style={{ marginTop: '1rem' }}>
+                <div className="flex items-center gap-1" style={{ height: '0.5rem', borderRadius: '0.25rem', overflow: 'hidden' }}>
+                  {totals.map(t => {
+                    const pct = (t.total / grandTotal) * 100
+                    if (pct === 0) return null
+                    return (
+                      <div
+                        key={t.key}
+                        style={{
+                          width: `${pct}%`,
+                          height: '100%',
+                          background: t.color,
+                          minWidth: pct > 0 ? '0.25rem' : 0,
+                        }}
+                      />
+                    )
+                  })}
+                </div>
+                <div className="flex items-center justify-between mt-2">
+                  {totals.filter(t => t.total > 0).map(t => (
+                    <div key={t.key} className="flex items-center gap-1.5">
+                      <div
+                        style={{
+                          width: '0.5rem',
+                          height: '0.5rem',
+                          borderRadius: '50%',
+                          background: t.color,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
+                        {t.label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FinancialOutstandingCard({ value, isPositive }: { value: string; isPositive: boolean }) {
+  return (
+    <div
+      style={{
+        background: 'var(--color-bg)',
+        borderRadius: 'var(--radius-card)',
+        border: isPositive ? '1px solid #fecaca' : '1px solid var(--color-border)',
+        padding: '1.5rem',
+      }}
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className="flex items-center justify-center flex-shrink-0"
+          style={{
+            width: '2.75rem',
+            height: '2.75rem',
+            borderRadius: 'var(--radius-leaf-sm)',
+            background: isPositive ? '#fef2f2' : '#ede9fe',
+            color: isPositive ? '#dc2626' : '#7c3aed',
+          }}
+        >
+          <AlertTriangle className="w-5 h-5" aria-hidden="true" />
+        </div>
+        <div>
+          <p className="text-xs font-medium text-[var(--color-text-muted)]">Total Outstanding</p>
+          <p
+            className="text-xl font-bold"
+            style={{ color: isPositive ? '#dc2626' : 'var(--color-text)' }}
+          >
+            {value}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Currency conversion helper ────────────────────────────────────────────
 
 interface CurrencyProps {
@@ -711,14 +1216,6 @@ interface SalesData {
   lostCount: number
 }
 
-function formatNzd(amount: number): string {
-  return new Intl.NumberFormat('en-NZ', {
-    style: 'currency',
-    currency: 'NZD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
 
 function SalesPipelineSection({ displayCurrency, exchangeRates }: CurrencyProps) {
   const [data, setData] = useState<SalesData | null>(null)
@@ -1920,41 +2417,55 @@ function RevenueForecastSection({ displayCurrency, exchangeRates }: CurrencyProp
     let cancelled = false
     const loadForecast = async () => {
       try {
-        const res = await fetch(apiPath('/api/admin/capacity/forecast'))
-        if (!res.ok) throw new Error('Failed')
-        const d = await res.json() as ForecastData
-        if (!cancelled) setForecastData(d)
-      } catch {
-        // Fallback: build forecast from sales data
-        try {
-          const salesRes = await fetch(apiPath('/api/admin/reports/sales'))
-          if (!salesRes.ok) throw new Error('Failed')
-          const salesJson = await salesRes.json() as { weightedPipelineValue?: number }
-          const weighted = salesJson.weightedPipelineValue ?? 0
-          if (weighted > 0 && !cancelled) {
-            const monthlyWeighted = weighted / 6
-            const months: ForecastMonth[] = []
-            const now = new Date()
-            for (let i = 0; i < 6; i++) {
-              const d = new Date(now.getFullYear(), now.getMonth() + i + 1, 1)
-              const label = d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' })
-              months.push({
-                month: label,
-                revenue: Math.round(monthlyWeighted),
-                bestCase: Math.round(monthlyWeighted * 1.5),
-                worstCase: Math.round(monthlyWeighted * 0.5),
-              })
-            }
-            setForecastData({
-              months,
-              totalWeightedValue: weighted,
-              totalBestCase: Math.round(weighted * 1.5),
-              totalWorstCase: Math.round(weighted * 0.5),
+        // Fetch both sales data and financial health for comprehensive forecast
+        const [salesRes, healthRes] = await Promise.all([
+          fetch(apiPath('/api/admin/reports/sales')),
+          fetch(apiPath('/api/admin/billing/financial-health')),
+        ])
+
+        if (!salesRes.ok) throw new Error('Failed')
+        const salesJson = await salesRes.json() as { weightedPipelineValue?: number }
+        const healthJson = healthRes.ok
+          ? (await healthRes.json() as { mrr?: number; pipeline?: { monthlyProjections?: Record<string, number> } })
+          : null
+
+        const weighted = salesJson.weightedPipelineValue ?? 0
+        const mrr = healthJson?.mrr ?? 0
+
+        if ((weighted > 0 || mrr > 0) && !cancelled) {
+          const months: ForecastMonth[] = []
+          const now = new Date()
+
+          // Use monthly projections from financial health if available
+          const projections = healthJson?.pipeline?.monthlyProjections ?? {}
+
+          for (let i = 0; i < 6; i++) {
+            const d = new Date(now.getFullYear(), now.getMonth() + i + 1, 1)
+            const label = d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' })
+            const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+
+            // MRR is recurring base, pipeline projections are additive
+            const pipelineForMonth = projections[monthKey] ?? Math.round(weighted / 6)
+            const baseRevenue = mrr + pipelineForMonth
+
+            months.push({
+              month: label,
+              revenue: Math.round(baseRevenue),
+              bestCase: Math.round(baseRevenue * 1.3),
+              worstCase: Math.round(baseRevenue * 0.6),
             })
           }
-        } catch {
-          // silent
+
+          const totalWeighted = months.reduce((s, m) => s + m.revenue, 0)
+          setForecastData({
+            months,
+            totalWeightedValue: totalWeighted,
+            totalBestCase: Math.round(totalWeighted * 1.3),
+            totalWorstCase: Math.round(totalWeighted * 0.6),
+          })
         }
+      } catch {
+        // silent
       } finally {
         if (!cancelled) setForecastLoading(false)
       }
@@ -2056,7 +2567,7 @@ function RevenueForecastSection({ displayCurrency, exchangeRates }: CurrencyProp
               tickFormatter={(v: number) => `$${Math.round(v / 1000)}k`}
             />
             <Tooltip
-              formatter={(value: number) => [formatNzd(value), '']}
+              formatter={(value: number) => [fmtCur(value), '']}
               contentStyle={{
                 fontSize: '0.75rem',
                 borderRadius: '0.5rem',

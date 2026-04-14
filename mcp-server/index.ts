@@ -701,6 +701,11 @@ server.tool(
     industry: z.string().optional().describe('Updated industry'),
     website: z.string().optional().describe('Updated website URL'),
     internalNotes: z.string().optional().describe('Internal notes about the client'),
+    customMrr: z.number().optional().describe('Custom monthly recurring revenue amount for this client'),
+    healthStatus: z.string().optional().describe('Client health: green, amber, red'),
+    healthNote: z.string().optional().describe('Note explaining health status'),
+    defaultHourlyRate: z.number().optional().describe('Default hourly rate for this client'),
+    preferredCurrency: z.string().optional().describe('Preferred currency: NZD, USD, GBP, EUR, AUD'),
   },
   async (args) => {
     const { clientId, ...body } = args
@@ -886,6 +891,7 @@ server.tool(
     status: z.string().optional().describe('Updated status: draft, sent, overdue, paid, cancelled'),
     amount: z.number().optional().describe('Updated amount'),
     dueDate: z.string().optional().describe('Updated due date in YYYY-MM-DD format'),
+    orgId: z.string().optional().describe('Reassign invoice to a different client organisation ID'),
   },
   async (args) => {
     const { invoiceId, ...body } = args

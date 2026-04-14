@@ -6,6 +6,7 @@ import {
   ArrowLeft, Building2, Calendar, Clock,
   Phone, Mail, FileText, MessageSquare,
   Plus, Loader2, Check, ChevronDown, Inbox, X, Search, UserPlus, Send, BellOff,
+  UserCheck, ExternalLink,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { REQUEST_STATUS_CONFIG } from '@/lib/status-config'
@@ -405,6 +406,16 @@ export function DealDetail({ dealId }: { dealId: string }) {
               onUpdated={fetchDeal}
             />
           </SidebarCard>
+
+          {/* Convert to Client (shown when Closed Won) */}
+          {!!deal.stageIsClosedWon && (
+            <ConvertToClientCard
+              dealId={dealId}
+              orgId={deal.orgId}
+              orgName={deal.orgName}
+              onConverted={fetchDeal}
+            />
+          )}
 
           {/* Value */}
           <SidebarCard title="Value">
@@ -2133,6 +2144,134 @@ function AssociatedRequests({ orgId }: { orgId: string }) {
           })}
         </div>
       )}
+    </div>
+  )
+}
+
+// ---- Convert to Client Card ------------------------------------------------
+
+function ConvertToClientCard({ dealId, orgId, orgName, onConverted }: {
+  dealId: string
+  orgId: string | null
+  orgName: string | null
+  onConverted: () => void
+}) {
+  const [converting, setConverting] = useState(false)
+  const [result, setResult] = useState<{ orgId: string; orgName: string; created: boolean } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // If the deal is already linked to an org, show the link
+  const linkedOrgId = result?.orgId ?? orgId
+  const linkedOrgName = result?.orgName ?? orgName
+
+  if (linkedOrgId && linkedOrgName) {
+    return (
+      <div
+        className="rounded-xl border shadow-sm"
+        style={{
+          padding: '1rem 1.25rem',
+          background: 'var(--color-brand-50, #f0f7ee)',
+          borderColor: 'var(--color-brand-light, #7aab6b)',
+        }}
+      >
+        <div className="flex items-center gap-2" style={{ marginBottom: '0.5rem' }}>
+          <UserCheck style={{ width: '1rem', height: '1rem', color: 'var(--color-brand, #5A824E)' }} />
+          <p className="font-semibold uppercase tracking-wide" style={{ fontSize: '0.625rem', color: 'var(--color-brand, #5A824E)' }}>
+            Client
+          </p>
+        </div>
+        <Link
+          href={`/clients/${linkedOrgId}`}
+          className="inline-flex items-center gap-1.5 font-medium transition-colors"
+          style={{
+            fontSize: '0.875rem',
+            color: 'var(--color-brand, #5A824E)',
+            textDecoration: 'none',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark, #425F39)' }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-brand, #5A824E)' }}
+        >
+          {linkedOrgName}
+          <ExternalLink style={{ width: '0.75rem', height: '0.75rem' }} />
+        </Link>
+        {result?.created && (
+          <p style={{ fontSize: '0.6875rem', color: 'var(--color-brand, #5A824E)', marginTop: '0.375rem' }}>
+            New client created from this deal
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  const handleConvert = async () => {
+    setConverting(true)
+    setError(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/deals/${dealId}/convert-to-client`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: 'Failed to convert' }))
+        setError((data as { error?: string }).error ?? 'Failed to convert deal to client')
+        return
+      }
+      const data = await res.json() as { success: boolean; orgId: string; orgName: string; created: boolean }
+      setResult(data)
+      onConverted()
+    } catch {
+      setError('Failed to convert deal to client')
+    } finally {
+      setConverting(false)
+    }
+  }
+
+  return (
+    <div
+      className="rounded-xl border shadow-sm"
+      style={{
+        padding: '1rem 1.25rem',
+        background: 'var(--color-brand-50, #f0f7ee)',
+        borderColor: 'var(--color-brand-light, #7aab6b)',
+      }}
+    >
+      <div className="flex items-center gap-2" style={{ marginBottom: '0.5rem' }}>
+        <UserCheck style={{ width: '1rem', height: '1rem', color: 'var(--color-brand, #5A824E)' }} />
+        <p className="font-semibold uppercase tracking-wide" style={{ fontSize: '0.625rem', color: 'var(--color-brand, #5A824E)' }}>
+          Won - Convert to Client
+        </p>
+      </div>
+      <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.75rem' }}>
+        This deal is closed-won. Create a client record to start managing their work.
+      </p>
+      {error && (
+        <p style={{ fontSize: '0.75rem', color: 'var(--color-danger, #f87171)', marginBottom: '0.5rem' }}>
+          {error}
+        </p>
+      )}
+      <button
+        onClick={handleConvert}
+        disabled={converting}
+        className="inline-flex items-center gap-1.5 font-medium transition-colors rounded-lg w-full justify-center"
+        style={{
+          padding: '0.5rem 1rem',
+          fontSize: '0.8125rem',
+          background: 'var(--color-brand, #5A824E)',
+          color: 'white',
+          border: 'none',
+          cursor: converting ? 'not-allowed' : 'pointer',
+          opacity: converting ? 0.7 : 1,
+          minHeight: '2.5rem',
+        }}
+        onMouseEnter={e => { if (!converting) e.currentTarget.style.background = 'var(--color-brand-dark, #425F39)' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-brand, #5A824E)' }}
+      >
+        {converting ? (
+          <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Converting...</>
+        ) : (
+          <><UserCheck className="w-3.5 h-3.5" /> Convert to Client</>
+        )}
+      </button>
     </div>
   )
 }

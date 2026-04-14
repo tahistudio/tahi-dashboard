@@ -100,6 +100,8 @@ interface Organisation {
   healthNote: string | null
   internalNotes: string | null
   brands: string | null
+  preferredCurrency: string | null
+  customMrr: number | null
   createdAt: string
   updatedAt: string
 }
@@ -506,6 +508,88 @@ function BrandsCard({ org, onUpdated }: { org: Organisation; onUpdated: () => vo
   )
 }
 
+// ── MRR inline edit ───────────────────────────────────────────────────────────
+
+function MrrInlineEdit({
+  orgId,
+  value,
+  currency,
+  onUpdated,
+}: {
+  orgId: string
+  value: number | null
+  currency: string
+  onUpdated: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value?.toString() ?? '')
+  const [saving, setSaving] = useState(false)
+
+  const formatted = value != null
+    ? new Intl.NumberFormat('en-NZ', { style: 'currency', currency }).format(value)
+    : null
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      const parsed = draft.trim() === '' ? null : parseFloat(draft)
+      if (parsed !== null && isNaN(parsed)) return
+      await fetch(apiPath(`/api/admin/clients/${orgId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customMrr: parsed }),
+      })
+      onUpdated()
+      setEditing(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+          autoFocus
+          className="w-28 px-2 py-1 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
+          placeholder="0.00"
+        />
+        <button
+          onClick={save}
+          disabled={saving}
+          className="p-1 text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] disabled:opacity-50"
+          aria-label="Save MRR"
+        >
+          <Check className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={() => { setEditing(false); setDraft(value?.toString() ?? '') }}
+          className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          aria-label="Cancel"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <button
+      onClick={() => { setDraft(value?.toString() ?? ''); setEditing(true) }}
+      className="flex items-center gap-1.5 text-sm text-[var(--color-text)] hover:text-[var(--color-brand)] transition-colors group"
+    >
+      <span>{formatted ?? '--'}</span>
+      <Pencil className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity text-[var(--color-text-muted)]" />
+    </button>
+  )
+}
+
 // ── Org details card (editable) ────────────────────────────────────────────────
 
 interface TeamMemberPm {
@@ -722,7 +806,13 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
               {new Date(org.updatedAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
             </dd>
           </div>
-          <div className="col-span-2">
+          <div>
+            <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Monthly Retainer (MRR)</dt>
+            <dd>
+              <MrrInlineEdit orgId={org.id} value={org.customMrr} currency={org.preferredCurrency ?? 'NZD'} onUpdated={onUpdated} />
+            </dd>
+          </div>
+          <div>
             <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Project Manager</dt>
             <dd>
               <select

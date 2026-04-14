@@ -144,6 +144,11 @@ const TOOLS: ToolDef[] = [
     industry: prop('string', 'Updated industry'),
     website: prop('string', 'Updated website URL'),
     internalNotes: prop('string', 'Internal notes about the client'),
+    customMrr: prop('number', 'Custom monthly recurring revenue amount for this client'),
+    healthStatus: prop('string', 'Client health: green, amber, red'),
+    healthNote: prop('string', 'Note explaining health status'),
+    defaultHourlyRate: prop('number', 'Default hourly rate for this client'),
+    preferredCurrency: prop('string', 'Preferred currency: NZD, USD, GBP, EUR, AUD'),
   }, ['clientId']),
   tool('create_client_contact', 'Create a new contact at a client organisation', {
     clientId: prop('string', 'Client organisation ID'),
@@ -278,6 +283,7 @@ const TOOLS: ToolDef[] = [
     status: prop('string', 'Updated status: draft, sent, overdue, paid, cancelled'),
     amount: prop('number', 'Updated amount'),
     dueDate: prop('string', 'Updated due date in YYYY-MM-DD format'),
+    orgId: prop('string', 'Reassign invoice to a different client organisation ID'),
   }, ['invoiceId']),
   tool('send_invoice_email', 'Send an invoice email to the client', {
     invoiceId: prop('string', 'Invoice ID'),

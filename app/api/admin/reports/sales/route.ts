@@ -46,8 +46,11 @@ export async function GET(req: NextRequest) {
     const stageProbability = stage.probability ?? 0
     totalDealCount += stage.dealCount
 
-    totalPipelineValue += stageValue
-    weightedPipelineValue += stageValue * (stageProbability / 100)
+    // Only include open deals in pipeline totals
+    if (!stage.isClosedWon && !stage.isClosedLost) {
+      totalPipelineValue += stageValue
+      weightedPipelineValue += stageValue * (stageProbability / 100)
+    }
 
     if (stage.isClosedWon) {
       wonCount += stage.dealCount
@@ -59,8 +62,9 @@ export async function GET(req: NextRequest) {
 
   const closedTotal = wonCount + lostCount
   const winRate = closedTotal > 0 ? Math.round((wonCount / closedTotal) * 10000) / 100 : 0
-  const avgDealSize = totalDealCount > 0
-    ? Math.round(totalPipelineValue / totalDealCount)
+  const openDealCount = totalDealCount - wonCount - lostCount
+  const avgDealSize = openDealCount > 0
+    ? Math.round(totalPipelineValue / openDealCount)
     : 0
 
   // Avg days to close for won deals

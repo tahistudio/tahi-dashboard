@@ -723,3 +723,33 @@ Escalated to Liam: No. Direct confirmation from Liam.
 **Why:** Accurate source attribution matters for ROI tracking. StraightIn is a paid agency vs organic LinkedIn. Webflow Partner is a specific referral channel. Call and meeting were redundant as activity types.
 
 ---
+
+## #036 - MCP Parity Rule: Any API Capability Must Be Exposed via MCP
+
+**Decision:** Whenever a feature requires direct API access that the MCP tools do not yet support, the MCP tool definition must be updated to include that capability. Both MCP servers (local `mcp-server/index.ts` and Cloudflare Worker `workers/mcp-server/src/index.ts`) must be kept in sync.
+
+**Rationale:** The MCP server is the primary interface for AI-assisted operations on the dashboard. If an operation is only possible via raw API calls, it means the MCP tooling has a gap. Closing these gaps proactively future-proofs the system and makes the dashboard fully operable through Claude and other AI assistants.
+
+**How to apply:**
+- Before making any direct API call for data mutations, check if the relevant MCP tool supports the required parameters
+- If not, add the missing parameter to both `mcp-server/index.ts` (Zod schema) and `workers/mcp-server/src/index.ts` (prop definition)
+- The handler pattern `const { primaryId, ...body } = args` means new optional fields just need to be added to the tool schema; the handler passes them through automatically
+- Example: `update_invoice` was missing `orgId` for invoice reassignment. Added to both MCP servers.
+
+**Why:** AI-first operations. If we can do it in the dashboard, we should be able to do it through MCP.
+
+---
+
+## #037 - Custom MRR Per Client
+
+**Decision:** Add a `customMrr` (real) field to the `organisations` table. MRR is calculated by summing `customMrr` across all active clients, not by inferring from plan types.
+
+**Rationale:** Clients are on custom retainer amounts that don't map cleanly to plan tier prices. Physitrack pays GBP 3,125/mo, Stride pays USD 1,200/mo, etc. Hardcoded plan prices ($1,500 maintain, $4,000 scale) were inaccurate. The custom field gives exact control.
+
+**How to apply:**
+- Set `customMrr` on each active retainer client via the client detail page or MCP `update_client`
+- Financial health API sums `customMrr` from active orgs
+- Overview MRR KPI reads from the same source
+- Currency conversion applies based on org's `preferredCurrency`
+
+---

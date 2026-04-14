@@ -103,6 +103,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     defaultHourlyRate: number | null
     size: string | null
     annualRevenue: number | null
+    customMrr: number | null
   }>
 
   const now = new Date().toISOString()
@@ -110,7 +111,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const allowed = [
     'name', 'website', 'industry', 'planType', 'status',
     'healthStatus', 'healthNote', 'internalNotes', 'brands',
-    'customFields', 'defaultHourlyRate', 'size', 'annualRevenue',
+    'customFields', 'defaultHourlyRate', 'size', 'annualRevenue', 'customMrr',
   ] as const
   for (const key of allowed) {
     if (key in body) patch[key] = body[key] ?? null

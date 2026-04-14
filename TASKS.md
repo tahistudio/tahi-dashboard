@@ -894,3 +894,10 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [ ] T569 - [BE] Webhook handlers: implement Xero payment notification webhooks for real-time sync — [BE]
 - [ ] T570 - [BE] Zapier outgoing webhooks: enable external automation triggers for rule-based actions — [BE]
 - [ ] T571 - [FE] Deal-to-Client LTV: link deals to client orgs, show LTV (total invoices + deal value) on deal detail page — [FE/BE]
+- [x] T572 - [FE] Financial Health section on Reports page: MRR, invoiced/paid/outstanding KPIs, invoice aging with expandable buckets, pipeline forecast chart — [FE] 2026-04-14
+- [ ] T573 - [UIUX] Review Financial Health section spacing and visual consistency on Reports page — [UIUX]
+- [ ] T574 - [QA] Regression test Financial Health section: verify data loads, aging buckets expand, currency conversion works — [QA]
+- [x] T575 - [FE] Fix Revenue Forecast section: skip non-existent capacity/forecast endpoint, build forecast from sales + financial-health data (MRR + pipeline projections), fix tooltip to use currency-converted fmtCur, remove unused formatNzd — [FE] 2026-04-14
+- [x] T576 - [FE] Client detail: add inline-editable Monthly Retainer (MRR) field to OrgDetailsCard, saves via PATCH customMrr, formats with org preferredCurrency — [FE] 2026-04-14
+- [ ] T577 - [UIUX] Review MRR inline edit field spacing and interaction on client detail page — [UIUX]
+- [ ] T578 - [QA] Regression test: Revenue Forecast chart loads with data, MRR field edits and saves on client detail — [QA]
