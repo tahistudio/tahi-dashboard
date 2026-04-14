@@ -495,6 +495,11 @@ const TOOLS: ToolDef[] = [
     dryRun: prop('boolean', 'Preview only without creating invoices'),
   }),
   tool('match_xero_contacts', 'List Xero contacts with suggested dashboard client matches'),
+  tool('import_stripe_invoices', 'Import all invoices from Stripe into dashboard'),
+  tool('create_stripe_invoice', 'Create a Stripe invoice from a local invoice and get payment link', {
+    invoiceId: prop('string', 'Local invoice ID to create Stripe invoice from'),
+  }, ['invoiceId']),
+  tool('get_xero_branding_themes', 'Get available Xero branding themes'),
 
   // ── AI ────────────────────────────────────────────────────────────
   tool('ai_task_wizard', 'Use AI to break down work into tasks, estimate effort, and suggest assignments', {
@@ -776,6 +781,12 @@ async function executeTool(
       return json(await apiWrite('/api/admin/billing/xero-export', token, 'POST', args as Record<string, unknown>))
     case 'match_xero_contacts':
       return json(await apiGet('/api/admin/integrations/xero/match-contacts', token))
+    case 'import_stripe_invoices':
+      return json(await apiWrite('/api/admin/integrations/stripe/import-invoices', token, 'POST'))
+    case 'create_stripe_invoice':
+      return json(await apiWrite('/api/admin/invoices/stripe-create', token, 'POST', args as Record<string, unknown>))
+    case 'get_xero_branding_themes':
+      return json(await apiGet('/api/admin/integrations/xero/branding-themes', token))
 
     // ── AI ────────────────────────────────────────────────────────────
     case 'ai_task_wizard':
