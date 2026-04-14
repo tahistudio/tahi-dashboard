@@ -477,7 +477,6 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
   const [error, setError] = useState(false)
   const [activeTab, setActiveTab] = useState('all')
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [syncing, setSyncing] = useState('')
   const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
 
   // Client-side date filter
@@ -532,102 +531,7 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
           </p>
         </div>
         {isAdmin && (
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            <button
-              onClick={async () => {
-                setSyncing('xero')
-                try {
-                  let page = 1
-                  let totalImported = 0
-                  let totalSkipped = 0
-                  let hasMore = true
-                  while (hasMore) {
-                    const res = await fetch(apiPath(`/api/admin/integrations/xero/import-invoices?page=${page}`), { method: 'POST' })
-                    if (!res.ok) { alert('Xero import failed. Check connection in Settings.'); break }
-                    const d = await res.json() as { imported: number; skipped: number; hasMore: boolean }
-                    totalImported += d.imported
-                    totalSkipped += d.skipped
-                    hasMore = d.hasMore
-                    page++
-                  }
-                  alert(`Imported ${totalImported} invoices from Xero (${totalSkipped} already existed)`)
-                  fetchInvoices(activeTab)
-                } catch { alert('Xero import failed') }
-                finally { setSyncing('') }
-              }}
-              disabled={!!syncing}
-              className="flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
-              style={{
-                padding: '0.5rem 0.875rem',
-                background: '#13b5ea10',
-                border: '1px solid #13b5ea30',
-                borderRadius: '0.5rem',
-                cursor: syncing ? 'default' : 'pointer',
-                color: '#13b5ea',
-                minHeight: 44,
-                opacity: syncing === 'xero' ? 0.6 : 1,
-              }}
-            >
-              {syncing === 'xero' ? 'Importing...' : 'Sync Xero'}
-            </button>
-            <button
-              onClick={async () => {
-                setSyncing('payments')
-                try {
-                  const res = await fetch(apiPath('/api/admin/integrations/xero/sync-payments'), { method: 'POST' })
-                  if (res.ok) {
-                    const d = await res.json() as { updated: number }
-                    if (d.updated > 0) alert(`Updated ${d.updated} invoice payment statuses`)
-                    fetchInvoices(activeTab)
-                  }
-                } catch { /* silent */ }
-                finally { setSyncing('') }
-              }}
-              disabled={!!syncing}
-              className="flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
-              style={{
-                padding: '0.5rem 0.875rem',
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
-                borderRadius: '0.5rem',
-                cursor: syncing ? 'default' : 'pointer',
-                color: 'var(--color-text-muted)',
-                minHeight: 44,
-                opacity: syncing === 'payments' ? 0.6 : 1,
-              }}
-            >
-              {syncing === 'payments' ? 'Syncing...' : 'Sync Payments'}
-            </button>
-            <button
-              onClick={async () => {
-                setSyncing('stripe')
-                try {
-                  const res = await fetch(apiPath('/api/admin/integrations/stripe/import-invoices'), { method: 'POST' })
-                  if (res.ok) {
-                    const d = await res.json() as { imported: number; skipped: number }
-                    alert(`Imported ${d.imported} invoices from Stripe (${d.skipped} already existed)`)
-                    fetchInvoices(activeTab)
-                  } else {
-                    alert('Stripe import failed. Check Stripe configuration.')
-                  }
-                } catch { alert('Stripe import failed') }
-                finally { setSyncing('') }
-              }}
-              disabled={!!syncing}
-              className="flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
-              style={{
-                padding: '0.5rem 0.875rem',
-                background: '#635bff10',
-                border: '1px solid #635bff30',
-                borderRadius: '0.5rem',
-                cursor: syncing ? 'default' : 'pointer',
-                color: '#635bff',
-                minHeight: 44,
-                opacity: syncing === 'stripe' ? 0.6 : 1,
-              }}
-            >
-              {syncing === 'stripe' ? 'Importing...' : 'Sync Stripe'}
-            </button>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <button
               onClick={() => {
                 const link = document.createElement('a')
