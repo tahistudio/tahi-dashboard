@@ -257,6 +257,40 @@ export function ClientDetail({ clientId }: { clientId: string }) {
                 <RefreshCw className="w-3.5 h-3.5 sm:mr-1.5" />
                 <span className="hidden sm:inline">Refresh</span>
               </TahiButton>
+              <TahiButton
+                variant="secondary"
+                size="sm"
+                onClick={async () => {
+                  const isArchiving = org.status !== 'archived'
+                  const verb = isArchiving ? 'Archive' : 'Unarchive'
+                  if (!confirm(`${verb} ${org.name}?\n\n${isArchiving ? 'They will be hidden from active client lists. All data will be preserved and can be restored.' : 'They will reappear in your active client lists.'}`)) return
+                  try {
+                    const res = await fetch(apiPath(`/api/admin/clients/${clientId}`), {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ status: isArchiving ? 'archived' : 'active' }),
+                    })
+                    if (!res.ok) throw new Error('Failed')
+                    await load()
+                  } catch {
+                    alert(`Failed to ${verb.toLowerCase()} client. Please try again.`)
+                  }
+                }}
+                aria-label={org.status === 'archived' ? 'Unarchive client' : 'Archive client'}
+                title={org.status === 'archived' ? 'Unarchive client' : 'Archive client'}
+              >
+                {org.status === 'archived' ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 sm:mr-1.5" />
+                    <span className="hidden sm:inline">Unarchive</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5 sm:mr-1.5" />
+                    <span className="hidden sm:inline">Archive</span>
+                  </>
+                )}
+              </TahiButton>
             </div>
           </div>
 

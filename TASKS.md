@@ -1,8 +1,8 @@
 # tahi-dashboard — Task List
 
-Last updated: 2026-04-14 (Session: Finance roadmap logged, Xero fix plan, Stripe invoicing, client archive, data cleanup tasks)
-Total tasks: 621 (S1-S11 schema + T1-T495 feature + T546-T557 integration + T558-T621 post-launch)
-Completed: 544/544 core features + 10/11 integration tasks + 4 phase-8 polish tasks done
+Last updated: 2026-04-15 (Session: Phase 9 Xero/Stripe fixes landed, client archive button, Evan Kwan consolidation, Stripe dedupe bug logged)
+Total tasks: 623 (S1-S11 schema + T1-T495 feature + T546-T557 integration + T558-T623 post-launch)
+Completed: 544/544 core features + 10/11 integration tasks + 4 phase-8 polish tasks + 9 phase-9 tasks done
 
 Agents: claim a task by adding your initials and the date next to it.
 Format: `— [AGENT] YYYY-MM-DD`
@@ -909,20 +909,20 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 > Per active plan: fix Xero invoice push, add Stripe invoice creation, multi-line items, client archive UI.
 
 ### Xero Invoice Push Fix
-- [ ] T579 - [BE] Fix Xero invoice push: add CurrencyCode from invoice currency, fetch branding themes from Xero API, use org xeroContactId for contact matching, allow re-sync (PUT update) for invoices already linked to Xero — [BE]
-- [ ] T580 - [BE] Xero branding themes API: create `GET /api/admin/integrations/xero/branding-themes` to fetch and cache branding themes from Xero, used for currency-specific invoice branding — [BE]
+- [x] T579 - [BE] Fix Xero invoice push: add CurrencyCode from invoice currency, fetch branding themes from Xero API, use org xeroContactId for contact matching, allow re-sync (PUT update) for invoices already linked to Xero — [BE] — done 2026-04-15 (added callXeroAPIOrThrow to surface Xero validation errors instead of silent null; wrapped update payload in { Invoices: [...] }; added dryRun flag for safe testing)
+- [x] T580 - [BE] Xero branding themes API: create `GET /api/admin/integrations/xero/branding-themes` to fetch and cache branding themes from Xero, used for currency-specific invoice branding — [BE] — verified done
 - [ ] T581 - [QA] Test Xero push: create GBP invoice, sync to Xero, verify branding theme and currency code appear correctly — [QA]
 
 ### Stripe Invoice Creation
-- [ ] T582 - [BE] Stripe invoice creation endpoint: `POST /api/admin/invoices/stripe-create` — creates Stripe customer if needed, creates invoice + line items via Stripe API, finalizes, returns hosted_invoice_url. Stores stripeInvoiceId on local invoice. — [BE]
-- [ ] T583 - [BE] Stripe invoice import endpoint: `POST /api/admin/integrations/stripe/import-invoices` — fetches all Stripe invoices, auto-matches by stripeCustomerId, creates local invoices with source='stripe', maps Stripe statuses — [BE]
-- [ ] T584 - [FE] Invoice creation dialog: multi-line items with Add/Remove Line Item buttons, destination toggle (Dashboard Only | Create in Xero | Create Stripe Link), currency selector — [FE]
-- [ ] T585 - [FE] Invoice detail: "Create Stripe Link" button for manual invoices, "Sync to Xero" updates existing linked Xero invoice, show payment link URL, editable line items — [FE]
+- [x] T582 - [BE] Stripe invoice creation endpoint: `POST /api/admin/invoices/stripe-create` — creates Stripe customer if needed, creates invoice + line items via Stripe API, finalizes, returns hosted_invoice_url. Stores stripeInvoiceId on local invoice. — [BE] — verified done
+- [x] T583 - [BE] Stripe invoice import endpoint: `POST /api/admin/integrations/stripe/import-invoices` — fetches all Stripe invoices, auto-matches by stripeCustomerId, creates local invoices with source='stripe', maps Stripe statuses — [BE] — verified done
+- [x] T584 - [FE] Invoice creation dialog: multi-line items with Add/Remove Line Item buttons, destination toggle (Dashboard Only | Create in Xero | Create Stripe Link), currency selector — [FE] — verified done
+- [x] T585 - [FE] Invoice detail: "Create Stripe Link" button for manual invoices, "Sync to Xero" updates existing linked Xero invoice, show payment link URL, editable line items — [FE] — verified done
 - [ ] T586 - [UIUX] Review multi-line invoice creation dialog and invoice detail enhancements — [UIUX]
 - [ ] T587 - [QA] Test: create invoice with 3 line items in USD with Stripe destination, verify payment link works — [QA]
 
 ### Client Archive/Churn UI
-- [ ] T588 - [FE] Client list: add status filter tabs (Active | Archived | All), "Archive" button on client detail page, archived clients hidden from main views but data preserved — [FE]
+- [x] T588 - [FE] Client list: add status filter tabs (Active | Archived | All), "Archive" button on client detail page, archived clients hidden from main views but data preserved — [FE] — done 2026-04-15 (tabs already existed; added one-click Archive/Unarchive button in client detail header with confirm dialog)
 - [ ] T589 - [UIUX] Review client archive UI: tab styling, archive confirmation dialog, visual treatment of archived clients — [UIUX]
 
 ---
@@ -984,6 +984,11 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 
 ## Pending Data Cleanup (2026-04-14)
 
-- [ ] T619 - [PM] Reassign 3 Fluvial invoices: move from org INV-2026000027 (f8b5f588) to Fluvial (4668ffd6) via MCP update_invoice with orgId — [PM]
-- [ ] T620 - [PM] Evan Kwan duplicate orgs: consolidate invoices across 4 org IDs (c79a6dcf, c4ed4811, 2859abca, fbab8478) into single active org — [PM]
-- [ ] T621 - [BE] Apply migration 0011 (add_custom_mrr) to production D1 — must be done manually via wrangler d1 execute — [BE]
+- [x] T619 - [PM] Reassign 3 Fluvial invoices: move from org INV-2026000027 (f8b5f588) to Fluvial (4668ffd6) via MCP update_invoice with orgId — [PM] — done 2026-04-14
+- [x] T620 - [PM] Evan Kwan duplicate orgs: consolidate invoices across 4 org IDs (c79a6dcf, c4ed4811, 2859abca, fbab8478) into single active org — [PM] — done 2026-04-15 (reassigned 3 invoices to canonical c79a6dcf; note 6 invoices total likely contains charge/invoice duplicates from Stripe import — see T622)
+- [x] T621 - [BE] Apply migration 0011 (add_custom_mrr) to production D1 — must be done manually via wrangler d1 execute — [BE] — done 2026-04-14
+
+### Newly discovered bugs (2026-04-15)
+
+- [ ] T622 - [BE] Stripe import dedupes charge vs invoice: Evan Kwan Sep/Oct/Nov shows 6 rows — 3 `ch_*` (charges) and 3 `in_1*` (invoices) for the same subscription payments. The /v1/invoices endpoint should not return charges, so either the import is paginating across endpoints or a separate import created the charges. Add dedupe logic: when both `in_*` and `ch_*` exist for same subscription period + amount + customer, keep the `in_*` (invoice) and mark the `ch_*` (charge) as superseded or delete. — [BE]
+- [ ] T623 - [BE] Stripe import pagination: `/v1/invoices?limit=100` caps at 100 — if any client ever has >100 historical Stripe invoices, older ones are missed. Use `starting_after` cursor to paginate fully. — [BE]
