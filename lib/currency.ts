@@ -21,13 +21,71 @@ export const SUPPORTED_CURRENCIES = [
 
 export type CurrencyCode = typeof SUPPORTED_CURRENCIES[number]['code']
 
-interface ExchangeRate {
+export interface ExchangeRate {
   currency: string
   rateToUsd: number
 }
 
+export type RateMap = Record<string, number>
+
 /**
- * Convert an amount from one currency to NZD.
+ * Build a pre-computed rate map keyed by currency code. Values are
+ * "how many of [currency] per 1 NZD", used as a divisor to convert
+ * TO NZD. NZD itself is 1.
+ *
+ * Note: rateToUsd in the DB is stored as "how many of [currency] per
+ * 1 USD". We re-base against NZD here so the downstream math is a
+ * single division per amount.
+ *
+ *   map[C] = rateToUsd[C] / rateToUsd[NZD]
+ *   amountInNzd = amountInC / map[C]
+ */
+export function buildRateMap(rates: ExchangeRate[]): RateMap {
+  const nzdRow = rates.find(r => r.currency === 'NZD')
+  if (!nzdRow) {
+    console.warn('[currency] No NZD rate in exchange_rates — conversions may be incorrect')
+  }
+  const nzdRateToUsd = nzdRow?.rateToUsd ?? 1
+  const map: RateMap = { NZD: 1 }
+  for (const r of rates) {
+    map[r.currency] = r.rateToUsd / nzdRateToUsd
+  }
+  return map
+}
+
+/**
+ * Pure-math conversion using a pre-built rate map. Prefer this in hot
+ * aggregation loops over convertToNzd (which searches the rates array
+ * each call).
+ */
+export function toNzd(amount: number, currency: string, rateMap: RateMap): number {
+  if (!Number.isFinite(amount)) return 0
+  if (currency === 'NZD') return amount
+  const rate = rateMap[currency]
+  if (!rate || rate === 0) return amount // unknown currency — fall back unconverted
+  return amount / rate
+}
+
+/**
+ * Sum a list of native-currency amounts, converting each to NZD first.
+ */
+export function sumAsNzd<T>(
+  rows: T[],
+  pick: (row: T) => { amount: number; currency: string },
+  rateMap: RateMap,
+): number {
+  let total = 0
+  for (const row of rows) {
+    const { amount, currency } = pick(row)
+    total += toNzd(amount, currency, rateMap)
+  }
+  return total
+}
+
+/**
+ * Convert an amount from one currency to NZD using the raw rates array.
+ * Convenience wrapper for one-off conversions. For aggregation loops,
+ * use buildRateMap + toNzd instead.
  */
 export function convertToNzd(
   amount: number,

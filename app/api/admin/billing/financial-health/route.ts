@@ -4,26 +4,15 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { sql, eq } from 'drizzle-orm'
 import { callXeroAPI } from '@/lib/xero'
+import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-// Build a currency-to-NZD conversion map from exchange_rates table
-async function getRateMap(database: D1): Promise<Record<string, number>> {
+// Build a currency-to-NZD conversion map from exchange_rates table.
+// See lib/currency.ts for the underlying math (tested in lib/__tests__/currency.test.ts).
+async function getRateMap(database: D1): Promise<RateMap> {
   const rates = await database.select().from(schema.exchangeRates)
-  const nzdRateToUsd = rates.find(r => r.currency === 'NZD')?.rateToUsd ?? 1
-  const map: Record<string, number> = { NZD: 1 }
-  for (const r of rates) {
-    // rateToNzd = how many of [currency] per 1 NZD
-    // To convert FROM [currency] TO NZD: divide by rateToNzd
-    map[r.currency] = r.rateToUsd / nzdRateToUsd
-  }
-  return map
-}
-
-function toNzd(amount: number, currency: string, rateMap: Record<string, number>): number {
-  const rate = rateMap[currency]
-  if (!rate || rate === 0) return amount // unknown currency, return as-is
-  return amount / rate
+  return buildRateMap(rates)
 }
 
 // GET /api/admin/billing/financial-health
