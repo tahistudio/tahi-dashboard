@@ -946,7 +946,7 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [ ] T594c - [BE] MCP parity for client costs: add list_client_costs, add_client_cost, update_client_cost, delete_client_cost, get_client_profitability tools to both mcp-server/index.ts and workers/mcp-server/src/index.ts per Decision #036. — [BE]
 
 ### Cash Flow Forecast
-- [ ] T598 - [BE] Cash flow forecast API: `GET /api/admin/reports/cash-flow-forecast` — projects 6 months forward: MRR (recurring revenue) + pipeline weighted deals (expected close dates) - recurring expenses (from Xero) = projected monthly cash position — [BE]
+- [x] T598 - [BE] Cash flow forecast API: `GET /api/admin/reports/cash-flow-forecast` — projects 6 months forward: MRR (recurring revenue) + pipeline weighted deals (expected close dates) - recurring expenses (from Xero) = projected monthly cash position — [BE] — done 2026-04-15. Uses customMrr + pipelineStages.probability × deal.valueNzd + client_costs (recurring and dated). Returns per-month net + cumulative. Xero expense sync (T590) will enhance the cost side later.
 - [ ] T599 - [FE] Cash flow forecast chart: stacked area chart showing projected income vs expenses vs net position over 6 months, with best/worst case bands — [FE]
 - [ ] T600 - [FE] Cash flow: runway indicator (months of runway at current burn rate based on bank balance from Xero) — [FE]
 
@@ -956,18 +956,18 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [ ] T603 - [UIUX] Review project calculator UI: match premium dashboard feel, responsive at mobile — [UIUX]
 
 ### Utilization Rate (Capacity Section)
-- [ ] T604 - [BE] Utilization rate API: `GET /api/admin/reports/utilization` — per team member: billable hours / available hours (configurable per member, default 40h/week). Returns weekly and monthly utilization %, trend, and team average. — [BE]
+- [x] T604 - [BE] Utilization rate API: `GET /api/admin/reports/utilization?weeks=4` — per team member: billable hours / (weeklyCapacityHours × weeks). Returns per-member utilization %, health (green/amber/red), and team average (excluding contractors). — [BE] — done 2026-04-15.
 - [ ] T605 - [FE] Capacity page: utilization rate section showing per-member utilization bars, team average, trend sparkline, target line (e.g. 80%). Colour code: green >= 70%, amber 50-70%, red < 50%. — [FE]
-- [ ] T606 - [BE] Team member: add `availableHoursPerWeek` field (default 40) for utilization calculation — [BE]
+- [x] T606 - [BE] Team member: add `availableHoursPerWeek` field (default 40) for utilization calculation — [BE] — already present as `weeklyCapacityHours` on team_members table (schema.ts:99).
+
+### Retainer Health Monitor
+- [x] T609 - [BE] Retainer health API: `GET /api/admin/reports/retainer-health` — per active retainer client: hours used vs included (from subscription plan), request velocity, response time, MRR value, months active, churn risk score — [BE] — done 2026-04-15. Returns sorted-by-churn list with openRequests, requestsLast30d/90d, billableHoursLast30d, utilizationPct vs PLAN_HOURS, churnRiskScore (0-100), upsellSignal.
+- [ ] T610 - [FE] Reports or Client list: Retainer Health Monitor section — table of retainer clients with health indicators: hours usage (bar), churn risk (traffic light), upsell opportunity flag, months since last request — [FE]
+- [ ] T611 - [BE] Retainer alerts: automation trigger when client hours usage drops below 30% for 2+ months (churn risk) or exceeds 120% for 2+ months (upsell opportunity). Creates notification for admin. — [BE]
 
 ### Revenue Per Head
 - [ ] T607 - [BE] Revenue per head API: `GET /api/admin/reports/revenue-per-head` — total revenue (paid invoices) / active team member count, by month. Includes trend and comparison to industry benchmarks. — [BE]
 - [ ] T608 - [FE] Reports: Revenue Per Head KPI card and trend chart, filterable by time period — [FE]
-
-### Retainer Health Monitor
-- [ ] T609 - [BE] Retainer health API: `GET /api/admin/reports/retainer-health` — per active retainer client: hours used vs included (from subscription plan), request velocity, response time, MRR value, months active, churn risk score — [BE]
-- [ ] T610 - [FE] Reports or Client list: Retainer Health Monitor section — table of retainer clients with health indicators: hours usage (bar), churn risk (traffic light), upsell opportunity flag, months since last request — [FE]
-- [ ] T611 - [BE] Retainer alerts: automation trigger when client hours usage drops below 30% for 2+ months (churn risk) or exceeds 120% for 2+ months (upsell opportunity). Creates notification for admin. — [BE]
 
 ### Quote/Proposal to Invoice Pipeline
 - [ ] T612 - [BE] Deal-to-invoice conversion: `POST /api/admin/deals/[id]/create-invoice` — when a deal is closed-won, auto-generate a draft invoice from deal value, line items from deal description, linked to the client org. Supports deposit invoices (% of total). — [BE]
