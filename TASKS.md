@@ -992,3 +992,12 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 
 - [ ] T622 - [BE] Stripe import dedupes charge vs invoice: Evan Kwan Sep/Oct/Nov shows 6 rows — 3 `ch_*` (charges) and 3 `in_1*` (invoices) for the same subscription payments. The /v1/invoices endpoint should not return charges, so either the import is paginating across endpoints or a separate import created the charges. Add dedupe logic: when both `in_*` and `ch_*` exist for same subscription period + amount + customer, keep the `in_*` (invoice) and mark the `ch_*` (charge) as superseded or delete. — [BE]
 - [ ] T623 - [BE] Stripe import pagination: `/v1/invoices?limit=100` caps at 100 — if any client ever has >100 historical Stripe invoices, older ones are missed. Use `starting_after` cursor to paginate fully. — [BE]
+
+### Hardening sprint (2026-04-15)
+
+- [x] T624 - [BE] Access scoping on detail API routes. Added `lib/require-access.ts` with `requireAccessToOrg` + `getOrgScope`. Applied to `/api/admin/invoices/[id]`, `/api/admin/invoices` list + POST, `/api/admin/requests/[id]`, `/api/admin/clients/[id]`, `/api/admin/tasks/[id]`. Admins bypass; restricted team members see only allowed orgs. — [BE] — done 2026-04-15
+- [x] T625 - [BE] R2 file access cross-org fix. `/api/uploads/serve` and `/api/uploads/proxy` now verify the caller's orgId matches the first segment of the storage key, or that a Tahi admin has team-member access to that org. Previously any authed user could read any file by passing a key. — [BE] — done 2026-04-15
+- [ ] T626 - [BE] Apply access scoping to remaining admin detail routes: `/api/admin/conversations/[id]`, `/api/admin/conversations/[id]/messages`, `/api/admin/time-entries/[id]`, `/api/admin/contracts/[id]`, `/api/admin/calls/[id]`, `/api/admin/deals/[id]`, per-org sub-resources under `/api/admin/clients/[id]/*`. Use the same `requireAccessToOrg` helper. — [BE]
+- [ ] T627 - [QA] Playwright cross-org isolation e2e: seed two client orgs, log in as client A, verify every attempt to fetch client B's requests/clients/invoices/files by ID returns 403. Covers portal and admin paths. — [QA]
+- [ ] T628 - [BE] Rate limit portal API routes: 60 req/min per userId on `/api/portal/*`, 20 req/min on `/api/uploads/*`. Use Cloudflare KV for counters. — [BE]
+- [ ] T629 - [QA] Currency invariant vitest: seed 3 orgs in NZD/GBP/USD with known customMrr + invoices, call `/api/admin/overview` and `/api/admin/billing/financial-health`, assert returned NZD totals match hand-computed within 1¢. — [QA]

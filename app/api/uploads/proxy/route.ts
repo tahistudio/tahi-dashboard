@@ -1,6 +1,8 @@
-import { getRequestAuth } from '@/lib/server-auth'
+import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCloudflareContext } from '@opennextjs/cloudflare'
+import { db } from '@/lib/db'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,16 +13,12 @@ export const dynamic = 'force-dynamic'
  * Used because R2 Workers bindings do not support presigned PUT URLs.
  *
  * The client sends a PUT request with the file body here.
- * This route validates auth, then writes to R2.
- *
- * Note: We consume the body as an ArrayBuffer rather than streaming
- * because the NextRequest body ReadableStream from OpenNext on Cloudflare
- * Workers is not directly compatible with R2's put() method. Buffering
- * as ArrayBuffer is the reliable approach on this runtime.
+ * Validates auth + that the caller's org matches the first segment of
+ * the storage key (prevents a client writing to another org's prefix).
  */
 export async function PUT(req: NextRequest) {
   try {
-    const { userId } = await getRequestAuth(req)
+    const { userId, orgId: authOrgId } = await getRequestAuth(req)
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
     }
@@ -30,6 +28,19 @@ export async function PUT(req: NextRequest) {
 
     if (!key) {
       return NextResponse.json({ error: 'Missing storage key' }, { status: 400 })
+    }
+
+    // The first segment of the key must match the caller's org.
+    const [keyOrgId] = key.split('/', 1)
+    if (!keyOrgId || keyOrgId === 'anon') {
+      return NextResponse.json({ error: 'Invalid storage key' }, { status: 400 })
+    }
+    if (isTahiAdmin(authOrgId)) {
+      const drizzle = (await db()) as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+      const denied = await requireAccessToOrg(drizzle, userId, keyOrgId)
+      if (denied) return denied
+    } else if (authOrgId !== keyOrgId) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const { env } = await getCloudflareContext({ async: true })

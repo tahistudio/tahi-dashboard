@@ -1,6 +1,8 @@
-import { getRequestAuth } from '@/lib/server-auth'
+import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCloudflareContext } from '@opennextjs/cloudflare'
+import { db } from '@/lib/db'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,14 +10,21 @@ export const dynamic = 'force-dynamic'
  * GET /api/uploads/serve?key=<storageKey>&download=1
  *
  * Serves a file from R2 Object Storage.
- * Validates auth before serving : files are never publicly accessible.
+ * Validates auth + org-scoping before serving.
+ *
+ * Storage keys are formatted as `orgId/requestId/timestamp-filename`
+ * (see /api/uploads/presign). We extract the first path segment and
+ * verify the caller has access to that org:
+ *   - Tahi admins (NEXT_PUBLIC_TAHI_ORG_ID): allowed (team-member scoping
+ *     still applies via requireAccessToOrg).
+ *   - Client users: orgId from their Clerk org must match the key's orgId.
  *
  * ?download=1 forces Content-Disposition: attachment (browser download)
  * Otherwise serves inline (e.g. images display in-browser).
  */
 export async function GET(req: NextRequest) {
   try {
-    const { userId } = await getRequestAuth(req)
+    const { userId, orgId: authOrgId } = await getRequestAuth(req)
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
     }
@@ -26,6 +35,27 @@ export async function GET(req: NextRequest) {
 
     if (!key) {
       return NextResponse.json({ error: 'Missing storage key' }, { status: 400 })
+    }
+
+    // Extract the orgId prefix from the key and verify access.
+    // Keys look like: `{orgId}/{requestId|'general'}/{timestamp}-{filename}`.
+    // Legacy keys starting with 'anon' are not served here.
+    const [keyOrgId] = key.split('/', 1)
+    if (!keyOrgId || keyOrgId === 'anon') {
+      return NextResponse.json({ error: 'Invalid or legacy file key' }, { status: 400 })
+    }
+
+    if (isTahiAdmin(authOrgId)) {
+      // Admin path: apply team-member scoping (restricted team members can
+      // only serve files for orgs they're allowed to see).
+      const drizzle = (await db()) as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+      const denied = await requireAccessToOrg(drizzle, userId, keyOrgId)
+      if (denied) return denied
+    } else {
+      // Client path: their Clerk org must match the file's org
+      if (authOrgId !== keyOrgId) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     const { env } = await getCloudflareContext({ async: true })
