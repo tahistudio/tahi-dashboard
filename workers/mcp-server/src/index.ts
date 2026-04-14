@@ -496,6 +496,7 @@ const TOOLS: ToolDef[] = [
   }),
   tool('match_xero_contacts', 'List Xero contacts with suggested dashboard client matches'),
   tool('import_stripe_invoices', 'Import all invoices from Stripe into dashboard'),
+  tool('import_stripe_payments', 'Import one-off Stripe payments (charges without invoices) as paid records'),
   tool('create_stripe_invoice', 'Create a Stripe invoice from a local invoice and get payment link', {
     invoiceId: prop('string', 'Local invoice ID to create Stripe invoice from'),
   }, ['invoiceId']),
@@ -783,6 +784,8 @@ async function executeTool(
       return json(await apiGet('/api/admin/integrations/xero/match-contacts', token))
     case 'import_stripe_invoices':
       return json(await apiWrite('/api/admin/integrations/stripe/import-invoices', token, 'POST'))
+    case 'import_stripe_payments':
+      return json(await apiWrite('/api/admin/integrations/stripe/import-payments', token, 'POST'))
     case 'create_stripe_invoice':
       return json(await apiWrite('/api/admin/invoices/stripe-create', token, 'POST', args as Record<string, unknown>))
     case 'get_xero_branding_themes':
