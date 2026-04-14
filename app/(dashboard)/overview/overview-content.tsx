@@ -39,7 +39,7 @@ interface KPIs {
   activeClients: number
   openRequests: number
   inProgress: number
-  outstandingInvoicesUsd: number
+  outstandingInvoicesNzd: number
   mrr: number
 }
 
@@ -149,10 +149,10 @@ export function AdminOverview({ userName }: { userName: string }) {
         />
         <StatCard
           label="Outstanding"
-          value={loading ? null : formatNzd(kpis?.outstandingInvoicesUsd ?? 0)}
+          value={loading ? null : formatNzd(kpis?.outstandingInvoicesNzd ?? 0)}
           icon={<FileText size={18} />}
           href="/invoices"
-          accent={kpis && kpis.outstandingInvoicesUsd > 0 ? 'amber' : 'neutral'}
+          accent={kpis && kpis.outstandingInvoicesNzd > 0 ? 'amber' : 'neutral'}
           sub="invoices"
         />
         <StatCard

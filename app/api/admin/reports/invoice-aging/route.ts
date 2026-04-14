@@ -4,10 +4,29 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 
+type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+function toNzd(amount: number, currency: string, rateMap: Record<string, number>): number {
+  const rate = rateMap[currency]
+  if (!rate || rate === 0) return amount
+  return amount / rate
+}
+
+async function getRateMap(database: D1): Promise<Record<string, number>> {
+  const rates = await database.select().from(schema.exchangeRates)
+  const nzdRateToUsd = rates.find(r => r.currency === 'NZD')?.rateToUsd ?? 1
+  const map: Record<string, number> = { NZD: 1 }
+  for (const r of rates) {
+    map[r.currency] = r.rateToUsd / nzdRateToUsd
+  }
+  return map
+}
+
 interface AgingInvoice {
   id: string
   orgName: string | null
   totalUsd: number
+  totalNzd: number
   currency: string
   dueDate: string | null
   daysPastDue: number
@@ -16,6 +35,7 @@ interface AgingInvoice {
 interface AgingBucket {
   count: number
   totalUsd: number
+  totalNzd: number
   invoices: AgingInvoice[]
 }
 
@@ -27,7 +47,9 @@ export async function GET(req: NextRequest) {
   }
 
   const database = await db()
-  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  const drizzle = database as D1
+
+  const rateMap = await getRateMap(drizzle)
 
   // Query all sent invoices with org name
   const rows = await drizzle
@@ -44,7 +66,7 @@ export async function GET(req: NextRequest) {
 
   const now = new Date()
 
-  const makeBucket = (): AgingBucket => ({ count: 0, totalUsd: 0, invoices: [] })
+  const makeBucket = (): AgingBucket => ({ count: 0, totalUsd: 0, totalNzd: 0, invoices: [] })
 
   const aging = {
     current: makeBucket(),
@@ -64,11 +86,15 @@ export async function GET(req: NextRequest) {
       daysPastDue = Math.floor(diffMs / (1000 * 60 * 60 * 24))
     }
 
+    const currency = row.currency ?? 'USD'
+    const nzdAmount = toNzd(row.totalUsd, currency, rateMap)
+
     const invoice: AgingInvoice = {
       id: row.id,
       orgName: row.orgName ?? null,
       totalUsd: row.totalUsd,
-      currency: row.currency ?? 'USD',
+      totalNzd: Math.round(nzdAmount),
+      currency,
       dueDate: row.dueDate ?? null,
       daysPastDue,
     }
@@ -86,9 +112,10 @@ export async function GET(req: NextRequest) {
 
     bucket.count += 1
     bucket.totalUsd += row.totalUsd
+    bucket.totalNzd += nzdAmount
     bucket.invoices.push(invoice)
 
-    totalOutstanding += row.totalUsd
+    totalOutstanding += nzdAmount
     if (daysPastDue > oldestDaysPastDue) {
       oldestDaysPastDue = daysPastDue
     }

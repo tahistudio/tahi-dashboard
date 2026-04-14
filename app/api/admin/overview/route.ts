@@ -6,6 +6,26 @@ import { eq, ne, count, and, inArray, gte, sql } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
 
+type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+// Convert amount from source currency to NZD using rateMap
+function toNzd(amount: number, currency: string, rateMap: Record<string, number>): number {
+  const rate = rateMap[currency]
+  if (!rate || rate === 0) return amount
+  return amount / rate
+}
+
+// Build {currency: rateToNzd} map where rateToNzd = "how many [currency] per 1 NZD"
+async function getRateMap(drizzle: D1): Promise<Record<string, number>> {
+  const rates = await drizzle.select().from(schema.exchangeRates)
+  const nzdRateToUsd = rates.find(r => r.currency === 'NZD')?.rateToUsd ?? 1
+  const map: Record<string, number> = { NZD: 1 }
+  for (const r of rates) {
+    map[r.currency] = r.rateToUsd / nzdRateToUsd
+  }
+  return map
+}
+
 // ── GET /api/admin/overview ───────────────────────────────────────────────────
 // Returns all KPIs needed for the admin dashboard home page in one request.
 export async function GET(req: NextRequest) {
@@ -15,7 +35,10 @@ export async function GET(req: NextRequest) {
   }
 
   const database = await db()
-  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  const drizzle = database as D1
+
+  // Load exchange rates for currency conversion
+  const rateMap = await getRateMap(drizzle)
 
   // Calculate date 6 months ago for revenue query
   const now = new Date()
@@ -28,7 +51,7 @@ export async function GET(req: NextRequest) {
     inProgressResult,
     recentRequests,
     paidInvoices,
-    outstandingInvoices,
+    outstandingInvoiceRows,
   ] = await Promise.all([
     // Active client orgs
     drizzle
@@ -87,16 +110,23 @@ export async function GET(req: NextRequest) {
         gte(schema.invoices.paidAt, sixMonthsAgoIso),
       )),
 
-    // Outstanding invoices (sent or overdue)
+    // Outstanding invoices (sent or overdue) - individual rows for currency conversion
     drizzle
       .select({
-        total: sql<number>`COALESCE(SUM(${schema.invoices.totalUsd}), 0)`,
+        totalUsd: schema.invoices.totalUsd,
+        currency: schema.invoices.currency,
       })
       .from(schema.invoices)
       .where(inArray(schema.invoices.status, ['sent', 'overdue'])),
   ])
 
-  // Aggregate paid invoices into monthly buckets
+  // Outstanding invoices total in NZD
+  let outstandingNzd = 0
+  for (const inv of outstandingInvoiceRows) {
+    outstandingNzd += toNzd(inv.totalUsd, inv.currency ?? 'USD', rateMap)
+  }
+
+  // Aggregate paid invoices into monthly buckets (converted to NZD)
   const monthlyMap = new Map<string, number>()
 
   // Pre-fill the last 6 months with 0
@@ -112,7 +142,8 @@ export async function GET(req: NextRequest) {
       const d = new Date(inv.paidAt)
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
       if (monthlyMap.has(key)) {
-        monthlyMap.set(key, (monthlyMap.get(key) ?? 0) + (inv.totalUsd ?? 0))
+        const nzd = toNzd(inv.totalUsd ?? 0, inv.currency ?? 'USD', rateMap)
+        monthlyMap.set(key, (monthlyMap.get(key) ?? 0) + nzd)
       }
     } catch {
       // Skip invalid dates
@@ -124,13 +155,15 @@ export async function GET(req: NextRequest) {
     total: Math.round(total * 100) / 100,
   }))
 
-  // MRR from custom_mrr field (raw SQL, column may not exist before migration 0011)
+  // MRR from custom_mrr field, converted per-org currency to NZD
   let mrr = 0
   try {
-    const mrrResult = await drizzle.all<{ total_mrr: number }>(
-      sql`SELECT COALESCE(SUM(custom_mrr), 0) as total_mrr FROM organisations WHERE status = 'active' AND custom_mrr > 0`
+    const mrrRows = await drizzle.all<{ custom_mrr: number; preferred_currency: string }>(
+      sql`SELECT custom_mrr, preferred_currency FROM organisations WHERE status = 'active' AND custom_mrr > 0`
     )
-    mrr = mrrResult?.[0]?.total_mrr ?? 0
+    for (const row of mrrRows ?? []) {
+      mrr += toNzd(row.custom_mrr, row.preferred_currency ?? 'NZD', rateMap)
+    }
   } catch {
     // Column doesn't exist yet
   }
@@ -140,8 +173,8 @@ export async function GET(req: NextRequest) {
       activeClients: activeClientsResult[0]?.count ?? 0,
       openRequests: openRequestsResult[0]?.count ?? 0,
       inProgress: inProgressResult[0]?.count ?? 0,
-      outstandingInvoicesUsd: outstandingInvoices[0]?.total ?? 0,
-      mrr,
+      outstandingInvoicesNzd: Math.round(outstandingNzd),
+      mrr: Math.round(mrr),
     },
     recentRequests,
     monthlyRevenue,

@@ -524,6 +524,7 @@ interface AgingInvoice {
   id: string
   orgName: string
   totalUsd: number
+  totalNzd: number
   currency: string
   dueDate: string
   daysPastDue: number
@@ -532,6 +533,7 @@ interface AgingInvoice {
 interface AgingBucket {
   count: number
   totalUsd: number
+  totalNzd: number
   invoices: AgingInvoice[]
 }
 
@@ -806,7 +808,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
               const agingBucket = agingData.aging[bucket.key]
               const invoices = agingBucket.invoices ?? []
               const count = agingBucket.count ?? invoices.length
-              const total = agingBucket.totalUsd ?? invoices.reduce((sum: number, inv: AgingInvoice) => sum + inv.totalUsd, 0)
+              const total = agingBucket.totalNzd ?? agingBucket.totalUsd ?? 0
               const isExpanded = expandedBucket === bucket.key
 
               return (
@@ -895,7 +897,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                                 className="text-sm text-[var(--color-text)] text-right"
                                 style={{ padding: '0.375rem 0.75rem' }}
                               >
-                                {fmtCur(inv.totalUsd)}
+                                {fmtCur(inv.totalNzd ?? inv.totalUsd)}
                               </td>
                               <td
                                 className="text-sm text-[var(--color-text-muted)] text-right"
@@ -932,7 +934,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
           {(() => {
             const totals = AGING_BUCKETS.map(b => ({
               ...b,
-              total: agingData.aging[b.key].totalUsd ?? 0,
+              total: agingData.aging[b.key].totalNzd ?? agingData.aging[b.key].totalUsd ?? 0,
             }))
             const grandTotal = totals.reduce((sum, t) => sum + t.total, 0)
             if (grandTotal === 0) return null

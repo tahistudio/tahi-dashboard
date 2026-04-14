@@ -7,6 +7,25 @@ import { callXeroAPI } from '@/lib/xero'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
+// Build a currency-to-NZD conversion map from exchange_rates table
+async function getRateMap(database: D1): Promise<Record<string, number>> {
+  const rates = await database.select().from(schema.exchangeRates)
+  const nzdRateToUsd = rates.find(r => r.currency === 'NZD')?.rateToUsd ?? 1
+  const map: Record<string, number> = { NZD: 1 }
+  for (const r of rates) {
+    // rateToNzd = how many of [currency] per 1 NZD
+    // To convert FROM [currency] TO NZD: divide by rateToNzd
+    map[r.currency] = r.rateToUsd / nzdRateToUsd
+  }
+  return map
+}
+
+function toNzd(amount: number, currency: string, rateMap: Record<string, number>): number {
+  const rate = rateMap[currency]
+  if (!rate || rate === 0) return amount // unknown currency, return as-is
+  return amount / rate
+}
+
 // GET /api/admin/billing/financial-health
 // Aggregates: local invoice totals, pipeline projections, Xero P&L summary, Xero bank balances
 export async function GET(req: NextRequest) {
@@ -15,20 +34,37 @@ export async function GET(req: NextRequest) {
 
   const database = await db() as unknown as D1
 
-  // 1. Local invoice totals
-  const [invoiceTotals] = await database
+  // Load exchange rates for currency conversion
+  const rateMap = await getRateMap(database)
+
+  // 1. Local invoice totals (per-invoice conversion to NZD)
+  const allInvoices = await database
     .select({
-      totalInvoiced: sql<number>`COALESCE(SUM(${schema.invoices.totalUsd}), 0)`,
-      totalPaid: sql<number>`COALESCE(SUM(CASE WHEN ${schema.invoices.status} = 'paid' THEN ${schema.invoices.totalUsd} ELSE 0 END), 0)`,
-      totalOutstanding: sql<number>`COALESCE(SUM(CASE WHEN ${schema.invoices.status} IN ('sent', 'overdue', 'viewed') THEN ${schema.invoices.totalUsd} ELSE 0 END), 0)`,
-      invoiceCount: sql<number>`COUNT(*)`,
+      totalUsd: schema.invoices.totalUsd,
+      currency: schema.invoices.currency,
+      status: schema.invoices.status,
     })
     .from(schema.invoices)
 
+  let totalInvoiced = 0
+  let totalPaid = 0
+  let totalOutstanding = 0
+  let invoiceCount = allInvoices.length
+
+  for (const inv of allInvoices) {
+    const nzd = toNzd(inv.totalUsd, inv.currency ?? 'USD', rateMap)
+    totalInvoiced += nzd
+    if (inv.status === 'paid') totalPaid += nzd
+    if (inv.status === 'sent' || inv.status === 'overdue' || inv.status === 'viewed') totalOutstanding += nzd
+  }
+
   // 2. Pipeline projections (weighted by historical probability)
+  // valueNzd is already NZD-converted, use COALESCE with value for fallback
   const pipelineDeals = await database
     .select({
-      value: schema.deals.valueNzd,
+      valueNzd: schema.deals.valueNzd,
+      value: schema.deals.value,
+      currency: schema.deals.currency,
       probability: schema.pipelineStages.probability,
       isClosedWon: schema.pipelineStages.isClosedWon,
       isClosedLost: schema.pipelineStages.isClosedLost,
@@ -39,26 +75,29 @@ export async function GET(req: NextRequest) {
     .where(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)
 
   const openDeals = pipelineDeals.filter(d => !d.isClosedWon && !d.isClosedLost)
-  const pipelineTotal = openDeals.reduce((s, d) => s + (d.value ?? 0), 0)
-  const weightedForecast = openDeals.reduce((s, d) => s + ((d.value ?? 0) * (d.probability ?? 0) / 100), 0)
+  const pipelineTotal = openDeals.reduce((s, d) => s + (d.valueNzd ?? d.value ?? 0), 0)
+  const weightedForecast = openDeals.reduce((s, d) => s + ((d.valueNzd ?? d.value ?? 0) * (d.probability ?? 0) / 100), 0)
 
   // Monthly projected revenue from deals with expected close dates
   const monthlyProjections: Record<string, number> = {}
   for (const deal of openDeals) {
     if (deal.expectedCloseDate) {
       const month = deal.expectedCloseDate.slice(0, 7)
-      monthlyProjections[month] = (monthlyProjections[month] ?? 0) + ((deal.value ?? 0) * (deal.probability ?? 0) / 100)
+      const dealValue = deal.valueNzd ?? deal.value ?? 0
+      monthlyProjections[month] = (monthlyProjections[month] ?? 0) + (dealValue * (deal.probability ?? 0) / 100)
     }
   }
 
   // 3. MRR from active organisations with custom MRR set
-  // Use raw SQL with try-catch: column may not exist yet if migration 0011 hasn't been applied
+  // Each org's customMrr is in their preferredCurrency, so convert to NZD
   let mrr = 0
   try {
-    const mrrResult = await database.all<{ total_mrr: number }>(
-      sql`SELECT COALESCE(SUM(custom_mrr), 0) as total_mrr FROM organisations WHERE status = 'active' AND custom_mrr > 0`
+    const mrrRows = await database.all<{ custom_mrr: number; preferred_currency: string }>(
+      sql`SELECT custom_mrr, preferred_currency FROM organisations WHERE status = 'active' AND custom_mrr > 0`
     )
-    mrr = mrrResult?.[0]?.total_mrr ?? 0
+    for (const row of mrrRows ?? []) {
+      mrr += toNzd(row.custom_mrr, row.preferred_currency ?? 'NZD', rateMap)
+    }
   } catch {
     // Column doesn't exist yet, fall back to 0
     mrr = 0
@@ -90,10 +129,10 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     invoices: {
-      totalInvoiced: invoiceTotals?.totalInvoiced ?? 0,
-      totalPaid: invoiceTotals?.totalPaid ?? 0,
-      totalOutstanding: invoiceTotals?.totalOutstanding ?? 0,
-      count: invoiceTotals?.invoiceCount ?? 0,
+      totalInvoiced: Math.round(totalInvoiced),
+      totalPaid: Math.round(totalPaid),
+      totalOutstanding: Math.round(totalOutstanding),
+      count: invoiceCount,
     },
     pipeline: {
       totalValue: pipelineTotal,
@@ -101,7 +140,7 @@ export async function GET(req: NextRequest) {
       openDealCount: openDeals.length,
       monthlyProjections,
     },
-    mrr,
+    mrr: Math.round(mrr),
     xero: {
       profitAndLoss: xeroPnl,
       bankSummary: xeroBanks,
