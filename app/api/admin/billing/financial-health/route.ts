@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
   let totalInvoiced = 0
   let totalPaid = 0
   let totalOutstanding = 0
-  let invoiceCount = allInvoices.length
+  const invoiceCount = allInvoices.length
 
   for (const inv of allInvoices) {
     const nzd = toNzd(inv.totalUsd, inv.currency ?? 'USD', rateMap)
