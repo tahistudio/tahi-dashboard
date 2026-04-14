@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
-import { callXeroAPI } from '@/lib/xero'
+import { callXeroAPI, callXeroAPIOrThrow, XeroAPIError } from '@/lib/xero'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -38,7 +38,9 @@ export async function POST(req: NextRequest) {
     invoiceId?: string
     invoiceIds?: string[]
     orgId?: string
+    dryRun?: boolean
   }
+  const dryRun = body.dryRun === true
 
   const database = await db() as unknown as D1
 
@@ -69,7 +71,15 @@ export async function POST(req: NextRequest) {
     return match?.BrandingThemeID
   }
 
-  const results = []
+  const results: Array<{
+    invoiceId: string
+    status: 'synced' | 'updated' | 'error' | 'dry-run'
+    xeroInvoiceId?: string
+    xeroInvoiceNumber?: string
+    wouldCall?: string
+    payload?: unknown
+    error?: string
+  }> = []
   const now = new Date().toISOString()
 
   for (const invId of invoiceIds) {
@@ -115,8 +125,9 @@ export async function POST(req: NextRequest) {
       let contactId = org.xeroContactId ?? null
 
       if (!contactId) {
-        // Search by name
-        const contactRes = await callXeroAPI<XeroContactResponse>(
+        // Search by name — use throwing variant so a real API failure
+        // surfaces as a clear error instead of a silent null -> "not found" loop.
+        const contactRes = await callXeroAPIOrThrow<XeroContactResponse>(
           'GET',
           `/Contacts?where=Name=="${encodeURIComponent(org.name)}"`,
         )
@@ -131,9 +142,11 @@ export async function POST(req: NextRequest) {
             .where(eq(schema.contacts.orgId, org.id))
             .limit(1)
 
-          const createRes = await callXeroAPI<XeroContactResponse>('POST', '/Contacts', {
-            Name: org.name,
-            EmailAddress: contact?.email ?? undefined,
+          const createRes = await callXeroAPIOrThrow<XeroContactResponse>('POST', '/Contacts', {
+            Contacts: [{
+              Name: org.name,
+              EmailAddress: contact?.email ?? undefined,
+            }],
           })
           contactId = createRes?.Contacts?.[0]?.ContactID ?? null
         }
@@ -189,23 +202,31 @@ export async function POST(req: NextRequest) {
         xeroPayload.BrandingThemeID = brandingThemeId
       }
 
-      // Create or update in Xero
+      // Create or update in Xero. Xero accepts a wrapped { Invoices: [...] }
+      // payload for BOTH create (POST /Invoices) and update (POST /Invoices/{id}).
       const xeroInvoiceId = invoice.xeroInvoiceId
-      let method: string
-      let endpoint: string
+      const isUpdate = Boolean(xeroInvoiceId)
+      const endpoint = isUpdate ? `/Invoices/${xeroInvoiceId}` : '/Invoices'
 
-      if (xeroInvoiceId) {
-        // Update existing Xero invoice
-        method = 'POST'
-        endpoint = `/Invoices/${xeroInvoiceId}`
-      } else {
-        // Create new
-        method = 'POST'
-        endpoint = '/Invoices'
+      if (!isUpdate) {
         xeroPayload.InvoiceNumber = `INV-${invId.slice(0, 8).toUpperCase()}`
       }
 
-      const invoiceRes = await callXeroAPI<XeroInvoiceResponse>(method, endpoint, xeroInvoiceId ? xeroPayload : { Invoices: [xeroPayload] })
+      if (dryRun) {
+        results.push({
+          invoiceId: invId,
+          status: 'dry-run',
+          wouldCall: `POST ${endpoint}`,
+          payload: { Invoices: [xeroPayload] },
+        })
+        continue
+      }
+
+      const invoiceRes = await callXeroAPIOrThrow<XeroInvoiceResponse>(
+        'POST',
+        endpoint,
+        { Invoices: [xeroPayload] },
+      )
 
       const createdInv = invoiceRes?.Invoices?.[0]
       if (createdInv) {
@@ -217,7 +238,7 @@ export async function POST(req: NextRequest) {
 
         results.push({
           invoiceId: invId,
-          status: xeroInvoiceId ? 'updated' : 'synced',
+          status: isUpdate ? 'updated' : 'synced',
           xeroInvoiceId: createdInv.InvoiceID,
           xeroInvoiceNumber: createdInv.InvoiceNumber,
         })
@@ -225,10 +246,13 @@ export async function POST(req: NextRequest) {
         results.push({ invoiceId: invId, status: 'error', error: 'Xero API returned no invoice' })
       }
     } catch (err) {
+      const errorMessage = err instanceof XeroAPIError
+        ? `Xero ${err.status}: ${err.responseBody?.slice(0, 300) ?? err.message}`
+        : err instanceof Error ? err.message : 'Unknown error'
       results.push({
         invoiceId: invId,
         status: 'error',
-        error: err instanceof Error ? err.message : 'Unknown error',
+        error: errorMessage,
       })
     }
   }

@@ -173,44 +173,80 @@ export async function getValidXeroToken(): Promise<string | null> {
   return updated?.accessToken ?? null
 }
 
+export class XeroAPIError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public endpoint: string,
+    public method: string,
+    public responseBody?: string,
+  ) {
+    super(message)
+    this.name = 'XeroAPIError'
+  }
+}
+
 /**
- * Make an authenticated call to the Xero API
+ * Throwing variant of callXeroAPI. Use this when you need to surface the
+ * actual Xero validation error back to the caller (e.g. invoice sync UI).
+ * Throws XeroAPIError on HTTP error (with Xero's response body attached)
+ * or a generic Error if no token can be obtained.
+ */
+export async function callXeroAPIOrThrow<T>(
+  method: string,
+  endpoint: string,
+  body?: Record<string, unknown>,
+): Promise<T> {
+  const token = await getValidXeroToken()
+  if (!token) {
+    throw new Error('Unable to obtain valid Xero token (check XERO_CLIENT_ID/SECRET and tenant connection)')
+  }
+
+  const options: RequestInit = {
+    method,
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Xero-tenant-id': process.env.XERO_TENANT_ID || '',
+    },
+  }
+
+  if (body) {
+    options.body = JSON.stringify(body)
+  }
+
+  const res = await fetch(`https://api.xero.com/api.xro/2.0${endpoint}`, options)
+
+  if (!res.ok) {
+    let errText = ''
+    try { errText = await res.text() } catch { /* ignore */ }
+    throw new XeroAPIError(
+      `Xero API ${method} ${endpoint} failed: ${res.status} ${res.statusText}${errText ? ' - ' + errText.slice(0, 500) : ''}`,
+      res.status,
+      endpoint,
+      method,
+      errText,
+    )
+  }
+
+  return (await res.json()) as T
+}
+
+/**
+ * Make an authenticated call to the Xero API.
+ * Returns null on any error (logged to console). Use callXeroAPIOrThrow
+ * when you need the actual error surfaced.
  */
 export async function callXeroAPI<T>(
   method: string,
   endpoint: string,
   body?: Record<string, unknown>,
 ): Promise<T | null> {
-  const token = await getValidXeroToken()
-  if (!token) {
-    console.error('Unable to obtain valid Xero token')
-    return null
-  }
-
   try {
-    const options: RequestInit = {
-      method,
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'Xero-tenant-id': process.env.XERO_TENANT_ID || '',
-      },
-    }
-
-    if (body) {
-      options.body = JSON.stringify(body)
-    }
-
-    const res = await fetch(`https://api.xero.com/api.xro/2.0${endpoint}`, options)
-
-    if (!res.ok) {
-      console.error(`Xero API error (${method} ${endpoint}):`, res.status, res.statusText)
-      return null
-    }
-
-    return (await res.json()) as T
+    return await callXeroAPIOrThrow<T>(method, endpoint, body)
   } catch (err) {
-    console.error(`Xero API call failed (${method} ${endpoint}):`, err)
+    console.error('[xero]', err instanceof Error ? err.message : err)
     return null
   }
 }
