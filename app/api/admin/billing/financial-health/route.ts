@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { sql, eq, and } from 'drizzle-orm'
+import { sql, eq } from 'drizzle-orm'
 import { callXeroAPI } from '@/lib/xero'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>

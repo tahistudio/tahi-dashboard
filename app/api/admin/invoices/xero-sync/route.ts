@@ -185,7 +185,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Create or update in Xero
-      let xeroInvoiceId = invoice.xeroInvoiceId
+      const xeroInvoiceId = invoice.xeroInvoiceId
       let method: string
       let endpoint: string
 

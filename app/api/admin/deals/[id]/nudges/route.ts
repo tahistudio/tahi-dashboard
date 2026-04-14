@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc } from 'drizzle-orm'
-import { sendEmail } from '@/lib/email'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
