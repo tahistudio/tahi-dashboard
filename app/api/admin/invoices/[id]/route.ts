@@ -4,12 +4,13 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { callXeroAPI } from '@/lib/xero'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 type Params = { params: Promise<{ id: string }> }
 
 // ── GET /api/admin/invoices/[id] ─────────────────────────────────────────────
 export async function GET(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -17,6 +18,15 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { id } = await params
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Access scoping: look up the invoice's orgId before returning details
+  const [ownerRow] = await drizzle
+    .select({ orgId: schema.invoices.orgId })
+    .from(schema.invoices)
+    .where(eq(schema.invoices.id, id))
+    .limit(1)
+  const denied = await requireAccessToOrg(drizzle, userId, ownerRow?.orgId)
+  if (denied) return denied
 
   const [invoiceRow] = await drizzle
     .select({
@@ -60,7 +70,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
 // ── PATCH /api/admin/invoices/[id] ───────────────────────────────────────────
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -87,6 +97,19 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Access scoping: must have access to both the current owner and (if reassigning) the new owner
+  const [currentOwner] = await drizzle
+    .select({ orgId: schema.invoices.orgId })
+    .from(schema.invoices)
+    .where(eq(schema.invoices.id, id))
+    .limit(1)
+  const denied = await requireAccessToOrg(drizzle, userId, currentOwner?.orgId)
+  if (denied) return denied
+  if (body.orgId !== undefined) {
+    const deniedNew = await requireAccessToOrg(drizzle, userId, body.orgId)
+    if (deniedNew) return deniedNew
+  }
 
   await drizzle
     .update(schema.invoices)
@@ -119,7 +142,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 // ── DELETE /api/admin/invoices/[id] ─────────────────────────────────────────
 // Only draft invoices can be deleted
 export async function DELETE(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -133,6 +156,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
       status: schema.invoices.status,
       stripeInvoiceId: schema.invoices.stripeInvoiceId,
       xeroInvoiceId: schema.invoices.xeroInvoiceId,
+      orgId: schema.invoices.orgId,
     })
     .from(schema.invoices)
     .where(eq(schema.invoices.id, id))
@@ -141,6 +165,9 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   if (!invoice) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
+
+  const denied = await requireAccessToOrg(drizzle, userId, invoice.orgId)
+  if (denied) return denied
 
   // Void in Stripe if linked (draft = delete, finalized = void)
   if (invoice.stripeInvoiceId && process.env.STRIPE_SECRET_KEY) {

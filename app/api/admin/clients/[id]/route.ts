@@ -3,13 +3,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, sql } from 'drizzle-orm'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 type Params = { params: Promise<{ id: string }> }
 
 // ── GET /api/admin/clients/[id] ──────────────────────────────────────────────
 // Returns full client profile: org + contacts + subscription + tracks + recent requests
 export async function GET(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -17,6 +18,10 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { id } = await params
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Access scoping: check the team member can see this specific org
+  const denied = await requireAccessToOrg(drizzle, userId, id)
+  if (denied) return denied
 
   const [org] = await drizzle
     .select()
@@ -94,7 +99,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
 // ── PATCH /api/admin/clients/[id] ────────────────────────────────────────────
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -130,6 +135,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Access scoping
+  const denied = await requireAccessToOrg(drizzle, userId, id)
+  if (denied) return denied
 
   await drizzle
     .update(schema.organisations)

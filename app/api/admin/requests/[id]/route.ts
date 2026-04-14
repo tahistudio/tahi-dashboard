@@ -4,12 +4,13 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
 import { createNotifications } from '@/lib/notifications'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 type Params = { params: Promise<{ id: string }> }
 
 // ── GET /api/admin/requests/[id] ─────────────────────────────────────────────
 export async function GET(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -17,6 +18,15 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { id } = await params
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Access scoping
+  const [ownerRow] = await drizzle
+    .select({ orgId: schema.requests.orgId })
+    .from(schema.requests)
+    .where(eq(schema.requests.id, id))
+    .limit(1)
+  const denied = await requireAccessToOrg(drizzle, userId, ownerRow?.orgId)
+  if (denied) return denied
 
   const [request] = await drizzle
     .select({
@@ -60,7 +70,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
 // ── PATCH /api/admin/requests/[id] ───────────────────────────────────────────
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -96,6 +106,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Access scoping
+  const [ownerRow] = await drizzle
+    .select({ orgId: schema.requests.orgId })
+    .from(schema.requests)
+    .where(eq(schema.requests.id, id))
+    .limit(1)
+  const denied = await requireAccessToOrg(drizzle, userId, ownerRow?.orgId)
+  if (denied) return denied
 
   await drizzle
     .update(schema.requests)
@@ -151,7 +170,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
 // ── DELETE /api/admin/requests/[id] ──────────────────────────────────────────
 export async function DELETE(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -159,6 +178,15 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const { id } = await params
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Access scoping
+  const [ownerRow] = await drizzle
+    .select({ orgId: schema.requests.orgId })
+    .from(schema.requests)
+    .where(eq(schema.requests.id, id))
+    .limit(1)
+  const denied = await requireAccessToOrg(drizzle, userId, ownerRow?.orgId)
+  if (denied) return denied
 
   // Soft-delete: archive rather than destroy
   await drizzle

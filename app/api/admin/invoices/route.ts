@@ -2,14 +2,15 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and } from 'drizzle-orm'
+import { eq, desc, and, inArray } from 'drizzle-orm'
 import { createNotifications } from '@/lib/notifications'
+import { getOrgScope, requireAccessToOrg } from '@/lib/require-access'
 
 // ── GET /api/admin/invoices ───────────────────────────────────────────────────
 // Returns paginated invoices with org name joined.
 // Query params: status (draft|sent|overdue|paid|all, default all), page (default 1)
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -24,6 +25,12 @@ export async function GET(req: NextRequest) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
+  // Access scoping: restrict to the team member's allowed orgs
+  const scope = await getOrgScope(drizzle, userId)
+  if (scope !== null && scope.length === 0) {
+    return NextResponse.json({ items: [], page, limit })
+  }
+
   // Build conditions
   const conditions = []
   if (statusParam !== 'all') {
@@ -31,6 +38,9 @@ export async function GET(req: NextRequest) {
   }
   if (orgIdFilter) {
     conditions.push(eq(schema.invoices.orgId, orgIdFilter))
+  }
+  if (scope !== null) {
+    conditions.push(inArray(schema.invoices.orgId, scope))
   }
 
   const query = drizzle
@@ -65,7 +75,7 @@ export async function GET(req: NextRequest) {
 // Creates a new invoice with line items.
 // Body: { orgId, subscriptionId?, lineItems: [{ description, quantity, unitAmount, currency }], dueDate?, notes? }
 export async function POST(req: NextRequest) {
-  const { orgId: authOrgId } = await getRequestAuth(req)
+  const { orgId: authOrgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(authOrgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -87,6 +97,10 @@ export async function POST(req: NextRequest) {
   if (!body.orgId) {
     return NextResponse.json({ error: 'orgId is required' }, { status: 400 })
   }
+
+  const drizzleForAccess = (await db()) as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  const deniedAccess = await requireAccessToOrg(drizzleForAccess, userId, body.orgId)
+  if (deniedAccess) return deniedAccess
 
   if (!Array.isArray(body.lineItems) || body.lineItems.length === 0) {
     return NextResponse.json({ error: 'lineItems must be a non-empty array' }, { status: 400 })

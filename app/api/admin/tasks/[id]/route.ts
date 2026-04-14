@@ -4,13 +4,14 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { createNotification } from '@/lib/notifications'
+import { requireAccessToOrg, getOrgScope } from '@/lib/require-access'
 
 // ── PATCH /api/admin/tasks/[id] ───────────────────────────────────────────
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -35,15 +36,27 @@ export async function PATCH(
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // Verify task exists
+  // Verify task exists + scope check
   const [existing] = await drizzle
-    .select({ id: schema.tasks.id })
+    .select({ id: schema.tasks.id, orgId: schema.tasks.orgId })
     .from(schema.tasks)
     .where(eq(schema.tasks.id, id))
     .limit(1)
 
   if (!existing) {
     return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+  }
+
+  // Tahi-internal tasks (orgId null) are only visible to unrestricted users
+  if (existing.orgId) {
+    const denied = await requireAccessToOrg(drizzle, userId, existing.orgId)
+    if (denied) return denied
+  } else {
+    // No orgId: check user has unrestricted access (null from getOrgScope)
+    const scope = await getOrgScope(drizzle, userId)
+    if (scope !== null) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
   }
 
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
