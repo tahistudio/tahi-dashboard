@@ -19,12 +19,15 @@ export type NotificationEventType =
   | 'task_assigned'
   | 'invoice_created'
   | 'request_created'
+  | 'retainer_churn_risk'
+  | 'retainer_upsell_opportunity'
 
 export type NotificationEntityType =
   | 'request'
   | 'message'
   | 'task'
   | 'invoice'
+  | 'organisation'
 
 interface CreateNotificationParams {
   userId: string

@@ -555,6 +555,7 @@ const TOOLS: ToolDef[] = [
     months: prop('number', 'Trailing months to include (default 12)'),
   }),
   tool('get_bank_balances', 'Current bank account balances + total NZD + runway months at current burn rate'),
+  tool('fire_retainer_alerts', 'Send admin notifications for retainer churn risk (>=70) and upsell signals (>120% utilisation). Dedupes against alerts from the last 14 days.'),
 ]
 
 // ---------------------------------------------------------------------------
@@ -895,6 +896,8 @@ async function executeTool(
     }
     case 'get_bank_balances':
       return json(await apiGet('/api/admin/reports/bank-balances', token))
+    case 'fire_retainer_alerts':
+      return json(await apiWrite('/api/admin/reports/retainer-alerts', token, 'POST'))
 
     default:
       throw new Error(`Unknown tool: ${name}`)

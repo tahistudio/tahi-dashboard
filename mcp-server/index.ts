@@ -1512,6 +1512,16 @@ server.tool(
   }
 )
 
+server.tool(
+  'fire_retainer_alerts',
+  'Recompute retainer health and send admin notifications for churn risk (>=70) and upsell signals (>120% utilisation). Dedupes against alerts fired in the last 14 days.',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/reports/retainer-alerts', { method: 'POST' })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
 // ---------------------------------------------------------------------------
 // Start server
 // ---------------------------------------------------------------------------
