@@ -104,32 +104,101 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── Costs: Xero recurring expenses (primary) + client_costs (layered on) ──
-  // Xero P&L sync tags categories that appear in ≥3 of the last 4 months as
-  // recurring. We use the average across those months as the projected
-  // monthly burn from Xero. Fall back to client_costs if no Xero data.
-  const xeroExpenses = await drizzle
+  // ── Costs: commitments (primary) + Xero recurring (fallback) + client_costs ──
+  //
+  // Hierarchy of trust:
+  //   1. expense_commitments — user-maintained fixed costs with explicit
+  //      cadence. Authoritative when present (not polluted by accountant
+  //      reclassifications or Xero journal entries).
+  //   2. Xero recurring categories — only used if no commitments exist
+  //      (first-time setup). Falls back to averaging auto-detected
+  //      recurring categories over their observed months.
+  //   3. client_costs — layered on top of the above for project-specific
+  //      costs not yet in Xero (subcontractor fees, one-off software, etc).
+  //
+  // Commitments are projected month-by-month based on their cadence so a
+  // quarterly $3,000 insurance bill doesn't distort a month it doesn't fall in.
+  const commitments = await drizzle
     .select()
-    .from(schema.xeroExpenseCategories)
-    .catch(() => [] as Array<typeof schema.xeroExpenseCategories.$inferSelect>)
+    .from(schema.expenseCommitments)
+    .catch(() => [] as Array<typeof schema.expenseCommitments.$inferSelect>)
+  const activeCommitments = commitments.filter(c => c.active)
 
-  let recurringCostNzd = 0
-  if (xeroExpenses.length > 0) {
-    // Group recurring categories by name and average over distinct months present
-    const recurringByAccount = new Map<string, { total: number; months: Set<string> }>()
-    for (const e of xeroExpenses) {
-      if (!e.isRecurring) continue
-      const nzd = toNzd(e.amount, e.currency ?? 'NZD', rateMap)
-      if (!recurringByAccount.has(e.accountName)) {
-        recurringByAccount.set(e.accountName, { total: 0, months: new Set() })
+  // Per-month commitment costs, in NZD.
+  const commitmentByMonth: Record<string, number> = {}
+  for (const m of monthKeys) commitmentByMonth[m] = 0
+
+  function applyCommitment(c: typeof schema.expenseCommitments.$inferSelect) {
+    const amountNzd = toNzd(c.amount, c.currency ?? 'NZD', rateMap)
+    switch (c.cadence) {
+      case 'monthly':
+        for (const m of monthKeys) commitmentByMonth[m] += amountNzd
+        break
+      case 'quarterly':
+      case 'annual':
+      case 'one_off': {
+        if (!c.nextDueDate) {
+          // No anchor date — spread quarterly as 1/3 per month, annual as 1/12
+          const divisor = c.cadence === 'quarterly' ? 3 : c.cadence === 'annual' ? 12 : monthKeys.length
+          const perMonth = amountNzd / divisor
+          for (const m of monthKeys) commitmentByMonth[m] += perMonth
+          return
+        }
+        const anchor = new Date(c.nextDueDate)
+        if (c.cadence === 'one_off') {
+          const key = c.nextDueDate.slice(0, 7)
+          if (key in commitmentByMonth) commitmentByMonth[key] += amountNzd
+          return
+        }
+        const stepMonths = c.cadence === 'quarterly' ? 3 : 12
+        // Walk forward from anchor, placing the amount in each occurrence
+        let cursor = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), 1))
+        while (true) {
+          const key = cursor.toISOString().slice(0, 7)
+          if (key > monthKeys[monthKeys.length - 1]) break
+          if (key in commitmentByMonth) commitmentByMonth[key] += amountNzd
+          cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + stepMonths, 1))
+        }
+        // Also walk backward in case the anchor is in the future but some
+        // occurrences fall in-window (the anchor is "next due", not first)
+        cursor = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() - stepMonths, 1))
+        while (true) {
+          const key = cursor.toISOString().slice(0, 7)
+          if (key < monthKeys[0]) break
+          if (key in commitmentByMonth) commitmentByMonth[key] += amountNzd
+          cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() - stepMonths, 1))
+        }
+        break
       }
-      const entry = recurringByAccount.get(e.accountName)!
-      entry.total += nzd
-      entry.months.add(e.monthKey)
     }
-    for (const entry of recurringByAccount.values()) {
-      if (entry.months.size > 0) {
-        recurringCostNzd += entry.total / entry.months.size
+  }
+
+  for (const c of activeCommitments) applyCommitment(c)
+
+  // Fallback to Xero recurring detection only if no commitments exist.
+  let recurringCostNzd = 0
+  if (activeCommitments.length === 0) {
+    const xeroExpenses = await drizzle
+      .select()
+      .from(schema.xeroExpenseCategories)
+      .catch(() => [] as Array<typeof schema.xeroExpenseCategories.$inferSelect>)
+
+    if (xeroExpenses.length > 0) {
+      const recurringByAccount = new Map<string, { total: number; months: Set<string> }>()
+      for (const e of xeroExpenses) {
+        if (!e.isRecurring) continue
+        const nzd = toNzd(e.amount, e.currency ?? 'NZD', rateMap)
+        if (!recurringByAccount.has(e.accountName)) {
+          recurringByAccount.set(e.accountName, { total: 0, months: new Set() })
+        }
+        const entry = recurringByAccount.get(e.accountName)!
+        entry.total += nzd
+        entry.months.add(e.monthKey)
+      }
+      for (const entry of recurringByAccount.values()) {
+        if (entry.months.size > 0) {
+          recurringCostNzd += entry.total / entry.months.size
+        }
       }
     }
   }
@@ -166,13 +235,19 @@ export async function GET(req: NextRequest) {
 
   const monthlyRows = monthKeys.map(month => {
     const revenue = recurringMrrNzd + (pipelineByMonth[month] ?? 0)
-    const cost = recurringCostNzd + (oneOffCostByMonth[month] ?? 0)
+    // Cost = per-month commitments + the xero-recurring fallback + dated one-offs
+    const cost = (commitmentByMonth[month] ?? 0) + recurringCostNzd + (oneOffCostByMonth[month] ?? 0)
     const net = revenue - cost
     cumulative += net
     totalRevenue += revenue
     totalCost += cost
     return { month, revenue, cost, net, cumulative }
   })
+
+  // Average monthly commitment cost across the window (for the summary card)
+  const avgCommitmentCostNzd = monthKeys.length > 0
+    ? Object.values(commitmentByMonth).reduce((s, v) => s + v, 0) / monthKeys.length
+    : 0
 
   return NextResponse.json({
     months: monthlyRows,
@@ -181,7 +256,11 @@ export async function GET(req: NextRequest) {
       totalCost,
       totalNet: totalRevenue - totalCost,
       recurringMrrNzd,
-      recurringCostNzd,
+      // Prefer commitments-based number when commitments exist; otherwise fall
+      // back to Xero-derived recurring for backwards compatibility.
+      recurringCostNzd: avgCommitmentCostNzd > 0 ? avgCommitmentCostNzd : recurringCostNzd,
+      commitmentCount: activeCommitments.length,
+      commitmentSource: activeCommitments.length > 0 ? 'commitments' : 'xero_recurring',
     },
   })
 }

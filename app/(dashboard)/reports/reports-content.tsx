@@ -523,6 +523,9 @@ export function ReportsContent() {
       {/* Team Utilization (T605) */}
       <div id="utilization" className="scroll-mt-20"><UtilizationSection /></div>
 
+      {/* Fixed Costs / Commitments (T652) — user-maintained projections */}
+      <div id="commitments" className="scroll-mt-20"><CommitmentsSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
+
       {/* Xero Expenses + P&L Trend (T592) */}
       <div id="expenses" className="scroll-mt-20"><ExpenseDashboardSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
 
@@ -3375,6 +3378,7 @@ const REPORTS_SECTIONS: Array<{ id: string; label: string; group: 'Operations' |
   { id: 'retainer-health',       label: 'Retainer Health',    group: 'Sales' },
   { id: 'financial-health',      label: 'Financial Health',   group: 'Finance' },
   { id: 'cash-flow',             label: 'Cash Flow',          group: 'Finance' },
+  { id: 'commitments',           label: 'Fixed Costs',        group: 'Finance' },
   { id: 'expenses',              label: 'Expenses & P&L',     group: 'Finance' },
   { id: 'client-profitability',  label: 'Client Margin',      group: 'Finance' },
   { id: 'utilization',           label: 'Team Utilisation',   group: 'Team' },
@@ -3434,4 +3438,339 @@ function ReportsJumpNav() {
       </div>
     </div>
   )
+}
+
+// ── Fixed Costs / Commitments (T652) ───────────────────────────────────────
+// User-maintained fixed costs with cadence. These feed the cash-flow forecast
+// as the authoritative source — Xero P&L is chaotic (reclassifications,
+// journal entries) and bad for projection.
+
+interface Commitment {
+  id: string
+  name: string
+  vendor: string | null
+  amount: number
+  currency: string
+  cadence: 'monthly' | 'quarterly' | 'annual' | 'one_off'
+  category: string
+  nextDueDate: string | null
+  active: boolean
+  notes: string | null
+  linkedXeroAccount: string | null
+}
+
+const COMMITMENT_CATEGORIES = ['salary', 'contractor', 'software', 'insurance', 'tax', 'office', 'marketing', 'other'] as const
+const COMMITMENT_CADENCES: Array<Commitment['cadence']> = ['monthly', 'quarterly', 'annual', 'one_off']
+
+function monthlyEquivalent(c: Commitment): number {
+  if (!c.active) return 0
+  switch (c.cadence) {
+    case 'monthly': return c.amount
+    case 'quarterly': return c.amount / 3
+    case 'annual': return c.amount / 12
+    case 'one_off': return 0
+  }
+}
+
+function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
+  const [items, setItems] = useState<Commitment[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [form, setForm] = useState<{
+    name: string
+    vendor: string
+    amount: string
+    currency: string
+    cadence: Commitment['cadence']
+    category: string
+    nextDueDate: string
+    notes: string
+    active: boolean
+  }>({
+    name: '', vendor: '', amount: '', currency: 'NZD', cadence: 'monthly',
+    category: 'other', nextDueDate: '', notes: '', active: true,
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/commitments'))
+      if (!res.ok) throw new Error('Failed')
+      const d = await res.json() as { commitments?: Commitment[] }
+      setItems(d.commitments ?? [])
+    } catch {
+      setItems([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  function resetForm() {
+    setForm({ name: '', vendor: '', amount: '', currency: 'NZD', cadence: 'monthly',
+              category: 'other', nextDueDate: '', notes: '', active: true })
+    setEditingId(null)
+    setError(null)
+  }
+
+  function editRow(c: Commitment) {
+    setForm({
+      name: c.name,
+      vendor: c.vendor ?? '',
+      amount: String(c.amount),
+      currency: c.currency,
+      cadence: c.cadence,
+      category: c.category,
+      nextDueDate: c.nextDueDate ?? '',
+      notes: c.notes ?? '',
+      active: c.active,
+    })
+    setEditingId(c.id)
+    setShowForm(true)
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault()
+    const amount = parseFloat(form.amount)
+    if (!form.name.trim() || !Number.isFinite(amount)) {
+      setError('Name and a numeric amount are required.')
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      const body = {
+        name: form.name.trim(),
+        vendor: form.vendor.trim() || null,
+        amount,
+        currency: form.currency,
+        cadence: form.cadence,
+        category: form.category,
+        nextDueDate: form.nextDueDate || null,
+        notes: form.notes.trim() || null,
+        active: form.active,
+      }
+      const url = editingId ? apiPath(`/api/admin/commitments/${editingId}`) : apiPath('/api/admin/commitments')
+      const method = editingId ? 'PATCH' : 'POST'
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        setError(j.error ?? 'Save failed')
+        return
+      }
+      resetForm()
+      setShowForm(false)
+      await load()
+    } catch {
+      setError('Network error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!confirm('Delete this commitment?')) return
+    try {
+      await fetch(apiPath(`/api/admin/commitments/${id}`), { method: 'DELETE' })
+      await load()
+    } catch { /* noop */ }
+  }
+
+  async function toggleActive(c: Commitment) {
+    try {
+      await fetch(apiPath(`/api/admin/commitments/${c.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !c.active }),
+      })
+      await load()
+    } catch { /* noop */ }
+  }
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border p-6 animate-pulse" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <div className="h-5 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '40%' }} />
+        <div className="h-24 rounded mt-4" style={{ background: 'var(--color-bg-tertiary)' }} />
+      </div>
+    )
+  }
+
+  const active = (items ?? []).filter(c => c.active)
+  const totalMonthlyNzd = active.reduce((s, c) => {
+    const nzd = toDisplayNzd(c.amount, c.currency, exchangeRates)
+    return s + monthlyEqFromNzd(c.cadence, nzd)
+  }, 0)
+  const annualNzd = totalMonthlyNzd * 12
+
+  return (
+    <div className="rounded-xl border p-6" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+      <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--color-text)]">Fixed Costs (Commitments)</h2>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1">
+            Your recurring costs with cadence. This is what the Cash Flow Forecast uses for projections.
+            Xero P&amp;L is too chaotic (reclassifications, journal entries) to trust for forecasting.
+          </p>
+          <p className="text-xs text-[var(--color-text-subtle)] mt-1">
+            <strong>Monthly run rate:</strong> {formatInCur(totalMonthlyNzd, displayCurrency, exchangeRates)} ·
+            <strong> Annual:</strong> {formatInCur(annualNzd, displayCurrency, exchangeRates)} ·
+            {active.length} active commitment{active.length === 1 ? '' : 's'}
+          </p>
+        </div>
+        <button
+          onClick={() => { resetForm(); setShowForm(v => !v) }}
+          className="text-xs font-medium px-3 py-1.5 rounded transition-colors"
+          style={{
+            background: showForm ? 'var(--color-bg-tertiary)' : 'var(--color-brand)',
+            color: showForm ? 'var(--color-text)' : 'white',
+            border: 'none', cursor: 'pointer', minHeight: '2.25rem',
+          }}
+        >
+          {showForm ? 'Cancel' : '+ Add commitment'}
+        </button>
+      </div>
+
+      {showForm && (
+        <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5 p-4 rounded" style={{ background: 'var(--color-bg-secondary)' }}>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Name</label>
+            <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Liam salary PAYE" className="w-full px-3 py-2 text-sm border rounded-lg" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Vendor / supplier (optional)</label>
+            <input value={form.vendor} onChange={e => setForm(f => ({ ...f, vendor: e.target.value }))} className="w-full px-3 py-2 text-sm border rounded-lg" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Amount</label>
+            <input type="number" step="0.01" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} className="w-full px-3 py-2 text-sm border rounded-lg" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Currency</label>
+            <select value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))} className="w-full px-3 py-2 text-sm border rounded-lg" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+              {CURRENCY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Cadence</label>
+            <select value={form.cadence} onChange={e => setForm(f => ({ ...f, cadence: e.target.value as Commitment['cadence'] }))} className="w-full px-3 py-2 text-sm border rounded-lg" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+              {COMMITMENT_CADENCES.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Category</label>
+            <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} className="w-full px-3 py-2 text-sm border rounded-lg" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+              {COMMITMENT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          {form.cadence !== 'monthly' && (
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Next due date</label>
+              <input type="date" value={form.nextDueDate} onChange={e => setForm(f => ({ ...f, nextDueDate: e.target.value }))} className="w-full px-3 py-2 text-sm border rounded-lg" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }} />
+            </div>
+          )}
+          <div className="md:col-span-2">
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Notes (optional)</label>
+            <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="w-full px-3 py-2 text-sm border rounded-lg" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }} />
+          </div>
+          <div className="md:col-span-2 flex items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-[var(--color-text)]">
+              <input type="checkbox" checked={form.active} onChange={e => setForm(f => ({ ...f, active: e.target.checked }))} />
+              Active (include in cash flow forecast)
+            </label>
+          </div>
+          {error && <p className="md:col-span-2 text-sm" style={{ color: 'var(--color-danger)' }}>{error}</p>}
+          <div className="md:col-span-2 flex justify-end gap-2">
+            <button type="button" onClick={() => { resetForm(); setShowForm(false) }} className="text-sm font-medium px-4 py-2 rounded" style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text)', border: 'none', cursor: 'pointer' }}>Cancel</button>
+            <button type="submit" disabled={saving} className="text-sm font-medium px-4 py-2 rounded disabled:opacity-50" style={{ background: 'var(--color-brand)', color: 'white', border: 'none', cursor: saving ? 'wait' : 'pointer' }}>
+              {saving ? 'Saving...' : editingId ? 'Update' : 'Add commitment'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {(items ?? []).length === 0 ? (
+        <p className="text-sm text-[var(--color-text-muted)] py-4">
+          No fixed costs yet. Add your salaries, software subscriptions, insurance and other recurring expenses
+          for accurate cash flow projection.
+        </p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs font-medium text-[var(--color-text-muted)] border-b" style={{ borderColor: 'var(--color-border)' }}>
+              <th className="py-2 pr-3">Name</th>
+              <th className="py-2 pr-3">Category</th>
+              <th className="py-2 pr-3 text-right">Amount</th>
+              <th className="py-2 pr-3">Cadence</th>
+              <th className="py-2 pr-3 text-right">Monthly equiv.</th>
+              <th className="py-2 pr-3">Active</th>
+              <th className="py-2 pr-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {(items ?? []).map(c => {
+              const monthlyNative = monthlyEquivalent(c)
+              const monthlyDisplay = convertNzd(toDisplayNzd(monthlyNative, c.currency, exchangeRates), displayCurrency, exchangeRates)
+              return (
+                <tr key={c.id} className="border-b" style={{ borderColor: 'var(--color-border-subtle)', opacity: c.active ? 1 : 0.5 }}>
+                  <td className="py-2 pr-3">
+                    <div className="font-medium text-[var(--color-text)]">{c.name}</div>
+                    {c.vendor && <div className="text-xs text-[var(--color-text-subtle)]">{c.vendor}</div>}
+                  </td>
+                  <td className="py-2 pr-3 text-xs text-[var(--color-text-muted)] capitalize">{c.category}</td>
+                  <td className="py-2 pr-3 text-right text-[var(--color-text)]">
+                    {new Intl.NumberFormat('en-NZ', { style: 'currency', currency: c.currency, maximumFractionDigits: 0 }).format(c.amount)}
+                  </td>
+                  <td className="py-2 pr-3 text-xs text-[var(--color-text-muted)]">{c.cadence.replace('_', ' ')}</td>
+                  <td className="py-2 pr-3 text-right text-[var(--color-text-muted)]">
+                    {formatInCur(monthlyDisplay, displayCurrency, exchangeRates)}
+                  </td>
+                  <td className="py-2 pr-3">
+                    <button onClick={() => toggleActive(c)} className="text-xs font-medium px-2 py-0.5 rounded transition-colors" style={{
+                      background: c.active ? 'var(--color-brand-50)' : 'var(--color-bg-tertiary)',
+                      color: c.active ? 'var(--color-brand)' : 'var(--color-text-subtle)',
+                      border: 'none', cursor: 'pointer',
+                    }}>
+                      {c.active ? 'Active' : 'Paused'}
+                    </button>
+                  </td>
+                  <td className="py-2 pr-3 text-right">
+                    <button onClick={() => editRow(c)} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-brand)] mr-3">Edit</button>
+                    <button onClick={() => handleDelete(c.id)} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-danger)]">Delete</button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+// Helper: convert an amount from a source currency to NZD using the
+// rates map (which is keyed as "units of currency per 1 NZD").
+function toDisplayNzd(amount: number, currency: string, rates: Record<string, number>): number {
+  if (currency === 'NZD') return amount
+  const rate = rates[currency]
+  if (!rate || rate === 0) return amount
+  return amount / rate
+}
+
+// Helper: monthly-equivalent of an NZD amount given a cadence.
+function monthlyEqFromNzd(cadence: Commitment['cadence'], amountNzd: number): number {
+  switch (cadence) {
+    case 'monthly': return amountNzd
+    case 'quarterly': return amountNzd / 3
+    case 'annual': return amountNzd / 12
+    case 'one_off': return 0
+  }
 }

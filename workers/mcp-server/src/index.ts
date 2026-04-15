@@ -560,6 +560,37 @@ const TOOLS: ToolDef[] = [
   tool('run_migration', 'Apply a database migration by name. All statements use IF NOT EXISTS so re-running is safe.', {
     name: prop('string', 'Migration name like "0012", "0013", or "all"'),
   }, ['name']),
+
+  // ── Expense commitments (fixed-cost forecasting) ────────────────────
+  tool('list_commitments', 'List all expense commitments (user-maintained fixed costs with cadence)'),
+  tool('add_commitment', 'Add an expense commitment. Cadence: monthly | quarterly | annual | one_off. nextDueDate anchors non-monthly cadences.', {
+    name: prop('string', 'Short name, e.g. "Liam salary PAYE"'),
+    amount: prop('number', 'Numeric amount in the given currency'),
+    currency: prop('string', 'Currency code (default NZD)'),
+    cadence: prop('string', 'monthly | quarterly | annual | one_off'),
+    category: prop('string', 'salary | contractor | software | insurance | tax | office | marketing | other'),
+    vendor: prop('string', 'Optional vendor name'),
+    nextDueDate: prop('string', 'YYYY-MM-DD. Anchor for quarterly/annual/one_off.'),
+    notes: prop('string', 'Optional notes'),
+    linkedXeroAccount: prop('string', 'Optional Xero account name for reconciliation'),
+    active: prop('boolean', 'Whether this commitment is active (default true)'),
+  }, ['name', 'amount']),
+  tool('update_commitment', 'Update an existing expense commitment', {
+    id: prop('string', 'Commitment ID'),
+    name: prop('string', 'Name'),
+    amount: prop('number', 'Amount'),
+    currency: prop('string', 'Currency'),
+    cadence: prop('string', 'monthly | quarterly | annual | one_off'),
+    category: prop('string', 'Category'),
+    vendor: prop('string', 'Vendor'),
+    nextDueDate: prop('string', 'YYYY-MM-DD'),
+    notes: prop('string', 'Notes'),
+    linkedXeroAccount: prop('string', 'Linked Xero account'),
+    active: prop('boolean', 'Active'),
+  }, ['id']),
+  tool('delete_commitment', 'Delete an expense commitment', {
+    id: prop('string', 'Commitment ID'),
+  }, ['id']),
 ]
 
 // ---------------------------------------------------------------------------
@@ -906,6 +937,24 @@ async function executeTool(
       return json(await apiGet('/api/admin/db/migrate', token))
     case 'run_migration':
       return json(await apiWrite('/api/admin/db/migrate', token, 'POST', { name: s('name') }))
+
+    // ── Expense commitments ────────────────────────────────────────
+    case 'list_commitments':
+      return json(await apiGet('/api/admin/commitments', token))
+    case 'add_commitment':
+      return json(await apiWrite('/api/admin/commitments', token, 'POST', args as Record<string, unknown>))
+    case 'update_commitment': {
+      const id = s('id')
+      if (!id) throw new Error('id is required')
+      const { id: _, ...body } = args as Record<string, unknown>
+      void _
+      return json(await apiWrite(`/api/admin/commitments/${id}`, token, 'PATCH', body))
+    }
+    case 'delete_commitment': {
+      const id = s('id')
+      if (!id) throw new Error('id is required')
+      return json(await apiWrite(`/api/admin/commitments/${id}`, token, 'DELETE'))
+    }
 
     default:
       throw new Error(`Unknown tool: ${name}`)

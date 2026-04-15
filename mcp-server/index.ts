@@ -1544,6 +1544,74 @@ server.tool(
   }
 )
 
+// ─── Expense commitments (fixed-cost forecasting) ─────────────────────────
+
+server.tool(
+  'list_commitments',
+  'List all expense commitments (user-maintained fixed costs with cadence) used as the primary source for cash-flow projection.',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/commitments')
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'add_commitment',
+  'Add an expense commitment (fixed recurring cost). Cadence controls how it is projected: monthly (every month), quarterly (every 3 months from nextDueDate), annual (every 12 months from nextDueDate), or one_off (only in the month of nextDueDate).',
+  {
+    name: z.string().describe('Short name, e.g. "Liam salary PAYE"'),
+    amount: z.number().describe('Numeric amount in the given currency'),
+    currency: z.string().optional().describe('Currency code (default NZD)'),
+    cadence: z.string().optional().describe('monthly | quarterly | annual | one_off (default monthly)'),
+    category: z.string().optional().describe('salary | contractor | software | insurance | tax | office | marketing | other'),
+    vendor: z.string().optional(),
+    nextDueDate: z.string().optional().describe('YYYY-MM-DD. Anchor for quarterly/annual/one_off.'),
+    notes: z.string().optional(),
+    linkedXeroAccount: z.string().optional().describe('Optional Xero account name to reconcile against (e.g. "Salaries")'),
+    active: z.boolean().optional(),
+  },
+  async (args) => {
+    const data = await apiFetch('/api/admin/commitments', { method: 'POST', body: args })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'update_commitment',
+  'Update an existing expense commitment',
+  {
+    id: z.string().describe('Commitment ID'),
+    name: z.string().optional(),
+    amount: z.number().optional(),
+    currency: z.string().optional(),
+    cadence: z.string().optional(),
+    category: z.string().optional(),
+    vendor: z.string().optional(),
+    nextDueDate: z.string().optional(),
+    notes: z.string().optional(),
+    linkedXeroAccount: z.string().optional(),
+    active: z.boolean().optional(),
+  },
+  async (args) => {
+    const { id, ...body } = args
+    const data = await apiFetch(`/api/admin/commitments/${id}`, { method: 'PATCH', body })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'delete_commitment',
+  'Delete an expense commitment',
+  {
+    id: z.string().describe('Commitment ID'),
+  },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/commitments/${args.id}`, { method: 'DELETE' })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
 // ---------------------------------------------------------------------------
 // Start server
 // ---------------------------------------------------------------------------

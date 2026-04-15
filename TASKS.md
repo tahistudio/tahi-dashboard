@@ -1071,6 +1071,8 @@ as the integration story instead.
   and red for errors only. Legacy accent names (violet/blue/teal/
   emerald) now alias to brand colours so existing call sites work
   without a sweep. Applied to overview-content.tsx and reports-content.tsx.
+- [x] T652 - [BE+FE] Expense commitments model. New `expense_commitments` table (migration 0014) with per-item cadence (monthly/quarterly/annual/one_off). CRUD at `/api/admin/commitments` + `/api/admin/commitments/[id]`. Cash flow forecast prefers commitments over Xero recurring detection when any exist (authoritative for projection; Xero P&L stays the actuals view). New Fixed Costs section on Reports page with add/edit/delete, active toggle, monthly-equivalent column, monthly + annual totals. Four MCP tools (list/add/update/delete_commitment). Solves the Shareholder Salaries reclassification mess — Liam says "I pay $4,333/mo each for me and Staci" once, forecast gets it right forever. — done 2026-04-15
+
 - [ ] T651 - [FE] Sweep all other coloured accent backgrounds across
   the dashboard (status badges, chips, progress bars, chart colours).
   Audit for any remaining hardcoded `#dbeafe`, `#ede9fe`, `#d1fae5`,

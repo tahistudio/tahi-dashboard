@@ -690,6 +690,49 @@ export const xeroExpenseCategories = sqliteTable('xero_expense_categories', {
   index('idx_xero_exp_category').on(table.accountName),
 ])
 
+// ============================================================
+// EXPENSE COMMITMENTS (fixed costs with cadence)
+// ============================================================
+// User-maintained fixed costs. Xero P&L data is chaotic (accountant
+// reclassifications, journal entries, split/unsplit categories) so
+// it's unreliable for forecasting. Commitments are the source of
+// truth for cash-flow projection and burn rate calculations. Xero
+// P&L stays as a separate view of historical actuals.
+//
+// Each commitment has a cadence (monthly / quarterly / annual / one_off)
+// so the forecast correctly spreads it across months:
+//   monthly:    amount appears every month
+//   quarterly:  amount appears every 3 months starting from nextDueDate
+//   annual:     amount appears once a year from nextDueDate
+//   one_off:    amount appears only in the month of nextDueDate
+//
+// Optional linkedXeroAccount field lets us reconcile expected vs actual:
+// if you say "Salaries $8,666.66/mo" and Xero shows the same figure in
+// the "Salaries" account, the dashboard can flag drift.
+export const expenseCommitments = sqliteTable('expense_commitments', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
+  vendor: text('vendor'),
+  amount: real('amount').notNull(),
+  currency: text('currency').notNull().default('NZD'),
+  // monthly | quarterly | annual | one_off
+  cadence: text('cadence').notNull().default('monthly'),
+  // contractor | software | salary | insurance | tax | office | marketing | other
+  category: text('category').notNull().default('other'),
+  // YYYY-MM-DD. Used to place quarterly/annual/one_off in the forecast.
+  nextDueDate: text('next_due_date'),
+  // When false, commitment is excluded from forecast (kept for history)
+  active: integer('active', { mode: 'boolean' }).default(true),
+  notes: text('notes'),
+  // Optional Xero account name this reconciles against (e.g. "Salaries")
+  linkedXeroAccount: text('linked_xero_account'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  index('idx_commitments_active').on(table.active),
+  index('idx_commitments_category').on(table.category),
+])
+
 // Latest bank balances by Xero account.
 // Key on Xero's AccountID so resync overwrites.
 export const xeroBankBalances = sqliteTable('xero_bank_balances', {
