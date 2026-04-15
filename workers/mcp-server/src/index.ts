@@ -556,6 +556,10 @@ const TOOLS: ToolDef[] = [
   }),
   tool('get_bank_balances', 'Current bank account balances + total NZD + runway months at current burn rate'),
   tool('fire_retainer_alerts', 'Send admin notifications for retainer churn risk (>=70) and upsell signals (>120% utilisation). Dedupes against alerts from the last 14 days.'),
+  tool('list_migrations', 'List the database migrations baked into the dashboard runtime'),
+  tool('run_migration', 'Apply a database migration by name. All statements use IF NOT EXISTS so re-running is safe.', {
+    name: prop('string', 'Migration name like "0012", "0013", or "all"'),
+  }, ['name']),
 ]
 
 // ---------------------------------------------------------------------------
@@ -898,6 +902,10 @@ async function executeTool(
       return json(await apiGet('/api/admin/reports/bank-balances', token))
     case 'fire_retainer_alerts':
       return json(await apiWrite('/api/admin/reports/retainer-alerts', token, 'POST'))
+    case 'list_migrations':
+      return json(await apiGet('/api/admin/db/migrate', token))
+    case 'run_migration':
+      return json(await apiWrite('/api/admin/db/migrate', token, 'POST', { name: s('name') }))
 
     default:
       throw new Error(`Unknown tool: ${name}`)

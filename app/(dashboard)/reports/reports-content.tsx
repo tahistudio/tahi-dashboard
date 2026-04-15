@@ -3149,7 +3149,10 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
                     <tr key={c.accountName} className="border-b" style={{ borderColor: 'var(--color-border-subtle)' }}>
                       <td className="py-2 pr-3">
                         <span className="font-medium text-[var(--color-text)]">{c.accountName}</span>
-                        {c.accountCode && <span className="text-xs text-[var(--color-text-subtle)] ml-2">#{c.accountCode}</span>}
+                        {/* Only show the code if it looks like a short Xero account code (e.g. "400"). UUIDs are internal AccountIDs and not user-facing. */}
+                        {c.accountCode && /^\d{3,5}$/.test(c.accountCode) && (
+                          <span className="text-xs text-[var(--color-text-subtle)] ml-2">#{c.accountCode}</span>
+                        )}
                       </td>
                       <td className="py-2 pr-3 text-xs text-[var(--color-text-muted)]">{c.section === 'cost_of_sales' ? 'COGS' : c.section}</td>
                       <td className="py-2 pr-3">

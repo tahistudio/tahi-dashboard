@@ -1522,6 +1522,28 @@ server.tool(
   }
 )
 
+server.tool(
+  'list_migrations',
+  'List the database migrations baked into the dashboard runtime',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/db/migrate')
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'run_migration',
+  'Apply a database migration to the live D1 by name (e.g. "0013") or "all". All statements use IF NOT EXISTS so re-running is safe.',
+  {
+    name: z.string().describe('Migration name like "0012", "0013", or "all"'),
+  },
+  async (args) => {
+    const data = await apiFetch('/api/admin/db/migrate', { method: 'POST', body: { name: args.name } })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
 // ---------------------------------------------------------------------------
 // Start server
 // ---------------------------------------------------------------------------
