@@ -1688,11 +1688,20 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
 
 // ── Summary Card ────────────────────────────────────────────────────────────
 
+// Neutralised 2026-04-15: legacy accent names now map to brand-family
+// colours so KPI icons don't read as a rainbow. Amber kept warm only
+// for real warnings. Prefer the semantic names in new code.
 const ACCENT_COLORS: Record<string, { bg: string; color: string }> = {
-  emerald: { bg: '#d1fae5', color: '#059669' },
-  blue:    { bg: '#dbeafe', color: '#2563eb' },
-  amber:   { bg: '#fef3c7', color: '#d97706' },
-  violet:  { bg: '#ede9fe', color: '#7c3aed' },
+  brand:        { bg: '#dcefd8', color: '#5A824E' },
+  'brand-soft': { bg: '#f0f7ee', color: '#7aab6b' },
+  'brand-dark': { bg: '#c8e2c0', color: '#425F39' },
+  amber:        { bg: '#fef3c7', color: '#b45309' },
+  red:          { bg: '#fee2e2', color: '#b91c1c' },
+  neutral:      { bg: '#eef0eb', color: '#6b7566' },
+  // Legacy aliases
+  emerald: { bg: '#c8e2c0', color: '#425F39' },
+  blue:    { bg: '#f0f7ee', color: '#7aab6b' },
+  violet:  { bg: '#dcefd8', color: '#5A824E' },
 }
 
 function SummaryCard({

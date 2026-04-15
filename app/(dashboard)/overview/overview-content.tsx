@@ -20,15 +20,33 @@ import { useImpersonation } from '@/components/tahi/impersonation-banner'
 const BRAND = '#5A824E'
 
 // ─── Accent colour map (hex only, no Tailwind dynamic classes) ───────────────
-
+//
+// Neutralised 2026-04-15 to stay in the brand family instead of rainbow.
+// Semantic rules:
+//   brand / brand-soft / brand-dark  — any informational KPI (clients,
+//     requests, MRR, team count). Visually distinct but all in the green
+//     family so the dashboard reads as one product.
+//   amber  — actual warnings only (outstanding invoices, in-review flags).
+//   red    — errors and overdue states only.
+//   neutral — truly neutral counters where any colour would imply meaning.
+//
+// The legacy names (violet/blue/emerald/teal) remain as aliases pointing
+// to the new brand-family values so existing callers keep working without
+// a sweep. Prefer the semantic names for new code.
 const ACCENTS = {
-  violet:  { bg: '#ede9fe', color: '#7c3aed' },
-  blue:    { bg: '#dbeafe', color: '#2563eb' },
-  amber:   { bg: '#fef3c7', color: '#d97706' },
-  emerald: { bg: '#d1fae5', color: '#059669' },
-  neutral: { bg: '#e5e7eb', color: '#6b7280' },
-  teal:    { bg: '#ccfbf1', color: '#0d9488' },
-  red:     { bg: '#fee2e2', color: '#dc2626' },
+  brand:      { bg: '#dcefd8', color: '#5A824E' },  // brand-100 bg / brand fg
+  'brand-soft': { bg: '#f0f7ee', color: '#7aab6b' }, // brand-50 bg / brand-light fg
+  'brand-dark': { bg: '#c8e2c0', color: '#425F39' }, // deeper for emphasis
+
+  amber:   { bg: '#fef3c7', color: '#b45309' },
+  red:     { bg: '#fee2e2', color: '#b91c1c' },
+  neutral: { bg: '#eef0eb', color: '#6b7566' },     // earthy neutral, was grey
+
+  // Legacy aliases — point to brand family so nothing reads rainbow.
+  violet:  { bg: '#dcefd8', color: '#5A824E' },
+  blue:    { bg: '#f0f7ee', color: '#7aab6b' },
+  emerald: { bg: '#c8e2c0', color: '#425F39' },
+  teal:    { bg: '#f0f7ee', color: '#7aab6b' },
 } as const
 
 type Accent = keyof typeof ACCENTS

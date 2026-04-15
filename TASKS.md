@@ -1014,6 +1014,70 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [x] T635 - [FE] Sidebar role-aware NAV: split into ADMIN_NAV (Workspace / Clients / Billing / Operations / Account) and CLIENT_NAV (Your project / Library / Billing). "Daily" was confusing for clients; neutral labels work for both.
 - [x] T636 - [PM] Assign Liam Miller as PM to all 10 active clients via assign_client_pm MCP tool. — done 2026-04-15.
 
+### ManyRequests feature parity audit (2026-04-15)
+
+Reference: MR changelog April 7 2026. Zapier item explicitly skipped
+per user decision — we expose MCP tools + outgoing webhooks (Phase 4)
+as the integration story instead.
+
+- [ ] T640 - [BE] Email-to-Request intake. Each org gets a unique
+  inbound address (e.g. `inv-{orgIdHash}@requests.tahi.studio`);
+  incoming email → parse subject=title, body=description, sender email
+  matched against schema.contacts to assign the correct client. Use
+  Cloudflare Email Routing → Worker or a Resend inbound webhook.
+  Create the request with `source='email'`. Reject unmatched senders
+  with a bounce. Matches MR "Turn Emails into Requests Automatically". — [BE]
+- [x] T641 - [skip] Zapier update-request action — user prefers MCP
+  + native webhooks. Keep the Zapier outgoing webhook story in Phase 4.
+- [ ] T642 - [BE+FE] Edit + delete messages with permissions.
+  Add `PATCH /api/admin/requests/[id]/messages/[messageId]` and DELETE
+  counterpart (plus portal + conversations equivalents). Rule:
+  team members can edit/delete their own messages (owner check on
+  `authorId === userId`); Tahi admins can edit/delete any message.
+  Soft-delete with a `deletedAt` column so audit trail is preserved.
+  UI: hover actions on each message bubble. — [BE+FE]
+- [ ] T643 - [BE] Add `{{requestNumber}}` variable to all email
+  templates in `emails/` (new-request, request-delivered, review-request,
+  invoice-sent, invoice-overdue, welcome). Prefix subject lines with
+  `[REQ-{number}]` so replies group correctly in client inboxes. — [BE]
+- [ ] T644 - [FE] Filter requests by organisation tags. We already
+  have `schema.tags`; extend the requests list filter bar to include
+  a "Tags" dropdown that filters by tags applied at the org level
+  (joined through organisations). Works on list, kanban, reports. — [FE]
+- [ ] T645 - [FE] Comments-only view in request activity. Activity
+  feed currently shows status changes + system events + comments
+  interleaved. Add segmented control: All / Comments / Status changes.
+  Default to All; persist preference to localStorage. — [FE]
+- [ ] T646 - [BE+FE] Control portal indexing by search engines. Add
+  `indexPortal` (boolean, default false) to settings table. Inject
+  `<meta name="robots" content="noindex,nofollow">` on all client-facing
+  pages when false, plus a `/robots.txt` route that returns
+  `Disallow: /portal/*` when private. — [BE+FE]
+- [ ] T647 - [BE+FE] Lock comments on delivered/closed requests for
+  client users. `POST /api/portal/requests/[id]/messages` rejects
+  with 403 if `request.status` in ('delivered','cancelled','archived').
+  Admin POST still works (to post follow-up notes). Client UI hides
+  the reply box with a gentle notice. — [BE+FE]
+- [x] T648 - Due dates on request intake form — already supported.
+  Field exists in new-request-dialog.tsx and is accepted by
+  `POST /api/portal/requests`. Verified 2026-04-15.
+
+### Brand alignment (2026-04-15)
+
+- [x] T650 - [FE] Neutralise KPI leaf-icon palette. Previous palette
+  used violet/blue/emerald/amber rainbow across StatCard and
+  SummaryCard components. Repainted to brand-family (brand/brand-soft/
+  brand-dark) for informational KPIs; reserved amber for real warnings
+  and red for errors only. Legacy accent names (violet/blue/teal/
+  emerald) now alias to brand colours so existing call sites work
+  without a sweep. Applied to overview-content.tsx and reports-content.tsx.
+- [ ] T651 - [FE] Sweep all other coloured accent backgrounds across
+  the dashboard (status badges, chips, progress bars, chart colours).
+  Audit for any remaining hardcoded `#dbeafe`, `#ede9fe`, `#d1fae5`,
+  `#fef3c7` etc that aren't semantic (warning/danger), and migrate
+  to brand-family tokens. Chart series colours in Recharts components
+  should also prefer brand shades. — [FE]
+
 ### Hardening sprint (2026-04-15)
 
 - [x] T624 - [BE] Access scoping on detail API routes. Added `lib/require-access.ts` with `requireAccessToOrg` + `getOrgScope`. Applied to `/api/admin/invoices/[id]`, `/api/admin/invoices` list + POST, `/api/admin/requests/[id]`, `/api/admin/clients/[id]`, `/api/admin/tasks/[id]`. Admins bypass; restricted team members see only allowed orgs. — [BE] — done 2026-04-15
