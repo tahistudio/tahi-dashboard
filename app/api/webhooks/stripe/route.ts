@@ -3,6 +3,36 @@ import Stripe from 'stripe'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { importStripeInvoice, type StripeInvoiceLike } from '@/lib/stripe-import'
+
+// Convert Stripe SDK Invoice into the loose shape importStripeInvoice wants.
+function toImportable(inv: Stripe.Invoice): StripeInvoiceLike {
+  return {
+    id: inv.id ?? '',
+    number: inv.number ?? null,
+    status: inv.status ?? null,
+    customer: typeof inv.customer === 'string' ? inv.customer : inv.customer?.id ?? null,
+    customer_name: inv.customer_name ?? null,
+    currency: inv.currency ?? null,
+    subtotal: inv.subtotal ?? 0,
+    total: inv.total ?? 0,
+    amount_paid: inv.amount_paid ?? 0,
+    due_date: inv.due_date ?? null,
+    created: inv.created ?? Math.floor(Date.now() / 1000),
+    status_transitions: inv.status_transitions
+      ? { paid_at: inv.status_transitions.paid_at ?? null }
+      : null,
+    lines: inv.lines
+      ? {
+          data: inv.lines.data.map(l => ({
+            description: l.description ?? null,
+            quantity: l.quantity ?? null,
+            amount: l.amount ?? 0,
+          })),
+        }
+      : undefined,
+  }
+}
 
 // Force dynamic : prevents Next.js from trying to statically analyse this
 // route at build time (when env vars are unavailable on Webflow Cloud).
@@ -53,7 +83,16 @@ export async function POST(req: Request) {
     case 'invoice.paid': {
       const invoice = event.data.object as Stripe.Invoice
       if (invoice.id) {
-        // Update local invoice status to paid
+        // Self-heal: if no local row exists for this Stripe invoice yet
+        // (e.g. it was created in Stripe directly and never imported),
+        // import it now. Otherwise just mark paid.
+        // autoCreateOrg=false so an unknown customer doesn't spawn a
+        // duplicate org silently — payment sits until the next manual
+        // Import Stripe Invoices sync resolves the org mapping.
+        await importStripeInvoice(database, toImportable(invoice), { autoCreateOrg: false })
+
+        // Re-check and force status=paid (import may have used the
+        // status on the event, which should already be 'paid' here).
         const existing = await database
           .select({ id: schema.invoices.id })
           .from(schema.invoices)

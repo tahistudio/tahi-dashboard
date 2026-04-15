@@ -515,6 +515,7 @@ interface InvoiceListProps {
 
 export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
   const { isImpersonatingClient } = useImpersonation()
+  const { showToast } = useToast()
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
   const router = useRouter()
@@ -524,6 +525,7 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
   const [activeTab, setActiveTab] = useState('all')
   const [sourceFilter, setSourceFilter] = useState('all')
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
 
   // Fetch all invoices once, filter client-side for accurate overdue detection
@@ -616,6 +618,41 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
             >
               <Download style={{ width: 16, height: 16 }} aria-hidden="true" />
               Export CSV
+            </button>
+            <button
+              onClick={async () => {
+                if (importing) return
+                setImporting(true)
+                try {
+                  const res = await fetch(apiPath('/api/admin/integrations/stripe/import-invoices'), { method: 'POST' })
+                  const json = await res.json() as { imported?: number; updated?: number; skipped?: number; error?: string; message?: string }
+                  if (res.ok) {
+                    showToast(`Stripe: ${json.imported ?? 0} imported, ${json.updated ?? 0} updated, ${json.skipped ?? 0} skipped`)
+                    handleCreated()
+                  } else {
+                    showToast(json.message ?? json.error ?? 'Import failed')
+                  }
+                } catch {
+                  showToast('Import failed — check connection')
+                } finally {
+                  setImporting(false)
+                }
+              }}
+              disabled={importing}
+              className="flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
+              style={{
+                padding: '0.625rem 1.125rem',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                borderRadius: '0 10px 0 10px',
+                cursor: importing ? 'wait' : 'pointer',
+                color: 'var(--color-text)',
+                minHeight: 44,
+              }}
+              title="Pull new invoices from Stripe into the dashboard"
+            >
+              <RefreshCw style={{ width: 16, height: 16, opacity: 0.7 }} aria-hidden="true" />
+              {importing ? 'Importing...' : 'Import from Stripe'}
             </button>
             <button
               onClick={() => setShowCreateModal(true)}
