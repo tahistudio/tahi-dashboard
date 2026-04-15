@@ -39,6 +39,7 @@ import {
   Palette,
   Pencil,
   ListOrdered,
+  Percent,
 } from 'lucide-react'
 import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badge'
 import { TrackMeter } from '@/components/tahi/track-meter'
@@ -127,21 +128,22 @@ interface ClientData {
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'overview',   label: 'Overview',   icon: Building2 },
-  { id: 'requests',   label: 'Requests',   icon: Layers },
-  { id: 'trackqueue', label: 'Track Queue', icon: ListOrdered },
-  { id: 'files',      label: 'Files',      icon: File },
-  { id: 'invoices',   label: 'Invoices',   icon: DollarSign },
-  { id: 'contracts',  label: 'Contracts',  icon: ScrollText },
-  { id: 'contacts',   label: 'Contacts',   icon: Users },
-  { id: 'calls',      label: 'Calls',      icon: Phone },
-  { id: 'messages',   label: 'Messages',   icon: MessageSquare },
-  { id: 'brands',     label: 'Brands',     icon: Palette },
-  { id: 'deals',      label: 'Deals',      icon: Handshake },
-  { id: 'time',       label: 'Time',       icon: Clock },
-  { id: 'crm',        label: 'Activities', icon: CalendarDays },
-  { id: 'revenue',    label: 'Revenue',    icon: TrendingUp },
-  { id: 'activity',   label: 'Activity',   icon: Activity },
+  { id: 'overview',      label: 'Overview',      icon: Building2 },
+  { id: 'requests',      label: 'Requests',      icon: Layers },
+  { id: 'trackqueue',    label: 'Track Queue',   icon: ListOrdered },
+  { id: 'files',         label: 'Files',         icon: File },
+  { id: 'invoices',      label: 'Invoices',      icon: DollarSign },
+  { id: 'contracts',     label: 'Contracts',     icon: ScrollText },
+  { id: 'contacts',      label: 'Contacts',      icon: Users },
+  { id: 'calls',         label: 'Calls',         icon: Phone },
+  { id: 'messages',      label: 'Messages',      icon: MessageSquare },
+  { id: 'brands',        label: 'Brands',        icon: Palette },
+  { id: 'deals',         label: 'Deals',         icon: Handshake },
+  { id: 'time',          label: 'Time',          icon: Clock },
+  { id: 'crm',           label: 'Activities',    icon: CalendarDays },
+  { id: 'revenue',       label: 'Revenue',       icon: TrendingUp },
+  { id: 'profitability', label: 'Profitability', icon: Percent },
+  { id: 'activity',      label: 'Activity',      icon: Activity },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -377,6 +379,9 @@ export function ClientDetail({ clientId }: { clientId: string }) {
         )}
         {activeTab === 'revenue' && (
           <RevenueTab clientId={clientId} />
+        )}
+        {activeTab === 'profitability' && (
+          <ProfitabilityTab clientId={clientId} />
         )}
         {activeTab === 'activity' && (
           <ActivityTab clientId={clientId} />
@@ -3389,6 +3394,308 @@ function RevenueTab({ clientId }: { clientId: string }) {
             </div>
           )
         })}
+      </div>
+    </div>
+  )
+}
+
+// ── Profitability tab (T595) ─────────────────────────────────────────────────
+// Shows gross margin for this client (revenue minus costs including
+// billable time × default hourly rate + logged client_costs). Includes a
+// form to add cost entries.
+
+interface ProfitabilityData {
+  orgId: string
+  orgName: string
+  hourlyRateNzd: number
+  revenueNzd: number
+  costNzd: number
+  marginNzd: number
+  marginPct: number
+  byCategory: Record<string, number>
+  timeCost: { hours: number; rate: number; cost: number }
+  byMonth: Array<{ month: string; revenue: number; cost: number; margin: number }>
+}
+
+interface ClientCostRow {
+  id: string
+  description: string
+  amount: number
+  currency: string
+  category: 'contractor' | 'software' | 'hours' | 'other'
+  date: string
+  recurring: boolean
+}
+
+function ProfitabilityTab({ clientId }: { clientId: string }) {
+  const [data, setData] = useState<ProfitabilityData | null>(null)
+  const [costs, setCosts] = useState<ClientCostRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showAdd, setShowAdd] = useState(false)
+  const [form, setForm] = useState({
+    description: '',
+    amount: '',
+    currency: 'NZD',
+    category: 'other' as ClientCostRow['category'],
+    date: new Date().toISOString().slice(0, 10),
+    recurring: false,
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const loadAll = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [profitRes, costsRes] = await Promise.all([
+        fetch(apiPath(`/api/admin/clients/${clientId}/profitability`)).then(r => r.ok ? r.json() : Promise.reject()),
+        fetch(apiPath(`/api/admin/clients/${clientId}/costs`)).then(r => r.ok ? r.json() : Promise.reject()),
+      ])
+      setData(profitRes as ProfitabilityData)
+      setCosts(((costsRes as { costs?: ClientCostRow[] }).costs) ?? [])
+    } catch {
+      setData(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [clientId])
+
+  useEffect(() => { loadAll() }, [loadAll])
+
+  async function handleAdd(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    const amount = parseFloat(form.amount)
+    if (!form.description.trim() || !Number.isFinite(amount)) {
+      setError('Description and a numeric amount are required.')
+      return
+    }
+    setSaving(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/clients/${clientId}/costs`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: form.description.trim(),
+          amount,
+          currency: form.currency,
+          category: form.category,
+          date: form.date,
+          recurring: form.recurring,
+        }),
+      })
+      if (!res.ok) {
+        const json = await res.json() as { error?: string }
+        setError(json.error ?? 'Failed to save cost')
+        return
+      }
+      setForm({
+        description: '', amount: '', currency: form.currency, category: 'other',
+        date: new Date().toISOString().slice(0, 10), recurring: false,
+      })
+      setShowAdd(false)
+      await loadAll()
+    } catch {
+      setError('Network error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete(costId: string) {
+    if (!confirm('Delete this cost entry?')) return
+    try {
+      await fetch(apiPath(`/api/admin/clients/${clientId}/costs/${costId}`), { method: 'DELETE' })
+      await loadAll()
+    } catch { /* noop */ }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading profitability data...
+      </div>
+    )
+  }
+
+  if (!data) {
+    return (
+      <div className="rounded-xl border p-6 bg-[var(--color-bg)]" style={{ borderColor: 'var(--color-border)' }}>
+        <p className="text-sm text-[var(--color-text-muted)]">Unable to load profitability data.</p>
+      </div>
+    )
+  }
+
+  const nzd = (n: number) => new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD', maximumFractionDigits: 0 }).format(n)
+  const marginColour = data.marginPct >= 50 ? '#16a34a'
+    : data.marginPct >= 25 ? '#f59e0b'
+    : '#dc2626'
+
+  return (
+    <div className="space-y-6">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="rounded-xl border p-4" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+          <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Revenue (paid)</div>
+          <div className="text-xl font-bold text-[var(--color-text)] mt-1">{nzd(data.revenueNzd)}</div>
+        </div>
+        <div className="rounded-xl border p-4" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+          <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Total cost</div>
+          <div className="text-xl font-bold text-[var(--color-text)] mt-1">{nzd(data.costNzd)}</div>
+          <div className="text-xs text-[var(--color-text-subtle)] mt-0.5">
+            {data.timeCost.hours.toFixed(1)}h × ${data.timeCost.rate}/h = {nzd(data.timeCost.cost)}
+          </div>
+        </div>
+        <div className="rounded-xl border p-4" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+          <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Gross margin</div>
+          <div className="text-xl font-bold mt-1" style={{ color: marginColour }}>{nzd(data.marginNzd)}</div>
+        </div>
+        <div className="rounded-xl border p-4" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+          <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Margin %</div>
+          <div className="text-xl font-bold mt-1" style={{ color: marginColour }}>
+            {data.marginPct.toFixed(1)}%
+          </div>
+        </div>
+      </div>
+
+      {/* By category */}
+      <div className="rounded-xl border p-5" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <h3 className="text-base font-semibold text-[var(--color-text)] mb-3">Cost breakdown</h3>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {(['contractor', 'software', 'hours', 'other', 'timeCost'] as const).map(cat => (
+            <div key={cat} className="rounded-lg p-3" style={{ background: 'var(--color-bg-secondary)' }}>
+              <div className="text-xs text-[var(--color-text-muted)] capitalize">{cat === 'timeCost' ? 'Time (hours × rate)' : cat}</div>
+              <div className="text-sm font-semibold text-[var(--color-text)] mt-1">
+                {nzd(data.byCategory[cat] ?? 0)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Costs list + add form */}
+      <div className="rounded-xl border p-5" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-base font-semibold text-[var(--color-text)]">Logged costs</h3>
+          <button
+            onClick={() => setShowAdd(v => !v)}
+            className="text-xs font-medium px-3 py-1.5 rounded transition-colors"
+            style={{ background: showAdd ? 'var(--color-bg-tertiary)' : 'var(--color-brand)', color: showAdd ? 'var(--color-text)' : 'white', border: 'none', cursor: 'pointer', minHeight: '2.25rem' }}
+          >
+            {showAdd ? 'Cancel' : '+ Add cost'}
+          </button>
+        </div>
+
+        {showAdd && (
+          <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4 p-3 rounded" style={{ background: 'var(--color-bg-secondary)' }}>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Description</label>
+              <input
+                value={form.description}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                placeholder="e.g. Webflow Pro plan, designer subcontract"
+                className="w-full px-3 py-2 text-sm border rounded-lg"
+                style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Amount</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.amount}
+                onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                className="w-full px-3 py-2 text-sm border rounded-lg"
+                style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Currency</label>
+              <select
+                value={form.currency}
+                onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}
+                className="w-full px-3 py-2 text-sm border rounded-lg"
+                style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+              >
+                {['NZD', 'USD', 'GBP', 'EUR', 'AUD'].map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Category</label>
+              <select
+                value={form.category}
+                onChange={e => setForm(f => ({ ...f, category: e.target.value as ClientCostRow['category'] }))}
+                className="w-full px-3 py-2 text-sm border rounded-lg"
+                style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+              >
+                <option value="contractor">Contractor</option>
+                <option value="software">Software</option>
+                <option value="hours">Hours (manual)</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Date</label>
+              <input
+                type="date"
+                value={form.date}
+                onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                className="w-full px-3 py-2 text-sm border rounded-lg"
+                style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+              />
+            </div>
+            <div className="flex items-center gap-2 md:col-span-2">
+              <label className="flex items-center gap-2 text-sm text-[var(--color-text)]">
+                <input type="checkbox" checked={form.recurring} onChange={e => setForm(f => ({ ...f, recurring: e.target.checked }))} />
+                Recurring monthly cost
+              </label>
+            </div>
+            {error && <p className="text-sm md:col-span-2" style={{ color: 'var(--color-danger)' }}>{error}</p>}
+            <div className="md:col-span-2 flex justify-end">
+              <button type="submit" disabled={saving} className="text-sm font-medium px-4 py-2 rounded disabled:opacity-50"
+                style={{ background: 'var(--color-brand)', color: 'white', border: 'none', cursor: saving ? 'wait' : 'pointer' }}>
+                {saving ? 'Saving...' : 'Save cost'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {costs.length === 0 ? (
+          <p className="text-sm text-[var(--color-text-muted)] py-4">
+            No costs logged yet. Add subcontractor fees, software subscriptions, or other client-specific costs to compute real gross margin.
+          </p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs font-medium text-[var(--color-text-muted)] border-b" style={{ borderColor: 'var(--color-border)' }}>
+                <th className="py-2 pr-3">Date</th>
+                <th className="py-2 pr-3">Description</th>
+                <th className="py-2 pr-3">Category</th>
+                <th className="py-2 pr-3 text-right">Amount</th>
+                <th className="py-2 pr-3">Recurring?</th>
+                <th className="py-2 pr-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {costs.map(c => (
+                <tr key={c.id} className="border-b" style={{ borderColor: 'var(--color-border-subtle)' }}>
+                  <td className="py-2 pr-3 text-[var(--color-text-muted)]">{c.date}</td>
+                  <td className="py-2 pr-3 text-[var(--color-text)]">{c.description}</td>
+                  <td className="py-2 pr-3 text-xs text-[var(--color-text-muted)] capitalize">{c.category}</td>
+                  <td className="py-2 pr-3 text-right text-[var(--color-text)] font-medium">
+                    {new Intl.NumberFormat('en-NZ', { style: 'currency', currency: c.currency }).format(c.amount)}
+                  </td>
+                  <td className="py-2 pr-3">{c.recurring && <span className="text-xs text-[var(--color-brand)] font-medium">Recurring</span>}</td>
+                  <td className="py-2 pr-3 text-right">
+                    <button onClick={() => handleDelete(c.id)} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-danger)]">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   )

@@ -520,6 +520,9 @@ export function ReportsContent() {
 
       {/* Xero Expenses + P&L Trend (T592) */}
       <ExpenseDashboardSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+
+      {/* Client Profitability Scorecard (T597) */}
+      <ClientProfitabilityScorecard displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
     </div>
   )
 }
@@ -3173,6 +3176,118 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+// ── Client Profitability Scorecard (T597) ──────────────────────────────────
+
+interface ProfitabilityRow {
+  orgId: string
+  orgName: string
+  planType: string | null
+  status: string
+  revenueNzd: number
+  directCostNzd: number
+  timeCostNzd: number
+  billableHours: number
+  hourlyRate: number
+  costNzd: number
+  marginNzd: number
+  marginPct: number
+}
+
+function ClientProfitabilityScorecard({ displayCurrency, exchangeRates }: CurrencyProps) {
+  const [rows, setRows] = useState<ProfitabilityRow[] | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/reports/client-profitability'))
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => setRows((d as { clients?: ProfitabilityRow[] }).clients ?? []))
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border p-6 animate-pulse" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <div className="h-5 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '40%' }} />
+        <div className="h-32 rounded mt-4" style={{ background: 'var(--color-bg-tertiary)' }} />
+      </div>
+    )
+  }
+
+  if (!rows || rows.length === 0) {
+    return (
+      <div className="rounded-xl border p-6" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <h2 className="text-lg font-semibold text-[var(--color-text)] mb-1">Client Profitability Scorecard</h2>
+        <p className="text-sm text-[var(--color-text-muted)]">No client data yet.</p>
+      </div>
+    )
+  }
+
+  function marginColour(pct: number) {
+    if (pct >= 50) return { bg: 'var(--color-success-bg)', fg: 'var(--color-success)' }
+    if (pct >= 25) return { bg: 'var(--color-warning-bg)', fg: 'var(--color-warning)' }
+    return { bg: 'var(--color-danger-bg)', fg: 'var(--color-danger)' }
+  }
+
+  return (
+    <div className="rounded-xl border p-6" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+      <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--color-text)]">Client Profitability Scorecard</h2>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1">
+            Gross margin per client = paid revenue − (logged costs + billable hours × hourly rate). Sorted by revenue descending.
+          </p>
+          <p className="text-xs text-[var(--color-text-subtle)] mt-1">
+            Tip: Add subcontractor and software costs on each client&apos;s Profitability tab for accurate margins.
+          </p>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs font-medium text-[var(--color-text-muted)] border-b" style={{ borderColor: 'var(--color-border)' }}>
+              <th className="py-2 pr-3">Client</th>
+              <th className="py-2 pr-3 text-right">Revenue</th>
+              <th className="py-2 pr-3 text-right">Time cost</th>
+              <th className="py-2 pr-3 text-right">Direct cost</th>
+              <th className="py-2 pr-3 text-right">Total cost</th>
+              <th className="py-2 pr-3 text-right">Margin</th>
+              <th className="py-2 pr-3 text-right">Margin %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => {
+              const colour = marginColour(r.marginPct)
+              return (
+                <tr key={r.orgId} className="border-b" style={{ borderColor: 'var(--color-border-subtle)' }}>
+                  <td className="py-2 pr-3">
+                    <Link href={`/clients/${r.orgId}?tab=profitability`} className="font-medium text-[var(--color-text)] hover:text-[var(--color-brand)]">
+                      {r.orgName}
+                    </Link>
+                    <div className="text-xs text-[var(--color-text-subtle)]">{r.billableHours.toFixed(1)}h at ${r.hourlyRate}/h · {r.planType ?? 'no plan'}</div>
+                  </td>
+                  <td className="py-2 pr-3 text-right text-[var(--color-text)]">{formatInCur(r.revenueNzd, displayCurrency, exchangeRates)}</td>
+                  <td className="py-2 pr-3 text-right text-[var(--color-text-muted)]">{formatInCur(r.timeCostNzd, displayCurrency, exchangeRates)}</td>
+                  <td className="py-2 pr-3 text-right text-[var(--color-text-muted)]">{formatInCur(r.directCostNzd, displayCurrency, exchangeRates)}</td>
+                  <td className="py-2 pr-3 text-right text-[var(--color-text)]">{formatInCur(r.costNzd, displayCurrency, exchangeRates)}</td>
+                  <td className="py-2 pr-3 text-right font-medium" style={{ color: colour.fg }}>
+                    {formatInCur(r.marginNzd, displayCurrency, exchangeRates)}
+                  </td>
+                  <td className="py-2 pr-3 text-right">
+                    <span className="text-xs font-medium px-2 py-0.5 rounded" style={{ background: colour.bg, color: colour.fg }}>
+                      {r.marginPct.toFixed(0)}%
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
