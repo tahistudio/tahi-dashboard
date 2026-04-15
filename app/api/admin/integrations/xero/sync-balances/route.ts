@@ -77,25 +77,34 @@ export async function POST(req: NextRequest) {
     const skipped: Array<{ name: string; reason: string }> = []
     const accountByNameLower = new Map(bankAccounts.map(a => [a.Name.toLowerCase(), a]))
 
-    function resolveAccountId(nameCell: { Value: string; Attributes?: Array<{ Value: string; Id: string }> }): { accountId: string; method: string } | null {
+    // Synthesise a stable accountId from a name when Xero doesn't give us one.
+    // Same name -> same id, so re-syncs upsert correctly.
+    function syntheticId(name: string): string {
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+      return `synthetic-${slug || 'unknown'}`
+    }
+
+    function resolveAccountId(nameCell: { Value: string; Attributes?: Array<{ Value: string; Id: string }> }): { accountId: string; method: string } {
       // 1. Attribute lookup
       const attr = nameCell.Attributes?.find(a => ['account', 'accountID', 'AccountID', 'accountId'].includes(a.Id))
       if (attr?.Value && accountById.has(attr.Value)) {
         return { accountId: attr.Value, method: 'attribute' }
       }
-      // 2. Exact name match
+      // 2. Exact name match against /Accounts
       const name = (nameCell.Value ?? '').trim()
-      if (!name) return null
-      const exact = bankAccounts.find(a => a.Name === name)
-      if (exact) return { accountId: exact.AccountID, method: 'exact-name' }
-      // 3. Case-insensitive contains
-      const lower = name.toLowerCase()
-      const containsMatch = bankAccounts.find(a => a.Name.toLowerCase().includes(lower) || lower.includes(a.Name.toLowerCase()))
-      if (containsMatch) return { accountId: containsMatch.AccountID, method: 'name-contains' }
-      // 4. Map lookup as last resort
-      const byNameLower = accountByNameLower.get(lower)
-      if (byNameLower) return { accountId: byNameLower.AccountID, method: 'name-lower' }
-      return null
+      if (name) {
+        const exact = bankAccounts.find(a => a.Name === name)
+        if (exact) return { accountId: exact.AccountID, method: 'exact-name' }
+        // 3. Case-insensitive contains
+        const lower = name.toLowerCase()
+        const containsMatch = bankAccounts.find(a => a.Name.toLowerCase().includes(lower) || lower.includes(a.Name.toLowerCase()))
+        if (containsMatch) return { accountId: containsMatch.AccountID, method: 'name-contains' }
+        const byNameLower = accountByNameLower.get(lower)
+        if (byNameLower) return { accountId: byNameLower.AccountID, method: 'name-lower' }
+      }
+      // 4. Synthetic ID — last resort. Better to show the balance with the
+      //    name and mark the source than to drop the row entirely.
+      return { accountId: syntheticId(name || 'unknown'), method: 'synthetic' }
     }
 
     for (const topRow of report.Rows) {
@@ -106,11 +115,11 @@ export async function POST(req: NextRequest) {
         const closingCell = row.Cells[row.Cells.length - 1]
         if (!nameCell || !closingCell) continue
 
+        // Skip empty Total rows (Xero often appends a "Total" row with an
+        // empty first cell, which would otherwise produce a synthetic-unknown row).
+        if (!(nameCell.Value ?? '').trim()) continue
+
         const resolved = resolveAccountId(nameCell)
-        if (!resolved) {
-          skipped.push({ name: nameCell.Value, reason: 'could not resolve AccountID' })
-          continue
-        }
 
         const balance = parseFloat((closingCell.Value ?? '0').replace(/,/g, ''))
         if (!Number.isFinite(balance)) {

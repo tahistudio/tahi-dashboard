@@ -1004,6 +1004,16 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 - [ ] T622 - [BE] Stripe import dedupes charge vs invoice: Evan Kwan Sep/Oct/Nov shows 6 rows — 3 `ch_*` (charges) and 3 `in_1*` (invoices) for the same subscription payments. The /v1/invoices endpoint should not return charges, so either the import is paginating across endpoints or a separate import created the charges. Add dedupe logic: when both `in_*` and `ch_*` exist for same subscription period + amount + customer, keep the `in_*` (invoice) and mark the `ch_*` (charge) as superseded or delete. — [BE]
 - [ ] T623 - [BE] Stripe import pagination: `/v1/invoices?limit=100` caps at 100 — if any client ever has >100 historical Stripe invoices, older ones are missed. Use `starting_after` cursor to paginate fully. — [BE]
 
+### Live-testing fixes (2026-04-15)
+
+- [x] T630 - [BE] Bank balance sync: synthesise an accountId from the row name when Xero doesn't expose AccountID in the BankSummary report. Better to show the balance with a hashed ID than drop the row entirely. Skip empty Total rows. — done 2026-04-15.
+- [x] T631 - [FE] Expense dashboard: time-range chips (3/6/12/24mo) replace the hardcoded 12-month window. Summary card labels update to match.
+- [x] T632 - [BE] PATCH /api/admin/reports/expenses/category — set isRecurring or rename accountName for all rows of a category in one shot.
+- [x] T633 - [FE] Expense table: click the Recurring/One-off badge to toggle. Updates persist via T632.
+- [ ] T634 - [BE] Add `xero_category_overrides` table so the next sync-pnl respects manual flags. Right now sync-pnl re-runs auto-recurring detection and may overwrite a manually-set flag. Schema: { accountName text PK, isRecurring int, displayName text? }. sync-pnl reads the table after auto-detection and applies overrides.
+- [x] T635 - [FE] Sidebar role-aware NAV: split into ADMIN_NAV (Workspace / Clients / Billing / Operations / Account) and CLIENT_NAV (Your project / Library / Billing). "Daily" was confusing for clients; neutral labels work for both.
+- [x] T636 - [PM] Assign Liam Miller as PM to all 10 active clients via assign_client_pm MCP tool. — done 2026-04-15.
+
 ### Hardening sprint (2026-04-15)
 
 - [x] T624 - [BE] Access scoping on detail API routes. Added `lib/require-access.ts` with `requireAccessToOrg` + `getOrgScope`. Applied to `/api/admin/invoices/[id]`, `/api/admin/invoices` list + POST, `/api/admin/requests/[id]`, `/api/admin/clients/[id]`, `/api/admin/tasks/[id]`. Admins bypass; restricted team members see only allowed orgs. — [BE] — done 2026-04-15

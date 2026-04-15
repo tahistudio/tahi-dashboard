@@ -27,54 +27,80 @@ type NavGroup = {
   items: NavItem[]
 }
 
-// Sidebar IA (revised 2026-04-15):
-//   Daily      — what you open first thing every morning
-//   Clients    — anything tied to a relationship (current, future, past)
-//   Money      — every $ in/out + the time that bills for it
-//   Studio     — running the business (reports, capacity, team, contracts)
-//   Workspace  — admin / reference
-const NAV: NavGroup[] = [
+// Sidebar IA (revised 2026-04-15, role-aware).
+//
+// Two separate NAVs because group names that make sense to an internal team
+// member ("Operations") sound off to a client, and vice versa ("Your Work"
+// is patronising to a co-founder). Per-item visibility is still controlled
+// by the existing flags so we don't lose admin/client gating.
+//
+// Future hires (sales, designer, dev, marketing) all see the ADMIN_NAV but
+// filtered by their teamMemberAccess rule. Specific role-tailored sidebars
+// (e.g. designer-only) can be added later by adding a `roles` field per item.
+const ADMIN_NAV: NavGroup[] = [
   {
-    group: 'Daily',
+    group: 'Workspace',
     items: [
-      { label: 'Overview',  href: '/overview',  icon: LayoutDashboard, clientVisible: true },
-      { label: 'Requests',  href: '/requests',  icon: Inbox, clientVisible: true },
+      { label: 'Overview',  href: '/overview',  icon: LayoutDashboard },
+      { label: 'Requests',  href: '/requests',  icon: Inbox },
       { label: 'Tasks',     href: '/tasks',     icon: CheckSquare },
-      { label: 'Messages',  href: '/messages',  icon: MessageSquare, clientVisible: true },
+      { label: 'Messages',  href: '/messages',  icon: MessageSquare },
     ],
   },
   {
     group: 'Clients',
     items: [
-      { label: 'Clients',   href: '/clients',   icon: Users,        adminOnly: true },
-      { label: 'Pipeline',  href: '/pipeline',  icon: TrendingUp,   adminOnly: true },
-      { label: 'Reviews',   href: '/reviews',   icon: Star,         adminOnly: true },
-      { label: 'Files',     href: '/files',     icon: FolderOpen,   clientOnly: true, clientVisible: true },
-      { label: 'Services',  href: '/services',  icon: ShoppingBag,  clientOnly: true, clientVisible: true },
+      { label: 'Clients',   href: '/clients',   icon: Users,         adminOnly: true },
+      { label: 'Pipeline',  href: '/pipeline',  icon: TrendingUp,    adminOnly: true },
+      { label: 'Reviews',   href: '/reviews',   icon: Star,          adminOnly: true },
     ],
   },
   {
-    group: 'Money',
+    group: 'Billing',
     items: [
-      { label: 'Invoices',  href: '/invoices',  icon: FileText,     clientVisible: true },
-      { label: 'Billing',   href: '/billing',   icon: CreditCard,   adminOnly: true },
-      { label: 'Time',      href: '/time',      icon: Clock,        adminOnly: true },
+      { label: 'Invoices',  href: '/invoices',  icon: FileText },
+      { label: 'Billing',   href: '/billing',   icon: CreditCard,    adminOnly: true },
+      { label: 'Time',      href: '/time',      icon: Clock,         adminOnly: true },
     ],
   },
   {
-    group: 'Studio',
+    group: 'Operations',
     items: [
-      { label: 'Reports',   href: '/reports',   icon: BarChart2,    adminOnly: true },
-      { label: 'Capacity',  href: '/capacity',  icon: Gauge,        adminOnly: true },
-      { label: 'Team',      href: '/team',      icon: UserCog,      adminOnly: true },
+      { label: 'Reports',   href: '/reports',   icon: BarChart2,     adminOnly: true },
+      { label: 'Capacity',  href: '/capacity',  icon: Gauge,         adminOnly: true },
+      { label: 'Team',      href: '/team',      icon: UserCog,       adminOnly: true },
       { label: 'Contracts', href: '/contracts', icon: FileSignature, adminOnly: true },
     ],
   },
   {
-    group: 'Workspace',
+    group: 'Account',
     items: [
-      { label: 'Docs Hub',  href: '/docs',      icon: BookOpen,     adminOnly: true },
-      { label: 'Settings',  href: '/settings',  icon: Settings,     adminOnly: true },
+      { label: 'Docs Hub',  href: '/docs',      icon: BookOpen,      adminOnly: true },
+      { label: 'Settings',  href: '/settings',  icon: Settings,      adminOnly: true },
+    ],
+  },
+]
+
+const CLIENT_NAV: NavGroup[] = [
+  {
+    group: 'Your project',
+    items: [
+      { label: 'Overview',  href: '/overview',  icon: LayoutDashboard, clientVisible: true },
+      { label: 'Requests',  href: '/requests',  icon: Inbox,           clientVisible: true },
+      { label: 'Messages',  href: '/messages',  icon: MessageSquare,   clientVisible: true },
+    ],
+  },
+  {
+    group: 'Library',
+    items: [
+      { label: 'Files',     href: '/files',     icon: FolderOpen,      clientOnly: true, clientVisible: true },
+      { label: 'Services',  href: '/services',  icon: ShoppingBag,     clientOnly: true, clientVisible: true },
+    ],
+  },
+  {
+    group: 'Billing',
+    items: [
+      { label: 'Invoices',  href: '/invoices',  icon: FileText,        clientVisible: true },
     ],
   },
 ]
@@ -142,7 +168,13 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   // Pages hidden for viewer-role team members (management/config pages)
   const VIEWER_HIDDEN_PAGES = new Set(['/team', '/settings', '/billing', '/contracts'])
 
-  const visibleNav = NAV.map(group => ({
+  // Pick the right NAV definition based on audience. Clients get
+  // friendlier group names ("Your project", "Library") and a much
+  // smaller surface; admins (and impersonated team members) get the
+  // full operational nav.
+  const sourceNav = showAsAdmin ? ADMIN_NAV : CLIENT_NAV
+
+  const visibleNav = sourceNav.map(group => ({
     ...group,
     items: group.items.filter(item => {
       if (showAsAdmin) {

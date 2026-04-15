@@ -2984,11 +2984,12 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState<'idle' | 'pnl' | 'balances'>('idle')
   const [syncMessage, setSyncMessage] = useState<string | null>(null)
+  const [windowMonths, setWindowMonths] = useState<3 | 6 | 12 | 24>(12)
 
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(apiPath('/api/admin/reports/expenses?months=12'))
+      const res = await fetch(apiPath(`/api/admin/reports/expenses?months=${windowMonths}`))
       if (!res.ok) throw new Error('Failed')
       setData(await res.json() as ExpenseDashboardData)
     } catch {
@@ -2996,7 +2997,7 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [windowMonths])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -3029,9 +3030,23 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
     setSyncMessage('Pulling bank balances from Xero...')
     try {
       const res = await fetch(apiPath('/api/admin/integrations/xero/sync-balances'), { method: 'POST' })
-      const json = await res.json() as { synced?: number; error?: string }
+      const json = await res.json() as {
+        synced?: number
+        error?: string
+        skipped?: Array<{ name: string; reason: string }>
+        diagnostics?: { bankAccountsFound?: number; bankAccountNames?: string[]; reportRowCount?: number }
+      }
       if (res.ok) {
-        setSyncMessage(`Synced ${json.synced ?? 0} bank account(s)`)
+        const synced = json.synced ?? 0
+        const skipped = json.skipped?.length ?? 0
+        if (synced === 0 && json.diagnostics) {
+          // Surface enough info to debug without opening the network tab
+          const accs = json.diagnostics.bankAccountsFound ?? 0
+          const names = (json.diagnostics.bankAccountNames ?? []).slice(0, 5).join(', ')
+          setSyncMessage(`Synced 0 balances. Xero returned ${accs} bank account(s) (${names || 'none named'}) but the BankSummary report yielded no rows. Open dev tools / network for full diagnostics.`)
+        } else {
+          setSyncMessage(`Synced ${synced} bank account(s)${skipped ? ` (${skipped} skipped)` : ''}`)
+        }
       } else {
         setSyncMessage(json.error ?? 'Sync failed')
       }
@@ -3039,7 +3054,8 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
       setSyncMessage('Sync error')
     } finally {
       setSyncing('idle')
-      setTimeout(() => setSyncMessage(null), 4000)
+      // Keep the message longer if it carries diagnostic info
+      setTimeout(() => setSyncMessage(null), 12000)
     }
   }
 
@@ -3067,7 +3083,7 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
         <div>
           <h2 className="text-lg font-semibold text-[var(--color-text)]">Expenses and P&amp;L (from Xero)</h2>
           <p className="text-xs text-[var(--color-text-muted)] mt-1">
-            12-month P&amp;L trend and recurring expense breakdown. Data syncs from Xero on demand.
+            {windowMonths}-month P&amp;L trend and recurring expense breakdown. Data syncs from Xero on demand.
           </p>
           {data?.lastSyncedAt && (
             <p className="text-xs text-[var(--color-text-subtle)] mt-0.5">
@@ -3075,7 +3091,28 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
             </p>
           )}
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
+          {/* Time-range chips */}
+          <div className="flex gap-1 mr-2" role="tablist" aria-label="Expense time range">
+            {([3, 6, 12, 24] as const).map(n => (
+              <button
+                key={n}
+                role="tab"
+                aria-selected={windowMonths === n}
+                onClick={() => setWindowMonths(n)}
+                className="text-xs font-medium px-2.5 py-1 rounded-full transition-colors"
+                style={{
+                  background: windowMonths === n ? 'var(--color-brand-50)' : 'var(--color-bg-tertiary)',
+                  color: windowMonths === n ? 'var(--color-brand)' : 'var(--color-text-muted)',
+                  border: windowMonths === n ? '1px solid var(--color-brand)' : '1px solid transparent',
+                  cursor: 'pointer',
+                  minHeight: '2.25rem',
+                }}
+              >
+                {n}mo
+              </button>
+            ))}
+          </div>
           <button
             onClick={runPnlSync}
             disabled={syncing !== 'idle'}
@@ -3111,9 +3148,9 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
       ) : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <MiniMetric label="12-mo revenue" value={formatInCur(data!.summary.totalRevenue, displayCurrency, exchangeRates)} colour="var(--color-success)" />
-            <MiniMetric label="12-mo expenses" value={formatInCur(data!.summary.totalExpenses, displayCurrency, exchangeRates)} colour="var(--color-danger)" />
-            <MiniMetric label="12-mo net profit" value={formatInCur(data!.summary.totalNetProfit, displayCurrency, exchangeRates)} colour={data!.summary.totalNetProfit >= 0 ? 'var(--color-brand)' : 'var(--color-danger)'} />
+            <MiniMetric label={`${windowMonths}-mo revenue`} value={formatInCur(data!.summary.totalRevenue, displayCurrency, exchangeRates)} colour="var(--color-success)" />
+            <MiniMetric label={`${windowMonths}-mo expenses`} value={formatInCur(data!.summary.totalExpenses, displayCurrency, exchangeRates)} colour="var(--color-danger)" />
+            <MiniMetric label={`${windowMonths}-mo net profit`} value={formatInCur(data!.summary.totalNetProfit, displayCurrency, exchangeRates)} colour={data!.summary.totalNetProfit >= 0 ? 'var(--color-brand)' : 'var(--color-danger)'} />
             <MiniMetric label="Avg monthly burn" value={formatInCur(data!.summary.avgMonthlyBurn, displayCurrency, exchangeRates)} colour="var(--color-text-muted)" />
           </div>
 
@@ -3161,11 +3198,29 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
                       </td>
                       <td className="py-2 pr-3 text-xs text-[var(--color-text-muted)]">{c.section === 'cost_of_sales' ? 'COGS' : c.section}</td>
                       <td className="py-2 pr-3">
-                        {c.isRecurring ? (
-                          <span className="text-xs font-medium px-2 py-0.5 rounded" style={{ background: 'var(--color-brand-50)', color: 'var(--color-brand)' }}>Recurring</span>
-                        ) : (
-                          <span className="text-xs text-[var(--color-text-subtle)]">One-off</span>
-                        )}
+                        <button
+                          onClick={async () => {
+                            const next = !c.isRecurring
+                            try {
+                              const res = await fetch(apiPath('/api/admin/reports/expenses/category'), {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ accountName: c.accountName, isRecurring: next }),
+                              })
+                              if (res.ok) await loadData()
+                            } catch { /* noop */ }
+                          }}
+                          className="text-xs font-medium px-2 py-0.5 rounded transition-colors hover:opacity-80"
+                          style={{
+                            background: c.isRecurring ? 'var(--color-brand-50)' : 'var(--color-bg-tertiary)',
+                            color: c.isRecurring ? 'var(--color-brand)' : 'var(--color-text-subtle)',
+                            border: 'none',
+                            cursor: 'pointer',
+                          }}
+                          title="Click to toggle recurring/one-off"
+                        >
+                          {c.isRecurring ? 'Recurring' : 'One-off'}
+                        </button>
                       </td>
                       <td className="py-2 pr-3 text-right text-[var(--color-text)] font-medium">
                         {formatInCur(c.total, displayCurrency, exchangeRates)}
