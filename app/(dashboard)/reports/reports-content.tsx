@@ -511,22 +511,24 @@ export function ReportsContent() {
       {/* Sales Cycle Length (T391) */}
       <SalesCycleLengthSection />
 
-      {/* Revenue Forecast (T326) */}
-      <RevenueForecastSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+      {/* Revenue Forecast section removed 2026-04-15: data duplicated by
+          Cash Flow Forecast which already projects weighted pipeline +
+          best/worst cases with more context. Keep RevenueForecastSection
+          function defined in case we want to resurrect it later. */}
 
       {/* Retainer Health Monitor (T610) */}
       <div id="retainer-health" className="scroll-mt-20"><RetainerHealthSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
 
-      {/* Cash Flow Forecast (T599-T600) */}
+      {/* Fixed Costs / Commitments (T652) — the authoritative "what you pay" */}
+      <div id="commitments" className="scroll-mt-20"><CommitmentsSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
+
+      {/* Cash Flow Forecast (T599-T600) — combined revenue + cost forward view */}
       <div id="cash-flow" className="scroll-mt-20"><CashFlowForecastSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
 
       {/* Team Utilization (T605) */}
       <div id="utilization" className="scroll-mt-20"><UtilizationSection /></div>
 
-      {/* Fixed Costs / Commitments (T652) — user-maintained projections */}
-      <div id="commitments" className="scroll-mt-20"><CommitmentsSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
-
-      {/* Xero Expenses + P&L Trend (T592) */}
+      {/* Xero Expenses + P&L Trend (T592) — HISTORICAL ACTUALS, for reference */}
       <div id="expenses" className="scroll-mt-20"><ExpenseDashboardSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
 
       {/* Client Profitability Scorecard (T597) */}
@@ -3093,9 +3095,9 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
     <div className="rounded-xl border p-6" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
       <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-[var(--color-text)]">Expenses and P&amp;L (from Xero)</h2>
+          <h2 className="text-lg font-semibold text-[var(--color-text)]">Xero P&amp;L (historical actuals)</h2>
           <p className="text-xs text-[var(--color-text-muted)] mt-1">
-            {windowMonths}-month P&amp;L trend and recurring expense breakdown. Data syncs from Xero on demand.
+            {windowMonths}-month view of what Xero actually recorded. For reference only — use <strong>Fixed Costs</strong> above for projections.
           </p>
           {data?.lastSyncedAt && (
             <p className="text-xs text-[var(--color-text-subtle)] mt-0.5">
@@ -3377,9 +3379,9 @@ const REPORTS_SECTIONS: Array<{ id: string; label: string; group: 'Operations' |
   { id: 'sales-pipeline',        label: 'Pipeline',           group: 'Sales' },
   { id: 'retainer-health',       label: 'Retainer Health',    group: 'Sales' },
   { id: 'financial-health',      label: 'Financial Health',   group: 'Finance' },
-  { id: 'cash-flow',             label: 'Cash Flow',          group: 'Finance' },
   { id: 'commitments',           label: 'Fixed Costs',        group: 'Finance' },
-  { id: 'expenses',              label: 'Expenses & P&L',     group: 'Finance' },
+  { id: 'cash-flow',             label: 'Cash Flow',          group: 'Finance' },
+  { id: 'expenses',              label: 'Xero P&L (past)',    group: 'Finance' },
   { id: 'client-profitability',  label: 'Client Margin',      group: 'Finance' },
   { id: 'utilization',           label: 'Team Utilisation',   group: 'Team' },
 ]
@@ -3454,6 +3456,9 @@ interface Commitment {
   cadence: 'monthly' | 'quarterly' | 'annual' | 'one_off'
   category: string
   nextDueDate: string | null
+  startDate: string | null
+  endDate: string | null
+  billingDayOfMonth: number | null
   active: boolean
   notes: string | null
   linkedXeroAccount: string | null
@@ -3485,11 +3490,15 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
     cadence: Commitment['cadence']
     category: string
     nextDueDate: string
+    startDate: string
+    endDate: string
+    billingDayOfMonth: string
     notes: string
     active: boolean
   }>({
     name: '', vendor: '', amount: '', currency: 'NZD', cadence: 'monthly',
-    category: 'other', nextDueDate: '', notes: '', active: true,
+    category: 'other', nextDueDate: '', startDate: '', endDate: '',
+    billingDayOfMonth: '', notes: '', active: true,
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -3512,7 +3521,8 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
 
   function resetForm() {
     setForm({ name: '', vendor: '', amount: '', currency: 'NZD', cadence: 'monthly',
-              category: 'other', nextDueDate: '', notes: '', active: true })
+              category: 'other', nextDueDate: '', startDate: '', endDate: '',
+              billingDayOfMonth: '', notes: '', active: true })
     setEditingId(null)
     setError(null)
   }
@@ -3526,6 +3536,9 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
       cadence: c.cadence,
       category: c.category,
       nextDueDate: c.nextDueDate ?? '',
+      startDate: c.startDate ?? '',
+      endDate: c.endDate ?? '',
+      billingDayOfMonth: c.billingDayOfMonth ? String(c.billingDayOfMonth) : '',
       notes: c.notes ?? '',
       active: c.active,
     })
@@ -3543,6 +3556,7 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
     setSaving(true)
     setError(null)
     try {
+      const billingDay = form.billingDayOfMonth ? parseInt(form.billingDayOfMonth, 10) : null
       const body = {
         name: form.name.trim(),
         vendor: form.vendor.trim() || null,
@@ -3551,6 +3565,9 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
         cadence: form.cadence,
         category: form.category,
         nextDueDate: form.nextDueDate || null,
+        startDate: form.startDate || null,
+        endDate: form.endDate || null,
+        billingDayOfMonth: billingDay && billingDay >= 1 && billingDay <= 31 ? billingDay : null,
         notes: form.notes.trim() || null,
         active: form.active,
       }
@@ -3677,6 +3694,22 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
               <input type="date" value={form.nextDueDate} onChange={e => setForm(f => ({ ...f, nextDueDate: e.target.value }))} className="w-full px-3 py-2 text-sm border rounded-lg" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }} />
             </div>
           )}
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Start date (optional)</label>
+            <input type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} className="w-full px-3 py-2 text-sm border rounded-lg" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }} />
+            <p className="text-xs text-[var(--color-text-subtle)] mt-1">Forecast excludes months before this date.</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">End date (optional)</label>
+            <input type="date" value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} className="w-full px-3 py-2 text-sm border rounded-lg" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }} />
+            <p className="text-xs text-[var(--color-text-subtle)] mt-1">Fixed-term contract? Set the end. Forecast drops off after.</p>
+          </div>
+          {form.cadence !== 'one_off' && (
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Billing day of month (1-31, optional)</label>
+              <input type="number" min="1" max="31" value={form.billingDayOfMonth} onChange={e => setForm(f => ({ ...f, billingDayOfMonth: e.target.value }))} placeholder="e.g. 1" className="w-full px-3 py-2 text-sm border rounded-lg" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }} />
+            </div>
+          )}
           <div className="md:col-span-2">
             <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Notes (optional)</label>
             <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="w-full px-3 py-2 text-sm border rounded-lg" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }} />
@@ -3724,12 +3757,22 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
                   <td className="py-2 pr-3">
                     <div className="font-medium text-[var(--color-text)]">{c.name}</div>
                     {c.vendor && <div className="text-xs text-[var(--color-text-subtle)]">{c.vendor}</div>}
+                    {(c.startDate || c.endDate) && (
+                      <div className="text-xs text-[var(--color-text-subtle)] mt-0.5">
+                        {c.startDate && <>from {c.startDate}</>}
+                        {c.startDate && c.endDate && ' · '}
+                        {c.endDate && <span style={{ color: 'var(--color-warning)' }}>ends {c.endDate}</span>}
+                      </div>
+                    )}
                   </td>
                   <td className="py-2 pr-3 text-xs text-[var(--color-text-muted)] capitalize">{c.category}</td>
                   <td className="py-2 pr-3 text-right text-[var(--color-text)]">
                     {new Intl.NumberFormat('en-NZ', { style: 'currency', currency: c.currency, maximumFractionDigits: 0 }).format(c.amount)}
                   </td>
-                  <td className="py-2 pr-3 text-xs text-[var(--color-text-muted)]">{c.cadence.replace('_', ' ')}</td>
+                  <td className="py-2 pr-3 text-xs text-[var(--color-text-muted)]">
+                    {c.cadence.replace('_', ' ')}
+                    {c.billingDayOfMonth && <div className="text-xs text-[var(--color-text-subtle)]">day {c.billingDayOfMonth}</div>}
+                  </td>
                   <td className="py-2 pr-3 text-right text-[var(--color-text-muted)]">
                     {formatInCur(monthlyDisplay, displayCurrency, exchangeRates)}
                   </td>

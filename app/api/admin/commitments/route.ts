@@ -47,6 +47,9 @@ export async function POST(req: NextRequest) {
     category: string
     vendor: string | null
     nextDueDate: string | null
+    startDate: string | null
+    endDate: string | null
+    billingDayOfMonth: number | null
     notes: string | null
     linkedXeroAccount: string | null
     active: boolean
@@ -73,6 +76,9 @@ export async function POST(req: NextRequest) {
     cadence,
     category: body.category ?? 'other',
     nextDueDate: body.nextDueDate ?? null,
+    startDate: body.startDate ?? null,
+    endDate: body.endDate ?? null,
+    billingDayOfMonth: body.billingDayOfMonth ?? null,
     active: body.active ?? true,
     notes: body.notes ?? null,
     linkedXeroAccount: body.linkedXeroAccount ?? null,

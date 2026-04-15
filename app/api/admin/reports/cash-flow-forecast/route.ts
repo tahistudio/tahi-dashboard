@@ -128,11 +128,29 @@ export async function GET(req: NextRequest) {
   const commitmentByMonth: Record<string, number> = {}
   for (const m of monthKeys) commitmentByMonth[m] = 0
 
+  // Respect startDate + endDate when placing commitment charges in months.
+  // startDate filters out months before the commitment began (e.g. a new
+  // hire starting mid-year shouldn't retroactively reduce past net position).
+  // endDate filters out months after the commitment ends (e.g. the
+  // StraightIn 4-month contract should drop off the forecast when done).
+  function commitmentActiveInMonth(c: typeof schema.expenseCommitments.$inferSelect, monthKey: string): boolean {
+    if (c.startDate && c.startDate.slice(0, 7) > monthKey) return false
+    if (c.endDate && c.endDate.slice(0, 7) < monthKey) return false
+    return true
+  }
+
   function applyCommitment(c: typeof schema.expenseCommitments.$inferSelect) {
     const amountNzd = toNzd(c.amount, c.currency ?? 'NZD', rateMap)
+
+    function addToMonth(monthKey: string, amt: number) {
+      if (!(monthKey in commitmentByMonth)) return
+      if (!commitmentActiveInMonth(c, monthKey)) return
+      commitmentByMonth[monthKey] += amt
+    }
+
     switch (c.cadence) {
       case 'monthly':
-        for (const m of monthKeys) commitmentByMonth[m] += amountNzd
+        for (const m of monthKeys) addToMonth(m, amountNzd)
         break
       case 'quarterly':
       case 'annual':
@@ -141,13 +159,12 @@ export async function GET(req: NextRequest) {
           // No anchor date — spread quarterly as 1/3 per month, annual as 1/12
           const divisor = c.cadence === 'quarterly' ? 3 : c.cadence === 'annual' ? 12 : monthKeys.length
           const perMonth = amountNzd / divisor
-          for (const m of monthKeys) commitmentByMonth[m] += perMonth
+          for (const m of monthKeys) addToMonth(m, perMonth)
           return
         }
         const anchor = new Date(c.nextDueDate)
         if (c.cadence === 'one_off') {
-          const key = c.nextDueDate.slice(0, 7)
-          if (key in commitmentByMonth) commitmentByMonth[key] += amountNzd
+          addToMonth(c.nextDueDate.slice(0, 7), amountNzd)
           return
         }
         const stepMonths = c.cadence === 'quarterly' ? 3 : 12
@@ -156,7 +173,7 @@ export async function GET(req: NextRequest) {
         while (true) {
           const key = cursor.toISOString().slice(0, 7)
           if (key > monthKeys[monthKeys.length - 1]) break
-          if (key in commitmentByMonth) commitmentByMonth[key] += amountNzd
+          addToMonth(key, amountNzd)
           cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + stepMonths, 1))
         }
         // Also walk backward in case the anchor is in the future but some
@@ -165,7 +182,7 @@ export async function GET(req: NextRequest) {
         while (true) {
           const key = cursor.toISOString().slice(0, 7)
           if (key < monthKeys[0]) break
-          if (key in commitmentByMonth) commitmentByMonth[key] += amountNzd
+          addToMonth(key, amountNzd)
           cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() - stepMonths, 1))
         }
         break

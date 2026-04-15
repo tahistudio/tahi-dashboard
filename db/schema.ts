@@ -721,6 +721,20 @@ export const expenseCommitments = sqliteTable('expense_commitments', {
   category: text('category').notNull().default('other'),
   // YYYY-MM-DD. Used to place quarterly/annual/one_off in the forecast.
   nextDueDate: text('next_due_date'),
+  // YYYY-MM-DD. When this commitment started being paid. Commitments
+  // are excluded from any forecast month before startDate so a new
+  // hire or subscription doesn't retroactively inflate historical views.
+  startDate: text('start_date'),
+  // YYYY-MM-DD. When this commitment stops. Commitments are excluded
+  // from forecast months after endDate. Used for fixed-term contracts
+  // like "StraightIn 4-month contract" — set endDate = contract end so
+  // the burn rate naturally drops off when it runs out.
+  endDate: text('end_date'),
+  // 1-31. For monthly/quarterly cadences, the day-of-month the
+  // charge typically hits (e.g. 1 = first of month, 15 = mid-month).
+  // Purely informational for now; used to show "next charge ≈ 1 May"
+  // in the UI. Forecast math uses cadence + dates.
+  billingDayOfMonth: integer('billing_day_of_month'),
   // When false, commitment is excluded from forecast (kept for history)
   active: integer('active', { mode: 'boolean' }).default(true),
   notes: text('notes'),

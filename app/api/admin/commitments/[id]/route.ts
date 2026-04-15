@@ -22,6 +22,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     category: string
     vendor: string | null
     nextDueDate: string | null
+    startDate: string | null
+    endDate: string | null
+    billingDayOfMonth: number | null
     notes: string | null
     linkedXeroAccount: string | null
     active: boolean
@@ -35,6 +38,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (body.category !== undefined) patch.category = body.category
   if ('vendor' in body) patch.vendor = body.vendor ?? null
   if ('nextDueDate' in body) patch.nextDueDate = body.nextDueDate ?? null
+  if ('startDate' in body) patch.startDate = body.startDate ?? null
+  if ('endDate' in body) patch.endDate = body.endDate ?? null
+  if ('billingDayOfMonth' in body) patch.billingDayOfMonth = body.billingDayOfMonth ?? null
   if ('notes' in body) patch.notes = body.notes ?? null
   if ('linkedXeroAccount' in body) patch.linkedXeroAccount = body.linkedXeroAccount ?? null
   if (body.active !== undefined) patch.active = body.active

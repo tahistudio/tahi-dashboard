@@ -114,6 +114,17 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_commitments_category ON expense_commitments(category)`,
     ],
   },
+  {
+    name: '0015',
+    description: 'commitment start/end dates + billing day of month',
+    statements: [
+      // SQLite ALTER TABLE ADD COLUMN doesn't support IF NOT EXISTS.
+      // The runner catches "duplicate column" errors as success so re-running is safe.
+      `ALTER TABLE expense_commitments ADD COLUMN start_date text`,
+      `ALTER TABLE expense_commitments ADD COLUMN end_date text`,
+      `ALTER TABLE expense_commitments ADD COLUMN billing_day_of_month integer`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
@@ -132,16 +143,28 @@ export async function POST(req: NextRequest) {
     }, { status: 400 })
   }
 
-  const results: Array<{ name: string; status: 'applied' | 'error'; error?: string; statementCount?: number }> = []
+  const results: Array<{ name: string; status: 'applied' | 'error'; error?: string; statementCount?: number; skippedAlreadyExists?: number }> = []
 
   for (const m of targets) {
     let applied = 0
+    let skippedAlreadyExists = 0
     try {
       for (const stmt of m.statements) {
-        await drizzle.run(sql.raw(stmt))
-        applied++
+        try {
+          await drizzle.run(sql.raw(stmt))
+          applied++
+        } catch (stmtErr) {
+          const msg = stmtErr instanceof Error ? stmtErr.message : String(stmtErr)
+          // SQLite: "duplicate column name" means the ALTER already ran.
+          // Treat as success so the migration is idempotent.
+          if (msg.includes('duplicate column name') || msg.includes('already exists')) {
+            skippedAlreadyExists++
+          } else {
+            throw stmtErr
+          }
+        }
       }
-      results.push({ name: m.name, status: 'applied', statementCount: applied })
+      results.push({ name: m.name, status: 'applied', statementCount: applied, skippedAlreadyExists })
     } catch (err) {
       results.push({
         name: m.name,
