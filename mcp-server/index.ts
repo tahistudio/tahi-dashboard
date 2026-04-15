@@ -1331,6 +1331,188 @@ server.tool(
 )
 
 // ---------------------------------------------------------------------------
+// Finance reporting (Phase 10)
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'get_financial_health',
+  'Aggregate financial KPIs: total invoiced, paid, outstanding, MRR, pipeline forecast (NZD)',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/billing/financial-health')
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'get_invoice_aging',
+  'Outstanding invoices grouped by aging bucket (current/30/60/90+ days), in NZD',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/reports/invoice-aging')
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'get_client_profitability',
+  'Detailed gross margin for one client (revenue, costs by category, monthly trend)',
+  {
+    clientId: z.string().describe('Client organisation ID'),
+  },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/clients/${args.clientId}/profitability`)
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_client_profitability',
+  'Cross-client gross margin scorecard sorted by revenue desc',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/reports/client-profitability')
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'get_retainer_health',
+  'Per-retainer-client churn risk, MRR, recent activity, utilisation, upsell signals',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/reports/retainer-health')
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'get_cash_flow_forecast',
+  'N-month forward cash flow projection (recurring MRR + weighted pipeline minus expenses)',
+  {
+    months: z.number().optional().describe('Months to forecast (default 6, max 24)'),
+  },
+  async (args) => {
+    const m = args.months ?? 6
+    const data = await apiFetch(`/api/admin/reports/cash-flow-forecast?months=${m}`)
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'get_utilization',
+  'Per-team-member billable hours / capacity utilisation over a rolling window',
+  {
+    weeks: z.number().optional().describe('Window length in weeks (default 4)'),
+  },
+  async (args) => {
+    const w = args.weeks ?? 4
+    const data = await apiFetch(`/api/admin/reports/utilization?weeks=${w}`)
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+// ---------------------------------------------------------------------------
+// Client costs (gross margin tracking)
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'list_client_costs',
+  'List logged costs for a specific client (subcontractor, software, hours, other)',
+  {
+    clientId: z.string().describe('Client organisation ID'),
+  },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/clients/${args.clientId}/costs`)
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'add_client_cost',
+  'Add a cost entry against a client (used in gross margin calculation)',
+  {
+    clientId: z.string().describe('Client organisation ID'),
+    description: z.string().describe('What the cost is for, e.g. "Webflow Pro plan"'),
+    amount: z.number().describe('Numeric amount in the given currency'),
+    currency: z.string().optional().describe('Currency code (default NZD)'),
+    category: z.string().optional().describe('contractor | software | hours | other (default other)'),
+    date: z.string().describe('Date in YYYY-MM-DD'),
+    recurring: z.boolean().optional().describe('Mark as a recurring monthly cost'),
+  },
+  async (args) => {
+    const { clientId, ...body } = args
+    const data = await apiFetch(`/api/admin/clients/${clientId}/costs`, { method: 'POST', body })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'delete_client_cost',
+  'Delete a logged client cost entry',
+  {
+    clientId: z.string().describe('Client organisation ID'),
+    costId: z.string().describe('Cost entry ID'),
+  },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/clients/${args.clientId}/costs/${args.costId}`, { method: 'DELETE' })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+// ---------------------------------------------------------------------------
+// Xero P&L + bank balances + expense reporting
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'sync_xero_pnl',
+  'Pull Xero Profit & Loss for the last N months (default 12) and store snapshots + line items locally',
+  {
+    months: z.number().optional().describe('Number of trailing months to sync (default 12, max 24)'),
+  },
+  async (args) => {
+    const data = await apiFetch('/api/admin/integrations/xero/sync-pnl', {
+      method: 'POST',
+      body: { months: args.months ?? 12 },
+    })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'sync_xero_balances',
+  'Pull current bank account balances from Xero and store snapshot',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/integrations/xero/sync-balances', { method: 'POST' })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'get_expenses',
+  'Categorised monthly expenses + P&L trend from synced Xero data (NZD)',
+  {
+    months: z.number().optional().describe('Trailing months to include (default 12)'),
+  },
+  async (args) => {
+    const m = args.months ?? 12
+    const data = await apiFetch(`/api/admin/reports/expenses?months=${m}`)
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'get_bank_balances',
+  'Current bank account balances + total NZD + runway months at current burn rate',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/reports/bank-balances')
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+// ---------------------------------------------------------------------------
 // Start server
 // ---------------------------------------------------------------------------
 

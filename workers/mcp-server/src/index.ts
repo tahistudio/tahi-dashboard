@@ -513,6 +513,48 @@ const TOOLS: ToolDef[] = [
     messages: { type: 'array', items: { type: 'object', properties: { role: { type: 'string' }, content: { type: 'string' } } }, description: 'Conversation messages for the AI wizard' },
     context: prop('string', 'Additional context about the client or project'),
   }, ['messages']),
+
+  // ── Finance reporting (Phase 10) ──────────────────────────────────
+  tool('get_invoice_aging', 'Outstanding invoices grouped by aging bucket (current/30/60/90+ days), in NZD'),
+  tool('get_client_profitability', 'Detailed gross margin for one client (revenue, costs by category, monthly trend)', {
+    clientId: prop('string', 'Client organisation ID'),
+  }, ['clientId']),
+  tool('list_client_profitability', 'Cross-client gross margin scorecard sorted by revenue desc'),
+  tool('get_retainer_health', 'Per-retainer-client churn risk, MRR, recent activity, utilisation, upsell signals'),
+  tool('get_cash_flow_forecast', 'N-month forward cash flow projection (recurring MRR + weighted pipeline minus expenses)', {
+    months: prop('number', 'Months to forecast (default 6, max 24)'),
+  }),
+  tool('get_utilization', 'Per-team-member billable hours / capacity utilisation over a rolling window', {
+    weeks: prop('number', 'Window length in weeks (default 4)'),
+  }),
+
+  // ── Client costs ──────────────────────────────────────────────────
+  tool('list_client_costs', 'List logged costs for a specific client', {
+    clientId: prop('string', 'Client organisation ID'),
+  }, ['clientId']),
+  tool('add_client_cost', 'Add a cost entry against a client (used in gross margin)', {
+    clientId: prop('string', 'Client organisation ID'),
+    description: prop('string', 'What the cost is for'),
+    amount: prop('number', 'Numeric amount in the given currency'),
+    currency: prop('string', 'Currency code (default NZD)'),
+    category: prop('string', 'contractor | software | hours | other (default other)'),
+    date: prop('string', 'Date in YYYY-MM-DD'),
+    recurring: prop('boolean', 'Mark as a recurring monthly cost'),
+  }, ['clientId', 'description', 'amount', 'date']),
+  tool('delete_client_cost', 'Delete a logged client cost entry', {
+    clientId: prop('string', 'Client organisation ID'),
+    costId: prop('string', 'Cost entry ID'),
+  }, ['clientId', 'costId']),
+
+  // ── Xero P&L / expenses / bank balances ──────────────────────────
+  tool('sync_xero_pnl', 'Pull Xero P&L for the last N months and store snapshots + line items locally', {
+    months: prop('number', 'Trailing months to sync (default 12, max 24)'),
+  }),
+  tool('sync_xero_balances', 'Pull current bank account balances from Xero and store snapshot'),
+  tool('get_expenses', 'Categorised monthly expenses + P&L trend from synced Xero data (NZD)', {
+    months: prop('number', 'Trailing months to include (default 12)'),
+  }),
+  tool('get_bank_balances', 'Current bank account balances + total NZD + runway months at current burn rate'),
 ]
 
 // ---------------------------------------------------------------------------
@@ -800,6 +842,59 @@ async function executeTool(
     // ── AI ────────────────────────────────────────────────────────────
     case 'ai_task_wizard':
       return json(await apiWrite('/api/admin/ai/task-wizard', token, 'POST', args as Record<string, unknown>))
+
+    // ── Finance reporting (Phase 10) ──────────────────────────────────
+    case 'get_invoice_aging':
+      return json(await apiGet('/api/admin/reports/invoice-aging', token))
+    case 'get_client_profitability': {
+      const id = s('clientId')
+      if (!id) throw new Error('clientId is required')
+      return json(await apiGet(`/api/admin/clients/${id}/profitability`, token))
+    }
+    case 'list_client_profitability':
+      return json(await apiGet('/api/admin/reports/client-profitability', token))
+    case 'get_retainer_health':
+      return json(await apiGet('/api/admin/reports/retainer-health', token))
+    case 'get_cash_flow_forecast': {
+      const m = args.months ? String(args.months) : '6'
+      return json(await apiGet(`/api/admin/reports/cash-flow-forecast`, token, { months: m }))
+    }
+    case 'get_utilization': {
+      const w = args.weeks ? String(args.weeks) : '4'
+      return json(await apiGet(`/api/admin/reports/utilization`, token, { weeks: w }))
+    }
+
+    // ── Client costs ──────────────────────────────────────────────────
+    case 'list_client_costs': {
+      const id = s('clientId')
+      if (!id) throw new Error('clientId is required')
+      return json(await apiGet(`/api/admin/clients/${id}/costs`, token))
+    }
+    case 'add_client_cost': {
+      const id = s('clientId')
+      if (!id) throw new Error('clientId is required')
+      const { clientId: _ignore, ...body } = args as Record<string, unknown>
+      void _ignore
+      return json(await apiWrite(`/api/admin/clients/${id}/costs`, token, 'POST', body))
+    }
+    case 'delete_client_cost': {
+      const id = s('clientId')
+      const costId = s('costId')
+      if (!id || !costId) throw new Error('clientId and costId are required')
+      return json(await apiWrite(`/api/admin/clients/${id}/costs/${costId}`, token, 'DELETE'))
+    }
+
+    // ── Xero P&L / expenses / bank balances ──────────────────────────
+    case 'sync_xero_pnl':
+      return json(await apiWrite('/api/admin/integrations/xero/sync-pnl', token, 'POST', args as Record<string, unknown>))
+    case 'sync_xero_balances':
+      return json(await apiWrite('/api/admin/integrations/xero/sync-balances', token, 'POST'))
+    case 'get_expenses': {
+      const m = args.months ? String(args.months) : '12'
+      return json(await apiGet(`/api/admin/reports/expenses`, token, { months: m }))
+    }
+    case 'get_bank_balances':
+      return json(await apiGet('/api/admin/reports/bank-balances', token))
 
     default:
       throw new Error(`Unknown tool: ${name}`)
