@@ -233,6 +233,8 @@ export function ReportsContent() {
           </p>
         </div>
         {/* Currency selector (T340) */}
+        {/* Jump-to chip nav so the long page is navigable */}
+        {/* Currency selector continues below */}
         <div className="flex items-center gap-2">
           <DollarSign className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
           <select
@@ -257,8 +259,11 @@ export function ReportsContent() {
         </div>
       </div>
 
+      {/* Section quick-jump nav. Each chip scrolls to a section anchor below. */}
+      <ReportsJumpNav />
+
       {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div id="overview" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 scroll-mt-20">
         <SummaryCard
           icon={Users}
           label="Total Clients"
@@ -286,7 +291,7 @@ export function ReportsContent() {
       </div>
 
       {/* Financial Health */}
-      <FinancialHealthSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+      <div id="financial-health" className="scroll-mt-20"><FinancialHealthSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
 
       {/* Two-column layout for charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -486,10 +491,10 @@ export function ReportsContent() {
       </div>
 
       {/* Response Time per Team Member */}
-      <ResponseTimeSection />
+      <div id="response-time" className="scroll-mt-20"><ResponseTimeSection /></div>
 
       {/* Sales Pipeline */}
-      <SalesPipelineSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+      <div id="sales-pipeline" className="scroll-mt-20"><SalesPipelineSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
 
       {/* Sales Funnel / Close Rates */}
       <SalesFunnelSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
@@ -510,19 +515,19 @@ export function ReportsContent() {
       <RevenueForecastSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
 
       {/* Retainer Health Monitor (T610) */}
-      <RetainerHealthSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+      <div id="retainer-health" className="scroll-mt-20"><RetainerHealthSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
 
       {/* Cash Flow Forecast (T599-T600) */}
-      <CashFlowForecastSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+      <div id="cash-flow" className="scroll-mt-20"><CashFlowForecastSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
 
       {/* Team Utilization (T605) */}
-      <UtilizationSection />
+      <div id="utilization" className="scroll-mt-20"><UtilizationSection /></div>
 
       {/* Xero Expenses + P&L Trend (T592) */}
-      <ExpenseDashboardSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+      <div id="expenses" className="scroll-mt-20"><ExpenseDashboardSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
 
       {/* Client Profitability Scorecard (T597) */}
-      <ClientProfitabilityScorecard displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+      <div id="client-profitability" className="scroll-mt-20"><ClientProfitabilityScorecard displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
     </div>
   )
 }
@@ -3290,6 +3295,78 @@ function ClientProfitabilityScorecard({ displayCurrency, exchangeRates }: Curren
             })}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+// ── Jump-to nav for the Reports page ──────────────────────────────────────
+// Sticky chip strip that scrolls to anchor IDs below. Grouped by
+// Operations / Sales / Finance / Team so the long page reads like a TOC.
+
+const REPORTS_SECTIONS: Array<{ id: string; label: string; group: 'Operations' | 'Sales' | 'Finance' | 'Team' }> = [
+  { id: 'overview',              label: 'Overview',           group: 'Operations' },
+  { id: 'response-time',         label: 'Response Time',      group: 'Operations' },
+  { id: 'sales-pipeline',        label: 'Pipeline',           group: 'Sales' },
+  { id: 'retainer-health',       label: 'Retainer Health',    group: 'Sales' },
+  { id: 'financial-health',      label: 'Financial Health',   group: 'Finance' },
+  { id: 'cash-flow',             label: 'Cash Flow',          group: 'Finance' },
+  { id: 'expenses',              label: 'Expenses & P&L',     group: 'Finance' },
+  { id: 'client-profitability',  label: 'Client Margin',      group: 'Finance' },
+  { id: 'utilization',           label: 'Team Utilisation',   group: 'Team' },
+]
+
+function ReportsJumpNav() {
+  function jumpTo(id: string) {
+    const el = document.getElementById(id)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  const groups = ['Operations', 'Sales', 'Finance', 'Team'] as const
+
+  return (
+    <div
+      className="sticky z-10 -mx-4 px-4 py-3 backdrop-blur"
+      style={{
+        top: 0,
+        background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
+        borderBottom: '1px solid var(--color-border-subtle)',
+      }}
+    >
+      <div className="flex flex-wrap gap-x-5 gap-y-2 items-center">
+        {groups.map(g => {
+          const items = REPORTS_SECTIONS.filter(s => s.group === g)
+          return (
+            <div key={g} className="flex items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]">{g}</span>
+              <div className="flex flex-wrap gap-1.5">
+                {items.map(s => (
+                  <button
+                    key={s.id}
+                    onClick={() => jumpTo(s.id)}
+                    className="text-xs font-medium px-2.5 py-1 rounded-full transition-colors"
+                    style={{
+                      background: 'var(--color-bg-tertiary)',
+                      color: 'var(--color-text-muted)',
+                      border: '1px solid transparent',
+                      cursor: 'pointer',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'var(--color-brand-50)'
+                      e.currentTarget.style.color = 'var(--color-brand)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'var(--color-bg-tertiary)'
+                      e.currentTarget.style.color = 'var(--color-text-muted)'
+                    }}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

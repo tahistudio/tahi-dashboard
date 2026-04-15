@@ -27,9 +27,15 @@ type NavGroup = {
   items: NavItem[]
 }
 
+// Sidebar IA (revised 2026-04-15):
+//   Daily      — what you open first thing every morning
+//   Clients    — anything tied to a relationship (current, future, past)
+//   Money      — every $ in/out + the time that bills for it
+//   Studio     — running the business (reports, capacity, team, contracts)
+//   Workspace  — admin / reference
 const NAV: NavGroup[] = [
   {
-    group: 'Work',
+    group: 'Daily',
     items: [
       { label: 'Overview',  href: '/overview',  icon: LayoutDashboard, clientVisible: true },
       { label: 'Requests',  href: '/requests',  icon: Inbox, clientVisible: true },
@@ -38,42 +44,37 @@ const NAV: NavGroup[] = [
     ],
   },
   {
-    group: 'Finance',
-    items: [
-      { label: 'Invoices',  href: '/invoices',  icon: FileText, clientVisible: true },
-      { label: 'Billing',   href: '/billing',   icon: CreditCard, adminOnly: true },
-    ],
-  },
-  {
     group: 'Clients',
     items: [
-      { label: 'Clients',   href: '/clients',   icon: Users,       adminOnly: true },
-      { label: 'Files',     href: '/files',     icon: FolderOpen,  clientOnly: true, clientVisible: true },
-      { label: 'Services',  href: '/services',  icon: ShoppingBag, clientOnly: true, clientVisible: true },
+      { label: 'Clients',   href: '/clients',   icon: Users,        adminOnly: true },
+      { label: 'Pipeline',  href: '/pipeline',  icon: TrendingUp,   adminOnly: true },
+      { label: 'Reviews',   href: '/reviews',   icon: Star,         adminOnly: true },
+      { label: 'Files',     href: '/files',     icon: FolderOpen,   clientOnly: true, clientVisible: true },
+      { label: 'Services',  href: '/services',  icon: ShoppingBag,  clientOnly: true, clientVisible: true },
     ],
   },
   {
-    group: 'Insights',
+    group: 'Money',
     items: [
-      { label: 'Reports',   href: '/reports',   icon: BarChart2,  adminOnly: true },
-      { label: 'Time',      href: '/time',      icon: Clock,      adminOnly: true },
-      { label: 'Reviews',   href: '/reviews',   icon: Star,       adminOnly: true },
-    ],
-  },
-  {
-    group: 'Sales',
-    items: [
-      { label: 'Pipeline',  href: '/pipeline', icon: TrendingUp, adminOnly: true },
-      { label: 'Capacity',  href: '/capacity', icon: Gauge, adminOnly: true },
+      { label: 'Invoices',  href: '/invoices',  icon: FileText,     clientVisible: true },
+      { label: 'Billing',   href: '/billing',   icon: CreditCard,   adminOnly: true },
+      { label: 'Time',      href: '/time',      icon: Clock,        adminOnly: true },
     ],
   },
   {
     group: 'Studio',
     items: [
-      { label: 'Team',      href: '/team',      icon: UserCog,    adminOnly: true },
+      { label: 'Reports',   href: '/reports',   icon: BarChart2,    adminOnly: true },
+      { label: 'Capacity',  href: '/capacity',  icon: Gauge,        adminOnly: true },
+      { label: 'Team',      href: '/team',      icon: UserCog,      adminOnly: true },
       { label: 'Contracts', href: '/contracts', icon: FileSignature, adminOnly: true },
-      { label: 'Docs Hub',  href: '/docs',      icon: BookOpen,   adminOnly: true },
-      { label: 'Settings',  href: '/settings',  icon: Settings, adminOnly: true },
+    ],
+  },
+  {
+    group: 'Workspace',
+    items: [
+      { label: 'Docs Hub',  href: '/docs',      icon: BookOpen,     adminOnly: true },
+      { label: 'Settings',  href: '/settings',  icon: Settings,     adminOnly: true },
     ],
   },
 ]
