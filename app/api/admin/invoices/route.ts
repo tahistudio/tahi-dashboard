@@ -92,6 +92,10 @@ export async function POST(req: NextRequest) {
     }>
     dueDate?: string
     notes?: string
+    // Source captures the user's intent at creation time. Even if the
+    // downstream Stripe/Xero call fails, source remembers what they
+    // were trying to do so the FE can show "Stripe link failed — retry".
+    source?: 'manual' | 'stripe' | 'xero'
   }
 
   if (!body.orgId) {
@@ -132,10 +136,13 @@ export async function POST(req: NextRequest) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
+  const requestedSource = body.source ?? 'manual'
+
   await drizzle.insert(schema.invoices).values({
     id: invoiceId,
     orgId: body.orgId,
     subscriptionId: body.subscriptionId ?? null,
+    source: requestedSource,
     status: 'draft',
     amountUsd: totalAmount,
     totalUsd: totalAmount,
@@ -170,7 +177,9 @@ export async function POST(req: NextRequest) {
   }))
 
   if (recipients.length > 0) {
-    const formattedAmount = `${currency} ${(totalAmount / 100).toFixed(2)}`
+    // totalAmount is already a dollar amount in the invoice's currency,
+    // not cents. (We don't store amounts in minor units anywhere.)
+    const formattedAmount = `${currency} ${totalAmount.toFixed(2)}`
     await createNotifications(drizzle, recipients, {
       type: 'invoice_created',
       title: 'New invoice created',

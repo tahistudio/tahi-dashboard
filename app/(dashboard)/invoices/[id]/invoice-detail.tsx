@@ -353,14 +353,20 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                       const data = await res.json() as { payUrl?: string }
                       if (data.payUrl) {
                         await navigator.clipboard.writeText(data.payUrl)
-                        alert('Stripe invoice created! Payment link copied to clipboard.')
+                        alert('Stripe invoice created — payment link copied to clipboard.')
                       }
                       fetchInvoice()
                     } else {
-                      const err = await res.json() as { error?: string }
-                      alert(err.error ?? 'Failed to create Stripe invoice')
+                      // Surface the real Stripe error rather than a generic message.
+                      // Most common cause: the client has no contact with email
+                      // (Stripe rejects customer.create without one).
+                      const err = await res.json().catch(() => ({})) as { error?: string; message?: string }
+                      const detail = err.message || err.error || `HTTP ${res.status}`
+                      alert(`Stripe invoice failed:\n\n${detail}\n\nIf this says "Missing email", add a contact with email on this client's Contacts tab.`)
                     }
-                  } catch { alert('Failed to create Stripe link') }
+                  } catch (err) {
+                    alert(`Failed to create Stripe link: ${err instanceof Error ? err.message : 'unknown error'}`)
+                  }
                 }}
                 variant="ghost"
               />

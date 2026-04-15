@@ -111,6 +111,9 @@ function CreateInvoiceModal({
   const [selectedOrgName, setSelectedOrgName] = useState('')
   const [destination, setDestination] = useState<'manual' | 'xero' | 'stripe'>('manual')
   const [lineItems, setLineItems] = useState([{ description: '', quantity: '1', unitAmount: '' }])
+  // Track whether the selected org has at least one contact with an email
+  // (Stripe rejects the customer create call without one)
+  const [orgHasEmailContact, setOrgHasEmailContact] = useState<boolean | null>(null)
 
   // Fetch clients on mount
   useEffect(() => {
@@ -122,6 +125,25 @@ function CreateInvoiceModal({
       })
       .catch(() => setOrgOptions([]))
   }, [])
+
+  // When the org changes, check if it has any contact with email.
+  // Used to pre-empt the "Stripe rejects customer without email" failure.
+  useEffect(() => {
+    if (!orgId.trim()) {
+      setOrgHasEmailContact(null)
+      return
+    }
+    let cancelled = false
+    fetch(apiPath(`/api/admin/clients/${orgId}/contacts`))
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        if (cancelled) return
+        const contacts = (d as { contacts?: Array<{ email?: string | null }> }).contacts ?? []
+        setOrgHasEmailContact(contacts.some(c => !!c.email))
+      })
+      .catch(() => { if (!cancelled) setOrgHasEmailContact(null) })
+    return () => { cancelled = true }
+  }, [orgId])
   // quantity and unitAmount are now per-line-item in lineItems array
   const [currency, setCurrency] = useState('NZD')
   const [dueDate, setDueDate] = useState('')
@@ -134,6 +156,12 @@ function CreateInvoiceModal({
     const validItems = lineItems.filter(li => li.description.trim() && li.unitAmount)
     if (!orgId.trim() || validItems.length === 0) {
       setError('Client and at least one line item (description + amount) are required.')
+      return
+    }
+    // Stripe needs a customer email. Block before we create the local
+    // invoice so we don't end up with a draft + manual source ghost row.
+    if (destination === 'stripe' && orgHasEmailContact === false) {
+      setError(`${selectedOrgName || 'This client'} has no contact with an email. Add one on the client's Contacts tab before creating a Stripe link.`)
       return
     }
     setSaving(true)
@@ -185,15 +213,23 @@ function CreateInvoiceModal({
             const stripeData = await stripeRes.json() as { payUrl?: string }
             if (stripeData.payUrl) {
               await navigator.clipboard.writeText(stripeData.payUrl)
-              showToast('Stripe invoice created! Payment link copied to clipboard')
+              showToast('Stripe invoice created — payment link copied to clipboard')
             } else {
               showToast('Stripe invoice created')
             }
           } else {
-            showToast('Invoice created (Stripe link failed)')
+            // Surface the actual Stripe error inline so the user can fix it
+            // (e.g. "Missing email" -> add a contact). The local invoice is
+            // already saved as draft + source=stripe so it can be retried.
+            const stripeJson = await stripeRes.json().catch(() => ({})) as { error?: string; message?: string }
+            const detail = stripeJson.message || stripeJson.error || `HTTP ${stripeRes.status}`
+            setError(`Invoice saved as draft, but Stripe link failed: ${detail}`)
+            return
           }
-        } catch {
-          showToast('Invoice created (Stripe failed)')
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : 'unknown error'
+          setError(`Invoice saved as draft, but Stripe call failed: ${detail}`)
+          return
         }
       } else {
         showToast('Invoice created successfully')
@@ -204,7 +240,7 @@ function CreateInvoiceModal({
     } finally {
       setSaving(false)
     }
-  }, [orgId, lineItems, currency, dueDate, notes, destination, onCreated, showToast])
+  }, [orgId, lineItems, currency, dueDate, notes, destination, orgHasEmailContact, selectedOrgName, onCreated, showToast])
 
   return (
     <div
@@ -234,6 +270,15 @@ function CreateInvoiceModal({
             style={{ background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger)', borderRadius: '0.5rem', padding: '0.625rem 0.875rem', marginBottom: '1rem', color: 'var(--color-danger)', fontSize: '0.8125rem' }}
           >
             {error}
+          </div>
+        )}
+        {/* Pre-flight warning: Stripe rejects customer creation without an email */}
+        {destination === 'stripe' && orgId && orgHasEmailContact === false && (
+          <div
+            aria-live="polite"
+            style={{ background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning)', borderRadius: '0.5rem', padding: '0.625rem 0.875rem', marginBottom: '1rem', color: 'var(--color-warning)', fontSize: '0.8125rem' }}
+          >
+            <strong>{selectedOrgName}</strong> has no contact with an email. Stripe needs one to invoice them. Add a contact on the client&apos;s Contacts tab first.
           </div>
         )}
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
