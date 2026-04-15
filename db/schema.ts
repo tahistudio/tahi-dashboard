@@ -655,6 +655,53 @@ export const exchangeRates = sqliteTable('exchange_rates', {
 })
 
 // ============================================================
+// XERO P&L SNAPSHOTS (monthly summary from Xero)
+// ============================================================
+// One row per month per report pull. We use a natural key on month_key
+// so re-syncing the same month overwrites rather than appending.
+export const xeroPnlSnapshots = sqliteTable('xero_pnl_snapshots', {
+  monthKey: text('month_key').primaryKey(),  // YYYY-MM
+  periodStart: text('period_start').notNull(),
+  periodEnd: text('period_end').notNull(),
+  totalRevenue: real('total_revenue').notNull().default(0),      // in Xero base currency (NZD for a NZ tenant)
+  totalCostOfSales: real('total_cost_of_sales').notNull().default(0),
+  totalExpenses: real('total_expenses').notNull().default(0),
+  grossProfit: real('gross_profit').notNull().default(0),
+  netProfit: real('net_profit').notNull().default(0),
+  currency: text('currency').notNull().default('NZD'),
+  rawJson: text('raw_json'),  // original Xero response for later re-parsing
+  syncedAt: text('synced_at').notNull(),
+})
+
+// Per-month per-category expense breakdown from Xero P&L.
+// Composite-unique on (month_key, account_code) so re-sync is idempotent.
+export const xeroExpenseCategories = sqliteTable('xero_expense_categories', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  monthKey: text('month_key').notNull(),
+  accountCode: text('account_code'),       // Xero account code (e.g. "400")
+  accountName: text('account_name').notNull(),
+  section: text('section').notNull(),      // 'cost_of_sales' | 'expense' | 'other'
+  amount: real('amount').notNull(),
+  currency: text('currency').notNull().default('NZD'),
+  isRecurring: integer('is_recurring', { mode: 'boolean' }).default(false),
+  syncedAt: text('synced_at').notNull(),
+}, (table) => [
+  index('idx_xero_exp_month').on(table.monthKey),
+  index('idx_xero_exp_category').on(table.accountName),
+])
+
+// Latest bank balances by Xero account.
+// Key on Xero's AccountID so resync overwrites.
+export const xeroBankBalances = sqliteTable('xero_bank_balances', {
+  accountId: text('account_id').primaryKey(),
+  accountName: text('account_name').notNull(),
+  currency: text('currency').notNull().default('NZD'),
+  balance: real('balance').notNull().default(0),
+  asOf: text('as_of').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+// ============================================================
 // CLIENT COSTS (gross margin tracking per client)
 // ============================================================
 // Captures the costs Tahi incurs to service a particular client so we

@@ -932,10 +932,19 @@ Note: Phase 6 already has CRM pipeline tasks (T286-T391). The tasks below cover 
 > Finance features discussed with Liam. Combines Xero data, dashboard metrics, and projections.
 
 ### Xero P&L Sync and Expense Tracking
-- [ ] T590 - [BE] Xero P&L deep sync: pull full Profit & Loss report from Xero with expense categories, store monthly snapshots locally for trend analysis. Pull account categories from Xero chart of accounts. — [BE]
-- [ ] T591 - [BE] Recurring expense detection: tag expenses that appear monthly in Xero P&L as recurring, allow admin to confirm/override. Store in local table for cash flow forecasting. — [BE]
-- [ ] T592 - [FE] Expense dashboard: show Xero expense categories with monthly trends, highlight recurring vs one-off, filter by category/date. Show as section on Reports page or standalone Finance page. — [FE]
+- [x] T590 - [BE] Xero P&L deep sync — done 2026-04-15. Schema: `xero_pnl_snapshots` (monthly P&L totals) + `xero_expense_categories` (per-month line items). Endpoint `POST /api/admin/integrations/xero/sync-pnl` pulls last N months (default 12) of P&L reports, parses Section rows for Income/COGS/Expenses, upserts snapshots, replaces line items per month. Migration 0013_xero_pnl_and_balances.sql.
+- [x] T591 - [BE] Recurring expense detection — done 2026-04-15. Post-sync step: any `account_name` present in ≥3 of the last 4 months with amount > 0 is flagged `is_recurring=true` in xero_expense_categories. Used by cash-flow-forecast to project ongoing monthly burn.
+- [x] T592 - [FE] Expense dashboard — done 2026-04-15. `ExpenseDashboardSection` on Reports page: 4 summary cards (12-mo revenue/expenses/net profit + avg monthly burn), P&L line chart (revenue/expenses/net across 12 months), category breakdown table sorted by total spend, "Recurring" badge. In-page "Sync P&L" and "Sync Bank Balances" buttons so the user can refresh without leaving the page. Follows currency toggle.
 - [ ] T593 - [UIUX] Review expense dashboard layout, category colour coding, trend sparklines — [UIUX]
+
+### Xero Bank Balance Sync (T600 support)
+- [x] T590b - [BE] `POST /api/admin/integrations/xero/sync-balances` — pulls Xero /Accounts (type=BANK) + /Reports/BankSummary, upserts current closing balance per account into `xero_bank_balances` (keyed on AccountID so resync overwrites). — [BE] — done 2026-04-15
+- [x] T600 - [FE] Cash flow: runway indicator — done 2026-04-15. `BankRunwayCard` on Overview page between Pipeline Summary and Revenue Trend. Shows total NZD balance, count of accounts, per-account breakdown, trailing 3-month burn rate, and runway months (green ≥12mo, amber ≥6mo, red <6mo). Graceful empty state with CTA to Reports if no sync yet.
+- [x] T598b - [BE] Upgrade cash-flow-forecast to use Xero recurring expense data — done 2026-04-15. Now primary cost source is Xero recurring categories (averaged across months present). client_costs layer on top (for project-specific costs not yet in Xero).
+
+### Misc
+- [x] vitest.config.ts: exclude nested node_modules + mcp-server + workers from test discovery — done 2026-04-15. Was picking up 1000+ third-party tests from dependency packages (fast-uri, blake3-wasm, zod), now cleanly runs only 9 suites / 107 tests.
+- [x] Fix admin-requests unit test: mock was missing `drizzle.run` method used by atomic request numbering — done 2026-04-15.
 
 ### Gross Margin Per Client
 - [x] T594 - [BE] Client cost tracking: schema addition for `clientCosts` table (id, orgId, description, amount, currency, category [contractor|software|hours|other], date, recurring, createdAt). API routes for CRUD. — [BE] — done 2026-04-15. Schema in db/schema.ts, migration 0012_client_costs.sql, CRUD at /api/admin/clients/[id]/costs and /api/admin/clients/[id]/costs/[costId].

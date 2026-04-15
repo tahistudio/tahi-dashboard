@@ -22,6 +22,7 @@ vi.mock('@/lib/server-auth', () => ({
 vi.mock('@/lib/db', () => ({
   db: vi.fn().mockResolvedValue({
     insert: vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue(undefined) }),
+    run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }),  // atomic request numbering uses drizzle.run(sql`...`)
     select: vi.fn().mockReturnValue({
       from: vi.fn().mockReturnValue({
         leftJoin: vi.fn().mockReturnValue({

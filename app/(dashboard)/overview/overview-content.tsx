@@ -168,6 +168,9 @@ export function AdminOverview({ userName }: { userName: string }) {
       {/* Pipeline summary */}
       <PipelineSummaryCard />
 
+      {/* Bank balance + runway from Xero sync */}
+      <BankRunwayCard />
+
       {/* Revenue trend */}
       {!loading && monthlyRevenue.length > 0 && (
         <RevenueChart data={monthlyRevenue} />
@@ -358,6 +361,104 @@ function PipelineSummaryCard() {
 function formatNzd(n: number) {
   if (n === 0) return '$0'
   return new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD', maximumFractionDigits: 0 }).format(n)
+}
+
+// ─── Bank Runway Card (T600) ─────────────────────────────────────────────────
+// Shows current bank balance (from latest Xero sync) + months of runway at
+// the trailing 3-month burn rate. A dismissive note appears if no sync has
+// happened yet, with a direct link to the Reports page where the sync
+// buttons live.
+
+interface BankRunwayData {
+  asOf: string | null
+  accounts: Array<{ accountId: string; accountName: string; currency: string; balance: number; balanceNzd: number }>
+  totalBalanceNzd: number
+  avgMonthlyBurnNzd: number
+  runwayMonths: number | null
+  lastSyncedAt: string | null
+}
+
+function BankRunwayCard() {
+  const [data, setData] = useState<BankRunwayData | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/reports/bank-balances'))
+      .then(r => r.ok ? r.json() as Promise<BankRunwayData> : Promise.reject())
+      .then(setData)
+      .catch(() => setData(null))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border p-5 animate-pulse" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <div className="h-4 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '30%' }} />
+        <div className="h-8 rounded mt-3" style={{ background: 'var(--color-bg-tertiary)', width: '50%' }} />
+      </div>
+    )
+  }
+
+  const noData = !data || data.accounts.length === 0
+
+  if (noData) {
+    return (
+      <div className="rounded-xl border p-5" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Bank & Runway</div>
+            <div className="text-base font-medium text-[var(--color-text)] mt-1">No Xero bank data yet</div>
+            <div className="text-xs text-[var(--color-text-subtle)] mt-1">Run a bank + P&L sync from the Reports page.</div>
+          </div>
+          <Link href="/reports" className="text-sm font-medium text-[var(--color-brand)] hover:underline">
+            Go to Reports →
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  const runway = data.runwayMonths
+  const runwayColour = runway === null ? 'var(--color-text-muted)'
+    : runway >= 12 ? 'var(--color-success)'
+    : runway >= 6 ? 'var(--color-warning)'
+    : 'var(--color-danger)'
+  const runwayLabel = runway === null ? 'Need more months of P&L data'
+    : runway >= 24 ? `${Math.floor(runway)}+ months of runway`
+    : `${runway.toFixed(1)} months of runway`
+
+  return (
+    <div className="rounded-xl border p-5" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+      <div className="flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Bank & Runway</div>
+          <div className="flex items-baseline gap-3 mt-1">
+            <div className="text-2xl font-bold text-[var(--color-text)]">{formatNzd(data.totalBalanceNzd)}</div>
+            <div className="text-xs text-[var(--color-text-subtle)]">across {data.accounts.length} account{data.accounts.length === 1 ? '' : 's'}</div>
+          </div>
+          <div className="text-sm mt-1" style={{ color: runwayColour, fontWeight: 500 }}>{runwayLabel}</div>
+          {data.avgMonthlyBurnNzd > 0 && (
+            <div className="text-xs text-[var(--color-text-subtle)] mt-0.5">
+              Burn rate: {formatNzd(data.avgMonthlyBurnNzd)}/mo (3-mo avg)
+            </div>
+          )}
+          {data.asOf && (
+            <div className="text-xs text-[var(--color-text-subtle)] mt-0.5">As of {data.asOf}</div>
+          )}
+        </div>
+        <div className="flex flex-col gap-1 text-xs min-w-[12rem]">
+          {data.accounts.slice(0, 4).map(a => (
+            <div key={a.accountId} className="flex justify-between gap-3">
+              <span className="text-[var(--color-text-muted)] truncate">{a.accountName}</span>
+              <span className="text-[var(--color-text)] font-medium whitespace-nowrap">
+                {new Intl.NumberFormat('en-NZ', { style: 'currency', currency: a.currency, maximumFractionDigits: 0 }).format(a.balance)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ─── Pipeline Capacity Card ──────────────────────────────────────────────────

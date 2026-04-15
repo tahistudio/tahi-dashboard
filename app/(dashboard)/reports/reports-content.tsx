@@ -517,6 +517,9 @@ export function ReportsContent() {
 
       {/* Team Utilization (T605) */}
       <UtilizationSection />
+
+      {/* Xero Expenses + P&L Trend (T592) */}
+      <ExpenseDashboardSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
     </div>
   )
 }
@@ -2934,6 +2937,242 @@ function MiniMetric({ label, value, colour }: { label: string; value: string; co
     >
       <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">{label}</div>
       <div className="text-xl font-semibold mt-1" style={{ color: colour }}>{value}</div>
+    </div>
+  )
+}
+
+// ── Expense Dashboard Section (T592) ───────────────────────────────────────
+// Surfaces xero_expense_categories + xero_pnl_snapshots as a P&L trend chart
+// plus a category breakdown table. Includes in-page "Sync now" buttons so
+// the user can refresh without leaving the page.
+
+interface ExpenseCategoryRow {
+  accountName: string
+  accountCode: string | null
+  section: string
+  isRecurring: boolean
+  monthly: Record<string, number>
+  total: number
+}
+interface PnlMonth {
+  monthKey: string
+  revenue: number
+  costOfSales: number
+  expenses: number
+  grossProfit: number
+  netProfit: number
+}
+interface ExpenseDashboardData {
+  months: string[]
+  totals: Record<string, number>
+  pnl: PnlMonth[]
+  categories: ExpenseCategoryRow[]
+  summary: { totalRevenue: number; totalExpenses: number; totalNetProfit: number; avgMonthlyBurn: number; monthsWithData: number }
+  lastSyncedAt: string | null
+}
+
+function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyProps) {
+  const [data, setData] = useState<ExpenseDashboardData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState<'idle' | 'pnl' | 'balances'>('idle')
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
+
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/reports/expenses?months=12'))
+      if (!res.ok) throw new Error('Failed')
+      setData(await res.json() as ExpenseDashboardData)
+    } catch {
+      setData(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadData() }, [loadData])
+
+  async function runPnlSync() {
+    setSyncing('pnl')
+    setSyncMessage('Pulling 12 months of P&L from Xero...')
+    try {
+      const res = await fetch(apiPath('/api/admin/integrations/xero/sync-pnl'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ months: 12 }),
+      })
+      const json = await res.json() as { synced?: number; failed?: number }
+      if (res.ok) {
+        setSyncMessage(`Synced ${json.synced ?? 0} month(s)${json.failed ? `, ${json.failed} failed` : ''}`)
+        await loadData()
+      } else {
+        setSyncMessage('Sync failed. Check Xero connection.')
+      }
+    } catch {
+      setSyncMessage('Sync error')
+    } finally {
+      setSyncing('idle')
+      setTimeout(() => setSyncMessage(null), 4000)
+    }
+  }
+
+  async function runBalancesSync() {
+    setSyncing('balances')
+    setSyncMessage('Pulling bank balances from Xero...')
+    try {
+      const res = await fetch(apiPath('/api/admin/integrations/xero/sync-balances'), { method: 'POST' })
+      const json = await res.json() as { synced?: number; error?: string }
+      if (res.ok) {
+        setSyncMessage(`Synced ${json.synced ?? 0} bank account(s)`)
+      } else {
+        setSyncMessage(json.error ?? 'Sync failed')
+      }
+    } catch {
+      setSyncMessage('Sync error')
+    } finally {
+      setSyncing('idle')
+      setTimeout(() => setSyncMessage(null), 4000)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border p-6 animate-pulse" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <div className="h-5 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '40%' }} />
+        <div className="h-48 rounded mt-4" style={{ background: 'var(--color-bg-tertiary)' }} />
+      </div>
+    )
+  }
+
+  const hasData = data && data.pnl.some(m => m.revenue > 0 || m.expenses > 0)
+
+  const pnlChartData = (data?.pnl ?? []).map(m => ({
+    name: formatMonthLabel(m.monthKey),
+    revenue: convertNzd(m.revenue, displayCurrency, exchangeRates),
+    expenses: convertNzd(m.expenses + m.costOfSales, displayCurrency, exchangeRates),
+    netProfit: convertNzd(m.netProfit, displayCurrency, exchangeRates),
+  }))
+
+  return (
+    <div className="rounded-xl border p-6" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+      <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--color-text)]">Expenses and P&amp;L (from Xero)</h2>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1">
+            12-month P&amp;L trend and recurring expense breakdown. Data syncs from Xero on demand.
+          </p>
+          {data?.lastSyncedAt && (
+            <p className="text-xs text-[var(--color-text-subtle)] mt-0.5">
+              Last synced {new Date(data.lastSyncedAt).toLocaleString('en-NZ')}
+            </p>
+          )}
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={runPnlSync}
+            disabled={syncing !== 'idle'}
+            className="text-xs font-medium px-3 py-1.5 rounded transition-colors disabled:opacity-50"
+            style={{ background: 'var(--color-brand)', color: 'white', border: 'none', cursor: syncing !== 'idle' ? 'wait' : 'pointer', minHeight: '2.25rem' }}
+          >
+            {syncing === 'pnl' ? 'Syncing P&L...' : 'Sync P&L'}
+          </button>
+          <button
+            onClick={runBalancesSync}
+            disabled={syncing !== 'idle'}
+            className="text-xs font-medium px-3 py-1.5 rounded transition-colors disabled:opacity-50"
+            style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text)', border: '1px solid var(--color-border)', cursor: syncing !== 'idle' ? 'wait' : 'pointer', minHeight: '2.25rem' }}
+          >
+            {syncing === 'balances' ? 'Syncing...' : 'Sync Bank Balances'}
+          </button>
+        </div>
+      </div>
+
+      {syncMessage && (
+        <div className="text-xs font-medium mb-3 px-3 py-2 rounded"
+          style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border-subtle)' }}
+          aria-live="polite"
+        >
+          {syncMessage}
+        </div>
+      )}
+
+      {!hasData ? (
+        <div className="py-8 text-center">
+          <p className="text-sm text-[var(--color-text-muted)]">No P&amp;L data yet. Click <strong>Sync P&amp;L</strong> above to pull the last 12 months from Xero.</p>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <MiniMetric label="12-mo revenue" value={formatInCur(data!.summary.totalRevenue, displayCurrency, exchangeRates)} colour="var(--color-success)" />
+            <MiniMetric label="12-mo expenses" value={formatInCur(data!.summary.totalExpenses, displayCurrency, exchangeRates)} colour="var(--color-danger)" />
+            <MiniMetric label="12-mo net profit" value={formatInCur(data!.summary.totalNetProfit, displayCurrency, exchangeRates)} colour={data!.summary.totalNetProfit >= 0 ? 'var(--color-brand)' : 'var(--color-danger)'} />
+            <MiniMetric label="Avg monthly burn" value={formatInCur(data!.summary.avgMonthlyBurn, displayCurrency, exchangeRates)} colour="var(--color-text-muted)" />
+          </div>
+
+          <div style={{ height: '16rem' }} className="mb-6">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={pnlChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-subtle)" />
+                <XAxis dataKey="name" stroke="var(--color-text-muted)" tick={{ fontSize: 12 }} />
+                <YAxis stroke="var(--color-text-muted)" tick={{ fontSize: 12 }} />
+                <Tooltip
+                  contentStyle={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: '0.5rem' }}
+                  formatter={(v: number) => formatInCur(v, displayCurrency, exchangeRates)}
+                />
+                <Legend />
+                <Line type="monotone" dataKey="revenue" stroke="#5A824E" strokeWidth={2} name="Revenue" dot={false} />
+                <Line type="monotone" dataKey="expenses" stroke="#f87171" strokeWidth={2} name="Expenses" dot={false} />
+                <Line type="monotone" dataKey="netProfit" stroke="#60a5fa" strokeWidth={2} name="Net Profit" dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs font-medium text-[var(--color-text-muted)] border-b" style={{ borderColor: 'var(--color-border)' }}>
+                  <th className="py-2 pr-3">Category</th>
+                  <th className="py-2 pr-3">Section</th>
+                  <th className="py-2 pr-3">Recurring?</th>
+                  <th className="py-2 pr-3 text-right">12-mo total</th>
+                  <th className="py-2 pr-3 text-right">Monthly avg</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data!.categories.slice(0, 25).map(c => {
+                  const monthsPresent = Object.values(c.monthly).filter(v => v > 0).length
+                  const monthlyAvg = monthsPresent > 0 ? c.total / monthsPresent : 0
+                  return (
+                    <tr key={c.accountName} className="border-b" style={{ borderColor: 'var(--color-border-subtle)' }}>
+                      <td className="py-2 pr-3">
+                        <span className="font-medium text-[var(--color-text)]">{c.accountName}</span>
+                        {c.accountCode && <span className="text-xs text-[var(--color-text-subtle)] ml-2">#{c.accountCode}</span>}
+                      </td>
+                      <td className="py-2 pr-3 text-xs text-[var(--color-text-muted)]">{c.section === 'cost_of_sales' ? 'COGS' : c.section}</td>
+                      <td className="py-2 pr-3">
+                        {c.isRecurring ? (
+                          <span className="text-xs font-medium px-2 py-0.5 rounded" style={{ background: 'var(--color-brand-50)', color: 'var(--color-brand)' }}>Recurring</span>
+                        ) : (
+                          <span className="text-xs text-[var(--color-text-subtle)]">One-off</span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 text-right text-[var(--color-text)] font-medium">
+                        {formatInCur(c.total, displayCurrency, exchangeRates)}
+                      </td>
+                      <td className="py-2 pr-3 text-right text-[var(--color-text-muted)] text-xs">
+                        {formatInCur(monthlyAvg, displayCurrency, exchangeRates)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+            {data!.categories.length > 25 && (
+              <p className="text-xs text-[var(--color-text-subtle)] mt-2">Showing top 25 of {data!.categories.length} categories by total spend.</p>
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }

@@ -104,7 +104,38 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── Costs: client_costs per month (recurring + one-offs) ───────────────────
+  // ── Costs: Xero recurring expenses (primary) + client_costs (layered on) ──
+  // Xero P&L sync tags categories that appear in ≥3 of the last 4 months as
+  // recurring. We use the average across those months as the projected
+  // monthly burn from Xero. Fall back to client_costs if no Xero data.
+  const xeroExpenses = await drizzle
+    .select()
+    .from(schema.xeroExpenseCategories)
+    .catch(() => [] as Array<typeof schema.xeroExpenseCategories.$inferSelect>)
+
+  let recurringCostNzd = 0
+  if (xeroExpenses.length > 0) {
+    // Group recurring categories by name and average over distinct months present
+    const recurringByAccount = new Map<string, { total: number; months: Set<string> }>()
+    for (const e of xeroExpenses) {
+      if (!e.isRecurring) continue
+      const nzd = toNzd(e.amount, e.currency ?? 'NZD', rateMap)
+      if (!recurringByAccount.has(e.accountName)) {
+        recurringByAccount.set(e.accountName, { total: 0, months: new Set() })
+      }
+      const entry = recurringByAccount.get(e.accountName)!
+      entry.total += nzd
+      entry.months.add(e.monthKey)
+    }
+    for (const entry of recurringByAccount.values()) {
+      if (entry.months.size > 0) {
+        recurringCostNzd += entry.total / entry.months.size
+      }
+    }
+  }
+
+  // Layer on client_costs (typically project-specific subcontractors or
+  // software that aren't yet reflected in Xero).
   const costs = await drizzle
     .select({
       amount: schema.clientCosts.amount,
@@ -113,9 +144,8 @@ export async function GET(req: NextRequest) {
       recurring: schema.clientCosts.recurring,
     })
     .from(schema.clientCosts)
-    .catch(() => [])  // tolerate pre-migration envs
+    .catch(() => [] as Array<{ amount: number; currency: string; date: string; recurring: boolean | null }>)
 
-  let recurringCostNzd = 0
   const oneOffCostByMonth: Record<string, number> = {}
   for (const c of costs ?? []) {
     const nzd = toNzd(c.amount, c.currency ?? 'NZD', rateMap)
