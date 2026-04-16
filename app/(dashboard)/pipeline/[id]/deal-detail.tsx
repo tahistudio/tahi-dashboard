@@ -34,6 +34,7 @@ interface DealData {
   closedAt: string | null
   closeReason: string | null
   notes: string | null
+  stageEnteredAt: string | null
   createdAt: string
   updatedAt: string
   orgName: string | null
@@ -120,11 +121,11 @@ const ACTIVITY_ICONS: Record<string, React.ComponentType<{ className?: string; s
 }
 
 const ACTIVITY_COLORS: Record<string, string> = {
-  call: '#60a5fa',
-  meeting: '#a78bfa',
-  email: '#4ade80',
-  note: '#fbbf24',
-  task: '#fb923c',
+  call: 'var(--status-submitted-dot)',
+  meeting: 'var(--status-client-review-dot)',
+  email: 'var(--status-delivered-dot)',
+  note: 'var(--status-in-review-dot)',
+  task: 'var(--color-warning)',
 }
 
 const SOURCE_STYLES: Record<string, { label: string; bg: string; text: string }> = {
@@ -244,23 +245,30 @@ export function DealDetail({ dealId }: { dealId: string }) {
   }
 
   return (
-    <div style={{ padding: '1.5rem' }}>
+    <div className="dashboard-main">
       {/* Back link */}
       <Link
         href="/pipeline"
-        className="inline-flex items-center gap-1.5 font-medium transition-colors"
-        style={{ fontSize: '0.875rem', color: 'var(--color-brand)', textDecoration: 'none', marginBottom: '1rem', display: 'inline-flex' }}
-        onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark)' }}
-        onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-brand)' }}
+        className="view-link"
+        style={{
+          fontSize: 'var(--text-sm)',
+          fontWeight: 500,
+          color: 'var(--color-text-muted)',
+          textDecoration: 'none',
+          marginBottom: 'var(--space-5)',
+          display: 'inline-flex',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand)' }}
+        onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
       >
-        <ArrowLeft className="w-4 h-4" />
+        <ArrowLeft size={15} aria-hidden="true" />
         Back to Pipeline
       </Link>
 
       {/* Two-column layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3" style={{ gap: 'var(--space-6)' }}>
         {/* Left column (2/3) */}
-        <div className="lg:col-span-2 flex flex-col gap-6">
+        <div className="lg:col-span-2 flex flex-col" style={{ gap: 'var(--space-6)' }}>
           {/* Title + stage */}
           <div>
             <h1 className="font-bold" style={{ fontSize: '1.5rem', color: 'var(--color-text)', marginBottom: '0.5rem' }}>
@@ -474,7 +482,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
           {/* Days in Stage */}
           <SidebarCard title="Days in Stage">
             <span className="font-semibold" style={{ fontSize: '1.125rem', color: 'var(--color-text)' }}>
-              {daysInStage(null, deal.updatedAt)}
+              {daysInStage(deal.stageEnteredAt ?? null, deal.updatedAt)}
             </span>
             <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginLeft: '0.25rem' }}>
               days
@@ -1638,7 +1646,7 @@ function NudgeDialog({ dealId, dealTitle, contacts, onClose, onSent }: {
   const [to, setTo] = useState(contactEmails.join(', '))
   const [subject, setSubject] = useState(`Following up: ${dealTitle}`)
   const [body, setBody] = useState(
-    `Hi,\n\nJust wanted to check in on this. Happy to answer any questions or jump on a quick call if it helps.\n\nCheers,\nLiam`
+    `Hi,\n\nJust wanted to check in on this. Happy to answer any questions or jump on a quick call if it helps.\n\nCheers`
   )
   const [templates, setTemplates] = useState<{ id: string; name: string; subject: string; bodyHtml: string }[]>([])
   const [scheduleDate, setScheduleDate] = useState('')
