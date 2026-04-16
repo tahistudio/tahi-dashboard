@@ -11,9 +11,12 @@
  */
 import { getCloudflareContext } from '@opennextjs/cloudflare'
 import { getDB } from '@/db/d1'
-import { migrate } from 'drizzle-orm/d1/migrator'
 
-let _migrated = false
+// HOTFIX #6: keep schema (needed for typed queries) but absolutely
+// NO migrate import. The drizzle-orm/d1/migrator module imports Node.js
+// fs APIs that may not work on newer Cloudflare Workers runtimes.
+// Even though it was caught by try/catch, the mere IMPORT of the
+// module might crash the Worker during bundling or initialization.
 
 export async function db() {
   const { env } = await getCloudflareContext({ async: true })
@@ -25,19 +28,5 @@ export async function db() {
       'Local dev: run `npm run dev:wrangler` instead of `npm run dev`.'
     )
   }
-  const database = getDB(env as CloudflareEnv)
-
-  // Run pending migrations once per cold start (no-op if already up to date)
-  if (!_migrated) {
-    try {
-      await migrate(database, { migrationsFolder: 'drizzle/migrations' })
-      _migrated = true
-    } catch (err) {
-      // Log but don't crash : table may already exist on subsequent cold starts
-      console.error('[db] Migration error (may be safe to ignore):', err)
-      _migrated = true
-    }
-  }
-
-  return database
+  return getDB(env as CloudflareEnv)
 }
