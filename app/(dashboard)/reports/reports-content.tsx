@@ -132,7 +132,7 @@ export function ReportsContent() {
               className="animate-pulse"
               style={{
                 background: 'var(--color-bg)',
-                borderRadius: 'var(--radius-card)',
+                borderRadius: 'var(--radius-lg)',
                 border: '1px solid var(--color-border)',
                 padding: '1.5rem',
                 height: '6rem',
@@ -327,7 +327,7 @@ export function ReportsContent() {
         <div
           style={{
             background: 'var(--color-bg)',
-            borderRadius: 'var(--radius-card)',
+            borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
             padding: '1.5rem',
           }}
@@ -370,7 +370,7 @@ export function ReportsContent() {
         <div
           style={{
             background: 'var(--color-bg)',
-            borderRadius: 'var(--radius-card)',
+            borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
             padding: '1.5rem',
           }}
@@ -424,7 +424,7 @@ export function ReportsContent() {
         <div
           style={{
             background: 'var(--color-bg)',
-            borderRadius: 'var(--radius-card)',
+            borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
             padding: '1.5rem',
           }}
@@ -483,7 +483,7 @@ export function ReportsContent() {
         <div
           style={{
             background: 'var(--color-bg)',
-            borderRadius: 'var(--radius-card)',
+            borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
             padding: '1.5rem',
           }}
@@ -666,7 +666,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
               className="animate-pulse"
               style={{
                 background: 'var(--color-bg)',
-                borderRadius: 'var(--radius-card)',
+                borderRadius: 'var(--radius-lg)',
                 border: '1px solid var(--color-border)',
                 padding: '1.5rem',
                 height: '6rem',
@@ -681,7 +681,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
         <div
           style={{
             background: 'var(--color-bg)',
-            borderRadius: 'var(--radius-card)',
+            borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
             padding: '1.5rem',
           }}
@@ -737,7 +737,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
             <div
               style={{
                 background: 'var(--color-bg)',
-                borderRadius: 'var(--radius-card)',
+                borderRadius: 'var(--radius-lg)',
                 border: '1px solid var(--color-border)',
                 padding: '1.5rem',
               }}
@@ -793,7 +793,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
         <div
           style={{
             background: 'var(--color-bg)',
-            borderRadius: 'var(--radius-card)',
+            borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
             padding: '1.5rem',
           }}
@@ -812,7 +812,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
         <div
           style={{
             background: 'var(--color-bg)',
-            borderRadius: 'var(--radius-card)',
+            borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
             padding: '1.5rem',
           }}
@@ -846,7 +846,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
         <div
           style={{
             background: 'var(--color-bg)',
-            borderRadius: 'var(--radius-card)',
+            borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
             padding: '1.5rem',
           }}
@@ -1044,7 +1044,7 @@ function FinancialOutstandingCard({ value, isPositive }: { value: string; isPosi
     <div
       style={{
         background: 'var(--color-bg)',
-        borderRadius: 'var(--radius-card)',
+        borderRadius: 'var(--radius-lg)',
         border: isPositive ? '1px solid #fecaca' : '1px solid var(--color-border)',
         padding: '1.5rem',
       }}
@@ -1157,7 +1157,7 @@ function ResponseTimeSection() {
     <div
       style={{
         background: 'var(--color-bg)',
-        borderRadius: 'var(--radius-card)',
+        borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--color-border)',
         padding: '1.5rem',
       }}
@@ -1316,7 +1316,7 @@ function SalesPipelineSection({ displayCurrency, exchangeRates }: CurrencyProps)
               className="animate-pulse"
               style={{
                 background: 'var(--color-bg)',
-                borderRadius: 'var(--radius-card)',
+                borderRadius: 'var(--radius-lg)',
                 border: '1px solid var(--color-border)',
                 padding: '1.5rem',
                 height: '6rem',
@@ -1336,7 +1336,7 @@ function SalesPipelineSection({ displayCurrency, exchangeRates }: CurrencyProps)
       <div
         style={{
           background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
+          borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
           padding: '1.5rem',
         }}
@@ -1392,7 +1392,7 @@ function SalesPipelineSection({ displayCurrency, exchangeRates }: CurrencyProps)
       <div
         style={{
           background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
+          borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
           padding: '1.5rem',
         }}
@@ -1474,7 +1474,7 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
       <div
         style={{
           background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
+          borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
           padding: '1.5rem',
         }}
@@ -1497,7 +1497,7 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
       <div
         style={{
           background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
+          borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
           padding: '1.5rem',
         }}
@@ -1538,7 +1538,7 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
       <div
         style={{
           background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
+          borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
           padding: '1.5rem',
         }}
@@ -1594,7 +1594,7 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
       <div
         style={{
           background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
+          borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
           padding: '1.5rem',
         }}
@@ -1651,7 +1651,7 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
         <div
           style={{
             background: 'var(--color-bg)',
-            borderRadius: 'var(--radius-card)',
+            borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
             padding: '1.5rem',
           }}
@@ -1754,7 +1754,7 @@ function SummaryCard({
     <div
       style={{
         background: 'var(--color-bg)',
-        borderRadius: 'var(--radius-card)',
+        borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--color-border)',
         padding: '1.5rem',
       }}
@@ -1794,7 +1794,7 @@ function StatCard({
     <div
       style={{
         background: 'var(--color-bg)',
-        borderRadius: 'var(--radius-card)',
+        borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--color-border)',
         padding: '1.5rem',
       }}
@@ -1859,7 +1859,7 @@ function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProp
       <div
         style={{
           background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
+          borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
           padding: '1.5rem',
         }}
@@ -1900,7 +1900,7 @@ function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProp
       <div
         style={{
           background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
+          borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
           padding: '1.5rem',
         }}
@@ -1923,7 +1923,7 @@ function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProp
         <div
           style={{
             background: 'var(--color-bg)',
-            borderRadius: 'var(--radius-card)',
+            borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
             padding: '1.5rem',
           }}
@@ -1956,7 +1956,7 @@ function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProp
         <div
           style={{
             background: 'var(--color-bg)',
-            borderRadius: 'var(--radius-card)',
+            borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
             padding: '1.5rem',
           }}
@@ -2067,7 +2067,7 @@ function StageVelocitySection() {
       <div
         style={{
           background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
+          borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
           padding: '1.5rem',
         }}
@@ -2092,7 +2092,7 @@ function StageVelocitySection() {
       <div
         style={{
           background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
+          borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
           padding: '1.5rem',
         }}
@@ -2114,7 +2114,7 @@ function StageVelocitySection() {
     <div
       style={{
         background: 'var(--color-bg)',
-        borderRadius: 'var(--radius-card)',
+        borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--color-border)',
         padding: '1.5rem',
       }}
@@ -2231,7 +2231,7 @@ function CloseRateSourceBreakdownSection({ displayCurrency, exchangeRates }: Cur
       <div
         style={{
           background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
+          borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
           padding: '1.5rem',
         }}
@@ -2254,7 +2254,7 @@ function CloseRateSourceBreakdownSection({ displayCurrency, exchangeRates }: Cur
       <div
         style={{
           background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
+          borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
           padding: '1.5rem',
         }}
@@ -2274,7 +2274,7 @@ function CloseRateSourceBreakdownSection({ displayCurrency, exchangeRates }: Cur
     <div
       style={{
         background: 'var(--color-bg)',
-        borderRadius: 'var(--radius-card)',
+        borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--color-border)',
         padding: '1.5rem',
       }}
@@ -2391,7 +2391,7 @@ function SalesCycleLengthSection() {
       <div
         style={{
           background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
+          borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
           padding: '1.5rem',
         }}
@@ -2414,7 +2414,7 @@ function SalesCycleLengthSection() {
       <div
         style={{
           background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
+          borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
           padding: '1.5rem',
         }}
@@ -2434,7 +2434,7 @@ function SalesCycleLengthSection() {
     <div
       style={{
         background: 'var(--color-bg)',
-        borderRadius: 'var(--radius-card)',
+        borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--color-border)',
         padding: '1.5rem',
       }}
@@ -2473,197 +2473,7 @@ function SalesCycleLengthSection() {
   )
 }
 
-// ── Revenue Forecast Section (T326) ──────────────────────────────────────────
-
-interface ForecastMonth {
-  month: string
-  revenue: number
-  bestCase: number
-  worstCase: number
-}
-
-interface ForecastData {
-  months: ForecastMonth[]
-  totalWeightedValue: number
-  totalBestCase: number
-  totalWorstCase: number
-}
-
-function RevenueForecastSection({ displayCurrency, exchangeRates }: CurrencyProps) {
-  const [forecastData, setForecastData] = useState<ForecastData | null>(null)
-  const [forecastLoading, setForecastLoading] = useState(true)
-  const fmtCur = (v: number) => formatInCur(v, displayCurrency, exchangeRates)
-
-  useEffect(() => {
-    let cancelled = false
-    const loadForecast = async () => {
-      try {
-        // Fetch both sales data and financial health for comprehensive forecast
-        const [salesRes, healthRes] = await Promise.all([
-          fetch(apiPath('/api/admin/reports/sales')),
-          fetch(apiPath('/api/admin/billing/financial-health')),
-        ])
-
-        if (!salesRes.ok) throw new Error('Failed')
-        const salesJson = await salesRes.json() as { weightedPipelineValue?: number }
-        const healthJson = healthRes.ok
-          ? (await healthRes.json() as { mrr?: number; pipeline?: { monthlyProjections?: Record<string, number> } })
-          : null
-
-        const weighted = salesJson.weightedPipelineValue ?? 0
-        const mrr = healthJson?.mrr ?? 0
-
-        if ((weighted > 0 || mrr > 0) && !cancelled) {
-          const months: ForecastMonth[] = []
-          const now = new Date()
-
-          // Use monthly projections from financial health if available
-          const projections = healthJson?.pipeline?.monthlyProjections ?? {}
-
-          for (let i = 0; i < 6; i++) {
-            const d = new Date(now.getFullYear(), now.getMonth() + i + 1, 1)
-            const label = d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' })
-            const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-
-            // MRR is recurring base, pipeline projections are additive
-            const pipelineForMonth = projections[monthKey] ?? Math.round(weighted / 6)
-            const baseRevenue = mrr + pipelineForMonth
-
-            months.push({
-              month: label,
-              revenue: Math.round(baseRevenue),
-              bestCase: Math.round(baseRevenue * 1.3),
-              worstCase: Math.round(baseRevenue * 0.6),
-            })
-          }
-
-          const totalWeighted = months.reduce((s, m) => s + m.revenue, 0)
-          setForecastData({
-            months,
-            totalWeightedValue: totalWeighted,
-            totalBestCase: Math.round(totalWeighted * 1.3),
-            totalWorstCase: Math.round(totalWeighted * 0.6),
-          })
-        }
-      } catch {
-        // silent
-      } finally {
-        if (!cancelled) setForecastLoading(false)
-      }
-    }
-    loadForecast()
-    return () => { cancelled = true }
-  }, [])
-
-  if (forecastLoading) {
-    return (
-      <div
-        style={{
-          background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
-          border: '1px solid var(--color-border)',
-          padding: '1.5rem',
-        }}
-      >
-        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
-          <TrendingUp className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
-          Revenue Forecast
-        </h3>
-        <div className="space-y-2">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="animate-pulse rounded" style={{ height: '2.5rem', background: 'var(--color-bg-tertiary)' }} />
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  if (!forecastData || forecastData.months.length === 0) {
-    return (
-      <div
-        style={{
-          background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
-          border: '1px solid var(--color-border)',
-          padding: '1.5rem',
-        }}
-      >
-        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
-          <TrendingUp className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
-          Revenue Forecast
-        </h3>
-        <p className="text-sm text-[var(--color-text-muted)]">
-          No forecast data available. Add deals to the pipeline to generate a revenue forecast.
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-[var(--color-text)]">Revenue Forecast</h2>
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-        <SummaryCard
-          icon={DollarSign}
-          label="Weighted Forecast (6mo)"
-          value={fmtCur(forecastData.totalWeightedValue)}
-          accent="emerald"
-        />
-        <SummaryCard
-          icon={TrendingUp}
-          label="Best Case"
-          value={fmtCur(forecastData.totalBestCase)}
-          accent="blue"
-        />
-        <SummaryCard
-          icon={Target}
-          label="Worst Case"
-          value={fmtCur(forecastData.totalWorstCase)}
-          accent="amber"
-        />
-      </div>
-
-      {/* Bar chart */}
-      <div
-        style={{
-          background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
-          border: '1px solid var(--color-border)',
-          padding: '1.5rem',
-        }}
-      >
-        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
-          <BarChart2 className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
-          Forecasted Revenue by Month (next 6 months)
-        </h3>
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={forecastData.months}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" />
-            <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-            <YAxis
-              allowDecimals={false}
-              tick={{ fontSize: 11 }}
-              tickFormatter={(v: number) => `$${Math.round(v / 1000)}k`}
-            />
-            <Tooltip
-              formatter={(value: number) => [fmtCur(value), '']}
-              contentStyle={{
-                fontSize: '0.75rem',
-                borderRadius: '0.5rem',
-                border: '1px solid var(--color-border)',
-              }}
-            />
-            <Bar dataKey="worstCase" fill="#fbbf24" radius={[4, 4, 0, 0]} name="Worst Case" />
-            <Bar dataKey="revenue" fill="#5A824E" radius={[4, 4, 0, 0]} name="Weighted" />
-            <Bar dataKey="bestCase" fill="#60a5fa" radius={[4, 4, 0, 0]} name="Best Case" />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
-  )
-}
+// ── (RevenueForecastSection removed — data is covered by CashFlowForecastSection) ──
 
 // ── Retainer Health Section (T610) ─────────────────────────────────────────
 
@@ -2981,7 +2791,7 @@ function MiniMetric({ label, value, colour }: { label: string; value: string; co
       style={{
         background: 'var(--color-bg-secondary)',
         border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-card)',
+        borderRadius: 'var(--radius-lg)',
         padding: '1rem 1.25rem',
       }}
     >
