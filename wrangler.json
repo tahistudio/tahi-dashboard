@@ -11,8 +11,7 @@
     {
       "binding": "DB",
       "database_name": "tahi-db",
-      "database_id": "placeholder",
-      "migrations_dir": "./drizzle/migrations"
+      "database_id": "placeholder"
     }
   ],
   "r2_buckets": [
