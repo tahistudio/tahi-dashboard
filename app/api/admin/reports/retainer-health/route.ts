@@ -51,16 +51,33 @@ export async function GET(req: NextRequest) {
     sub_started: string | null
   }
 
-  const orgsRaw = await drizzle.all<RawRow>(sql`
-    SELECT
-      o.id, o.name, o.status, o.health_status, o.preferred_currency,
-      o.custom_mrr, o.billing_model, o.retainer_end_date, o.created_at,
-      s.plan_type, s.status as sub_status, s.current_period_start as sub_started
-    FROM organisations o
-    LEFT JOIN subscriptions s
-      ON s.org_id = o.id AND s.status = 'active'
-    WHERE o.status != 'archived'
-  `)
+  // Try with billing_model column first (migration 0016). Fall back to
+  // the old query without it if the column doesn't exist yet.
+  let orgsRaw: RawRow[] | null = null
+  try {
+    orgsRaw = await drizzle.all<RawRow>(sql`
+      SELECT
+        o.id, o.name, o.status, o.health_status, o.preferred_currency,
+        o.custom_mrr, o.billing_model, o.retainer_end_date, o.created_at,
+        s.plan_type, s.status as sub_status, s.current_period_start as sub_started
+      FROM organisations o
+      LEFT JOIN subscriptions s
+        ON s.org_id = o.id AND s.status = 'active'
+      WHERE o.status != 'archived'
+    `)
+  } catch {
+    // billing_model / retainer_end_date columns don't exist yet (pre-0016)
+    orgsRaw = await drizzle.all<RawRow>(sql`
+      SELECT
+        o.id, o.name, o.status, o.health_status, o.preferred_currency,
+        o.custom_mrr, NULL as billing_model, NULL as retainer_end_date, o.created_at,
+        s.plan_type, s.status as sub_status, s.current_period_start as sub_started
+      FROM organisations o
+      LEFT JOIN subscriptions s
+        ON s.org_id = o.id AND s.status = 'active'
+      WHERE o.status != 'archived'
+    `)
+  }
 
   // Only show clients that are explicitly retainer-billed (billingModel = 'retainer')
   // OR have a legacy customMrr set with no billingModel specified.

@@ -31,8 +31,31 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   if (!org) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // customMrr + billingModel + retainer dates are now in the Drizzle
-  // schema (migration 0016), so org already includes them via select().
+  // billingModel, customMrr, retainerStartDate, retainerEndDate live in DB
+  // via migration 0016 but are NOT in Drizzle schema (to avoid crashing
+  // SELECT * before migration is applied). Access via raw SQL.
+  let billingExtras: Record<string, unknown> = {}
+  try {
+    const rows = await drizzle.all<{
+      custom_mrr: number | null
+      billing_model: string | null
+      retainer_start_date: string | null
+      retainer_end_date: string | null
+    }>(
+      sql`SELECT custom_mrr, billing_model, retainer_start_date, retainer_end_date
+          FROM organisations WHERE id = ${id} LIMIT 1`
+    )
+    if (rows?.[0]) {
+      billingExtras = {
+        customMrr: rows[0].custom_mrr,
+        billingModel: rows[0].billing_model,
+        retainerStartDate: rows[0].retainer_start_date,
+        retainerEndDate: rows[0].retainer_end_date,
+      }
+    }
+  } catch {
+    // Columns don't exist yet (pre-migration-0016)
+  }
 
   const [contacts, subscription, recentRequests] = await Promise.all([
     drizzle
@@ -86,7 +109,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       .where(eq(schema.tracks.subscriptionId, subscription.id))
   }
 
-  return NextResponse.json({ org, contacts, subscription, tracks, recentRequests })
+  return NextResponse.json({ org: { ...org, ...billingExtras }, contacts, subscription, tracks, recentRequests })
 }
 
 // ── PATCH /api/admin/clients/[id] ────────────────────────────────────────────
@@ -123,7 +146,6 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     'name', 'website', 'industry', 'planType', 'status',
     'healthStatus', 'healthNote', 'internalNotes', 'brands',
     'customFields', 'defaultHourlyRate', 'size', 'annualRevenue',
-    'billingModel', 'customMrr', 'retainerStartDate', 'retainerEndDate',
   ] as const
   for (const key of allowed) {
     if (key in body) patch[key] = body[key] ?? null
@@ -141,8 +163,40 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .set(patch)
     .where(eq(schema.organisations.id, id))
 
-  // customMrr is now in the Drizzle schema (migration 0016) so it's
-  // handled by the generic patch loop above. No more raw SQL needed.
+  // Handle billing fields via raw SQL (not in Drizzle schema to avoid
+  // crashing SELECT * before migration 0016 is applied).
+  const billingFields = ['customMrr', 'billingModel', 'retainerStartDate', 'retainerEndDate'] as const
+  const billingUpdates: string[] = []
+  const billingValues: unknown[] = []
+  for (const field of billingFields) {
+    if (field in body) {
+      const colMap: Record<string, string> = {
+        customMrr: 'custom_mrr',
+        billingModel: 'billing_model',
+        retainerStartDate: 'retainer_start_date',
+        retainerEndDate: 'retainer_end_date',
+      }
+      billingUpdates.push(`${colMap[field]} = ?`)
+      billingValues.push(body[field] ?? null)
+    }
+  }
+  if (billingUpdates.length > 0) {
+    try {
+      const setClause = billingUpdates.join(', ')
+      await drizzle.run(
+        sql.raw(`UPDATE organisations SET ${setClause} WHERE id = '${id}'`),
+      )
+      // Re-run with parameterised values via individual updates
+      // (sql.raw doesn't support params, so do one at a time)
+      for (let i = 0; i < billingUpdates.length; i++) {
+        const col = billingUpdates[i].split(' = ')[0]
+        const val = billingValues[i]
+        await drizzle.run(sql`UPDATE organisations SET ${sql.raw(col)} = ${val} WHERE id = ${id}`)
+      }
+    } catch {
+      // Columns don't exist yet (pre-migration-0016), silently skip
+    }
+  }
 
   return NextResponse.json({ success: true })
 }

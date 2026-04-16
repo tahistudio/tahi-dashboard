@@ -52,16 +52,29 @@ export async function GET(req: NextRequest) {
   // ── Revenue: recurring MRR from active clients with customMrr ──────────────
   // Now per-month: respects retainer_end_date so churning clients (Physitrack)
   // drop out of the forecast after their end date instead of projecting forever.
-  const mrrRows = await drizzle.all<{
+  // Try with retainer date columns (migration 0016). Fall back to
+  // the old query without them if columns don't exist yet.
+  type MrrRow = {
     custom_mrr: number
     preferred_currency: string | null
     retainer_start_date: string | null
     retainer_end_date: string | null
-  }>(
-    sql`SELECT custom_mrr, preferred_currency, retainer_start_date, retainer_end_date
-        FROM organisations
-        WHERE status = 'active' AND custom_mrr IS NOT NULL AND custom_mrr > 0`
-  )
+  }
+  let mrrRows: MrrRow[] | null = null
+  try {
+    mrrRows = await drizzle.all<MrrRow>(
+      sql`SELECT custom_mrr, preferred_currency, retainer_start_date, retainer_end_date
+          FROM organisations
+          WHERE status = 'active' AND custom_mrr IS NOT NULL AND custom_mrr > 0`
+    )
+  } catch {
+    // retainer date columns don't exist yet (pre-0016)
+    mrrRows = await drizzle.all<MrrRow>(
+      sql`SELECT custom_mrr, preferred_currency, NULL as retainer_start_date, NULL as retainer_end_date
+          FROM organisations
+          WHERE status = 'active' AND custom_mrr IS NOT NULL AND custom_mrr > 0`
+    )
+  }
 
   // Build per-month MRR (some clients drop off mid-window)
   const mrrByMonth: Record<string, number> = {}
