@@ -765,3 +765,32 @@ Escalated to Liam: No. Direct confirmation from Liam.
 **Deprioritized:** Client expense allocation (Liam doesn't expense to clients directly).
 
 ---
+
+## #039 - Production Outage: WFCloud Builder 1.2.0 D1 Binding Regression
+
+**Date:** 2026-04-16
+
+**Incident:** All DB-touching API routes returned 500 for ~2 hours. Every request hit: "D1 database binding (DB) not found in Cloudflare context." Seven code hotfixes were deployed before the root cause was identified as a platform issue, not a code issue.
+
+**Root cause:** Webflow Cloud upgraded their builder from **1.1.1 to 1.2.0** between deploys. Builder 1.1.1 preserved user wrangler config:
+```
+/repo/wrangler.json not found, checking for /repo/wrangler.jsonc
+saving user-provided wrangler JSONC as /repo/clouduser.wrangler.json...
+```
+Builder 1.2.0 skips this step entirely, just printing "Copying wrangler.json template..." and overwriting the user config with its template (which only has ASSETS). The D1 and R2 bindings declared in the user's wrangler.jsonc were silently lost.
+
+**Fix:** Ship `clouduser.wrangler.json` directly in the repo so the deployer reads it without needing the builder to generate it. Also removed `migrations_dir` from the config because the 1.2.0 deployer crashes with ENOENT when it cannot find the migrations at `output/migrations/drizzle/migrations`. We manage migrations ourselves via `/api/admin/db/migrate`.
+
+**Files changed:**
+- Added `clouduser.wrangler.json` (D1 + R2 bindings, no migrations_dir)
+- Added `wrangler.json` (same content, for local dev and documentation)
+- Removed `wrangler.jsonc` (original file, no longer needed)
+
+**Lessons learned:**
+1. When rolling back code does not fix the problem, investigate the platform (builder version, deploy logs, binding injection), not the code.
+2. The Webflow Cloud deploy log line "Your Worker has access to the following bindings" is the definitive check. If DB is missing there, no code change will fix it.
+3. Always compare deploy logs between working and broken deploys. The builder version difference (1.1.1 vs 1.2.0) was the smoking gun.
+4. Keep `clouduser.wrangler.json` in the repo as the source of truth for storage bindings. Do NOT rely on the builder to generate it.
+5. Do NOT use `migrations_dir` in the wrangler config. We run migrations via our own endpoint with idempotent DDL.
+
+---
