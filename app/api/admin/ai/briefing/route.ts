@@ -210,7 +210,7 @@ function buildBriefingContext(data: {
     for (const inv of data.overdueInvoices) {
       const client = data.clients.find(c => c.id === inv.orgId)
       const daysPast = inv.dueDate ? Math.floor((Date.now() - new Date(inv.dueDate).getTime()) / (1000 * 60 * 60 * 24)) : 0
-      lines.push(`- $${inv.amountUsd ?? 0} for ${client?.name ?? 'Unknown'} - ${daysPast} days overdue (due ${inv.dueDate ?? 'unknown'})`)
+      lines.push(`- [id:${inv.id} href:/invoices/${inv.id}] $${inv.amountUsd ?? 0} for ${client?.name ?? 'Unknown'} (client:/clients/${inv.orgId}) - ${daysPast} days overdue (due ${inv.dueDate ?? 'unknown'})`)
     }
   }
   lines.push('')
@@ -223,7 +223,7 @@ function buildBriefingContext(data: {
     for (const req of data.stagnantRequests) {
       const client = data.clients.find(c => c.id === req.orgId)
       const daysStale = Math.floor((Date.now() - new Date(req.updatedAt).getTime()) / (1000 * 60 * 60 * 24))
-      lines.push(`- "${req.title}" (${req.status}) for ${client?.name ?? 'Unknown'} - ${daysStale} days since last update`)
+      lines.push(`- [id:${req.id} href:/requests/${req.id}] "${req.title}" (${req.status}) for ${client?.name ?? 'Unknown'} (client:/clients/${req.orgId}) - ${daysStale} days since last update`)
     }
   }
   lines.push('')
@@ -235,7 +235,7 @@ function buildBriefingContext(data: {
     lines.push('All clients green')
   } else {
     for (const c of unhealthyClients) {
-      lines.push(`- ${c.name}: ${c.healthStatus}${c.healthNote ? ` - ${c.healthNote}` : ''}`)
+      lines.push(`- [id:${c.id} href:/clients/${c.id}] ${c.name}: ${c.healthStatus}${c.healthNote ? ` - ${c.healthNote}` : ''}`)
     }
   }
   lines.push('')
@@ -243,14 +243,14 @@ function buildBriefingContext(data: {
   // Pipeline deals
   lines.push(`## Open Pipeline Deals (${data.deals.length})`)
   for (const d of data.deals.slice(0, 10)) {
-    lines.push(`- "${d.title}" $${d.value ?? 0} - stage: ${d.stageName ?? 'unknown'} - close date: ${d.expectedCloseDate ?? 'none set'}`)
+    lines.push(`- [id:${d.id} href:/pipeline/${d.id}] "${d.title}" $${d.value ?? 0} - stage: ${d.stageName ?? 'unknown'} - close date: ${d.expectedCloseDate ?? 'none set'}`)
   }
   lines.push('')
 
   // Tasks due
   lines.push(`## Tasks Due This Week (${data.tasksDueSoon.length})`)
   for (const t of data.tasksDueSoon) {
-    lines.push(`- "${t.title}" due ${t.dueDate ?? 'unknown'} - ${t.priority ?? 'standard'} priority - status: ${t.status}`)
+    lines.push(`- [id:${t.id} href:/tasks/${t.id}] "${t.title}" due ${t.dueDate ?? 'unknown'} - ${t.priority ?? 'standard'} priority - status: ${t.status}`)
   }
   lines.push('')
 
@@ -286,17 +286,19 @@ Rules:
 - Team members over 85% utilization are at risk of burnout
 - Large tasks with far due dates but no progress need to be started early
 
+Each data item includes an [id:xxx href:/path/to/item] prefix. You MUST include the href in your output so the UI can link directly to the referenced item. If an item references multiple entities, include the most relevant one.
+
 Output format - respond with ONLY this XML structure, no other text:
 <briefing>
 <summary>One sentence overview of today's priorities</summary>
 <today>
-<item category="invoice|request|health|pipeline|capacity|task" priority="high|medium|low">
+<item category="invoice|request|health|pipeline|capacity|task" priority="high|medium|low" href="/path/to/item">
 <title>Short title</title>
 <detail>Explanation and recommended action</detail>
 </item>
 </today>
 <week>
-<item category="invoice|request|health|pipeline|capacity|task" priority="high|medium|low">
+<item category="invoice|request|health|pipeline|capacity|task" priority="high|medium|low" href="/path/to/item">
 <title>Short title</title>
 <detail>Explanation and recommended action</detail>
 </item>
@@ -329,14 +331,15 @@ function parseBriefingResponse(text: string): BriefingResponse {
     if (!sectionMatch) return []
 
     const items: BriefingItem[] = []
-    const itemRegex = /<item\s+category="([^"]*?)"\s+priority="([^"]*?)">\s*<title>([\s\S]*?)<\/title>\s*<detail>([\s\S]*?)<\/detail>\s*<\/item>/g
+    const itemRegex = /<item\s+category="([^"]*?)"\s+priority="([^"]*?)"(?:\s+href="([^"]*?)")?\s*>\s*<title>([\s\S]*?)<\/title>\s*<detail>([\s\S]*?)<\/detail>\s*<\/item>/g
     let match
     while ((match = itemRegex.exec(sectionMatch[1])) !== null) {
       items.push({
         category: match[1] as BriefingItem['category'],
         priority: match[2] as BriefingItem['priority'],
-        title: match[3].trim(),
-        detail: match[4].trim(),
+        title: match[4].trim(),
+        detail: match[5].trim(),
+        href: match[3]?.trim() || undefined,
       })
     }
     return items

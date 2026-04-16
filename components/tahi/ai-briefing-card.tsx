@@ -4,7 +4,9 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Sparkles, RefreshCw, ChevronDown, ChevronUp,
   FileText, Inbox, Heart, Target, Users, CheckSquare,
+  ArrowRight,
 } from 'lucide-react'
+import Link from 'next/link'
 import { apiPath } from '@/lib/api'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -14,6 +16,7 @@ interface BriefingItem {
   priority: 'high' | 'medium' | 'low'
   title: string
   detail: string
+  href?: string
 }
 
 interface BriefingData {
@@ -318,52 +321,78 @@ export function AIDailyBriefing() {
             </div>
           ) : (
             <div>
-              {items.map((item, i) => {
-                const pStyle = PRIORITY_STYLES[item.priority] ?? PRIORITY_STYLES.low
-                return (
-                  <div
-                    key={i}
-                    className="flex items-start"
-                    style={{
-                      padding: 'var(--space-3) var(--space-5)',
-                      borderBottom: i < items.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
-                      gap: 'var(--space-3)',
-                    }}
-                  >
-                    {/* Priority dot */}
-                    <div style={{
-                      width: '0.5rem',
-                      height: '0.5rem',
-                      borderRadius: 'var(--radius-full)',
-                      background: pStyle.dot,
-                      marginTop: '0.375rem',
-                      flexShrink: 0,
-                    }} />
-
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-0-5)' }}>
-                        <span style={{ color: 'var(--color-text-subtle)' }}>
-                          {CATEGORY_ICON[item.category]}
-                        </span>
-                        <span style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                          {CATEGORY_LABEL[item.category] ?? item.category}
-                        </span>
-                      </div>
-                      <p style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
-                        {item.title}
-                      </p>
-                      <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-0-5)' }}>
-                        {item.detail}
-                      </p>
-                    </div>
-                  </div>
-                )
-              })}
+              {items.map((item, i) => (
+                <BriefingRow key={i} item={item} isLast={i === items.length - 1} />
+              ))}
             </div>
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Briefing row (separate component for clean Link/div handling) ──────────
+
+function BriefingRow({ item, isLast }: { item: BriefingItem; isLast: boolean }) {
+  const pStyle = PRIORITY_STYLES[item.priority] ?? PRIORITY_STYLES.low
+  const rowStyle: React.CSSProperties = {
+    padding: 'var(--space-3) var(--space-5)',
+    borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
+    gap: 'var(--space-3)',
+    textDecoration: 'none',
+    transition: 'background-color 150ms ease',
+  }
+
+  const inner = (
+    <>
+      <div style={{
+        width: '0.5rem',
+        height: '0.5rem',
+        borderRadius: 'var(--radius-full)',
+        background: pStyle.dot,
+        marginTop: '0.375rem',
+        flexShrink: 0,
+      }} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-0-5)' }}>
+          <span style={{ color: 'var(--color-text-subtle)' }}>
+            {CATEGORY_ICON[item.category]}
+          </span>
+          <span style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            {CATEGORY_LABEL[item.category] ?? item.category}
+          </span>
+        </div>
+        <p style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
+          {item.title}
+        </p>
+        <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-0-5)' }}>
+          {item.detail}
+        </p>
+      </div>
+      {item.href && (
+        <ArrowRight size={14} aria-hidden="true" className="flex-shrink-0 row-arrow" style={{ color: 'var(--color-text-subtle)', marginTop: '0.25rem' }} />
+      )}
+    </>
+  )
+
+  if (item.href) {
+    return (
+      <Link
+        href={item.href}
+        className="flex items-start group"
+        style={rowStyle}
+        onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-row-hover)' }}
+        onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
+      >
+        {inner}
+      </Link>
+    )
+  }
+
+  return (
+    <div className="flex items-start" style={rowStyle}>
+      {inner}
     </div>
   )
 }
