@@ -410,72 +410,63 @@ export function PipelineContent() {
       </div>
 
       {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3" style={{ marginBottom: '1rem' }}>
+      <div className="flex flex-col sm:flex-row sm:items-center" style={{ marginBottom: 'var(--space-4)', gap: 'var(--space-3)' }}>
         {/* Search */}
         <div className="relative flex-1" style={{ maxWidth: '20rem' }}>
           <Search
+            size={15}
+            aria-hidden="true"
             className="absolute pointer-events-none"
-            style={{ width: '1rem', height: '1rem', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)' }}
+            style={{ left: 'var(--space-3)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)' }}
           />
           <input
             type="text"
             placeholder="Search deals..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full rounded-lg transition-colors"
             style={{
-              padding: '0.5rem 0.75rem 0.5rem 2.25rem',
-              fontSize: '0.875rem',
-              border: '1px solid var(--color-border)',
+              width: '100%',
+              padding: 'var(--space-2) var(--space-3) var(--space-2) var(--space-8)',
+              fontSize: 'var(--text-sm)',
+              border: '1px solid var(--color-border-subtle)',
+              borderRadius: 'var(--radius-md)',
               background: 'var(--color-bg)',
               color: 'var(--color-text)',
               outline: 'none',
-              minHeight: '2.75rem',
+              height: '2.25rem',
+              transition: 'border-color 150ms ease',
             }}
             onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
-            onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+            onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border-subtle)' }}
           />
         </div>
 
         {/* View toggle */}
         <div
-          className="inline-flex rounded-lg overflow-hidden"
-          style={{ border: '1px solid var(--color-border)' }}
+          className="inline-flex overflow-hidden"
+          style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-md)' }}
         >
-          <button
-            onClick={() => setView('kanban')}
-            className="inline-flex items-center gap-1.5 transition-colors"
-            style={{
-              padding: '0.5rem 0.75rem',
-              fontSize: '0.8125rem',
-              fontWeight: 500,
-              background: view === 'kanban' ? 'var(--color-brand)' : 'var(--color-bg)',
-              color: view === 'kanban' ? 'white' : 'var(--color-text-muted)',
-              border: 'none',
-              cursor: 'pointer',
-              minHeight: '2.75rem',
-            }}
-          >
-            <Columns3 className="w-4 h-4" />
-            Board
-          </button>
-          <button
-            onClick={() => setView('list')}
-            className="inline-flex items-center gap-1.5 transition-colors"
-            style={{
-              padding: '0.5rem 0.75rem',
-              fontSize: '0.8125rem',
-              fontWeight: 500,
-              background: view === 'list' ? 'var(--color-brand)' : 'var(--color-bg)',
-              color: view === 'list' ? 'white' : 'var(--color-text-muted)',
-              border: 'none',
-              cursor: 'pointer',
-              minHeight: '2.75rem',
-            }}
-          >
-            <LayoutList className="w-4 h-4" />
-            List
-          </button>
+          {([['kanban', Columns3, 'Board'], ['list', LayoutList, 'List']] as const).map(([v, Icon, label]) => (
+            <button
+              key={v}
+              onClick={() => setView(v as ViewMode)}
+              className="inline-flex items-center"
+              style={{
+                padding: 'var(--space-2) var(--space-3)',
+                fontSize: 'var(--text-sm)',
+                fontWeight: 500,
+                background: view === v ? 'var(--color-brand)' : 'var(--color-bg)',
+                color: view === v ? 'white' : 'var(--color-text-muted)',
+                border: 'none',
+                gap: 'var(--space-1-5)',
+                height: '2.25rem',
+                transition: 'background-color 150ms ease, color 150ms ease',
+              }}
+            >
+              <Icon size={15} aria-hidden="true" />
+              {label}
+            </button>
+          ))}
         </div>
 
         {/* Sort (list view only) */}
@@ -484,15 +475,17 @@ export function PipelineContent() {
             <select
               value={sortKey}
               onChange={e => setSortKey(e.target.value as SortKey)}
-              className="appearance-none rounded-lg cursor-pointer transition-colors"
               style={{
-                padding: '0.5rem 2rem 0.5rem 0.75rem',
-                fontSize: '0.8125rem',
+                appearance: 'none',
+                padding: 'var(--space-2) var(--space-8) var(--space-2) var(--space-3)',
+                fontSize: 'var(--text-sm)',
                 fontWeight: 500,
-                border: '1px solid var(--color-border)',
+                border: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-md)',
                 background: 'var(--color-bg)',
                 color: 'var(--color-text-muted)',
-                minHeight: '2.75rem',
+                height: '2.25rem',
+                cursor: 'pointer',
               }}
             >
               <option value="updatedAt">Last Updated</option>
@@ -501,8 +494,10 @@ export function PipelineContent() {
               <option value="title">Title</option>
             </select>
             <ChevronDown
+              size={13}
+              aria-hidden="true"
               className="absolute pointer-events-none"
-              style={{ width: '0.875rem', height: '0.875rem', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)' }}
+              style={{ right: 'var(--space-2)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)' }}
             />
           </div>
         )}
@@ -510,28 +505,33 @@ export function PipelineContent() {
         {/* Filter toggle */}
         <button
           onClick={() => setShowFilters(!showFilters)}
-          className="inline-flex items-center gap-1.5 transition-colors rounded-lg"
+          className="inline-flex items-center"
           style={{
-            padding: '0.5rem 0.75rem',
-            fontSize: '0.8125rem',
+            padding: 'var(--space-2) var(--space-3)',
+            fontSize: 'var(--text-sm)',
             fontWeight: 500,
-            border: `1px solid ${showFilters || hasActiveFilters ? 'var(--color-brand)' : 'var(--color-border)'}`,
+            border: `1px solid ${showFilters || hasActiveFilters ? 'var(--color-brand)' : 'var(--color-border-subtle)'}`,
+            borderRadius: 'var(--radius-md)',
             background: showFilters || hasActiveFilters ? 'var(--color-brand-50)' : 'var(--color-bg)',
             color: showFilters || hasActiveFilters ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-            cursor: 'pointer',
-            minHeight: '2.75rem',
+            gap: 'var(--space-1-5)',
+            height: '2.25rem',
+            transition: 'border-color 150ms ease, background-color 150ms ease',
           }}
         >
-          <Filter className="w-4 h-4" />
+          <Filter size={15} aria-hidden="true" />
           Filters
           {hasActiveFilters && (
             <span
-              className="inline-flex items-center justify-center rounded-full text-white font-semibold"
+              className="inline-flex items-center justify-center"
               style={{
                 width: '1.125rem',
                 height: '1.125rem',
                 fontSize: '0.625rem',
+                fontWeight: 600,
                 background: 'var(--color-brand)',
+                color: 'white',
+                borderRadius: 'var(--radius-full)',
               }}
             >
               {[filterOwner, filterSource, filterValueMin, filterValueMax].filter(Boolean).length}
@@ -716,13 +716,33 @@ export function PipelineContent() {
 
 function LoadingSkeleton() {
   return (
-    <div className="flex gap-3 overflow-hidden">
-      {[1, 2, 3, 4].map(i => (
-        <div key={i} className="flex-shrink-0" style={{ width: '17rem' }}>
-          <div className="animate-pulse rounded-t-lg" style={{ height: '2.5rem', background: 'var(--color-bg-tertiary)' }} />
-          <div className="flex flex-col gap-2" style={{ padding: '0.5rem' }}>
-            {[1, 2].map(j => (
-              <div key={j} className="animate-pulse rounded-lg" style={{ height: '7rem', background: 'var(--color-bg-tertiary)' }} />
+    <div className="flex overflow-hidden" style={{ gap: 'var(--space-3)' }}>
+      {[1, 2, 3, 4, 5].map(i => (
+        <div key={i} className="flex-shrink-0" style={{ width: '16rem' }}>
+          <div className="animate-pulse" style={{
+            height: '2.75rem',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border-subtle)',
+            borderBottom: 'none',
+            borderRadius: 'var(--radius-md) var(--radius-md) 0 0',
+            borderTop: '3px solid var(--color-bg-tertiary)',
+          }} />
+          <div className="flex flex-col animate-pulse" style={{
+            padding: 'var(--space-2)',
+            gap: 'var(--space-2)',
+            background: 'var(--color-bg-secondary)',
+            border: '1px solid var(--color-border-subtle)',
+            borderTop: 'none',
+            borderRadius: '0 0 var(--radius-md) var(--radius-md)',
+            minHeight: '12rem',
+          }}>
+            {[1, 2, 3].map(j => (
+              <div key={j} style={{
+                height: '5.5rem',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-md)',
+              }} />
             ))}
           </div>
         </div>
@@ -809,8 +829,14 @@ function KanbanView({ deals, stages, onStageChange, displayCurrency, toDisplay }
   return (
     <>
     <div
-      className="flex gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide"
-      style={{ paddingBottom: '1.25rem', WebkitOverflowScrolling: 'touch', height: 'calc(100vh - 24rem)' }}
+      className="flex overflow-x-auto overflow-y-hidden scrollbar-hide"
+      style={{
+        paddingBottom: 'var(--space-4)',
+        gap: 'var(--space-3)',
+        WebkitOverflowScrolling: 'touch',
+        minHeight: '24rem',
+        maxHeight: 'calc(100vh - 18rem)',
+      }}
     >
       {stages.map(stage => {
         const cards = byStage(stage.id)
@@ -821,46 +847,54 @@ function KanbanView({ deals, stages, onStageChange, displayCurrency, toDisplay }
           <div
             key={stage.id}
             className="flex flex-col flex-shrink-0"
-            style={{ width: '17rem', minWidth: '17rem' }}
+            style={{ width: '16rem', minWidth: '16rem' }}
           >
             {/* Column header */}
             <div
               className="flex items-center justify-between"
               style={{
-                padding: '0.625rem 0.75rem',
+                padding: 'var(--space-3)',
                 background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
+                border: '1px solid var(--color-border-subtle)',
                 borderBottom: 'none',
-                borderRadius: '0.5rem 0.5rem 0 0',
+                borderRadius: 'var(--radius-md) var(--radius-md) 0 0',
                 borderTop: `3px solid ${colour}`,
               }}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center" style={{ gap: 'var(--space-2)', minWidth: 0 }}>
                 <span
-                  className="rounded-full flex-shrink-0"
-                  style={{ width: '0.5rem', height: '0.5rem', background: colour, display: 'inline-block' }}
+                  className="flex-shrink-0"
+                  style={{ width: '0.5rem', height: '0.5rem', background: colour, borderRadius: 'var(--radius-full)', display: 'inline-block' }}
                 />
                 <span
-                  className="font-semibold uppercase tracking-wide"
+                  className="truncate"
                   style={{
-                    fontSize: '0.625rem',
-                    color: 'var(--color-text-muted)',
+                    fontSize: 'var(--text-xs)',
+                    fontWeight: 600,
+                    color: 'var(--color-text)',
                     lineHeight: 1.3,
-                    wordBreak: 'break-word',
                   }}
                   title={stage.name}
                 >
                   {stage.name}
                 </span>
                 <span
-                  className="font-semibold rounded-full"
-                  style={{ padding: '0.125rem 0.4375rem', fontSize: '0.6875rem', background: 'var(--color-bg-secondary)', color: 'var(--color-text-subtle)' }}
+                  className="flex-shrink-0"
+                  style={{
+                    padding: 'var(--space-0-5) var(--space-1-5)',
+                    fontSize: 'var(--text-xs)',
+                    fontWeight: 600,
+                    background: 'var(--color-bg-tertiary)',
+                    color: 'var(--color-text-subtle)',
+                    borderRadius: 'var(--radius-full)',
+                  }}
                 >
                   {cards.length}
                 </span>
                 {!stage.isClosedWon && !stage.isClosedLost && (
                   <span
-                    style={{ fontSize: '0.5625rem', color: 'var(--color-text-subtle)' }}
+                    className="flex-shrink-0 tabular-nums"
+                    style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}
                     title={stage.historicalProbability != null
                       ? `${stage.historicalProbability}% historical win rate (${stage.dealsSampled} deals sampled)`
                       : `${stage.probability}% static probability`}
@@ -870,7 +904,7 @@ function KanbanView({ deals, stages, onStageChange, displayCurrency, toDisplay }
                 )}
               </div>
               {stageValue > 0 && (
-                <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)' }}>
+                <span className="tabular-nums flex-shrink-0" style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)' }}>
                   {formatCurrency(toDisplay(stageValue), displayCurrency)}
                 </span>
               )}
@@ -878,16 +912,17 @@ function KanbanView({ deals, stages, onStageChange, displayCurrency, toDisplay }
 
             {/* Drop zone */}
             <div
-              className="flex flex-col gap-2 overflow-y-auto"
+              className="flex flex-col overflow-y-auto"
               style={{
-                padding: '0.5rem',
-                background: 'var(--color-bg-tertiary)',
-                border: '1px solid var(--color-border)',
+                padding: 'var(--space-2)',
+                gap: 'var(--space-2)',
+                background: 'var(--color-bg-secondary)',
+                border: '1px solid var(--color-border-subtle)',
                 borderTop: 'none',
-                borderRadius: '0 0 0.5rem 0.5rem',
+                borderRadius: '0 0 var(--radius-md) var(--radius-md)',
                 minHeight: '10rem',
-                maxHeight: 'calc(100vh - 28rem)',
-                transition: 'border-color 0.15s',
+                flex: 1,
+                transition: 'border-color 150ms ease',
               }}
               onDragOver={e => {
                 e.preventDefault()
@@ -900,12 +935,13 @@ function KanbanView({ deals, stages, onStageChange, displayCurrency, toDisplay }
             >
               {cards.length === 0 ? (
                 <div
-                  className="flex items-center justify-center rounded-lg"
+                  className="flex items-center justify-center"
                   style={{
-                    padding: '1.75rem 0',
-                    fontSize: '0.75rem',
+                    padding: 'var(--space-6) 0',
+                    fontSize: 'var(--text-xs)',
                     color: 'var(--color-text-subtle)',
-                    border: '1px dashed var(--color-border)',
+                    border: '1px dashed var(--color-border-subtle)',
+                    borderRadius: 'var(--radius-md)',
                   }}
                 >
                   No deals
@@ -972,20 +1008,26 @@ function DealCloseDialog({ type, dealTitle, onConfirm, onCancel }: {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.5)' }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={isWon ? 'Mark deal as won' : 'Mark deal as lost'}
+      style={{ background: 'rgba(0,0,0,0.4)' }}
       onClick={e => { if (e.target === e.currentTarget) onCancel() }}
     >
       <div
-        className="rounded-xl shadow-lg w-full"
+        className="w-full"
         style={{
           maxWidth: '26rem',
+          margin: '0 var(--space-4)',
           background: 'var(--color-bg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          borderRadius: 'var(--radius-lg)',
+          boxShadow: 'var(--shadow-lg)',
+          padding: 'var(--space-6)',
         }}
       >
         {/* Icon + title */}
-        <div className="flex items-center gap-3" style={{ marginBottom: '1.25rem' }}>
+        <div className="flex items-center" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-5)' }}>
           <div
             className="flex items-center justify-center flex-shrink-0"
             style={{
