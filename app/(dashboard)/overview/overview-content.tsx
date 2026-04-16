@@ -15,38 +15,27 @@ import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 
-// ─── Brand / palette constants ────────────────────────────────────────────────
-
-const BRAND = '#5A824E'
-
-// ─── Accent colour map (hex only, no Tailwind dynamic classes) ───────────────
+// ─── Accent colour map (CSS var references for dark mode compat) ─────────────
 //
-// Neutralised 2026-04-15 to stay in the brand family instead of rainbow.
 // Semantic rules:
-//   brand / brand-soft / brand-dark  — any informational KPI (clients,
-//     requests, MRR, team count). Visually distinct but all in the green
-//     family so the dashboard reads as one product.
-//   amber  — actual warnings only (outstanding invoices, in-review flags).
-//   red    — errors and overdue states only.
-//   neutral — truly neutral counters where any colour would imply meaning.
-//
-// The legacy names (violet/blue/emerald/teal) remain as aliases pointing
-// to the new brand-family values so existing callers keep working without
-// a sweep. Prefer the semantic names for new code.
+//   brand / brand-soft / brand-dark  -- informational KPIs
+//   amber  -- warnings only (outstanding invoices, in-review flags)
+//   red    -- errors and overdue states only
+//   neutral -- truly neutral counters
 const ACCENTS = {
-  brand:      { bg: '#dcefd8', color: '#5A824E' },  // brand-100 bg / brand fg
-  'brand-soft': { bg: '#f0f7ee', color: '#7aab6b' }, // brand-50 bg / brand-light fg
-  'brand-dark': { bg: '#c8e2c0', color: '#425F39' }, // deeper for emphasis
+  brand:        { bg: 'var(--color-brand-100)', color: 'var(--color-brand)' },
+  'brand-soft': { bg: 'var(--color-brand-50)',  color: 'var(--color-brand-light)' },
+  'brand-dark': { bg: 'var(--color-brand-200)', color: 'var(--color-brand-dark)' },
 
   amber:   { bg: '#fef3c7', color: '#b45309' },
   red:     { bg: '#fee2e2', color: '#b91c1c' },
-  neutral: { bg: '#eef0eb', color: '#6b7566' },     // earthy neutral, was grey
+  neutral: { bg: 'var(--color-bg-tertiary)', color: 'var(--color-text-subtle)' },
 
-  // Legacy aliases — point to brand family so nothing reads rainbow.
-  violet:  { bg: '#dcefd8', color: '#5A824E' },
-  blue:    { bg: '#f0f7ee', color: '#7aab6b' },
-  emerald: { bg: '#c8e2c0', color: '#425F39' },
-  teal:    { bg: '#f0f7ee', color: '#7aab6b' },
+  // Legacy aliases
+  violet:  { bg: 'var(--color-brand-100)', color: 'var(--color-brand)' },
+  blue:    { bg: 'var(--color-brand-50)',  color: 'var(--color-brand-light)' },
+  emerald: { bg: 'var(--color-brand-200)', color: 'var(--color-brand-dark)' },
+  teal:    { bg: 'var(--color-brand-50)',  color: 'var(--color-brand-light)' },
 } as const
 
 type Accent = keyof typeof ACCENTS
@@ -125,69 +114,47 @@ export function AdminOverview({ userName }: { userName: string }) {
   const firstName = userName.split(' ')[0]
 
   return (
-    <div className="flex flex-col" style={{ gap: '2rem', maxWidth: '68.75rem' }}>
+    <div className="flex flex-col" style={{ gap: 'var(--space-6)', maxWidth: '68.75rem' }}>
       {fetchError && (
-        <div style={{ padding: '0.75rem 1rem', background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger)', borderRadius: 8, fontSize: '0.875rem', color: 'var(--color-danger)' }}>
+        <div
+          className="flex items-center"
+          style={{
+            padding: 'var(--space-3) var(--space-4)',
+            background: 'var(--color-danger-bg)',
+            border: '1px solid var(--color-danger)',
+            borderRadius: 'var(--radius-md)',
+            fontSize: 'var(--text-base)',
+            color: 'var(--color-danger)',
+            gap: 'var(--space-2)',
+          }}
+        >
+          <AlertTriangle size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
           Failed to load overview data. Please refresh the page.
         </div>
       )}
-      {/* Greeting */}
-      <div className="flex items-start justify-between gap-4">
+
+      {/* Greeting + quick actions */}
+      <div className="flex items-start justify-between" style={{ gap: 'var(--space-4)' }}>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--color-text)' }}>
+          <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)' }}>
             Welcome back{firstName ? `, ${firstName}` : ''}
           </h1>
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
+          <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
             Here&apos;s what&apos;s happening at Tahi today.
           </p>
         </div>
-        <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
-          <QuickBtn href="/requests?new=1" icon={<Plus size={13} />} label="New Request" primary />
-          <QuickBtn href="/clients?new=1" icon={<UserPlus size={13} />} label="Add Client" />
-          <QuickBtn href="/time?new=1" icon={<Clock size={13} />} label="Log Time" />
+        <div className="hidden sm:flex items-center flex-shrink-0" style={{ gap: 'var(--space-2)' }}>
+          <QuickBtn href="/requests?new=1" icon={<Plus size={14} aria-hidden="true" />} label="New Request" primary />
+          <QuickBtn href="/clients?new=1" icon={<UserPlus size={14} aria-hidden="true" />} label="Add Client" />
+          <QuickBtn href="/time?new=1" icon={<Clock size={14} aria-hidden="true" />} label="Log Time" />
         </div>
       </div>
 
-      {/* KPI cards */}
-      <div data-tour="overview-kpis" className="grid grid-cols-2 lg:grid-cols-4 gap-5">
-        <StatCard
-          label="Active Clients"
-          value={loading ? null : kpis?.activeClients ?? 0}
-          icon={<Users size={18} />}
-          href="/clients"
-          accent="violet"
-        />
-        <StatCard
-          label="Open Requests"
-          value={loading ? null : kpis?.openRequests ?? 0}
-          icon={<Inbox size={18} />}
-          href="/requests"
-          accent="blue"
-          sub={kpis ? `${kpis.inProgress} in progress` : undefined}
-        />
-        <StatCard
-          label="Outstanding"
-          value={loading ? null : formatNzd(kpis?.outstandingInvoicesNzd ?? 0)}
-          icon={<FileText size={18} />}
-          href="/invoices"
-          accent={kpis && kpis.outstandingInvoicesNzd > 0 ? 'amber' : 'neutral'}
-          sub="invoices"
-        />
-        <StatCard
-          label="MRR"
-          value={loading ? null : formatNzd(kpis?.mrr ?? 0)}
-          icon={<TrendingUp size={18} />}
-          href="/reports"
-          accent="emerald"
-          sub="recurring retainers"
-        />
-      </div>
+      {/* KPI strip: single panel with internal dividers */}
+      <KPIStrip kpis={kpis} loading={loading} />
 
       {/* Pipeline summary */}
       <PipelineSummaryCard />
-
-      {/* Bank balance + runway from Xero sync */}
-      <BankRunwayCard />
 
       {/* Revenue trend */}
       {!loading && monthlyRevenue.length > 0 && (
@@ -273,106 +240,81 @@ function PipelineSummaryCard() {
   })
   const closingThisMonthValue = closingThisMonth.reduce((sum, d) => sum + (d.valueNzd ?? d.value ?? 0), 0)
 
+  const pipelineItems = [
+    { label: 'Pipeline Value', value: formatNzd(totalPipelineValue), sub: `${openDeals.length} open deal${openDeals.length !== 1 ? 's' : ''}`, icon: <TrendingUp size={14} aria-hidden="true" />, accent: ACCENTS.emerald },
+    { label: 'Weighted Value', value: formatNzd(weightedValue), sub: 'probability-adjusted', icon: <TrendingUp size={14} aria-hidden="true" />, accent: ACCENTS.blue },
+    { label: 'Closing This Month', value: formatNzd(closingThisMonthValue), sub: `${closingThisMonth.length} deal${closingThisMonth.length !== 1 ? 's' : ''}`, icon: <Clock size={14} aria-hidden="true" />, accent: ACCENTS.amber },
+  ]
+
   return (
-    <div
-      className="grid grid-cols-1 sm:grid-cols-3 gap-4"
+    <Link
+      href="/pipeline"
+      className="block"
+      style={{
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-lg)',
+        textDecoration: 'none',
+        overflow: 'hidden',
+        transition: 'border-color 150ms ease, box-shadow 150ms ease',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.borderColor = 'var(--color-border)'
+        e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
+        e.currentTarget.style.boxShadow = 'none'
+      }}
     >
-      <Link
-        href="/pipeline"
-        className="block rounded-xl transition-all"
-        style={{
-          padding: '1.25rem',
-          background: 'var(--color-bg)',
-          border: '1px solid var(--color-border)',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-          textDecoration: 'none',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)' }}
-        onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.06)' }}
-      >
-        <div className="flex items-center gap-2" style={{ marginBottom: '0.75rem' }}>
+      <div className="grid grid-cols-1 sm:grid-cols-3">
+        {pipelineItems.map((item, i) => (
           <div
-            className="flex items-center justify-center flex-shrink-0"
-            style={{ width: '2rem', height: '2rem', background: ACCENTS.emerald.bg, color: ACCENTS.emerald.color, borderRadius: '0 0.5rem 0 0.5rem' }}
+            key={item.label}
+            style={{
+              padding: 'var(--space-5)',
+              borderRight: i < pipelineItems.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
+              /* On mobile (stacked): bottom border on all but last. On sm+ (side by side): no bottom border */
+            }}
           >
-            <TrendingUp size={14} />
+            <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+              <div
+                className="flex items-center justify-center flex-shrink-0"
+                style={{
+                  width: '2rem',
+                  height: '2rem',
+                  background: item.accent.bg,
+                  color: item.accent.color,
+                  borderRadius: 'var(--radius-leaf-sm)',
+                }}
+              >
+                {item.icon}
+              </div>
+              <span style={{
+                fontSize: 'var(--text-xs)',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+                color: 'var(--color-text-subtle)',
+              }}>
+                {item.label}
+              </span>
+            </div>
+            <p className="tabular-nums" style={{
+              fontSize: 'var(--text-2xl)',
+              fontWeight: 700,
+              color: 'var(--color-text)',
+              marginBottom: 'var(--space-1)',
+            }}>
+              {item.value}
+            </p>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
+              {item.sub}
+            </p>
           </div>
-          <span className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--color-text-subtle)' }}>
-            Pipeline Value
-          </span>
-        </div>
-        <p className="font-bold tabular-nums" style={{ fontSize: '1.5rem', color: 'var(--color-text)', marginBottom: '0.25rem' }}>
-          {formatNzd(totalPipelineValue)}
-        </p>
-        <p className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
-          {openDeals.length} open deal{openDeals.length !== 1 ? 's' : ''}
-        </p>
-      </Link>
-
-      <Link
-        href="/pipeline"
-        className="block rounded-xl transition-all"
-        style={{
-          padding: '1.25rem',
-          background: 'var(--color-bg)',
-          border: '1px solid var(--color-border)',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-          textDecoration: 'none',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)' }}
-        onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.06)' }}
-      >
-        <div className="flex items-center gap-2" style={{ marginBottom: '0.75rem' }}>
-          <div
-            className="flex items-center justify-center flex-shrink-0"
-            style={{ width: '2rem', height: '2rem', background: ACCENTS.blue.bg, color: ACCENTS.blue.color, borderRadius: '0 0.5rem 0 0.5rem' }}
-          >
-            <TrendingUp size={14} />
-          </div>
-          <span className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--color-text-subtle)' }}>
-            Weighted Value
-          </span>
-        </div>
-        <p className="font-bold tabular-nums" style={{ fontSize: '1.5rem', color: 'var(--color-text)', marginBottom: '0.25rem' }}>
-          {formatNzd(weightedValue)}
-        </p>
-        <p className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
-          probability-adjusted
-        </p>
-      </Link>
-
-      <Link
-        href="/pipeline"
-        className="block rounded-xl transition-all"
-        style={{
-          padding: '1.25rem',
-          background: 'var(--color-bg)',
-          border: '1px solid var(--color-border)',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-          textDecoration: 'none',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)' }}
-        onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.06)' }}
-      >
-        <div className="flex items-center gap-2" style={{ marginBottom: '0.75rem' }}>
-          <div
-            className="flex items-center justify-center flex-shrink-0"
-            style={{ width: '2rem', height: '2rem', background: ACCENTS.amber.bg, color: ACCENTS.amber.color, borderRadius: '0 0.5rem 0 0.5rem' }}
-          >
-            <Clock size={14} />
-          </div>
-          <span className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--color-text-subtle)' }}>
-            Closing This Month
-          </span>
-        </div>
-        <p className="font-bold tabular-nums" style={{ fontSize: '1.5rem', color: 'var(--color-text)', marginBottom: '0.25rem' }}>
-          {formatNzd(closingThisMonthValue)}
-        </p>
-        <p className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
-          {closingThisMonth.length} deal{closingThisMonth.length !== 1 ? 's' : ''}
-        </p>
-      </Link>
-    </div>
+        ))}
+      </div>
+    </Link>
   )
 }
 
@@ -533,96 +475,70 @@ function PipelineCapacityCard() {
 
   return (
     <SectionCard title="Team Capacity" action={{ label: 'View pipeline', href: '/pipeline' }}>
-      <div style={{ padding: '0 0.5rem' }}>
+      <div style={{ padding: 'var(--space-4) var(--space-5)' }}>
         {/* Overall utilization */}
-        <div className="flex items-center justify-between" style={{ marginBottom: '0.375rem' }}>
-          <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-1-5)' }}>
+          <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)' }}>
             Overall Utilization
           </span>
-          <span style={{ fontSize: '0.875rem', fontWeight: 700, color: barColor }}>
+          <span style={{ fontSize: 'var(--text-base)', fontWeight: 700, color: barColor }}>
             {utilizationPct}%
           </span>
         </div>
-        <div
-          className="overflow-hidden"
-          style={{ height: '0.5rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem', marginBottom: '1.25rem' }}
-        >
-          <div
-            className="transition-all"
-            style={{ height: '100%', width: `${Math.min(utilizationPct, 100)}%`, background: barColor, borderRadius: '0.25rem' }}
-          />
+        <div className="overflow-hidden" style={{ height: 'var(--space-2)', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-full)', marginBottom: 'var(--space-5)' }}>
+          <div style={{ height: '100%', width: `${Math.min(utilizationPct, 100)}%`, background: barColor, borderRadius: 'var(--radius-full)', transition: 'width 300ms ease' }} />
         </div>
 
         {/* Stats row */}
-        <div className="grid grid-cols-3" style={{ gap: '0.75rem', marginBottom: '1.25rem' }}>
-          <div style={{ padding: '0.625rem 0.75rem', background: 'var(--color-bg-secondary)', borderRadius: '0.5rem' }}>
-            <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.125rem' }}>
-              Available
-            </p>
-            <p style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-text)' }}>
-              {data.availableCapacity}h
-            </p>
-          </div>
-          <div style={{ padding: '0.625rem 0.75rem', background: 'var(--color-bg-secondary)', borderRadius: '0.5rem' }}>
-            <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.125rem' }}>
-              Pipeline
-            </p>
-            <p style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-warning)' }}>
-              {data.pipelineImpact}h
-            </p>
-          </div>
-          <div style={{ padding: '0.625rem 0.75rem', background: 'var(--color-bg-secondary)', borderRadius: '0.5rem' }}>
-            <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.125rem' }}>
-              Forecast
-            </p>
-            <p style={{ fontSize: '1.125rem', fontWeight: 700, color: data.forecastedCapacity < 0 ? 'var(--color-danger)' : 'var(--color-brand)' }}>
-              {data.forecastedCapacity}h
-            </p>
-          </div>
+        <div className="grid grid-cols-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-5)' }}>
+          {[
+            { label: 'Available', value: `${data.availableCapacity}h`, color: 'var(--color-text)' },
+            { label: 'Pipeline', value: `${data.pipelineImpact}h`, color: 'var(--color-warning)' },
+            { label: 'Forecast', value: `${data.forecastedCapacity}h`, color: data.forecastedCapacity < 0 ? 'var(--color-danger)' : 'var(--color-brand)' },
+          ].map(stat => (
+            <div key={stat.label} style={{ padding: 'var(--space-3)', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)' }}>
+              <p style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-0-5)' }}>
+                {stat.label}
+              </p>
+              <p className="tabular-nums" style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: stat.color }}>
+                {stat.value}
+              </p>
+            </div>
+          ))}
         </div>
 
         {/* Per-member bars */}
         {data.teamMembers.length > 0 && (
-          <>
-            <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: '1rem' }}>
-              <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.75rem' }}>
-                Team Members
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {data.teamMembers.slice(0, 5).map(m => {
-                  const memberBarColor = m.utilization > 85 ? 'var(--color-danger)' : m.utilization >= 60 ? 'var(--color-warning)' : 'var(--color-brand)'
-                  return (
-                    <div key={m.id} style={{ background: 'var(--color-bg-secondary)', padding: '0.75rem', borderRadius: '0.5rem' }}>
-                      <div className="flex items-center justify-between" style={{ marginBottom: '0.375rem' }}>
-                        <span className="truncate" style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)', maxWidth: '10rem' }}>
-                          {m.name}
+          <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: 'var(--space-4)' }}>
+            <p style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-3)' }}>
+              Team Members
+            </p>
+            <div className="flex flex-col" style={{ gap: 'var(--space-2)' }}>
+              {data.teamMembers.slice(0, 5).map(m => {
+                const memberBarColor = m.utilization > 85 ? 'var(--color-danger)' : m.utilization >= 60 ? 'var(--color-warning)' : 'var(--color-brand)'
+                return (
+                  <div key={m.id} style={{ background: 'var(--color-bg-secondary)', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)' }}>
+                    <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-1-5)' }}>
+                      <span className="truncate" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)', maxWidth: '10rem' }}>
+                        {m.name}
+                      </span>
+                      <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
+                        <span className="tabular-nums" style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-text-muted)' }}>
+                          {m.currentHoursAllocated}h / {m.weeklyCapacityHours}h
                         </span>
-                        <div className="flex items-center" style={{ gap: '0.5rem' }}>
-                          <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>
-                            {m.currentHoursAllocated}h / {m.weeklyCapacityHours}h
-                          </span>
-                          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: memberBarColor }}>
-                            {m.utilization}%
-                          </span>
-                        </div>
-                      </div>
-                      <div className="overflow-hidden" style={{ height: '0.5rem', background: 'var(--color-bg-tertiary)', borderRadius: '9999px' }}>
-                        <div
-                          className="transition-all"
-                          style={{
-                            height: '100%',
-                            width: `${Math.min(m.utilization, 100)}%`,
-                            background: memberBarColor,
-                            borderRadius: '9999px',
-                          }}
-                        />
+                        <span className="tabular-nums" style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: memberBarColor }}>
+                          {m.utilization}%
+                        </span>
                       </div>
                     </div>
-                  )
-                })}
-              </div>
+                    <div className="overflow-hidden" style={{ height: 'var(--space-2)', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-full)' }}>
+                      <div style={{ height: '100%', width: `${Math.min(m.utilization, 100)}%`, background: memberBarColor, borderRadius: 'var(--radius-full)', transition: 'width 300ms ease' }} />
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-          </>
+          </div>
         )}
 
         {/* Earliest Start Date calculator */}
@@ -721,45 +637,31 @@ function PipelineImpactCard() {
   if (loading || !forecast) return null
   if (forecast.dealCount === 0) return null
 
+  const impactItems = [
+    { label: 'Weighted', value: `${forecast.totalWeightedHours}h`, sub: `${forecast.dealCount} deal${forecast.dealCount !== 1 ? 's' : ''}`, color: 'var(--color-brand)' },
+    { label: 'Best Case', value: `${forecast.bestCaseHours}h`, sub: 'all deals close', color: 'var(--color-info)' },
+    { label: 'Worst Case', value: `${forecast.worstCaseHours}h`, sub: 'conservative', color: 'var(--color-warning)' },
+  ]
+
   return (
-    <div id="capacity" style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: '1rem', marginTop: '0.25rem' }}>
-      <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.75rem' }}>
+    <div id="capacity" style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: 'var(--space-4)', marginTop: 'var(--space-1)' }}>
+      <p style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-3)' }}>
         Pipeline Impact
       </p>
-      <div className="grid grid-cols-3" style={{ gap: '0.75rem' }}>
-        <div style={{ padding: '0.625rem 0.75rem', background: 'var(--color-bg-secondary)', borderRadius: '0.5rem' }}>
-          <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.125rem' }}>
-            Weighted
-          </p>
-          <p style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-brand)' }}>
-            {forecast.totalWeightedHours}h
-          </p>
-          <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
-            {forecast.dealCount} deal{forecast.dealCount !== 1 ? 's' : ''}
-          </p>
-        </div>
-        <div style={{ padding: '0.625rem 0.75rem', background: 'var(--color-bg-secondary)', borderRadius: '0.5rem' }}>
-          <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.125rem' }}>
-            Best Case
-          </p>
-          <p style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-info)' }}>
-            {forecast.bestCaseHours}h
-          </p>
-          <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
-            all deals close
-          </p>
-        </div>
-        <div style={{ padding: '0.625rem 0.75rem', background: 'var(--color-bg-secondary)', borderRadius: '0.5rem' }}>
-          <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.125rem' }}>
-            Worst Case
-          </p>
-          <p style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-warning)' }}>
-            {forecast.worstCaseHours}h
-          </p>
-          <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
-            conservative
-          </p>
-        </div>
+      <div className="grid grid-cols-3" style={{ gap: 'var(--space-3)' }}>
+        {impactItems.map(item => (
+          <div key={item.label} style={{ padding: 'var(--space-3)', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)' }}>
+            <p style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-0-5)' }}>
+              {item.label}
+            </p>
+            <p className="tabular-nums" style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: item.color }}>
+              {item.value}
+            </p>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
+              {item.sub}
+            </p>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -808,11 +710,11 @@ function EarliestStartDateWidget() {
   }
 
   return (
-    <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: '1rem', marginTop: '0.25rem' }}>
-      <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.75rem' }}>
+    <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: 'var(--space-4)', marginTop: 'var(--space-1)' }}>
+      <p style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-3)' }}>
         Earliest Start Date
       </p>
-      <div className="flex items-center" style={{ gap: '0.5rem' }}>
+      <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
         <div style={{ position: 'relative', flex: 1 }}>
           <input
             type="number"
@@ -822,11 +724,12 @@ function EarliestStartDateWidget() {
             value={hoursPerWeek}
             onChange={e => { setHoursPerWeek(e.target.value); setResult(null) }}
             onKeyDown={e => { if (e.key === 'Enter') calculate() }}
+            aria-label="Hours per week needed"
             style={{
               width: '100%',
-              fontSize: '0.8125rem',
-              padding: '0.5rem 0.75rem',
-              borderRadius: 'var(--radius-button)',
+              fontSize: 'var(--text-sm)',
+              padding: 'var(--space-2) var(--space-3)',
+              borderRadius: 'var(--radius-input)',
               border: '1px solid var(--color-border)',
               background: 'var(--color-bg)',
               color: 'var(--color-text)',
@@ -843,59 +746,55 @@ function EarliestStartDateWidget() {
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '0.375rem',
-            padding: '0.5rem 0.75rem',
-            fontSize: '0.75rem',
+            gap: 'var(--space-1-5)',
+            padding: 'var(--space-2) var(--space-3)',
+            fontSize: 'var(--text-xs)',
             fontWeight: 600,
             color: '#ffffff',
             background: hovered ? 'var(--color-brand-dark)' : 'var(--color-brand)',
             border: 'none',
-            borderRadius: 'var(--radius-button)',
-            cursor: calculating || !hoursPerWeek ? 'not-allowed' : 'pointer',
-            opacity: calculating || !hoursPerWeek ? 0.6 : 1,
+            borderRadius: 'var(--radius-md)',
             minHeight: '2.25rem',
             whiteSpace: 'nowrap',
             transition: 'background 150ms ease',
           }}
         >
           {calculating ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <Loader2 size={14} className="animate-spin" aria-hidden="true" />
           ) : (
-            <CalendarClock className="w-3.5 h-3.5" />
+            <CalendarClock size={14} aria-hidden="true" />
           )}
           Calculate
         </button>
       </div>
 
       {result && (
-        <div
-          style={{
-            marginTop: '0.75rem',
-            padding: '0.75rem',
-            background: result.earliestDate ? 'var(--color-brand-50)' : 'var(--status-in-review-bg)',
-            borderRadius: '0.5rem',
-          }}
-        >
+        <div style={{
+          marginTop: 'var(--space-3)',
+          padding: 'var(--space-3)',
+          background: result.earliestDate ? 'var(--color-brand-50)' : 'var(--status-in-review-bg)',
+          borderRadius: 'var(--radius-md)',
+        }}>
           {result.earliestDate ? (
             <div>
-              <div className="flex items-center" style={{ gap: '0.375rem', marginBottom: '0.25rem' }}>
-                <CalendarClock style={{ width: '0.875rem', height: '0.875rem', color: 'var(--color-brand)' }} />
-                <span style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-brand-dark)' }}>
+              <div className="flex items-center" style={{ gap: 'var(--space-1-5)', marginBottom: 'var(--space-1)' }}>
+                <CalendarClock size={14} aria-hidden="true" style={{ color: 'var(--color-brand)' }} />
+                <span style={{ fontSize: 'var(--text-base)', fontWeight: 700, color: 'var(--color-brand-dark)' }}>
                   {formatDate(result.earliestDate)}
                 </span>
               </div>
-              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: 0 }}>
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
                 {result.weeksOut === 1 ? 'Next week' : `${result.weeksOut} weeks out`}
-                {' -- '}
+                {' \u2014 '}
                 {result.availableHoursPerWeek}h/week available of {result.totalTeamCapacity}h total
               </p>
             </div>
           ) : (
             <div>
-              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-danger)' }}>
+              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-danger)' }}>
                 No capacity available in the next 12 weeks
               </span>
-              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: '0.25rem 0 0' }}>
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 'var(--space-1) 0 0' }}>
                 {result.availableHoursPerWeek}h/week available, {parseFloat(hoursPerWeek)}h/week needed
               </p>
             </div>
@@ -929,34 +828,57 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
   const firstName = userName.split(' ')[0]
 
   return (
-    <div className="flex flex-col" style={{ gap: '2rem', maxWidth: '56.25rem' }}>
+    <div className="flex flex-col" style={{ gap: 'var(--space-6)', maxWidth: '56.25rem' }}>
       {fetchError && (
-        <div style={{ padding: '0.75rem 1rem', background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger)', borderRadius: 8, fontSize: '0.875rem', color: 'var(--color-danger)' }}>
+        <div
+          className="flex items-center"
+          style={{
+            padding: 'var(--space-3) var(--space-4)',
+            background: 'var(--color-danger-bg)',
+            border: '1px solid var(--color-danger)',
+            borderRadius: 'var(--radius-md)',
+            fontSize: 'var(--text-base)',
+            color: 'var(--color-danger)',
+            gap: 'var(--space-2)',
+          }}
+        >
+          <AlertTriangle size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
           Failed to load your requests. Please refresh the page.
         </div>
       )}
+
       {/* Greeting */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start justify-between" style={{ gap: 'var(--space-4)' }}>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--color-text)' }}>
+          <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)' }}>
             Welcome back{firstName ? `, ${firstName}` : ''}
           </h1>
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
+          <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
             {orgName} (Tahi Studio workspace)
           </p>
         </div>
         <Link
           href="/requests?new=1"
-          className="flex-shrink-0 flex items-center gap-1.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-          style={{ padding: '0.5625rem 1rem', background: BRAND, borderRadius: 8 }}
+          className="flex-shrink-0 flex items-center hover:opacity-90"
+          style={{
+            padding: 'var(--space-2) var(--space-4)',
+            background: 'var(--color-brand)',
+            color: 'white',
+            borderRadius: 'var(--radius-leaf-sm)',
+            textDecoration: 'none',
+            fontSize: 'var(--text-sm)',
+            fontWeight: 600,
+            gap: 'var(--space-1-5)',
+            transition: 'opacity 150ms ease',
+          }}
         >
-          <Plus size={14} />
+          <Plus size={14} aria-hidden="true" />
           New Request
         </Link>
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3" style={{ gap: 'var(--space-4)' }}>
         <StatCard
           label="Open Requests"
           value={loading ? null : open.length}
@@ -987,24 +909,35 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
       {/* Review alert */}
       {inReview.length > 0 && (
         <div
-          className="flex items-start gap-3 rounded-xl"
-          style={{ padding: '0.875rem 1rem', background: 'var(--status-in-review-bg)', border: '1px solid var(--status-in-review-border)' }}
+          className="flex items-start"
+          style={{
+            padding: 'var(--space-4)',
+            background: 'var(--status-in-review-bg)',
+            border: '1px solid var(--status-in-review-border)',
+            borderRadius: 'var(--radius-lg)',
+            gap: 'var(--space-3)',
+          }}
         >
-          <RefreshCw size={15} className="text-amber-500 flex-shrink-0" style={{ marginTop: 1 }} />
+          <RefreshCw size={16} aria-hidden="true" className="flex-shrink-0" style={{ color: 'var(--status-in-review-dot)', marginTop: '0.125rem' }} />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold" style={{ color: 'var(--status-in-review-text)' }}>
+            <p style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--status-in-review-text)' }}>
               {inReview.length} request{inReview.length > 1 ? 's' : ''} waiting for your review
             </p>
-            <p className="text-xs" style={{ color: 'var(--status-in-review-text)', marginTop: '0.125rem' }}>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--status-in-review-text)', marginTop: 'var(--space-0-5)' }}>
               Please approve or request changes.
             </p>
           </div>
           <Link
             href="/requests?status=client_review"
-            className="text-xs font-semibold flex items-center gap-1 whitespace-nowrap hover:underline"
-            style={{ color: 'var(--status-in-review-text)' }}
+            className="flex items-center whitespace-nowrap hover:underline"
+            style={{
+              fontSize: 'var(--text-sm)',
+              fontWeight: 600,
+              color: 'var(--status-in-review-text)',
+              gap: 'var(--space-1)',
+            }}
           >
-            Review now <ArrowRight size={11} />
+            Review now <ArrowRight size={12} aria-hidden="true" />
           </Link>
         </div>
       )}
@@ -1110,7 +1043,141 @@ function OnboardingChecklistWrapper() {
   )
 }
 
-// ─── StatCard ─────────────────────────────────────────────────────────────────
+// ─── KPI Strip (grouped panel with dividers) ────────────────────────────────
+
+function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
+  const items: Array<{
+    label: string
+    value: number | string | null
+    icon: React.ReactNode
+    href: string
+    accent: Accent
+    sub?: string
+  }> = [
+    {
+      label: 'Active Clients',
+      value: loading ? null : kpis?.activeClients ?? 0,
+      icon: <Users size={16} aria-hidden="true" />,
+      href: '/clients',
+      accent: 'brand',
+    },
+    {
+      label: 'Open Requests',
+      value: loading ? null : kpis?.openRequests ?? 0,
+      icon: <Inbox size={16} aria-hidden="true" />,
+      href: '/requests',
+      accent: 'brand-soft',
+      sub: kpis ? `${kpis.inProgress} in progress` : undefined,
+    },
+    {
+      label: 'Outstanding',
+      value: loading ? null : formatNzd(kpis?.outstandingInvoicesNzd ?? 0),
+      icon: <FileText size={16} aria-hidden="true" />,
+      href: '/invoices',
+      accent: kpis && kpis.outstandingInvoicesNzd > 0 ? 'amber' : 'neutral',
+      sub: 'invoices',
+    },
+    {
+      label: 'MRR',
+      value: loading ? null : formatNzd(kpis?.mrr ?? 0),
+      icon: <TrendingUp size={16} aria-hidden="true" />,
+      href: '/reports',
+      accent: 'brand-dark',
+      sub: 'recurring retainers',
+    },
+  ]
+
+  return (
+    <div
+      data-tour="overview-kpis"
+      style={{
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-lg)',
+        overflow: 'hidden',
+      }}
+    >
+      <div className="grid grid-cols-2 lg:grid-cols-4">
+        {items.map((item, i) => {
+          const a = ACCENTS[item.accent]
+          const isLastInRow = i === items.length - 1
+          return (
+            <Link
+              key={item.label}
+              href={item.href}
+              className="group relative flex flex-col"
+              style={{
+                padding: 'var(--space-5)',
+                textDecoration: 'none',
+                borderRight: isLastInRow ? 'none' : '1px solid var(--color-border-subtle)',
+                /* Bottom border for mobile 2-col layout (first two items) */
+                borderBottom: i < 2 ? '1px solid var(--color-border-subtle)' : 'none',
+                transition: 'background-color 150ms ease',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)' }}
+              onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
+            >
+              {/* Icon + label */}
+              <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+                <div
+                  className="flex items-center justify-center flex-shrink-0"
+                  style={{
+                    width: '2rem',
+                    height: '2rem',
+                    background: a.bg,
+                    color: a.color,
+                    borderRadius: 'var(--radius-leaf-sm)',
+                  }}
+                >
+                  {item.icon}
+                </div>
+                <span style={{
+                  fontSize: 'var(--text-sm)',
+                  fontWeight: 500,
+                  color: 'var(--color-text-muted)',
+                }}>
+                  {item.label}
+                </span>
+              </div>
+
+              {/* Value */}
+              {item.value === null ? (
+                <div className="animate-pulse" style={{
+                  height: '1.75rem',
+                  width: '3.5rem',
+                  background: 'var(--color-bg-tertiary)',
+                  borderRadius: 'var(--radius-sm)',
+                }} />
+              ) : (
+                <p className="tabular-nums" style={{
+                  fontSize: 'var(--text-2xl)',
+                  fontWeight: 700,
+                  lineHeight: 1.2,
+                  color: 'var(--color-text)',
+                }}>
+                  {item.value}
+                </p>
+              )}
+
+              {/* Sub label */}
+              {item.sub && (
+                <p style={{
+                  fontSize: 'var(--text-xs)',
+                  color: 'var(--color-text-subtle)',
+                  marginTop: 'var(--space-1)',
+                }}>
+                  {item.sub}
+                </p>
+              )}
+            </Link>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ─── StatCard (used by client portal) ────────────────────────────────────────
 
 function StatCard({
   label, value, icon, href, accent, sub, highlight,
@@ -1127,30 +1194,47 @@ function StatCard({
   return (
     <Link
       href={href}
-      className="block rounded-xl transition-all hover:shadow-md"
+      className="group block"
       style={{
-        padding: '1.5rem',
+        padding: 'var(--space-5)',
         background: 'var(--color-bg)',
-        border: '1px solid var(--color-border)',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-lg)',
         textDecoration: 'none',
+        transition: 'border-color 150ms ease, box-shadow 150ms ease',
       }}
-      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)' }}
-      onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.06)' }}
+      onMouseEnter={e => {
+        e.currentTarget.style.borderColor = 'var(--color-border)'
+        e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
+        e.currentTarget.style.boxShadow = 'none'
+      }}
     >
       {/* Icon row */}
-      <div className="flex items-start justify-between" style={{ marginBottom: '1.25rem' }}>
+      <div className="flex items-start justify-between" style={{ marginBottom: 'var(--space-4)' }}>
         <div
           className="flex items-center justify-center flex-shrink-0"
-          style={{ width: 44, height: 44, background: a.bg, color: a.color, borderRadius: '0 0.75rem 0 0.75rem' }}
+          style={{
+            width: '2.5rem',
+            height: '2.5rem',
+            background: a.bg,
+            color: a.color,
+            borderRadius: 'var(--radius-leaf-sm)',
+          }}
         >
           {icon}
         </div>
         {highlight && (
-          <span
-            className="text-xs font-semibold rounded-full"
-            style={{ padding: '0.1875rem 0.625rem', background: 'var(--status-in-review-bg)', color: 'var(--status-in-review-text)' }}
-          >
+          <span style={{
+            padding: 'var(--space-0-5) var(--space-2)',
+            fontSize: 'var(--text-xs)',
+            fontWeight: 600,
+            background: 'var(--status-in-review-bg)',
+            color: 'var(--status-in-review-text)',
+            borderRadius: 'var(--radius-full)',
+          }}>
             Action needed
           </span>
         )}
@@ -1158,16 +1242,28 @@ function StatCard({
 
       {/* Value */}
       {value === null ? (
-        <div className="rounded animate-pulse" style={{ height: 36, width: 64, background: 'var(--color-bg-tertiary)', marginBottom: '0.5rem' }} />
+        <div className="animate-pulse" style={{
+          height: '2rem',
+          width: '3.5rem',
+          background: 'var(--color-bg-tertiary)',
+          borderRadius: 'var(--radius-sm)',
+          marginBottom: 'var(--space-2)',
+        }} />
       ) : (
-        <p className="font-bold leading-none tabular-nums" style={{ fontSize: '2rem', color: 'var(--color-text)', marginBottom: '0.5rem' }}>
+        <p className="tabular-nums" style={{
+          fontSize: 'var(--text-2xl)',
+          fontWeight: 700,
+          lineHeight: 1.2,
+          color: 'var(--color-text)',
+          marginBottom: 'var(--space-2)',
+        }}>
           {value}
         </p>
       )}
 
       {/* Label */}
-      <p className="text-sm font-medium" style={{ color: 'var(--color-text-muted)' }}>{label}</p>
-      {sub && <p className="text-xs" style={{ color: 'var(--color-text-subtle)', marginTop: '0.1875rem' }}>{sub}</p>}
+      <p style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text-muted)' }}>{label}</p>
+      {sub && <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>{sub}</p>}
     </Link>
   )
 }
@@ -1183,21 +1279,33 @@ function SectionCard({
 }) {
   return (
     <div
-      className="rounded-xl overflow-hidden"
-      style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+      className="overflow-hidden"
+      style={{
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-lg)',
+      }}
     >
       <div
         className="flex items-center justify-between"
-        style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}
+        style={{
+          padding: 'var(--space-4) var(--space-5)',
+          borderBottom: '1px solid var(--color-border-subtle)',
+        }}
       >
-        <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{title}</h2>
+        <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>{title}</h2>
         {action && (
           <Link
             href={action.href}
-            className="text-xs flex items-center gap-1 font-medium hover:underline"
-            style={{ color: BRAND }}
+            className="flex items-center hover:underline"
+            style={{
+              fontSize: 'var(--text-sm)',
+              fontWeight: 500,
+              color: 'var(--color-brand)',
+              gap: 'var(--space-1)',
+            }}
           >
-            {action.label} <ArrowRight size={11} />
+            {action.label} <ArrowRight size={12} aria-hidden="true" />
           </Link>
         )}
       </div>
@@ -1212,43 +1320,51 @@ function RequestRow({ req, isLast, showOrg }: { req: RecentRequest; isLast: bool
   return (
     <Link
       href={`/requests/${req.id}`}
-      className="flex items-center gap-4 group transition-colors"
+      className="flex items-center group"
       style={{
-        padding: '0.875rem 1.25rem',
-        borderBottom: isLast ? 'none' : '1px solid var(--color-row-border)',
+        padding: 'var(--space-3) var(--space-5)',
+        borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
         textDecoration: 'none',
-        background: 'var(--color-bg)',
+        gap: 'var(--space-3)',
+        transition: 'background-color 150ms ease',
       }}
-      onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-row-hover)' }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
+      onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-row-hover)' }}
+      onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
     >
       <StatusBadge status={req.status} />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>
+        <div className="flex items-center" style={{ gap: 'var(--space-1-5)' }}>
+          <p className="truncate" style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
             {req.title}
           </p>
           {req.scopeFlagged && (
-            <AlertTriangle size={11} style={{ color: 'var(--color-danger)', flexShrink: 0 }} />
+            <AlertTriangle size={12} aria-hidden="true" style={{ color: 'var(--color-danger)', flexShrink: 0 }} />
           )}
           {req.priority === 'high' && (
             <span
-              className="text-xs rounded-full flex-shrink-0"
-              style={{ padding: '0.0625rem 0.4375rem', background: 'var(--status-in-review-bg)', color: 'var(--status-in-review-text)', fontSize: '0.625rem', fontWeight: 600 }}
+              className="flex-shrink-0"
+              style={{
+                padding: 'var(--space-0-5) var(--space-2)',
+                background: 'var(--status-in-review-bg)',
+                color: 'var(--status-in-review-text)',
+                fontSize: '0.625rem',
+                fontWeight: 600,
+                borderRadius: 'var(--radius-full)',
+              }}
             >
               High
             </span>
           )}
         </div>
-        <p className="text-xs truncate" style={{ color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
-          {showOrg && req.orgName ? `${req.orgName} · ` : ''}
+        <p className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
+          {showOrg && req.orgName ? `${req.orgName} \u00b7 ` : ''}
           {req.type.replace(/_/g, ' ')}
         </p>
       </div>
-      <span className="text-xs tabular-nums flex-shrink-0" style={{ color: 'var(--color-text-subtle)' }}>
+      <span className="tabular-nums flex-shrink-0" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
         {timeAgo(req.updatedAt)}
       </span>
-      <ArrowRight size={13} style={{ color: 'var(--color-border)', flexShrink: 0 }} />
+      <ArrowRight size={14} aria-hidden="true" className="flex-shrink-0" style={{ color: 'var(--color-border)', opacity: 0, transition: 'opacity 150ms ease' }} />
     </Link>
   )
 }
@@ -1261,15 +1377,19 @@ function LoadingRows() {
       {[...Array(4)].map((_, i) => (
         <div
           key={i}
-          className="flex items-center gap-4 animate-pulse"
-          style={{ padding: '1rem 1.25rem', borderBottom: i < 3 ? '1px solid var(--color-row-border)' : 'none' }}
+          className="flex items-center animate-pulse"
+          style={{
+            padding: 'var(--space-4) var(--space-5)',
+            borderBottom: i < 3 ? '1px solid var(--color-border-subtle)' : 'none',
+            gap: 'var(--space-3)',
+          }}
         >
-          <div className="rounded-full" style={{ width: 80, height: 22, background: 'var(--color-bg-tertiary)' }} />
-          <div className="flex-1" style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            <div className="rounded" style={{ height: 13, width: '60%', background: 'var(--color-bg-tertiary)' }} />
-            <div className="rounded" style={{ height: 11, width: '35%', background: 'var(--color-bg-tertiary)' }} />
+          <div style={{ width: '5rem', height: '1.375rem', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-full)' }} />
+          <div className="flex-1 flex flex-col" style={{ gap: 'var(--space-1-5)' }}>
+            <div style={{ height: '0.8125rem', width: '60%', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
+            <div style={{ height: '0.6875rem', width: '35%', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
           </div>
-          <div className="rounded" style={{ height: 11, width: 48, background: 'var(--color-bg-tertiary)' }} />
+          <div style={{ height: '0.6875rem', width: '3rem', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
         </div>
       ))}
     </div>
@@ -1286,22 +1406,33 @@ function EmptyRows({
   action?: { label: string; href: string }
 }) {
   return (
-    <div className="flex flex-col items-center justify-center text-center" style={{ padding: '3rem 1.5rem', gap: '0.5rem' }}>
+    <div className="flex flex-col items-center justify-center text-center" style={{ padding: 'var(--space-12) var(--space-6)', gap: 'var(--space-2)' }}>
       <div
-        className="flex items-center justify-center"
-        style={{ width: 44, height: 44, background: 'linear-gradient(135deg, #7aab6b, #425F39)', borderRadius: '0 0.75rem 0 0.75rem', marginBottom: '0.25rem' }}
+        className="flex items-center justify-center brand-gradient"
+        style={{
+          width: '2.75rem',
+          height: '2.75rem',
+          borderRadius: 'var(--radius-leaf-sm)',
+          marginBottom: 'var(--space-1)',
+        }}
       >
-        <Inbox size={20} style={{ color: 'white' }} />
+        <Inbox size={20} style={{ color: 'white' }} aria-hidden="true" />
       </div>
-      <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{title}</p>
-      <p className="text-xs" style={{ color: 'var(--color-text-subtle)', maxWidth: 280 }}>{message}</p>
+      <p style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>{title}</p>
+      <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', maxWidth: '17.5rem' }}>{message}</p>
       {action && (
         <Link
           href={action.href}
-          className="text-xs flex items-center gap-1 font-medium hover:underline"
-          style={{ color: BRAND, marginTop: '0.25rem' }}
+          className="flex items-center hover:underline"
+          style={{
+            fontSize: 'var(--text-sm)',
+            fontWeight: 500,
+            color: 'var(--color-brand)',
+            gap: 'var(--space-1)',
+            marginTop: 'var(--space-1)',
+          }}
         >
-          {action.label} <ArrowRight size={11} />
+          {action.label} <ArrowRight size={12} aria-hidden="true" />
         </Link>
       )}
     </div>
@@ -1321,11 +1452,35 @@ function QuickBtn({
   return (
     <Link
       href={href}
-      className="flex items-center gap-1.5 text-sm font-medium rounded-lg transition-opacity hover:opacity-90"
+      className="flex items-center hover:opacity-90"
       style={primary
-        ? { padding: '0.5rem 0.875rem', background: BRAND, color: 'white', border: `1px solid ${BRAND}`, textDecoration: 'none' }
-        : { padding: '0.5rem 0.875rem', background: 'var(--color-bg)', color: 'var(--color-text)', border: '1px solid var(--color-border)', textDecoration: 'none' }
+        ? {
+            padding: 'var(--space-2) var(--space-3)',
+            background: 'var(--color-brand)',
+            color: 'white',
+            border: '1px solid var(--color-brand)',
+            borderRadius: 'var(--radius-leaf-sm)',
+            textDecoration: 'none',
+            fontSize: 'var(--text-sm)',
+            fontWeight: 600,
+            gap: 'var(--space-1-5)',
+            transition: 'opacity 150ms ease',
+          }
+        : {
+            padding: 'var(--space-2) var(--space-3)',
+            background: 'var(--color-bg)',
+            color: 'var(--color-text)',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-md)',
+            textDecoration: 'none',
+            fontSize: 'var(--text-sm)',
+            fontWeight: 500,
+            gap: 'var(--space-1-5)',
+            transition: 'border-color 150ms ease',
+          }
       }
+      onMouseEnter={e => { if (!primary) e.currentTarget.style.borderColor = 'var(--color-border)' }}
+      onMouseLeave={e => { if (!primary) e.currentTarget.style.borderColor = 'var(--color-border-subtle)' }}
     >
       {icon}
       {label}
@@ -1368,24 +1523,31 @@ function UpcomingCallsWidget() {
         return (
           <div
             key={call.id}
-            className="flex items-center gap-3"
+            className="flex items-center"
             style={{
-              padding: '0.75rem 1.25rem',
-              borderBottom: i < calls.length - 1 ? '1px solid var(--color-row-border)' : 'none',
+              padding: 'var(--space-3) var(--space-5)',
+              borderBottom: i < calls.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
+              gap: 'var(--space-3)',
             }}
           >
             <div
               className="flex items-center justify-center flex-shrink-0"
-              style={{ width: '2.25rem', height: '2.25rem', background: 'var(--color-info-bg, #eff6ff)', color: 'var(--color-info, #2563eb)', borderRadius: '0 0.625rem 0 0.625rem' }}
+              style={{
+                width: '2.25rem',
+                height: '2.25rem',
+                background: 'var(--color-info-bg)',
+                color: 'var(--color-info)',
+                borderRadius: 'var(--radius-leaf-sm)',
+              }}
             >
-              <Video size={16} />
+              <Video size={16} aria-hidden="true" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>
+              <p className="truncate" style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
                 {call.title}
               </p>
-              <p className="text-xs truncate" style={{ color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
-                {call.orgName ? `${call.orgName} · ` : ''}
+              <p className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
+                {call.orgName ? `${call.orgName} \u00b7 ` : ''}
                 {d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}
                 {' at '}
                 {d.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}
@@ -1397,10 +1559,15 @@ function UpcomingCallsWidget() {
                 href={call.meetingUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1 text-xs font-medium hover:underline flex-shrink-0"
-                style={{ color: BRAND }}
+                className="flex items-center hover:underline flex-shrink-0"
+                style={{
+                  fontSize: 'var(--text-sm)',
+                  fontWeight: 500,
+                  color: 'var(--color-brand)',
+                  gap: 'var(--space-1)',
+                }}
               >
-                Join <ExternalLink size={11} />
+                Join <ExternalLink size={12} aria-hidden="true" />
               </a>
             )}
           </div>
@@ -1420,34 +1587,57 @@ function GettingStarted() {
     { n: 4, label: 'Connect Stripe for billing',       href: '/settings'      },
   ]
   return (
-    <div
-      className="rounded-xl"
-      style={{ padding: '1.5rem', background: 'var(--color-bg)', border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
-    >
-      <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)', marginBottom: '0.25rem' }}>
+    <div style={{
+      padding: 'var(--space-6)',
+      background: 'var(--color-bg)',
+      border: '1px solid var(--color-border-subtle)',
+      borderRadius: 'var(--radius-lg)',
+    }}>
+      <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)', marginBottom: 'var(--space-1)' }}>
         Getting started
       </h2>
-      <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginBottom: '1.25rem' }}>
+      <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-5)' }}>
         Complete these steps to set up your dashboard.
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+      <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 'var(--space-3)' }}>
         {steps.map(s => (
           <Link
             key={s.n}
             href={s.href}
-            className="flex items-center gap-3 rounded-lg transition-colors"
-            style={{ padding: '0.75rem 0.875rem', border: '1px solid var(--color-row-border)', textDecoration: 'none' }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-brand-200)'; e.currentTarget.style.background = 'var(--color-brand-50)' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-row-border)'; e.currentTarget.style.background = 'var(--color-bg)' }}
+            className="flex items-center"
+            style={{
+              padding: 'var(--space-3) var(--space-4)',
+              border: '1px solid var(--color-border-subtle)',
+              borderRadius: 'var(--radius-md)',
+              textDecoration: 'none',
+              gap: 'var(--space-3)',
+              transition: 'border-color 150ms ease, background-color 150ms ease',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.borderColor = 'var(--color-brand-200)'
+              e.currentTarget.style.backgroundColor = 'var(--color-brand-50)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
+              e.currentTarget.style.backgroundColor = 'transparent'
+            }}
           >
             <span
-              className="flex items-center justify-center rounded-full text-xs font-semibold text-white flex-shrink-0"
-              style={{ width: 24, height: 24, background: BRAND }}
+              className="flex items-center justify-center flex-shrink-0"
+              style={{
+                width: '1.5rem',
+                height: '1.5rem',
+                background: 'var(--color-brand)',
+                color: 'white',
+                borderRadius: 'var(--radius-full)',
+                fontSize: 'var(--text-xs)',
+                fontWeight: 600,
+              }}
             >
               {s.n}
             </span>
-            <span className="text-sm" style={{ color: 'var(--color-text)', flex: 1 }}>{s.label}</span>
-            <ArrowRight size={13} style={{ color: 'var(--color-border)' }} />
+            <span style={{ fontSize: 'var(--text-base)', color: 'var(--color-text)', flex: 1 }}>{s.label}</span>
+            <ArrowRight size={14} aria-hidden="true" style={{ color: 'var(--color-border)' }} />
           </Link>
         ))}
       </div>
@@ -1476,18 +1666,19 @@ function ScheduleCallWidget() {
 
   return (
     <div
-      className="rounded-xl flex items-center justify-between"
+      className="flex items-center justify-between"
       style={{
-        padding: '1rem 1.25rem',
+        padding: 'var(--space-4) var(--space-5)',
         background: 'var(--color-brand-50)',
         border: '1px solid var(--color-brand-100)',
+        borderRadius: 'var(--radius-lg)',
       }}
     >
       <div>
-        <p className="text-sm font-semibold" style={{ color: 'var(--color-brand-dark)' }}>
+        <p style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-brand-dark)' }}>
           Need to chat?
         </p>
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
+        <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-0-5)' }}>
           Book a quick call with the Tahi team.
         </p>
       </div>
@@ -1495,16 +1686,18 @@ function ScheduleCallWidget() {
         href={bookingUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center gap-1.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+        className="flex items-center hover:opacity-90"
         style={{
-          padding: '0.5rem 1rem',
-          background: BRAND,
-          borderRadius: '0 0.5rem 0 0.5rem',
+          padding: 'var(--space-2) var(--space-4)',
+          background: 'var(--color-brand)',
+          color: 'white',
+          borderRadius: 'var(--radius-leaf-sm)',
           textDecoration: 'none',
           whiteSpace: 'nowrap',
-          minHeight: '2.75rem',
-          display: 'flex',
-          alignItems: 'center',
+          fontSize: 'var(--text-sm)',
+          fontWeight: 600,
+          gap: 'var(--space-1-5)',
+          transition: 'opacity 150ms ease',
         }}
       >
         <Video size={14} aria-hidden="true" />
@@ -1719,38 +1912,49 @@ function ReviewOutreachBanner() {
   }
 
   return (
-    <div
-      className="rounded-xl"
-      style={{
-        padding: '1.25rem',
-        background: 'var(--color-info-bg, #eff6ff)',
-        border: '1px solid var(--color-info, #60a5fa)',
-      }}
-    >
-      <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+    <div style={{
+      padding: 'var(--space-5)',
+      background: 'var(--color-info-bg)',
+      border: '1px solid var(--color-info)',
+      borderRadius: 'var(--radius-lg)',
+    }}>
+      <p style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
         We would love your feedback!
       </p>
-      <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: '0.25rem', marginBottom: '0.75rem' }}>
+      <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)', marginBottom: 'var(--space-3)' }}>
         Your experience matters. Share a quick review to help us improve.
       </p>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
         <button
           onClick={() => handleResponse('yes')}
           disabled={responding}
-          className="px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-opacity hover:opacity-90"
-          style={{ background: 'var(--color-brand)', border: 'none', cursor: 'pointer' }}
+          className="hover:opacity-90"
+          style={{
+            padding: 'var(--space-1-5) var(--space-3)',
+            fontSize: 'var(--text-sm)',
+            fontWeight: 500,
+            color: 'white',
+            background: 'var(--color-brand)',
+            border: 'none',
+            borderRadius: 'var(--radius-md)',
+            transition: 'opacity 150ms ease',
+          }}
         >
           Yes, I will
         </button>
         <button
           onClick={() => handleResponse('defer')}
           disabled={responding}
-          className="px-3 py-1.5 text-xs font-medium rounded-lg transition-opacity hover:opacity-90"
+          className="hover:opacity-90"
           style={{
+            padding: 'var(--space-1-5) var(--space-3)',
+            fontSize: 'var(--text-sm)',
+            fontWeight: 500,
             background: 'var(--color-bg)',
             border: '1px solid var(--color-border)',
             color: 'var(--color-text-muted)',
-            cursor: 'pointer',
+            borderRadius: 'var(--radius-md)',
+            transition: 'opacity 150ms ease',
           }}
         >
           Not right now
@@ -1758,12 +1962,15 @@ function ReviewOutreachBanner() {
         <button
           onClick={() => handleResponse('no')}
           disabled={responding}
-          className="px-3 py-1.5 text-xs font-medium rounded-lg transition-opacity hover:opacity-90"
+          className="hover:opacity-90"
           style={{
+            padding: 'var(--space-1-5) var(--space-3)',
+            fontSize: 'var(--text-sm)',
+            fontWeight: 500,
             background: 'transparent',
             border: 'none',
             color: 'var(--color-text-subtle)',
-            cursor: 'pointer',
+            transition: 'opacity 150ms ease',
           }}
         >
           No thanks
@@ -1789,41 +1996,47 @@ function RevenueChart({ data }: { data: MonthlyRevenue[] }) {
   }
 
   return (
-    <div
-      className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl"
-      style={{ padding: '1.25rem' }}
-    >
-      <div className="flex items-center justify-between mb-4">
+    <div style={{
+      background: 'var(--color-bg)',
+      border: '1px solid var(--color-border-subtle)',
+      borderRadius: 'var(--radius-lg)',
+      padding: 'var(--space-5)',
+    }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-4)' }}>
         <div>
-          <h2 className="text-sm font-semibold text-[var(--color-text)]">Revenue Trend</h2>
-          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Paid invoices, last 6 months</p>
+          <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>Revenue Trend</h2>
+          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-0-5)' }}>
+            Paid invoices, last 6 months
+          </p>
         </div>
         <Link
           href="/reports"
-          className="text-xs font-medium hover:underline"
-          style={{ color: 'var(--color-brand)' }}
+          className="hover:underline"
+          style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)' }}
         >
           View reports
         </Link>
       </div>
-      <div className="flex items-end gap-2" style={{ height: '8rem' }}>
+      <div className="flex items-end" style={{ height: '8rem', gap: 'var(--space-2)' }}>
         {data.map(d => {
           const heightPct = maxTotal > 0 ? (d.total / maxTotal) * 100 : 0
           return (
-            <div key={d.month} className="flex-1 flex flex-col items-center gap-1">
-              <span className="text-xs font-medium text-[var(--color-text)]">
+            <div key={d.month} className="flex-1 flex flex-col items-center" style={{ gap: 'var(--space-1)' }}>
+              <span style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-text)' }}>
                 {d.total > 0 ? formatNzd(d.total) : ''}
               </span>
               <div
-                className="w-full rounded-t-md transition-all"
+                className="w-full"
                 style={{
                   height: `${Math.max(heightPct, 2)}%`,
                   background: d.total > 0 ? 'var(--color-brand)' : 'var(--color-border-subtle)',
-                  minHeight: '0.25rem',
+                  minHeight: 'var(--space-1)',
                   maxWidth: '4rem',
+                  borderRadius: 'var(--radius-sm) var(--radius-sm) 0 0',
+                  transition: 'height 300ms ease',
                 }}
               />
-              <span className="text-xs text-[var(--color-text-muted)]">
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                 {formatMonth(d.month)}
               </span>
             </div>
