@@ -4,6 +4,53 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, gte, sql } from 'drizzle-orm'
 
+export const dynamic = 'force-dynamic'
+
+// -- GET /api/admin/health — diagnostic endpoint (no auth needed) -----------
+export async function GET() {
+  const checks: Record<string, string> = {}
+  checks.js = 'ok'
+  checks.timestamp = new Date().toISOString()
+
+  try {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare')
+    const { env } = await getCloudflareContext({ async: true })
+    checks.cfContext = env ? 'ok' : 'env is falsy'
+    checks.envKeys = Object.keys(env ?? {}).join(', ')
+
+    if (env?.DB) {
+      checks.d1Binding = 'present'
+      try {
+        const r = await (env.DB as D1Database).prepare('SELECT 1 as t').first()
+        checks.d1Query = r ? 'ok' : 'null'
+      } catch (e) { checks.d1Query = `err: ${e instanceof Error ? e.message : e}` }
+
+      try {
+        const r = await (env.DB as D1Database).prepare('SELECT COUNT(*) as c FROM organisations').first()
+        checks.orgCount = JSON.stringify(r)
+      } catch (e) { checks.orgCount = `err: ${e instanceof Error ? e.message : e}` }
+
+      try {
+        const r = await (env.DB as D1Database).prepare('PRAGMA table_info(organisations)').all()
+        const cols = (r.results ?? []).map((c: Record<string, unknown>) => c.name)
+        checks.orgColumns = cols.join(', ')
+      } catch (e) { checks.orgColumns = `err: ${e instanceof Error ? e.message : e}` }
+    } else {
+      checks.d1Binding = 'MISSING'
+    }
+
+    try {
+      const database = await db()
+      checks.dbHelper = database ? 'ok' : 'falsy'
+    } catch (e) { checks.dbHelper = `err: ${e instanceof Error ? e.message : e}` }
+
+  } catch (e) {
+    checks.cfContext = `err: ${e instanceof Error ? e.message : e}`
+  }
+
+  return NextResponse.json(checks)
+}
+
 // -- POST /api/admin/health ---------------------------------------------------
 // Recalculates health scores for all orgs (or a specific orgId).
 // Body: { orgId?: string }
