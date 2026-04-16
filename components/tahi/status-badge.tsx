@@ -37,8 +37,13 @@ export function StatusBadge({ status, type = 'request', className }: StatusBadge
 
   return (
     <span
-      className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', className)}
+      className={cn('inline-flex items-center justify-center whitespace-nowrap', className)}
       style={{
+        padding: '0.125rem 0.5rem',
+        borderRadius: 'var(--radius-full, 9999px)',
+        fontSize: 'var(--text-xs, 0.75rem)',
+        fontWeight: 500,
+        minWidth: '5.5rem',
         background: config.bg,
         color: config.color,
         border: config.border ? `1px solid ${config.border}` : undefined,

@@ -3,10 +3,11 @@
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import {
-  Users, Inbox, FileText, TrendingUp,
+  Users, Inbox, FileText, BarChart3,
   Plus, Clock, UserPlus,
   ArrowRight, AlertTriangle, RefreshCw, Video, ExternalLink,
-  CalendarClock, Loader2,
+  CalendarClock, Loader2, TrendingUp,
+  Target, Scale, Timer,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { OnboardingChecklist, type OnboardingState } from '@/components/tahi/onboarding-checklist'
@@ -14,6 +15,7 @@ import { BookingWidget } from '@/components/tahi/booking-widget'
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 
 // ─── Accent colour map (CSS var references for dark mode compat) ─────────────
 //
@@ -169,8 +171,8 @@ export function AdminOverview({ userName }: { userName: string }) {
             message="When clients submit requests they'll appear here."
             action={{ label: 'Create first request', href: '/requests?new=1' }}
           />
-        ) : recentRequests.map((req, i) => (
-          <RequestRow key={req.id} req={req} isLast={i === recentRequests.length - 1} showOrg />
+        ) : recentRequests.slice(0, 5).map((req, i) => (
+          <RequestRow key={req.id} req={req} isLast={i === Math.min(recentRequests.length, 5) - 1} showOrg />
         ))}
       </SectionCard>
 
@@ -241,9 +243,9 @@ function PipelineSummaryCard() {
   const closingThisMonthValue = closingThisMonth.reduce((sum, d) => sum + (d.valueNzd ?? d.value ?? 0), 0)
 
   const pipelineItems = [
-    { label: 'Pipeline Value', value: formatNzd(totalPipelineValue), sub: `${openDeals.length} open deal${openDeals.length !== 1 ? 's' : ''}`, icon: <TrendingUp size={14} aria-hidden="true" />, accent: ACCENTS.emerald },
-    { label: 'Weighted Value', value: formatNzd(weightedValue), sub: 'probability-adjusted', icon: <TrendingUp size={14} aria-hidden="true" />, accent: ACCENTS.blue },
-    { label: 'Closing This Month', value: formatNzd(closingThisMonthValue), sub: `${closingThisMonth.length} deal${closingThisMonth.length !== 1 ? 's' : ''}`, icon: <Clock size={14} aria-hidden="true" />, accent: ACCENTS.amber },
+    { label: 'Pipeline Value', value: formatNzd(totalPipelineValue), sub: `${openDeals.length} open deal${openDeals.length !== 1 ? 's' : ''}`, icon: <Target size={14} aria-hidden="true" /> },
+    { label: 'Weighted Value', value: formatNzd(weightedValue), sub: 'probability-adjusted', icon: <Scale size={14} aria-hidden="true" /> },
+    { label: 'Closing This Month', value: formatNzd(closingThisMonthValue), sub: `${closingThisMonth.length} deal${closingThisMonth.length !== 1 ? 's' : ''}`, icon: <Timer size={14} aria-hidden="true" /> },
   ]
 
   return (
@@ -267,15 +269,11 @@ function PipelineSummaryCard() {
         e.currentTarget.style.boxShadow = 'none'
       }}
     >
-      <div className="grid grid-cols-1 sm:grid-cols-3">
-        {pipelineItems.map((item, i) => (
+      <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x" style={{ '--tw-divide-opacity': 1, borderColor: 'var(--color-border-subtle)' } as React.CSSProperties}>
+        {pipelineItems.map((item) => (
           <div
             key={item.label}
-            style={{
-              padding: 'var(--space-5)',
-              borderRight: i < pipelineItems.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
-              /* On mobile (stacked): bottom border on all but last. On sm+ (side by side): no bottom border */
-            }}
+            style={{ padding: 'var(--space-5)' }}
           >
             <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
               <div
@@ -283,8 +281,8 @@ function PipelineSummaryCard() {
                 style={{
                   width: '2rem',
                   height: '2rem',
-                  background: item.accent.bg,
-                  color: item.accent.color,
+                  background: 'var(--color-brand-50)',
+                  color: 'var(--color-brand)',
                   borderRadius: 'var(--radius-leaf-sm)',
                 }}
               >
@@ -1051,7 +1049,6 @@ function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
     value: number | string | null
     icon: React.ReactNode
     href: string
-    accent: Accent
     sub?: string
   }> = [
     {
@@ -1059,14 +1056,13 @@ function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
       value: loading ? null : kpis?.activeClients ?? 0,
       icon: <Users size={16} aria-hidden="true" />,
       href: '/clients',
-      accent: 'brand',
+      sub: 'across all plans',
     },
     {
       label: 'Open Requests',
       value: loading ? null : kpis?.openRequests ?? 0,
       icon: <Inbox size={16} aria-hidden="true" />,
       href: '/requests',
-      accent: 'brand-soft',
       sub: kpis ? `${kpis.inProgress} in progress` : undefined,
     },
     {
@@ -1074,15 +1070,13 @@ function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
       value: loading ? null : formatNzd(kpis?.outstandingInvoicesNzd ?? 0),
       icon: <FileText size={16} aria-hidden="true" />,
       href: '/invoices',
-      accent: kpis && kpis.outstandingInvoicesNzd > 0 ? 'amber' : 'neutral',
       sub: 'invoices',
     },
     {
       label: 'MRR',
       value: loading ? null : formatNzd(kpis?.mrr ?? 0),
-      icon: <TrendingUp size={16} aria-hidden="true" />,
+      icon: <BarChart3 size={16} aria-hidden="true" />,
       href: '/reports',
-      accent: 'brand-dark',
       sub: 'recurring retainers',
     },
   ]
@@ -1099,19 +1093,20 @@ function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
     >
       <div className="grid grid-cols-2 lg:grid-cols-4">
         {items.map((item, i) => {
-          const a = ACCENTS[item.accent]
-          const isLastInRow = i === items.length - 1
+          // On 2-col mobile: items 0,1 get bottom border. Items 0,2 get right border.
+          // On 4-col desktop: all except last get right border, no bottom borders.
+          const rightBorder = i < items.length - 1 ? '1px solid var(--color-border-subtle)' : 'none'
+          const bottomBorder = i < 2 ? '1px solid var(--color-border-subtle)' : 'none'
           return (
             <Link
               key={item.label}
               href={item.href}
-              className="group relative flex flex-col"
+              className="group relative flex flex-col kpi-strip-item"
               style={{
                 padding: 'var(--space-5)',
                 textDecoration: 'none',
-                borderRight: isLastInRow ? 'none' : '1px solid var(--color-border-subtle)',
-                /* Bottom border for mobile 2-col layout (first two items) */
-                borderBottom: i < 2 ? '1px solid var(--color-border-subtle)' : 'none',
+                borderRight: rightBorder,
+                borderBottom: bottomBorder,
                 transition: 'background-color 150ms ease',
               }}
               onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)' }}
@@ -1124,8 +1119,8 @@ function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
                   style={{
                     width: '2rem',
                     height: '2rem',
-                    background: a.bg,
-                    color: a.color,
+                    background: 'var(--color-brand-50)',
+                    color: 'var(--color-brand)',
                     borderRadius: 'var(--radius-leaf-sm)',
                   }}
                 >
@@ -1322,7 +1317,7 @@ function RequestRow({ req, isLast, showOrg }: { req: RecentRequest; isLast: bool
       href={`/requests/${req.id}`}
       className="flex items-center group"
       style={{
-        padding: 'var(--space-3) var(--space-5)',
+        padding: 'var(--space-4) var(--space-5)',
         borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
         textDecoration: 'none',
         gap: 'var(--space-3)',
@@ -1517,63 +1512,75 @@ function UpcomingCallsWidget() {
   if (!loading && calls.length === 0) return null
 
   return (
-    <SectionCard title="Upcoming Calls" action={{ label: 'View all', href: '/calls' }}>
-      {loading ? <LoadingRows /> : calls.map((call, i) => {
-        const d = new Date(call.scheduledAt)
-        return (
-          <div
-            key={call.id}
-            className="flex items-center"
-            style={{
-              padding: 'var(--space-3) var(--space-5)',
-              borderBottom: i < calls.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
-              gap: 'var(--space-3)',
-            }}
-          >
+    <div>
+      <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-3)' }}>
+        <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>Upcoming Calls</h2>
+        <Link
+          href="/calls"
+          className="flex items-center hover:underline"
+          style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)', gap: 'var(--space-1)' }}
+        >
+          View all <ArrowRight size={12} aria-hidden="true" />
+        </Link>
+      </div>
+      <div className="flex flex-col" style={{ gap: 'var(--space-2)' }}>
+        {loading ? <LoadingRows /> : calls.map(call => {
+          const d = new Date(call.scheduledAt)
+          return (
             <div
-              className="flex items-center justify-center flex-shrink-0"
+              key={call.id}
+              className="flex items-center"
               style={{
-                width: '2.25rem',
-                height: '2.25rem',
-                background: 'var(--color-info-bg)',
-                color: 'var(--color-info)',
-                borderRadius: 'var(--radius-leaf-sm)',
+                padding: 'var(--space-3) var(--space-4)',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                gap: 'var(--space-3)',
+                transition: 'border-color 150ms ease',
               }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-subtle)' }}
             >
-              <Video size={16} aria-hidden="true" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="truncate" style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
-                {call.title}
-              </p>
-              <p className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
-                {call.orgName ? `${call.orgName} \u00b7 ` : ''}
-                {d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}
-                {' at '}
-                {d.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}
-                {' '}({call.durationMinutes}min)
-              </p>
-            </div>
-            {call.meetingUrl && (
-              <a
-                href={call.meetingUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center hover:underline flex-shrink-0"
+              <div
+                className="flex items-center justify-center flex-shrink-0"
                 style={{
-                  fontSize: 'var(--text-sm)',
-                  fontWeight: 500,
+                  width: '2rem',
+                  height: '2rem',
+                  background: 'var(--color-brand-50)',
                   color: 'var(--color-brand)',
-                  gap: 'var(--space-1)',
+                  borderRadius: 'var(--radius-leaf-sm)',
                 }}
               >
-                Join <ExternalLink size={12} aria-hidden="true" />
-              </a>
-            )}
-          </div>
-        )
-      })}
-    </SectionCard>
+                <Video size={14} aria-hidden="true" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="truncate" style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
+                  {call.title}
+                </p>
+                <p className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
+                  {call.orgName ? `${call.orgName} \u00b7 ` : ''}
+                  {d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}
+                  {' at '}
+                  {d.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}
+                  {' '}({call.durationMinutes}min)
+                </p>
+              </div>
+              {call.meetingUrl && (
+                <a
+                  href={call.meetingUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center hover:underline flex-shrink-0"
+                  style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)', gap: 'var(--space-1)' }}
+                >
+                  Join <ExternalLink size={12} aria-hidden="true" />
+                </a>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -1983,17 +1990,15 @@ function ReviewOutreachBanner() {
 // ─── Revenue Chart ───────────────────────────────────────────────────────────
 
 function RevenueChart({ data }: { data: MonthlyRevenue[] }) {
-  const maxTotal = Math.max(...data.map(d => d.total), 1)
-
-  function formatMonth(m: string): string {
+  const chartData = data.map(d => {
+    let label = d.month
     try {
-      const [year, month] = m.split('-')
-      const d = new Date(parseInt(year), parseInt(month) - 1)
-      return d.toLocaleDateString('en-NZ', { month: 'short' })
-    } catch {
-      return m
-    }
-  }
+      const [year, month] = d.month.split('-')
+      const dt = new Date(parseInt(year), parseInt(month) - 1)
+      label = dt.toLocaleDateString('en-NZ', { month: 'short' })
+    } catch { /* keep raw */ }
+    return { month: label, total: d.total }
+  })
 
   return (
     <div style={{
@@ -2002,7 +2007,7 @@ function RevenueChart({ data }: { data: MonthlyRevenue[] }) {
       borderRadius: 'var(--radius-lg)',
       padding: 'var(--space-5)',
     }}>
-      <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-4)' }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-5)' }}>
         <div>
           <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>Revenue Trend</h2>
           <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-0-5)' }}>
@@ -2017,31 +2022,46 @@ function RevenueChart({ data }: { data: MonthlyRevenue[] }) {
           View reports
         </Link>
       </div>
-      <div className="flex items-end" style={{ height: '8rem', gap: 'var(--space-2)' }}>
-        {data.map(d => {
-          const heightPct = maxTotal > 0 ? (d.total / maxTotal) * 100 : 0
-          return (
-            <div key={d.month} className="flex-1 flex flex-col items-center" style={{ gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-text)' }}>
-                {d.total > 0 ? formatNzd(d.total) : ''}
-              </span>
-              <div
-                className="w-full"
-                style={{
-                  height: `${Math.max(heightPct, 2)}%`,
-                  background: d.total > 0 ? 'var(--color-brand)' : 'var(--color-border-subtle)',
-                  minHeight: 'var(--space-1)',
-                  maxWidth: '4rem',
-                  borderRadius: 'var(--radius-sm) var(--radius-sm) 0 0',
-                  transition: 'height 300ms ease',
-                }}
-              />
-              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                {formatMonth(d.month)}
-              </span>
-            </div>
-          )
-        })}
+      <div style={{ height: '10rem' }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-subtle)" vertical={false} />
+            <XAxis
+              dataKey="month"
+              axisLine={false}
+              tickLine={false}
+              tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
+              dy={8}
+            />
+            <YAxis
+              axisLine={false}
+              tickLine={false}
+              tick={{ fontSize: 11, fill: 'var(--color-text-subtle)' }}
+              tickFormatter={(v: number) => v === 0 ? '$0' : `$${(v / 1000).toFixed(0)}k`}
+              width={48}
+            />
+            <Tooltip
+              contentStyle={{
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+                boxShadow: 'var(--shadow-md)',
+                fontSize: '0.8125rem',
+                padding: '0.5rem 0.75rem',
+              }}
+              formatter={(value: number) => [formatNzd(value), 'Revenue']}
+              labelStyle={{ fontWeight: 600, color: 'var(--color-text)', marginBottom: '0.25rem' }}
+            />
+            <Line
+              type="monotone"
+              dataKey="total"
+              stroke="var(--color-brand)"
+              strokeWidth={2}
+              dot={{ r: 3, fill: 'var(--color-brand)', stroke: 'var(--color-bg)', strokeWidth: 2 }}
+              activeDot={{ r: 5, fill: 'var(--color-brand)', stroke: 'var(--color-bg)', strokeWidth: 2 }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
       </div>
     </div>
   )

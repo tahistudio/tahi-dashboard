@@ -51,28 +51,29 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
 
   return (
     <header
-      className="h-14 flex items-center justify-between flex-shrink-0"
+      className="flex items-center justify-between flex-shrink-0"
       style={{
-        padding: '0 1.5rem',
+        height: '3.5rem',
+        padding: '0 var(--space-6)',
         background: 'var(--color-bg)',
         borderBottom: '1px solid var(--color-border-subtle)',
       }}
     >
       {/* Left */}
-      <div className="flex items-center gap-3 flex-1 min-w-0">
+      <div className="flex items-center flex-1 min-w-0" style={{ gap: 'var(--space-3)' }}>
         {isAdmin && isImpersonatingClient ? (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
             <Eye size={16} style={{ color: 'var(--color-warning)', flexShrink: 0 }} aria-hidden="true" />
-            <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+            <span style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
               {impersonatedContactName
                 ? `${impersonatedContactName} at ${impersonatedOrgName}`
                 : impersonatedOrgName}
             </span>
           </div>
         ) : isAdmin && isImpersonatingTeamMember ? (
-          <div className="flex items-center gap-2">
-            <UserCog size={16} style={{ color: 'var(--color-info, #60a5fa)', flexShrink: 0 }} aria-hidden="true" />
-            <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+          <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
+            <UserCog size={16} style={{ color: 'var(--color-info)', flexShrink: 0 }} aria-hidden="true" />
+            <span style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
               Viewing as {impersonatedTeamMemberName}
             </span>
           </div>
@@ -80,21 +81,24 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
           <>
             {/* Desktop: full search bar */}
             <button
-              className="hidden md:flex items-center gap-2 transition-colors"
+              className="hidden md:flex items-center"
               style={{
-                padding: '0.4375rem 0.875rem',
-                fontSize: '0.8125rem',
+                padding: 'var(--space-2) var(--space-3)',
+                fontSize: 'var(--text-sm)',
                 fontWeight: 400,
                 color: 'var(--color-text-subtle)',
                 background: 'var(--color-bg-secondary)',
                 border: '1px solid var(--color-border-subtle)',
-                borderRadius: 'var(--radius-button)',
-                cursor: 'pointer',
+                borderRadius: 'var(--radius-md)',
                 maxWidth: '28rem',
                 width: '100%',
                 minWidth: '12rem',
+                gap: 'var(--space-2)',
+                transition: 'border-color 150ms ease',
               }}
               onClick={() => setSearchOpen(true)}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-subtle)' }}
               aria-label="Search"
             >
               <Search size={14} style={{ flexShrink: 0 }} aria-hidden="true" />
@@ -102,8 +106,8 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
               <kbd
                 style={{
                   fontSize: '0.625rem',
-                  padding: '0.125rem 0.375rem',
-                  borderRadius: 4,
+                  padding: 'var(--space-0-5) var(--space-1-5)',
+                  borderRadius: 'var(--radius-sm)',
                   background: 'var(--color-bg)',
                   border: '1px solid var(--color-border)',
                   color: 'var(--color-text-subtle)',
@@ -117,17 +121,19 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
 
             {/* Mobile: search icon button */}
             <button
-              className="md:hidden flex items-center justify-center transition-colors"
+              className="md:hidden flex items-center justify-center"
               style={{
-                width: '2.75rem',
-                height: '2.75rem',
-                borderRadius: 'var(--radius-button)',
+                width: '2.5rem',
+                height: '2.5rem',
+                borderRadius: 'var(--radius-md)',
                 color: 'var(--color-text-subtle)',
                 background: 'transparent',
                 border: 'none',
-                cursor: 'pointer',
+                transition: 'background-color 150ms ease',
               }}
               onClick={() => setSearchOpen(true)}
+              onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)' }}
+              onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
               aria-label="Search"
             >
               <Search size={18} aria-hidden="true" />
@@ -147,7 +153,7 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
       </div>
 
       {/* Right */}
-      <div className="flex items-center" style={{ gap: '0.5rem' }}>
+      <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
         <NotificationBell />
         <UserButton
           appearance={{
@@ -172,15 +178,15 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
             style={{
               width: '100%',
               maxWidth: '32rem',
-              margin: '0 1rem',
+              margin: '0 var(--space-4)',
               background: 'var(--color-bg)',
-              borderRadius: 'var(--radius-card)',
+              borderRadius: 'var(--radius-lg)',
               border: '1px solid var(--color-border)',
-              boxShadow: '0 16px 48px rgba(0,0,0,0.2)',
+              boxShadow: 'var(--shadow-lg)',
               overflow: 'hidden',
             }}
           >
-            <div className="flex items-center gap-3" style={{ padding: '0.75rem 1rem' }}>
+            <div className="flex items-center" style={{ padding: 'var(--space-3) var(--space-4)', gap: 'var(--space-3)' }}>
               <Search size={16} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} aria-hidden="true" />
               <input
                 ref={inputRef}
@@ -189,12 +195,12 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
                 value={searchValue}
                 onChange={(e) => setSearchValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                className="flex-1 text-sm outline-none"
+                className="flex-1 outline-none"
                 style={{
                   background: 'transparent',
                   border: 'none',
                   color: 'var(--color-text)',
-                  fontSize: '0.875rem',
+                  fontSize: 'var(--text-base)',
                 }}
               />
               <button
@@ -203,24 +209,21 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
                 style={{
                   width: '1.75rem',
                   height: '1.75rem',
-                  borderRadius: 'var(--radius-button)',
+                  borderRadius: 'var(--radius-md)',
                   background: 'var(--color-bg-secondary)',
                   border: 'none',
-                  cursor: 'pointer',
                   color: 'var(--color-text-muted)',
+                  transition: 'background-color 150ms ease',
                 }}
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)' }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)' }}
                 aria-label="Close search"
               >
                 <X size={14} aria-hidden="true" />
               </button>
             </div>
-            <div
-              style={{
-                borderTop: '1px solid var(--color-border-subtle)',
-                padding: '0.75rem 1rem',
-              }}
-            >
-              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
+            <div style={{ borderTop: '1px solid var(--color-border-subtle)', padding: 'var(--space-3) var(--space-4)' }}>
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
                 Press Enter to search requests
               </p>
             </div>
