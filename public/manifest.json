@@ -17,7 +17,7 @@
       "purpose": "any"
     },
     {
-      "src": "/dashboard/tahi-logo.png",
+      "src": "/dashboard/favicon.png",
       "sizes": "any",
       "type": "image/png",
       "purpose": "maskable"
