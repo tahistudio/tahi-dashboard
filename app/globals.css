@@ -52,6 +52,17 @@
   --color-info: #60a5fa;
   --color-info-bg: #eff6ff;
 
+  /* ── Color language ─────────────────────────────────────
+     Gray   = inactive, draft, archived, neutral
+     Blue   = new, submitted, incoming (awaiting action)
+     Amber  = needs attention, in review, paused (warning)
+     Green  = active, in progress, working on it
+     Teal   = complete, delivered, paid, done
+     Purple = client action needed (client review)
+     Red    = high priority, overdue, danger
+     Rose   = urgent priority (escalation above high)
+     ─────────────────────────────────────────────────────── */
+
   /* ── Request status palette ─────────────────────────────── */
   --status-draft-dot:          #9ca3af;
   --status-draft-bg:           #f3f4f6;
@@ -65,7 +76,7 @@
 
   --status-in-review-dot:      #fbbf24;
   --status-in-review-bg:       #fffbeb;
-  --status-in-review-text:     #b45309;
+  --status-in-review-text:     #92400e;
   --status-in-review-border:   #fde68a;
 
   --status-in-progress-dot:    #22c55e;
@@ -75,13 +86,13 @@
 
   --status-client-review-dot:      #a78bfa;
   --status-client-review-bg:       #f5f3ff;
-  --status-client-review-text:     #7c3aed;
+  --status-client-review-text:     #6d28d9;
   --status-client-review-border:   #ede9fe;
 
-  --status-delivered-dot:      #10b981;
-  --status-delivered-bg:       #ecfdf5;
-  --status-delivered-text:     #065f46;
-  --status-delivered-border:   #a7f3d0;
+  --status-delivered-dot:      #06b6d4;
+  --status-delivered-bg:       #ecfeff;
+  --status-delivered-text:     #0e7490;
+  --status-delivered-border:   #a5f3fc;
 
   --status-archived-dot:       #d1d5db;
   --status-archived-bg:        #f9fafb;
@@ -107,11 +118,16 @@
   --cat-bug-bg:           #fee2e2;
   --cat-bug-text:         #dc2626;
 
-  /* ── Priority palette ───────────────────────────────────── */
+  /* ── Priority palette (distinct from status colors) ───── */
+  --priority-standard-bg:     var(--color-bg-secondary);
+  --priority-standard-text:   var(--color-text-muted);
+  --priority-standard-border: var(--color-border-subtle);
+  --priority-standard-dot:    var(--color-border);
+
   --priority-high-bg:     #fef2f2;
-  --priority-high-text:   #dc2626;
-  --priority-high-border: #fee2e2;
-  --priority-high-dot:    #f87171;
+  --priority-high-text:   #b91c1c;
+  --priority-high-border: #fecaca;
+  --priority-high-dot:    #ef4444;
 
   --priority-urgent-bg:     #fdf2f8;
   --priority-urgent-text:   #9d174d;

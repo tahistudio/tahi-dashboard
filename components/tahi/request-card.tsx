@@ -98,7 +98,7 @@ export function RequestCard({
       <div className="flex-1 min-w-0 space-y-1">
         <div className="flex items-start gap-2">
           {isHighPriority && (
-            <Zap className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
+            <Zap className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: 'var(--priority-high-dot)' }} />
           )}
           {scopeFlagged && (
             <AlertTriangle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" aria-label="Scope creep flagged" />

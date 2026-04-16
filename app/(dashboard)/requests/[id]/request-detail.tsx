@@ -443,9 +443,9 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 className="inline-flex items-center text-xs font-medium rounded-full"
                 style={{
                   padding: '0.125rem 0.5rem',
-                  background: 'var(--status-in-review-bg)',
-                  color: 'var(--status-in-review-text)',
-                  border: '1px solid var(--status-in-review-border)',
+                  background: 'var(--priority-high-bg)',
+                  color: 'var(--priority-high-text)',
+                  border: '1px solid var(--priority-high-border)',
                 }}
               >
                 High Priority

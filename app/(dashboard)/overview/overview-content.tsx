@@ -599,8 +599,8 @@ function PipelineImpactCard() {
 
   const impactItems = [
     { label: 'Weighted', value: `${forecast.totalWeightedHours}h`, sub: `${forecast.dealCount} deal${forecast.dealCount !== 1 ? 's' : ''}`, color: 'var(--color-brand)' },
-    { label: 'Best Case', value: `${forecast.bestCaseHours}h`, sub: 'all deals close', color: 'var(--color-info)' },
-    { label: 'Worst Case', value: `${forecast.worstCaseHours}h`, sub: 'conservative', color: 'var(--color-warning)' },
+    { label: 'Best Case', value: `${forecast.bestCaseHours}h`, sub: 'all deals close', color: 'var(--status-delivered-text)' },
+    { label: 'Worst Case', value: `${forecast.worstCaseHours}h`, sub: 'conservative', color: 'var(--color-danger)' },
   ]
 
   return (
@@ -1302,8 +1302,9 @@ function RequestRow({ req, isLast, showOrg }: { req: RecentRequest; isLast: bool
               className="flex-shrink-0"
               style={{
                 padding: 'var(--space-0-5) var(--space-2)',
-                background: 'var(--status-in-review-bg)',
-                color: 'var(--status-in-review-text)',
+                background: 'var(--priority-high-bg)',
+                color: 'var(--priority-high-text)',
+                border: '1px solid var(--priority-high-border)',
                 fontSize: '0.625rem',
                 fontWeight: 600,
                 borderRadius: 'var(--radius-full)',
