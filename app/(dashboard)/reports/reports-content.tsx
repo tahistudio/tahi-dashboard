@@ -134,7 +134,7 @@ export function ReportsContent() {
                 background: 'var(--color-bg)',
                 borderRadius: 'var(--radius-lg)',
                 border: '1px solid var(--color-border)',
-                padding: '1.5rem',
+                padding: 'var(--space-5)',
                 height: '6rem',
               }}
             >
@@ -329,7 +329,7 @@ export function ReportsContent() {
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
-            padding: '1.5rem',
+            padding: 'var(--space-5)',
           }}
         >
           <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -372,7 +372,7 @@ export function ReportsContent() {
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
-            padding: '1.5rem',
+            padding: 'var(--space-5)',
           }}
         >
           <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -395,38 +395,15 @@ export function ReportsContent() {
         </div>
       </div>
 
-      {/* Extra stats row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-        <StatCard
-          label="Total Requests"
-          value={String(data.totalRequests)}
-          icon={Inbox}
-        />
-        <StatCard
-          label="Avg. Delivery Days"
-          value={data.avgDeliveryDays > 0 ? `${data.avgDeliveryDays}d` : 'N/A'}
-          icon={Calendar}
-        />
-        <StatCard
-          label="Completion Rate"
-          value={
-            data.totalRequests > 0
-              ? `${Math.round(((data.requestsByStatus['delivered'] ?? 0) / data.totalRequests) * 100)}%`
-              : 'N/A'
-          }
-          icon={TrendingUp}
-        />
-      </div>
-
-      {/* Delivery time trend + Revenue by plan type */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Operations: Delivery time + Plan breakdown (side by side) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: 'var(--space-6)' }}>
         {/* Delivery time trend */}
         <div
           style={{
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
-            padding: '1.5rem',
+            padding: 'var(--space-5)',
           }}
         >
           <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -485,7 +462,7 @@ export function ReportsContent() {
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
-            padding: '1.5rem',
+            padding: 'var(--space-5)',
           }}
         >
           <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -527,22 +504,17 @@ export function ReportsContent() {
       {/* Sales Funnel / Close Rates */}
       <SalesFunnelSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
 
-      {/* Stage Velocity (T355) */}
-      <StageVelocitySection />
+      {/* Deal timing: Stage Velocity + Sales Cycle side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: 'var(--space-6)' }}>
+        <StageVelocitySection />
+        <SalesCycleLengthSection />
+      </div>
 
-      {/* Close Rate Source Breakdown (T476) */}
-      <CloseRateSourceBreakdownSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
-
-      {/* Source Breakdown (T390) */}
-      <SourceBreakdownSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
-
-      {/* Sales Cycle Length (T391) */}
-      <SalesCycleLengthSection />
-
-      {/* Revenue Forecast section removed 2026-04-15: data duplicated by
-          Cash Flow Forecast which already projects weighted pipeline +
-          best/worst cases with more context. Keep RevenueForecastSection
-          function defined in case we want to resurrect it later. */}
+      {/* Source analysis: Close Rate + Source Breakdown side by side on lg */}
+      <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: 'var(--space-6)' }}>
+        <CloseRateSourceBreakdownSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+        <SourceBreakdownSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} />
+      </div>
 
       {/* Retainer Health Monitor (T610) */}
       <div id="retainer-health" className="scroll-mt-20"><RetainerHealthSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
@@ -668,7 +640,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                 background: 'var(--color-bg)',
                 borderRadius: 'var(--radius-lg)',
                 border: '1px solid var(--color-border)',
-                padding: '1.5rem',
+                padding: 'var(--space-5)',
                 height: '6rem',
               }}
             >
@@ -683,7 +655,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
-            padding: '1.5rem',
+            padding: 'var(--space-5)',
           }}
         >
           <div className="flex items-center justify-between">
@@ -739,7 +711,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                 background: 'var(--color-bg)',
                 borderRadius: 'var(--radius-lg)',
                 border: '1px solid var(--color-border)',
-                padding: '1.5rem',
+                padding: 'var(--space-5)',
               }}
             >
               <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -795,7 +767,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
-            padding: '1.5rem',
+            padding: 'var(--space-5)',
           }}
         >
           <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -814,7 +786,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
-            padding: '1.5rem',
+            padding: 'var(--space-5)',
           }}
         >
           <div className="flex items-center justify-between">
@@ -848,7 +820,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
-            padding: '1.5rem',
+            padding: 'var(--space-5)',
           }}
         >
           <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -1046,7 +1018,7 @@ function FinancialOutstandingCard({ value, isPositive }: { value: string; isPosi
         background: 'var(--color-bg)',
         borderRadius: 'var(--radius-lg)',
         border: isPositive ? '1px solid #fecaca' : '1px solid var(--color-border)',
-        padding: '1.5rem',
+        padding: 'var(--space-5)',
       }}
     >
       <div className="flex items-center gap-3">
@@ -1159,7 +1131,7 @@ function ResponseTimeSection() {
         background: 'var(--color-bg)',
         borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--color-border)',
-        padding: '1.5rem',
+        padding: 'var(--space-5)',
       }}
     >
       <div className="flex items-center justify-between mb-4">
@@ -1318,7 +1290,7 @@ function SalesPipelineSection({ displayCurrency, exchangeRates }: CurrencyProps)
                 background: 'var(--color-bg)',
                 borderRadius: 'var(--radius-lg)',
                 border: '1px solid var(--color-border)',
-                padding: '1.5rem',
+                padding: 'var(--space-5)',
                 height: '6rem',
               }}
             >
@@ -1338,7 +1310,7 @@ function SalesPipelineSection({ displayCurrency, exchangeRates }: CurrencyProps)
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          padding: 'var(--space-5)',
         }}
       >
         <h2 className="text-lg font-semibold text-[var(--color-text)] mb-2">Sales Pipeline</h2>
@@ -1394,7 +1366,7 @@ function SalesPipelineSection({ displayCurrency, exchangeRates }: CurrencyProps)
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          padding: 'var(--space-5)',
         }}
       >
         <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -1476,7 +1448,7 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          padding: 'var(--space-5)',
         }}
       >
         <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -1499,7 +1471,7 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          padding: 'var(--space-5)',
         }}
       >
         <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -1540,7 +1512,7 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          padding: 'var(--space-5)',
         }}
       >
         <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -1596,7 +1568,7 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          padding: 'var(--space-5)',
         }}
       >
         <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -1653,7 +1625,7 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
-            padding: '1.5rem',
+            padding: 'var(--space-5)',
           }}
         >
           <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -1756,7 +1728,7 @@ function SummaryCard({
         background: 'var(--color-bg)',
         borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--color-border)',
-        padding: '1.5rem',
+        padding: 'var(--space-5)',
       }}
     >
       <div className="flex items-center gap-3">
@@ -1796,7 +1768,7 @@ function StatCard({
         background: 'var(--color-bg)',
         borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--color-border)',
-        padding: '1.5rem',
+        padding: 'var(--space-5)',
       }}
     >
       <div className="flex items-center gap-2 mb-1">
@@ -1861,7 +1833,7 @@ function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProp
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          padding: 'var(--space-5)',
         }}
       >
         <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -1902,7 +1874,7 @@ function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProp
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          padding: 'var(--space-5)',
         }}
       >
         <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -1925,7 +1897,7 @@ function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProp
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
-            padding: '1.5rem',
+            padding: 'var(--space-5)',
           }}
         >
           <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -1958,7 +1930,7 @@ function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProp
             background: 'var(--color-bg)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--color-border)',
-            padding: '1.5rem',
+            padding: 'var(--space-5)',
           }}
         >
           <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -2069,7 +2041,7 @@ function StageVelocitySection() {
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          padding: 'var(--space-5)',
         }}
       >
         <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -2094,7 +2066,7 @@ function StageVelocitySection() {
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          padding: 'var(--space-5)',
         }}
       >
         <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -2116,7 +2088,7 @@ function StageVelocitySection() {
         background: 'var(--color-bg)',
         borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--color-border)',
-        padding: '1.5rem',
+        padding: 'var(--space-5)',
       }}
     >
       <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -2233,7 +2205,7 @@ function CloseRateSourceBreakdownSection({ displayCurrency, exchangeRates }: Cur
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          padding: 'var(--space-5)',
         }}
       >
         <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -2256,7 +2228,7 @@ function CloseRateSourceBreakdownSection({ displayCurrency, exchangeRates }: Cur
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          padding: 'var(--space-5)',
         }}
       >
         <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -2276,7 +2248,7 @@ function CloseRateSourceBreakdownSection({ displayCurrency, exchangeRates }: Cur
         background: 'var(--color-bg)',
         borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--color-border)',
-        padding: '1.5rem',
+        padding: 'var(--space-5)',
       }}
     >
       <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -2393,7 +2365,7 @@ function SalesCycleLengthSection() {
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          padding: 'var(--space-5)',
         }}
       >
         <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -2416,7 +2388,7 @@ function SalesCycleLengthSection() {
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          padding: '1.5rem',
+          padding: 'var(--space-5)',
         }}
       >
         <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -2436,7 +2408,7 @@ function SalesCycleLengthSection() {
         background: 'var(--color-bg)',
         borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--color-border)',
-        padding: '1.5rem',
+        padding: 'var(--space-5)',
       }}
     >
       <h3 className="text-sm font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
