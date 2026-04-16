@@ -285,91 +285,127 @@ export function PipelineContent() {
     : 0
 
   return (
-    <div style={{ padding: '1.5rem' }}>
+    <div className="dashboard-main">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3" style={{ marginBottom: '1.5rem' }}>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between" style={{ marginBottom: 'var(--space-6)', gap: 'var(--space-3)' }}>
         <div>
-          <h1 className="font-bold" style={{ fontSize: '1.5rem', color: 'var(--color-text)' }}>
+          <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)' }}>
             Sales Pipeline
           </h1>
-          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
+          <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
             Track and manage deals through your sales process
           </p>
         </div>
         <button
           onClick={() => setShowNewDeal(true)}
-          className="inline-flex items-center gap-2 font-medium transition-colors rounded-xl"
+          className="inline-flex items-center font-medium hover:-translate-y-px"
           style={{
-            padding: '0.625rem 1.25rem',
-            fontSize: '0.875rem',
+            padding: 'var(--space-2) var(--space-4)',
+            fontSize: 'var(--text-sm)',
+            fontWeight: 600,
             background: 'var(--color-brand)',
             color: 'white',
             border: 'none',
-            cursor: 'pointer',
-            minHeight: '2.75rem',
+            borderRadius: 'var(--radius-leaf-sm)',
+            gap: 'var(--space-1-5)',
+            transition: 'background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease',
           }}
-          onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-dark)' }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-brand)' }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = '#3d6333'
+            e.currentTarget.style.boxShadow = '0 4px 14px rgba(90,130,78,0.4)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'var(--color-brand)'
+            e.currentTarget.style.boxShadow = 'none'
+          }}
         >
-          <Plus className="w-4 h-4" />
+          <Plus size={15} aria-hidden="true" />
           New Deal
         </button>
       </div>
 
-      {/* KPI summary bar with currency switcher */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <div className="flex items-center justify-end gap-1" style={{ marginBottom: '0.5rem' }}>
-          {CURRENCY_OPTIONS.map(opt => (
-            <button
-              key={opt.code}
-              onClick={() => setDisplayCurrency(opt.code)}
-              className="transition-colors font-medium"
+      {/* KPI strip: grouped panel with internal dividers */}
+      <div style={{
+        marginBottom: 'var(--space-6)',
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-lg)',
+        overflow: 'hidden',
+      }}>
+        {/* Currency switcher in header */}
+        <div className="flex items-center justify-between" style={{
+          padding: 'var(--space-3) var(--space-5)',
+          borderBottom: '1px solid var(--color-border-subtle)',
+        }}>
+          <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Pipeline Overview
+          </span>
+          <div className="relative">
+            <select
+              value={displayCurrency}
+              onChange={e => setDisplayCurrency(e.target.value as DisplayCurrency)}
               style={{
-                padding: '0.25rem 0.5rem',
-                fontSize: '0.6875rem',
-                borderRadius: '0.375rem',
-                border: '1px solid',
-                borderColor: displayCurrency === opt.code ? 'var(--color-brand)' : 'var(--color-border)',
-                background: displayCurrency === opt.code ? 'var(--color-brand)' : 'var(--color-bg)',
-                color: displayCurrency === opt.code ? 'white' : 'var(--color-text-muted)',
+                appearance: 'none',
+                padding: 'var(--space-1) var(--space-6) var(--space-1) var(--space-2)',
+                fontSize: 'var(--text-xs)',
+                fontWeight: 600,
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--color-border-subtle)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text-muted)',
                 cursor: 'pointer',
               }}
             >
-              {opt.label}
-            </button>
-          ))}
+              {CURRENCY_OPTIONS.map(opt => (
+                <option key={opt.code} value={opt.code}>{opt.code}</option>
+              ))}
+            </select>
+            <ChevronDown
+              size={12}
+              aria-hidden="true"
+              style={{ position: 'absolute', right: 'var(--space-1-5)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)', pointerEvents: 'none' }}
+            />
+          </div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-          <SummaryCard
-            icon={DollarSign}
-            label="Total Pipeline Value"
-            value={formatCurrency(toDisplay(totalValue), displayCurrency)}
-            accent="emerald"
-          />
-          <SummaryCard
-            icon={Target}
-            label="Weighted Forecast"
-            value={formatCurrency(toDisplay(weightedForecast), displayCurrency)}
-            accent="blue"
-          />
-          <SummaryCard
-            icon={TrendingUp}
-            label="Open Deals"
-            value={String(openDeals.length)}
-            accent="amber"
-          />
-          <SummaryCard
-            icon={Award}
-            label="Win Rate"
-            value={closedDeals.length > 0 ? `${winRate}%` : '--'}
-            accent="purple"
-          />
-          <SummaryCard
-            icon={BarChart3}
-            label="Avg Deal Size"
-            value={openDeals.length > 0 ? formatCurrency(toDisplay(avgDealSize), displayCurrency) : '--'}
-            accent="rose"
-          />
+        {/* KPI cells */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+          {[
+            { icon: DollarSign, label: 'Pipeline Value', value: formatCurrency(toDisplay(totalValue), displayCurrency) },
+            { icon: Target, label: 'Weighted Forecast', value: formatCurrency(toDisplay(weightedForecast), displayCurrency) },
+            { icon: TrendingUp, label: 'Open Deals', value: String(openDeals.length) },
+            { icon: Award, label: 'Win Rate', value: closedDeals.length > 0 ? `${winRate}%` : '--' },
+            { icon: BarChart3, label: 'Avg Deal Size', value: openDeals.length > 0 ? formatCurrency(toDisplay(avgDealSize), displayCurrency) : '--' },
+          ].map((item, i) => {
+            const Icon = item.icon
+            return (
+              <div
+                key={item.label}
+                className="pipeline-divider-item kpi-strip-item"
+                style={{
+                  padding: 'var(--space-4) var(--space-5)',
+                  borderBottom: i < 2 ? '1px solid var(--color-border-subtle)' : 'none',
+                }}
+              >
+                <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+                  <div className="flex items-center justify-center flex-shrink-0" style={{
+                    width: '2rem',
+                    height: '2rem',
+                    background: 'var(--color-brand-50)',
+                    color: 'var(--color-brand)',
+                    borderRadius: 'var(--radius-leaf-sm)',
+                  }}>
+                    <Icon size={15} aria-hidden="true" />
+                  </div>
+                  <span style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
+                    {item.label}
+                  </span>
+                </div>
+                <p className="tabular-nums" style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--color-text)' }}>
+                  {item.value}
+                </p>
+              </div>
+            )
+          })}
         </div>
       </div>
 
@@ -695,47 +731,7 @@ function LoadingSkeleton() {
   )
 }
 
-// ---- Summary Card --------------------------------------------------------
-
-const ACCENT_MAP = {
-  emerald: { bg: 'var(--color-brand-50)', icon: 'var(--color-brand)' },
-  blue:    { bg: 'var(--status-submitted-bg)', icon: 'var(--status-submitted-text)' },
-  amber:   { bg: 'var(--status-in-review-bg)', icon: 'var(--status-in-review-text)' },
-  purple:  { bg: 'var(--status-client-review-bg)', icon: 'var(--status-client-review-text)' },
-  rose:    { bg: 'var(--priority-high-bg)', icon: 'var(--priority-high-text)' },
-} as const
-
-function SummaryCard({ icon: Icon, label, value, accent }: {
-  icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>
-  label: string
-  value: string
-  accent: keyof typeof ACCENT_MAP
-}) {
-  const a = ACCENT_MAP[accent]
-  return (
-    <div
-      className="rounded-xl border shadow-sm"
-      style={{ padding: '1.25rem 1.5rem', background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
-    >
-      <div className="flex items-center gap-3">
-        <div
-          className="rounded-lg flex items-center justify-center flex-shrink-0"
-          style={{ width: '2.5rem', height: '2.5rem', background: a.bg }}
-        >
-          <Icon className="w-5 h-5" style={{ color: a.icon }} />
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <p style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            {label}
-          </p>
-          <p className="font-bold truncate" style={{ fontSize: '1.125rem', color: 'var(--color-text)', marginTop: '0.125rem' }}>
-            {value}
-          </p>
-        </div>
-      </div>
-    </div>
-  )
-}
+// (SummaryCard removed - KPIs now rendered inline in grouped panel above)
 
 // ---- Kanban View ---------------------------------------------------------
 
@@ -1144,7 +1140,7 @@ function DealCard({ deal, stages, displayCurrency, toDisplay }: { deal: Deal; st
   return (
     <Link
       href={`/pipeline/${deal.id}`}
-      className="block rounded-lg transition-all"
+      className="block hover-lift group"
       draggable
       onDragStart={e => {
         e.dataTransfer.setData('dealId', deal.id)
@@ -1156,64 +1152,84 @@ function DealCard({ deal, stages, displayCurrency, toDisplay }: { deal: Deal; st
         ;(e.currentTarget as HTMLElement).style.opacity = '1'
       }}
       style={{
-        padding: '0.75rem',
+        padding: 'var(--space-3)',
         background: 'var(--color-bg)',
-        border: '1px solid var(--color-border)',
-        boxShadow: 'var(--shadow-sm)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-md)',
         textDecoration: 'none',
         cursor: 'grab',
+        transition: 'border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease',
       }}
       onMouseEnter={e => {
-        e.currentTarget.style.borderColor = 'var(--color-brand)'
-        e.currentTarget.style.boxShadow = 'var(--shadow-md)'
-      }}
-      onMouseLeave={e => {
         e.currentTarget.style.borderColor = 'var(--color-border)'
         e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
       }}
+      onMouseLeave={e => {
+        e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
+        e.currentTarget.style.boxShadow = 'none'
+      }}
     >
-      {/* Title */}
-      <p className="font-medium truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text)', marginBottom: '0.375rem' }}>
-        {deal.title}
-      </p>
-
-      {/* Company */}
-      {deal.orgName && (
-        <div className="flex items-center gap-1.5" style={{ marginBottom: '0.375rem' }}>
-          <Building2 style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }} />
-          <span className="truncate" style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-            {deal.orgName}
-          </span>
-        </div>
-      )}
-
-      {/* Value + Probability row */}
-      <div className="flex items-center gap-2" style={{ marginBottom: '0.375rem' }}>
-        <p className="font-semibold" style={{ fontSize: '0.875rem', color: (deal.valueNzd ?? deal.value) > 0 ? 'var(--color-brand)' : 'var(--color-text-subtle)' }}>
+      {/* Value + Probability header */}
+      <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-2)' }}>
+        <p className="font-semibold tabular-nums" style={{
+          fontSize: 'var(--text-base)',
+          color: (deal.valueNzd ?? deal.value) > 0 ? 'var(--color-text)' : 'var(--color-text-subtle)',
+        }}>
           {(deal.valueNzd ?? deal.value) > 0
             ? formatCurrency(toDisplay(deal.valueNzd ?? deal.value), displayCurrency)
             : 'TBD'}
         </p>
         <span
-          className="inline-flex items-center rounded-full font-medium"
+          className="inline-flex items-center justify-center tabular-nums"
           style={{
-            padding: '0.0625rem 0.375rem',
-            fontSize: '0.625rem',
-            background: probability >= 60 ? '#d1fae520' : probability >= 25 ? '#fef3c720' : '#dbeafe20',
+            padding: 'var(--space-0-5) var(--space-1-5)',
+            fontSize: 'var(--text-xs)',
+            fontWeight: 600,
+            borderRadius: 'var(--radius-full)',
+            background: probability >= 60 ? 'var(--status-delivered-bg)' : probability >= 25 ? 'var(--status-in-review-bg)' : 'var(--status-submitted-bg)',
             color: probability >= 60 ? 'var(--status-delivered-text)' : probability >= 25 ? 'var(--status-in-review-text)' : 'var(--status-submitted-text)',
-            border: `1px solid ${probability >= 60 ? '#d1fae5' : probability >= 25 ? '#fef3c7' : '#dbeafe'}`,
           }}
         >
           {probability}%
         </span>
       </div>
 
+      {/* Title */}
+      <p className="truncate" style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-text)', marginBottom: 'var(--space-1-5)' }}>
+        {deal.title}
+      </p>
+
+      {/* Company */}
+      {deal.orgName && (
+        <div className="flex items-center" style={{ marginBottom: 'var(--space-2)', gap: 'var(--space-1-5)' }}>
+          <div className="flex items-center justify-center flex-shrink-0" style={{
+            width: '1.25rem',
+            height: '1.25rem',
+            background: 'var(--color-brand-50)',
+            color: 'var(--color-brand)',
+            borderRadius: 'var(--radius-leaf-sm)',
+          }}>
+            <Building2 size={10} aria-hidden="true" />
+          </div>
+          <span className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+            {deal.orgName}
+          </span>
+        </div>
+      )}
+
       {/* Source badge */}
       {srcCfg && (
-        <div style={{ marginBottom: '0.375rem' }}>
+        <div style={{ marginBottom: 'var(--space-2)' }}>
           <span
-            className="inline-flex rounded-full font-medium"
-            style={{ padding: '0.0625rem 0.375rem', fontSize: '0.625rem', background: srcCfg.bg, color: srcCfg.text }}
+            className="inline-flex"
+            style={{
+              padding: 'var(--space-0-5) var(--space-1-5)',
+              fontSize: '0.625rem',
+              fontWeight: 500,
+              borderRadius: 'var(--radius-full)',
+              background: srcCfg.bg,
+              color: srcCfg.text,
+            }}
           >
             {srcCfg.label}
           </span>

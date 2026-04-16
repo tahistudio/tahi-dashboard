@@ -224,28 +224,28 @@ export function ReportsContent() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between" style={{ gap: 'var(--space-4)' }}>
         <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">Reports</h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">
+          <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)' }}>
+            Reports
+          </h1>
+          <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
             Revenue, request throughput, and client overview.
           </p>
         </div>
-        {/* Currency selector (T340) */}
-        {/* Jump-to chip nav so the long page is navigable */}
-        {/* Currency selector continues below */}
-        <div className="flex items-center gap-2">
-          <DollarSign className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+        <div className="relative flex-shrink-0">
           <select
             value={displayCurrency}
             onChange={(e) => setDisplayCurrency(e.target.value as DisplayCurrency)}
-            className="text-sm font-medium"
             style={{
+              appearance: 'none',
+              padding: 'var(--space-2) var(--space-8) var(--space-2) var(--space-3)',
+              fontSize: 'var(--text-sm)',
+              fontWeight: 500,
               background: 'var(--color-bg)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-button)',
-              padding: '0.375rem 0.75rem',
+              border: '1px solid var(--color-border-subtle)',
+              borderRadius: 'var(--radius-md)',
               color: 'var(--color-text)',
               cursor: 'pointer',
               minHeight: '2.25rem',
@@ -256,38 +256,66 @@ export function ReportsContent() {
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
+          <ChevronDown
+            size={14}
+            aria-hidden="true"
+            style={{ position: 'absolute', right: 'var(--space-3)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)', pointerEvents: 'none' }}
+          />
         </div>
       </div>
 
       {/* Section quick-jump nav. Each chip scrolls to a section anchor below. */}
       <ReportsJumpNav />
 
-      {/* Summary cards */}
-      <div id="overview" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 scroll-mt-20">
-        <SummaryCard
-          icon={Users}
-          label="Total Clients"
-          value={String(data.totalClients)}
-          accent="emerald"
-        />
-        <SummaryCard
-          icon={Inbox}
-          label="Open Requests"
-          value={String(data.openRequests)}
-          accent="blue"
-        />
-        <SummaryCard
-          icon={Clock}
-          label="Billable Hours"
-          value={data.totalBillableHours.toFixed(1)}
-          accent="amber"
-        />
-        <SummaryCard
-          icon={CreditCard}
-          label="Outstanding"
-          value={formatInCurrency(data.outstandingInvoiceAmount)}
-          accent="violet"
-        />
+      {/* KPI strip: grouped panel with dividers */}
+      <div
+        id="overview"
+        className="scroll-mt-20"
+        style={{
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border-subtle)',
+          borderRadius: 'var(--radius-lg)',
+          overflow: 'hidden',
+        }}
+      >
+        <div className="grid grid-cols-2 lg:grid-cols-4">
+          {[
+            { icon: Users, label: 'Total Clients', value: String(data.totalClients) },
+            { icon: Inbox, label: 'Open Requests', value: String(data.openRequests) },
+            { icon: Clock, label: 'Billable Hours', value: data.totalBillableHours.toFixed(1) },
+            { icon: CreditCard, label: 'Outstanding', value: formatInCurrency(data.outstandingInvoiceAmount) },
+          ].map((item, i) => {
+            const Icon = item.icon
+            return (
+              <div
+                key={item.label}
+                className="kpi-strip-item pipeline-divider-item"
+                style={{
+                  padding: 'var(--space-5)',
+                  borderBottom: i < 2 ? '1px solid var(--color-border-subtle)' : 'none',
+                }}
+              >
+                <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+                  <div className="flex items-center justify-center flex-shrink-0" style={{
+                    width: '2rem',
+                    height: '2rem',
+                    background: 'var(--color-brand-50)',
+                    color: 'var(--color-brand)',
+                    borderRadius: 'var(--radius-leaf-sm)',
+                  }}>
+                    <Icon size={15} aria-hidden="true" />
+                  </div>
+                  <span style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
+                    {item.label}
+                  </span>
+                </div>
+                <p className="tabular-nums" style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--color-text)' }}>
+                  {item.value}
+                </p>
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       {/* Financial Health */}
@@ -3392,51 +3420,50 @@ function ReportsJumpNav() {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
-  const groups = ['Operations', 'Sales', 'Finance', 'Team'] as const
-
   return (
     <div
-      className="sticky z-10 -mx-4 px-4 py-3 backdrop-blur"
+      className="sticky z-10"
       style={{
         top: 0,
-        background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)',
+        background: 'var(--color-bg)',
         borderBottom: '1px solid var(--color-border-subtle)',
+        marginLeft: 'calc(var(--space-5) * -1)',
+        marginRight: 'calc(var(--space-5) * -1)',
+        paddingLeft: 'var(--space-5)',
+        paddingRight: 'var(--space-5)',
       }}
     >
-      <div className="flex flex-wrap gap-x-5 gap-y-2 items-center">
-        {groups.map(g => {
-          const items = REPORTS_SECTIONS.filter(s => s.group === g)
-          return (
-            <div key={g} className="flex items-center gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]">{g}</span>
-              <div className="flex flex-wrap gap-1.5">
-                {items.map(s => (
-                  <button
-                    key={s.id}
-                    onClick={() => jumpTo(s.id)}
-                    className="text-xs font-medium px-2.5 py-1 rounded-full transition-colors"
-                    style={{
-                      background: 'var(--color-bg-tertiary)',
-                      color: 'var(--color-text-muted)',
-                      border: '1px solid transparent',
-                      cursor: 'pointer',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'var(--color-brand-50)'
-                      e.currentTarget.style.color = 'var(--color-brand)'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'var(--color-bg-tertiary)'
-                      e.currentTarget.style.color = 'var(--color-text-muted)'
-                    }}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )
-        })}
+      <div
+        className="flex overflow-x-auto scrollbar-hide"
+        style={{ gap: 'var(--space-0-5)' }}
+      >
+        {REPORTS_SECTIONS.map(s => (
+          <button
+            key={s.id}
+            onClick={() => jumpTo(s.id)}
+            className="whitespace-nowrap flex-shrink-0"
+            style={{
+              padding: 'var(--space-3) var(--space-4)',
+              fontSize: 'var(--text-sm)',
+              fontWeight: 500,
+              color: 'var(--color-text-muted)',
+              background: 'transparent',
+              border: 'none',
+              borderBottom: '2px solid transparent',
+              transition: 'color 150ms ease, border-color 150ms ease',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.color = 'var(--color-brand)'
+              e.currentTarget.style.borderBottomColor = 'var(--color-brand)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.color = 'var(--color-text-muted)'
+              e.currentTarget.style.borderBottomColor = 'transparent'
+            }}
+          >
+            {s.label}
+          </button>
+        ))}
       </div>
     </div>
   )
