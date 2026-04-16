@@ -6,16 +6,16 @@ import {
   Users, Inbox, FileText, BarChart3,
   Plus, Clock, UserPlus,
   ArrowRight, AlertTriangle, RefreshCw, Video, ExternalLink,
-  CalendarClock, Loader2, TrendingUp,
+  TrendingUp,
   Target, Scale, Timer,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { OnboardingChecklist, type OnboardingState } from '@/components/tahi/onboarding-checklist'
 import { BookingWidget } from '@/components/tahi/booking-widget'
+import { AIDailyBriefing } from '@/components/tahi/ai-briefing-card'
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 
 // ─── Accent colour map (CSS var references for dark mode compat) ─────────────
 //
@@ -94,7 +94,7 @@ export function OverviewSwitcher({ userName, orgName }: { userName: string; orgN
 export function AdminOverview({ userName }: { userName: string }) {
   const [kpis, setKpis] = useState<KPIs | null>(null)
   const [recentRequests, setRecentRequests] = useState<RecentRequest[]>([])
-  const [monthlyRevenue, setMonthlyRevenue] = useState<MonthlyRevenue[]>([])
+  const [, setMonthlyRevenue] = useState<MonthlyRevenue[]>([])
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState(false)
 
@@ -116,7 +116,7 @@ export function AdminOverview({ userName }: { userName: string }) {
   const firstName = userName.split(' ')[0]
 
   return (
-    <div className="flex flex-col" style={{ gap: 'var(--space-6)', maxWidth: '68.75rem' }}>
+    <div className="flex flex-col" style={{ gap: 'var(--space-8)', maxWidth: '68.75rem' }}>
       {fetchError && (
         <div
           className="flex items-center"
@@ -135,7 +135,7 @@ export function AdminOverview({ userName }: { userName: string }) {
         </div>
       )}
 
-      {/* Greeting + quick actions */}
+      {/* 1. Greeting + quick actions */}
       <div className="flex items-start justify-between" style={{ gap: 'var(--space-4)' }}>
         <div>
           <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)' }}>
@@ -152,28 +152,13 @@ export function AdminOverview({ userName }: { userName: string }) {
         </div>
       </div>
 
-      {/* KPI strip: single panel with internal dividers */}
+      {/* 2. AI Daily Briefing */}
+      <AIDailyBriefing />
+
+      {/* 3. KPI strip */}
       <KPIStrip kpis={kpis} loading={loading} />
 
-      {/* Pipeline summary */}
-      <PipelineSummaryCard />
-
-      {/* Revenue trend */}
-      {loading ? (
-        <div className="animate-pulse" style={{
-          background: 'var(--color-bg)',
-          border: '1px solid var(--color-border-subtle)',
-          borderRadius: 'var(--radius-lg)',
-          padding: 'var(--space-5)',
-        }}>
-          <div style={{ height: '0.875rem', width: '30%', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)', marginBottom: 'var(--space-5)' }} />
-          <div style={{ height: '10rem', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
-        </div>
-      ) : monthlyRevenue.length > 0 ? (
-        <RevenueChart data={monthlyRevenue} />
-      ) : null}
-
-      {/* Recent requests + Upcoming calls side by side */}
+      {/* 4. Recent requests + Upcoming calls side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-5" style={{ gap: 'var(--space-6)' }}>
         <div className="lg:col-span-3">
           <SectionCard title="Recent Requests" action={{ label: 'View all', href: '/requests' }}>
@@ -193,7 +178,10 @@ export function AdminOverview({ userName }: { userName: string }) {
         </div>
       </div>
 
-      {/* Pipeline + Capacity */}
+      {/* 5. Pipeline summary */}
+      <PipelineSummaryCard />
+
+      {/* 6. Team Capacity */}
       <PipelineCapacityCard />
 
       {!loading && (kpis?.activeClients ?? 0) === 0 && <GettingStarted />}
@@ -436,10 +424,10 @@ function PipelineCapacityCard() {
             {utilizationPct}%
           </span>
         </div>
-        <Link href="/pipeline" className="flex items-center hover:underline" style={{
-          fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)', gap: 'var(--space-1)',
+        <Link href="/pipeline" className="view-link" style={{
+          fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)',
         }}>
-          View pipeline <ArrowRight size={12} aria-hidden="true" />
+          View pipeline <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
         </Link>
       </div>
 
@@ -502,265 +490,6 @@ function PipelineCapacityCard() {
         </div>
       )}
 
-      {/* Earliest Start Date + Pipeline Impact inside same card */}
-      <div style={{ padding: '0 var(--space-5) var(--space-4)' }}>
-        <EarliestStartDateWidget />
-        <PipelineImpactCard />
-      </div>
-    </div>
-  )
-}
-
-// ─── Pipeline Impact Card (T478) ────────────────────────────────────────────
-
-interface PipelineForecast {
-  totalWeightedHours: number
-  bestCaseHours: number
-  worstCaseHours: number
-  dealCount: number
-}
-
-function PipelineImpactCard() {
-  const [forecast, setForecast] = useState<PipelineForecast | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      try {
-        const res = await fetch(apiPath('/api/admin/capacity/forecast'))
-        if (!res.ok) throw new Error('Failed')
-        const d = await res.json() as {
-          totalWeightedHours?: number
-          bestCaseHours?: number
-          worstCaseHours?: number
-          dealCount?: number
-        }
-        if (!cancelled && d.totalWeightedHours !== undefined) {
-          setForecast({
-            totalWeightedHours: d.totalWeightedHours ?? 0,
-            bestCaseHours: d.bestCaseHours ?? 0,
-            worstCaseHours: d.worstCaseHours ?? 0,
-            dealCount: d.dealCount ?? 0,
-          })
-        }
-      } catch {
-        // Fallback: derive from deals data
-        try {
-          const dealsRes = await fetch(apiPath('/api/admin/deals?limit=100'))
-          if (!dealsRes.ok) throw new Error('Failed')
-          const dealsJson = await dealsRes.json() as {
-            items: Array<{
-              stageIsClosedWon: number | null
-              stageIsClosedLost: number | null
-              stageProbability: number | null
-              estimatedHours?: number | null
-              valueNzd: number | null
-              value: number | null
-            }>
-          }
-          const openDeals = (dealsJson.items ?? []).filter(
-            d => !d.stageIsClosedWon && !d.stageIsClosedLost
-          )
-          // Estimate hours from deal value (rough: $100/hr assumed)
-          const hourlyRate = 100
-          let weightedHrs = 0
-          let bestHrs = 0
-          let worstHrs = 0
-          for (const deal of openDeals) {
-            const val = deal.valueNzd ?? deal.value ?? 0
-            const prob = deal.stageProbability ?? 0
-            const hrs = deal.estimatedHours ?? (val / hourlyRate)
-            weightedHrs += hrs * (prob / 100)
-            bestHrs += hrs
-            worstHrs += hrs * Math.max(prob - 20, 0) / 100
-          }
-          if (!cancelled) {
-            setForecast({
-              totalWeightedHours: Math.round(weightedHrs),
-              bestCaseHours: Math.round(bestHrs),
-              worstCaseHours: Math.round(worstHrs),
-              dealCount: openDeals.length,
-            })
-          }
-        } catch {
-          // silent
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    load()
-    return () => { cancelled = true }
-  }, [])
-
-  if (loading || !forecast) return null
-  if (forecast.dealCount === 0) return null
-
-  const impactItems = [
-    { label: 'Weighted', value: `${forecast.totalWeightedHours}h`, sub: `${forecast.dealCount} deal${forecast.dealCount !== 1 ? 's' : ''}`, color: 'var(--color-brand)' },
-    { label: 'Best Case', value: `${forecast.bestCaseHours}h`, sub: 'all deals close', color: 'var(--status-delivered-text)' },
-    { label: 'Worst Case', value: `${forecast.worstCaseHours}h`, sub: 'conservative', color: 'var(--color-danger)' },
-  ]
-
-  return (
-    <div id="capacity" style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: 'var(--space-4)', marginTop: 'var(--space-1)' }}>
-      <p style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-3)' }}>
-        Pipeline Impact
-      </p>
-      <div className="grid grid-cols-3" style={{ gap: 'var(--space-3)' }}>
-        {impactItems.map(item => (
-          <div key={item.label} style={{ padding: 'var(--space-3)', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)' }}>
-            <p style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-0-5)' }}>
-              {item.label}
-            </p>
-            <p className="tabular-nums" style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: item.color }}>
-              {item.value}
-            </p>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
-              {item.sub}
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ─── Earliest Start Date Widget ──────────────────────────────────────────────
-
-interface StartDateResult {
-  earliestDate: string | null
-  availableHoursPerWeek: number
-  totalTeamCapacity: number
-  committedHours: number
-  weeksOut: number
-}
-
-function EarliestStartDateWidget() {
-  const [hoursPerWeek, setHoursPerWeek] = useState('')
-  const [result, setResult] = useState<StartDateResult | null>(null)
-  const [calculating, setCalculating] = useState(false)
-  const [hovered, setHovered] = useState(false)
-
-  const calculate = async () => {
-    const hours = parseFloat(hoursPerWeek)
-    if (!hours || hours <= 0) return
-    setCalculating(true)
-    setResult(null)
-    try {
-      const res = await fetch(apiPath('/api/admin/capacity/start-date'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ estimatedHoursPerWeek: hours }),
-      })
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as StartDateResult
-      setResult(data)
-    } catch {
-      setResult(null)
-    } finally {
-      setCalculating(false)
-    }
-  }
-
-  const formatDate = (iso: string) => {
-    const d = new Date(iso)
-    return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
-  }
-
-  return (
-    <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: 'var(--space-4)', marginTop: 'var(--space-1)' }}>
-      <p style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-3)' }}>
-        Earliest Start Date
-      </p>
-      <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
-        <div style={{ position: 'relative', flex: 1 }}>
-          <input
-            type="number"
-            min="1"
-            step="1"
-            placeholder="Hours/week needed"
-            value={hoursPerWeek}
-            onChange={e => { setHoursPerWeek(e.target.value); setResult(null) }}
-            onKeyDown={e => { if (e.key === 'Enter') calculate() }}
-            aria-label="Hours per week needed"
-            style={{
-              width: '100%',
-              fontSize: 'var(--text-sm)',
-              padding: 'var(--space-2) var(--space-3)',
-              borderRadius: 'var(--radius-input)',
-              border: '1px solid var(--color-border)',
-              background: 'var(--color-bg)',
-              color: 'var(--color-text)',
-              outline: 'none',
-              minHeight: '2.25rem',
-            }}
-          />
-        </div>
-        <button
-          onClick={calculate}
-          disabled={calculating || !hoursPerWeek || parseFloat(hoursPerWeek) <= 0}
-          onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => setHovered(false)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--space-1-5)',
-            padding: 'var(--space-2) var(--space-3)',
-            fontSize: 'var(--text-xs)',
-            fontWeight: 600,
-            color: '#ffffff',
-            background: hovered ? 'var(--color-brand-dark)' : 'var(--color-brand)',
-            border: 'none',
-            borderRadius: 'var(--radius-md)',
-            minHeight: '2.25rem',
-            whiteSpace: 'nowrap',
-            transition: 'background 150ms ease',
-          }}
-        >
-          {calculating ? (
-            <Loader2 size={14} className="animate-spin" aria-hidden="true" />
-          ) : (
-            <CalendarClock size={14} aria-hidden="true" />
-          )}
-          Calculate
-        </button>
-      </div>
-
-      {result && (
-        <div style={{
-          marginTop: 'var(--space-3)',
-          padding: 'var(--space-3)',
-          background: result.earliestDate ? 'var(--color-brand-50)' : 'var(--status-in-review-bg)',
-          borderRadius: 'var(--radius-md)',
-        }}>
-          {result.earliestDate ? (
-            <div>
-              <div className="flex items-center" style={{ gap: 'var(--space-1-5)', marginBottom: 'var(--space-1)' }}>
-                <CalendarClock size={14} aria-hidden="true" style={{ color: 'var(--color-brand)' }} />
-                <span style={{ fontSize: 'var(--text-base)', fontWeight: 700, color: 'var(--color-brand-dark)' }}>
-                  {formatDate(result.earliestDate)}
-                </span>
-              </div>
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
-                {result.weeksOut === 1 ? 'Next week' : `${result.weeksOut} weeks out`}
-                {' \u2014 '}
-                {result.availableHoursPerWeek}h/week available of {result.totalTeamCapacity}h total
-              </p>
-            </div>
-          ) : (
-            <div>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-danger)' }}>
-                No capacity available in the next 12 weeks
-              </span>
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 'var(--space-1) 0 0' }}>
-                {result.availableHoursPerWeek}h/week available, {parseFloat(hoursPerWeek)}h/week needed
-              </p>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   )
 }
@@ -1254,15 +983,14 @@ function SectionCard({
         {action && (
           <Link
             href={action.href}
-            className="flex items-center hover:underline"
+            className="view-link"
             style={{
               fontSize: 'var(--text-sm)',
               fontWeight: 500,
               color: 'var(--color-brand)',
-              gap: 'var(--space-1)',
             }}
           >
-            {action.label} <ArrowRight size={12} aria-hidden="true" />
+            {action.label} <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
           </Link>
         )}
       </div>
@@ -1322,7 +1050,7 @@ function RequestRow({ req, isLast, showOrg }: { req: RecentRequest; isLast: bool
       <span className="tabular-nums flex-shrink-0" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
         {timeAgo(req.updatedAt)}
       </span>
-      <ArrowRight size={14} aria-hidden="true" className="flex-shrink-0" style={{ color: 'var(--color-border)', opacity: 0, transition: 'opacity 150ms ease' }} />
+      <ArrowRight size={14} aria-hidden="true" className="flex-shrink-0 row-arrow" style={{ color: 'var(--color-border)' }} />
     </Link>
   )
 }
@@ -1486,10 +1214,10 @@ function UpcomingCallsWidget() {
         <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>Upcoming Calls</h2>
         <Link
           href="/calls"
-          className="flex items-center hover:underline"
-          style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)', gap: 'var(--space-1)' }}
+          className="view-link"
+          style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)' }}
         >
-          View all <ArrowRight size={12} aria-hidden="true" />
+          View all <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
         </Link>
       </div>
       <div className="flex flex-col" style={{ gap: 'var(--space-2)' }}>
@@ -1965,86 +1693,6 @@ function ReviewOutreachBanner() {
         >
           No thanks
         </button>
-      </div>
-    </div>
-  )
-}
-
-// ─── Revenue Chart ───────────────────────────────────────────────────────────
-
-function RevenueChart({ data }: { data: MonthlyRevenue[] }) {
-  const chartData = data.map(d => {
-    let label = d.month
-    try {
-      const [year, month] = d.month.split('-')
-      const dt = new Date(parseInt(year), parseInt(month) - 1)
-      label = dt.toLocaleDateString('en-NZ', { month: 'short' })
-    } catch { /* keep raw */ }
-    return { month: label, total: d.total }
-  })
-
-  return (
-    <div style={{
-      background: 'var(--color-bg)',
-      border: '1px solid var(--color-border-subtle)',
-      borderRadius: 'var(--radius-lg)',
-      padding: 'var(--space-5)',
-    }}>
-      <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-5)' }}>
-        <div>
-          <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>Revenue Trend</h2>
-          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-0-5)' }}>
-            Paid invoices, last 6 months
-          </p>
-        </div>
-        <Link
-          href="/reports"
-          className="hover:underline"
-          style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)' }}
-        >
-          View reports
-        </Link>
-      </div>
-      <div style={{ height: '10rem' }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-subtle)" vertical={false} />
-            <XAxis
-              dataKey="month"
-              axisLine={false}
-              tickLine={false}
-              tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
-              dy={8}
-            />
-            <YAxis
-              axisLine={false}
-              tickLine={false}
-              tick={{ fontSize: 11, fill: 'var(--color-text-subtle)' }}
-              tickFormatter={(v: number) => v === 0 ? '$0' : `$${(v / 1000).toFixed(0)}k`}
-              width={48}
-            />
-            <Tooltip
-              contentStyle={{
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-md)',
-                boxShadow: 'var(--shadow-md)',
-                fontSize: '0.8125rem',
-                padding: '0.5rem 0.75rem',
-              }}
-              formatter={(value: number) => [formatNzd(value), 'Revenue']}
-              labelStyle={{ fontWeight: 600, color: 'var(--color-text)', marginBottom: '0.25rem' }}
-            />
-            <Line
-              type="monotone"
-              dataKey="total"
-              stroke="var(--color-brand)"
-              strokeWidth={2}
-              dot={{ r: 3, fill: 'var(--color-brand)', stroke: 'var(--color-bg)', strokeWidth: 2 }}
-              activeDot={{ r: 5, fill: 'var(--color-brand)', stroke: 'var(--color-bg)', strokeWidth: 2 }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
       </div>
     </div>
   )

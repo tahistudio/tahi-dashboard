@@ -56,8 +56,8 @@
      Gray   = inactive, draft, archived, neutral
      Blue   = new, submitted, incoming (awaiting action)
      Amber  = needs attention, in review, paused (warning)
-     Green  = active, in progress, working on it
-     Teal   = complete, delivered, paid, done
+     Teal   = active, in progress, working on it
+     Green  = complete, delivered, paid, done, success
      Purple = client action needed (client review)
      Red    = high priority, overdue, danger
      Rose   = urgent priority (escalation above high)
@@ -79,20 +79,20 @@
   --status-in-review-text:     #92400e;
   --status-in-review-border:   #fde68a;
 
-  --status-in-progress-dot:    #22c55e;
-  --status-in-progress-bg:     #f0fdf4;
-  --status-in-progress-text:   #15803d;
-  --status-in-progress-border: #bbf7d0;
+  --status-in-progress-dot:    #06b6d4;
+  --status-in-progress-bg:     #ecfeff;
+  --status-in-progress-text:   #0e7490;
+  --status-in-progress-border: #a5f3fc;
 
   --status-client-review-dot:      #a78bfa;
   --status-client-review-bg:       #f5f3ff;
   --status-client-review-text:     #6d28d9;
   --status-client-review-border:   #ede9fe;
 
-  --status-delivered-dot:      #06b6d4;
-  --status-delivered-bg:       #ecfeff;
-  --status-delivered-text:     #0e7490;
-  --status-delivered-border:   #a5f3fc;
+  --status-delivered-dot:      #22c55e;
+  --status-delivered-bg:       #f0fdf4;
+  --status-delivered-text:     #15803d;
+  --status-delivered-border:   #bbf7d0;
 
   --status-archived-dot:       #d1d5db;
   --status-archived-bg:        #f9fafb;
@@ -319,6 +319,64 @@ textarea,
   transition-property: color, background-color, border-color, box-shadow, opacity, transform;
   transition-duration: 150ms;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Micro-interactions ────────────────────────────────── */
+
+/* View all / View more links: underline slides in from left */
+.view-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  text-decoration: none;
+}
+.view-link::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background: currentColor;
+  transition: width 200ms ease;
+}
+.view-link:hover::after {
+  width: 100%;
+}
+.view-link .view-arrow {
+  transition: transform 200ms ease;
+}
+.view-link:hover .view-arrow {
+  transform: translateX(3px);
+}
+
+/* Hoverable cards: subtle lift on hover */
+.hover-lift {
+  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+}
+.hover-lift:hover {
+  transform: translateY(-1px);
+}
+
+/* Row arrow reveal + translate on group hover */
+.row-arrow {
+  opacity: 0;
+  transform: translateX(0);
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+.group:hover .row-arrow {
+  opacity: 1;
+  transform: translateX(3px);
+}
+
+/* Number fade-in when data loads */
+.fade-in {
+  animation: fadeIn 200ms ease-out;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* Hide scrollbar utility */
