@@ -52,13 +52,18 @@ export const organisations = sqliteTable('organisations', {
   // JSON object for arbitrary custom fields, e.g. {"industry_vertical":"SaaS"}
   customFields: text('custom_fields').default('{}'),
   defaultHourlyRate: integer('default_hourly_rate'),
+  // retainer | hourly | project | none
+  billingModel: text('billing_model').default('none'),
+  // MRR amount in org's preferredCurrency. Set for retainer clients.
+  customMrr: real('custom_mrr'),
+  // Retainer lifecycle dates. Used by cash-flow forecast to automatically
+  // drop MRR from months outside the active window (e.g. Physitrack churns
+  // May 17 → forecast stops counting their MRR after that).
+  retainerStartDate: text('retainer_start_date'),
+  retainerEndDate: text('retainer_end_date'),
   // micro | small | medium | large | enterprise
   size: text('size'),
   annualRevenue: integer('annual_revenue'),
-  // customMrr lives in DB as custom_mrr (real) via migration 0011
-  // NOT in Drizzle schema to avoid breaking SELECT * before migration is applied
-  // Query via raw SQL: SELECT custom_mrr FROM organisations WHERE ...
-  // Update via raw SQL: UPDATE organisations SET custom_mrr = ? WHERE id = ?
   ...timestamps,
 }, (table) => [
   index('idx_orgs_status').on(table.status),
@@ -97,6 +102,16 @@ export const teamMembers = sqliteTable('team_members', {
   role: text('role').notNull().default('member'),
   clerkUserId: text('clerk_user_id'),
   weeklyCapacityHours: real('weekly_capacity_hours').default(40),
+  // What we PAY this person per hour (internal cost). Used by profitability
+  // reports to compute cost-of-delivery when they log time. For salaried
+  // staff: annualSalary / (52 × weeklyCapacityHours). For contractors:
+  // their actual contracted rate.
+  hourlyCostRate: real('hourly_cost_rate'),
+  // annual | hourly | contract — how this person is compensated
+  compensationType: text('compensation_type').default('annual'),
+  // Annual salary in NZD (for salaried staff). Used to auto-derive
+  // hourlyCostRate if not set manually: salary / (52 × capacity).
+  annualSalary: real('annual_salary'),
   // JSON array of skill tags
   skills: text('skills').default('[]'),
   isContractor: integer('is_contractor', { mode: 'boolean' }).default(false),

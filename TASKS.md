@@ -1,7 +1,7 @@
 # tahi-dashboard — Task List
 
-Last updated: 2026-04-15 (Session: Phase 9 Xero/Stripe fixes landed, client archive button, Evan Kwan consolidation, Stripe dedupe bug logged)
-Total tasks: 623 (S1-S11 schema + T1-T495 feature + T546-T557 integration + T558-T623 post-launch)
+Last updated: 2026-04-16 (Session: Phase 11 planned, 75 new tasks T660-T734)
+Total tasks: 698 (S1-S11 schema + S23-S25 phase 11 schema + T1-T495 feature + T546-T557 integration + T558-T652 post-launch + T660-T734 phase 11)
 Completed: 544/544 core features + 10/11 integration tasks + 4 phase-8 polish tasks + 9 phase-9 tasks done
 
 Agents: claim a task by adding your initials and the date next to it.
@@ -1088,3 +1088,135 @@ as the integration story instead.
 - [ ] T627 - [QA] Playwright cross-org isolation e2e: seed two client orgs, log in as client A, verify every attempt to fetch client B's requests/clients/invoices/files by ID returns 403. Covers portal and admin paths. — [QA]
 - [ ] T628 - [BE] Rate limit portal API routes: 60 req/min per userId on `/api/portal/*`, 20 req/min on `/api/uploads/*`. **Blocked**: needs KV namespace provisioned in Webflow Cloud (currently only D1 + R2 are bound in wrangler.jsonc). Implementation plan once KV available: `lib/rate-limit.ts` with `rateLimit(userId, bucket, limit, windowSec)` helper using KV atomic counter (`put` w/ TTL, fallback to GET+increment). Wire into portal route layout / middleware equivalent. Interim workaround: add Cloudflare WAF rate rule at the edge (out-of-code, one-click in CF dashboard). — [BE]
 - [x] T629 - [QA] Currency invariant vitest — done 2026-04-15. Extracted buildRateMap/toNzd/sumAsNzd into lib/currency.ts, de-duped from 3 API routes, covered by 17 unit tests including the actual April 2026 MRR scenario as a regression case.
+
+---
+
+## Phase 11: Platform Polish + Notifications + Portal Readiness (2026-04-16)
+
+One continuous build phase. Schema first, then BE, then FE. Quick wins batched early. Notifications as a multi-day block. Portal features before Aug 1 deadline.
+
+### Schema Additions (Phase 11)
+
+- [ ] S23 - [BE] Add `notificationPreferences` table: id (uuid pk), userId (text, unique), emailNewRequest (int default 1), emailStatusChange (int default 1), emailInvoiceCreated (int default 1), emailMessageReceived (int default 1), emailRetainerAlert (int default 1), inAppNewRequest (int default 1), inAppStatusChange (int default 1), inAppInvoiceCreated (int default 1), inAppMessageReceived (int default 1), inAppRetainerAlert (int default 1), pushEnabled (int default 0), pushSubscription (text nullable, JSON), createdAt, updatedAt. Single migration with S24 and S25.
+- [ ] S24 - [BE] Add `deletedAt` column to messages table if not present; add `editedAt` (text nullable) column to messages table; add `commentsLocked` (int default 0) column to requests table.
+- [ ] S25 - [BE] Add `xero_category_overrides` table: accountName (text pk), isRecurring (int), displayName (text nullable). Add `hourlyRateCurrency` (text default 'USD') and `salaryAnnual` (real nullable) columns to teamMembers table.
+
+### Quick Wins (30 min items, batch for momentum)
+
+- [ ] T660 - [FE] Comments-only view in request activity: add segmented control (All / Comments / Status changes) to activity feed, persist preference to localStorage (was T645) — [FE]
+- [ ] T661 - [FE] Filter requests by organisation tags: extend request list filter bar with Tags dropdown joined through organisations (was T644) — [FE]
+- [ ] T662 - [BE] Add `{{requestNumber}}` variable to all email templates in `emails/`: prefix subject lines with `[REQ-{number}]` so replies group correctly in client inboxes (was T643) — [BE]
+- [ ] T663 - [BE+FE] Portal noindex toggle: add `indexPortal` boolean to settings table, inject `<meta name="robots" content="noindex,nofollow">` on client pages when false, add `/robots.txt` route (was T646) — [BE+FE]
+- [ ] T664 - [FE] Accent colour sweep: audit all remaining hardcoded rainbow hex (`#dbeafe`, `#ede9fe`, `#d1fae5`, `#fef3c7`) and migrate to brand-family tokens. Chart series colours in Recharts should prefer brand shades (was T651) — [FE]
+- [ ] T665 - [BE] Stripe import dedupe: when both `in_*` and `ch_*` exist for same subscription period + amount + customer, keep the `in_*` and delete the `ch_*` (was T622) — [BE]
+- [ ] T666 - [BE] Stripe import pagination: use `starting_after` cursor to paginate past the 100-invoice cap (was T623) — [BE]
+- [ ] T667 - [BE] Xero category overrides table: create the table (S25), then update sync-pnl to apply manual recurring flags after auto-detection so flags survive resync (was T634) — [BE]
+
+### Retainer and Client Billing Model
+
+- [ ] T668 - [FE] Client detail: editable customMrr field with amount, currency, retainerStartDate, retainerEndDate inputs. Save via PATCH /api/admin/clients/[id]. Already partially done (T576 added inline MRR edit); extend to include start/end date pickers and currency selector — [FE]
+- [ ] T669 - [FE] Client detail: billingModel selector (retainer | hourly | project | none) displayed prominently on overview tab. Save via existing PATCH — [FE]
+- [ ] T670 - [BE] Retainer Health filter: exclude non-retainer clients from retainer health API. Filter by `billingModel = 'retainer'` in `/api/admin/reports/retainer-health` so hourly clients (e.g. Elevate) do not appear — [BE]
+- [ ] T671 - [BE] MRR forecast respects churn dates: in cash-flow-forecast and MRR calculations, stop counting a client's customMrr for months after their retainerEndDate. Clients with a past endDate and status != 'churned' should be flagged — [BE]
+- [ ] T672 - [BE] Auto-churn on retainer end: scheduled check (or on MRR recalculation) sets org status to 'churned' when retainerEndDate is past and status is still 'active'. Creates a notification for the team — [BE]
+- [ ] T673 - [BE] Team member hourly rate and salary: add `salaryAnnual` field (S25 migration). Ensure `hourlyRateUsd` is editable via PATCH /api/admin/team-members/[id] — [BE]
+- [ ] T674 - [FE] Team member profile: editable hourly rate, salary, and currency fields on team detail page — [FE]
+- [ ] T675 - [BE] Time tracking cost visibility: extend GET /api/admin/time-entries to return `costAmount` (hours * team member hourlyRateUsd) and `revenueImpact` (hours * org defaultHourlyRate) per entry — [BE]
+- [ ] T676 - [FE] Time entries page: show cost column (hours * team member rate) and revenue column (hours * client rate) with margin indicator. Totals row at bottom — [FE]
+
+### Comments and Messages Polish
+
+- [ ] T677 - [BE] Lock comments on delivered/closed requests for clients: POST /api/portal/requests/[id]/messages rejects with 403 if request.status in ('delivered','cancelled','archived'). Admin POST still works (was T647) — [BE]
+- [ ] T678 - [FE] Lock comments UI: hide reply box for clients on delivered/closed requests with a gentle notice ("This request is closed. Contact us to reopen."). Show admin toggle to unlock — [FE]
+- [ ] T679 - [BE] Admin toggle to unlock comments: add `commentsLocked` column to requests (S24). When commentsLocked=0, clients can comment even on delivered requests. Default: locked on delivered/cancelled — [BE]
+- [ ] T680 - [BE+FE] Edit and delete messages with permissions: PATCH and DELETE on `/api/admin/requests/[id]/messages/[messageId]` plus portal and conversations equivalents. Owner edits own; admin edits/deletes any. Soft delete via `deletedAt` column. `editedAt` timestamp on edit. Hover actions on message bubbles (was T642) — [BE+FE]
+- [ ] T681 - [FE] Edited message indicator: show "(edited)" label next to timestamp. Deleted messages show "This message was removed" placeholder — [FE]
+
+### Notifications Overhaul (multi-day block)
+
+#### Schema and Preferences
+- [ ] T682 - [BE] Notification preferences API: GET and PUT /api/notifications/preferences. Returns/saves per-user email vs in-app vs push toggle for each event type. Uses notificationPreferences table (S23) — [BE]
+- [ ] T683 - [FE] Notification preferences page: settings section with toggle grid (rows: event types, columns: Email / In-App / Push). Clean card layout — [FE]
+
+#### Rich Notification Content
+- [ ] T684 - [BE] Enrich notification creation: all notification inserts must include actor name, entity title, and preview snippet. New request: "Alice from Acme submitted REQ-042: Homepage redesign". Status change: "Liam moved REQ-042 to In Progress". Message: "Bob: Can we add a CTA to the hero section?" — [BE]
+- [ ] T685 - [BE] Notification badges helper: GET /api/notifications/badges returns unread counts grouped by category (messages, requests, invoices, tasks). Single lightweight query — [BE]
+
+#### SSE Real-Time Stream
+- [ ] T686 - [BE] SSE notification stream: upgrade the existing stub at /api/notifications/stream to a working SSE endpoint. Sends new notifications as they are created. Heartbeat every 30s. Reconnect-friendly with Last-Event-ID — [BE]
+- [ ] T687 - [FE] SSE client hook: useNotificationStream() hook that connects to SSE endpoint, updates notification bell count in real-time, shows toast for new notifications. Auto-reconnect on disconnect — [FE]
+
+#### Email Notifications
+- [ ] T688 - [BE] Email notification dispatcher: when a notification is created, check user's preferences. If email is enabled for that event type, queue a Resend email. Use React Email templates with rich content (actor avatar, entity link, preview) — [BE]
+- [ ] T689 - [BE] Email templates for notifications: new-request, status-change, invoice-created, message-received, retainer-alert. Each template includes a "View in Dashboard" button with deep link — [BE]
+- [ ] T690 - [BE] Email throttling: batch notifications within a 5-minute window per user to avoid spamming. If 3+ notifications fire in 5 min, send a digest instead of individual emails — [BE]
+
+#### Notification History Page
+- [ ] T691 - [FE] Notification history page at /notifications: full list with filters (All / Unread / By type), mark as read, mark all read, pagination. Rich cards showing actor, action, entity, timestamp, preview — [FE]
+- [ ] T692 - [FE] Notification bell dropdown: show latest 10 notifications with unread badge. "View all" links to /notifications page. Mark as read on click — [FE]
+
+#### Sidebar Badges
+- [ ] T693 - [FE] Sidebar notification badges: Messages nav item shows unread message count badge. Requests shows count of new (unviewed) requests. Badges update via SSE stream — [FE]
+
+#### Push Notifications (PWA)
+- [ ] T694 - [BE] Web Push subscription API: POST /api/notifications/push-subscribe accepts PushSubscription JSON, stores in notificationPreferences.pushSubscription. DELETE to unsubscribe — [BE]
+- [ ] T695 - [BE] Web Push send: when a notification is created and user has push enabled, send via Web Push API using VAPID keys. Store VAPID keys in environment variables — [BE]
+- [ ] T696 - [FE] Service worker push handler: extend existing service worker to handle push events, show native notification with title/body/icon/action URL — [FE]
+- [ ] T697 - [FE] Push opt-in UI: notification preferences page shows "Enable push notifications" toggle. On enable, requests browser permission and subscribes — [FE]
+
+#### Weekly MRR Digest Email
+- [ ] T698 - [BE] Weekly MRR digest: Cloudflare Cron Trigger (Monday 8am NZT) sends Resend email to admin with MRR change (delta from last week), new/churned clients, pipeline movement, top retainer health alerts, runway months — [BE]
+- [ ] T699 - [FE] Settings toggle: enable/disable weekly MRR digest email — [FE]
+
+### Revenue-Enabling Features
+
+- [ ] T700 - [BE] Deal-to-invoice conversion: POST /api/admin/deals/[id]/create-invoice auto-generates draft invoice from closed-won deal. Supports full amount, deposit (configurable %), or custom line items. Links invoice to deal org (was T612) — [BE]
+- [ ] T701 - [FE] Deal detail: "Create Invoice" button on closed-won deals. Options: full amount, deposit %, custom. Creates local invoice and optionally pushes to Xero/Stripe (was T613) — [FE]
+- [ ] T702 - [FE] Pipeline: invoice status indicator on deal cards (no invoice | draft | sent | paid) with coloured dot (was T614) — [FE]
+- [ ] T703 - [BE] Project calculator API: POST /api/admin/tools/project-calculator accepts project parameters, returns estimated hours, cost range, timeline. Port logic from tahi.studio (was T601) — [BE]
+- [ ] T704 - [FE] Project calculator page: interactive form with sliders for project type, complexity, pages, features, integrations. Shows estimated price range, hours, timeline. Linkable from deal detail (was T602) — [FE]
+- [ ] T705 - [BE] Xero payment webhooks: implement webhook receiver for Xero payment notifications for real-time invoice status updates (was T569) — [BE]
+
+### Data Accuracy and Trust
+
+- [ ] T706 - [BE] Bank balance fix: fetch both statement balance and cash balance from Xero accounts. Display statement balance as primary ("available"), cash balance as secondary. Show both on BankRunwayCard — [BE]
+- [ ] T707 - [FE] BankRunwayCard: show "Statement Balance" and "Cash Balance" as separate rows per account — [FE]
+- [ ] T708 - [BE] Outstanding KPI dedup on Reports page: the financial health endpoint returns outstanding amount; verify it uses DISTINCT on invoice IDs and excludes voided/cancelled invoices — [BE]
+
+### Intelligence and Analytics
+
+- [ ] T709 - [BE] Revenue per head API: GET /api/admin/reports/revenue-per-head returns total paid invoice revenue / active team member count, by month. Includes team member cost (salary or hourly * capacity) for margin per head (was T607) — [BE]
+- [ ] T710 - [FE] Reports: Revenue Per Head KPI card and trend chart with cost overlay, filterable by time period (was T608) — [FE]
+- [ ] T711 - [BE] Client LTV API: GET /api/admin/clients/[id]/ltv returns total paid invoices + active deal values + projected remaining retainer value (MRR * estimated remaining months). LTV trend over time (was T615) — [BE]
+- [ ] T712 - [FE] Client detail: LTV summary card with breakdown (invoices paid, retainer projected, deal value) and LTV trend sparkline (was T616) — [FE]
+- [ ] T713 - [FE] Reports: Client LTV Leaderboard ranked by LTV with plan type segmentation (was T617) — [FE]
+- [ ] T714 - [BE] Pipeline quality dashboard API: GET /api/admin/reports/pipeline-quality returns dead deal count (no activity in 30+ days), dormant flagging, avg days since last activity per open deal, deal aging buckets — [BE]
+- [ ] T715 - [FE] Reports: Pipeline Quality section with dead/dormant/healthy deal breakdown, aging chart, "needs attention" list with links to deal detail — [FE]
+
+### Client Portal Readiness (Aug 1 deadline)
+
+- [ ] T716 - [BE] Email-to-Request intake: org gets unique inbound address, Cloudflare Email Routing or Resend inbound webhook parses subject to title, body to description, sender email matched to contacts. Creates request with source='email'. Rejects unmatched senders (was T640) — [BE]
+- [ ] T717 - [BE] Access scoping on remaining admin detail routes: conversations, time-entries, contracts, calls, deals, per-org sub-resources under /api/admin/clients/[id]/*. Use requireAccessToOrg helper (was T626) — [BE]
+- [ ] T718 - [QA] Playwright cross-org isolation e2e: seed two client orgs, verify client A cannot fetch client B's data on any endpoint. Covers portal and admin paths (was T627) — [QA]
+- [ ] T719 - [BE] Rate limiting on portal routes: add Cloudflare WAF rate rule (60 req/min per IP on /api/portal/*, 20 req/min on /api/uploads/*) as interim measure until KV is provisioned (was T628, using WAF workaround) — [BE]
+
+### UIUX Reviews (carried forward)
+
+- [ ] T720 - [UIUX] Review Financial Health section spacing and visual consistency on Reports page (was T573) — [UIUX]
+- [ ] T721 - [UIUX] Review MRR inline edit field spacing and interaction on client detail page (was T577) — [UIUX]
+- [ ] T722 - [UIUX] Review multi-line invoice creation dialog and invoice detail enhancements (was T586) — [UIUX]
+- [ ] T723 - [UIUX] Review client archive UI: tab styling, archive confirmation dialog, visual treatment of archived clients (was T589) — [UIUX]
+- [ ] T724 - [UIUX] Review expense dashboard layout, category colour coding, trend sparklines (was T593) — [UIUX]
+- [ ] T725 - [UIUX] Review project calculator UI: match premium dashboard feel, responsive at mobile (was T603) — [UIUX]
+- [ ] T726 - [UIUX] Review notification history page, bell dropdown, preferences grid, push opt-in UI — [UIUX]
+- [ ] T727 - [UIUX] Review time entries cost/revenue columns and team member profile edit layout — [UIUX]
+
+### QA Tests (carried forward and new)
+
+- [ ] T728 - [QA] Regression test Financial Health section: verify data loads, aging buckets expand, currency conversion works (was T574) — [QA]
+- [ ] T729 - [QA] Regression test: Revenue Forecast chart loads with data, MRR field edits and saves on client detail (was T578) — [QA]
+- [ ] T730 - [QA] Test Xero push: create GBP invoice, sync to Xero, verify branding theme and currency code (was T581) — [QA]
+- [ ] T731 - [QA] Test: create invoice with 3 line items in USD with Stripe destination, verify payment link works (was T587) — [QA]
+- [ ] T732 - [QA] Test notification flow end-to-end: create request, verify in-app notification appears via SSE, email sent via Resend, push notification fires if subscribed — [QA]
+- [ ] T733 - [QA] Test comment locking: deliver a request, verify client cannot post comment, admin can toggle unlock, client can then post — [QA]
+- [ ] T734 - [QA] Test retainer auto-churn: set retainerEndDate to yesterday on a test org, trigger churn check, verify status becomes 'churned' and notification fires — [QA]

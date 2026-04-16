@@ -50,15 +50,34 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Revenue: recurring MRR from active clients with customMrr ──────────────
-  const mrrRows = await drizzle.all<{ custom_mrr: number; preferred_currency: string | null }>(
-    sql`SELECT custom_mrr, preferred_currency
+  // Now per-month: respects retainer_end_date so churning clients (Physitrack)
+  // drop out of the forecast after their end date instead of projecting forever.
+  const mrrRows = await drizzle.all<{
+    custom_mrr: number
+    preferred_currency: string | null
+    retainer_start_date: string | null
+    retainer_end_date: string | null
+  }>(
+    sql`SELECT custom_mrr, preferred_currency, retainer_start_date, retainer_end_date
         FROM organisations
         WHERE status = 'active' AND custom_mrr IS NOT NULL AND custom_mrr > 0`
   )
-  let recurringMrrNzd = 0
+
+  // Build per-month MRR (some clients drop off mid-window)
+  const mrrByMonth: Record<string, number> = {}
+  for (const m of monthKeys) mrrByMonth[m] = 0
   for (const row of mrrRows ?? []) {
-    recurringMrrNzd += toNzd(row.custom_mrr, row.preferred_currency ?? 'NZD', rateMap)
+    const nzd = toNzd(row.custom_mrr, row.preferred_currency ?? 'NZD', rateMap)
+    for (const m of monthKeys) {
+      // Skip months before this client started
+      if (row.retainer_start_date && row.retainer_start_date.slice(0, 7) > m) continue
+      // Skip months after this client churns
+      if (row.retainer_end_date && row.retainer_end_date.slice(0, 7) < m) continue
+      mrrByMonth[m] += nzd
+    }
   }
+  // For the summary, use the CURRENT month's MRR (not a future month where churn has hit)
+  const recurringMrrNzd = mrrByMonth[monthKeys[0]] ?? 0
 
   // ── Revenue: weighted pipeline (one-off deals that might close) ────────────
   // Deals table uses stageId -> pipelineStages for stage info (including
@@ -251,7 +270,8 @@ export async function GET(req: NextRequest) {
   let totalCost = 0
 
   const monthlyRows = monthKeys.map(month => {
-    const revenue = recurringMrrNzd + (pipelineByMonth[month] ?? 0)
+    // Revenue = per-month MRR (respects churn dates) + weighted pipeline
+    const revenue = (mrrByMonth[month] ?? 0) + (pipelineByMonth[month] ?? 0)
     // Cost = per-month commitments + the xero-recurring fallback + dated one-offs
     const cost = (commitmentByMonth[month] ?? 0) + recurringCostNzd + (oneOffCostByMonth[month] ?? 0)
     const net = revenue - cost

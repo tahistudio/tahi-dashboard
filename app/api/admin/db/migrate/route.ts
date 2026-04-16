@@ -118,11 +118,21 @@ const MIGRATIONS: Migration[] = [
     name: '0015',
     description: 'commitment start/end dates + billing day of month',
     statements: [
-      // SQLite ALTER TABLE ADD COLUMN doesn't support IF NOT EXISTS.
-      // The runner catches "duplicate column" errors as success so re-running is safe.
       `ALTER TABLE expense_commitments ADD COLUMN start_date text`,
       `ALTER TABLE expense_commitments ADD COLUMN end_date text`,
       `ALTER TABLE expense_commitments ADD COLUMN billing_day_of_month integer`,
+    ],
+  },
+  {
+    name: '0016',
+    description: 'org billing model + retainer dates + team member cost tracking',
+    statements: [
+      `ALTER TABLE organisations ADD COLUMN billing_model text DEFAULT 'none'`,
+      `ALTER TABLE organisations ADD COLUMN retainer_start_date text`,
+      `ALTER TABLE organisations ADD COLUMN retainer_end_date text`,
+      `ALTER TABLE team_members ADD COLUMN hourly_cost_rate real`,
+      `ALTER TABLE team_members ADD COLUMN compensation_type text DEFAULT 'annual'`,
+      `ALTER TABLE team_members ADD COLUMN annual_salary real`,
     ],
   },
 ]

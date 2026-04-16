@@ -103,6 +103,10 @@ interface Organisation {
   brands: string | null
   preferredCurrency: string | null
   customMrr: number | null
+  billingModel: string | null
+  defaultHourlyRate: number | null
+  retainerStartDate: string | null
+  retainerEndDate: string | null
   createdAt: string
   updatedAt: string
 }
@@ -680,15 +684,29 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
     status: org.status,
     healthStatus: org.healthStatus ?? 'green',
     healthNote: org.healthNote ?? '',
+    billingModel: org.billingModel ?? 'none',
+    customMrr: org.customMrr ? String(org.customMrr) : '',
+    defaultHourlyRate: org.defaultHourlyRate ? String(org.defaultHourlyRate) : '',
+    preferredCurrency: org.preferredCurrency ?? 'NZD',
+    retainerStartDate: org.retainerStartDate ?? '',
+    retainerEndDate: org.retainerEndDate ?? '',
   })
 
   const save = async () => {
     setSaving(true)
     try {
+      // Build the patch with proper type coercion for numeric fields
+      const patch: Record<string, unknown> = {
+        ...form,
+        customMrr: form.customMrr ? parseFloat(form.customMrr) : null,
+        defaultHourlyRate: form.defaultHourlyRate ? parseFloat(form.defaultHourlyRate) : null,
+        retainerStartDate: form.retainerStartDate || null,
+        retainerEndDate: form.retainerEndDate || null,
+      }
       await fetch(apiPath(`/api/admin/clients/${org.id}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify(patch),
       })
       onUpdated()
       setEditing(false)
@@ -720,7 +738,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
         ) : (
           <div className="flex gap-2">
             <button
-              onClick={() => { setEditing(false); setForm({ name: org.name, website: org.website ?? '', industry: org.industry ?? '', status: org.status, healthStatus: org.healthStatus ?? 'green', healthNote: org.healthNote ?? '' }) }}
+              onClick={() => { setEditing(false); setForm({ name: org.name, website: org.website ?? '', industry: org.industry ?? '', status: org.status, healthStatus: org.healthStatus ?? 'green', healthNote: org.healthNote ?? '', billingModel: org.billingModel ?? 'none', customMrr: org.customMrr ? String(org.customMrr) : '', defaultHourlyRate: org.defaultHourlyRate ? String(org.defaultHourlyRate) : '', preferredCurrency: org.preferredCurrency ?? 'NZD', retainerStartDate: org.retainerStartDate ?? '', retainerEndDate: org.retainerEndDate ?? '' }) }}
               className="flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
             >
               <X className="w-3.5 h-3.5" /> Cancel
@@ -795,6 +813,85 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
               className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] resize-none"
             />
           </div>
+
+          {/* Billing section */}
+          <div className="col-span-2 border-t border-[var(--color-border-subtle)] pt-3 mt-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]">Billing</span>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Billing model</label>
+            <select
+              value={form.billingModel}
+              onChange={e => setForm(f => ({ ...f, billingModel: e.target.value }))}
+              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            >
+              <option value="none">None</option>
+              <option value="retainer">Retainer</option>
+              <option value="hourly">Hourly</option>
+              <option value="project">Project</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Currency</label>
+            <select
+              value={form.preferredCurrency}
+              onChange={e => setForm(f => ({ ...f, preferredCurrency: e.target.value }))}
+              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            >
+              {['NZD', 'USD', 'GBP', 'EUR', 'AUD'].map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          {(form.billingModel === 'retainer' || form.billingModel === 'none') && (
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">MRR ({form.preferredCurrency})</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.customMrr}
+                onChange={e => setForm(f => ({ ...f, customMrr: e.target.value }))}
+                placeholder="e.g. 3125"
+                className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              />
+            </div>
+          )}
+          {form.billingModel === 'hourly' && (
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Hourly rate ({form.preferredCurrency})</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.defaultHourlyRate}
+                onChange={e => setForm(f => ({ ...f, defaultHourlyRate: e.target.value }))}
+                placeholder="e.g. 50"
+                className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              />
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Retainer start</label>
+            <input
+              type="date"
+              value={form.retainerStartDate}
+              onChange={e => setForm(f => ({ ...f, retainerStartDate: e.target.value }))}
+              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">
+              Retainer end <span className="text-xs text-[var(--color-text-subtle)]">(churn date)</span>
+            </label>
+            <input
+              type="date"
+              value={form.retainerEndDate}
+              onChange={e => setForm(f => ({ ...f, retainerEndDate: e.target.value }))}
+              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            />
+            {form.retainerEndDate && (
+              <p className="text-xs mt-0.5" style={{ color: 'var(--color-warning)' }}>
+                Cash flow forecast will stop counting this MRR after this date.
+              </p>
+            )}
+          </div>
         </div>
       ) : (
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
@@ -846,11 +943,40 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Monthly Retainer (MRR)</dt>
-            <dd>
-              <MrrInlineEdit orgId={org.id} value={org.customMrr} currency={org.preferredCurrency ?? 'NZD'} onUpdated={onUpdated} />
-            </dd>
+            <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Billing model</dt>
+            <dd className="text-[var(--color-text)] capitalize">{org.billingModel ?? 'none'}</dd>
           </div>
+          {org.billingModel === 'retainer' || org.customMrr ? (
+            <div>
+              <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">MRR</dt>
+              <dd className="text-[var(--color-text)] font-medium">
+                {org.customMrr
+                  ? new Intl.NumberFormat('en-NZ', { style: 'currency', currency: org.preferredCurrency ?? 'NZD', maximumFractionDigits: 0 }).format(org.customMrr)
+                  : '--'}
+              </dd>
+            </div>
+          ) : org.billingModel === 'hourly' ? (
+            <div>
+              <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Hourly rate</dt>
+              <dd className="text-[var(--color-text)] font-medium">
+                {org.defaultHourlyRate
+                  ? `${org.preferredCurrency ?? 'NZD'} ${org.defaultHourlyRate}/hr`
+                  : '--'}
+              </dd>
+            </div>
+          ) : null}
+          {(org.retainerStartDate || org.retainerEndDate) && (
+            <div>
+              <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Retainer period</dt>
+              <dd className="text-[var(--color-text)]">
+                {org.retainerStartDate && <span>{org.retainerStartDate}</span>}
+                {org.retainerStartDate && org.retainerEndDate && ' \u2192 '}
+                {org.retainerEndDate && (
+                  <span style={{ color: 'var(--color-warning)', fontWeight: 500 }}>{org.retainerEndDate}</span>
+                )}
+              </dd>
+            </div>
+          )}
           <div>
             <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Project Manager</dt>
             <dd>

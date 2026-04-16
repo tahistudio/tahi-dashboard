@@ -43,6 +43,8 @@ export async function GET(req: NextRequest) {
     health_status: string | null
     preferred_currency: string | null
     custom_mrr: number | null
+    billing_model: string | null
+    retainer_end_date: string | null
     created_at: string
     plan_type: string | null
     sub_status: string | null
@@ -52,7 +54,7 @@ export async function GET(req: NextRequest) {
   const orgsRaw = await drizzle.all<RawRow>(sql`
     SELECT
       o.id, o.name, o.status, o.health_status, o.preferred_currency,
-      o.custom_mrr, o.created_at,
+      o.custom_mrr, o.billing_model, o.retainer_end_date, o.created_at,
       s.plan_type, s.status as sub_status, s.current_period_start as sub_started
     FROM organisations o
     LEFT JOIN subscriptions s
@@ -60,9 +62,17 @@ export async function GET(req: NextRequest) {
     WHERE o.status != 'archived'
   `)
 
-  const retainerOrgs = (orgsRaw ?? []).filter(o =>
-    (o.custom_mrr && o.custom_mrr > 0) || o.sub_status === 'active'
-  )
+  // Only show clients that are explicitly retainer-billed (billingModel = 'retainer')
+  // OR have a legacy customMrr set with no billingModel specified.
+  // Hourly clients (Elevate) should NOT appear here even if they have
+  // customMrr set for forecast purposes (their MRR is an estimated average,
+  // not a contractual commitment).
+  const retainerOrgs = (orgsRaw ?? []).filter(o => {
+    // Explicitly hourly or project = never show in retainer health
+    if (o.billing_model === 'hourly' || o.billing_model === 'project') return false
+    // Must have MRR or active subscription to be a retainer
+    return (o.custom_mrr && o.custom_mrr > 0) || o.sub_status === 'active'
+  })
   const scopedOrgs = scope === null
     ? retainerOrgs
     : retainerOrgs.filter(o => scope.includes(o.id))
