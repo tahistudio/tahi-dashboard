@@ -1227,9 +1227,9 @@ function BillingIntervalEditor({ subscription, onUpdated }: { subscription: Subs
               onMouseLeave={() => setHoveredBtn(null)}
               className="flex-1 text-xs font-medium py-1.5 rounded-md transition-colors"
               style={{
-                background: isActive ? '#5A824E' : isHovered ? 'var(--color-bg-tertiary)' : 'transparent',
+                background: isActive ? 'var(--color-brand)' : isHovered ? 'var(--color-bg-tertiary)' : 'transparent',
                 color: isActive ? '#ffffff' : 'var(--color-text-muted)',
-                border: isActive ? '1px solid #5A824E' : '1px solid var(--color-border)',
+                border: isActive ? '1px solid var(--color-brand)' : '1px solid var(--color-border)',
               }}
             >
               {INTERVAL_LABELS[interval]}
@@ -1244,12 +1244,12 @@ function BillingIntervalEditor({ subscription, onUpdated }: { subscription: Subs
           className="rounded-lg p-2.5 mb-2"
           style={{ background: 'var(--color-brand-50, #f0f7ee)', border: '1px solid var(--color-brand-100, #dcefd8)' }}
         >
-          <p className="text-xs font-medium" style={{ color: '#425F39' }}>
+          <p className="text-xs font-medium" style={{ color: 'var(--color-brand-dark)' }}>
             {selected === 'quarterly' && 'Includes free SEO Dashboard ($150/mo value)'}
             {selected === 'annual' && 'Includes free Extra Track + Priority Support + SEO Dashboard'}
           </p>
           {annualSavings > 0 && (
-            <p className="text-xs mt-1" style={{ color: '#5A824E' }}>
+            <p className="text-xs mt-1" style={{ color: 'var(--color-brand)' }}>
               Annual value of bundled add-ons: ${annualSavings.toLocaleString()}/yr
             </p>
           )}
@@ -1275,7 +1275,7 @@ function BillingIntervalEditor({ subscription, onUpdated }: { subscription: Subs
           onMouseLeave={() => setHoveredBtn(null)}
           className="w-full text-xs font-medium py-1.5 rounded-md transition-colors disabled:opacity-50"
           style={{
-            background: hoveredBtn === 'save' ? '#425F39' : '#5A824E',
+            background: hoveredBtn === 'save' ? 'var(--color-brand-dark)' : 'var(--color-brand)',
             color: '#ffffff',
           }}
         >
@@ -1984,7 +1984,7 @@ function TrackQueueTab({ clientId }: { clientId: string }) {
       <div className="text-center py-12">
         <div
           className="mx-auto w-14 h-14 flex items-center justify-center mb-4"
-          style={{ borderRadius: '0 16px 0 16px', background: 'linear-gradient(135deg, #5A824E, #425F39)' }}
+          style={{ borderRadius: '0 16px 0 16px', background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))' }}
         >
           <ListOrdered className="w-7 h-7 text-white" />
         </div>
@@ -3446,8 +3446,8 @@ function RevenueTab({ clientId }: { clientId: string }) {
       value: `$${totalInvoiced.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
       detail: `${invoices.length} invoices`,
       icon: DollarSign,
-      color: '#5A824E',
-      bg: '#f0f7ee',
+      color: 'var(--color-brand)',
+      bg: 'var(--color-brand-50, #f0f7ee)',
     },
     {
       label: 'Total Paid',
@@ -3486,8 +3486,8 @@ function RevenueTab({ clientId }: { clientId: string }) {
       value: `$${ltv.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
       detail: 'paid + outstanding',
       icon: TrendingUp,
-      color: '#5A824E',
-      bg: '#f0f7ee',
+      color: 'var(--color-brand)',
+      bg: 'var(--color-brand-50, #f0f7ee)',
     },
   ]
 

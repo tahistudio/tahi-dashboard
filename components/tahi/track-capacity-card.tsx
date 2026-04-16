@@ -2,8 +2,8 @@
 
 import { Lock, ArrowUpRight, Zap } from 'lucide-react'
 
-const BRAND = '#5A824E'
-const BRAND_DARK = '#425F39'
+const BRAND = 'var(--color-brand)'
+const BRAND_DARK = 'var(--color-brand-dark)'
 
 interface TrackCapacityCardProps {
   planType: string | null

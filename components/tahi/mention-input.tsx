@@ -5,7 +5,7 @@ import { useMentions, type MentionPerson } from '@/lib/use-mentions'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const BRAND_HEX = '#5A824E'
+const BRAND_HEX = 'var(--color-brand)'
 const TEXT_PRIMARY = '#121A0F'
 const TEXT_MUTED = '#5a6657'
 const TEXT_SUBTLE = '#8a9987'

@@ -9,7 +9,7 @@ import { useToast } from '@/components/tahi/toast'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const BRAND_HEX = '#5A824E'   // keep one hex only for box-shadow alpha
+const BRAND_HEX = 'var(--color-brand)'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 

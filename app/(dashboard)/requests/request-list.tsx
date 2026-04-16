@@ -1069,7 +1069,7 @@ function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: R
               }}
               onDragOver={(e) => {
                 e.preventDefault()
-                e.currentTarget.style.borderColor = '#5A824E'
+                e.currentTarget.style.borderColor = 'var(--color-brand)'
               }}
               onDragLeave={(e) => {
                 e.currentTarget.style.borderColor = 'var(--color-border)'

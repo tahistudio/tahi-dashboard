@@ -683,10 +683,10 @@ function LoadingSkeleton() {
     <div className="flex gap-3 overflow-hidden">
       {[1, 2, 3, 4].map(i => (
         <div key={i} className="flex-shrink-0" style={{ width: '17rem' }}>
-          <div className="animate-pulse rounded-t-lg" style={{ height: '2.5rem', background: '#f3f4f6' }} />
+          <div className="animate-pulse rounded-t-lg" style={{ height: '2.5rem', background: 'var(--color-bg-tertiary)' }} />
           <div className="flex flex-col gap-2" style={{ padding: '0.5rem' }}>
             {[1, 2].map(j => (
-              <div key={j} className="animate-pulse rounded-lg" style={{ height: '7rem', background: '#f3f4f6' }} />
+              <div key={j} className="animate-pulse rounded-lg" style={{ height: '7rem', background: 'var(--color-bg-tertiary)' }} />
             ))}
           </div>
         </div>
@@ -698,11 +698,11 @@ function LoadingSkeleton() {
 // ---- Summary Card --------------------------------------------------------
 
 const ACCENT_MAP = {
-  emerald: { bg: '#d1fae5', icon: '#059669' },
-  blue:    { bg: '#dbeafe', icon: '#2563eb' },
-  amber:   { bg: '#fef3c7', icon: '#d97706' },
-  purple:  { bg: '#ede9fe', icon: '#7c3aed' },
-  rose:    { bg: '#ffe4e6', icon: '#e11d48' },
+  emerald: { bg: 'var(--color-brand-50)', icon: 'var(--color-brand)' },
+  blue:    { bg: 'var(--status-submitted-bg)', icon: 'var(--status-submitted-text)' },
+  amber:   { bg: 'var(--status-in-review-bg)', icon: 'var(--status-in-review-text)' },
+  purple:  { bg: 'var(--status-client-review-bg)', icon: 'var(--status-client-review-text)' },
+  rose:    { bg: 'var(--priority-high-bg)', icon: 'var(--priority-high-text)' },
 } as const
 
 function SummaryCard({ icon: Icon, label, value, accent }: {
@@ -895,7 +895,7 @@ function KanbanView({ deals, stages, onStageChange, displayCurrency, toDisplay }
               }}
               onDragOver={e => {
                 e.preventDefault()
-                e.currentTarget.style.borderColor = '#5A824E'
+                e.currentTarget.style.borderColor = 'var(--color-brand)'
               }}
               onDragLeave={e => {
                 e.currentTarget.style.borderColor = 'var(--color-border)'
@@ -997,8 +997,8 @@ function DealCloseDialog({ type, dealTitle, onConfirm, onCancel }: {
               height: '2.75rem',
               borderRadius: '0 0.75rem 0 0.75rem',
               background: isWon
-                ? 'linear-gradient(135deg, #4ade80, #059669)'
-                : 'linear-gradient(135deg, #f87171, #dc2626)',
+                ? 'linear-gradient(135deg, var(--status-delivered-dot), var(--status-delivered-text))'
+                : 'linear-gradient(135deg, var(--color-danger), var(--priority-high-text))',
             }}
           >
             {isWon
@@ -1044,7 +1044,7 @@ function DealCloseDialog({ type, dealTitle, onConfirm, onCancel }: {
                     value={opt.value}
                     checked={wonSource === opt.value}
                     onChange={() => setWonSource(opt.value)}
-                    style={{ accentColor: '#5A824E' }}
+                    style={{ accentColor: 'var(--color-brand)' }}
                   />
                   {opt.label}
                 </label>
@@ -1109,7 +1109,7 @@ function DealCloseDialog({ type, dealTitle, onConfirm, onCancel }: {
             style={{
               padding: '0.5rem 1.25rem',
               fontSize: '0.875rem',
-              background: isWon ? '#059669' : '#dc2626',
+              background: isWon ? 'var(--status-delivered-text)' : 'var(--priority-high-text)',
               color: 'white',
               border: 'none',
               cursor: !canConfirm || submitting ? 'not-allowed' : 'pointer',
@@ -1122,7 +1122,7 @@ function DealCloseDialog({ type, dealTitle, onConfirm, onCancel }: {
               }
             }}
             onMouseLeave={e => {
-              e.currentTarget.style.background = isWon ? '#059669' : '#dc2626'
+              e.currentTarget.style.background = isWon ? 'var(--status-delivered-text)' : 'var(--priority-high-text)'
             }}
           >
             {submitting ? 'Saving...' : 'Confirm'}
@@ -1200,7 +1200,7 @@ function DealCard({ deal, stages, displayCurrency, toDisplay }: { deal: Deal; st
             padding: '0.0625rem 0.375rem',
             fontSize: '0.625rem',
             background: probability >= 60 ? '#d1fae520' : probability >= 25 ? '#fef3c720' : '#dbeafe20',
-            color: probability >= 60 ? '#059669' : probability >= 25 ? '#d97706' : '#2563eb',
+            color: probability >= 60 ? 'var(--status-delivered-text)' : probability >= 25 ? 'var(--status-in-review-text)' : 'var(--status-submitted-text)',
             border: `1px solid ${probability >= 60 ? '#d1fae5' : probability >= 25 ? '#fef3c7' : '#dbeafe'}`,
           }}
         >
@@ -1398,7 +1398,7 @@ function ListView({ deals, stages, sortKey, displayCurrency, toDisplay }: {
                         padding: '0.125rem 0.5rem',
                         fontSize: '0.75rem',
                         background: probability >= 60 ? '#d1fae5' : probability >= 25 ? '#fef3c7' : '#dbeafe',
-                        color: probability >= 60 ? '#059669' : probability >= 25 ? '#d97706' : '#2563eb',
+                        color: probability >= 60 ? 'var(--status-delivered-text)' : probability >= 25 ? 'var(--status-in-review-text)' : 'var(--status-submitted-text)',
                       }}
                     >
                       {probability}%

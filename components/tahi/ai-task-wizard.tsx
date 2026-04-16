@@ -293,7 +293,7 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
               width: '2.25rem',
               height: '2.25rem',
               borderRadius: '0 0.625rem 0 0.625rem',
-              background: 'linear-gradient(135deg, var(--color-brand, #5A824E), var(--color-brand-dark, #425F39))',
+              background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -390,8 +390,8 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
                       background: creating
                         ? 'var(--color-text-subtle, #8a9987)'
                         : hoveredButton === 'create'
-                          ? 'var(--color-brand-dark, #425F39)'
-                          : 'var(--color-brand, #5A824E)',
+                          ? 'var(--color-brand-dark)'
+                          : 'var(--color-brand)',
                       color: '#ffffff',
                       fontSize: '0.875rem',
                       fontWeight: 600,
@@ -423,7 +423,7 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
                   width: '1.75rem',
                   height: '1.75rem',
                   borderRadius: '0 0.5rem 0 0.5rem',
-                  background: 'linear-gradient(135deg, var(--color-brand, #5A824E), var(--color-brand-dark, #425F39))',
+                  background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -491,7 +491,7 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
                 lineHeight: 1.5,
               }}
               onFocus={e => {
-                e.currentTarget.style.borderColor = 'var(--color-brand, #5A824E)'
+                e.currentTarget.style.borderColor = 'var(--color-brand)'
               }}
               onBlur={e => {
                 e.currentTarget.style.borderColor = 'var(--color-border, #d4e0d0)'
@@ -509,8 +509,8 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
                 background: !input.trim() || sending
                   ? 'var(--color-bg-tertiary, #eef3ec)'
                   : hoveredButton === 'send'
-                    ? 'var(--color-brand-dark, #425F39)'
-                    : 'var(--color-brand, #5A824E)',
+                    ? 'var(--color-brand-dark)'
+                    : 'var(--color-brand)',
                 color: !input.trim() || sending
                   ? 'var(--color-text-subtle, #8a9987)'
                   : '#ffffff',
@@ -577,7 +577,7 @@ export function AiTaskWizardButton({ onClick }: { onClick: () => void }) {
         borderRadius: '0.5rem',
         border: '1px solid var(--color-border, #d4e0d0)',
         background: hovered ? 'var(--color-bg-tertiary, #eef3ec)' : 'var(--color-bg, #ffffff)',
-        color: 'var(--color-brand, #5A824E)',
+        color: 'var(--color-brand)',
         fontSize: '0.875rem',
         fontWeight: 600,
         cursor: 'pointer',
@@ -701,7 +701,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             width: '1.75rem',
             height: '1.75rem',
             borderRadius: '0 0.5rem 0 0.5rem',
-            background: 'linear-gradient(135deg, var(--color-brand, #5A824E), var(--color-brand-dark, #425F39))',
+            background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -718,7 +718,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           padding: '0.625rem 0.875rem',
           borderRadius: isUser ? '0.75rem 0.75rem 0.125rem 0.75rem' : '0.75rem 0.75rem 0.75rem 0.125rem',
           background: isUser
-            ? 'var(--color-brand, #5A824E)'
+            ? 'var(--color-brand)'
             : 'var(--color-bg-secondary, #f7f9f6)',
           color: isUser
             ? '#ffffff'
@@ -807,7 +807,7 @@ function TaskCard({
       <div
         style={{
           background: 'var(--color-bg, #ffffff)',
-          border: '2px solid var(--color-brand, #5A824E)',
+          border: '2px solid var(--color-brand)',
           borderRadius: '0.75rem',
           padding: '1rem',
           display: 'flex',
@@ -946,7 +946,7 @@ function TaskCard({
               padding: '0.375rem 0.75rem',
               borderRadius: '0.375rem',
               border: 'none',
-              background: hoveredButton === 'save-edit' ? 'var(--color-brand-dark, #425F39)' : 'var(--color-brand, #5A824E)',
+              background: hoveredButton === 'save-edit' ? 'var(--color-brand-dark)' : 'var(--color-brand)',
               color: '#ffffff',
               fontSize: '0.8125rem',
               fontWeight: 600,

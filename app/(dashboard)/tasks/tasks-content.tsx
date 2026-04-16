@@ -987,7 +987,7 @@ function TaskBoardView({ tasks, isAdmin, teamMap, onStatusChange }: {
               }}
               onDragOver={(e) => {
                 e.preventDefault()
-                e.currentTarget.style.borderColor = '#5A824E'
+                e.currentTarget.style.borderColor = 'var(--color-brand)'
               }}
               onDragLeave={(e) => {
                 e.currentTarget.style.borderColor = 'var(--color-border)'
@@ -2610,7 +2610,7 @@ function FieldGroup({
   )
 }
 
-const BRAND_HEX = '#5A824E'
+const BRAND_HEX = 'var(--color-brand)'
 
 function StyledInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (

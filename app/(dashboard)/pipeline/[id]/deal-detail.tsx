@@ -545,7 +545,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
                 borderRadius: '0.5rem',
                 marginBottom: '0.5rem',
               }}>
-                <div style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--color-brand, #5A824E)' }}>
+                <div style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--color-brand)' }}>
                   {deal.engagementType === 'project' ? (
                     <>
                       {deal.totalHours} hrs total
@@ -2171,12 +2171,12 @@ function ConvertToClientCard({ dealId, orgId, orgName, onConverted }: {
         style={{
           padding: '1rem 1.25rem',
           background: 'var(--color-brand-50, #f0f7ee)',
-          borderColor: 'var(--color-brand-light, #7aab6b)',
+          borderColor: 'var(--color-brand-light)',
         }}
       >
         <div className="flex items-center gap-2" style={{ marginBottom: '0.5rem' }}>
-          <UserCheck style={{ width: '1rem', height: '1rem', color: 'var(--color-brand, #5A824E)' }} />
-          <p className="font-semibold uppercase tracking-wide" style={{ fontSize: '0.625rem', color: 'var(--color-brand, #5A824E)' }}>
+          <UserCheck style={{ width: '1rem', height: '1rem', color: 'var(--color-brand)' }} />
+          <p className="font-semibold uppercase tracking-wide" style={{ fontSize: '0.625rem', color: 'var(--color-brand)' }}>
             Client
           </p>
         </div>
@@ -2185,17 +2185,17 @@ function ConvertToClientCard({ dealId, orgId, orgName, onConverted }: {
           className="inline-flex items-center gap-1.5 font-medium transition-colors"
           style={{
             fontSize: '0.875rem',
-            color: 'var(--color-brand, #5A824E)',
+            color: 'var(--color-brand)',
             textDecoration: 'none',
           }}
-          onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark, #425F39)' }}
-          onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-brand, #5A824E)' }}
+          onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark)' }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-brand)' }}
         >
           {linkedOrgName}
           <ExternalLink style={{ width: '0.75rem', height: '0.75rem' }} />
         </Link>
         {result?.created && (
-          <p style={{ fontSize: '0.6875rem', color: 'var(--color-brand, #5A824E)', marginTop: '0.375rem' }}>
+          <p style={{ fontSize: '0.6875rem', color: 'var(--color-brand)', marginTop: '0.375rem' }}>
             New client created from this deal
           </p>
         )}
@@ -2232,12 +2232,12 @@ function ConvertToClientCard({ dealId, orgId, orgName, onConverted }: {
       style={{
         padding: '1rem 1.25rem',
         background: 'var(--color-brand-50, #f0f7ee)',
-        borderColor: 'var(--color-brand-light, #7aab6b)',
+        borderColor: 'var(--color-brand-light)',
       }}
     >
       <div className="flex items-center gap-2" style={{ marginBottom: '0.5rem' }}>
-        <UserCheck style={{ width: '1rem', height: '1rem', color: 'var(--color-brand, #5A824E)' }} />
-        <p className="font-semibold uppercase tracking-wide" style={{ fontSize: '0.625rem', color: 'var(--color-brand, #5A824E)' }}>
+        <UserCheck style={{ width: '1rem', height: '1rem', color: 'var(--color-brand)' }} />
+        <p className="font-semibold uppercase tracking-wide" style={{ fontSize: '0.625rem', color: 'var(--color-brand)' }}>
           Won - Convert to Client
         </p>
       </div>
@@ -2256,15 +2256,15 @@ function ConvertToClientCard({ dealId, orgId, orgName, onConverted }: {
         style={{
           padding: '0.5rem 1rem',
           fontSize: '0.8125rem',
-          background: 'var(--color-brand, #5A824E)',
+          background: 'var(--color-brand)',
           color: 'white',
           border: 'none',
           cursor: converting ? 'not-allowed' : 'pointer',
           opacity: converting ? 0.7 : 1,
           minHeight: '2.5rem',
         }}
-        onMouseEnter={e => { if (!converting) e.currentTarget.style.background = 'var(--color-brand-dark, #425F39)' }}
-        onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-brand, #5A824E)' }}
+        onMouseEnter={e => { if (!converting) e.currentTarget.style.background = 'var(--color-brand-dark)' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-brand)' }}
       >
         {converting ? (
           <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Converting...</>

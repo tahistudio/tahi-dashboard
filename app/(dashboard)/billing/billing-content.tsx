@@ -165,7 +165,7 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                       {subscription.billingInterval && subscription.billingInterval !== 'monthly' && (
                         <span
                           className="text-xs px-2 py-0.5 rounded-full font-medium"
-                          style={{ background: 'var(--color-brand-50, #f0f7ee)', color: '#5A824E' }}
+                          style={{ background: 'var(--color-brand-50, #f0f7ee)', color: 'var(--color-brand)' }}
                         >
                           {INTERVAL_LABELS[subscription.billingInterval] ?? subscription.billingInterval}
                         </span>
@@ -192,17 +192,17 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                         className="rounded-lg p-3 mt-1"
                         style={{ background: 'var(--color-brand-50, #f0f7ee)', border: '1px solid var(--color-brand-100, #dcefd8)' }}
                       >
-                        <p className="text-xs font-medium mb-1.5" style={{ color: '#425F39' }}>Included with your plan</p>
+                        <p className="text-xs font-medium mb-1.5" style={{ color: 'var(--color-brand-dark)' }}>Included with your plan</p>
                         <div className="flex flex-col gap-1">
                           {subscription.addonDetails.map(addon => (
                             <div key={addon.key} className="flex items-center justify-between text-xs">
-                              <span style={{ color: '#5A824E' }}>{addon.label}</span>
+                              <span style={{ color: 'var(--color-brand)' }}>{addon.label}</span>
                               <span className="text-[var(--color-text-muted)]">${addon.monthlyValue}/mo value</span>
                             </div>
                           ))}
                         </div>
                         {billing && billing.monthlySavings > 0 && (
-                          <p className="text-xs font-medium mt-2" style={{ color: '#5A824E' }}>
+                          <p className="text-xs font-medium mt-2" style={{ color: 'var(--color-brand)' }}>
                             You save ${(billing.monthlySavings * 12).toLocaleString()}/yr vs paying monthly for add-ons
                           </p>
                         )}

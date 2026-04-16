@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { X, ChevronRight, ChevronLeft } from 'lucide-react'
 
-const BRAND = '#5A824E'
+const BRAND = 'var(--color-brand)'
 
 interface TourStep {
   target: string

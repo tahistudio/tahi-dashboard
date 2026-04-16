@@ -20,7 +20,7 @@ import { useToast } from '@/components/tahi/toast'
 
 // ---- Constants ---------------------------------------------------------------
 
-const BRAND = '#5A824E'
+// Brand color - use var(--color-brand) in styles instead of hardcoded hex
 
 const STATUS_FLOW = [
   'submitted',
@@ -354,7 +354,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         {/* Header skeleton */}
         <div
           className="bg-[var(--color-bg)] rounded-xl"
-          style={{ padding: '1.5rem', border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+          style={{ padding: '1.5rem', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
         >
           <div className="flex items-center gap-3 animate-pulse" style={{ marginBottom: '1rem' }}>
             <div className="rounded-full" style={{ width: 80, height: 22, background: 'var(--color-bg-tertiary)' }} />
@@ -401,7 +401,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         <Link
           href="/requests"
           className="text-xs font-medium hover:underline"
-          style={{ color: BRAND, marginTop: '0.25rem' }}
+          style={{ color: 'var(--color-brand)', marginTop: '0.25rem' }}
         >
           Back to requests
         </Link>
@@ -432,7 +432,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       {/* Header card */}
       <div
         className="bg-[var(--color-bg)] rounded-xl"
-        style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+        style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
       >
         <div style={{ padding: '1.5rem' }}>
           {/* Badges row */}
@@ -567,9 +567,9 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     style={{
                       width: 28,
                       height: 28,
-                      border: `2px solid ${isDone || isCurrent ? BRAND : 'var(--color-border)'}`,
-                      background: isDone ? BRAND : 'var(--color-bg)',
-                      color: isDone ? '#ffffff' : isCurrent ? BRAND : 'var(--color-text-subtle)',
+                      border: `2px solid ${isDone || isCurrent ? 'var(--color-brand)' : 'var(--color-border)'}`,
+                      background: isDone ? 'var(--color-brand)' : 'var(--color-bg)',
+                      color: isDone ? '#ffffff' : isCurrent ? 'var(--color-brand)' : 'var(--color-text-subtle)',
                       fontSize: '0.75rem',
                       fontWeight: 600,
                       transition: 'all 0.2s',
@@ -582,7 +582,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                       fontSize: '0.625rem',
                       marginTop: '0.3125rem',
                       whiteSpace: 'nowrap',
-                      color: isCurrent ? BRAND : 'var(--color-text-subtle)',
+                      color: isCurrent ? 'var(--color-brand)' : 'var(--color-text-subtle)',
                       fontWeight: isCurrent ? 600 : 400,
                     }}
                   >
@@ -594,7 +594,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     style={{
                       width: '2rem',
                       height: 2,
-                      background: isDone ? BRAND : 'var(--color-border)',
+                      background: isDone ? 'var(--color-brand)' : 'var(--color-border)',
                       marginTop: '-0.875rem',
                       flexShrink: 0,
                     }}
@@ -614,7 +614,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           {request.description && (
             <div
               className="bg-[var(--color-bg)] rounded-xl"
-              style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+              style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
             >
               <div
                 style={{
@@ -637,7 +637,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           {/* Thread */}
           <div
             className="bg-[var(--color-bg)] rounded-xl"
-            style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+            style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
           >
             <div
               className="flex items-center justify-between"
@@ -736,7 +736,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     }}
                     onMouseEnter={e => {
                       if (!statusUpdating) {
-                        e.currentTarget.style.borderColor = BRAND
+                        e.currentTarget.style.borderColor = 'var(--color-brand)'
                         e.currentTarget.style.background = 'var(--color-brand-50)'
                         e.currentTarget.style.color = 'var(--color-brand-dark)'
                       }
@@ -753,7 +753,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                       <span
                         style={{
                           width: 6, height: 6, borderRadius: '50%',
-                          background: BRAND, flexShrink: 0,
+                          background: 'var(--color-brand)', flexShrink: 0,
                         }}
                       />
                     )}
@@ -834,7 +834,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                         background: 'var(--color-bg)',
                         outline: 'none',
                       }}
-                      onFocus={e => { e.currentTarget.style.borderColor = BRAND }}
+                      onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
                       onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
                     />
                     <button
@@ -844,7 +844,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                         fontSize: '0.75rem',
                         fontWeight: 600,
                         padding: '0.25rem 0.5rem',
-                        background: BRAND,
+                        background: 'var(--color-brand)',
                         color: '#ffffff',
                         border: 'none',
                         borderRadius: 'var(--radius-button)',
@@ -881,7 +881,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                         setEditingDueDate(true)
                       }
                     }}
-                    onMouseEnter={e => { if (isAdmin) e.currentTarget.style.color = BRAND }}
+                    onMouseEnter={e => { if (isAdmin) e.currentTarget.style.color = 'var(--color-brand)' }}
                     onMouseLeave={e => { if (isAdmin) e.currentTarget.style.color = 'var(--color-text)' }}
                   >
                     <Calendar size={12} style={{ color: 'var(--color-text-subtle)' }} />
@@ -1064,7 +1064,7 @@ function ActivityLog({
   return (
     <div
       className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
-      style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+      style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
     >
       <div
         className="flex items-center justify-between"
@@ -1134,7 +1134,7 @@ function ActivityLog({
             onClick={() => setExpanded(!expanded)}
             className="text-xs font-medium transition-colors"
             style={{
-              color: BRAND,
+              color: 'var(--color-brand)',
               background: 'none',
               border: 'none',
               cursor: 'pointer',
@@ -1174,7 +1174,7 @@ function SidebarCard({ title, children }: { title: string; children: React.React
   return (
     <div
       className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
-      style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+      style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
     >
       <div
         style={{
@@ -1272,7 +1272,7 @@ function ChecklistsPanel({ checklists, onSave, isAdmin }: ChecklistsPanelProps) 
   return (
     <div
       className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
-      style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+      style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
     >
       <div
         className="flex items-center justify-between"
@@ -1303,7 +1303,7 @@ function ChecklistsPanel({ checklists, onSave, isAdmin }: ChecklistsPanelProps) 
               padding: '0.375rem 0.75rem',
               borderRadius: 'var(--radius-button)',
               border: '1px solid var(--color-brand)',
-              color: BRAND,
+              color: 'var(--color-brand)',
               background: 'var(--color-bg)',
               cursor: 'pointer',
             }}
@@ -1345,7 +1345,7 @@ function ChecklistsPanel({ checklists, onSave, isAdmin }: ChecklistsPanelProps) 
             className="text-xs font-semibold"
             style={{
               padding: '0.375rem 0.75rem',
-              background: BRAND,
+              background: 'var(--color-brand)',
               color: '#ffffff',
               border: 'none',
               borderRadius: '0.25rem',
@@ -1421,7 +1421,7 @@ function ChecklistsPanel({ checklists, onSave, isAdmin }: ChecklistsPanelProps) 
                         style={{
                           height: '100%',
                           width: `${progress}%`,
-                          background: progress === 100 ? 'var(--color-success)' : BRAND,
+                          background: progress === 100 ? 'var(--color-success)' : 'var(--color-brand)',
                           borderRadius: 2,
                           transition: 'width 0.2s',
                         }}
@@ -1446,7 +1446,7 @@ function ChecklistsPanel({ checklists, onSave, isAdmin }: ChecklistsPanelProps) 
                           border: 'none',
                           cursor: 'pointer',
                           padding: 0,
-                          color: item.done ? BRAND : 'var(--color-text-subtle)',
+                          color: item.done ? 'var(--color-brand)' : 'var(--color-text-subtle)',
                           flexShrink: 0,
                         }}
                         aria-label={item.done ? 'Mark incomplete' : 'Mark complete'}
@@ -1509,7 +1509,7 @@ function ChecklistsPanel({ checklists, onSave, isAdmin }: ChecklistsPanelProps) 
                         background: 'none',
                         border: 'none',
                         cursor: 'pointer',
-                        color: BRAND,
+                        color: 'var(--color-brand)',
                         fontWeight: 500,
                       }}
                     >
@@ -1620,7 +1620,7 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
   return (
     <div
       className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
-      style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+      style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
     >
       <div
         className="flex items-center justify-between"
@@ -1660,8 +1660,8 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
                 style={{
                   padding: '0.375rem 0.75rem',
                   borderRadius: 'var(--radius-button)',
-                  border: `1px solid ${BRAND}`,
-                  color: BRAND,
+                  border: '1px solid var(--color-brand)',
+                  color: 'var(--color-brand)',
                   background: 'var(--color-bg)',
                   cursor: uploading ? 'not-allowed' : 'pointer',
                   opacity: uploading ? 0.5 : 1,

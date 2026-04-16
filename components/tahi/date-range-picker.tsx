@@ -229,7 +229,7 @@ function MonthGrid({
             fontWeight = '600'
           } else if (inRange) {
             bg = 'var(--color-brand-50, #f0f7ee)'
-            textColor = 'var(--color-brand-dark, #425F39)'
+            textColor = 'var(--color-brand-dark)'
             borderRadius = '0'
           }
 

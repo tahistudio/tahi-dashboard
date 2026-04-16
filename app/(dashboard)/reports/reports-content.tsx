@@ -1697,16 +1697,16 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
 // colours so KPI icons don't read as a rainbow. Amber kept warm only
 // for real warnings. Prefer the semantic names in new code.
 const ACCENT_COLORS: Record<string, { bg: string; color: string }> = {
-  brand:        { bg: '#dcefd8', color: '#5A824E' },
-  'brand-soft': { bg: '#f0f7ee', color: '#7aab6b' },
-  'brand-dark': { bg: '#c8e2c0', color: '#425F39' },
-  amber:        { bg: '#fef3c7', color: '#b45309' },
-  red:          { bg: '#fee2e2', color: '#b91c1c' },
-  neutral:      { bg: '#eef0eb', color: '#6b7566' },
+  brand:        { bg: 'var(--color-brand-100)', color: 'var(--color-brand)' },
+  'brand-soft': { bg: 'var(--color-brand-50)',  color: 'var(--color-brand-light)' },
+  'brand-dark': { bg: 'var(--color-brand-200)', color: 'var(--color-brand-dark)' },
+  amber:        { bg: 'var(--status-in-review-bg)', color: 'var(--status-in-review-text)' },
+  red:          { bg: 'var(--priority-high-bg)', color: 'var(--priority-high-text)' },
+  neutral:      { bg: 'var(--color-bg-tertiary)', color: 'var(--color-text-subtle)' },
   // Legacy aliases
-  emerald: { bg: '#c8e2c0', color: '#425F39' },
-  blue:    { bg: '#f0f7ee', color: '#7aab6b' },
-  violet:  { bg: '#dcefd8', color: '#5A824E' },
+  emerald: { bg: 'var(--color-brand-200)', color: 'var(--color-brand-dark)' },
+  blue:    { bg: 'var(--color-brand-50)',  color: 'var(--color-brand-light)' },
+  violet:  { bg: 'var(--color-brand-100)', color: 'var(--color-brand)' },
 }
 
 function SummaryCard({

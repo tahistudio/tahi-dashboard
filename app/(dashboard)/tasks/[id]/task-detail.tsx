@@ -16,7 +16,7 @@ import { useToast } from '@/components/tahi/toast'
 
 // ---- Constants ---------------------------------------------------------------
 
-const BRAND = '#5A824E'
+// Brand color references now use var(--color-brand) directly in styles
 
 const TASK_STATUS_CONFIG: Record<string, { label: string; dot: string; bg: string; text: string; border: string }> = {
   todo:        { label: 'To Do',       dot: 'var(--status-submitted-dot)',    bg: 'var(--status-submitted-bg)',    text: 'var(--status-submitted-text)',    border: 'var(--status-submitted-border)'    },
@@ -204,7 +204,7 @@ function SidebarCard({ title, children }: { title: string; children: React.React
   return (
     <div
       className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
-      style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+      style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
     >
       <div
         style={{
@@ -465,7 +465,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
         <div className="animate-pulse rounded" style={{ height: 16, width: 120, background: 'var(--color-bg-tertiary)' }} />
         <div
           className="bg-[var(--color-bg)] rounded-xl"
-          style={{ padding: '1.5rem', border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+          style={{ padding: '1.5rem', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
         >
           <div className="flex items-center gap-3 animate-pulse" style={{ marginBottom: '1rem' }}>
             <div className="rounded-full" style={{ width: 80, height: 22, background: 'var(--color-bg-tertiary)' }} />
@@ -516,7 +516,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
         <Link
           href="/tasks"
           className="text-xs font-medium hover:underline"
-          style={{ color: BRAND, marginTop: '0.25rem' }}
+          style={{ color: 'var(--color-brand)', marginTop: '0.25rem' }}
         >
           Back to tasks
         </Link>
@@ -549,7 +549,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
       {/* Header card */}
       <div
         className="bg-[var(--color-bg)] rounded-xl"
-        style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+        style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
       >
         <div style={{ padding: '1.5rem' }}>
           {/* Badges row */}
@@ -666,7 +666,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
           {/* Description */}
           <div
             className="bg-[var(--color-bg)] rounded-xl"
-            style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+            style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
           >
             <div
               className="flex items-center justify-between"
@@ -690,7 +690,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
                     color: 'var(--color-text-muted)',
                     cursor: 'pointer',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = BRAND; e.currentTarget.style.color = BRAND }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-brand)'; e.currentTarget.style.color = 'var(--color-brand)' }}
                   onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.color = 'var(--color-text-muted)' }}
                 >
                   <Pencil size={11} />
@@ -729,7 +729,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
                       style={{
                         padding: '0.375rem 0.75rem',
                         fontSize: '0.8125rem',
-                        background: BRAND,
+                        background: 'var(--color-brand)',
                         borderRadius: 'var(--radius-button)',
                         border: 'none',
                         cursor: 'pointer',
@@ -770,7 +770,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
           {/* Subtasks */}
           <div
             className="bg-[var(--color-bg)] rounded-xl"
-            style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+            style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
           >
             <div
               className="flex items-center justify-between"
@@ -912,7 +912,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
           {/* Dependencies (Blocked by) */}
           <div
             className="bg-[var(--color-bg)] rounded-xl"
-            style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+            style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
           >
             <div
               style={{
@@ -957,7 +957,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
                         background: 'var(--color-bg-secondary)',
                         textDecoration: 'none',
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.borderColor = BRAND }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
                       onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-subtle)' }}
                     >
                       <GitBranch style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }} />
@@ -979,7 +979,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
           {/* Time entries */}
           <div
             className="bg-[var(--color-bg)] rounded-xl"
-            style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+            style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
           >
             <div
               className="flex items-center justify-between"
@@ -1062,7 +1062,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
           {/* Activity / Comments */}
           <div
             className="bg-[var(--color-bg)] rounded-xl"
-            style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+            style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
           >
             <div
               style={{
@@ -1136,7 +1136,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
                     }}
                     onMouseEnter={e => {
                       if (!statusUpdating) {
-                        e.currentTarget.style.borderColor = BRAND
+                        e.currentTarget.style.borderColor = 'var(--color-brand)'
                         e.currentTarget.style.background = 'var(--color-brand-50)'
                         e.currentTarget.style.color = 'var(--color-brand-dark)'
                       }
@@ -1230,7 +1230,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
                         padding: '0.25rem',
                         borderRadius: '0.25rem',
                         border: 'none',
-                        background: BRAND,
+                        background: 'var(--color-brand)',
                         color: 'white',
                         cursor: 'pointer',
                         display: 'flex',
@@ -1265,7 +1265,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
                         setEditingDueDate(true)
                       }
                     }}
-                    onMouseEnter={e => { if (isAdmin) e.currentTarget.style.color = BRAND }}
+                    onMouseEnter={e => { if (isAdmin) e.currentTarget.style.color = 'var(--color-brand)' }}
                     onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text)' }}
                   >
                     <Calendar size={13} style={{ color: 'var(--color-text-subtle)' }} />
@@ -1288,7 +1288,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
                   <Link
                     href={`/requests/${task.requestId}`}
                     className="inline-flex items-center gap-1"
-                    style={{ fontSize: '0.8125rem', color: BRAND, textDecoration: 'none' }}
+                    style={{ fontSize: '0.8125rem', color: 'var(--color-brand)', textDecoration: 'none' }}
                     onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline' }}
                     onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none' }}
                   >
@@ -1320,7 +1320,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
               {showDeleteConfirm ? (
                 <div
                   className="bg-[var(--color-bg)] rounded-xl"
-                  style={{ padding: '1rem', border: '1px solid var(--color-danger)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
+                  style={{ padding: '1rem', border: '1px solid var(--color-danger)', boxShadow: 'var(--shadow-xs)' }}
                 >
                   <p className="text-sm font-medium" style={{ color: 'var(--color-text)', marginBottom: '0.5rem' }}>
                     Are you sure you want to delete this task?

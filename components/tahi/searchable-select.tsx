@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Search, X, ChevronDown, Check } from 'lucide-react'
 
-const BRAND_HEX = '#5A824E'
+const BRAND_HEX = 'var(--color-brand)'
 
 interface Option {
   value: string
