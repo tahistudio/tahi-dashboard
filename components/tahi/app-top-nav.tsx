@@ -83,39 +83,47 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
             <button
               className="hidden md:flex items-center"
               style={{
-                padding: 'var(--space-2) var(--space-3)',
+                padding: 'var(--space-2) var(--space-4)',
                 fontSize: 'var(--text-sm)',
                 fontWeight: 400,
                 color: 'var(--color-text-subtle)',
-                background: 'var(--color-bg-secondary)',
+                background: 'var(--color-bg)',
                 border: '1px solid var(--color-border-subtle)',
-                borderRadius: 'var(--radius-md)',
-                maxWidth: '28rem',
+                borderRadius: 'var(--radius-lg)',
+                maxWidth: '26rem',
                 width: '100%',
-                minWidth: '12rem',
+                minWidth: '14rem',
+                height: '2.25rem',
                 gap: 'var(--space-2)',
-                transition: 'border-color 150ms ease',
+                transition: 'border-color 150ms ease, box-shadow 150ms ease',
               }}
               onClick={() => setSearchOpen(true)}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-subtle)' }}
-              aria-label="Search"
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = 'var(--color-border)'
+                e.currentTarget.style.boxShadow = 'var(--shadow-xs)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
+                e.currentTarget.style.boxShadow = 'none'
+              }}
+              aria-label="Search requests and clients"
             >
-              <Search size={14} style={{ flexShrink: 0 }} aria-hidden="true" />
-              <span className="flex-1 text-left truncate">Search requests, clients...</span>
+              <Search size={14} style={{ flexShrink: 0, opacity: 0.5 }} aria-hidden="true" />
+              <span className="flex-1 text-left truncate">Search...</span>
               <kbd
                 style={{
                   fontSize: '0.625rem',
-                  padding: 'var(--space-0-5) var(--space-1-5)',
+                  padding: '0.125rem var(--space-1-5)',
                   borderRadius: 'var(--radius-sm)',
-                  background: 'var(--color-bg)',
-                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg-secondary)',
+                  border: '1px solid var(--color-border-subtle)',
                   color: 'var(--color-text-subtle)',
                   fontFamily: 'monospace',
                   flexShrink: 0,
+                  lineHeight: 1.4,
                 }}
               >
-                Ctrl+K
+                {'\u2318'}K
               </kbd>
             </button>
 
@@ -177,21 +185,21 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
           <div
             style={{
               width: '100%',
-              maxWidth: '32rem',
+              maxWidth: '34rem',
               margin: '0 var(--space-4)',
               background: 'var(--color-bg)',
               borderRadius: 'var(--radius-lg)',
               border: '1px solid var(--color-border)',
-              boxShadow: 'var(--shadow-lg)',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.15), 0 4px 16px rgba(0,0,0,0.1)',
               overflow: 'hidden',
             }}
           >
-            <div className="flex items-center" style={{ padding: 'var(--space-3) var(--space-4)', gap: 'var(--space-3)' }}>
-              <Search size={16} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} aria-hidden="true" />
+            <div className="flex items-center" style={{ padding: 'var(--space-4) var(--space-5)', gap: 'var(--space-3)' }}>
+              <Search size={18} style={{ color: 'var(--color-brand)', flexShrink: 0 }} aria-hidden="true" />
               <input
                 ref={inputRef}
                 type="text"
-                placeholder="Search requests, clients..."
+                placeholder="Search requests, clients, invoices..."
                 value={searchValue}
                 onChange={(e) => setSearchValue(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -200,31 +208,37 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
                   background: 'transparent',
                   border: 'none',
                   color: 'var(--color-text)',
-                  fontSize: 'var(--text-base)',
+                  fontSize: 'var(--text-md)',
+                  fontWeight: 500,
                 }}
               />
               <button
                 onClick={() => { setSearchOpen(false); setSearchValue('') }}
                 className="flex items-center justify-center"
                 style={{
-                  width: '1.75rem',
-                  height: '1.75rem',
-                  borderRadius: 'var(--radius-md)',
-                  background: 'var(--color-bg-secondary)',
+                  width: '1.5rem',
+                  height: '1.5rem',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'var(--color-bg-tertiary)',
                   border: 'none',
                   color: 'var(--color-text-muted)',
+                  fontSize: '0.625rem',
+                  fontFamily: 'monospace',
                   transition: 'background-color 150ms ease',
                 }}
-                onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)' }}
-                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)' }}
-                aria-label="Close search"
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-border-subtle)' }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)' }}
+                aria-label="Close search (Escape)"
               >
-                <X size={14} aria-hidden="true" />
+                Esc
               </button>
             </div>
-            <div style={{ borderTop: '1px solid var(--color-border-subtle)', padding: 'var(--space-3) var(--space-4)' }}>
+            <div style={{ borderTop: '1px solid var(--color-border-subtle)', padding: 'var(--space-3) var(--space-5)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
-                Press Enter to search requests
+                Press <kbd style={{ padding: '0.0625rem var(--space-1)', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)', fontSize: '0.625rem', fontFamily: 'monospace' }}>Enter</kbd> to search
+              </p>
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
+                <kbd style={{ padding: '0.0625rem var(--space-1)', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)', fontSize: '0.625rem', fontFamily: 'monospace' }}>Esc</kbd> to close
               </p>
             </div>
           </div>

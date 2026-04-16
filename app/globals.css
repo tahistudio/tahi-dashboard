@@ -242,6 +242,12 @@ body {
   .kpi-strip-item { border-bottom: none !important; }
 }
 
+/* Pipeline dividers: bottom border on mobile, right border on sm+ */
+@media (min-width: 40rem) {
+  .pipeline-divider-item { border-bottom: none !important; border-right: 1px solid var(--color-border-subtle); }
+  .pipeline-divider-item:last-child { border-right: none !important; }
+}
+
 /* Glass panel : used in dark sections */
 .glass {
   background: var(--color-glass);

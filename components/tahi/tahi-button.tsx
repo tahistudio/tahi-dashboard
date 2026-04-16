@@ -15,10 +15,10 @@ const BASE =
   'inline-flex items-center justify-center gap-1.5 font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 select-none'
 
 const VARIANTS = {
-  primary:   'bg-[var(--color-brand)] text-white hover:bg-[var(--color-brand-dark)] hover:shadow-[0_2px_8px_rgba(90,130,78,0.3)] active:scale-[0.97]',
-  secondary: 'bg-[var(--color-bg)] border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-bg-secondary)] hover:border-[var(--color-brand)] active:scale-[0.98]',
-  ghost:     'text-[var(--color-text-muted)] hover:bg-[var(--color-bg-secondary)] hover:text-[var(--color-text)] active:scale-[0.98]',
-  danger:    'bg-[#dc2626] text-white hover:bg-[#b91c1c] hover:shadow-[0_2px_8px_rgba(220,38,38,0.3)] active:scale-[0.97]',
+  primary:   'bg-[var(--color-brand)] text-white hover:bg-[#3d6333] hover:shadow-[0_4px_14px_rgba(90,130,78,0.4)] hover:-translate-y-px active:translate-y-0 active:shadow-none',
+  secondary: 'bg-[var(--color-bg)] border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-bg-tertiary)] hover:border-[var(--color-brand)] active:scale-[0.98]',
+  ghost:     'text-[var(--color-text-muted)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-text)] active:scale-[0.98]',
+  danger:    'bg-[#dc2626] text-white hover:bg-[#991b1b] hover:shadow-[0_4px_14px_rgba(220,38,38,0.4)] hover:-translate-y-px active:translate-y-0 active:shadow-none',
 }
 
 const SIZES = {

@@ -159,28 +159,42 @@ export function AdminOverview({ userName }: { userName: string }) {
       <PipelineSummaryCard />
 
       {/* Revenue trend */}
-      {!loading && monthlyRevenue.length > 0 && (
+      {loading ? (
+        <div className="animate-pulse" style={{
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border-subtle)',
+          borderRadius: 'var(--radius-lg)',
+          padding: 'var(--space-5)',
+        }}>
+          <div style={{ height: '0.875rem', width: '30%', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)', marginBottom: 'var(--space-5)' }} />
+          <div style={{ height: '10rem', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
+        </div>
+      ) : monthlyRevenue.length > 0 ? (
         <RevenueChart data={monthlyRevenue} />
-      )}
+      ) : null}
 
-      {/* Recent requests */}
-      <SectionCard title="Recent Requests" action={{ label: 'View all', href: '/requests' }}>
-        {loading ? <LoadingRows /> : recentRequests.length === 0 ? (
-          <EmptyRows
-            title="No requests yet"
-            message="When clients submit requests they'll appear here."
-            action={{ label: 'Create first request', href: '/requests?new=1' }}
-          />
-        ) : recentRequests.slice(0, 5).map((req, i) => (
-          <RequestRow key={req.id} req={req} isLast={i === Math.min(recentRequests.length, 5) - 1} showOrg />
-        ))}
-      </SectionCard>
+      {/* Recent requests + Upcoming calls side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-5" style={{ gap: 'var(--space-6)' }}>
+        <div className="lg:col-span-3">
+          <SectionCard title="Recent Requests" action={{ label: 'View all', href: '/requests' }}>
+            {loading ? <LoadingRows /> : recentRequests.length === 0 ? (
+              <EmptyRows
+                title="No requests yet"
+                message="When clients submit requests they'll appear here."
+                action={{ label: 'Create first request', href: '/requests?new=1' }}
+              />
+            ) : recentRequests.slice(0, 5).map((req, i) => (
+              <RequestRow key={req.id} req={req} isLast={i === Math.min(recentRequests.length, 5) - 1} showOrg />
+            ))}
+          </SectionCard>
+        </div>
+        <div className="lg:col-span-2">
+          <UpcomingCallsWidget />
+        </div>
+      </div>
 
       {/* Pipeline + Capacity */}
       <PipelineCapacityCard />
-
-      {/* Upcoming Calls */}
-      <UpcomingCallsWidget />
 
       {!loading && (kpis?.activeClients ?? 0) === 0 && <GettingStarted />}
     </div>
@@ -219,7 +233,25 @@ function PipelineSummaryCard() {
       .finally(() => setLoading(false))
   }, [])
 
-  if (loading) return null
+  if (loading) {
+    return (
+      <div className="animate-pulse" style={{
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-lg)',
+        padding: 'var(--space-5)',
+      }}>
+        <div className="grid grid-cols-1 sm:grid-cols-3" style={{ gap: 'var(--space-5)' }}>
+          {[0, 1, 2].map(n => (
+            <div key={n}>
+              <div style={{ height: '0.75rem', width: '40%', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)', marginBottom: 'var(--space-3)' }} />
+              <div style={{ height: '1.5rem', width: '60%', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
   if (deals.length === 0) return null
 
   // Calculate totals: only open deals (not won/lost)
@@ -269,11 +301,15 @@ function PipelineSummaryCard() {
         e.currentTarget.style.boxShadow = 'none'
       }}
     >
-      <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x" style={{ '--tw-divide-opacity': 1, borderColor: 'var(--color-border-subtle)' } as React.CSSProperties}>
-        {pipelineItems.map((item) => (
+      <div className="grid grid-cols-1 sm:grid-cols-3">
+        {pipelineItems.map((item, i) => (
           <div
             key={item.label}
-            style={{ padding: 'var(--space-5)' }}
+            className="pipeline-divider-item"
+            style={{
+              padding: 'var(--space-5)',
+              borderBottom: i < pipelineItems.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
+            }}
           >
             <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
               <div
@@ -319,104 +355,6 @@ function PipelineSummaryCard() {
 function formatNzd(n: number) {
   if (n === 0) return '$0'
   return new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD', maximumFractionDigits: 0 }).format(n)
-}
-
-// ─── Bank Runway Card (T600) ─────────────────────────────────────────────────
-// Shows current bank balance (from latest Xero sync) + months of runway at
-// the trailing 3-month burn rate. A dismissive note appears if no sync has
-// happened yet, with a direct link to the Reports page where the sync
-// buttons live.
-
-interface BankRunwayData {
-  asOf: string | null
-  accounts: Array<{ accountId: string; accountName: string; currency: string; balance: number; balanceNzd: number }>
-  totalBalanceNzd: number
-  avgMonthlyBurnNzd: number
-  runwayMonths: number | null
-  lastSyncedAt: string | null
-}
-
-function BankRunwayCard() {
-  const [data, setData] = useState<BankRunwayData | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/reports/bank-balances'))
-      .then(r => r.ok ? r.json() as Promise<BankRunwayData> : Promise.reject())
-      .then(setData)
-      .catch(() => setData(null))
-      .finally(() => setLoading(false))
-  }, [])
-
-  if (loading) {
-    return (
-      <div className="rounded-xl border p-5 animate-pulse" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
-        <div className="h-4 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '30%' }} />
-        <div className="h-8 rounded mt-3" style={{ background: 'var(--color-bg-tertiary)', width: '50%' }} />
-      </div>
-    )
-  }
-
-  const noData = !data || data.accounts.length === 0
-
-  if (noData) {
-    return (
-      <div className="rounded-xl border p-5" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Bank & Runway</div>
-            <div className="text-base font-medium text-[var(--color-text)] mt-1">No Xero bank data yet</div>
-            <div className="text-xs text-[var(--color-text-subtle)] mt-1">Run a bank + P&L sync from the Reports page.</div>
-          </div>
-          <Link href="/reports" className="text-sm font-medium text-[var(--color-brand)] hover:underline">
-            Go to Reports →
-          </Link>
-        </div>
-      </div>
-    )
-  }
-
-  const runway = data.runwayMonths
-  const runwayColour = runway === null ? 'var(--color-text-muted)'
-    : runway >= 12 ? 'var(--color-success)'
-    : runway >= 6 ? 'var(--color-warning)'
-    : 'var(--color-danger)'
-  const runwayLabel = runway === null ? 'Need more months of P&L data'
-    : runway >= 24 ? `${Math.floor(runway)}+ months of runway`
-    : `${runway.toFixed(1)} months of runway`
-
-  return (
-    <div className="rounded-xl border p-5" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
-      <div className="flex items-start justify-between flex-wrap gap-4">
-        <div>
-          <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Bank & Runway</div>
-          <div className="flex items-baseline gap-3 mt-1">
-            <div className="text-2xl font-bold text-[var(--color-text)]">{formatNzd(data.totalBalanceNzd)}</div>
-            <div className="text-xs text-[var(--color-text-subtle)]">across {data.accounts.length} account{data.accounts.length === 1 ? '' : 's'}</div>
-          </div>
-          <div className="text-sm mt-1" style={{ color: runwayColour, fontWeight: 500 }}>{runwayLabel}</div>
-          {data.avgMonthlyBurnNzd > 0 && (
-            <div className="text-xs text-[var(--color-text-subtle)] mt-0.5">
-              Burn rate: {formatNzd(data.avgMonthlyBurnNzd)}/mo (3-mo avg)
-            </div>
-          )}
-          {data.asOf && (
-            <div className="text-xs text-[var(--color-text-subtle)] mt-0.5">As of {data.asOf}</div>
-          )}
-        </div>
-        <div className="flex flex-col gap-1 text-xs min-w-[12rem]">
-          {data.accounts.slice(0, 4).map(a => (
-            <div key={a.accountId} className="flex justify-between gap-3">
-              <span className="text-[var(--color-text-muted)] truncate">{a.accountName}</span>
-              <span className="text-[var(--color-text)] font-medium whitespace-nowrap">
-                {new Intl.NumberFormat('en-NZ', { style: 'currency', currency: a.currency, maximumFractionDigits: 0 }).format(a.balance)}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
 }
 
 // ─── Pipeline Capacity Card ──────────────────────────────────────────────────
@@ -472,80 +410,104 @@ function PipelineCapacityCard() {
       : 'var(--color-brand)'
 
   return (
-    <SectionCard title="Team Capacity" action={{ label: 'View pipeline', href: '/pipeline' }}>
-      <div style={{ padding: 'var(--space-4) var(--space-5)' }}>
-        {/* Overall utilization */}
-        <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-1-5)' }}>
-          <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)' }}>
-            Overall Utilization
-          </span>
-          <span style={{ fontSize: 'var(--text-base)', fontWeight: 700, color: barColor }}>
+    <div style={{
+      background: 'var(--color-bg)',
+      border: '1px solid var(--color-border-subtle)',
+      borderRadius: 'var(--radius-lg)',
+      overflow: 'hidden',
+    }}>
+      {/* Header */}
+      <div className="flex items-center justify-between" style={{
+        padding: 'var(--space-4) var(--space-5)',
+        borderBottom: '1px solid var(--color-border-subtle)',
+      }}>
+        <div className="flex items-center" style={{ gap: 'var(--space-3)' }}>
+          <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
+            Team Capacity
+          </h2>
+          <span className="tabular-nums" style={{
+            fontSize: 'var(--text-sm)',
+            fontWeight: 700,
+            color: barColor,
+            padding: 'var(--space-0-5) var(--space-2)',
+            background: utilizationPct > 90 ? 'var(--color-danger-bg)' : utilizationPct > 70 ? 'var(--color-warning-bg)' : 'var(--color-brand-50)',
+            borderRadius: 'var(--radius-full)',
+          }}>
             {utilizationPct}%
           </span>
         </div>
-        <div className="overflow-hidden" style={{ height: 'var(--space-2)', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-full)', marginBottom: 'var(--space-5)' }}>
+        <Link href="/pipeline" className="flex items-center hover:underline" style={{
+          fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)', gap: 'var(--space-1)',
+        }}>
+          View pipeline <ArrowRight size={12} aria-hidden="true" />
+        </Link>
+      </div>
+
+      {/* Utilization bar */}
+      <div style={{ padding: 'var(--space-4) var(--space-5) 0' }}>
+        <div className="overflow-hidden" style={{ height: '0.375rem', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-full)' }}>
           <div style={{ height: '100%', width: `${Math.min(utilizationPct, 100)}%`, background: barColor, borderRadius: 'var(--radius-full)', transition: 'width 300ms ease' }} />
         </div>
+      </div>
 
-        {/* Stats row */}
-        <div className="grid grid-cols-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-5)' }}>
-          {[
-            { label: 'Available', value: `${data.availableCapacity}h`, color: 'var(--color-text)' },
-            { label: 'Pipeline', value: `${data.pipelineImpact}h`, color: 'var(--color-warning)' },
-            { label: 'Forecast', value: `${data.forecastedCapacity}h`, color: data.forecastedCapacity < 0 ? 'var(--color-danger)' : 'var(--color-brand)' },
-          ].map(stat => (
-            <div key={stat.label} style={{ padding: 'var(--space-3)', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)' }}>
-              <p style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-0-5)' }}>
-                {stat.label}
-              </p>
-              <p className="tabular-nums" style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: stat.color }}>
-                {stat.value}
-              </p>
-            </div>
-          ))}
-        </div>
-
-        {/* Per-member bars */}
-        {data.teamMembers.length > 0 && (
-          <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: 'var(--space-4)' }}>
-            <p style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-3)' }}>
-              Team Members
+      {/* Stats strip with dividers */}
+      <div className="grid grid-cols-3" style={{ padding: 'var(--space-4) 0', margin: '0 var(--space-5)', borderBottom: '1px solid var(--color-border-subtle)' }}>
+        {[
+          { label: 'Available', value: `${data.availableCapacity}h`, color: 'var(--color-text)' },
+          { label: 'Pipeline', value: `${data.pipelineImpact}h`, color: 'var(--color-warning)' },
+          { label: 'Forecast', value: `${data.forecastedCapacity}h`, color: data.forecastedCapacity < 0 ? 'var(--color-danger)' : 'var(--color-brand)' },
+        ].map((stat, i) => (
+          <div key={stat.label} className="text-center" style={{
+            borderRight: i < 2 ? '1px solid var(--color-border-subtle)' : 'none',
+          }}>
+            <p className="tabular-nums" style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: stat.color }}>
+              {stat.value}
             </p>
-            <div className="flex flex-col" style={{ gap: 'var(--space-2)' }}>
-              {data.teamMembers.slice(0, 5).map(m => {
-                const memberBarColor = m.utilization > 85 ? 'var(--color-danger)' : m.utilization >= 60 ? 'var(--color-warning)' : 'var(--color-brand)'
-                return (
-                  <div key={m.id} style={{ background: 'var(--color-bg-secondary)', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)' }}>
-                    <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-1-5)' }}>
-                      <span className="truncate" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)', maxWidth: '10rem' }}>
-                        {m.name}
-                      </span>
-                      <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
-                        <span className="tabular-nums" style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-text-muted)' }}>
-                          {m.currentHoursAllocated}h / {m.weeklyCapacityHours}h
-                        </span>
-                        <span className="tabular-nums" style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: memberBarColor }}>
-                          {m.utilization}%
-                        </span>
-                      </div>
-                    </div>
-                    <div className="overflow-hidden" style={{ height: 'var(--space-2)', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-full)' }}>
-                      <div style={{ height: '100%', width: `${Math.min(m.utilization, 100)}%`, background: memberBarColor, borderRadius: 'var(--radius-full)', transition: 'width 300ms ease' }} />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+            <p style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
+              {stat.label}
+            </p>
           </div>
-        )}
+        ))}
+      </div>
 
-        {/* Earliest Start Date calculator */}
+      {/* Per-member rows with divider lines */}
+      {data.teamMembers.length > 0 && (
+        <div>
+          {data.teamMembers.slice(0, 5).map((m, i) => {
+            const memberBarColor = m.utilization > 85 ? 'var(--color-danger)' : m.utilization >= 60 ? 'var(--color-warning)' : 'var(--color-brand)'
+            return (
+              <div key={m.id} style={{
+                padding: 'var(--space-3) var(--space-5)',
+                borderBottom: i < Math.min(data.teamMembers.length, 5) - 1 ? '1px solid var(--color-border-subtle)' : 'none',
+              }}>
+                <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-1-5)' }}>
+                  <span className="truncate" style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-text)' }}>
+                    {m.name}
+                  </span>
+                  <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
+                    <span className="tabular-nums" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
+                      {m.currentHoursAllocated}h / {m.weeklyCapacityHours}h
+                    </span>
+                    <span className="tabular-nums" style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: memberBarColor, minWidth: '2rem', textAlign: 'right' }}>
+                      {m.utilization}%
+                    </span>
+                  </div>
+                </div>
+                <div className="overflow-hidden" style={{ height: '0.25rem', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-full)' }}>
+                  <div style={{ height: '100%', width: `${Math.min(m.utilization, 100)}%`, background: memberBarColor, borderRadius: 'var(--radius-full)', transition: 'width 300ms ease' }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Earliest Start Date + Pipeline Impact inside same card */}
+      <div style={{ padding: '0 var(--space-5) var(--space-4)' }}>
         <EarliestStartDateWidget />
-
-        {/* Pipeline Impact (T478) */}
         <PipelineImpactCard />
       </div>
-    </SectionCard>
+    </div>
   )
 }
 
@@ -1509,7 +1471,13 @@ function UpcomingCallsWidget() {
       .finally(() => setLoading(false))
   }, [])
 
-  if (!loading && calls.length === 0) return null
+  if (!loading && calls.length === 0) {
+    return (
+      <SectionCard title="Upcoming Calls" action={{ label: 'Schedule', href: '/calls' }}>
+        <EmptyRows title="No upcoming calls" message="Schedule a call with a client." />
+      </SectionCard>
+    )
+  }
 
   return (
     <div>
@@ -1524,7 +1492,21 @@ function UpcomingCallsWidget() {
         </Link>
       </div>
       <div className="flex flex-col" style={{ gap: 'var(--space-2)' }}>
-        {loading ? <LoadingRows /> : calls.map(call => {
+        {loading ? [0, 1, 2].map(n => (
+          <div key={n} className="animate-pulse flex items-center" style={{
+            padding: 'var(--space-3) var(--space-4)',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-md)',
+            gap: 'var(--space-3)',
+          }}>
+            <div style={{ width: '2rem', height: '2rem', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-leaf-sm)', flexShrink: 0 }} />
+            <div className="flex-1" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+              <div style={{ height: '0.75rem', width: '70%', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
+              <div style={{ height: '0.625rem', width: '50%', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
+            </div>
+          </div>
+        )) : calls.map(call => {
           const d = new Date(call.scheduledAt)
           return (
             <div
