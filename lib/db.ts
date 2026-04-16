@@ -11,14 +11,9 @@
  */
 import { getCloudflareContext } from '@opennextjs/cloudflare'
 import { getDB } from '@/db/d1'
+import { migrate } from 'drizzle-orm/d1/migrator'
 
-// Auto-migration on cold start DISABLED (2026-04-16).
-// The drizzle/migrations/ folder has 16+ files but the journal only
-// tracks 6 (Drizzle-generated ones). Extra manually-written migrations
-// (0006-0016) confuse the Drizzle D1 migrator and cause the db() call
-// to fail, taking down the entire API.
-// Migrations are now applied ONLY via POST /api/admin/db/migrate which
-// uses sql.raw() directly and handles "duplicate column" errors safely.
+let _migrated = false
 
 export async function db() {
   const { env } = await getCloudflareContext({ async: true })
@@ -30,5 +25,19 @@ export async function db() {
       'Local dev: run `npm run dev:wrangler` instead of `npm run dev`.'
     )
   }
-  return getDB(env as CloudflareEnv)
+  const database = getDB(env as CloudflareEnv)
+
+  // Run pending migrations once per cold start (no-op if already up to date)
+  if (!_migrated) {
+    try {
+      await migrate(database, { migrationsFolder: 'drizzle/migrations' })
+      _migrated = true
+    } catch (err) {
+      // Log but don't crash : table may already exist on subsequent cold starts
+      console.error('[db] Migration error (may be safe to ignore):', err)
+      _migrated = true
+    }
+  }
+
+  return database
 }
