@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { convertFromNzd } from '@/lib/currency'
+import { Pagination, usePagination } from '@/components/tahi/pagination'
 
 type DisplayCurrency = 'NZD' | 'USD' | 'AUD' | 'GBP' | 'EUR'
 const CURRENCY_OPTIONS: { code: DisplayCurrency; label: string }[] = [
@@ -1354,6 +1355,8 @@ function ListView({ deals, stages, sortKey, displayCurrency, toDisplay }: {
     return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
   })
 
+  const { paged, page, pageSize, total, setPage, setPageSize } = usePagination(sorted, 10)
+
   const stageMap = Object.fromEntries(stages.map(s => [s.id, s]))
 
   if (sorted.length === 0) {
@@ -1405,7 +1408,7 @@ function ListView({ deals, stages, sortKey, displayCurrency, toDisplay }: {
             </tr>
           </thead>
           <tbody>
-            {sorted.map(deal => {
+            {paged.map(deal => {
               const stage = stageMap[deal.stageId]
               const srcCfg = SOURCE_LABELS[deal.source ?? '']
               const probability = deal.stageProbability ?? stage?.probability ?? 0
@@ -1489,6 +1492,14 @@ function ListView({ deals, stages, sortKey, displayCurrency, toDisplay }: {
           </tbody>
         </table>
       </div>
+      <Pagination
+        total={total}
+        page={page}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        itemLabel="deals"
+      />
     </div>
   )
 }
