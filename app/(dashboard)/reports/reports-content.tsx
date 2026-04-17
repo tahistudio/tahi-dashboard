@@ -55,9 +55,11 @@ const STATUS_LABELS: Record<string, string> = {
 // appears (funnel, velocity, breakdown, etc).
 
 const CHART = {
-  // Core directional colours
+  // Core directional colours.
+  // `negative` and `aging.ninetyPlus` match --color-danger (#dc2626) so every
+  // red on the page is the same red (no mix of pink / brick / brand-danger).
   positive: '#5A824E',        // brand green : revenue, net profit, won, current
-  negative: '#d97757',        // muted red : expenses, lost, overdue
+  negative: '#dc2626',        // danger red : expenses, lost, overdue (matches --color-danger)
   neutral: '#94a3b8',         // muted slate : neutral / info / forecast
 
   // Grid + axis
@@ -82,7 +84,7 @@ const CHART = {
     current: '#5A824E',
     thirtyDays: '#fbbf24',
     sixtyDays: '#fb923c',
-    ninetyPlus: '#d97757',
+    ninetyPlus: '#dc2626',
   },
 }
 
@@ -267,7 +269,7 @@ export function ReportsContent() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+    <div className="page-no-top-pad" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
       <div>
         <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)' }}>
           Reports
@@ -278,7 +280,8 @@ export function ReportsContent() {
       </div>
 
       {/* Section quick-jump nav with currency selector built in.
-          Sticks to the top of the main scroll area (flush below top nav). */}
+          Sticks flush to the top of the main scroll area (directly below top nav).
+          Rendered as a card (bordered, rounded, matches KPI strip width). */}
       <ReportsJumpNav displayCurrency={displayCurrency} onCurrencyChange={setDisplayCurrency} />
 
       {/* KPI strip: grouped panel with dividers */}
@@ -2314,7 +2317,7 @@ function CloseRateSourceBreakdownSection({ displayCurrency, exchangeRates }: Cur
           <tbody>
             {sourceData.map(row => {
               const rateColor = row.closeRate >= 50
-                ? 'var(--color-success)'
+                ? 'var(--color-brand)'
                 : row.closeRate >= 25
                   ? 'var(--color-warning)'
                   : 'var(--color-danger)'
@@ -2323,7 +2326,7 @@ function CloseRateSourceBreakdownSection({ displayCurrency, exchangeRates }: Cur
                   <td className="text-sm font-medium text-[var(--color-text)]" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}>
                     {row.source}
                   </td>
-                  <td className="text-sm text-right" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)', color: 'var(--color-success)' }}>
+                  <td className="text-sm text-right" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)', color: 'var(--color-brand)' }}>
                     {row.wonCount}
                   </td>
                   <td className="text-sm text-right" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)', color: 'var(--color-danger)' }}>
@@ -3146,7 +3149,7 @@ function ClientProfitabilityScorecard({ displayCurrency, exchangeRates }: Curren
   }
 
   function marginColour(pct: number) {
-    if (pct >= 50) return { bg: 'var(--color-success-bg)', fg: 'var(--color-success)' }
+    if (pct >= 50) return { bg: 'var(--color-brand-50)', fg: 'var(--color-brand)' }
     if (pct >= 25) return { bg: 'var(--color-warning-bg)', fg: 'var(--color-warning)' }
     return { bg: 'var(--color-danger-bg)', fg: 'var(--color-danger)' }
   }

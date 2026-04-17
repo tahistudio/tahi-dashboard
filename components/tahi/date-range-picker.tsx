@@ -159,6 +159,8 @@ function getPresets(): Preset[] {
 }
 
 // -- Calendar Month Grid --
+// Fixed size so the column layout can't collapse.
+// Each cell is 2rem x 2rem : total grid is 7 * 2rem = 14rem wide.
 
 function MonthGrid({
   year,
@@ -190,26 +192,49 @@ function MonthGrid({
   const effectiveTo = selected.from && !selected.to && hovered ? hovered : selected.to
 
   return (
-    <div>
+    <div style={{ width: '14rem', flexShrink: 0 }}>
       {/* Month/Year header */}
-      <div className="text-center text-sm font-semibold text-[var(--color-text)] mb-2">
+      <div
+        className="text-center"
+        style={{
+          fontSize: 'var(--text-sm)',
+          fontWeight: 600,
+          color: 'var(--color-text)',
+          marginBottom: 'var(--space-2)',
+        }}
+      >
         {MONTH_NAMES[month]} {year}
       </div>
 
       {/* Day labels */}
-      <div className="grid grid-cols-7 gap-0 mb-1">
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(7, 2rem)',
+          marginBottom: 'var(--space-1)',
+        }}
+      >
         {DAY_LABELS.map((d, i) => (
-          <div key={i} className="text-center text-xs font-medium text-[var(--color-text-subtle)] py-1">
+          <div
+            key={i}
+            className="text-center"
+            style={{
+              fontSize: 'var(--text-xs)',
+              fontWeight: 500,
+              color: 'var(--color-text-subtle)',
+              padding: '0.25rem 0',
+            }}
+          >
             {d}
           </div>
         ))}
       </div>
 
       {/* Day cells */}
-      <div className="grid grid-cols-7 gap-0">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 2rem)' }}>
         {cells.map((date, i) => {
           if (!date) {
-            return <div key={`empty-${i}`} className="h-8" />
+            return <div key={`empty-${i}`} style={{ height: '2rem', width: '2rem' }} />
           }
 
           const isToday = isSameDay(date, today)
@@ -220,21 +245,21 @@ function MonthGrid({
 
           let bg = 'transparent'
           let textColor = 'var(--color-text)'
-          let fontWeight = '400'
+          let fontWeight = 400
           let borderRadius = '9999px'
 
           if (isSelected) {
             bg = 'var(--color-brand)'
             textColor = '#ffffff'
-            fontWeight = '600'
+            fontWeight = 600
           } else if (inRange) {
-            bg = 'var(--color-brand-50, #f0f7ee)'
+            bg = 'var(--color-brand-50)'
             textColor = 'var(--color-brand-dark)'
             borderRadius = '0'
           }
 
           if (isToday && !isSelected) {
-            fontWeight = '700'
+            fontWeight = 700
           }
 
           // Soften range edges
@@ -251,19 +276,40 @@ function MonthGrid({
               onClick={() => onDayClick(date)}
               onMouseEnter={() => onDayHover(date)}
               onMouseLeave={() => onDayHover(null)}
-              className="h-8 flex items-center justify-center text-sm transition-colors hover:opacity-80"
+              className="relative flex items-center justify-center"
               style={{
+                height: '2rem',
+                width: '2rem',
+                fontSize: 'var(--text-sm)',
                 background: bg,
                 color: textColor,
                 fontWeight,
                 borderRadius,
+                border: 'none',
+                transition: 'background 150ms ease, color 150ms ease',
+              }}
+              onMouseOver={e => {
+                if (!isSelected && !inRange) {
+                  e.currentTarget.style.background = 'var(--color-bg-secondary)'
+                }
+              }}
+              onMouseOut={e => {
+                if (!isSelected && !inRange) {
+                  e.currentTarget.style.background = 'transparent'
+                }
               }}
             >
               {date.getDate()}
               {isToday && !isSelected && (
                 <span
-                  className="absolute mt-5 w-1 h-1 rounded-full"
-                  style={{ background: 'var(--color-brand)' }}
+                  style={{
+                    position: 'absolute',
+                    bottom: '0.1875rem',
+                    width: '0.25rem',
+                    height: '0.25rem',
+                    borderRadius: '9999px',
+                    background: 'var(--color-brand)',
+                  }}
                 />
               )}
             </button>
@@ -286,7 +332,7 @@ export function DateRangePicker({ value, onChange, label = 'Date range', align =
 
   const presets = useMemo(() => getPresets(), [])
 
-  // Close on outside click
+  // Close on outside click or Escape
   useEffect(() => {
     if (!open) return
     function handleClick(e: MouseEvent) {
@@ -294,8 +340,15 @@ export function DateRangePicker({ value, onChange, label = 'Date range', align =
         setOpen(false)
       }
     }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false)
+    }
     document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
   }, [open])
 
   // Sync selecting state when opening
@@ -358,51 +411,111 @@ export function DateRangePicker({ value, onChange, label = 'Date range', align =
 
   return (
     <div ref={ref} className="relative inline-block">
-      {/* Trigger button */}
+      {/* Trigger button : matches the native <select> filter chip style */}
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm transition-colors hover:border-[var(--color-brand)]"
+        className="flex items-center"
         style={{
-          borderColor: hasValue ? 'var(--color-brand)' : 'var(--color-border)',
-          background: hasValue ? 'var(--color-brand-50, #f0f7ee)' : 'var(--color-bg)',
+          gap: 'var(--space-2)',
+          padding: 'var(--space-1-5) var(--space-3)',
+          height: '2.25rem',
+          borderRadius: 'var(--radius-md)',
+          border: `1px solid ${hasValue ? 'var(--color-brand)' : 'var(--color-border)'}`,
+          background: hasValue ? 'var(--color-brand-50)' : 'var(--color-bg)',
           color: hasValue ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+          fontSize: 'var(--text-sm)',
+          fontWeight: 500,
+          transition: 'border-color 150ms ease, background 150ms ease, color 150ms ease',
+          cursor: 'pointer',
+        }}
+        onMouseEnter={e => {
+          if (!hasValue) e.currentTarget.style.borderColor = 'var(--color-brand)'
+        }}
+        onMouseLeave={e => {
+          if (!hasValue) e.currentTarget.style.borderColor = 'var(--color-border)'
         }}
       >
-        <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
-        <span className="truncate max-w-[12.5rem]">{triggerLabel}</span>
+        <Calendar size={14} className="flex-shrink-0" aria-hidden="true" />
+        <span className="truncate" style={{ maxWidth: '12.5rem' }}>{triggerLabel}</span>
         {hasValue && (
-          <button
-            type="button"
+          <span
+            role="button"
+            tabIndex={0}
             onClick={handleClear}
-            className="ml-0.5 p-0.5 rounded hover:bg-[var(--color-brand-100)] transition-colors"
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                handleClear(e as unknown as React.MouseEvent)
+              }
+            }}
             aria-label="Clear date filter"
+            className="flex items-center justify-center"
+            style={{
+              width: '1rem',
+              height: '1rem',
+              borderRadius: 'var(--radius-sm)',
+              cursor: 'pointer',
+            }}
           >
-            <X className="w-3 h-3" />
-          </button>
+            <X size={12} />
+          </span>
         )}
       </button>
 
-      {/* Dropdown */}
+      {/* Dropdown : mobile = stacked column with single month, desktop = presets + two months */}
       {open && (
         <div
-          className="absolute top-full mt-1 z-[60] bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl shadow-xl flex"
+          className="absolute top-full z-[60] flex flex-col sm:flex-row"
           style={{
+            marginTop: 'var(--space-1)',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-lg)',
+            boxShadow: 'var(--shadow-lg)',
             [align === 'right' ? 'right' : 'left']: 0,
+            maxWidth: '95vw',
+            overflow: 'hidden',
           }}
         >
-          {/* Presets sidebar */}
-          <div className="border-r border-[var(--color-border-subtle)] py-2 w-[10rem] flex-shrink-0">
+          {/* Presets sidebar : horizontal scroller on mobile, vertical sidebar on desktop */}
+          <div
+            className="flex sm:flex-col flex-shrink-0 h-scroll sm:h-auto"
+            style={{
+              borderRight: '1px solid var(--color-border-subtle)',
+              padding: 'var(--space-2) 0',
+              minWidth: '10rem',
+              maxWidth: '100%',
+            }}
+          >
             {presets.map(preset => (
               <button
                 key={preset.key}
                 type="button"
                 onClick={() => handlePreset(preset)}
-                className="w-full text-left px-4 py-1.5 text-sm transition-colors flex items-center justify-between"
+                className="text-left flex items-center justify-between whitespace-nowrap"
                 style={{
-                  background: activePreset === preset.key ? 'var(--color-brand-50, #f0f7ee)' : 'transparent',
+                  padding: 'var(--space-1-5) var(--space-4)',
+                  fontSize: 'var(--text-sm)',
+                  background: activePreset === preset.key ? 'var(--color-brand-50)' : 'transparent',
                   color: activePreset === preset.key ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-                  fontWeight: activePreset === preset.key ? '500' : '400',
+                  fontWeight: activePreset === preset.key ? 500 : 400,
+                  border: 'none',
+                  transition: 'background 150ms ease, color 150ms ease',
+                  cursor: 'pointer',
+                  width: '100%',
+                }}
+                onMouseEnter={e => {
+                  if (activePreset !== preset.key) {
+                    e.currentTarget.style.background = 'var(--color-bg-secondary)'
+                    e.currentTarget.style.color = 'var(--color-text)'
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (activePreset !== preset.key) {
+                    e.currentTarget.style.background = 'transparent'
+                    e.currentTarget.style.color = 'var(--color-text-muted)'
+                  }
                 }}
               >
                 {preset.label}
@@ -414,40 +527,80 @@ export function DateRangePicker({ value, onChange, label = 'Date range', align =
           </div>
 
           {/* Calendar grids */}
-          <div className="p-4 flex gap-6">
-            {/* Navigation */}
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <button
-                  type="button"
-                  onClick={prevMonth}
-                  className="p-1 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] transition-colors"
-                  aria-label="Previous month"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <span className="text-sm font-semibold text-[var(--color-text)]">
-                  {MONTH_NAMES[month1.month]} - {MONTH_NAMES[month2.month]} {month2.year}
+          <div style={{ padding: 'var(--space-4)' }}>
+            {/* Navigation header */}
+            <div
+              className="flex items-center justify-between"
+              style={{ marginBottom: 'var(--space-3)', gap: 'var(--space-3)' }}
+            >
+              <button
+                type="button"
+                onClick={prevMonth}
+                aria-label="Previous month"
+                className="flex items-center justify-center"
+                style={{
+                  width: '2rem',
+                  height: '2rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--color-text-muted)',
+                  cursor: 'pointer',
+                  transition: 'background 150ms ease',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span
+                style={{
+                  fontSize: 'var(--text-sm)',
+                  fontWeight: 600,
+                  color: 'var(--color-text)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <span className="hidden md:inline">
+                  {MONTH_NAMES[month1.month]} {month1.year} – {MONTH_NAMES[month2.month]} {month2.year}
                 </span>
-                <button
-                  type="button"
-                  onClick={nextMonth}
-                  className="p-1 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] transition-colors"
-                  aria-label="Next month"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
+                <span className="md:hidden">
+                  {MONTH_NAMES[month1.month]} {month1.year}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={nextMonth}
+                aria-label="Next month"
+                className="flex items-center justify-center"
+                style={{
+                  width: '2rem',
+                  height: '2rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--color-text-muted)',
+                  cursor: 'pointer',
+                  transition: 'background 150ms ease',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
 
-              <div className="flex gap-6">
-                <MonthGrid
-                  year={month1.year}
-                  month={month1.month}
-                  selected={selecting}
-                  hovered={hovered}
-                  onDayClick={handleDayClick}
-                  onDayHover={setHovered}
-                />
+            {/* Months : 1 on mobile (md-), 2 on desktop (md+) */}
+            <div className="flex" style={{ gap: 'var(--space-5)' }}>
+              <MonthGrid
+                year={month1.year}
+                month={month1.month}
+                selected={selecting}
+                hovered={hovered}
+                onDayClick={handleDayClick}
+                onDayHover={setHovered}
+              />
+              <div className="hidden md:block">
                 <MonthGrid
                   year={month2.year}
                   month={month2.month}
@@ -487,7 +640,7 @@ export function FilterBar({
   dateLabel?: string
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center" style={{ gap: 'var(--space-2)' }}>
       {onDateRangeChange && dateRange && (
         <DateRangePicker
           value={dateRange}
@@ -500,11 +653,21 @@ export function FilterBar({
           key={chip.key}
           value={chip.value}
           onChange={e => chip.onChange(e.target.value)}
-          className="text-sm px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] appearance-none pr-7"
+          aria-label={chip.label}
+          className="appearance-none"
           style={{
+            fontSize: 'var(--text-sm)',
+            fontWeight: 500,
+            padding: 'var(--space-1-5) var(--space-8) var(--space-1-5) var(--space-3)',
+            height: '2.25rem',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg)',
+            color: 'var(--color-text)',
+            cursor: 'pointer',
             backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235a6657' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
             backgroundRepeat: 'no-repeat',
-            backgroundPosition: 'right 0.5rem center',
+            backgroundPosition: 'right 0.625rem center',
           }}
         >
           {chip.options.map(opt => (

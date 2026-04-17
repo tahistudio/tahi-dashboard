@@ -102,6 +102,12 @@ Default height: **2.25rem** (was 2.75rem which felt chunky).
 
 One color = one meaning across the entire app.
 
+### One red across the system
+All danger / overdue / high-priority / lost / negative-delta UI uses the same red. Primary text red is `--color-danger` (#dc2626). Small indicator dots use `--color-danger-dot` (#ef4444). `--priority-high-text`, `--color-overdue-text`, and `CHART.negative` all alias `--color-danger`. Never introduce a new red hex — use the token.
+
+### Dropdowns: prefer native
+Use a native `<select>` for single-value filters and pickers (sort, category, currency, status). Custom dropdown menus have inconsistent focus/keyboard/hover behaviour across browsers. Reserve custom combobox UI for multi-select or search-in-list cases where native can't do the job.
+
 ### Micro-interactions
 - `.view-link` class: underline slides in from left, arrow translates 3px right
 - `.hover-lift` class: translateY(-1px) on hover
