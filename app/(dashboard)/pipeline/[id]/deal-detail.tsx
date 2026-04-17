@@ -271,7 +271,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
         <div className="lg:col-span-2 flex flex-col" style={{ gap: 'var(--space-6)' }}>
           {/* Title + stage */}
           <div>
-            <h1 className="font-bold" style={{ fontSize: '1.5rem', color: 'var(--color-text)', marginBottom: '0.5rem' }}>
+            <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)', marginBottom: 'var(--space-3)' }}>
               {deal.title}
             </h1>
             {/* Stage progress indicator */}
@@ -280,8 +280,8 @@ export function DealDetail({ dealId }: { dealId: string }) {
 
           {/* Activity Timeline */}
           <div
-            className="rounded-xl border shadow-sm"
-            style={{ padding: '1.5rem', background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+            className="rounded-xl"
+            style={{ padding: 'var(--space-5)', background: 'var(--color-bg)', border: '1px solid var(--color-border-subtle)' }}
           >
             <div className="flex items-center justify-between" style={{ marginBottom: '1rem' }}>
               <h2 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)' }}>
@@ -290,38 +290,58 @@ export function DealDetail({ dealId }: { dealId: string }) {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setShowNudgeDialog(true)}
-                  className="inline-flex items-center gap-1.5 font-medium transition-colors rounded-lg"
+                  className="inline-flex items-center"
                   style={{
-                    padding: '0.5rem 0.875rem',
-                    fontSize: '0.8125rem',
-                    background: 'var(--color-bg-tertiary)',
+                    padding: 'var(--space-1-5) var(--space-3)',
+                    fontSize: 'var(--text-sm)',
+                    fontWeight: 500,
+                    background: 'var(--color-bg)',
                     color: 'var(--color-text-muted)',
-                    border: '1px solid var(--color-border)',
-                    cursor: 'pointer',
-                    minHeight: '2.75rem',
+                    border: '1px solid var(--color-border-subtle)',
+                    borderRadius: 'var(--radius-md)',
+                    gap: 'var(--space-1-5)',
+                    height: '2.25rem',
+                    transition: 'border-color 150ms ease, background-color 150ms ease',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)' }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.borderColor = 'var(--color-border)'
+                    e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
+                    e.currentTarget.style.backgroundColor = 'var(--color-bg)'
+                  }}
                 >
-                  <Send className="w-3.5 h-3.5" />
+                  <Send size={14} aria-hidden="true" />
                   Nudge
                 </button>
                 <button
                   onClick={() => setShowActivityForm(true)}
-                  className="inline-flex items-center gap-1.5 font-medium transition-colors rounded-lg"
+                  className="inline-flex items-center"
                   style={{
-                    padding: '0.5rem 0.875rem',
-                    fontSize: '0.8125rem',
+                    padding: 'var(--space-1-5) var(--space-3)',
+                    fontSize: 'var(--text-sm)',
+                    fontWeight: 600,
                     background: 'var(--color-brand)',
                     color: 'white',
                     border: 'none',
-                    cursor: 'pointer',
-                    minHeight: '2.75rem',
+                    borderRadius: 'var(--radius-leaf-sm)',
+                    gap: 'var(--space-1-5)',
+                    height: '2.25rem',
+                    transition: 'background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-dark)' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-brand)' }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = '#3d6333'
+                    e.currentTarget.style.boxShadow = '0 4px 14px rgba(90,130,78,0.4)'
+                    e.currentTarget.style.transform = 'translateY(-1px)'
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = 'var(--color-brand)'
+                    e.currentTarget.style.boxShadow = 'none'
+                    e.currentTarget.style.transform = 'none'
+                  }}
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Plus size={14} aria-hidden="true" />
                   Log Activity
                 </button>
               </div>
@@ -404,7 +424,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
         </div>
 
         {/* Right column (1/3) - sidebar */}
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col" style={{ gap: 'var(--space-3)' }}>
           {/* Stage selector */}
           <SidebarCard title="Stage">
             <StageSelector
@@ -702,11 +722,20 @@ function StageProgress({ stages, currentStageId }: { stages: Stage[]; currentSta
 
 function SidebarCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div
-      className="rounded-xl border shadow-sm"
-      style={{ padding: '1rem 1.25rem', background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
-    >
-      <p className="font-semibold uppercase tracking-wide" style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', marginBottom: '0.5rem' }}>
+    <div style={{
+      padding: 'var(--space-4)',
+      background: 'var(--color-bg)',
+      border: '1px solid var(--color-border-subtle)',
+      borderRadius: 'var(--radius-lg)',
+    }}>
+      <p style={{
+        fontSize: 'var(--text-xs)',
+        fontWeight: 600,
+        color: 'var(--color-text-subtle)',
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
+        marginBottom: 'var(--space-3)',
+      }}>
         {title}
       </p>
       {children}
@@ -754,7 +783,7 @@ function StageSelector({ dealId, stages, currentStageId, onUpdated }: {
           border: '1px solid var(--color-border)',
           background: 'var(--color-bg)',
           color: 'var(--color-text)',
-          minHeight: '2.75rem',
+          minHeight: '2.25rem',
         }}
       >
         {stages.map(s => (
@@ -1119,7 +1148,7 @@ function ContactLinker({ dealId, contacts, onUpdated }: {
               style={{ padding: '0.375rem 0.375rem 0.375rem 1.75rem', fontSize: '0.75rem', border: '1px solid var(--color-brand)', background: 'var(--color-bg)', color: 'var(--color-text)', outline: 'none' }}
             />
           </div>
-          <div className="flex flex-col overflow-y-auto rounded-md border" style={{ maxHeight: '8rem', borderColor: 'var(--color-border)' }}>
+          <div className="flex flex-col overflow-y-auto rounded-md border" style={{ maxHeight: '8rem', border: '1px solid var(--color-border-subtle)' }}>
             {filtered.map(c => (
               <button
                 key={c.id}
@@ -1348,7 +1377,7 @@ function OwnerSelector({ dealId, currentOwnerId, teamMembers, onUpdated }: {
           border: '1px solid var(--color-border)',
           background: 'var(--color-bg)',
           color: 'var(--color-text)',
-          minHeight: '2.75rem',
+          minHeight: '2.25rem',
         }}
       >
         <option value="">Unassigned</option>
@@ -1403,7 +1432,7 @@ function EditableDate({ dealId, value, field, onUpdated }: {
         border: '1px solid var(--color-border)',
         background: 'var(--color-bg)',
         color: 'var(--color-text)',
-        minHeight: '2.75rem',
+        minHeight: '2.25rem',
       }}
     />
   )
@@ -1522,8 +1551,8 @@ function NotesSection({ dealId, initialNotes, onUpdated }: {
 
   return (
     <div
-      className="rounded-xl border shadow-sm"
-      style={{ padding: '1.5rem', background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+      className="rounded-xl"
+      style={{ padding: 'var(--space-5)', background: 'var(--color-bg)', border: '1px solid var(--color-border-subtle)' }}
     >
       <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
         <h2 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)' }}>Notes</h2>
@@ -1615,7 +1644,7 @@ function SourceSelector({ dealId, currentSource, onUpdated }: {
             border: '1px solid var(--color-border)',
             background: 'var(--color-bg)',
             color: 'var(--color-text)',
-            minHeight: '2.75rem',
+            minHeight: '2.25rem',
           }}
         >
           {SOURCE_OPTIONS.map(o => (
@@ -1939,7 +1968,7 @@ function ActivityFormDialog({ dealId, onClose, onCreated }: {
                 border: '1px solid var(--color-border)',
                 background: 'var(--color-bg)',
                 color: 'var(--color-text)',
-                minHeight: '2.75rem',
+                minHeight: '2.25rem',
               }}
               autoFocus
             />
@@ -1983,7 +2012,7 @@ function ActivityFormDialog({ dealId, onClose, onCreated }: {
                     border: '1px solid var(--color-border)',
                     background: 'var(--color-bg)',
                     color: 'var(--color-text)',
-                    minHeight: '2.75rem',
+                    minHeight: '2.25rem',
                   }}
                 />
               </div>
@@ -2003,7 +2032,7 @@ function ActivityFormDialog({ dealId, onClose, onCreated }: {
                     border: '1px solid var(--color-border)',
                     background: 'var(--color-bg)',
                     color: 'var(--color-text)',
-                    minHeight: '2.75rem',
+                    minHeight: '2.25rem',
                   }}
                 />
               </div>
@@ -2023,7 +2052,7 @@ function ActivityFormDialog({ dealId, onClose, onCreated }: {
                 background: 'var(--color-bg)',
                 color: 'var(--color-text-muted)',
                 cursor: 'pointer',
-                minHeight: '2.75rem',
+                minHeight: '2.25rem',
               }}
             >
               Cancel
@@ -2040,7 +2069,7 @@ function ActivityFormDialog({ dealId, onClose, onCreated }: {
                 border: 'none',
                 cursor: saving ? 'not-allowed' : 'pointer',
                 opacity: saving || !title.trim() ? 0.6 : 1,
-                minHeight: '2.75rem',
+                minHeight: '2.25rem',
               }}
             >
               {saving ? 'Saving...' : 'Log Activity'}
@@ -2078,8 +2107,8 @@ function AssociatedRequests({ orgId }: { orgId: string }) {
 
   return (
     <div
-      className="rounded-xl border shadow-sm"
-      style={{ padding: '1.5rem', background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+      className="rounded-xl"
+      style={{ padding: 'var(--space-5)', background: 'var(--color-bg)', border: '1px solid var(--color-border-subtle)' }}
     >
       <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
         <h2 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)' }}>
@@ -2175,7 +2204,7 @@ function ConvertToClientCard({ dealId, orgId, orgName, onConverted }: {
   if (linkedOrgId && linkedOrgName) {
     return (
       <div
-        className="rounded-xl border shadow-sm"
+        className="rounded-xl"
         style={{
           padding: '1rem 1.25rem',
           background: 'var(--color-brand-50, #f0f7ee)',
@@ -2236,7 +2265,7 @@ function ConvertToClientCard({ dealId, orgId, orgName, onConverted }: {
 
   return (
     <div
-      className="rounded-xl border shadow-sm"
+      className="rounded-xl"
       style={{
         padding: '1rem 1.25rem',
         background: 'var(--color-brand-50, #f0f7ee)',
