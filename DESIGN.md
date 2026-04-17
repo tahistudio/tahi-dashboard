@@ -108,6 +108,40 @@ All danger / overdue / high-priority / lost / negative-delta UI uses the same re
 ### Dropdowns: prefer native
 Use a native `<select>` for single-value filters and pickers (sort, category, currency, status). Custom dropdown menus have inconsistent focus/keyboard/hover behaviour across browsers. Reserve custom combobox UI for multi-select or search-in-list cases where native can't do the job.
 
+### Primitives + Composites (Webflow-style component library)
+The UI is built from a tight primitive layer and a set of composites. **Always compose from these** instead of raw `<div>` + Tailwind wherever the pattern matches — it keeps drift out of the system and makes per-page redesigns fast.
+
+#### Primitives (`components/tahi/`)
+
+| Component | Slots / props | When to use |
+|---|---|---|
+| `<Card>` | `variant: default \| flat \| grouped \| elevated` · `padding: none \| sm \| md \| lg` · `interactive` · `href` · Slots: `Card.Header`, `Card.Title`, `Card.Subtitle`, `Card.Action`, `Card.Body`, `Card.Footer`, `Card.Divider`, `Card.Section` | Any panel / surface. Replaces raw `<div className="border rounded-xl ...">`. |
+| `<Badge>` | `tone: brand \| positive \| warning \| danger \| info \| teal \| purple \| rose \| neutral` **or** `stage` / `source` (auto-looks-up colour via chart-colors) · `variant: soft \| solid \| outline \| count` · `size: sm \| md` · `dot` | Any pill / chip / status indicator. Replaces inline `<span className="inline-flex rounded-full ...">`. |
+| `<Input>` / `<Select>` / `<Textarea>` / `<Input.Group>` | `inputSize: sm \| md \| lg` · `tone: default \| danger \| success` · `leadingIcon` / `trailingIcon` · `Input.Icon`, `Input.Addon` slots | Form fields. Select wraps native `<select>` with our chevron + active-value highlight. |
+
+#### Composites (`components/tahi/`)
+
+| Component | Purpose |
+|---|---|
+| `<PageHeader title subtitle>{actions}</PageHeader>` | Every dashboard page's title block. Actions slot stacks on mobile. |
+| `<KPIStrip><KPICell icon label value sub tone href/></KPIStrip>` | Grouped panel with auto-internal-dividers. Mobile: 2-col with bottom dividers. Desktop: N-col with right dividers. Replaces the 7 hand-rolled KPI grids. |
+| `<SectionTabs items={[{id,label}]} rightSlot={} />` | Sticky jump-nav below top-nav. Tabs scroll on mobile, center on md+. `rightSlot` for page-level filters (currency etc). |
+| `<PageToolbar>` with `.Search`, `.Filters`, `.View`, `.Action` slots | The list-page toolbar. Handles responsive stacking. |
+| `<ViewToggle value onChange options={[{value,icon,label}]} />` | List/board/grid view switcher. Single-source for the icon-button cluster. |
+| `<SidebarCard><SidebarSection label>...</SidebarSection></SidebarCard>` | Detail-page right-rail: one outer card, many labelled sections with horizontal dividers. |
+| `<ActivityTimeline><ActivityItem type title timestamp actor description/></ActivityTimeline>` | CRM / audit / activity feed. `type: call \| meeting \| email \| note \| task \| status` drives the icon + colour via `ACTIVITY_TYPE_META`. |
+
+#### When to extract a new component
+Extract when **all three** are true:
+1. Pattern appears 3+ times across the app
+2. Props surface stays under ~8
+3. There's a visual rule worth enforcing (spacing, focus state, a11y, colour consistency)
+
+Don't extract when:
+- It's just wrapping a Tailwind class in an import
+- The component would need 10+ optional props to cover variations
+- The pattern is genuinely one-off (hero sections, specific flows)
+
 ### Layout shell: no padding-top on `.dashboard-main`
 `.dashboard-main` is the scroll container. It deliberately carries **no `padding-top`** so `position: sticky; top: 0` descendants (section navs, table headers) can sit flush against the top nav with no visible bg-secondary gap. Per-page top spacing lives on the inner `.dashboard-page-inner` wrapper (max-w-7xl) in `app/(dashboard)/layout.tsx`. Pages must NOT put `className="dashboard-main"` on their own wrapper — that doubles the padding.
 

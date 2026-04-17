@@ -14,6 +14,10 @@ import { apiPath } from '@/lib/api'
 import { convertFromNzd } from '@/lib/currency'
 import { Pagination, usePagination } from '@/components/tahi/pagination'
 import { stageColour, sourceBadge } from '@/lib/chart-colors'
+import { PageHeader } from '@/components/tahi/page-header'
+import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
+import { ViewToggle } from '@/components/tahi/view-toggle'
+import { Select } from '@/components/tahi/input'
 
 type DisplayCurrency = 'NZD' | 'USD' | 'AUD' | 'GBP' | 'EUR'
 const CURRENCY_OPTIONS: { code: DisplayCurrency; label: string }[] = [
@@ -290,17 +294,18 @@ export function PipelineContent() {
     : 0
 
   return (
-    <div>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between" style={{ marginBottom: 'var(--space-6)', gap: 'var(--space-3)' }}>
-        <div>
-          <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)' }}>
-            Sales Pipeline
-          </h1>
-          <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-            Track and manage deals through your sales process
-          </p>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+      <PageHeader
+        title="Sales Pipeline"
+        subtitle="Track and manage deals through your sales process"
+      >
+        <Select
+          value={displayCurrency}
+          onChange={e => setDisplayCurrency(e.target.value as DisplayCurrency)}
+          aria-label="Display currency"
+          selectSize="sm"
+          options={CURRENCY_OPTIONS.map(opt => ({ value: opt.code, label: opt.code }))}
+        />
         <button
           onClick={() => setShowNewDeal(true)}
           className="inline-flex items-center font-medium hover:-translate-y-px"
@@ -314,6 +319,7 @@ export function PipelineContent() {
             borderRadius: 'var(--radius-leaf-sm)',
             gap: 'var(--space-1-5)',
             transition: 'background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease',
+            height: '2.25rem',
           }}
           onMouseEnter={e => {
             e.currentTarget.style.background = 'var(--color-brand-dark)'
@@ -327,92 +333,15 @@ export function PipelineContent() {
           <Plus size={15} aria-hidden="true" />
           New Deal
         </button>
-      </div>
+      </PageHeader>
 
-      {/* KPI strip: grouped panel with internal dividers */}
-      <div style={{
-        marginBottom: 'var(--space-6)',
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-lg)',
-        overflow: 'hidden',
-      }}>
-        {/* Currency switcher in header */}
-        <div className="flex items-center justify-between" style={{
-          padding: 'var(--space-3) var(--space-5)',
-          borderBottom: '1px solid var(--color-border-subtle)',
-        }}>
-          <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            Pipeline Overview
-          </span>
-          <div className="relative">
-            <select
-              value={displayCurrency}
-              onChange={e => setDisplayCurrency(e.target.value as DisplayCurrency)}
-              style={{
-                appearance: 'none',
-                padding: 'var(--space-1) var(--space-6) var(--space-1) var(--space-2)',
-                fontSize: 'var(--text-xs)',
-                fontWeight: 600,
-                borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--color-border-subtle)',
-                background: 'var(--color-bg)',
-                color: 'var(--color-text-muted)',
-                cursor: 'pointer',
-              }}
-            >
-              {CURRENCY_OPTIONS.map(opt => (
-                <option key={opt.code} value={opt.code}>{opt.code}</option>
-              ))}
-            </select>
-            <ChevronDown
-              size={12}
-              aria-hidden="true"
-              style={{ position: 'absolute', right: 'var(--space-1-5)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)', pointerEvents: 'none' }}
-            />
-          </div>
-        </div>
-        {/* KPI cells */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
-          {[
-            { icon: DollarSign, label: 'Pipeline Value', value: formatCurrency(toDisplay(totalValue), displayCurrency) },
-            { icon: Target, label: 'Weighted Forecast', value: formatCurrency(toDisplay(weightedForecast), displayCurrency) },
-            { icon: TrendingUp, label: 'Open Deals', value: String(openDeals.length) },
-            { icon: Award, label: 'Win Rate', value: closedDeals.length > 0 ? `${winRate}%` : '--' },
-            { icon: BarChart3, label: 'Avg Deal Size', value: openDeals.length > 0 ? formatCurrency(toDisplay(avgDealSize), displayCurrency) : '--' },
-          ].map((item, i) => {
-            const Icon = item.icon
-            return (
-              <div
-                key={item.label}
-                className="pipeline-divider-item kpi-strip-item"
-                style={{
-                  padding: 'var(--space-4) var(--space-5)',
-                  borderBottom: i < 2 ? '1px solid var(--color-border-subtle)' : 'none',
-                }}
-              >
-                <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
-                  <div className="flex items-center justify-center flex-shrink-0" style={{
-                    width: '2rem',
-                    height: '2rem',
-                    background: 'var(--color-brand-50)',
-                    color: 'var(--color-brand)',
-                    borderRadius: 'var(--radius-leaf-sm)',
-                  }}>
-                    <Icon size={15} aria-hidden="true" />
-                  </div>
-                  <span style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
-                    {item.label}
-                  </span>
-                </div>
-                <p className="tabular-nums" style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--color-text)' }}>
-                  {item.value}
-                </p>
-              </div>
-            )
-          })}
-        </div>
-      </div>
+      <KPIStrip desktopCols={5}>
+        <KPICell icon={DollarSign} label="Pipeline Value"    value={formatCurrency(toDisplay(totalValue), displayCurrency)} />
+        <KPICell icon={Target}     label="Weighted Forecast" value={formatCurrency(toDisplay(weightedForecast), displayCurrency)} />
+        <KPICell icon={TrendingUp} label="Open Deals"        value={String(openDeals.length)} />
+        <KPICell icon={Award}      label="Win Rate"          value={closedDeals.length > 0 ? `${winRate}%` : '--'} />
+        <KPICell icon={BarChart3}  label="Avg Deal Size"     value={openDeals.length > 0 ? formatCurrency(toDisplay(avgDealSize), displayCurrency) : '--'} />
+      </KPIStrip>
 
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center" style={{ marginBottom: 'var(--space-4)', gap: 'var(--space-3)' }}>
@@ -447,32 +376,14 @@ export function PipelineContent() {
         </div>
 
         {/* View toggle */}
-        <div
-          className="inline-flex overflow-hidden"
-          style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-md)' }}
-        >
-          {([['kanban', Columns3, 'Board'], ['list', LayoutList, 'List']] as const).map(([v, Icon, label]) => (
-            <button
-              key={v}
-              onClick={() => setView(v as ViewMode)}
-              className="inline-flex items-center"
-              style={{
-                padding: 'var(--space-2) var(--space-3)',
-                fontSize: 'var(--text-sm)',
-                fontWeight: 500,
-                background: view === v ? 'var(--color-brand)' : 'var(--color-bg)',
-                color: view === v ? 'white' : 'var(--color-text-muted)',
-                border: 'none',
-                gap: 'var(--space-1-5)',
-                height: '2.25rem',
-                transition: 'background-color 150ms ease, color 150ms ease',
-              }}
-            >
-              <Icon size={15} aria-hidden="true" />
-              {label}
-            </button>
-          ))}
-        </div>
+        <ViewToggle
+          value={view}
+          onChange={v => setView(v)}
+          options={[
+            { value: 'kanban', icon: Columns3,   label: 'Board view' },
+            { value: 'list',   icon: LayoutList, label: 'List view'  },
+          ]}
+        />
 
         {/* Sort (list view only) */}
         {view === 'list' && (

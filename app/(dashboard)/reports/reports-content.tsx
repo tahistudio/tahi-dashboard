@@ -16,6 +16,10 @@ import {
 import { apiPath } from '@/lib/api'
 import { SkeletonChart, SkeletonTable, SkeletonProgressList } from '@/components/tahi/skeletons'
 import { CHART, stageColour, sourceColour, STATUS_COLORS } from '@/lib/chart-colors'
+import { PageHeader } from '@/components/tahi/page-header'
+import { SectionTabs } from '@/components/tahi/section-tabs'
+import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
+import { Select } from '@/components/tahi/input'
 
 // ── Currency options ─────────────────────────────────────────────────────────
 
@@ -219,69 +223,33 @@ export function ReportsContent() {
 
   return (
     <div className="page-flush-top" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-      <div>
-        <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)' }}>
-          Reports
-        </h1>
-        <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-          Revenue, request throughput, and client overview.
-        </p>
-      </div>
+      <PageHeader
+        title="Reports"
+        subtitle="Revenue, request throughput, and client overview."
+      />
 
-      {/* Section quick-jump nav with currency selector built in.
-          Sticks flush to the top of the main scroll area (directly below top nav).
-          Rendered as a card (bordered, rounded, matches KPI strip width). */}
-      <ReportsJumpNav displayCurrency={displayCurrency} onCurrencyChange={setDisplayCurrency} />
+      {/* Sticky jump nav with currency selector nested on the right */}
+      <SectionTabs
+        items={REPORTS_SECTIONS}
+        rightSlot={
+          <Select
+            value={displayCurrency}
+            onChange={e => setDisplayCurrency(e.target.value as DisplayCurrency)}
+            aria-label="Display currency"
+            selectSize="sm"
+            options={CURRENCY_OPTIONS.map(c => ({ value: c, label: c }))}
+          />
+        }
+      />
 
-      {/* KPI strip: grouped panel with dividers */}
-      <div
-        id="overview"
-        className="scroll-mt-20"
-        style={{
-          background: 'var(--color-bg)',
-          border: '1px solid var(--color-border-subtle)',
-          borderRadius: 'var(--radius-lg)',
-          overflow: 'hidden',
-        }}
-      >
-        <div className="grid grid-cols-2 lg:grid-cols-4">
-          {[
-            { icon: Users, label: 'Total Clients', value: String(data.totalClients) },
-            { icon: Inbox, label: 'Open Requests', value: String(data.openRequests) },
-            { icon: Clock, label: 'Billable Hours', value: data.totalBillableHours.toFixed(1) },
-            { icon: CreditCard, label: 'Outstanding', value: formatInCurrency(data.outstandingInvoiceAmount) },
-          ].map((item, i) => {
-            const Icon = item.icon
-            return (
-              <div
-                key={item.label}
-                className="kpi-strip-item pipeline-divider-item"
-                style={{
-                  padding: 'var(--space-5)',
-                  borderBottom: i < 2 ? '1px solid var(--color-border-subtle)' : 'none',
-                }}
-              >
-                <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
-                  <div className="flex items-center justify-center flex-shrink-0" style={{
-                    width: '2rem',
-                    height: '2rem',
-                    background: 'var(--color-brand-50)',
-                    color: 'var(--color-brand)',
-                    borderRadius: 'var(--radius-leaf-sm)',
-                  }}>
-                    <Icon size={15} aria-hidden="true" />
-                  </div>
-                  <span style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
-                    {item.label}
-                  </span>
-                </div>
-                <p className="tabular-nums" style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--color-text)' }}>
-                  {item.value}
-                </p>
-              </div>
-            )
-          })}
-        </div>
+      {/* KPI strip */}
+      <div id="overview" className="scroll-mt-20">
+        <KPIStrip>
+          <KPICell icon={Users}      label="Total Clients"  value={String(data.totalClients)} />
+          <KPICell icon={Inbox}      label="Open Requests"  value={String(data.openRequests)} />
+          <KPICell icon={Clock}      label="Billable Hours" value={data.totalBillableHours.toFixed(1)} />
+          <KPICell icon={CreditCard} label="Outstanding"    value={formatInCurrency(data.outstandingInvoiceAmount)} tone={data.outstandingInvoiceAmount > 0 ? 'warning' : 'brand'} />
+        </KPIStrip>
       </div>
 
       {/* Financial Health */}
@@ -3181,93 +3149,7 @@ const REPORTS_SECTIONS: Array<{ id: string; label: string; group: 'Operations' |
   { id: 'utilization',           label: 'Team Utilisation',   group: 'Team' },
 ]
 
-function ReportsJumpNav({
-  displayCurrency,
-  onCurrencyChange,
-}: {
-  displayCurrency: DisplayCurrency
-  onCurrencyChange: (c: DisplayCurrency) => void
-}) {
-  function jumpTo(id: string) {
-    const el = document.getElementById(id)
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-
-  return (
-    <div className="sticky-section-nav">
-      <div
-        className="flex items-center"
-        style={{ gap: 'var(--space-3)' }}
-      >
-        {/* Tabs: scroll on mobile, center on md+ */}
-        <div
-          className="flex-1 h-scroll scrollbar-hide md:flex md:justify-center"
-          style={{ minWidth: 0 }}
-        >
-          <div className="flex" style={{ gap: 'var(--space-0-5)' }}>
-            {REPORTS_SECTIONS.map(s => (
-              <button
-                key={s.id}
-                onClick={() => jumpTo(s.id)}
-                className="whitespace-nowrap flex-shrink-0"
-                style={{
-                  padding: 'var(--space-3) var(--space-4)',
-                  fontSize: 'var(--text-sm)',
-                  fontWeight: 500,
-                  color: 'var(--color-text-muted)',
-                  background: 'transparent',
-                  border: 'none',
-                  borderBottom: '2px solid transparent',
-                  transition: 'color 150ms ease, border-color 150ms ease',
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.color = 'var(--color-brand)'
-                  e.currentTarget.style.borderBottomColor = 'var(--color-brand)'
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.color = 'var(--color-text-muted)'
-                  e.currentTarget.style.borderBottomColor = 'transparent'
-                }}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Currency dropdown, pinned right */}
-        <div className="relative flex-shrink-0">
-          <select
-            value={displayCurrency}
-            onChange={(e) => onCurrencyChange(e.target.value as DisplayCurrency)}
-            aria-label="Display currency"
-            style={{
-              appearance: 'none',
-              padding: 'var(--space-1-5) var(--space-8) var(--space-1-5) var(--space-3)',
-              fontSize: 'var(--text-xs)',
-              fontWeight: 600,
-              background: 'var(--color-bg)',
-              border: '1px solid var(--color-border-subtle)',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--color-text)',
-              cursor: 'pointer',
-              height: '2rem',
-            }}
-          >
-            {CURRENCY_OPTIONS.map(c => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-          <ChevronDown
-            size={12}
-            aria-hidden="true"
-            style={{ position: 'absolute', right: 'var(--space-2)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)', pointerEvents: 'none' }}
-          />
-        </div>
-      </div>
-    </div>
-  )
-}
+// (ReportsJumpNav was replaced by the shared <SectionTabs> composite above.)
 
 // ── Fixed Costs / Commitments (T652) ───────────────────────────────────────
 // User-maintained fixed costs with cadence. These feed the cash-flow forecast

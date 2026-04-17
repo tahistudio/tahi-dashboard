@@ -13,6 +13,7 @@ import { StatusBadge } from '@/components/tahi/status-badge'
 import { OnboardingChecklist, type OnboardingState } from '@/components/tahi/onboarding-checklist'
 import { BookingWidget } from '@/components/tahi/booking-widget'
 import { AIDailyBriefing } from '@/components/tahi/ai-briefing-card'
+import { KPIStrip as SharedKPIStrip, KPICell } from '@/components/tahi/kpi-strip'
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
@@ -735,130 +736,40 @@ function OnboardingChecklistWrapper() {
 // ─── KPI Strip (grouped panel with dividers) ────────────────────────────────
 
 function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
-  const items: Array<{
-    label: string
-    value: number | string | null
-    icon: React.ReactNode
-    href: string
-    sub?: string
-  }> = [
-    {
-      label: 'Active Clients',
-      value: loading ? null : kpis?.activeClients ?? 0,
-      icon: <Users size={16} aria-hidden="true" />,
-      href: '/clients',
-      sub: 'across all plans',
-    },
-    {
-      label: 'Open Requests',
-      value: loading ? null : kpis?.openRequests ?? 0,
-      icon: <Inbox size={16} aria-hidden="true" />,
-      href: '/requests',
-      sub: kpis ? `${kpis.inProgress} in progress` : undefined,
-    },
-    {
-      label: 'Outstanding',
-      value: loading ? null : formatNzd(kpis?.outstandingInvoicesNzd ?? 0),
-      icon: <FileText size={16} aria-hidden="true" />,
-      href: '/invoices',
-      sub: 'invoices',
-    },
-    {
-      label: 'MRR',
-      value: loading ? null : formatNzd(kpis?.mrr ?? 0),
-      icon: <BarChart3 size={16} aria-hidden="true" />,
-      href: '/reports',
-      sub: 'recurring retainers',
-    },
-  ]
-
+  const outstanding = kpis?.outstandingInvoicesNzd ?? 0
   return (
-    <div
-      data-tour="overview-kpis"
-      style={{
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-lg)',
-        overflow: 'hidden',
-      }}
-    >
-      <div className="grid grid-cols-2 lg:grid-cols-4">
-        {items.map((item, i) => {
-          // On 2-col mobile: items 0,1 get bottom border. Items 0,2 get right border.
-          // On 4-col desktop: all except last get right border, no bottom borders.
-          const rightBorder = i < items.length - 1 ? '1px solid var(--color-border-subtle)' : 'none'
-          const bottomBorder = i < 2 ? '1px solid var(--color-border-subtle)' : 'none'
-          return (
-            <Link
-              key={item.label}
-              href={item.href}
-              className="group relative flex flex-col kpi-strip-item"
-              style={{
-                padding: 'var(--space-5)',
-                textDecoration: 'none',
-                borderRight: rightBorder,
-                borderBottom: bottomBorder,
-                transition: 'background-color 150ms ease',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)' }}
-              onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
-            >
-              {/* Icon + label */}
-              <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
-                <div
-                  className="flex items-center justify-center flex-shrink-0"
-                  style={{
-                    width: '2rem',
-                    height: '2rem',
-                    background: 'var(--color-brand-50)',
-                    color: 'var(--color-brand)',
-                    borderRadius: 'var(--radius-leaf-sm)',
-                  }}
-                >
-                  {item.icon}
-                </div>
-                <span style={{
-                  fontSize: 'var(--text-sm)',
-                  fontWeight: 500,
-                  color: 'var(--color-text-muted)',
-                }}>
-                  {item.label}
-                </span>
-              </div>
-
-              {/* Value */}
-              {item.value === null ? (
-                <div className="animate-pulse" style={{
-                  height: '1.75rem',
-                  width: '3.5rem',
-                  background: 'var(--color-bg-tertiary)',
-                  borderRadius: 'var(--radius-sm)',
-                }} />
-              ) : (
-                <p className="tabular-nums" style={{
-                  fontSize: 'var(--text-2xl)',
-                  fontWeight: 700,
-                  lineHeight: 1.2,
-                  color: 'var(--color-text)',
-                }}>
-                  {item.value}
-                </p>
-              )}
-
-              {/* Sub label */}
-              {item.sub && (
-                <p style={{
-                  fontSize: 'var(--text-xs)',
-                  color: 'var(--color-text-subtle)',
-                  marginTop: 'var(--space-1)',
-                }}>
-                  {item.sub}
-                </p>
-              )}
-            </Link>
-          )
-        })}
-      </div>
+    <div data-tour="overview-kpis">
+      <SharedKPIStrip>
+        <KPICell
+          icon={Users}
+          label="Active Clients"
+          value={loading ? '—' : String(kpis?.activeClients ?? 0)}
+          sub="across all plans"
+          href="/clients"
+        />
+        <KPICell
+          icon={Inbox}
+          label="Open Requests"
+          value={loading ? '—' : String(kpis?.openRequests ?? 0)}
+          sub={kpis ? `${kpis.inProgress} in progress` : undefined}
+          href="/requests"
+        />
+        <KPICell
+          icon={FileText}
+          label="Outstanding"
+          value={loading ? '—' : formatNzd(outstanding)}
+          sub="invoices"
+          tone={outstanding > 0 ? 'warning' : 'brand'}
+          href="/invoices"
+        />
+        <KPICell
+          icon={BarChart3}
+          label="MRR"
+          value={loading ? '—' : formatNzd(kpis?.mrr ?? 0)}
+          sub="recurring retainers"
+          href="/reports"
+        />
+      </SharedKPIStrip>
     </div>
   )
 }
