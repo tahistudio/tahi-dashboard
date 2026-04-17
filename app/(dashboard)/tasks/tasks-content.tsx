@@ -15,6 +15,9 @@ import { AiTaskWizard } from '@/components/tahi/ai-task-wizard'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { DateRangePicker, type DateRange } from '@/components/tahi/date-range-picker'
 import { useToast } from '@/components/tahi/toast'
+import { PageHeader } from '@/components/tahi/page-header'
+import { ViewToggle } from '@/components/tahi/view-toggle'
+import { Input, Select } from '@/components/tahi/input'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -403,26 +406,24 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
         />
       )}
 
-      {/* Page header */}
-      <div className="flex items-center justify-between" style={{ marginBottom: '1.5rem' }}>
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text)' }}>Tasks</h1>
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
-            {!loading
+      <div style={{ marginBottom: '1.5rem' }}>
+        <PageHeader
+          title="Tasks"
+          subtitle={
+            !loading
               ? `${filtered.length} ${filtered.length === 1 ? 'task' : 'tasks'}`
-              : isAdmin ? 'All tasks: client-facing, internal, and Tahi Studio.' : 'Tasks assigned to you by the Tahi team.'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+              : isAdmin ? 'All tasks: client-facing, internal, and Tahi Studio.' : 'Tasks assigned to you by the Tahi team.'
+          }
+        >
           {isAdmin && (
             <>
               <button
                 onClick={() => setWizardOpen(true)}
                 className="flex items-center gap-2 font-medium transition-colors hover:opacity-90"
                 style={{
-                  padding: '0.5rem 0.875rem', fontSize: '0.875rem',
+                  padding: '0.5rem 0.875rem', fontSize: '0.875rem', height: '2.25rem',
                   background: 'var(--color-bg-tertiary)', color: 'var(--color-brand)',
-                  borderRadius: '0.5rem', border: '1px solid var(--color-brand-light)', cursor: 'pointer',
+                  borderRadius: 'var(--radius-md)', border: '1px solid var(--color-brand-light)', cursor: 'pointer',
                 }}
               >
                 <Sparkles className="w-3.5 h-3.5" />
@@ -431,7 +432,7 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
               <button
                 onClick={() => setDialogOpen(true)}
                 className="flex items-center gap-2 font-semibold text-white transition-opacity hover:opacity-90"
-                style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', background: 'var(--color-brand)', borderRadius: '0.5rem', border: 'none', cursor: 'pointer' }}
+                style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', height: '2.25rem', background: 'var(--color-brand)', borderRadius: 'var(--radius-leaf-sm)', border: 'none', cursor: 'pointer' }}
               >
                 <Plus className="w-4 h-4" />
                 <span className="hidden sm:inline">Create Task</span>
@@ -439,7 +440,7 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
               </button>
             </>
           )}
-        </div>
+        </PageHeader>
       </div>
 
       {/* Type tabs (top-level filter) */}
@@ -513,91 +514,45 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
           style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--color-border-subtle)', background: 'var(--color-bg)' }}
         >
           {/* Search */}
-          <div className="relative" style={{ width: '16rem', minWidth: '8rem', flexShrink: 1 }}>
-            <Search
-              className="absolute top-1/2 pointer-events-none"
-              style={{ left: '0.625rem', transform: 'translateY(-50%)', width: '0.875rem', height: '0.875rem', color: 'var(--color-text-subtle)' }}
-            />
-            <input
-              type="text"
-              placeholder="Search tasks..."
+          <div style={{ width: '16rem', minWidth: '8rem', flexShrink: 1 }}>
+            <Input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-1"
-              style={{
-                paddingTop: '0.4375rem',
-                paddingBottom: '0.4375rem',
-                paddingLeft: '2rem',
-                paddingRight: '0.75rem',
-                fontSize: '0.875rem',
-                border: '1px solid var(--color-border)',
-                borderRadius: '0.5rem',
-                background: 'var(--color-bg-secondary)',
-                color: 'var(--color-text)',
-              }}
+              placeholder="Search tasks..."
+              leadingIcon={<Search size={14} aria-hidden="true" />}
+              style={{ width: '100%' }}
             />
           </div>
 
           {/* Filters */}
           <DateRangePicker value={dateRange} onChange={setDateRange} label="Due date" />
-          <select
-            value={priorityFilter}
-            onChange={e => setPriorityFilter(e.target.value)}
-            className="hidden sm:block appearance-none focus:outline-none"
-            style={{
-              padding: '0.4375rem 2rem 0.4375rem 0.75rem',
-              fontSize: '0.8125rem',
-              border: '1px solid var(--color-border)',
-              borderRadius: '0.5rem',
-              color: priorityFilter !== 'all' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-              background: priorityFilter !== 'all' ? 'var(--color-brand-50)' : 'var(--color-bg)',
-              cursor: 'pointer',
-            }}
-          >
-            <option value="all">All Priorities</option>
-            <option value="urgent">Urgent</option>
-            <option value="high">High</option>
-            <option value="standard">Standard</option>
-            <option value="low">Low</option>
-          </select>
+          <div className="hidden sm:block">
+            <Select
+              value={priorityFilter}
+              onChange={e => setPriorityFilter(e.target.value)}
+              aria-label="Priority filter"
+              highlightActive
+              options={[
+                { value: 'all',      label: 'All Priorities' },
+                { value: 'urgent',   label: 'Urgent'         },
+                { value: 'high',     label: 'High'           },
+                { value: 'standard', label: 'Standard'       },
+                { value: 'low',      label: 'Low'            },
+              ]}
+            />
+          </div>
 
           <div className="flex-1" />
 
           {/* View toggle */}
-          <div
-            className="flex items-center overflow-hidden flex-shrink-0"
-            style={{ border: '1px solid var(--color-border)', borderRadius: '0.5rem' }}
-          >
-            <button
-              onClick={() => setViewMode('list')}
-              className="flex items-center justify-center transition-colors"
-              style={{
-                padding: '0.5rem',
-                background: viewMode === 'list' ? 'var(--color-brand)' : 'var(--color-bg)',
-                color: viewMode === 'list' ? 'white' : 'var(--color-text-muted)',
-                cursor: 'pointer',
-                border: 'none',
-              }}
-              aria-label="List view"
-            >
-              <LayoutList className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setViewMode('board')}
-              className="flex items-center justify-center transition-colors"
-              style={{
-                padding: '0.5rem',
-                background: viewMode === 'board' ? 'var(--color-brand)' : 'var(--color-bg)',
-                color: viewMode === 'board' ? 'white' : 'var(--color-text-muted)',
-                border: 'none',
-                borderLeft: '1px solid var(--color-border)',
-                cursor: 'pointer',
-              }}
-              aria-label="Board view"
-            >
-              <Columns3 className="w-4 h-4" />
-            </button>
-          </div>
+          <ViewToggle
+            value={viewMode}
+            onChange={v => setViewMode(v)}
+            options={[
+              { value: 'list',  icon: LayoutList, label: 'List view'  },
+              { value: 'board', icon: Columns3,   label: 'Board view' },
+            ]}
+          />
         </div>
 
         {/* Status tabs */}

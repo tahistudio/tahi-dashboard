@@ -13,6 +13,8 @@ import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { DateRangePicker, type DateRange } from '@/components/tahi/date-range-picker'
 import { apiPath } from '@/lib/api'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
+import { ViewToggle } from '@/components/tahi/view-toggle'
+import { Input, Select } from '@/components/tahi/input'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -529,155 +531,83 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
           style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--color-border-subtle)', background: 'var(--color-bg)' }}
         >
           {/* Search */}
-          <div className="relative" style={{ width: '16rem', minWidth: '8rem', flexShrink: 1 }}>
-            <Search
-              className="absolute top-1/2 pointer-events-none"
-              style={{ left: '0.625rem', transform: 'translateY(-50%)', width: '0.875rem', height: '0.875rem', color: 'var(--color-text-subtle)' }}
-            />
-            <input
-              type="text"
-              placeholder="Search requests…"
+          <div style={{ width: '16rem', minWidth: '8rem', flexShrink: 1 }}>
+            <Input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-1"
-              style={{
-                paddingTop: '0.4375rem',
-                paddingBottom: '0.4375rem',
-                paddingLeft: '2rem',
-                paddingRight: '0.75rem',
-                fontSize: '0.875rem',
-                border: '1px solid var(--color-border)',
-                borderRadius: '0.5rem',
-                background: 'var(--color-bg-secondary)',
-                color: 'var(--color-text)',
-              }}
+              placeholder="Search requests…"
+              leadingIcon={<Search size={14} aria-hidden="true" />}
+              style={{ width: '100%' }}
             />
           </div>
 
           {/* Sort */}
-          <div className="relative hidden sm:block">
-            <select
+          <div className="hidden sm:block">
+            <Select
               value={sortKey}
               onChange={e => setSortKey(e.target.value as SortKey)}
-              className="appearance-none focus:outline-none"
-              style={{
-                padding: '0.4375rem 2rem 0.4375rem 0.75rem',
-                fontSize: '0.8125rem',
-                border: '1px solid var(--color-border)',
-                borderRadius: '0.5rem',
-                color: 'var(--color-text-muted)',
-                background: 'var(--color-bg)',
-                cursor: 'pointer',
-              }}
-            >
-              <option value="updatedAt">Sort: Updated</option>
-              <option value="dueDate">Sort: Due date</option>
-              <option value="priority">Sort: Priority</option>
-              <option value="status">Sort: Status</option>
-            </select>
-            <ArrowUpDown
-              className="absolute top-1/2 pointer-events-none"
-              style={{ right: '0.5rem', transform: 'translateY(-50%)', width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)' }}
+              aria-label="Sort"
+              options={[
+                { value: 'updatedAt', label: 'Sort: Updated'  },
+                { value: 'dueDate',   label: 'Sort: Due date' },
+                { value: 'priority',  label: 'Sort: Priority' },
+                { value: 'status',    label: 'Sort: Status'   },
+              ]}
             />
           </div>
 
           {/* Filters */}
           <DateRangePicker value={dateRange} onChange={setDateRange} label="Created date" />
-          <select
-            value={categoryFilter}
-            onChange={e => setCategoryFilter(e.target.value)}
-            className="hidden sm:block appearance-none focus:outline-none"
-            style={{
-              padding: '0.4375rem 2rem 0.4375rem 0.75rem',
-              fontSize: '0.8125rem',
-              border: '1px solid var(--color-border)',
-              borderRadius: '0.5rem',
-              color: categoryFilter !== 'all' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-              background: categoryFilter !== 'all' ? 'var(--color-brand-50)' : 'var(--color-bg)',
-              cursor: 'pointer',
-            }}
-          >
-            <option value="all">All Categories</option>
-            <option value="design">Design</option>
-            <option value="development">Development</option>
-            <option value="strategy">Strategy</option>
-            <option value="content">Content</option>
-            <option value="marketing">Marketing</option>
-            <option value="other">Other</option>
-          </select>
-          <select
-            value={typeFilter}
-            onChange={e => setTypeFilter(e.target.value)}
-            className="hidden sm:block appearance-none focus:outline-none"
-            style={{
-              padding: '0.4375rem 2rem 0.4375rem 0.75rem',
-              fontSize: '0.8125rem',
-              border: '1px solid var(--color-border)',
-              borderRadius: '0.5rem',
-              color: typeFilter !== 'all' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-              background: typeFilter !== 'all' ? 'var(--color-brand-50)' : 'var(--color-bg)',
-              cursor: 'pointer',
-            }}
-          >
-            <option value="all">All Types</option>
-            <option value="small_task">Small Task</option>
-            <option value="large_task">Large Task</option>
-          </select>
+          <div className="hidden sm:block">
+            <Select
+              value={categoryFilter}
+              onChange={e => setCategoryFilter(e.target.value)}
+              aria-label="Category filter"
+              highlightActive
+              options={[
+                { value: 'all',         label: 'All Categories' },
+                { value: 'design',      label: 'Design'         },
+                { value: 'development', label: 'Development'    },
+                { value: 'strategy',    label: 'Strategy'       },
+                { value: 'content',     label: 'Content'        },
+                { value: 'marketing',   label: 'Marketing'      },
+                { value: 'other',       label: 'Other'          },
+              ]}
+            />
+          </div>
+          <div className="hidden sm:block">
+            <Select
+              value={typeFilter}
+              onChange={e => setTypeFilter(e.target.value)}
+              aria-label="Type filter"
+              highlightActive
+              options={[
+                { value: 'all',        label: 'All Types'  },
+                { value: 'small_task', label: 'Small Task' },
+                { value: 'large_task', label: 'Large Task' },
+              ]}
+            />
+          </div>
 
           <div className="flex-1" />
 
           {/* View toggle */}
-          <div
-            className="flex items-center overflow-hidden flex-shrink-0"
-            style={{ border: '1px solid var(--color-border)', borderRadius: '0.5rem' }}
-          >
-            <button
-              onClick={() => setView('list')}
-              className="flex items-center justify-center transition-colors"
-              style={{
-                padding: '0.5rem',
-                background: view === 'list' ? 'var(--color-brand)' : 'var(--color-bg)',
-                color: view === 'list' ? 'white' : 'var(--color-text-muted)',
-                cursor: 'pointer',
-                border: 'none',
-              }}
-              aria-label="List view"
-            >
-              <LayoutList className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setView('board')}
-              className="flex items-center justify-center transition-colors"
-              style={{
-                padding: '0.5rem',
-                background: view === 'board' ? 'var(--color-brand)' : 'var(--color-bg)',
-                color: view === 'board' ? 'white' : 'var(--color-text-muted)',
-                border: 'none',
-                borderLeft: '1px solid var(--color-border)',
-                cursor: 'pointer',
-              }}
-              aria-label="Board view"
-            >
-              <Columns3 className="w-4 h-4" />
-            </button>
-            {isAdmin && (
-              <button
-                onClick={() => setView('workload')}
-                className="flex items-center justify-center transition-colors"
-                style={{
-                  padding: '0.5rem',
-                  background: view === 'workload' ? 'var(--color-brand)' : 'var(--color-bg)',
-                  color: view === 'workload' ? 'white' : 'var(--color-text-muted)',
-                  border: 'none',
-                  borderLeft: '1px solid var(--color-border)',
-                  cursor: 'pointer',
-                }}
-                aria-label="Workload view"
-              >
-                <BarChart3 className="w-4 h-4" />
-              </button>
-            )}
-          </div>
+          <ViewToggle
+            value={view}
+            onChange={v => setView(v)}
+            options={
+              isAdmin
+                ? [
+                    { value: 'list',     icon: LayoutList, label: 'List view'     },
+                    { value: 'board',    icon: Columns3,   label: 'Board view'    },
+                    { value: 'workload', icon: BarChart3,  label: 'Workload view' },
+                  ]
+                : [
+                    { value: 'list',  icon: LayoutList, label: 'List view'  },
+                    { value: 'board', icon: Columns3,   label: 'Board view' },
+                  ]
+            }
+          />
         </div>
 
         {/* Tabs */}
