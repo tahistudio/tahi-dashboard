@@ -91,7 +91,7 @@ interface TaskTemplate {
 const TASK_STATUS_CONFIG: Record<string, { label: string; dot: string; bg: string; text: string; border: string }> = {
   todo:        { label: 'To Do',       dot: 'var(--status-submitted-dot)',    bg: 'var(--status-submitted-bg)',    text: 'var(--status-submitted-text)',    border: 'var(--status-submitted-border)'    },
   in_progress: { label: 'In Progress', dot: 'var(--status-in-progress-dot)', bg: 'var(--status-in-progress-bg)', text: 'var(--status-in-progress-text)', border: 'var(--status-in-progress-border)' },
-  blocked:     { label: 'Blocked',     dot: 'var(--color-danger)',            bg: 'var(--color-danger-bg)',        text: 'var(--color-danger)',             border: 'var(--color-danger)'              },
+  blocked:     { label: 'Blocked',     dot: 'var(--status-in-review-dot)',    bg: 'var(--status-in-review-bg)',    text: 'var(--status-in-review-text)',    border: 'var(--status-in-review-border)'    },
   done:        { label: 'Done',        dot: 'var(--status-delivered-dot)',    bg: 'var(--status-delivered-bg)',    text: 'var(--status-delivered-text)',    border: 'var(--status-delivered-border)'    },
 }
 

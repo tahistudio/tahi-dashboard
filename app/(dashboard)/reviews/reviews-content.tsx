@@ -786,11 +786,11 @@ function LoadingSkeleton() {
           }}
         >
           <div className="flex-1 min-w-0">
-            <div className="animate-pulse" style={{ width: '10rem', height: '0.875rem', background: '#f3f4f6', borderRadius: '0.25rem', marginBottom: '0.25rem' }} />
-            <div className="animate-pulse" style={{ width: '5rem', height: '0.75rem', background: '#f3f4f6', borderRadius: '0.25rem' }} />
+            <div className="animate-pulse" style={{ width: '10rem', height: '0.875rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem', marginBottom: '0.25rem' }} />
+            <div className="animate-pulse" style={{ width: '5rem', height: '0.75rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }} />
           </div>
-          <div className="animate-pulse" style={{ width: '2.5rem', height: '0.875rem', background: '#f3f4f6', borderRadius: '0.25rem' }} />
-          <div className="animate-pulse" style={{ width: '5rem', height: '1.25rem', background: '#f3f4f6', borderRadius: '9999px' }} />
+          <div className="animate-pulse" style={{ width: '2.5rem', height: '0.875rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }} />
+          <div className="animate-pulse" style={{ width: '5rem', height: '1.25rem', background: 'var(--color-bg-tertiary)', borderRadius: '9999px' }} />
         </div>
       ))}
     </div>

@@ -185,7 +185,7 @@ export function AIDailyBriefing() {
             }}
             onMouseEnter={e => {
               if (!generating) {
-                e.currentTarget.style.background = '#3d6333'
+                e.currentTarget.style.background = 'var(--color-brand-dark)'
                 e.currentTarget.style.boxShadow = '0 4px 14px rgba(90,130,78,0.4)'
                 e.currentTarget.style.transform = 'translateY(-1px)'
               }

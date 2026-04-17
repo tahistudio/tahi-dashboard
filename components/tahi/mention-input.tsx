@@ -6,9 +6,9 @@ import { useMentions, type MentionPerson } from '@/lib/use-mentions'
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const BRAND_HEX = 'var(--color-brand)'
-const TEXT_PRIMARY = '#121A0F'
-const TEXT_MUTED = '#5a6657'
-const TEXT_SUBTLE = '#8a9987'
+const TEXT_PRIMARY = 'var(--color-text)'
+const TEXT_MUTED = 'var(--color-text-muted)'
+const TEXT_SUBTLE = 'var(--color-text-subtle)'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -102,8 +102,8 @@ function PersonAvatar({ person }: { person: MentionPerson }) {
         height: '1.75rem',
         borderRadius: '0 0.5rem 0 0.5rem',
         background: person.type === 'team_member'
-          ? 'var(--color-brand-50, #f0f7ee)'
-          : 'var(--color-bg-tertiary, #eef3ec)',
+          ? 'var(--color-brand-50)'
+          : 'var(--color-bg-tertiary)',
         color: person.type === 'team_member' ? BRAND_HEX : TEXT_MUTED,
         display: 'flex',
         alignItems: 'center',
@@ -133,8 +133,8 @@ function TypeBadge({ type }: { type: 'team_member' | 'contact' }) {
         padding: '0.0625rem 0.375rem',
         borderRadius: '0.25rem',
         background: isTeam
-          ? 'var(--color-brand-50, #f0f7ee)'
-          : 'var(--color-bg-tertiary, #eef3ec)',
+          ? 'var(--color-brand-50)'
+          : 'var(--color-bg-tertiary)',
         color: isTeam ? BRAND_HEX : TEXT_MUTED,
       }}
     >
@@ -178,7 +178,7 @@ function MentionDropdownItem({
         cursor: 'pointer',
         borderRadius: '0.375rem',
         background: isHighlighted || isHovered
-          ? 'var(--color-bg-secondary, #f7f9f6)'
+          ? 'var(--color-bg-secondary)'
           : 'transparent',
         transition: 'background 0.1s',
       }}
@@ -439,7 +439,7 @@ export function MentionInput({
 
   const borderColor = isFocused
     ? BRAND_HEX
-    : 'var(--color-border, #d4e0d0)'
+    : 'var(--color-border)'
   const boxShadow = isFocused
     ? '0 0 0 0.1875rem rgba(90, 130, 78, 0.12)'
     : 'none'
@@ -457,8 +457,8 @@ export function MentionInput({
           border: '1px solid ' + borderColor,
           borderRadius: '0.5rem',
           background: disabled
-            ? 'var(--color-bg-secondary, #f7f9f6)'
-            : 'var(--color-bg, #ffffff)',
+            ? 'var(--color-bg-secondary)'
+            : 'var(--color-bg)',
           transition: 'border-color 0.15s, box-shadow 0.15s',
           boxShadow,
           opacity: disabled ? 0.6 : 1,
@@ -568,8 +568,8 @@ export function MentionInput({
             left: 0,
             right: 0,
             zIndex: 100,
-            background: 'var(--color-bg, #ffffff)',
-            border: '1px solid var(--color-border, #d4e0d0)',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
             borderRadius: '0.75rem',
             boxShadow: '0 0.5rem 2rem rgba(0, 0, 0, 0.12)',
             overflow: 'hidden',
@@ -594,7 +594,7 @@ export function MentionInput({
                       width: '1.75rem',
                       height: '1.75rem',
                       borderRadius: '0 0.5rem 0 0.5rem',
-                      background: '#f3f4f6',
+                      background: 'var(--color-bg-tertiary)',
                     }}
                   />
                   <div style={{ flex: 1 }}>
@@ -604,7 +604,7 @@ export function MentionInput({
                         height: '0.75rem',
                         width: '60%',
                         borderRadius: '0.25rem',
-                        background: '#f3f4f6',
+                        background: 'var(--color-bg-tertiary)',
                       }}
                     />
                     <div
@@ -613,7 +613,7 @@ export function MentionInput({
                         height: '0.5rem',
                         width: '40%',
                         borderRadius: '0.25rem',
-                        background: '#f3f4f6',
+                        background: 'var(--color-bg-tertiary)',
                         marginTop: '0.375rem',
                       }}
                     />

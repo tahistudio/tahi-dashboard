@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { apiPath } from '@/lib/api'
+import { stageColour } from '@/lib/chart-colors'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import {
   Globe,
@@ -1242,7 +1243,7 @@ function BillingIntervalEditor({ subscription, onUpdated }: { subscription: Subs
       {bundledAddons.length > 0 && (
         <div
           className="rounded-lg p-2.5 mb-2"
-          style={{ background: 'var(--color-brand-50, #f0f7ee)', border: '1px solid var(--color-brand-100, #dcefd8)' }}
+          style={{ background: 'var(--color-brand-50)', border: '1px solid var(--color-brand-100)' }}
         >
           <p className="text-xs font-medium" style={{ color: 'var(--color-brand-dark)' }}>
             {selected === 'quarterly' && 'Includes free SEO Dashboard ($150/mo value)'}
@@ -1505,10 +1506,10 @@ interface InvoiceRow {
 
 const INVOICE_STATUS_STYLES: Record<string, { bg: string; text: string; dot: string }> = {
   draft:       { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)', dot: 'var(--color-text-subtle)' },
-  sent:        { bg: 'var(--color-info-bg, #eff6ff)', text: 'var(--color-info, #60a5fa)', dot: 'var(--color-info, #60a5fa)' },
-  viewed:      { bg: 'var(--color-info-bg, #eff6ff)', text: 'var(--color-info, #60a5fa)', dot: 'var(--color-info, #60a5fa)' },
-  overdue:     { bg: 'var(--color-danger-bg, #fef2f2)', text: 'var(--color-danger, #f87171)', dot: 'var(--color-danger, #f87171)' },
-  paid:        { bg: 'var(--color-success-bg, #f0fdf4)', text: 'var(--color-success, #4ade80)', dot: 'var(--color-success, #4ade80)' },
+  sent:        { bg: 'var(--color-info-bg)', text: 'var(--color-info)', dot: 'var(--color-info)' },
+  viewed:      { bg: 'var(--color-info-bg)', text: 'var(--color-info)', dot: 'var(--color-info)' },
+  overdue:     { bg: 'var(--color-danger-bg)', text: 'var(--color-danger)', dot: 'var(--color-danger)' },
+  paid:        { bg: 'var(--color-success-bg)', text: 'var(--color-success)', dot: 'var(--color-success)' },
   written_off: { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)', dot: 'var(--color-text-subtle)' },
 }
 
@@ -1749,7 +1750,7 @@ function ContactsTab({
           </div>
 
           {formError && (
-            <div aria-live="polite" className="text-sm text-[var(--color-danger)] bg-[var(--color-danger-bg,#fef2f2)] border border-[var(--color-danger)] rounded-lg px-3 py-2 mb-3">
+            <div aria-live="polite" className="text-sm text-[var(--color-danger)] bg-[var(--color-danger-bg)] border border-[var(--color-danger)] rounded-lg px-3 py-2 mb-3">
               {formError}
             </div>
           )}
@@ -1815,7 +1816,7 @@ function ContactsTab({
                     <span className={cn(
                       'inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full',
                       contact.clerkUserId
-                        ? 'bg-[var(--color-success-bg,#f0fdf4)] text-[var(--color-success,#4ade80)]'
+                        ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
                         : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-subtle)]'
                     )}>
                       <span className={cn('w-1.5 h-1.5 rounded-full', contact.clerkUserId ? 'bg-emerald-400' : 'bg-[var(--color-border)]')} />
@@ -1971,8 +1972,8 @@ function TrackQueueTab({ clientId }: { clientId: string }) {
       <div className="space-y-4">
         {[1, 2].map(i => (
           <div key={i} className="animate-pulse bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-6">
-            <div className="h-5 w-32 rounded" style={{ background: '#f3f4f6' }} />
-            <div className="mt-4 h-16 rounded" style={{ background: '#f3f4f6' }} />
+            <div className="h-5 w-32 rounded" style={{ background: 'var(--color-bg-tertiary)' }} />
+            <div className="mt-4 h-16 rounded" style={{ background: 'var(--color-bg-tertiary)' }} />
           </div>
         ))}
       </div>
@@ -2485,7 +2486,7 @@ function BrandsTab({ clientId }: { clientId: string }) {
                     padding: '0.25rem 0',
                     color: 'var(--color-text-subtle)',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-danger, #f87171)' }}
+                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-danger)' }}
                   onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-subtle)' }}
                 >
                   {deletingId === brand.id ? (
@@ -2527,9 +2528,9 @@ const CONTRACT_TYPE_LABELS: Record<string, string> = {
 
 const CONTRACT_STATUS_STYLES: Record<string, { bg: string; text: string }> = {
   draft:     { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)' },
-  sent:      { bg: 'var(--color-info-bg, #eff6ff)', text: 'var(--color-info, #60a5fa)' },
-  signed:    { bg: 'var(--color-success-bg, #f0fdf4)', text: 'var(--color-success, #4ade80)' },
-  expired:   { bg: 'var(--color-danger-bg, #fef2f2)', text: 'var(--color-danger, #f87171)' },
+  sent:      { bg: 'var(--color-info-bg)', text: 'var(--color-info)' },
+  signed:    { bg: 'var(--color-success-bg)', text: 'var(--color-success)' },
+  expired:   { bg: 'var(--color-danger-bg)', text: 'var(--color-danger)' },
   cancelled: { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-subtle)' },
 }
 
@@ -2650,10 +2651,10 @@ interface ScheduledCallRow {
 }
 
 const CALL_STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
-  scheduled:  { bg: 'var(--color-info-bg, #eff6ff)',    color: 'var(--color-info, #60a5fa)',    label: 'Scheduled' },
-  completed:  { bg: 'var(--color-success-bg, #f0fdf4)', color: 'var(--color-success, #4ade80)', label: 'Completed' },
+  scheduled:  { bg: 'var(--color-info-bg)',    color: 'var(--color-info)',    label: 'Scheduled' },
+  completed:  { bg: 'var(--color-success-bg)', color: 'var(--color-success)', label: 'Completed' },
   cancelled:  { bg: 'var(--color-bg-tertiary)',          color: 'var(--color-text-muted)',        label: 'Cancelled' },
-  no_show:    { bg: 'var(--color-danger-bg, #fef2f2)',   color: 'var(--color-danger, #f87171)',   label: 'No Show' },
+  no_show:    { bg: 'var(--color-danger-bg)',   color: 'var(--color-danger)',   label: 'No Show' },
 }
 
 function CallsTab({ clientId, orgName }: { clientId: string; orgName: string }) {
@@ -2988,7 +2989,7 @@ function TimeTab({ clientId }: { clientId: string }) {
             Total: <strong className="text-[var(--color-text)]">{totalHours.toFixed(1)}h</strong>
           </span>
           <span className="text-[var(--color-text-muted)]">
-            Billable: <strong style={{ color: '#16a34a' }}>{billableHours.toFixed(1)}h</strong>
+            Billable: <strong style={{ color: 'var(--color-brand)' }}>{billableHours.toFixed(1)}h</strong>
           </span>
         </div>
       </div>
@@ -3029,8 +3030,8 @@ function TimeTab({ clientId }: { clientId: string }) {
                     <span
                       className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
                       style={{
-                        background: entry.billable ? 'var(--color-success-bg, #f0fdf4)' : 'var(--color-bg-tertiary)',
-                        color: entry.billable ? 'var(--color-success, #4ade80)' : 'var(--color-text-muted)',
+                        background: entry.billable ? 'var(--color-success-bg)' : 'var(--color-bg-tertiary)',
+                        color: entry.billable ? 'var(--color-success)' : 'var(--color-text-muted)',
                       }}
                     >
                       {entry.billable ? 'Yes' : 'No'}
@@ -3074,7 +3075,7 @@ interface DealRow {
   contactCount: number
 }
 
-const DEAL_STAGE_FALLBACK = { bg: '#f3f4f6', text: '#374151' }
+const DEAL_STAGE_FALLBACK = { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text)' }
 
 function DealsTab({ clientId, orgName }: { clientId: string; orgName: string }) {
   const [deals, setDeals] = useState<DealRow[]>([])
@@ -3125,8 +3126,10 @@ function DealsTab({ clientId, orgName }: { clientId: string; orgName: string }) 
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {deals.map(deal => {
-            const stageColor = deal.stageColour ?? DEAL_STAGE_FALLBACK.text
+          {deals.map((deal, i) => {
+            // Use shared stageColour() so a deal's stage chip matches the
+            // Pipeline board and the Reports charts for the same stage.
+            const stageColor = stageColour(deal.stageName, i)
             const isWon = deal.stageIsClosedWon === 1
             const isLost = deal.stageIsClosedLost === 1
             return (
@@ -3143,8 +3146,8 @@ function DealsTab({ clientId, orgName }: { clientId: string; orgName: string }) 
                   <span
                     className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0"
                     style={{
-                      background: isWon ? '#f0fdf4' : isLost ? '#fef2f2' : `${stageColor}18`,
-                      color: isWon ? '#16a34a' : isLost ? '#dc2626' : stageColor,
+                      background: isWon ? 'var(--color-success-bg)' : isLost ? 'var(--color-danger-bg)' : `${stageColor}18`,
+                      color: isWon ? 'var(--color-brand)' : isLost ? 'var(--color-danger)' : stageColor,
                     }}
                   >
                     {deal.stageName ?? 'Unknown'}
@@ -3202,15 +3205,18 @@ interface CrmActivityRow {
   createdByName: string | null
 }
 
+// Activity types are categorical, not semantic statuses.
+// Using the --status-* tokens for their distinct palette (blue / teal /
+// purple / brand) without triggering "warning"/"danger" perception.
 const ACTIVITY_TYPE_ICONS: Record<string, { icon: typeof Phone; color: string; bg: string }> = {
-  call:    { icon: Phone,          color: '#3b82f6', bg: '#eff6ff' },
-  meeting: { icon: Video,          color: '#8b5cf6', bg: '#f5f3ff' },
-  email:   { icon: Mail,           color: '#f59e0b', bg: '#fffbeb' },
-  note:    { icon: FileText,       color: '#6b7280', bg: '#f9fafb' },
-  task:    { icon: Check,          color: '#16a34a', bg: '#f0fdf4' },
+  call:    { icon: Phone,          color: 'var(--status-submitted-text)',    bg: 'var(--status-submitted-bg)'    }, // blue
+  meeting: { icon: Video,          color: 'var(--status-client-review-text)',bg: 'var(--status-client-review-bg)' }, // purple
+  email:   { icon: Mail,           color: 'var(--status-in-progress-text)',  bg: 'var(--status-in-progress-bg)'  }, // teal
+  note:    { icon: FileText,       color: 'var(--color-text-muted)',         bg: 'var(--color-bg-secondary)'     }, // muted
+  task:    { icon: Check,          color: 'var(--color-brand)',              bg: 'var(--color-brand-50)'         }, // brand green
 }
 
-const ACTIVITY_TYPE_FALLBACK = { icon: Activity, color: '#6b7280', bg: '#f9fafb' }
+const ACTIVITY_TYPE_FALLBACK = { icon: Activity, color: 'var(--color-text-muted)', bg: 'var(--color-bg-secondary)' }
 
 function CrmActivitiesTab({ clientId }: { clientId: string }) {
   const [items, setItems] = useState<CrmActivityRow[]>([])
@@ -3447,39 +3453,39 @@ function RevenueTab({ clientId }: { clientId: string }) {
       detail: `${invoices.length} invoices`,
       icon: DollarSign,
       color: 'var(--color-brand)',
-      bg: 'var(--color-brand-50, #f0f7ee)',
+      bg: 'var(--color-brand-50)',
     },
     {
       label: 'Total Paid',
       value: `$${totalPaid.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
       detail: `${paidInvoices.length} paid`,
       icon: Check,
-      color: '#16a34a',
-      bg: '#f0fdf4',
+      color: 'var(--color-brand)',
+      bg: 'var(--color-success-bg)',
     },
     {
       label: 'Outstanding',
       value: `$${totalOutstanding.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
       detail: `${outstandingInvoices.length} unpaid`,
       icon: AlertTriangle,
-      color: totalOutstanding > 0 ? '#f59e0b' : '#6b7280',
-      bg: totalOutstanding > 0 ? '#fffbeb' : '#f9fafb',
+      color: totalOutstanding > 0 ? 'var(--color-warning)' : 'var(--color-text-muted)',
+      bg: totalOutstanding > 0 ? 'var(--color-warning-bg)' : 'var(--color-bg-secondary)',
     },
     {
       label: 'Billable Hours',
       value: `${billableHours.toFixed(1)}h`,
       detail: `${totalHours.toFixed(1)}h total`,
       icon: Clock,
-      color: '#3b82f6',
-      bg: '#eff6ff',
+      color: 'var(--color-info)',
+      bg: 'var(--color-info-bg)',
     },
     {
       label: 'Estimated Time Cost',
       value: `$${estimatedTimeCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
       detail: `at $${HOURLY_RATE}/hr`,
       icon: TrendingUp,
-      color: '#8b5cf6',
-      bg: '#f5f3ff',
+      color: 'var(--status-client-review-text)',
+      bg: 'var(--status-client-review-bg)',
     },
     {
       label: 'Lifetime Value (LTV)',
@@ -3487,7 +3493,7 @@ function RevenueTab({ clientId }: { clientId: string }) {
       detail: 'paid + outstanding',
       icon: TrendingUp,
       color: 'var(--color-brand)',
-      bg: 'var(--color-brand-50, #f0f7ee)',
+      bg: 'var(--color-brand-50)',
     },
   ]
 
@@ -3653,9 +3659,9 @@ function ProfitabilityTab({ clientId }: { clientId: string }) {
   }
 
   const nzd = (n: number) => new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD', maximumFractionDigits: 0 }).format(n)
-  const marginColour = data.marginPct >= 50 ? '#16a34a'
-    : data.marginPct >= 25 ? '#f59e0b'
-    : '#dc2626'
+  const marginColour = data.marginPct >= 50 ? 'var(--color-brand)'
+    : data.marginPct >= 25 ? 'var(--color-warning)'
+    : 'var(--color-danger)'
 
   return (
     <div className="space-y-6">

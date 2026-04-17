@@ -29,8 +29,8 @@ const ACCENTS = {
   'brand-soft': { bg: 'var(--color-brand-50)',  color: 'var(--color-brand-light)' },
   'brand-dark': { bg: 'var(--color-brand-200)', color: 'var(--color-brand-dark)' },
 
-  amber:   { bg: '#fef3c7', color: '#b45309' },
-  red:     { bg: '#fee2e2', color: '#b91c1c' },
+  amber:   { bg: 'var(--color-warning-bg)', color: 'var(--color-warning)' },
+  red:     { bg: 'var(--color-danger-bg)',  color: 'var(--color-danger)' },
   neutral: { bg: 'var(--color-bg-tertiary)', color: 'var(--color-text-subtle)' },
 
   // Legacy aliases
@@ -1167,7 +1167,7 @@ function QuickBtn({
       }
       onMouseEnter={e => {
         if (primary) {
-          e.currentTarget.style.background = '#3d6333'
+          e.currentTarget.style.background = 'var(--color-brand-dark)'
           e.currentTarget.style.boxShadow = '0 4px 14px rgba(90,130,78,0.4)'
           e.currentTarget.style.transform = 'translateY(-1px)'
         } else {

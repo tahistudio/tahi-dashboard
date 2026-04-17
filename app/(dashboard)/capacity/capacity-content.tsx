@@ -10,6 +10,7 @@ import {
   ResponsiveContainer, Legend,
 } from 'recharts'
 import { apiPath } from '@/lib/api'
+import { CHART } from '@/lib/chart-colors'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 
@@ -334,7 +335,7 @@ export function CapacityContent() {
         {timelineData.length > 0 ? (
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={timelineData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" />
+              <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
               <XAxis dataKey="week" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} unit="h" />
               <Tooltip
@@ -342,9 +343,9 @@ export function CapacityContent() {
                 formatter={(value: number, name: string) => [`${value} hrs/wk`, name]}
               />
               <Legend wrapperStyle={{ fontSize: '0.75rem' }} />
-              <Line type="monotone" dataKey="total" stroke="#5A824E" strokeWidth={2} name="Total Capacity" dot={false} />
-              <Line type="monotone" dataKey="committed" stroke="#60a5fa" strokeWidth={2} name="Committed" dot={false} />
-              <Line type="monotone" dataKey="forecasted" stroke="#fbbf24" strokeWidth={2} strokeDasharray="5 5" name="Committed + Pipeline" dot={false} />
+              <Line type="monotone" dataKey="total" stroke={CHART.positive} strokeWidth={2} name="Total Capacity" dot={false} />
+              <Line type="monotone" dataKey="committed" stroke={CHART.categorical[1]} strokeWidth={2} name="Committed" dot={false} />
+              <Line type="monotone" dataKey="forecasted" stroke={CHART.categorical[2]} strokeWidth={2} strokeDasharray="5 5" name="Committed + Pipeline" dot={false} />
             </LineChart>
           </ResponsiveContainer>
         ) : (
@@ -423,7 +424,7 @@ export function CapacityContent() {
             const dealHrs = parseFloat(callHours) || 0
             const newUtilization = totalCapacity > 0 ? Math.round(((committedHours + dealHrs) / totalCapacity) * 100) : 0
             return (
-              <div className="mt-3" style={{ padding: '0.75rem 1rem', background: callResult.availableHoursPerWeek >= dealHrs ? 'var(--color-brand-50, #f0f7ee)' : '#fef2f2', borderRadius: 'var(--radius-button)' }}>
+              <div className="mt-3" style={{ padding: '0.75rem 1rem', background: callResult.availableHoursPerWeek >= dealHrs ? 'var(--color-brand-50)' : 'var(--color-danger-bg)', borderRadius: 'var(--radius-button)' }}>
                 {callResult.earliestDate ? (
                   <div>
                     <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
@@ -450,11 +451,11 @@ export function CapacityContent() {
 // ── KPI Card ─────────────────────────────────────────────────────────────────
 
 const ACCENT_COLORS: Record<string, { bg: string; color: string }> = {
-  emerald: { bg: '#d1fae5', color: '#059669' },
-  blue:    { bg: '#dbeafe', color: '#2563eb' },
-  amber:   { bg: '#fef3c7', color: '#d97706' },
-  violet:  { bg: '#ede9fe', color: '#7c3aed' },
-  red:     { bg: '#fef2f2', color: '#dc2626' },
+  emerald: { bg: 'var(--color-brand-50)',              color: 'var(--color-brand)'                  },
+  blue:    { bg: 'var(--status-submitted-bg)',         color: 'var(--status-submitted-text)'        },
+  amber:   { bg: 'var(--color-warning-bg)',            color: 'var(--color-warning)'                },
+  violet:  { bg: 'var(--status-client-review-bg)',     color: 'var(--status-client-review-text)'    },
+  red:     { bg: 'var(--color-danger-bg)',             color: 'var(--color-danger)'                 },
 }
 
 function CapacityKPI({ icon: Icon, label, value, accent }: { icon: typeof Users; label: string; value: string; accent: string }) {

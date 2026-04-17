@@ -152,7 +152,7 @@ function AddMemberModal({
               className="text-sm px-3 py-2 rounded-lg"
               role="alert"
               aria-live="polite"
-              style={{ background: 'var(--color-danger-bg, #fef2f2)', color: 'var(--color-danger, #f87171)' }}
+              style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}
             >
               {error}
             </div>
@@ -372,7 +372,7 @@ function EditMemberModal({
               className="text-sm px-3 py-2 rounded-lg"
               role="alert"
               aria-live="polite"
-              style={{ background: 'var(--color-danger-bg, #fef2f2)', color: 'var(--color-danger, #f87171)' }}
+              style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}
             >
               {error}
             </div>
@@ -913,12 +913,12 @@ export function TeamContent() {
         <div
           className="flex items-center justify-between px-4 py-3 rounded-xl border"
           style={{
-            background: 'var(--color-info-bg, #eff6ff)',
-            borderColor: 'var(--color-info, #60a5fa)',
+            background: 'var(--color-info-bg)',
+            borderColor: 'var(--color-info)',
           }}
         >
           <div className="flex items-center gap-3">
-            <Link2 className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--color-info, #60a5fa)' }} />
+            <Link2 className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--color-info)' }} />
             <div>
               <p className="text-sm font-medium text-[var(--color-text)]">
                 You are not listed as a team member

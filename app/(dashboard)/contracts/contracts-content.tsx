@@ -49,10 +49,10 @@ const TYPE_LABELS: Record<string, string> = {
 
 const STATUS_STYLES: Record<string, { bg: string; color: string }> = {
   draft: { bg: 'var(--color-bg-tertiary)', color: 'var(--color-text-muted)' },
-  sent: { bg: 'var(--color-info-bg, #eff6ff)', color: 'var(--color-info, #60a5fa)' },
-  signed: { bg: 'var(--color-success-bg, #f0fdf4)', color: 'var(--color-success, #4ade80)' },
-  expired: { bg: 'var(--color-warning-bg, #fff7ed)', color: 'var(--color-warning, #fb923c)' },
-  cancelled: { bg: 'var(--color-danger-bg, #fef2f2)', color: 'var(--color-danger, #f87171)' },
+  sent: { bg: 'var(--color-info-bg)', color: 'var(--color-info)' },
+  signed: { bg: 'var(--color-success-bg)', color: 'var(--color-success)' },
+  expired: { bg: 'var(--color-warning-bg)', color: 'var(--color-warning)' },
+  cancelled: { bg: 'var(--color-danger-bg)', color: 'var(--color-danger)' },
 }
 
 function formatDate(iso: string | null): string {
@@ -162,7 +162,7 @@ function CreateContractDialog({
             <div
               className="text-sm px-3 py-2 rounded-lg"
               role="alert"
-              style={{ background: 'var(--color-danger-bg, #fef2f2)', color: 'var(--color-danger, #f87171)' }}
+              style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}
             >
               {error}
             </div>

@@ -1002,10 +1002,10 @@ const PRIORITY_OPTIONS = [
 ]
 
 const PRIORITY_STYLES: Record<string, { bg: string; text: string }> = {
-  low:    { bg: '#dbeafe', text: '#2563eb' },
-  medium: { bg: '#fef3c7', text: '#d97706' },
-  high:   { bg: '#fee2e2', text: '#dc2626' },
-  urgent: { bg: '#fce7f3', text: '#be185d' },
+  low:    { bg: 'var(--status-submitted-bg)', text: 'var(--status-submitted-text)' },
+  medium: { bg: 'var(--status-in-review-bg)', text: 'var(--status-in-review-text)' },
+  high:   { bg: 'var(--priority-high-bg)', text: 'var(--color-danger)' },
+  urgent: { bg: 'var(--priority-urgent-bg)', text: 'var(--priority-urgent-text)' },
 }
 
 function TaskTemplatesSection() {
@@ -1645,7 +1645,7 @@ function PipelineStagesSection() {
           )}
 
           {dirty && !showAdd && (
-            <p className="text-xs text-[var(--color-warning, #fb923c)]">
+            <p className="text-xs text-[var(--color-warning)]">
               You have unsaved changes. Click &quot;Save Changes&quot; to apply.
             </p>
           )}
@@ -1908,9 +1908,9 @@ function KanbanColumnsSection() {
             <div
               className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm"
               style={{
-                background: 'var(--color-info-bg, #eff6ff)',
-                color: 'var(--color-info, #60a5fa)',
-                border: '1px solid var(--color-info, #60a5fa)',
+                background: 'var(--color-info-bg)',
+                color: 'var(--color-info)',
+                border: '1px solid var(--color-info)',
               }}
             >
               This client has no custom columns. Showing global defaults. Add a column below to create a client-specific override.
@@ -2275,7 +2275,7 @@ function InlineEditText({
 // ── Branding Section (T277) ─────────────────────────────────────────────────
 
 const COLOR_PRESETS = [
-  '#5A824E', '#2563eb', '#7c3aed', '#dc2626', '#d97706',
+  '#5A824E', 'var(--status-submitted-text)', '#7c3aed', 'var(--color-danger)', 'var(--status-in-review-text)',
   '#059669', '#0d9488', '#db2777', '#6366f1', '#1e293b',
 ]
 

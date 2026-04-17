@@ -212,18 +212,29 @@ Things noticed but not currently being worked on. Fix during the right page's re
 - [ ] 9 remaining skeleton mismatches in Reports (smaller, lower priority)
 - [ ] Pipeline loading skeleton always shows 4 cols regardless of stage count
 
-### Site-wide colour sweep (#1 priority, in progress)
-User requested colour consistency as the top priority before more spacing work. Progress:
+### Site-wide colour sweep (COMPLETE)
 - [x] One red across the system (`--color-danger`, `--color-danger-dot`)
-- [x] Unified stage colours: Deals by Stage, Sales Funnel, Stage Velocity, Pipeline board, Pipeline list
-- [x] Unified source colours: Sources by Revenue, Deals by Source, Close Rate by Source
-- [x] Shared `lib/chart-colors.ts` module
-- [ ] Sweep Overview KPI badges and status dots
-- [ ] Sweep Tasks page (priority dots, category chips)
-- [ ] Sweep Clients list (health status, plan badges)
-- [ ] Sweep Invoices (status colours, aging)
-- [ ] Sweep Team + Capacity (utilization bars)
-- [ ] Audit every `#` hex literal in `components/` and `app/(dashboard)/` → move to tokens or `chart-colors`
+- [x] Unified stage colours: Deals by Stage, Sales Funnel, Stage Velocity, Pipeline board, Pipeline list, Clients → Deals tab
+- [x] Unified source colours: Sources by Revenue, Deals by Source, Close Rate by Source, Pipeline board + list, Deal detail — all via `sourceBadge()` helper
+- [x] Shared `lib/chart-colors.ts` module (CHART, stageColour, sourceColour, stageBadge, sourceBadge, STATUS_COLORS)
+- [x] Overview : accent map uses `--color-warning`/`--color-danger` tokens; utilisation thresholds at >90 / 70 / brand
+- [x] Tasks : "Blocked" moved from danger (red) to in-review (amber) — red fatigue avoided. Task detail matches.
+- [x] Requests list : utilisation bar now has >100 danger / >75 warning / brand tiers
+- [x] Request detail : file icons all muted (removed red PDF / purple image), warning bg uses token
+- [x] Clients detail : stripped 40+ stale `var(--color-x, #hex)` fallbacks, activity types repalette (email from warning→teal, strategy category neutralised), deal chips use `stageColour()`, margin thresholds brand/warning/danger
+- [x] Clients brands + contacts detail : skeleton bg → token, activity styles match client-detail
+- [x] Invoices list : Xero/Stripe brand colours preserved (vendor identity). Invoice detail : danger button border uses `--color-danger`
+- [x] Team + Capacity : chart greys → CHART.grid, capacity lines use CHART palette, ACCENT_COLORS repalette to status tokens
+- [x] Billing + Contracts + Reviews + Services + Messages + Settings + Automations : stripped all stale var() fallbacks + swapped hardcoded hex to tokens
+- [x] Components/tahi : ai-task-wizard (categories neutralised, priorities aligned with priority-* tokens), announcement-banner (warning amber, success brand green), mention-input (text tokens), org-chart (departments neutralised), tahi-button (brand-dark hover), track-capacity-card (purple token), ai-briefing-card (brand-dark hover)
+- [x] Red reserved for: `--color-danger` (danger, overdue, lost, scope-flagged, overcap >100%, priority-high), never for: blocked tasks, strategy category, file icons, stalled deals, PDFs
+
+Remaining hex literals are all legitimate:
+- Xero `#13b5ea` / Stripe `#635bff` / Webflow `#4353ff` — vendor brand identity
+- Pipeline stage fallback data (position + colour stored as DB-shape literals, aligned with `stageColour()`)
+- Settings portal-primary-color picker swatches — user-selectable palette
+- Sidebar always-dark tokens (per CLAUDE.md)
+- `#ffffff` / `#5A824E` literals in forms — user data defaults, not design tokens
 
 ---
 

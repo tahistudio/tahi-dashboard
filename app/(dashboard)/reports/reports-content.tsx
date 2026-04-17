@@ -539,10 +539,10 @@ interface AgingData {
 }
 
 const AGING_BUCKETS = [
-  { key: 'current' as const, label: 'Current (0-30d)', color: CHART.aging.current, bgColor: '#f0f7ee' },
-  { key: 'thirtyDays' as const, label: '30-60 days', color: CHART.aging.thirtyDays, bgColor: '#fffbeb' },
-  { key: 'sixtyDays' as const, label: '60-90 days', color: CHART.aging.sixtyDays, bgColor: '#fff7ed' },
-  { key: 'ninetyPlus' as const, label: '90+ days', color: CHART.aging.ninetyPlus, bgColor: '#fef2f2' },
+  { key: 'current' as const,    label: 'Current (0-30d)', color: CHART.aging.current,    bgColor: 'var(--color-brand-50)'         },
+  { key: 'thirtyDays' as const, label: '30-60 days',      color: CHART.aging.thirtyDays, bgColor: 'var(--status-in-review-bg)'    },
+  { key: 'sixtyDays' as const,  label: '60-90 days',      color: CHART.aging.sixtyDays,  bgColor: 'var(--color-warning-bg)'       },
+  { key: 'ninetyPlus' as const, label: '90+ days',        color: CHART.aging.ninetyPlus, bgColor: 'var(--color-danger-bg)'        },
 ]
 
 function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProps) {
@@ -1026,8 +1026,8 @@ function FinancialOutstandingCard({ value, isPositive }: { value: string; isPosi
             width: '2.75rem',
             height: '2.75rem',
             borderRadius: 'var(--radius-leaf-sm)',
-            background: isPositive ? '#fef2f2' : '#ede9fe',
-            color: isPositive ? '#dc2626' : '#7c3aed',
+            background: isPositive ? 'var(--color-danger-bg)' : 'var(--status-client-review-bg)',
+            color: isPositive ? 'var(--color-danger)' : 'var(--status-client-review-text)',
           }}
         >
           <AlertTriangle className="w-5 h-5" aria-hidden="true" />
@@ -1036,7 +1036,7 @@ function FinancialOutstandingCard({ value, isPositive }: { value: string; isPosi
           <p className="text-xs font-medium text-[var(--color-text-muted)]">Total Outstanding</p>
           <p
             className="text-xl font-bold"
-            style={{ color: isPositive ? '#dc2626' : 'var(--color-text)' }}
+            style={{ color: isPositive ? 'var(--color-danger)' : 'var(--color-text)' }}
           >
             {value}
           </p>

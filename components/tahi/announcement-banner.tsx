@@ -14,10 +14,10 @@ interface PortalAnnouncement {
 }
 
 const TYPE_STYLES: Record<string, { bg: string; text: string; border: string }> = {
-  info: { bg: 'var(--color-brand)', text: '#ffffff', border: 'var(--color-brand-dark)' },
-  warning: { bg: '#f97316', text: '#ffffff', border: '#ea580c' },
-  success: { bg: '#22c55e', text: '#ffffff', border: '#16a34a' },
-  maintenance: { bg: '#6b7280', text: '#ffffff', border: '#4b5563' },
+  info:        { bg: 'var(--color-brand)',   text: '#ffffff', border: 'var(--color-brand-dark)' },
+  warning:     { bg: 'var(--color-warning)', text: '#ffffff', border: 'var(--color-warning)'    },
+  success:     { bg: 'var(--color-brand)',   text: '#ffffff', border: 'var(--color-brand-dark)' },
+  maintenance: { bg: 'var(--color-text-muted)', text: '#ffffff', border: 'var(--color-text)'    },
 }
 
 const DISMISSED_KEY = 'tahi-dismissed-announcements'

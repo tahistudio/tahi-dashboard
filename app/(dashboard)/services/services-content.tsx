@@ -387,8 +387,8 @@ function CouponsSection() {
                         <span
                           className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full"
                           style={{
-                            background: active ? 'var(--color-success-bg, #f0fdf4)' : 'var(--color-bg-tertiary)',
-                            color: active ? 'var(--color-success, #4ade80)' : 'var(--color-text-subtle)',
+                            background: active ? 'var(--color-success-bg)' : 'var(--color-bg-tertiary)',
+                            color: active ? 'var(--color-success)' : 'var(--color-text-subtle)',
                           }}
                         >
                           {expired ? 'Expired' : exhausted ? 'Exhausted' : 'Active'}

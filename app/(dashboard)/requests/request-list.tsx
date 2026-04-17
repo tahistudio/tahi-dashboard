@@ -1322,7 +1322,7 @@ function WorkloadView({ requests }: { requests: Request[] }) {
                     style={{
                       width: `${pct}%`,
                       height: '100%',
-                      background: pct > 75 ? 'var(--color-warning)' : 'var(--color-brand)',
+                      background: pct > 100 ? 'var(--color-danger)' : pct > 75 ? 'var(--color-warning)' : 'var(--color-brand)',
                       borderRadius: '0.25rem',
                       transition: 'width 0.3s',
                     }}

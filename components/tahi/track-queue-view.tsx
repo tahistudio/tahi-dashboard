@@ -79,9 +79,9 @@ function dueDateStyle(dateStr: string | null | undefined): React.CSSProperties {
   try {
     const d = new Date(dateStr)
     const diffDays = Math.ceil((d.getTime() - Date.now()) / 86400000)
-    if (diffDays < 0) return { color: 'var(--color-danger)', background: 'var(--color-danger-bg, #fef2f2)' }
-    if (diffDays <= 3) return { color: 'var(--color-warning)', background: 'var(--color-warning-bg, #fff7ed)' }
-    return { color: 'var(--color-success)', background: 'var(--color-success-bg, #f0fdf4)' }
+    if (diffDays < 0) return { color: 'var(--color-danger)', background: 'var(--color-danger-bg)' }
+    if (diffDays <= 3) return { color: 'var(--color-warning)', background: 'var(--color-warning-bg)' }
+    return { color: 'var(--color-success)', background: 'var(--color-success-bg)' }
   } catch { return {} }
 }
 
@@ -130,7 +130,7 @@ function PriorityConfirmModal({ currentTopTitle, onConfirm, onCancel }: Priority
             width: '2.5rem', height: '2.5rem', flexShrink: 0,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             borderRadius: '0 1rem 0 1rem',
-            background: 'var(--color-warning-bg, #fff7ed)',
+            background: 'var(--color-warning-bg)',
           }}>
             <AlertTriangle size={18} style={{ color: 'var(--color-warning)' }} />
           </div>
@@ -364,7 +364,7 @@ function DraggableQueueItem({
           fontSize: '0.6875rem', fontWeight: 600,
           padding: '0.0625rem 0.375rem',
           borderRadius: 'var(--radius-full)',
-          background: 'var(--color-danger-bg, #fef2f2)',
+          background: 'var(--color-danger-bg)',
           color: 'var(--color-danger)',
           flexShrink: 0,
         }}>

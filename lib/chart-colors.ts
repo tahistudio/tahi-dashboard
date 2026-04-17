@@ -106,6 +106,20 @@ export function sourceColour(source: string | null | undefined, fallbackIndex = 
   return SOURCE_COLOUR_MAP[key] ?? CHART.categorical[fallbackIndex % CHART.categorical.length]
 }
 
+/** Badge style for a source : matching text + subtle tint bg. Used in
+ *  Pipeline list + deal detail so every "Webflow Partner" chip looks the
+ *  same across the app. '18' hex = ~9% alpha. */
+export function sourceBadge(source: string | null | undefined, fallbackIndex = 0): { bg: string; text: string } {
+  const c = sourceColour(source, fallbackIndex)
+  return { bg: `${c}18`, text: c }
+}
+
+/** Same pattern for stages. */
+export function stageBadge(stageName: string | null | undefined, fallbackIndex = 0): { bg: string; text: string } {
+  const c = stageColour(stageName, fallbackIndex)
+  return { bg: `${c}18`, text: c }
+}
+
 // ── Request/deal status colours ──────────────────────────────────────────
 // Match the status tokens in globals.css. One meaning per colour.
 

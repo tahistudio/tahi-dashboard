@@ -155,7 +155,7 @@ export function TrackCapacityCard({
           label="Large Tracks"
           used={largeTracksUsed}
           total={largeTracksTotal}
-          colour="#6366f1"
+          colour="var(--status-client-review-text)"
           available={hasLarge}
           upsellText={!hasLarge && isMaintain ? 'Upgrade to Scale' : (!hasLarge ? 'Add large tracks' : undefined)}
         />

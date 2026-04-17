@@ -42,7 +42,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
               width: '3.5rem',
               height: '3.5rem',
               borderRadius: '0 16px 0 16px',
-              background: 'var(--color-danger-bg, #fef2f2)',
+              background: 'var(--color-danger-bg)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -50,7 +50,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             }}
           >
             <AlertTriangle
-              style={{ width: '1.5rem', height: '1.5rem', color: 'var(--color-danger, #f87171)' }}
+              style={{ width: '1.5rem', height: '1.5rem', color: 'var(--color-danger)' }}
             />
           </div>
           <h2

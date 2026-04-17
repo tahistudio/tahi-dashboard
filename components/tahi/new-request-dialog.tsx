@@ -709,9 +709,9 @@ export function NewRequestDialog({
               {successMessage && (
                 <div style={{
                   fontSize: '0.8125rem',
-                  color: 'var(--color-success, #16a34a)',
-                  background: 'var(--color-success-bg, #f0fdf4)',
-                  border: '1px solid var(--color-success, #4ade80)',
+                  color: 'var(--color-success)',
+                  background: 'var(--color-success-bg)',
+                  border: '1px solid var(--color-success)',
                   borderRadius: 'var(--radius-button)',
                   padding: '0.625rem 0.875rem',
                 }}>

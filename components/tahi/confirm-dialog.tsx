@@ -37,7 +37,7 @@ export function ConfirmDialog({
     }
   }
 
-  const confirmBg = variant === 'danger' ? 'var(--color-danger, #f87171)' : 'var(--color-warning, #fb923c)'
+  const confirmBg = variant === 'danger' ? 'var(--color-danger)' : 'var(--color-warning)'
 
   return (
     <div
@@ -77,14 +77,14 @@ export function ConfirmDialog({
               alignItems: 'center',
               justifyContent: 'center',
               flexShrink: 0,
-              background: variant === 'danger' ? 'var(--color-danger-bg, #fef2f2)' : 'var(--color-warning-bg, #fff7ed)',
+              background: variant === 'danger' ? 'var(--color-danger-bg)' : 'var(--color-warning-bg)',
             }}
           >
             <AlertTriangle
               style={{
                 width: '1.25rem',
                 height: '1.25rem',
-                color: variant === 'danger' ? 'var(--color-danger, #f87171)' : 'var(--color-warning, #fb923c)',
+                color: variant === 'danger' ? 'var(--color-danger)' : 'var(--color-warning)',
               }}
             />
           </div>

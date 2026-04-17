@@ -13,7 +13,7 @@ import {
 import { apiPath } from '@/lib/api'
 import { convertFromNzd } from '@/lib/currency'
 import { Pagination, usePagination } from '@/components/tahi/pagination'
-import { stageColour } from '@/lib/chart-colors'
+import { stageColour, sourceBadge } from '@/lib/chart-colors'
 
 type DisplayCurrency = 'NZD' | 'USD' | 'AUD' | 'GBP' | 'EUR'
 const CURRENCY_OPTIONS: { code: DisplayCurrency; label: string }[] = [
@@ -83,9 +83,9 @@ const DEFAULT_STAGES: PipelineStage[] = [
   { id: '_contacted',     name: 'Contacted',     slug: 'contacted',     probability: 15,  position: 1, colour: '#a78bfa', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
   { id: '_discovery',     name: 'Discovery',     slug: 'discovery',     probability: 35,  position: 2, colour: '#fbbf24', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
   { id: '_proposal_sent', name: 'Proposal Sent', slug: 'proposal_sent', probability: 60,  position: 3, colour: '#fb923c', isDefault: 0, isClosedWon: 0, isClosedLost: 0 },
-  { id: '_won',           name: 'Won',           slug: 'won',           probability: 100, position: 4, colour: '#4ade80', isDefault: 0, isClosedWon: 1, isClosedLost: 0, isClosed: 1, closedType: 'won' },
-  { id: '_lost',          name: 'Lost',          slug: 'lost',          probability: 0,   position: 5, colour: '#f87171', isDefault: 0, isClosedWon: 0, isClosedLost: 1, isClosed: 1, closedType: 'lost' },
-  { id: '_stalled',       name: 'Stalled',       slug: 'stalled',       probability: 0,   position: 6, colour: '#8a9987', isDefault: 0, isClosedWon: 0, isClosedLost: 1, isClosed: 1, closedType: 'lost' },
+  { id: '_won',           name: 'Won',           slug: 'won',           probability: 100, position: 4, colour: '#5A824E', isDefault: 0, isClosedWon: 1, isClosedLost: 0, isClosed: 1, closedType: 'won' },
+  { id: '_lost',          name: 'Lost',          slug: 'lost',          probability: 0,   position: 5, colour: '#dc2626', isDefault: 0, isClosedWon: 0, isClosedLost: 1, isClosed: 1, closedType: 'lost' },
+  { id: '_stalled',       name: 'Stalled',       slug: 'stalled',       probability: 0,   position: 6, colour: '#9ca3af', isDefault: 0, isClosedWon: 0, isClosedLost: 1, isClosed: 1, closedType: 'lost' },
 ]
 
 // ---- Helpers -------------------------------------------------------------
@@ -122,18 +122,21 @@ function daysInStage(stageEnteredAt: string | null, updatedAt: string): number {
   return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)))
 }
 
-const SOURCE_LABELS: Record<string, { label: string; bg: string; text: string }> = {
-  referral:         { label: 'Referral',        bg: '#fef3c7', text: '#d97706' },
-  linkedin:         { label: 'LinkedIn',        bg: '#dbeafe', text: '#1d4ed8' },
-  website:          { label: 'Website',         bg: '#d1fae5', text: '#059669' },
-  cold:             { label: 'Cold Outreach',   bg: '#e0e7ff', text: '#4338ca' },
-  cold_outreach:    { label: 'Cold Outreach',   bg: '#e0e7ff', text: '#4338ca' },
-  straightin:       { label: 'StraightIn',      bg: '#c7d2fe', text: '#3730a3' },
-  partner:          { label: 'Partner',         bg: '#fce7f3', text: '#be185d' },
-  webflow_partner:  { label: 'Webflow Partner', bg: '#4353ff1a', text: '#4353ff' },
-  webflow:          { label: 'Webflow',         bg: '#dbeafe', text: '#2563eb' },
-  existing_client:  { label: 'Existing Client', bg: '#fef3c7', text: '#d97706' },
-  other:            { label: 'Other',           bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-subtle)' },
+// Source chip labels. Colours come from the shared sourceBadge() helper so
+// a given source is the same hue in Pipeline board + list, Deal detail,
+// and Reports Close-Rate-by-Source.
+const SOURCE_LABELS: Record<string, string> = {
+  referral:         'Referral',
+  linkedin:         'LinkedIn',
+  website:          'Website',
+  cold:             'Cold Outreach',
+  cold_outreach:    'Cold Outreach',
+  straightin:       'StraightIn',
+  partner:          'Partner',
+  webflow_partner:  'Webflow Partner',
+  webflow:          'Webflow',
+  existing_client:  'Existing Client',
+  other:            'Other',
 }
 
 // ---- Main component ------------------------------------------------------
@@ -313,7 +316,7 @@ export function PipelineContent() {
             transition: 'background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease',
           }}
           onMouseEnter={e => {
-            e.currentTarget.style.background = '#3d6333'
+            e.currentTarget.style.background = 'var(--color-brand-dark)'
             e.currentTarget.style.boxShadow = '0 4px 14px rgba(90,130,78,0.4)'
           }}
           onMouseLeave={e => {
@@ -1160,7 +1163,7 @@ function DealCloseDialog({ type, dealTitle, onConfirm, onCancel }: {
             }}
             onMouseEnter={e => {
               if (canConfirm && !submitting) {
-                e.currentTarget.style.background = isWon ? '#047857' : '#b91c1c'
+                e.currentTarget.style.background = isWon ? 'var(--color-brand-dark)' : 'var(--color-danger)'
               }
             }}
             onMouseLeave={e => {
@@ -1181,7 +1184,8 @@ function DealCard({ deal, stages, displayCurrency, toDisplay }: { deal: Deal; st
   const stage = stages.find(s => s.id === deal.stageId)
   const probability = deal.stageProbability ?? stage?.probability ?? 0
   const days = daysInStage(deal.stageEnteredAt ?? null, deal.updatedAt)
-  const srcCfg = SOURCE_LABELS[deal.source ?? '']
+  const srcLabel = deal.source ? (SOURCE_LABELS[deal.source] ?? deal.source) : null
+  const srcStyle = deal.source ? sourceBadge(deal.source) : null
 
   return (
     <Link
@@ -1264,7 +1268,7 @@ function DealCard({ deal, stages, displayCurrency, toDisplay }: { deal: Deal; st
       )}
 
       {/* Source badge */}
-      {srcCfg && (
+      {srcLabel && srcStyle && (
         <div style={{ marginBottom: 'var(--space-2)' }}>
           <span
             className="inline-flex"
@@ -1273,11 +1277,11 @@ function DealCard({ deal, stages, displayCurrency, toDisplay }: { deal: Deal; st
               fontSize: '0.625rem',
               fontWeight: 500,
               borderRadius: 'var(--radius-full)',
-              background: srcCfg.bg,
-              color: srcCfg.text,
+              background: srcStyle.bg,
+              color: srcStyle.text,
             }}
           >
-            {srcCfg.label}
+            {srcLabel}
           </span>
         </div>
       )}
@@ -1413,7 +1417,8 @@ function ListView({ deals, stages, sortKey, displayCurrency, toDisplay }: {
           <tbody>
             {paged.map(deal => {
               const stage = stageMap[deal.stageId]
-              const srcCfg = SOURCE_LABELS[deal.source ?? '']
+              const srcLabel = deal.source ? (SOURCE_LABELS[deal.source] ?? deal.source) : null
+              const srcStyle = deal.source ? sourceBadge(deal.source) : null
               const probability = deal.stageProbability ?? stage?.probability ?? 0
               const days = daysInStage(deal.stageEnteredAt ?? null, deal.updatedAt)
               return (
@@ -1464,7 +1469,7 @@ function ListView({ deals, stages, sortKey, displayCurrency, toDisplay }: {
                       style={{
                         padding: '0.125rem 0.5rem',
                         fontSize: '0.75rem',
-                        background: probability >= 60 ? '#d1fae5' : probability >= 25 ? '#fef3c7' : '#dbeafe',
+                        background: probability >= 60 ? 'var(--status-delivered-bg)' : probability >= 25 ? 'var(--status-in-review-bg)' : 'var(--status-submitted-bg)',
                         color: probability >= 60 ? 'var(--status-delivered-text)' : probability >= 25 ? 'var(--status-in-review-text)' : 'var(--status-submitted-text)',
                       }}
                     >
@@ -1475,12 +1480,12 @@ function ListView({ deals, stages, sortKey, displayCurrency, toDisplay }: {
                     {deal.ownerName ?? '--'}
                   </td>
                   <td style={{ padding: '0.75rem 1rem' }}>
-                    {srcCfg ? (
+                    {srcLabel && srcStyle ? (
                       <span
                         className="inline-flex rounded-full font-medium"
-                        style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: srcCfg.bg, color: srcCfg.text }}
+                        style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: srcStyle.bg, color: srcStyle.text }}
                       >
-                        {srcCfg.label}
+                        {srcLabel}
                       </span>
                     ) : (
                       <span style={{ color: 'var(--color-text-subtle)' }}>--</span>

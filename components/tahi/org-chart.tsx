@@ -38,13 +38,15 @@ interface PlannedRole {
 type OrgNode = { type: 'member' } & OrgMember | { type: 'planned' } & PlannedRole
 
 // -- Department colors --
+// Categorical (neutral palette). No semantic status colours so we don't
+// imply warning/danger where none exists.
 const DEPT_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  leadership:  { bg: 'var(--color-brand-50)',    text: 'var(--color-brand)',      border: 'var(--color-brand-light)' },
-  design:      { bg: '#f3e8ff',                  text: '#7c3aed',                 border: '#c4b5fd' },
-  development: { bg: '#eff6ff',                  text: '#2563eb',                 border: '#93c5fd' },
-  strategy:    { bg: '#fff7ed',                  text: '#ea580c',                 border: '#fdba74' },
-  operations:  { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)', border: 'var(--color-border)' },
-  marketing:   { bg: '#fdf2f8',                  text: '#db2777',                 border: '#f9a8d4' },
+  leadership:  { bg: 'var(--color-brand-50)',          text: 'var(--color-brand)',                  border: 'var(--color-brand-light)' },
+  design:      { bg: 'var(--status-client-review-bg)', text: 'var(--status-client-review-text)',    border: 'var(--status-client-review-border)' },
+  development: { bg: 'var(--status-submitted-bg)',     text: 'var(--status-submitted-text)',        border: 'var(--status-submitted-border)' },
+  strategy:    { bg: 'var(--status-in-progress-bg)',   text: 'var(--status-in-progress-text)',      border: 'var(--status-in-progress-border)' },
+  operations:  { bg: 'var(--color-bg-tertiary)',       text: 'var(--color-text-muted)',             border: 'var(--color-border)' },
+  marketing:   { bg: 'var(--priority-urgent-bg)',      text: 'var(--priority-urgent-text)',         border: 'var(--priority-urgent-border)' },
 }
 
 function getDeptStyle(dept: string | null) {
@@ -387,7 +389,7 @@ function AddPlannedRoleForm({ onCreated, onCancel }: { onCreated: () => void; on
         <div
           className="text-xs rounded-lg mb-3"
           role="alert"
-          style={{ padding: '0.375rem 0.625rem', background: '#fef2f2', color: '#f87171' }}
+          style={{ padding: '0.375rem 0.625rem', background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}
         >
           {error}
         </div>
@@ -396,7 +398,7 @@ function AddPlannedRoleForm({ onCreated, onCancel }: { onCreated: () => void; on
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <div>
           <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">
-            Title <span style={{ color: '#f87171' }}>*</span>
+            Title <span style={{ color: 'var(--color-danger)' }}>*</span>
           </label>
           <input
             type="text"

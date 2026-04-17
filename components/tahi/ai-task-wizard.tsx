@@ -34,19 +34,23 @@ interface AiTaskWizardProps {
 
 // ── Category and priority style maps ──────────────────────────────────────────
 
+// Categories are non-semantic tags : use distinct-but-neutral palette so
+// "Strategy" doesn't look dangerous and "Content" doesn't look like a warning.
 const CATEGORY_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  design:      { bg: '#f3e8ff', text: '#7c3aed', label: 'Design' },
-  development: { bg: '#dbeafe', text: '#2563eb', label: 'Development' },
-  content:     { bg: '#fef3c7', text: '#d97706', label: 'Content' },
-  seo:         { bg: '#d1fae5', text: '#059669', label: 'SEO' },
-  strategy:    { bg: '#fee2e2', text: '#dc2626', label: 'Strategy' },
+  design:      { bg: 'var(--status-client-review-bg)', text: 'var(--status-client-review-text)', label: 'Design'      }, // purple
+  development: { bg: 'var(--status-submitted-bg)',     text: 'var(--status-submitted-text)',     label: 'Development' }, // blue
+  content:     { bg: 'var(--status-in-progress-bg)',   text: 'var(--status-in-progress-text)',   label: 'Content'     }, // teal
+  seo:         { bg: 'var(--color-brand-50)',          text: 'var(--color-brand)',               label: 'SEO'         }, // brand green
+  strategy:    { bg: 'var(--color-bg-tertiary)',       text: 'var(--color-text-muted)',          label: 'Strategy'    }, // neutral (not a warning!)
 }
 
+// Priority uses the shared priority-* tokens so wizard High/Urgent matches
+// the rest of the app (high = red, urgent = rose).
 const PRIORITY_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  low:    { bg: '#f3f4f6', text: '#6b7280', label: 'Low' },
-  medium: { bg: '#dbeafe', text: '#2563eb', label: 'Medium' },
-  high:   { bg: '#fff7ed', text: '#ea580c', label: 'High' },
-  urgent: { bg: '#fef2f2', text: '#dc2626', label: 'Urgent' },
+  low:    { bg: 'var(--color-bg-tertiary)',    text: 'var(--color-text-muted)',       label: 'Low'    },
+  medium: { bg: 'var(--status-submitted-bg)',  text: 'var(--status-submitted-text)',  label: 'Medium' },
+  high:   { bg: 'var(--priority-high-bg)',     text: 'var(--priority-high-text)',     label: 'High'   },
+  urgent: { bg: 'var(--priority-urgent-bg)',   text: 'var(--priority-urgent-text)',   label: 'Urgent' },
 }
 
 const CATEGORY_OPTIONS = ['design', 'development', 'content', 'seo', 'strategy']
@@ -270,7 +274,7 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
           zIndex: 70,
           width: '100%',
           maxWidth: '28rem',
-          background: 'var(--color-bg, #ffffff)',
+          background: 'var(--color-bg)',
           boxShadow: '-8px 0 30px rgba(0, 0, 0, 0.12)',
           display: 'flex',
           flexDirection: 'column',
@@ -281,7 +285,7 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
         <div
           style={{
             padding: '1rem 1.25rem',
-            borderBottom: '1px solid var(--color-border, #d4e0d0)',
+            borderBottom: '1px solid var(--color-border)',
             display: 'flex',
             alignItems: 'center',
             gap: '0.75rem',
@@ -307,7 +311,7 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
               style={{
                 fontSize: '1rem',
                 fontWeight: 700,
-                color: 'var(--color-text, #121A0F)',
+                color: 'var(--color-text)',
                 margin: 0,
               }}
             >
@@ -316,7 +320,7 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
             <p
               style={{
                 fontSize: '0.75rem',
-                color: 'var(--color-text-subtle, #8a9987)',
+                color: 'var(--color-text-subtle)',
                 margin: 0,
               }}
             >
@@ -331,9 +335,9 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
               padding: '0.375rem',
               borderRadius: '0.5rem',
               border: 'none',
-              background: hoveredButton === 'close' ? 'var(--color-bg-tertiary, #eef3ec)' : 'transparent',
+              background: hoveredButton === 'close' ? 'var(--color-bg-tertiary)' : 'transparent',
               cursor: 'pointer',
-              color: 'var(--color-text-muted, #5a6657)',
+              color: 'var(--color-text-muted)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -388,7 +392,7 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
                       borderRadius: '0.5rem',
                       border: 'none',
                       background: creating
-                        ? 'var(--color-text-subtle, #8a9987)'
+                        ? 'var(--color-text-subtle)'
                         : hoveredButton === 'create'
                           ? 'var(--color-brand-dark)'
                           : 'var(--color-brand)',
@@ -436,14 +440,14 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
                 style={{
                   padding: '0.75rem 1rem',
                   borderRadius: '0.5rem',
-                  background: 'var(--color-bg-secondary, #f7f9f6)',
+                  background: 'var(--color-bg-secondary)',
                   display: 'flex',
                   gap: '0.375rem',
                   alignItems: 'center',
                 }}
               >
-                <Loader2 style={{ width: '0.875rem', height: '0.875rem', color: 'var(--color-text-subtle, #8a9987)' }} className="animate-spin" />
-                <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted, #5a6657)' }}>
+                <Loader2 style={{ width: '0.875rem', height: '0.875rem', color: 'var(--color-text-subtle)' }} className="animate-spin" />
+                <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
                   Thinking...
                 </span>
               </div>
@@ -457,7 +461,7 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
         <div
           style={{
             padding: '0.75rem 1.25rem 1rem',
-            borderTop: '1px solid var(--color-border, #d4e0d0)',
+            borderTop: '1px solid var(--color-border)',
             flexShrink: 0,
           }}
         >
@@ -479,9 +483,9 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
                 flex: 1,
                 padding: '0.625rem 0.75rem',
                 borderRadius: '0.5rem',
-                border: '1px solid var(--color-border, #d4e0d0)',
-                background: 'var(--color-bg, #ffffff)',
-                color: 'var(--color-text, #121A0F)',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
                 fontSize: '0.875rem',
                 fontFamily: 'inherit',
                 resize: 'none',
@@ -494,7 +498,7 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
                 e.currentTarget.style.borderColor = 'var(--color-brand)'
               }}
               onBlur={e => {
-                e.currentTarget.style.borderColor = 'var(--color-border, #d4e0d0)'
+                e.currentTarget.style.borderColor = 'var(--color-border)'
               }}
             />
             <button
@@ -507,12 +511,12 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
                 borderRadius: '0.5rem',
                 border: 'none',
                 background: !input.trim() || sending
-                  ? 'var(--color-bg-tertiary, #eef3ec)'
+                  ? 'var(--color-bg-tertiary)'
                   : hoveredButton === 'send'
                     ? 'var(--color-brand-dark)'
                     : 'var(--color-brand)',
                 color: !input.trim() || sending
-                  ? 'var(--color-text-subtle, #8a9987)'
+                  ? 'var(--color-text-subtle)'
                   : '#ffffff',
                 cursor: !input.trim() || sending ? 'not-allowed' : 'pointer',
                 display: 'flex',
@@ -534,7 +538,7 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
           <p
             style={{
               fontSize: '0.6875rem',
-              color: 'var(--color-text-subtle, #8a9987)',
+              color: 'var(--color-text-subtle)',
               marginTop: '0.375rem',
             }}
           >
@@ -575,8 +579,8 @@ export function AiTaskWizardButton({ onClick }: { onClick: () => void }) {
         gap: '0.375rem',
         padding: '0.5rem 0.875rem',
         borderRadius: '0.5rem',
-        border: '1px solid var(--color-border, #d4e0d0)',
-        background: hovered ? 'var(--color-bg-tertiary, #eef3ec)' : 'var(--color-bg, #ffffff)',
+        border: '1px solid var(--color-border)',
+        background: hovered ? 'var(--color-bg-tertiary)' : 'var(--color-bg)',
         color: 'var(--color-brand)',
         fontSize: '0.875rem',
         fontWeight: 600,
@@ -719,10 +723,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           borderRadius: isUser ? '0.75rem 0.75rem 0.125rem 0.75rem' : '0.75rem 0.75rem 0.75rem 0.125rem',
           background: isUser
             ? 'var(--color-brand)'
-            : 'var(--color-bg-secondary, #f7f9f6)',
+            : 'var(--color-bg-secondary)',
           color: isUser
             ? '#ffffff'
-            : 'var(--color-text, #121A0F)',
+            : 'var(--color-text)',
           fontSize: '0.875rem',
           lineHeight: 1.6,
           whiteSpace: isUser ? 'pre-wrap' : 'normal',
@@ -752,7 +756,7 @@ interface TaskCardProps {
 const labelStyle: React.CSSProperties = {
   fontSize: '0.6875rem',
   fontWeight: 600,
-  color: 'var(--color-text-muted, #5a6657)',
+  color: 'var(--color-text-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.05em',
   display: 'block',
@@ -763,10 +767,10 @@ const fieldInputStyle: React.CSSProperties = {
   marginTop: '0.25rem',
   padding: '0.5rem 0.625rem',
   borderRadius: '0.375rem',
-  border: '1px solid var(--color-border, #d4e0d0)',
+  border: '1px solid var(--color-border)',
   fontSize: '0.875rem',
-  color: 'var(--color-text, #121A0F)',
-  background: 'var(--color-bg, #ffffff)',
+  color: 'var(--color-text)',
+  background: 'var(--color-bg)',
   outline: 'none',
   fontFamily: 'inherit',
   boxSizing: 'border-box' as const,
@@ -784,7 +788,7 @@ const selectChevronStyle: React.CSSProperties = {
   transform: 'translateY(-50%)',
   width: '0.875rem',
   height: '0.875rem',
-  color: 'var(--color-text-subtle, #8a9987)',
+  color: 'var(--color-text-subtle)',
   pointerEvents: 'none' as const,
 }
 
@@ -806,7 +810,7 @@ function TaskCard({
     return (
       <div
         style={{
-          background: 'var(--color-bg, #ffffff)',
+          background: 'var(--color-bg)',
           border: '2px solid var(--color-brand)',
           borderRadius: '0.75rem',
           padding: '1rem',
@@ -926,9 +930,9 @@ function TaskCard({
             style={{
               padding: '0.375rem 0.75rem',
               borderRadius: '0.375rem',
-              border: '1px solid var(--color-border, #d4e0d0)',
-              background: hoveredButton === 'cancel-edit' ? 'var(--color-bg-secondary, #f7f9f6)' : 'var(--color-bg, #ffffff)',
-              color: 'var(--color-text, #121A0F)',
+              border: '1px solid var(--color-border)',
+              background: hoveredButton === 'cancel-edit' ? 'var(--color-bg-secondary)' : 'var(--color-bg)',
+              color: 'var(--color-text)',
               fontSize: '0.8125rem',
               fontWeight: 500,
               cursor: 'pointer',
@@ -970,8 +974,8 @@ function TaskCard({
   return (
     <div
       style={{
-        background: 'var(--color-bg, #ffffff)',
-        border: '1px solid var(--color-border, #d4e0d0)',
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border)',
         borderRadius: '0.75rem',
         padding: '0.875rem 1rem',
         display: 'flex',
@@ -987,7 +991,7 @@ function TaskCard({
             flex: 1,
             fontSize: '0.875rem',
             fontWeight: 600,
-            color: 'var(--color-text, #121A0F)',
+            color: 'var(--color-text)',
             margin: 0,
             lineHeight: 1.4,
           }}
@@ -1002,8 +1006,8 @@ function TaskCard({
             padding: '0.25rem',
             borderRadius: '0.25rem',
             border: 'none',
-            background: hoveredButton === `edit-${task.id}` ? 'var(--color-bg-tertiary, #eef3ec)' : 'transparent',
-            color: 'var(--color-text-subtle, #8a9987)',
+            background: hoveredButton === `edit-${task.id}` ? 'var(--color-bg-tertiary)' : 'transparent',
+            color: 'var(--color-text-subtle)',
             cursor: 'pointer',
             flexShrink: 0,
             display: 'flex',
@@ -1020,7 +1024,7 @@ function TaskCard({
       <p
         style={{
           fontSize: '0.8125rem',
-          color: 'var(--color-text-muted, #5a6657)',
+          color: 'var(--color-text-muted)',
           margin: 0,
           lineHeight: 1.5,
         }}
@@ -1060,8 +1064,8 @@ function TaskCard({
             fontWeight: 600,
             padding: '0.125rem 0.5rem',
             borderRadius: '1rem',
-            background: task.type === 'large' ? '#fef3c7' : '#dbeafe',
-            color: task.type === 'large' ? '#92400e' : '#1d4ed8',
+            background: task.type === 'large' ? 'var(--status-in-review-bg)' : 'var(--status-submitted-bg)',
+            color: task.type === 'large' ? 'var(--status-in-review-text)' : 'var(--status-submitted-text)',
           }}
         >
           {task.type === 'large' ? 'Large Track' : 'Small Track'}
@@ -1072,8 +1076,8 @@ function TaskCard({
             fontWeight: 500,
             padding: '0.125rem 0.5rem',
             borderRadius: '1rem',
-            background: 'var(--color-bg-tertiary, #eef3ec)',
-            color: 'var(--color-text-muted, #5a6657)',
+            background: 'var(--color-bg-tertiary)',
+            color: 'var(--color-text-muted)',
           }}
         >
           ~{task.estimatedHours}h

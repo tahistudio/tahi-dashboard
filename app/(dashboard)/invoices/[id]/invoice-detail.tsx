@@ -574,9 +574,9 @@ function ActionButton({
 }) {
   const styles: Record<string, React.CSSProperties> = {
     primary: { background: 'var(--color-brand)', color: 'white', border: 'none' },
-    success: { background: '#16a34a', color: 'white', border: 'none' },
+    success: { background: 'var(--color-brand)', color: 'white', border: 'none' },
     ghost:   { background: 'var(--color-bg)', color: 'var(--color-text)', border: '1px solid var(--color-border)' },
-    danger:  { background: 'var(--color-bg)', color: '#dc2626', border: '1px solid #fca5a5' },
+    danger:  { background: 'var(--color-bg)', color: 'var(--color-danger)', border: '1px solid var(--color-danger)' },
   }
   return (
     <button

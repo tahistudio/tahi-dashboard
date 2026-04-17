@@ -1288,7 +1288,7 @@ function NewConversationDialog({
                     onClick={() => setVisibility('internal')}
                     className="flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg border transition-colors"
                     style={{
-                      background: visibility === 'internal' ? '#fff7ed' : 'var(--color-bg)',
+                      background: visibility === 'internal' ? 'var(--color-warning-bg)' : 'var(--color-bg)',
                       borderColor: visibility === 'internal' ? 'var(--color-warning)' : 'var(--color-border)',
                       color: visibility === 'internal' ? 'var(--color-warning)' : 'var(--color-text-muted)',
                       cursor: 'pointer',

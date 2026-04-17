@@ -182,8 +182,8 @@ export function AutomationsContent() {
                       <span
                         className="text-xs px-2 py-0.5 rounded-full font-medium"
                         style={{
-                          background: isEnabled ? '#f0fdf4' : 'var(--color-bg-tertiary)',
-                          color: isEnabled ? '#16a34a' : 'var(--color-text-muted)',
+                          background: isEnabled ? 'var(--color-success-bg)' : 'var(--color-bg-tertiary)',
+                          color: isEnabled ? 'var(--color-brand)' : 'var(--color-text-muted)',
                         }}
                       >
                         {isEnabled ? 'Active' : 'Disabled'}
@@ -311,7 +311,7 @@ function CreateRuleForm({ onCreated, onCancel }: { onCreated: () => void; onCanc
       <h2 className="text-base font-semibold text-[var(--color-text)]">Create Automation Rule</h2>
 
       {error && (
-        <div className="text-sm text-[var(--color-danger)] bg-[#fef2f2] rounded-lg px-4 py-2" role="alert">
+        <div className="text-sm text-[var(--color-danger)] bg-[var(--color-danger-bg)] rounded-lg px-4 py-2" role="alert">
           {error}
         </div>
       )}

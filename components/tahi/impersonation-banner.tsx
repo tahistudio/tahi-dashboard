@@ -151,9 +151,9 @@ export function ImpersonationBanner() {
   if (isTeamMember) {
     displayName = impersonation.teamMemberName
     bannerIcon = <UserCog className="w-4 h-4 flex-shrink-0" />
-    bannerBg = 'var(--color-info-bg, #eff6ff)'
-    bannerBorder = 'var(--color-info, #60a5fa)'
-    bannerColor = 'var(--color-info, #60a5fa)'
+    bannerBg = 'var(--color-info-bg)'
+    bannerBorder = 'var(--color-info)'
+    bannerColor = 'var(--color-info)'
   } else {
     displayName = impersonation.contactName
       ? `${impersonation.contactName} at ${impersonation.orgName}`

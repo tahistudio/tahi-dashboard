@@ -156,8 +156,8 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                       <span
                         className="text-xs px-2 py-0.5 rounded-full font-medium"
                         style={{
-                          background: subscription.status === 'active' ? 'var(--color-success-bg, #f0fdf4)' : 'var(--color-bg-tertiary)',
-                          color: subscription.status === 'active' ? 'var(--color-success, #16a34a)' : 'var(--color-text-muted)',
+                          background: subscription.status === 'active' ? 'var(--color-success-bg)' : 'var(--color-bg-tertiary)',
+                          color: subscription.status === 'active' ? 'var(--color-success)' : 'var(--color-text-muted)',
                         }}
                       >
                         {subscription.status}
@@ -165,7 +165,7 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                       {subscription.billingInterval && subscription.billingInterval !== 'monthly' && (
                         <span
                           className="text-xs px-2 py-0.5 rounded-full font-medium"
-                          style={{ background: 'var(--color-brand-50, #f0f7ee)', color: 'var(--color-brand)' }}
+                          style={{ background: 'var(--color-brand-50)', color: 'var(--color-brand)' }}
                         >
                           {INTERVAL_LABELS[subscription.billingInterval] ?? subscription.billingInterval}
                         </span>
@@ -190,7 +190,7 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                     {subscription.addonDetails && subscription.addonDetails.length > 0 && (
                       <div
                         className="rounded-lg p-3 mt-1"
-                        style={{ background: 'var(--color-brand-50, #f0f7ee)', border: '1px solid var(--color-brand-100, #dcefd8)' }}
+                        style={{ background: 'var(--color-brand-50)', border: '1px solid var(--color-brand-100)' }}
                       >
                         <p className="text-xs font-medium mb-1.5" style={{ color: 'var(--color-brand-dark)' }}>Included with your plan</p>
                         <div className="flex flex-col gap-1">
@@ -391,7 +391,7 @@ function AdminBillingView() {
                             width: '2.5rem',
                             height: '2.5rem',
                             borderRadius: 'var(--radius-leaf-sm)',
-                            background: count > 0 ? 'var(--color-brand-50, #f0f7ee)' : 'var(--color-bg-tertiary)',
+                            background: count > 0 ? 'var(--color-brand-50)' : 'var(--color-bg-tertiary)',
                             color: count > 0 ? 'var(--color-brand)' : 'var(--color-text-subtle)',
                           }}
                         >

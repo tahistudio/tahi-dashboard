@@ -941,7 +941,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 onMouseEnter={e => {
                   if (!request.scopeFlagged) {
                     e.currentTarget.style.borderColor = 'var(--color-warning)'
-                    e.currentTarget.style.background = '#fff7ed'
+                    e.currentTarget.style.background = 'var(--color-warning-bg)'
                     e.currentTarget.style.color = 'var(--color-warning)'
                   }
                 }}
@@ -1542,10 +1542,11 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // File icons are visual differentiators, not status indicators.
+  // Keep them all muted so red/amber can stay reserved for danger/warning.
   function fileIcon(mimeType: string | null) {
     if (!mimeType) return <FileText size={14} style={{ color: 'var(--color-text-subtle)' }} />
-    if (mimeType.startsWith('image/')) return <ImageIcon size={14} style={{ color: '#7c3aed' }} />
-    if (mimeType === 'application/pdf') return <FileText size={14} style={{ color: 'var(--color-danger)' }} />
+    if (mimeType.startsWith('image/')) return <ImageIcon size={14} style={{ color: 'var(--color-text-muted)' }} />
     return <FileText size={14} style={{ color: 'var(--color-text-subtle)' }} />
   }
 

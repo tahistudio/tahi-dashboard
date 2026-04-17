@@ -328,7 +328,7 @@ export function BrandDetail({ brandId }: { brandId: string }) {
                             {isPrimary && (
                               <span
                                 className="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0"
-                                style={{ background: '#f0fdf4', color: '#16a34a' }}
+                                style={{ background: 'var(--color-success-bg)', color: 'var(--color-brand)' }}
                               >
                                 Primary
                               </span>
@@ -442,16 +442,16 @@ function LoadingSkeleton() {
     <div className="flex flex-col min-h-0">
       <div className="border-b border-[var(--color-border)] bg-[var(--color-bg)] pb-6">
         <div className="animate-pulse" style={{ marginBottom: '0.75rem' }}>
-          <div style={{ width: '14rem', height: '0.875rem', background: '#f3f4f6', borderRadius: '0.25rem' }} />
+          <div style={{ width: '14rem', height: '0.875rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }} />
         </div>
         <div className="flex items-start gap-3">
           <div
             className="animate-pulse flex-shrink-0"
-            style={{ width: '3rem', height: '3rem', borderRadius: 'var(--radius-leaf)', background: '#f3f4f6' }}
+            style={{ width: '3rem', height: '3rem', borderRadius: 'var(--radius-leaf)', background: 'var(--color-bg-tertiary)' }}
           />
           <div className="space-y-2 flex-1">
-            <div className="animate-pulse" style={{ width: '10rem', height: '1.5rem', background: '#f3f4f6', borderRadius: '0.25rem' }} />
-            <div className="animate-pulse" style={{ width: '8rem', height: '1rem', background: '#f3f4f6', borderRadius: '0.25rem' }} />
+            <div className="animate-pulse" style={{ width: '10rem', height: '1.5rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }} />
+            <div className="animate-pulse" style={{ width: '8rem', height: '1rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }} />
           </div>
         </div>
       </div>
@@ -464,9 +464,9 @@ function LoadingSkeleton() {
                 className="animate-pulse bg-[var(--color-bg)] border border-[var(--color-border)]"
                 style={{ borderRadius: '0.75rem', padding: '1.25rem', height: '10rem' }}
               >
-                <div style={{ width: '8rem', height: '0.75rem', background: '#f3f4f6', borderRadius: '0.25rem', marginBottom: '1rem' }} />
-                <div style={{ width: '100%', height: '0.75rem', background: '#f3f4f6', borderRadius: '0.25rem', marginBottom: '0.5rem' }} />
-                <div style={{ width: '60%', height: '0.75rem', background: '#f3f4f6', borderRadius: '0.25rem' }} />
+                <div style={{ width: '8rem', height: '0.75rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem', marginBottom: '1rem' }} />
+                <div style={{ width: '100%', height: '0.75rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem', marginBottom: '0.5rem' }} />
+                <div style={{ width: '60%', height: '0.75rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }} />
               </div>
             ))}
           </div>
@@ -477,10 +477,10 @@ function LoadingSkeleton() {
                 className="animate-pulse bg-[var(--color-bg)] border border-[var(--color-border)]"
                 style={{ borderRadius: '0.75rem', padding: '1.25rem', height: '12rem' }}
               >
-                <div style={{ width: '10rem', height: '0.75rem', background: '#f3f4f6', borderRadius: '0.25rem', marginBottom: '1rem' }} />
+                <div style={{ width: '10rem', height: '0.75rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem', marginBottom: '1rem' }} />
                 <div className="space-y-3">
                   {[1, 2, 3].map((j) => (
-                    <div key={j} style={{ width: '100%', height: '2rem', background: '#f3f4f6', borderRadius: '0.25rem' }} />
+                    <div key={j} style={{ width: '100%', height: '2rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }} />
                   ))}
                 </div>
               </div>

@@ -82,12 +82,14 @@ interface MessageItem {
 
 // ── Activity type styles ────────────────────────────────────────────────────
 
+// Matches client-detail ACTIVITY_TYPE_ICONS palette so "Email" etc is the
+// same colour in both places. Categorical, not semantic status.
 const ACTIVITY_TYPE_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  call:    { bg: '#eff6ff', text: '#2563eb', label: 'Call' },
-  email:   { bg: '#f0fdf4', text: '#16a34a', label: 'Email' },
-  meeting: { bg: '#fef3c7', text: '#d97706', label: 'Meeting' },
-  note:    { bg: '#f3f4f6', text: '#4b5563', label: 'Note' },
-  task:    { bg: '#fce7f3', text: '#db2777', label: 'Task' },
+  call:    { bg: 'var(--status-submitted-bg)',     text: 'var(--status-submitted-text)',     label: 'Call'    },
+  email:   { bg: 'var(--status-in-progress-bg)',   text: 'var(--status-in-progress-text)',   label: 'Email'   },
+  meeting: { bg: 'var(--status-client-review-bg)', text: 'var(--status-client-review-text)', label: 'Meeting' },
+  note:    { bg: 'var(--color-bg-secondary)',      text: 'var(--color-text-muted)',          label: 'Note'    },
+  task:    { bg: 'var(--color-brand-50)',          text: 'var(--color-brand)',               label: 'Task'    },
 }
 
 const ACTIVITY_TYPE_OPTIONS = [
@@ -222,7 +224,7 @@ export function ContactDetail({ contactId }: { contactId: string }) {
                   {isPrimary && (
                     <span
                       className="text-xs font-medium px-2 py-0.5 rounded-full"
-                      style={{ background: '#f0fdf4', color: '#16a34a' }}
+                      style={{ background: 'var(--color-success-bg)', color: 'var(--color-brand)' }}
                     >
                       Primary
                     </span>
@@ -622,16 +624,16 @@ function LoadingSkeleton() {
     <div className="flex flex-col min-h-0">
       <div className="border-b border-[var(--color-border)] bg-[var(--color-bg)] pb-6">
         <div className="animate-pulse" style={{ marginBottom: '0.75rem' }}>
-          <div style={{ width: '12rem', height: '0.875rem', background: '#f3f4f6', borderRadius: '0.25rem' }} />
+          <div style={{ width: '12rem', height: '0.875rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }} />
         </div>
         <div className="flex items-start gap-3">
           <div
             className="animate-pulse flex-shrink-0"
-            style={{ width: '3rem', height: '3rem', borderRadius: 'var(--radius-leaf)', background: '#f3f4f6' }}
+            style={{ width: '3rem', height: '3rem', borderRadius: 'var(--radius-leaf)', background: 'var(--color-bg-tertiary)' }}
           />
           <div className="space-y-2 flex-1">
-            <div className="animate-pulse" style={{ width: '10rem', height: '1.5rem', background: '#f3f4f6', borderRadius: '0.25rem' }} />
-            <div className="animate-pulse" style={{ width: '6rem', height: '1rem', background: '#f3f4f6', borderRadius: '0.25rem' }} />
+            <div className="animate-pulse" style={{ width: '10rem', height: '1.5rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }} />
+            <div className="animate-pulse" style={{ width: '6rem', height: '1rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }} />
           </div>
         </div>
       </div>
@@ -644,9 +646,9 @@ function LoadingSkeleton() {
                 className="animate-pulse bg-[var(--color-bg)] border border-[var(--color-border)]"
                 style={{ borderRadius: '0.75rem', padding: '1.25rem', height: '8rem' }}
               >
-                <div style={{ width: '8rem', height: '0.75rem', background: '#f3f4f6', borderRadius: '0.25rem', marginBottom: '1rem' }} />
-                <div style={{ width: '100%', height: '0.75rem', background: '#f3f4f6', borderRadius: '0.25rem', marginBottom: '0.5rem' }} />
-                <div style={{ width: '75%', height: '0.75rem', background: '#f3f4f6', borderRadius: '0.25rem' }} />
+                <div style={{ width: '8rem', height: '0.75rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem', marginBottom: '1rem' }} />
+                <div style={{ width: '100%', height: '0.75rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem', marginBottom: '0.5rem' }} />
+                <div style={{ width: '75%', height: '0.75rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }} />
               </div>
             ))}
           </div>
@@ -657,10 +659,10 @@ function LoadingSkeleton() {
                 className="animate-pulse bg-[var(--color-bg)] border border-[var(--color-border)]"
                 style={{ borderRadius: '0.75rem', padding: '1.25rem', height: '14rem' }}
               >
-                <div style={{ width: '10rem', height: '0.75rem', background: '#f3f4f6', borderRadius: '0.25rem', marginBottom: '1rem' }} />
+                <div style={{ width: '10rem', height: '0.75rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem', marginBottom: '1rem' }} />
                 <div className="space-y-3">
                   {[1, 2, 3].map((j) => (
-                    <div key={j} style={{ width: '100%', height: '2.5rem', background: '#f3f4f6', borderRadius: '0.25rem' }} />
+                    <div key={j} style={{ width: '100%', height: '2.5rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }} />
                   ))}
                 </div>
               </div>

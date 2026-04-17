@@ -9,6 +9,7 @@ import {
   UserCheck, ExternalLink,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { sourceBadge } from '@/lib/chart-colors'
 import { REQUEST_STATUS_CONFIG } from '@/lib/status-config'
 
 // ---- Types ---------------------------------------------------------------
@@ -128,23 +129,25 @@ const ACTIVITY_COLORS: Record<string, string> = {
   task: 'var(--color-warning)',
 }
 
-const SOURCE_STYLES: Record<string, { label: string; bg: string; text: string }> = {
-  referral:        { label: 'Referral',         bg: '#fef3c7', text: '#d97706' },
-  webflow_partner: { label: 'Webflow Partner',  bg: '#4353ff1a', text: '#4353ff' },
-  straightin:      { label: 'StraightIn',       bg: '#c7d2fe', text: '#3730a3' },
-  linkedin:        { label: 'LinkedIn',         bg: '#dbeafe', text: '#1d4ed8' },
-  website:         { label: 'Website',          bg: '#d1fae5', text: '#059669' },
-  cold:            { label: 'Cold Outreach',    bg: '#e0e7ff', text: '#4338ca' },
-  cold_outreach:   { label: 'Cold Outreach',    bg: '#e0e7ff', text: '#4338ca' },
-  inbound:         { label: 'Inbound',          bg: '#d1fae5', text: '#059669' },
-  direct:          { label: 'Direct',           bg: '#f0fdf4', text: '#16a34a' },
-  social:          { label: 'Social',           bg: '#fce7f3', text: '#db2777' },
-  partner:         { label: 'Partner',          bg: '#fce7f3', text: '#be185d' },
-  webflow:         { label: 'Webflow',          bg: '#dbeafe', text: '#2563eb' },
-  existing_client: { label: 'Existing Client',  bg: '#fef3c7', text: '#d97706' },
-  integration:     { label: 'Integration',      bg: '#e0e7ff', text: '#6366f1' },
-  outbound:        { label: 'Outbound',         bg: '#e0e7ff', text: '#4338ca' },
-  other:           { label: 'Other',            bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-subtle)' },
+// Source labels only; colours come from the shared sourceBadge() helper
+// so each source is the same hue on the board, list, detail, and Reports.
+const SOURCE_LABELS: Record<string, string> = {
+  referral:        'Referral',
+  webflow_partner: 'Webflow Partner',
+  straightin:      'StraightIn',
+  linkedin:        'LinkedIn',
+  website:         'Website',
+  cold:            'Cold Outreach',
+  cold_outreach:   'Cold Outreach',
+  inbound:         'Inbound',
+  direct:          'Direct',
+  social:          'Social',
+  partner:         'Partner',
+  webflow:         'Webflow',
+  existing_client: 'Existing Client',
+  integration:     'Integration',
+  outbound:        'Outbound',
+  other:           'Other',
 }
 
 const SOURCE_OPTIONS = [
@@ -334,7 +337,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
                     transition: 'background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease',
                   }}
                   onMouseEnter={e => {
-                    e.currentTarget.style.background = '#3d6333'
+                    e.currentTarget.style.background = 'var(--color-brand-dark)'
                     e.currentTarget.style.boxShadow = '0 4px 14px rgba(90,130,78,0.4)'
                     e.currentTarget.style.transform = 'translateY(-1px)'
                   }}
@@ -719,8 +722,8 @@ function StageProgress({ stages, currentStageId }: { stages: Stage[]; currentSta
             padding: '0.25rem 0.75rem',
             fontSize: '0.6875rem',
             marginLeft: '0.5rem',
-            background: currentStage.isClosedWon ? '#4ade8030' : '#f8717130',
-            color: currentStage.isClosedWon ? '#16a34a' : '#dc2626',
+            background: currentStage.isClosedWon ? 'var(--color-brand-50)' : 'var(--color-danger-bg)',
+            color: currentStage.isClosedWon ? 'var(--color-brand)' : 'var(--color-danger)',
           }}
         >
           {currentStage.name}
@@ -1623,7 +1626,8 @@ function SourceSelector({ dealId, currentSource, onUpdated }: {
   onUpdated: () => void
 }) {
   const [saving, setSaving] = useState(false)
-  const srcCfg = SOURCE_STYLES[currentSource ?? '']
+  const srcLabel = currentSource ? (SOURCE_LABELS[currentSource] ?? currentSource) : null
+  const srcStyle = currentSource ? sourceBadge(currentSource) : null
 
   const handleChange = async (newSource: string) => {
     setSaving(true)
@@ -1643,12 +1647,12 @@ function SourceSelector({ dealId, currentSource, onUpdated }: {
 
   return (
     <div className="flex flex-col gap-2">
-      {srcCfg && currentSource && (
+      {srcLabel && srcStyle && (
         <span
           className="inline-flex self-start rounded-full font-medium"
-          style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: srcCfg.bg, color: srcCfg.text }}
+          style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: srcStyle.bg, color: srcStyle.text }}
         >
-          {srcCfg.label}
+          {srcLabel}
         </span>
       )}
       <div className="relative">
