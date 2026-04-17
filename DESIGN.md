@@ -121,7 +121,7 @@ One color = one meaning across the entire app.
 
 ## Current Focus
 
-**Pre-redesign batch** (cross-cutting fixes before per-page work):
+**Pre-redesign batch** (cross-cutting fixes before per-page work) — **COMPLETE**:
 - [x] Color language established
 - [x] Design tokens in globals.css
 - [x] AI briefing card
@@ -129,14 +129,17 @@ One color = one meaning across the entire app.
 - [x] Pipeline main page
 - [x] Pipeline deal detail (pass 1 - token alignment)
 - [x] Reports (pass 1 - restructure + KPI strips + chart colors)
-- [ ] Mobile bottom padding
-- [ ] Mobile AI briefing header
-- [ ] Mobile activity timeline header
-- [ ] Mobile search overlay polish
-- [ ] Mobile "More" nav drawer
-- [ ] Deal detail sidebar consolidation
-- [ ] Pagination pattern
-- [ ] Skeleton loader consistency audit
+- [x] Mobile bottom padding (6rem + safe-area-inset on `.dashboard-main`)
+- [x] Mobile AI briefing header (stacks on mobile)
+- [x] Mobile activity timeline header (stacks on mobile)
+- [x] Mobile search overlay polish (shorter placeholder, X button, keyboard hints desktop-only)
+- [x] Mobile "More" nav drawer (bottom sheet with full grouped nav)
+- [x] Deal detail sidebar consolidation (1 card, 14 sections with dividers)
+- [x] Pagination pattern (`<Pagination>` + `usePagination` hook, applied to Pipeline list)
+- [x] Skeleton primitives (`SkeletonKPIStrip`, `SkeletonTable`, `SkeletonChart`, `SkeletonList`, `SkeletonProgressList`)
+- [x] Skeleton audit: 6 Reports blobs replaced with shape-matching skeletons
+
+**Foundation is done. Next session begins per-page redesigns.**
 
 **Next up: per-page redesigns**, in order:
 1. Overview polish (already shipped, may need tweaks)
@@ -157,13 +160,15 @@ One color = one meaning across the entire app.
 
 Things noticed but not currently being worked on. Fix during the right page's redesign.
 
-- [ ] Mobile nav has only 4 items, Docs/Settings unreachable on mobile
-- [ ] Pagination needed on pipeline list, invoices, reports tables
+- [x] Mobile nav has only 4 items, Docs/Settings unreachable on mobile → "More" drawer added
+- [x] Pagination needed on pipeline list → `<Pagination>` added, Pipeline done
+- [ ] Pagination rollout to invoices, reports tables, requests list, clients list
 - [ ] Request list badges not aligned consistently (width varies)
 - [ ] Request rows don't sort by recency consistently
 - [ ] Admin billing view is a partial stub
-- [ ] Dead code still present: `RevenueForecastSection` **fixed**
-- [ ] Deal detail sidebar is 14 separate cards - should be 1 card with dividers
+- [x] Deal detail sidebar is 14 separate cards → consolidated into 1 card with dividers
+- [ ] 9 remaining skeleton mismatches in Reports (smaller, lower priority)
+- [ ] Pipeline loading skeleton always shows 4 cols regardless of stage count
 
 ---
 
@@ -178,6 +183,12 @@ Things noticed but not currently being worked on. Fix during the right page's re
 - Deal detail: bug fixes (stageEnteredAt, removed "Liam" hardcode), activity colors to CSS vars
 - Reports: 228 lines of dead code removed, tab nav (was floating chip bar), Financial Health as grouped panel, pie chart uses status colors, invoice aging uses semantic palette
 - Sidebar hex brand color consolidation across 18 files
+- Mobile batch: `.dashboard-main` 6rem bottom padding, AI briefing + activity timeline headers stack on mobile, search overlay polished, full-nav drawer via new "More" button on MobileBottomNav
+- Deal detail: 14-SidebarCard stack consolidated into one outer card with section dividers
+- New: `components/tahi/pagination.tsx` (`<Pagination>` + `usePagination` hook), applied to Pipeline list view
+- New: `components/tahi/skeletons.tsx` (SkeletonBar/Card/KPIStrip/Table/Chart/List/ProgressList)
+- Reports: 6 blob skeletons replaced with structure-matching skeletons (Retainer Health, Cash Flow, Team Utilisation, Xero P&L, Client Profitability, Fixed Costs)
+- `DESIGN.md` created as living working doc
 
 ---
 
