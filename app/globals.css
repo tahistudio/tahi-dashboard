@@ -266,6 +266,12 @@ body {
   .pipeline-divider-item:last-child { border-right: none !important; }
 }
 
+/* Sidebar card group: last section has no bottom border
+   (used on deal detail, client detail, etc.) */
+.sidebar-card-group .sidebar-section:last-child {
+  border-bottom: none !important;
+}
+
 /* Glass panel : used in dark sections */
 .glass {
   background: var(--color-glass);
