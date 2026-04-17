@@ -13,6 +13,7 @@ import {
 import { apiPath } from '@/lib/api'
 import { convertFromNzd } from '@/lib/currency'
 import { Pagination, usePagination } from '@/components/tahi/pagination'
+import { stageColour } from '@/lib/chart-colors'
 
 type DisplayCurrency = 'NZD' | 'USD' | 'AUD' | 'GBP' | 'EUR'
 const CURRENCY_OPTIONS: { code: DisplayCurrency; label: string }[] = [
@@ -286,7 +287,7 @@ export function PipelineContent() {
     : 0
 
   return (
-    <div className="dashboard-main">
+    <div>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between" style={{ marginBottom: 'var(--space-6)', gap: 'var(--space-3)' }}>
         <div>
@@ -839,10 +840,12 @@ function KanbanView({ deals, stages, onStageChange, displayCurrency, toDisplay }
         maxHeight: 'calc(100vh - 18rem)',
       }}
     >
-      {stages.map(stage => {
+      {stages.map((stage, i) => {
         const cards = byStage(stage.id)
         const stageValue = cards.reduce((s, d) => s + (d.valueNzd ?? d.value), 0)
-        const colour = stage.colour ?? 'var(--color-brand)'
+        // Shared stageColour() so the kanban column dot matches the same stage
+        // colour used in Deals by Stage, Sales Funnel, and Stage Velocity.
+        const colour = stageColour(stage.name, i)
 
         return (
           <div
@@ -1434,20 +1437,23 @@ function ListView({ deals, stages, sortKey, displayCurrency, toDisplay }: {
                     {deal.orgName ?? '--'}
                   </td>
                   <td style={{ padding: '0.75rem 1rem' }}>
-                    {stage && (
-                      <span
-                        className="inline-flex items-center gap-1.5 rounded-full font-medium"
-                        style={{
-                          padding: '0.125rem 0.5rem',
-                          fontSize: '0.75rem',
-                          background: `${stage.colour}20`,
-                          color: stage.colour ?? 'var(--color-text-muted)',
-                        }}
-                      >
-                        <span className="rounded-full" style={{ width: '0.375rem', height: '0.375rem', background: stage.colour ?? 'var(--color-text-subtle)', display: 'inline-block' }} />
-                        {stage.name}
-                      </span>
-                    )}
+                    {stage && (() => {
+                      const sc = stageColour(stage.name, stages.findIndex(s => s.id === stage.id))
+                      return (
+                        <span
+                          className="inline-flex items-center gap-1.5 rounded-full font-medium"
+                          style={{
+                            padding: '0.125rem 0.5rem',
+                            fontSize: '0.75rem',
+                            background: `${sc}20`,
+                            color: sc,
+                          }}
+                        >
+                          <span className="rounded-full" style={{ width: '0.375rem', height: '0.375rem', background: sc, display: 'inline-block' }} />
+                          {stage.name}
+                        </span>
+                      )
+                    })()}
                   </td>
                   <td className="font-semibold" style={{ padding: '0.75rem 1rem', color: 'var(--color-text)', whiteSpace: 'nowrap' }}>
                     {formatCurrency(toDisplay(deal.valueNzd ?? deal.value), displayCurrency)}

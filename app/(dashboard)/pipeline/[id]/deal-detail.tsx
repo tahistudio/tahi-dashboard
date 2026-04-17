@@ -245,7 +245,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
   }
 
   return (
-    <div className="dashboard-main">
+    <div>
       {/* Back link */}
       <Link
         href="/pipeline"

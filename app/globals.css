@@ -232,21 +232,37 @@ body {
    TAHI COMPONENT UTILITIES
    ============================================================ */
 
-/* Dashboard main content area : responsive padding in rem
-   Mobile: generous bottom padding + safe-area inset so content
-   doesn't hide behind the bottom nav (3.5rem tall + safe area) */
+/* Dashboard main content area : the scrolling shell.
+   Deliberately NO top padding so `position: sticky; top: 0` descendants
+   (section navs, table headers) can sit flush against the top nav without
+   a visible bg-secondary gap. Horizontal + bottom padding stay here so
+   the bottom nav and safe-area offsets don't leak in. Per-page top
+   spacing is handled by `.dashboard-page-inner` below. */
 .dashboard-main {
-  padding: 1.25rem 1rem calc(6rem + env(safe-area-inset-bottom, 0px));
+  padding: 0 1rem calc(6rem + env(safe-area-inset-bottom, 0px));
 }
 @media (min-width: 48rem) {
   .dashboard-main {
-    padding: 2rem 2.5rem 2rem;
+    padding: 0 2.5rem 2rem;
   }
 }
 @media (min-width: 64rem) {
   .dashboard-main {
-    padding: 2.5rem 3rem 2.5rem;
+    padding: 0 3rem 2.5rem;
   }
+}
+
+/* Inner page wrapper (max-w-7xl mx-auto w-full). Owns the top spacing that
+   used to live on `.dashboard-main`. Since this wrapper isn't a scroll
+   container, its padding-top doesn't affect sticky positioning. */
+.dashboard-page-inner {
+  padding-top: 1.25rem;
+}
+@media (min-width: 48rem) {
+  .dashboard-page-inner { padding-top: 2rem; }
+}
+@media (min-width: 64rem) {
+  .dashboard-page-inner { padding-top: 2.5rem; }
 }
 
 /* Leaf shape : the Tahi signature border radius */
@@ -294,28 +310,27 @@ body {
   padding-left: var(--space-2);
   padding-right: var(--space-2);
 }
-/* Reports page shell : cancels dashboard-main's top padding so the sticky
-   nav can reach the top nav without a gap. Applied via `.page-no-top-pad`
-   on the page wrapper. */
-.page-no-top-pad {
+/* Pages with a sticky section nav (e.g. Reports) use `.page-flush-top`
+   to cancel out the inner wrapper's padding-top so the nav can sit
+   directly under the top nav with no gap. The page's title block gets
+   the padding back via `> :first-child`. */
+.page-flush-top {
   margin-top: -1.25rem;
 }
 @media (min-width: 48rem) {
-  .page-no-top-pad { margin-top: -2rem; }
+  .page-flush-top { margin-top: -2rem; }
 }
 @media (min-width: 64rem) {
-  .page-no-top-pad { margin-top: -2.5rem; }
+  .page-flush-top { margin-top: -2.5rem; }
 }
-/* When the page uses .page-no-top-pad, the first child usually still wants
-   a little breathing room — re-add it on the page title, not the main. */
-.page-no-top-pad > :first-child {
+.page-flush-top > :first-child {
   padding-top: 1.25rem;
 }
 @media (min-width: 48rem) {
-  .page-no-top-pad > :first-child { padding-top: 2rem; }
+  .page-flush-top > :first-child { padding-top: 2rem; }
 }
 @media (min-width: 64rem) {
-  .page-no-top-pad > :first-child { padding-top: 2.5rem; }
+  .page-flush-top > :first-child { padding-top: 2.5rem; }
 }
 
 /* Horizontal scroll container : use on any table/list row that risks

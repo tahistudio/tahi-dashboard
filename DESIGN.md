@@ -108,6 +108,16 @@ All danger / overdue / high-priority / lost / negative-delta UI uses the same re
 ### Dropdowns: prefer native
 Use a native `<select>` for single-value filters and pickers (sort, category, currency, status). Custom dropdown menus have inconsistent focus/keyboard/hover behaviour across browsers. Reserve custom combobox UI for multi-select or search-in-list cases where native can't do the job.
 
+### Layout shell: no padding-top on `.dashboard-main`
+`.dashboard-main` is the scroll container. It deliberately carries **no `padding-top`** so `position: sticky; top: 0` descendants (section navs, table headers) can sit flush against the top nav with no visible bg-secondary gap. Per-page top spacing lives on the inner `.dashboard-page-inner` wrapper (max-w-7xl) in `app/(dashboard)/layout.tsx`. Pages must NOT put `className="dashboard-main"` on their own wrapper — that doubles the padding.
+
+Pages with a sticky section nav that needs to sit directly below the top nav add `.page-flush-top` to cancel the inner wrapper's padding-top and re-add it on the first child (the page title). Example: Reports.
+
+### Shared chart colours: `@/lib/chart-colors`
+All chart fills/strokes, stage badges, and source indicators go through **one** module so the same "Discovery" stage or "Webflow Partner" source is the same colour in every chart on every page (Deals by Stage, Sales Funnel, Stage Velocity, Pipeline kanban, Close Rate by Source, etc). Never import the local constants — always `import { CHART, stageColour, sourceColour, STATUS_COLORS } from '@/lib/chart-colors'`.
+
+Standard stages (lead, discovery, proposal, negotiation, verbal_commit, stalled, closed_won, closed_lost) have fixed colours. Custom stages fall back to the categorical palette indexed by stage position.
+
 ### Micro-interactions
 - `.view-link` class: underline slides in from left, arrow translates 3px right
 - `.hover-lift` class: translateY(-1px) on hover
@@ -201,6 +211,19 @@ Things noticed but not currently being worked on. Fix during the right page's re
 - [x] Deal detail sidebar is 14 separate cards → consolidated into 1 card with dividers
 - [ ] 9 remaining skeleton mismatches in Reports (smaller, lower priority)
 - [ ] Pipeline loading skeleton always shows 4 cols regardless of stage count
+
+### Site-wide colour sweep (#1 priority, in progress)
+User requested colour consistency as the top priority before more spacing work. Progress:
+- [x] One red across the system (`--color-danger`, `--color-danger-dot`)
+- [x] Unified stage colours: Deals by Stage, Sales Funnel, Stage Velocity, Pipeline board, Pipeline list
+- [x] Unified source colours: Sources by Revenue, Deals by Source, Close Rate by Source
+- [x] Shared `lib/chart-colors.ts` module
+- [ ] Sweep Overview KPI badges and status dots
+- [ ] Sweep Tasks page (priority dots, category chips)
+- [ ] Sweep Clients list (health status, plan badges)
+- [ ] Sweep Invoices (status colours, aging)
+- [ ] Sweep Team + Capacity (utilization bars)
+- [ ] Audit every `#` hex literal in `components/` and `app/(dashboard)/` → move to tokens or `chart-colors`
 
 ---
 

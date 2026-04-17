@@ -15,6 +15,7 @@ import {
 } from 'recharts'
 import { apiPath } from '@/lib/api'
 import { SkeletonChart, SkeletonTable, SkeletonProgressList } from '@/components/tahi/skeletons'
+import { CHART, stageColour, sourceColour, STATUS_COLORS } from '@/lib/chart-colors'
 
 // ── Currency options ─────────────────────────────────────────────────────────
 
@@ -48,61 +49,9 @@ const STATUS_LABELS: Record<string, string> = {
   archived: 'Archived',
 }
 
-// ── Chart Colour System ─────────────────────────────────────────────────────
-// Hex values required here - Recharts SVG fill/stroke doesn't resolve CSS vars.
-// One palette, one meaning per colour, used across every chart on this page so
-// the same "Lead / Discovery / Won" stage renders the same colour wherever it
-// appears (funnel, velocity, breakdown, etc).
-
-const CHART = {
-  // Core directional colours.
-  // `negative` and `aging.ninetyPlus` match --color-danger (#dc2626) so every
-  // red on the page is the same red (no mix of pink / brick / brand-danger).
-  positive: '#5A824E',        // brand green : revenue, net profit, won, current
-  negative: '#dc2626',        // danger red : expenses, lost, overdue (matches --color-danger)
-  neutral: '#94a3b8',         // muted slate : neutral / info / forecast
-
-  // Grid + axis
-  grid: '#e8f0e6',
-  axis: '#8a9987',
-
-  // Categorical rotation : sources, stages, arbitrary groupings.
-  // Ordered so the first few colours are the most distinct.
-  categorical: [
-    '#5A824E', // brand green
-    '#60a5fa', // blue
-    '#fbbf24', // amber
-    '#a78bfa', // purple
-    '#06b6d4', // teal
-    '#fb923c', // orange
-    '#f472b6', // rose
-    '#9ca3af', // gray
-  ],
-
-  // Aging buckets : 0-30 -> 30-60 -> 60-90 -> 90+ (green to red gradient)
-  aging: {
-    current: '#5A824E',
-    thirtyDays: '#fbbf24',
-    sixtyDays: '#fb923c',
-    ninetyPlus: '#dc2626',
-  },
-}
-
-// Request/deal status colours (semantic, one meaning per colour)
-const STATUS_COLORS: Record<string, string> = {
-  draft: '#9ca3af',           // gray : inactive
-  submitted: '#60a5fa',       // blue : new / incoming
-  in_review: '#fbbf24',       // amber : needs attention
-  in_progress: '#06b6d4',     // teal : working on it
-  client_review: '#a78bfa',   // purple : client action
-  delivered: '#22c55e',       // green : done / paid / delivered
-  archived: '#d1d5db',        // light gray : archived
-}
-
-// Legacy alias : use STATUS_COLORS or CHART.categorical instead.
-// Exported-via-use-site reference to silence unused-var warning if needed.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const PIE_COLORS = CHART.categorical
+// Chart colours, stage/source lookups, and STATUS_COLORS are imported
+// from `@/lib/chart-colors` so the same stage renders the same colour in
+// every chart on this page AND on the Pipeline board.
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -269,7 +218,7 @@ export function ReportsContent() {
   }
 
   return (
-    <div className="page-no-top-pad" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+    <div className="page-flush-top" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
       <div>
         <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)' }}>
           Reports
@@ -1368,13 +1317,15 @@ function SalesPipelineSection({ displayCurrency, exchangeRates }: CurrencyProps)
     )
   }
 
-  // Chart data: deal count by stage, excluding closed stages with 0 deals for cleaner chart
+  // Chart data: deal count by stage, excluding closed stages with 0 deals for cleaner chart.
+  // Colour comes from the shared stageColour() lookup so a given stage is the same colour
+  // here, in the Sales Funnel, in Stage Velocity, and on the Pipeline board.
   const stageChartData = data.stages
     .filter(s => s.dealCount > 0 || (!s.isClosedWon && !s.isClosedLost))
-    .map(s => ({
+    .map((s, i) => ({
       name: s.name,
       deals: s.dealCount,
-      fill: s.colour ?? CHART.positive,
+      fill: stageColour(s.name, i),
     }))
 
   return (
@@ -1471,7 +1422,7 @@ interface CloseRateData {
   }>
 }
 
-const FUNNEL_COLORS = CHART.categorical
+// FUNNEL uses stageColour() directly instead of a separate palette
 
 function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
   const [data, setData] = useState<CloseRateData | null>(null)
@@ -1532,19 +1483,21 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
     )
   }
 
-  // Build funnel stages: first stage entry count + each subsequent stage
+  // Build funnel stages: first stage entry count + each subsequent stage.
+  // Colours come from the shared stageColour() lookup so each stage matches
+  // the Deals-by-Stage chart and the Pipeline board.
   const funnelStages: Array<{ name: string; count: number; color: string }> = []
   if (data.stageConversions.length > 0) {
     funnelStages.push({
       name: data.stageConversions[0].fromStage,
       count: data.stageConversions[0].entered,
-      color: FUNNEL_COLORS[0],
+      color: stageColour(data.stageConversions[0].fromStage, 0),
     })
     for (let i = 0; i < data.stageConversions.length; i++) {
       funnelStages.push({
         name: data.stageConversions[i].toStage,
         count: data.stageConversions[i].converted,
-        color: FUNNEL_COLORS[(i + 1) % FUNNEL_COLORS.length],
+        color: stageColour(data.stageConversions[i].toStage, i + 1),
       })
     }
   }
@@ -1841,7 +1794,7 @@ const SOURCE_LABELS: Record<string, string> = {
   other: 'Other',
 }
 
-const SOURCE_CHART_COLORS = CHART.categorical
+// Sources use sourceColour() directly so "Webflow Partner" matches across charts
 
 interface SourceDeal {
   source: string | null
@@ -1960,8 +1913,8 @@ function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProp
               />
               <Tooltip />
               <Bar dataKey="deals" radius={[0, 4, 4, 0]}>
-                {sourceData.map((_, index) => (
-                  <Cell key={`cell-${index}`} fill={SOURCE_CHART_COLORS[index % SOURCE_CHART_COLORS.length]} />
+                {sourceData.map((row, index) => (
+                  <Cell key={`cell-${index}`} fill={sourceColour(row.name, index)} />
                 ))}
               </Bar>
             </BarChart>
@@ -2022,7 +1975,7 @@ function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProp
                             width: '0.625rem',
                             height: '0.625rem',
                             borderRadius: '50%',
-                            background: SOURCE_CHART_COLORS[idx % SOURCE_CHART_COLORS.length],
+                            background: sourceColour(row.name, idx),
                             flexShrink: 0,
                           }}
                         />
@@ -2124,8 +2077,6 @@ function StageVelocitySection() {
     )
   }
 
-  const VELOCITY_COLORS = CHART.categorical
-
   return (
     <div
       style={{
@@ -2153,8 +2104,8 @@ function StageVelocitySection() {
             }}
           />
           <Bar dataKey="avgDays" radius={[0, 4, 4, 0]}>
-            {filtered.map((_, index) => (
-              <Cell key={`vel-${index}`} fill={VELOCITY_COLORS[index % VELOCITY_COLORS.length]} />
+            {filtered.map((row, index) => (
+              <Cell key={`vel-${index}`} fill={stageColour(row.stageName, index)} />
             ))}
           </Bar>
         </BarChart>
