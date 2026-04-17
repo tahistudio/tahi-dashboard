@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { apiPath } from '@/lib/api'
 import { stageColour } from '@/lib/chart-colors'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
+import { ActivityTimeline, ActivityItem, type ActivityType } from '@/components/tahi/activity-timeline'
+import { Badge } from '@/components/tahi/badge'
 import {
   Globe,
   Building2,
@@ -3205,18 +3207,8 @@ interface CrmActivityRow {
   createdByName: string | null
 }
 
-// Activity types are categorical, not semantic statuses.
-// Using the --status-* tokens for their distinct palette (blue / teal /
-// purple / brand) without triggering "warning"/"danger" perception.
-const ACTIVITY_TYPE_ICONS: Record<string, { icon: typeof Phone; color: string; bg: string }> = {
-  call:    { icon: Phone,          color: 'var(--status-submitted-text)',    bg: 'var(--status-submitted-bg)'    }, // blue
-  meeting: { icon: Video,          color: 'var(--status-client-review-text)',bg: 'var(--status-client-review-bg)' }, // purple
-  email:   { icon: Mail,           color: 'var(--status-in-progress-text)',  bg: 'var(--status-in-progress-bg)'  }, // teal
-  note:    { icon: FileText,       color: 'var(--color-text-muted)',         bg: 'var(--color-bg-secondary)'     }, // muted
-  task:    { icon: Check,          color: 'var(--color-brand)',              bg: 'var(--color-brand-50)'         }, // brand green
-}
-
-const ACTIVITY_TYPE_FALLBACK = { icon: Activity, color: 'var(--color-text-muted)', bg: 'var(--color-bg-secondary)' }
+// Activity types + palette now live in the shared <ActivityTimeline> component
+// (components/tahi/activity-timeline.tsx, ACTIVITY_TYPE_META).
 
 function CrmActivitiesTab({ clientId }: { clientId: string }) {
   const [items, setItems] = useState<CrmActivityRow[]>([])
@@ -3342,43 +3334,24 @@ function CrmActivitiesTab({ clientId }: { clientId: string }) {
           <p className="text-sm text-[var(--color-text-muted)]">No CRM activities for this client yet</p>
         </div>
       ) : (
-        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)]">
-          <div className="divide-y divide-[var(--color-border-subtle)]">
-            {items.map(item => {
-              const typeConfig = ACTIVITY_TYPE_ICONS[item.type] ?? ACTIVITY_TYPE_FALLBACK
-              const Icon = typeConfig.icon
-              return (
-                <div key={item.id} className="px-4 py-3 flex items-start gap-3 hover:bg-[var(--color-bg-secondary)] transition-colors">
-                  <div
-                    className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
-                    style={{ background: typeConfig.bg }}
-                  >
-                    <Icon className="w-3.5 h-3.5" style={{ color: typeConfig.color }} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-[var(--color-text)] truncate">{item.title}</p>
-                      <span
-                        className="text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0"
-                        style={{ background: typeConfig.bg, color: typeConfig.color }}
-                      >
-                        {item.type}
-                      </span>
-                    </div>
-                    {item.description && (
-                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5 truncate">{item.description}</p>
-                    )}
-                    {item.createdByName && (
-                      <p className="text-xs text-[var(--color-text-subtle)] mt-0.5">by {item.createdByName}</p>
-                    )}
-                  </div>
-                  <span className="text-xs text-[var(--color-text-subtle)] flex-shrink-0 whitespace-nowrap">
-                    {new Date(item.createdAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}
+        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-4">
+          <ActivityTimeline>
+            {items.map(item => (
+              <ActivityItem
+                key={item.id}
+                type={(item.type as ActivityType) ?? 'status'}
+                title={
+                  <span className="flex items-center gap-2">
+                    <span>{item.title}</span>
+                    <Badge size="sm" tone="neutral">{item.type}</Badge>
                   </span>
-                </div>
-              )
-            })}
-          </div>
+                }
+                actor={item.createdByName ? `by ${item.createdByName}` : undefined}
+                description={item.description ?? undefined}
+                timestamp={new Date(item.createdAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}
+              />
+            ))}
+          </ActivityTimeline>
         </div>
       )}
     </div>

@@ -11,6 +11,7 @@ import {
 import { apiPath } from '@/lib/api'
 import { sourceBadge } from '@/lib/chart-colors'
 import { REQUEST_STATUS_CONFIG } from '@/lib/status-config'
+import { SidebarSection, SidebarCard as SharedSidebarCard } from '@/components/tahi/sidebar-card'
 
 // ---- Types ---------------------------------------------------------------
 
@@ -430,16 +431,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
         </div>
 
         {/* Right column (1/3) - sidebar: one card, many sections */}
-        <div
-          className="sidebar-card-group flex flex-col"
-          style={{
-            background: 'var(--color-bg)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 'var(--radius-lg)',
-            overflow: 'hidden',
-            alignSelf: 'flex-start',
-          }}
-        >
+        <SharedSidebarCard className="flex flex-col">
           {/* Stage selector */}
           <SidebarCard title="Stage">
             <StageSelector
@@ -648,7 +640,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
               )}
             </div>
           </SidebarCard>
-        </div>
+        </SharedSidebarCard>
       </div>
 
       {/* Activity form dialog */}
@@ -741,27 +733,12 @@ function StageProgress({ stages, currentStageId }: { stages: Stage[]; currentSta
  * rendered inside a parent container with `sidebar-card-group`, the last
  * child's divider is removed via CSS.
  */
+// Thin wrapper kept for backward-compat — real component is <SidebarSection>.
 function SidebarCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div
-      className="sidebar-section"
-      style={{
-        padding: 'var(--space-4) var(--space-5)',
-        borderBottom: '1px solid var(--color-border-subtle)',
-      }}
-    >
-      <p style={{
-        fontSize: 'var(--text-xs)',
-        fontWeight: 600,
-        color: 'var(--color-text-subtle)',
-        textTransform: 'uppercase',
-        letterSpacing: '0.04em',
-        marginBottom: 'var(--space-2)',
-      }}>
-        {title}
-      </p>
+    <SidebarSection label={title}>
       {children}
-    </div>
+    </SidebarSection>
   )
 }
 

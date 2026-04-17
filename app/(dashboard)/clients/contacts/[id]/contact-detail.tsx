@@ -20,6 +20,8 @@ import {
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { StatusBadge } from '@/components/tahi/status-badge'
+import { ActivityTimeline, ActivityItem as TimelineItem, type ActivityType } from '@/components/tahi/activity-timeline'
+import { Badge } from '@/components/tahi/badge'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -480,77 +482,33 @@ export function ContactDetail({ contactId }: { contactId: string }) {
                   No activities recorded yet
                 </p>
               ) : (
-                <div className="space-y-0">
-                  {activities.map((activity, idx) => {
-                    const style = ACTIVITY_TYPE_STYLES[activity.type] ?? ACTIVITY_TYPE_STYLES.note
+                <ActivityTimeline>
+                  {activities.map(activity => {
+                    const label = ACTIVITY_TYPE_STYLES[activity.type]?.label ?? activity.type
+                    const dateStr = new Date(activity.createdAt).toLocaleDateString(undefined, {
+                      month: 'short', day: 'numeric', year: 'numeric',
+                    })
                     return (
-                      <div
+                      <TimelineItem
                         key={activity.id}
-                        className="flex gap-3 relative"
-                        style={{ paddingBottom: idx < activities.length - 1 ? '1rem' : 0 }}
-                      >
-                        {/* Timeline line */}
-                        {idx < activities.length - 1 && (
-                          <div
-                            className="absolute left-[0.6875rem] top-[1.5rem]"
-                            style={{
-                              width: '0.125rem',
-                              bottom: 0,
-                              background: 'var(--color-border-subtle)',
-                            }}
-                          />
-                        )}
-
-                        {/* Timeline dot */}
-                        <div
-                          className="flex-shrink-0 flex items-center justify-center relative z-10"
-                          style={{
-                            width: '1.5rem',
-                            height: '1.5rem',
-                            borderRadius: '50%',
-                            background: style.bg,
-                          }}
-                        >
-                          {activity.completedAt ? (
-                            <CheckCircle2 style={{ width: '0.75rem', height: '0.75rem', color: style.text }} />
-                          ) : (
-                            <div style={{ width: '0.375rem', height: '0.375rem', borderRadius: '50%', background: style.text }} />
-                          )}
-                        </div>
-
-                        {/* Content */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span
-                              className="text-xs font-medium px-1.5 py-0.5 rounded"
-                              style={{ background: style.bg, color: style.text }}
-                            >
-                              {style.label}
-                            </span>
-                            <span className="text-sm font-medium text-[var(--color-text)]">
-                              {activity.title}
-                            </span>
-                          </div>
-                          {activity.description && (
-                            <p className="text-sm text-[var(--color-text-muted)] mt-0.5 line-clamp-2">
-                              {activity.description}
-                            </p>
-                          )}
-                          <p className="text-xs text-[var(--color-text-subtle)] mt-1">
-                            {new Date(activity.createdAt).toLocaleDateString(undefined, {
-                              month: 'short',
-                              day: 'numeric',
-                              year: 'numeric',
-                            })}
-                            {activity.durationMinutes != null && (
-                              <span className="ml-2">{activity.durationMinutes} min</span>
-                            )}
-                          </p>
-                        </div>
-                      </div>
+                        type={(activity.type as ActivityType) ?? 'status'}
+                        title={
+                          <span className="flex items-center gap-2 flex-wrap">
+                            <Badge size="sm" tone="neutral">{label}</Badge>
+                            <span>{activity.title}</span>
+                          </span>
+                        }
+                        description={activity.description ?? undefined}
+                        timestamp={
+                          <>
+                            {dateStr}
+                            {activity.durationMinutes != null && <span className="ml-2">{activity.durationMinutes} min</span>}
+                          </>
+                        }
+                      />
                     )
                   })}
-                </div>
+                </ActivityTimeline>
               )}
             </div>
 

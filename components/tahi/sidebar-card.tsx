@@ -29,10 +29,12 @@ interface SidebarCardProps {
 }
 
 export function SidebarCard({ children, className, style }: SidebarCardProps) {
+  // No inner padding — each SidebarSection owns its own horizontal padding so
+  // the horizontal dividers between sections span the full card width.
   return (
     <div className={`sidebar-card-group ${className ?? ''}`} style={{ alignSelf: 'flex-start', ...style }}>
       <Card variant="default" padding="none">
-        <div style={{ padding: 'var(--space-5)' }}>{children}</div>
+        {children}
       </Card>
     </div>
   )
@@ -51,8 +53,7 @@ export function SidebarSection({ label, children, className, style }: SidebarSec
     <div
       className={`sidebar-section ${className ?? ''}`}
       style={{
-        paddingTop: 'var(--space-4)',
-        paddingBottom: 'var(--space-4)',
+        padding: 'var(--space-4) var(--space-5)',
         borderBottom: '1px solid var(--color-border-subtle)',
         ...style,
       }}

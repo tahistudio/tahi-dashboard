@@ -13,6 +13,7 @@ import Link from 'next/link'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { useToast } from '@/components/tahi/toast'
+import { Card } from '@/components/tahi/card'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -200,16 +201,15 @@ function TypeBadge({ type }: { type: string }) {
   )
 }
 
+// Task-detail sidebar block — same per-card-block pattern as request-detail.
+// Composed from the shared <Card> primitive with bordered header.
 function SidebarCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div
-      className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
-      style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
-    >
+    <Card padding="none" style={{ overflow: 'hidden' }}>
       <div
         style={{
           padding: '0.75rem 1rem',
-          borderBottom: '1px solid var(--color-row-border)',
+          borderBottom: '1px solid var(--color-border-subtle)',
         }}
       >
         <h3
@@ -222,7 +222,7 @@ function SidebarCard({ title, children }: { title: string; children: React.React
       <div style={{ padding: '1rem' }}>
         {children}
       </div>
-    </div>
+    </Card>
   )
 }
 

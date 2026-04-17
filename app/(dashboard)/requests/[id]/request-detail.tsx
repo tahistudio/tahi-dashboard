@@ -17,6 +17,7 @@ import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { useToast } from '@/components/tahi/toast'
+import { Card } from '@/components/tahi/card'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -1170,16 +1171,16 @@ function formatActivityDate(iso: string) {
 
 // ---- Sidebar Card ------------------------------------------------------------
 
+// Each request-detail sidebar block renders as its own standalone card
+// (kept separate rather than the deal-detail "one card, many sections"
+// pattern). Composed from the shared <Card> primitive with bordered header.
 function SidebarCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div
-      className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
-      style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
-    >
+    <Card padding="none" style={{ overflow: 'hidden' }}>
       <div
         style={{
           padding: '0.75rem 1rem',
-          borderBottom: '1px solid var(--color-row-border)',
+          borderBottom: '1px solid var(--color-border-subtle)',
         }}
       >
         <h3
@@ -1192,7 +1193,7 @@ function SidebarCard({ title, children }: { title: string; children: React.React
       <div style={{ padding: '1rem' }}>
         {children}
       </div>
-    </div>
+    </Card>
   )
 }
 
