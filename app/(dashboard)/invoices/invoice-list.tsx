@@ -11,6 +11,7 @@ import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { formatCurrency } from '@/lib/currency'
+import { PageHeader } from '@/components/tahi/page-header'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -588,16 +589,12 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text)', margin: 0 }}>Invoices</h1>
-          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
-            {isAdmin ? 'All invoices across every client.' : 'Your invoice history and outstanding payments.'}
-          </p>
-        </div>
+      <PageHeader
+        title="Invoices"
+        subtitle={isAdmin ? 'All invoices across every client.' : 'Your invoice history and outstanding payments.'}
+      >
         {isAdmin && (
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <>
             <button
               onClick={() => {
                 const link = document.createElement('a')
@@ -670,9 +667,9 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
               <Plus style={{ width: 16, height: 16 }} aria-hidden="true" />
               Create Invoice
             </button>
-          </div>
+          </>
         )}
-      </div>
+      </PageHeader>
 
       {/* Filter Tabs */}
       {isAdmin && (

@@ -8,6 +8,8 @@ import { TahiButton } from '@/components/tahi/tahi-button'
 import { NewClientDialog } from '@/components/tahi/dialogs/new-client-dialog'
 import { apiPath } from '@/lib/api'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
+import { PageHeader } from '@/components/tahi/page-header'
+import { Input } from '@/components/tahi/input'
 
 const STATUS_FILTERS = [
   { label: 'All',      value: 'all' },
@@ -148,16 +150,14 @@ export function ClientList() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">Clients</h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">
-            {filteredOrgs.length > 0
-              ? `${filteredOrgs.length} client${filteredOrgs.length !== 1 ? 's' : ''} (${filteredOrgs.filter(o => o.status === 'active').length} active)`
-              : 'All client organisations and their current status'}
-          </p>
-        </div>
+      <PageHeader
+        title="Clients"
+        subtitle={
+          filteredOrgs.length > 0
+            ? `${filteredOrgs.length} client${filteredOrgs.length !== 1 ? 's' : ''} (${filteredOrgs.filter(o => o.status === 'active').length} active)`
+            : 'All client organisations and their current status'
+        }
+      >
         {!isViewerImpersonation && (
           <TahiButton
             iconLeft={<Plus className="w-4 h-4" />}
@@ -167,19 +167,15 @@ export function ClientList() {
             Add client
           </TahiButton>
         )}
-      </div>
+      </PageHeader>
 
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-subtle)]" />
-        <input
-          type="text"
-          placeholder="Search clients by name or website..."
-          value={searchInput}
-          onChange={e => handleSearchChange(e.target.value)}
-          className="w-full pl-9 pr-4 py-2.5 text-sm bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg focus:outline-none focus:border-[var(--color-brand)] transition-colors placeholder:text-[var(--color-text-subtle)]"
-        />
-      </div>
+      <Input
+        value={searchInput}
+        onChange={e => handleSearchChange(e.target.value)}
+        placeholder="Search clients by name or website..."
+        leadingIcon={<Search size={14} aria-hidden="true" />}
+        style={{ width: '100%' }}
+      />
 
       {/* Filter chips */}
       <div className="flex items-center gap-2">

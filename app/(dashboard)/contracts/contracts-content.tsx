@@ -11,6 +11,8 @@ import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
+import { PageHeader } from '@/components/tahi/page-header'
+import { Input, Select } from '@/components/tahi/input'
 
 // -- Types --
 
@@ -369,37 +371,27 @@ export function ContractsContent() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">Contracts</h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">
-            Track NDAs, SLAs, MSAs, and SOWs across all clients.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <TahiButton variant="secondary" size="sm" onClick={fetchContracts} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
-            Refresh
-          </TahiButton>
-          <TahiButton size="sm" onClick={() => setShowCreateDialog(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
-            New Contract
-          </TahiButton>
-        </div>
-      </div>
+      <PageHeader
+        title="Contracts"
+        subtitle="Track NDAs, SLAs, MSAs, and SOWs across all clients."
+      >
+        <TahiButton variant="secondary" size="sm" onClick={fetchContracts} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+          Refresh
+        </TahiButton>
+        <TahiButton size="sm" onClick={() => setShowCreateDialog(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+          New Contract
+        </TahiButton>
+      </PageHeader>
 
-      {/* Search + Filters */}
+      {/* Search + Status tabs */}
       <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-subtle)]"
-            style={{ width: '0.875rem', height: '0.875rem' }}
-          />
-          <input
-            type="text"
-            placeholder="Search contracts..."
+        <div className="flex-1 max-w-sm">
+          <Input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] pl-9 pr-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            placeholder="Search contracts..."
+            leadingIcon={<Search size={14} aria-hidden="true" />}
+            style={{ width: '100%' }}
           />
         </div>
 
@@ -423,27 +415,20 @@ export function ContractsContent() {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
         <DateRangePicker value={dateRange} onChange={setDateRange} label="Expiry date" />
-        <select
+        <Select
           value={typeFilter}
           onChange={e => setTypeFilter(e.target.value)}
-          className="appearance-none focus:outline-none"
-          style={{
-            padding: '0.4375rem 2rem 0.4375rem 0.75rem',
-            fontSize: '0.8125rem',
-            border: '1px solid var(--color-border)',
-            borderRadius: '0.5rem',
-            color: typeFilter !== 'all' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-            background: typeFilter !== 'all' ? 'var(--color-brand-50)' : 'var(--color-bg)',
-            cursor: 'pointer',
-          }}
-        >
-          <option value="all">All Types</option>
-          <option value="nda">NDA</option>
-          <option value="sla">SLA</option>
-          <option value="msa">MSA</option>
-          <option value="sow">SOW</option>
-          <option value="other">Other</option>
-        </select>
+          aria-label="Contract type filter"
+          highlightActive
+          options={[
+            { value: 'all',   label: 'All Types' },
+            { value: 'nda',   label: 'NDA'       },
+            { value: 'sla',   label: 'SLA'       },
+            { value: 'msa',   label: 'MSA'       },
+            { value: 'sow',   label: 'SOW'       },
+            { value: 'other', label: 'Other'     },
+          ]}
+        />
       </div>
 
       {/* Content */}

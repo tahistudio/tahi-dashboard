@@ -11,6 +11,7 @@ import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
 import { setTeamMemberImpersonation, type TeamMemberAccessRule } from '@/components/tahi/impersonation-banner'
 import { useRouter } from 'next/navigation'
+import { PageHeader } from '@/components/tahi/page-header'
 
 // -- Types --
 
@@ -860,23 +861,17 @@ export function TeamContent() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">Team</h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">
-            Manage team members, roles, and access scoping.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <TahiButton variant="secondary" size="sm" onClick={fetchTeam} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
-            Refresh
-          </TahiButton>
-          <TahiButton size="sm" onClick={() => setShowAddModal(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
-            Add Member
-          </TahiButton>
-        </div>
-      </div>
+      <PageHeader
+        title="Team"
+        subtitle="Manage team members, roles, and access scoping."
+      >
+        <TahiButton variant="secondary" size="sm" onClick={fetchTeam} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+          Refresh
+        </TahiButton>
+        <TahiButton size="sm" onClick={() => setShowAddModal(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+          Add Member
+        </TahiButton>
+      </PageHeader>
 
       {/* View toggle tabs */}
       <div className="flex gap-1 border-b border-[var(--color-border-subtle)]">

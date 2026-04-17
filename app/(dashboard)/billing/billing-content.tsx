@@ -7,6 +7,7 @@ import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { apiPath } from '@/lib/api'
+import { PageHeader } from '@/components/tahi/page-header'
 
 interface InvoiceRow {
   id: string
@@ -127,16 +128,14 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">Billing</h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">View your plan, invoices, and manage billing.</p>
-        </div>
+      <PageHeader
+        title="Billing"
+        subtitle="View your plan, invoices, and manage billing."
+      >
         <TahiButton variant="secondary" size="sm" onClick={fetchData} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
           Refresh
         </TahiButton>
-      </div>
+      </PageHeader>
 
       {loading ? (
         <LoadingSkeleton rows={5} />
@@ -332,18 +331,14 @@ function AdminBillingView() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text)' }}>Billing</h1>
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
-            Subscriptions, invoices, and revenue overview.
-          </p>
-        </div>
+      <PageHeader
+        title="Billing"
+        subtitle="Subscriptions, invoices, and revenue overview."
+      >
         <TahiButton variant="secondary" size="sm" onClick={fetchData} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
           Refresh
         </TahiButton>
-      </div>
+      </PageHeader>
 
       {loading ? (
         <LoadingSkeleton rows={6} />

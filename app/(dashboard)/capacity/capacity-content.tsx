@@ -13,6 +13,8 @@ import { apiPath } from '@/lib/api'
 import { CHART } from '@/lib/chart-colors'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
+import { PageHeader } from '@/components/tahi/page-header'
+import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -215,28 +217,29 @@ export function CapacityContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">Capacity</h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">Team utilization, projected capacity, and pipeline impact.</p>
-        </div>
+      <PageHeader
+        title="Capacity"
+        subtitle="Team utilization, projected capacity, and pipeline impact."
+      >
         <button
           onClick={fetchData}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors"
-          style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-button)', color: 'var(--color-text)', cursor: 'pointer', minHeight: '2.75rem' }}
+          className="flex items-center gap-2 px-4 text-sm font-medium transition-colors"
+          style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text)', cursor: 'pointer', height: '2.25rem' }}
         >
-          <RefreshCw className="w-4 h-4" aria-hidden="true" />
+          <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
           Refresh
         </button>
-      </div>
+      </PageHeader>
 
-      {/* T331: Projected Capacity KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <CapacityKPI icon={Users} label="Total Team Capacity" value={`${totalCapacity} hrs/wk`} accent="emerald" />
-        <CapacityKPI icon={Clock} label="Committed (Subscriptions)" value={`${committedHours} hrs/wk`} accent="blue" />
-        <CapacityKPI icon={Gauge} label="Utilization" value={`${utilizationPct}%`} accent="amber" />
-        <CapacityKPI icon={TrendingUp} label="Available" value={`${availableHours} hrs/wk`} accent={availableHours > 0 ? 'emerald' : 'red'} />
-      </div>
+      {/* Projected Capacity KPI Cards */}
+      <KPIStrip>
+        <KPICell icon={Users}      label="Total Team Capacity"     value={`${totalCapacity} hrs/wk`}  />
+        <KPICell icon={Clock}      label="Committed (Subscriptions)" value={`${committedHours} hrs/wk`} tone="info" />
+        <KPICell icon={Gauge}      label="Utilization"             value={`${utilizationPct}%`}
+                                    tone={utilizationPct > 90 ? 'danger' : utilizationPct > 70 ? 'warning' : 'brand'} />
+        <KPICell icon={TrendingUp} label="Available"               value={`${availableHours} hrs/wk`}
+                                    tone={availableHours > 0 ? 'brand' : 'danger'} />
+      </KPIStrip>
 
       {/* Utilization bar */}
       <div style={{ background: 'var(--color-bg)', borderRadius: 'var(--radius-card)', border: '1px solid var(--color-border)', padding: '1.5rem' }}>
