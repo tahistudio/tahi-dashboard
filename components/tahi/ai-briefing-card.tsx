@@ -150,9 +150,12 @@ export function AIDailyBriefing() {
         borderRadius: 'var(--radius-lg)',
         padding: 'var(--space-5)',
       }}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
-            <Sparkles size={18} style={{ color: 'var(--color-brand)' }} aria-hidden="true" />
+        <div
+          className="flex flex-col sm:flex-row sm:items-center sm:justify-between"
+          style={{ gap: 'var(--space-3)' }}
+        >
+          <div className="flex items-start" style={{ gap: 'var(--space-2)' }}>
+            <Sparkles size={18} style={{ color: 'var(--color-brand)', flexShrink: 0, marginTop: '0.125rem' }} aria-hidden="true" />
             <div>
               <p style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
                 Daily Briefing
@@ -165,7 +168,7 @@ export function AIDailyBriefing() {
           <button
             onClick={generate}
             disabled={generating}
-            className="flex items-center hover-lift"
+            className="flex items-center justify-center sm:self-center"
             style={{
               padding: 'var(--space-2) var(--space-3)',
               background: 'var(--color-brand)',
@@ -176,6 +179,21 @@ export function AIDailyBriefing() {
               fontWeight: 600,
               gap: 'var(--space-1-5)',
               opacity: generating ? 0.7 : 1,
+              height: '2.25rem',
+              whiteSpace: 'nowrap',
+              transition: 'background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease',
+            }}
+            onMouseEnter={e => {
+              if (!generating) {
+                e.currentTarget.style.background = '#3d6333'
+                e.currentTarget.style.boxShadow = '0 4px 14px rgba(90,130,78,0.4)'
+                e.currentTarget.style.transform = 'translateY(-1px)'
+              }
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'var(--color-brand)'
+              e.currentTarget.style.boxShadow = 'none'
+              e.currentTarget.style.transform = 'none'
             }}
           >
             {generating ? (
@@ -183,7 +201,7 @@ export function AIDailyBriefing() {
             ) : (
               <Sparkles size={14} aria-hidden="true" />
             )}
-            {generating ? 'Generating...' : 'Generate Briefing'}
+            {generating ? 'Generating...' : 'Generate'}
           </button>
         </div>
       </div>

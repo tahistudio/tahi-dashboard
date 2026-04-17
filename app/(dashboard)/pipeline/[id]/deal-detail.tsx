@@ -283,11 +283,14 @@ export function DealDetail({ dealId }: { dealId: string }) {
             className="rounded-xl"
             style={{ padding: 'var(--space-5)', background: 'var(--color-bg)', border: '1px solid var(--color-border-subtle)' }}
           >
-            <div className="flex items-center justify-between" style={{ marginBottom: '1rem' }}>
-              <h2 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)' }}>
+            <div
+              className="flex flex-col sm:flex-row sm:items-center sm:justify-between"
+              style={{ marginBottom: 'var(--space-4)', gap: 'var(--space-3)' }}
+            >
+              <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 600, color: 'var(--color-text)' }}>
                 Activity Timeline
               </h2>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
                 <button
                   onClick={() => setShowNudgeDialog(true)}
                   className="inline-flex items-center"
