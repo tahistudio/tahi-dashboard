@@ -14,6 +14,7 @@ import {
   LineChart, Line,
 } from 'recharts'
 import { apiPath } from '@/lib/api'
+import { SkeletonChart, SkeletonTable, SkeletonProgressList } from '@/components/tahi/skeletons'
 
 // ── Currency options ─────────────────────────────────────────────────────────
 
@@ -2509,9 +2510,9 @@ function RetainerHealthSection({ displayCurrency, exchangeRates }: CurrencyProps
 
   if (loading) {
     return (
-      <div className="rounded-xl border p-6 animate-pulse" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
-        <div className="h-5 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '40%' }} />
-        <div className="h-24 rounded mt-4" style={{ background: 'var(--color-bg-tertiary)' }} />
+      <div>
+        <h2 className="text-lg font-semibold text-[var(--color-text)] mb-3">Retainer Health Monitor</h2>
+        <SkeletonTable rows={4} columns={5} />
       </div>
     )
   }
@@ -2632,12 +2633,7 @@ function CashFlowForecastSection({ displayCurrency, exchangeRates }: CurrencyPro
   }, [])
 
   if (loading) {
-    return (
-      <div className="rounded-xl border p-6 animate-pulse" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
-        <div className="h-5 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '40%' }} />
-        <div className="h-48 rounded mt-4" style={{ background: 'var(--color-bg-tertiary)' }} />
-      </div>
-    )
+    return <SkeletonChart height="14rem" />
   }
 
   if (!data || data.months.length === 0) {
@@ -2718,9 +2714,9 @@ function UtilizationSection() {
 
   if (loading) {
     return (
-      <div className="rounded-xl border p-6 animate-pulse" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
-        <div className="h-5 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '40%' }} />
-        <div className="h-32 rounded mt-4" style={{ background: 'var(--color-bg-tertiary)' }} />
+      <div>
+        <h2 className="text-lg font-semibold text-[var(--color-text)] mb-3">Team Utilisation</h2>
+        <SkeletonProgressList rows={4} />
       </div>
     )
   }
@@ -2911,12 +2907,7 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
   }
 
   if (loading) {
-    return (
-      <div className="rounded-xl border p-6 animate-pulse" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
-        <div className="h-5 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '40%' }} />
-        <div className="h-48 rounded mt-4" style={{ background: 'var(--color-bg-tertiary)' }} />
-      </div>
-    )
+    return <SkeletonChart height="14rem" />
   }
 
   const hasData = data && data.pnl.some(m => m.revenue > 0 || m.expenses > 0)
@@ -3125,9 +3116,9 @@ function ClientProfitabilityScorecard({ displayCurrency, exchangeRates }: Curren
 
   if (loading) {
     return (
-      <div className="rounded-xl border p-6 animate-pulse" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
-        <div className="h-5 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '40%' }} />
-        <div className="h-32 rounded mt-4" style={{ background: 'var(--color-bg-tertiary)' }} />
+      <div>
+        <h2 className="text-lg font-semibold text-[var(--color-text)] mb-3">Client Profitability Scorecard</h2>
+        <SkeletonTable rows={5} columns={5} />
       </div>
     )
   }
@@ -3450,9 +3441,9 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
 
   if (loading) {
     return (
-      <div className="rounded-xl border p-6 animate-pulse" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
-        <div className="h-5 rounded" style={{ background: 'var(--color-bg-tertiary)', width: '40%' }} />
-        <div className="h-24 rounded mt-4" style={{ background: 'var(--color-bg-tertiary)' }} />
+      <div>
+        <h2 className="text-lg font-semibold text-[var(--color-text)] mb-3">Fixed Costs</h2>
+        <SkeletonTable rows={4} columns={5} />
       </div>
     )
   }
