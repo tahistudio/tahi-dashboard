@@ -49,14 +49,15 @@ const STATUS_LABELS: Record<string, string> = {
 
 const PIE_COLORS = ['#60a5fa', '#22c55e', '#fbbf24', '#a78bfa', '#f87171', '#10b981', '#9ca3af']
 
+// Hex values required here - Recharts SVG fill doesn't resolve CSS vars
 const STATUS_COLORS: Record<string, string> = {
-  draft: 'var(--status-draft-dot)',
-  submitted: 'var(--status-submitted-dot)',
-  in_review: 'var(--status-in-review-dot)',
-  in_progress: 'var(--status-in-progress-dot)',
-  client_review: 'var(--status-client-review-dot)',
-  delivered: 'var(--status-delivered-dot)',
-  archived: 'var(--status-archived-dot)',
+  draft: '#9ca3af',
+  submitted: '#60a5fa',
+  in_review: '#fbbf24',
+  in_progress: '#06b6d4',
+  client_review: '#a78bfa',
+  delivered: '#22c55e',
+  archived: '#d1d5db',
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -351,7 +352,7 @@ export function ReportsContent() {
                   dataKey="value"
                 >
                   {statusChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                    <Cell key={`cell-${index}`} fill={entry.fill} />
                   ))}
                 </Pie>
                 <Tooltip />
@@ -573,10 +574,10 @@ interface AgingData {
 }
 
 const AGING_BUCKETS = [
-  { key: 'current' as const, label: 'Current (0-30d)', color: '#4ade80', bgColor: '#f0fdf4' },
-  { key: 'thirtyDays' as const, label: '30-60 days', color: '#fbbf24', bgColor: '#fefce8' },
+  { key: 'current' as const, label: 'Current (0-30d)', color: '#22c55e', bgColor: '#f0fdf4' },
+  { key: 'thirtyDays' as const, label: '30-60 days', color: '#fbbf24', bgColor: '#fffbeb' },
   { key: 'sixtyDays' as const, label: '60-90 days', color: '#fb923c', bgColor: '#fff7ed' },
-  { key: 'ninetyPlus' as const, label: '90+ days', color: '#f87171', bgColor: '#fef2f2' },
+  { key: 'ninetyPlus' as const, label: '90+ days', color: '#ef4444', bgColor: '#fef2f2' },
 ]
 
 function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProps) {
@@ -679,29 +680,55 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <SummaryCard
-              icon={TrendingUp}
-              label="MRR"
-              value={fmtCur(healthData.mrr)}
-              accent="emerald"
-            />
-            <SummaryCard
-              icon={DollarSign}
-              label="Total Invoiced"
-              value={fmtCur(healthData.invoices.totalInvoiced)}
-              accent="blue"
-            />
-            <SummaryCard
-              icon={CreditCard}
-              label="Total Paid"
-              value={fmtCur(healthData.invoices.totalPaid)}
-              accent="amber"
-            />
-            <FinancialOutstandingCard
-              value={fmtCur(healthData.invoices.totalOutstanding)}
-              isPositive={healthData.invoices.totalOutstanding > 0}
-            />
+          {/* Financial Health KPI strip - grouped panel with dividers */}
+          <div style={{
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-lg)',
+            overflow: 'hidden',
+          }}>
+            <div className="grid grid-cols-2 lg:grid-cols-4">
+              {[
+                { icon: TrendingUp, label: 'MRR', value: fmtCur(healthData.mrr) },
+                { icon: DollarSign, label: 'Total Invoiced', value: fmtCur(healthData.invoices.totalInvoiced) },
+                { icon: CreditCard, label: 'Total Paid', value: fmtCur(healthData.invoices.totalPaid) },
+                { icon: AlertTriangle, label: 'Outstanding', value: fmtCur(healthData.invoices.totalOutstanding), warn: healthData.invoices.totalOutstanding > 0 },
+              ].map((item, i) => {
+                const Icon = item.icon
+                return (
+                  <div
+                    key={item.label}
+                    className="kpi-strip-item pipeline-divider-item"
+                    style={{
+                      padding: 'var(--space-5)',
+                      borderBottom: i < 2 ? '1px solid var(--color-border-subtle)' : 'none',
+                    }}
+                  >
+                    <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+                      <div className="flex items-center justify-center flex-shrink-0" style={{
+                        width: '2rem',
+                        height: '2rem',
+                        background: item.warn ? 'var(--status-in-review-bg)' : 'var(--color-brand-50)',
+                        color: item.warn ? 'var(--status-in-review-text)' : 'var(--color-brand)',
+                        borderRadius: 'var(--radius-leaf-sm)',
+                      }}>
+                        <Icon size={15} aria-hidden="true" />
+                      </div>
+                      <span style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
+                        {item.label}
+                      </span>
+                    </div>
+                    <p className="tabular-nums" style={{
+                      fontSize: 'var(--text-xl)',
+                      fontWeight: 700,
+                      color: item.warn ? 'var(--status-in-review-text)' : 'var(--color-text)',
+                    }}>
+                      {item.value}
+                    </p>
+                  </div>
+                )
+              })}
+            </div>
           </div>
 
           {/* Pipeline Forecast Mini Chart */}

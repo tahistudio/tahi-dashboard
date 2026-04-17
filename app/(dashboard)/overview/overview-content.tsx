@@ -1138,10 +1138,10 @@ function QuickBtn({
   return (
     <Link
       href={href}
-      className="flex items-center hover:opacity-90"
+      className="flex items-center"
       style={primary
         ? {
-            padding: 'var(--space-2) var(--space-3)',
+            padding: 'var(--space-2) var(--space-4)',
             background: 'var(--color-brand)',
             color: 'white',
             border: '1px solid var(--color-brand)',
@@ -1150,7 +1150,7 @@ function QuickBtn({
             fontSize: 'var(--text-sm)',
             fontWeight: 600,
             gap: 'var(--space-1-5)',
-            transition: 'opacity 150ms ease',
+            transition: 'background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease',
           }
         : {
             padding: 'var(--space-2) var(--space-3)',
@@ -1162,11 +1162,29 @@ function QuickBtn({
             fontSize: 'var(--text-sm)',
             fontWeight: 500,
             gap: 'var(--space-1-5)',
-            transition: 'border-color 150ms ease',
+            transition: 'border-color 150ms ease, background-color 150ms ease',
           }
       }
-      onMouseEnter={e => { if (!primary) e.currentTarget.style.borderColor = 'var(--color-border)' }}
-      onMouseLeave={e => { if (!primary) e.currentTarget.style.borderColor = 'var(--color-border-subtle)' }}
+      onMouseEnter={e => {
+        if (primary) {
+          e.currentTarget.style.background = '#3d6333'
+          e.currentTarget.style.boxShadow = '0 4px 14px rgba(90,130,78,0.4)'
+          e.currentTarget.style.transform = 'translateY(-1px)'
+        } else {
+          e.currentTarget.style.borderColor = 'var(--color-border)'
+          e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'
+        }
+      }}
+      onMouseLeave={e => {
+        if (primary) {
+          e.currentTarget.style.background = 'var(--color-brand)'
+          e.currentTarget.style.boxShadow = 'none'
+          e.currentTarget.style.transform = 'none'
+        } else {
+          e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
+          e.currentTarget.style.backgroundColor = 'var(--color-bg)'
+        }
+      }}
     >
       {icon}
       {label}
