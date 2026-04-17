@@ -1392,7 +1392,7 @@ function ListView({ deals, stages, sortKey, displayCurrency, toDisplay }: {
       className="rounded-xl border overflow-hidden"
       style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
     >
-      <div className="overflow-x-auto">
+      <div className="h-scroll">
         <table className="w-full" style={{ fontSize: '0.8125rem' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--color-border)' }}>

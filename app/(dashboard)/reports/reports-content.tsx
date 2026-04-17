@@ -48,18 +48,59 @@ const STATUS_LABELS: Record<string, string> = {
   archived: 'Archived',
 }
 
-const PIE_COLORS = ['#60a5fa', '#22c55e', '#fbbf24', '#a78bfa', '#f87171', '#10b981', '#9ca3af']
+// ── Chart Colour System ─────────────────────────────────────────────────────
+// Hex values required here - Recharts SVG fill/stroke doesn't resolve CSS vars.
+// One palette, one meaning per colour, used across every chart on this page so
+// the same "Lead / Discovery / Won" stage renders the same colour wherever it
+// appears (funnel, velocity, breakdown, etc).
 
-// Hex values required here - Recharts SVG fill doesn't resolve CSS vars
-const STATUS_COLORS: Record<string, string> = {
-  draft: '#9ca3af',
-  submitted: '#60a5fa',
-  in_review: '#fbbf24',
-  in_progress: '#06b6d4',
-  client_review: '#a78bfa',
-  delivered: '#22c55e',
-  archived: '#d1d5db',
+const CHART = {
+  // Core directional colours
+  positive: '#5A824E',        // brand green : revenue, net profit, won, current
+  negative: '#d97757',        // muted red : expenses, lost, overdue
+  neutral: '#94a3b8',         // muted slate : neutral / info / forecast
+
+  // Grid + axis
+  grid: '#e8f0e6',
+  axis: '#8a9987',
+
+  // Categorical rotation : sources, stages, arbitrary groupings.
+  // Ordered so the first few colours are the most distinct.
+  categorical: [
+    '#5A824E', // brand green
+    '#60a5fa', // blue
+    '#fbbf24', // amber
+    '#a78bfa', // purple
+    '#06b6d4', // teal
+    '#fb923c', // orange
+    '#f472b6', // rose
+    '#9ca3af', // gray
+  ],
+
+  // Aging buckets : 0-30 -> 30-60 -> 60-90 -> 90+ (green to red gradient)
+  aging: {
+    current: '#5A824E',
+    thirtyDays: '#fbbf24',
+    sixtyDays: '#fb923c',
+    ninetyPlus: '#d97757',
+  },
 }
+
+// Request/deal status colours (semantic, one meaning per colour)
+const STATUS_COLORS: Record<string, string> = {
+  draft: '#9ca3af',           // gray : inactive
+  submitted: '#60a5fa',       // blue : new / incoming
+  in_review: '#fbbf24',       // amber : needs attention
+  in_progress: '#06b6d4',     // teal : working on it
+  client_review: '#a78bfa',   // purple : client action
+  delivered: '#22c55e',       // green : done / paid / delivered
+  archived: '#d1d5db',        // light gray : archived
+}
+
+// Legacy alias : use STATUS_COLORS or CHART.categorical instead.
+// Exported-via-use-site reference to silence unused-var warning if needed.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const PIE_COLORS = CHART.categorical
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -227,47 +268,18 @@ export function ReportsContent() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between" style={{ gap: 'var(--space-4)' }}>
-        <div>
-          <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)' }}>
-            Reports
-          </h1>
-          <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-            Revenue, request throughput, and client overview.
-          </p>
-        </div>
-        <div className="relative flex-shrink-0">
-          <select
-            value={displayCurrency}
-            onChange={(e) => setDisplayCurrency(e.target.value as DisplayCurrency)}
-            style={{
-              appearance: 'none',
-              padding: 'var(--space-2) var(--space-8) var(--space-2) var(--space-3)',
-              fontSize: 'var(--text-sm)',
-              fontWeight: 500,
-              background: 'var(--color-bg)',
-              border: '1px solid var(--color-border-subtle)',
-              borderRadius: 'var(--radius-md)',
-              color: 'var(--color-text)',
-              cursor: 'pointer',
-              minHeight: '2.25rem',
-            }}
-            aria-label="Display currency"
-          >
-            {CURRENCY_OPTIONS.map(c => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-          <ChevronDown
-            size={14}
-            aria-hidden="true"
-            style={{ position: 'absolute', right: 'var(--space-3)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)', pointerEvents: 'none' }}
-          />
-        </div>
+      <div>
+        <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)' }}>
+          Reports
+        </h1>
+        <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+          Revenue, request throughput, and client overview.
+        </p>
       </div>
 
-      {/* Section quick-jump nav. Each chip scrolls to a section anchor below. */}
-      <ReportsJumpNav />
+      {/* Section quick-jump nav with currency selector built in.
+          Sticks to the top of the main scroll area (flush below top nav). */}
+      <ReportsJumpNav displayCurrency={displayCurrency} onCurrencyChange={setDisplayCurrency} />
 
       {/* KPI strip: grouped panel with dividers */}
       <div
@@ -386,11 +398,11 @@ export function ReportsContent() {
           ) : (
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={monthlyChartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" />
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                 <Tooltip />
-                <Bar dataKey="requests" fill="#5A824E" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="requests" fill={CHART.positive} radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -413,7 +425,7 @@ export function ReportsContent() {
             Delivery Time Trend (avg days per month)
           </h3>
           {data.deliveryTimeTrend && Object.keys(data.deliveryTimeTrend).length > 0 ? (
-            <div style={{ overflowX: 'auto' }}>
+            <div className="h-scroll">
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
@@ -575,10 +587,10 @@ interface AgingData {
 }
 
 const AGING_BUCKETS = [
-  { key: 'current' as const, label: 'Current (0-30d)', color: '#22c55e', bgColor: '#f0fdf4' },
-  { key: 'thirtyDays' as const, label: '30-60 days', color: '#fbbf24', bgColor: '#fffbeb' },
-  { key: 'sixtyDays' as const, label: '60-90 days', color: '#fb923c', bgColor: '#fff7ed' },
-  { key: 'ninetyPlus' as const, label: '90+ days', color: '#ef4444', bgColor: '#fef2f2' },
+  { key: 'current' as const, label: 'Current (0-30d)', color: CHART.aging.current, bgColor: '#f0f7ee' },
+  { key: 'thirtyDays' as const, label: '30-60 days', color: CHART.aging.thirtyDays, bgColor: '#fffbeb' },
+  { key: 'sixtyDays' as const, label: '60-90 days', color: CHART.aging.sixtyDays, bgColor: '#fff7ed' },
+  { key: 'ninetyPlus' as const, label: '90+ days', color: CHART.aging.ninetyPlus, bgColor: '#fef2f2' },
 ]
 
 function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProps) {
@@ -751,7 +763,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                   name: formatMonthLabel(month),
                   amount: convertNzd(amount, displayCurrency, exchangeRates),
                 }))}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
                   <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                   <YAxis
                     allowDecimals={false}
@@ -780,7 +792,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                       border: '1px solid var(--color-border)',
                     }}
                   />
-                  <Bar dataKey="amount" fill="#5A824E" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="amount" fill={CHART.positive} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -869,11 +881,8 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                 <div key={bucket.key}>
                   <button
                     onClick={() => setExpandedBucket(isExpanded ? null : bucket.key)}
+                    className="flex items-center justify-between w-full"
                     style={{
-                      width: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
                       padding: '0.625rem 0.75rem',
                       background: bucket.bgColor,
                       borderRadius: isExpanded ? '0.5rem 0.5rem 0 0' : '0.5rem',
@@ -881,11 +890,12 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                       cursor: count > 0 ? 'pointer' : 'default',
                       minHeight: '2.75rem',
                       transition: 'background 0.15s',
+                      gap: 'var(--space-3)',
                     }}
                     disabled={count === 0}
                     type="button"
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center min-w-0" style={{ gap: 'var(--space-2)' }}>
                       <div
                         style={{
                           width: '0.625rem',
@@ -895,15 +905,21 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                           flexShrink: 0,
                         }}
                       />
-                      <span style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
+                      <span
+                        className="whitespace-nowrap overflow-hidden text-ellipsis"
+                        style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-text)' }}
+                      >
                         {bucket.label}
                       </span>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                    <div className="flex items-center flex-shrink-0" style={{ gap: 'var(--space-3)' }}>
+                      <span className="hidden sm:inline tabular-nums" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                         {count} invoice{count !== 1 ? 's' : ''}
                       </span>
-                      <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
+                      <span className="sm:hidden tabular-nums" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                        {count}
+                      </span>
+                      <span className="tabular-nums" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)' }}>
                         {fmtCur(total)}
                       </span>
                       {count > 0 && (
@@ -914,9 +930,11 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                     </div>
                   </button>
 
-                  {/* Expanded invoice list */}
+                  {/* Expanded invoice list. Wrapped in h-scroll so long client
+                      names or "Due Date" text don't squish on mobile. */}
                   {isExpanded && count > 0 && (
                     <div
+                      className="h-scroll"
                       style={{
                         background: 'var(--color-bg-secondary)',
                         borderRadius: '0 0 0.5rem 0.5rem',
@@ -924,7 +942,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                         padding: '0.5rem 0',
                       }}
                     >
-                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '32rem' }}>
                         <thead>
                           <tr>
                             {['Client', 'Amount', 'Due Date', 'Days Past Due'].map(h => (
@@ -965,9 +983,9 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                                 className="text-sm text-right font-medium"
                                 style={{
                                   padding: '0.375rem 0.75rem',
-                                  color: inv.daysPastDue > 90 ? '#f87171'
-                                    : inv.daysPastDue > 60 ? '#fb923c'
-                                    : inv.daysPastDue > 30 ? '#fbbf24'
+                                  color: inv.daysPastDue > 90 ? CHART.aging.ninetyPlus
+                                    : inv.daysPastDue > 60 ? CHART.aging.sixtyDays
+                                    : inv.daysPastDue > 30 ? CHART.aging.thirtyDays
                                     : 'var(--color-text-muted)',
                                 }}
                               >
@@ -1012,9 +1030,9 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                     )
                   })}
                 </div>
-                <div className="flex items-center justify-between mt-2">
+                <div className="flex flex-wrap items-center mt-2" style={{ gap: 'var(--space-3)' }}>
                   {totals.filter(t => t.total > 0).map(t => (
-                    <div key={t.key} className="flex items-center gap-1.5">
+                    <div key={t.key} className="flex items-center" style={{ gap: 'var(--space-1-5)' }}>
                       <div
                         style={{
                           width: '0.5rem',
@@ -1024,7 +1042,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                           flexShrink: 0,
                         }}
                       />
-                      <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                         {t.label}
                       </span>
                     </div>
@@ -1196,7 +1214,7 @@ function ResponseTimeSection() {
       ) : rows.length === 0 ? (
         <p className="text-sm text-[var(--color-text-muted)]">No response data available yet.</p>
       ) : (
-        <div style={{ overflowX: 'auto' }}>
+        <div className="h-scroll">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
@@ -1353,7 +1371,7 @@ function SalesPipelineSection({ displayCurrency, exchangeRates }: CurrencyProps)
     .map(s => ({
       name: s.name,
       deals: s.dealCount,
-      fill: s.colour ?? '#5A824E',
+      fill: s.colour ?? CHART.positive,
     }))
 
   return (
@@ -1406,11 +1424,11 @@ function SalesPipelineSection({ displayCurrency, exchangeRates }: CurrencyProps)
         ) : (
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={stageChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" />
+              <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
               <XAxis dataKey="name" tick={{ fontSize: 11 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
               <Tooltip />
-              <Bar dataKey="deals" fill="#5A824E" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="deals" fill={CHART.positive} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -1450,9 +1468,7 @@ interface CloseRateData {
   }>
 }
 
-const FUNNEL_COLORS = [
-  '#5A824E', '#4a9b3f', '#60a5fa', '#a78bfa', '#fbbf24', '#f87171', '#9ca3af',
-]
+const FUNNEL_COLORS = CHART.categorical
 
 function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
   const [data, setData] = useState<CloseRateData | null>(null)
@@ -1660,7 +1676,7 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
             <DollarSign className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
             Revenue by Stage
           </h3>
-          <div style={{ overflowX: 'auto' }}>
+          <div className="h-scroll">
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
@@ -1822,10 +1838,7 @@ const SOURCE_LABELS: Record<string, string> = {
   other: 'Other',
 }
 
-const SOURCE_CHART_COLORS = [
-  '#5A824E', '#60a5fa', '#fbbf24', '#a78bfa', '#fb923c',
-  '#4ade80', '#f87171', '#22d3ee', '#e879f9',
-]
+const SOURCE_CHART_COLORS = CHART.categorical
 
 interface SourceDeal {
   source: string | null
@@ -1934,7 +1947,7 @@ function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProp
           </h3>
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={sourceData} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" horizontal={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} horizontal={false} />
               <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
               <YAxis
                 type="category"
@@ -1965,7 +1978,7 @@ function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProp
             <DollarSign className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
             Revenue by Source
           </h3>
-          <div style={{ overflowX: 'auto' }}>
+          <div className="h-scroll">
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
@@ -2108,7 +2121,7 @@ function StageVelocitySection() {
     )
   }
 
-  const VELOCITY_COLORS = ['#5A824E', '#60a5fa', '#fbbf24', '#a78bfa', '#fb923c', '#4ade80', '#f87171']
+  const VELOCITY_COLORS = CHART.categorical
 
   return (
     <div
@@ -2125,7 +2138,7 @@ function StageVelocitySection() {
       </h3>
       <ResponsiveContainer width="100%" height={240}>
         <BarChart data={filtered} layout="vertical">
-          <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" horizontal={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} horizontal={false} />
           <XAxis type="number" tick={{ fontSize: 11 }} unit=" days" />
           <YAxis type="category" dataKey="stageName" tick={{ fontSize: 11 }} width={110} />
           <Tooltip
@@ -2283,7 +2296,7 @@ function CloseRateSourceBreakdownSection({ displayCurrency, exchangeRates }: Cur
         <Target className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
         Close Rate by Source
       </h3>
-      <div style={{ overflowX: 'auto' }}>
+      <div className="h-scroll">
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
@@ -2445,7 +2458,7 @@ function SalesCycleLengthSection() {
       </h3>
       <ResponsiveContainer width="100%" height={240}>
         <LineChart data={monthlyData}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e8f0e6" />
+          <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
           <XAxis dataKey="month" tick={{ fontSize: 11 }} />
           <YAxis tick={{ fontSize: 11 }} unit=" days" />
           <Tooltip
@@ -2462,9 +2475,9 @@ function SalesCycleLengthSection() {
           <Line
             type="monotone"
             dataKey="avgDays"
-            stroke="#5A824E"
+            stroke={CHART.positive}
             strokeWidth={2}
-            dot={{ fill: '#5A824E', r: 4 }}
+            dot={{ fill: CHART.positive, r: 4 }}
             name="Avg Cycle"
           />
         </LineChart>
@@ -2540,7 +2553,7 @@ function RetainerHealthSection({ displayCurrency, exchangeRates }: CurrencyProps
           <p className="text-xs text-[var(--color-text-muted)] mt-1">Sorted by churn risk. Red = needs a check-in, green = healthy.</p>
         </div>
       </div>
-      <div className="overflow-x-auto">
+      <div className="h-scroll">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs font-medium text-[var(--color-text-muted)] border-b" style={{ borderColor: 'var(--color-border)' }}>
@@ -2662,7 +2675,7 @@ function CashFlowForecastSection({ displayCurrency, exchangeRates }: CurrencyPro
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <MiniMetric label="Projected revenue" value={formatInCur(data.summary.totalRevenue, displayCurrency, exchangeRates)} colour="var(--color-success)" />
+        <MiniMetric label="Projected revenue" value={formatInCur(data.summary.totalRevenue, displayCurrency, exchangeRates)} colour="var(--color-brand)" />
         <MiniMetric label="Projected cost" value={formatInCur(data.summary.totalCost, displayCurrency, exchangeRates)} colour="var(--color-danger)" />
         <MiniMetric label="Net position" value={formatInCur(data.summary.totalNet, displayCurrency, exchangeRates)} colour={data.summary.totalNet >= 0 ? 'var(--color-brand)' : 'var(--color-danger)'} />
       </div>
@@ -2676,8 +2689,8 @@ function CashFlowForecastSection({ displayCurrency, exchangeRates }: CurrencyPro
               contentStyle={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: '0.5rem' }}
               formatter={(v: number) => formatInCur(v, displayCurrency, exchangeRates)}
             />
-            <Bar dataKey="revenue" fill="#5A824E" radius={[4, 4, 0, 0]} name="Revenue" />
-            <Bar dataKey="cost" fill="#f87171" radius={[4, 4, 0, 0]} name="Cost" />
+            <Bar dataKey="revenue" fill={CHART.positive} radius={[4, 4, 0, 0]} name="Revenue" />
+            <Bar dataKey="cost" fill={CHART.negative} radius={[4, 4, 0, 0]} name="Cost" />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -2990,7 +3003,7 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
       ) : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <MiniMetric label={`${windowMonths}-mo revenue`} value={formatInCur(data!.summary.totalRevenue, displayCurrency, exchangeRates)} colour="var(--color-success)" />
+            <MiniMetric label={`${windowMonths}-mo revenue`} value={formatInCur(data!.summary.totalRevenue, displayCurrency, exchangeRates)} colour="var(--color-brand)" />
             <MiniMetric label={`${windowMonths}-mo expenses`} value={formatInCur(data!.summary.totalExpenses, displayCurrency, exchangeRates)} colour="var(--color-danger)" />
             <MiniMetric label={`${windowMonths}-mo net profit`} value={formatInCur(data!.summary.totalNetProfit, displayCurrency, exchangeRates)} colour={data!.summary.totalNetProfit >= 0 ? 'var(--color-brand)' : 'var(--color-danger)'} />
             <MiniMetric label="Avg monthly burn" value={formatInCur(data!.summary.avgMonthlyBurn, displayCurrency, exchangeRates)} colour="var(--color-text-muted)" />
@@ -3007,14 +3020,14 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
                   formatter={(v: number) => formatInCur(v, displayCurrency, exchangeRates)}
                 />
                 <Legend />
-                <Line type="monotone" dataKey="revenue" stroke="#5A824E" strokeWidth={2} name="Revenue" dot={false} />
-                <Line type="monotone" dataKey="expenses" stroke="#f87171" strokeWidth={2} name="Expenses" dot={false} />
-                <Line type="monotone" dataKey="netProfit" stroke="#60a5fa" strokeWidth={2} name="Net Profit" dot={false} />
+                <Line type="monotone" dataKey="revenue" stroke={CHART.positive} strokeWidth={2} name="Revenue" dot={false} />
+                <Line type="monotone" dataKey="expenses" stroke={CHART.negative} strokeWidth={2} name="Expenses" dot={false} />
+                <Line type="monotone" dataKey="netProfit" stroke={CHART.categorical[1]} strokeWidth={2} name="Net Profit" dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="h-scroll">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs font-medium text-[var(--color-text-muted)] border-b" style={{ borderColor: 'var(--color-border)' }}>
@@ -3151,7 +3164,7 @@ function ClientProfitabilityScorecard({ displayCurrency, exchangeRates }: Curren
           </p>
         </div>
       </div>
-      <div className="overflow-x-auto">
+      <div className="h-scroll">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs font-medium text-[var(--color-text-muted)] border-b" style={{ borderColor: 'var(--color-border)' }}>
@@ -3214,56 +3227,89 @@ const REPORTS_SECTIONS: Array<{ id: string; label: string; group: 'Operations' |
   { id: 'utilization',           label: 'Team Utilisation',   group: 'Team' },
 ]
 
-function ReportsJumpNav() {
+function ReportsJumpNav({
+  displayCurrency,
+  onCurrencyChange,
+}: {
+  displayCurrency: DisplayCurrency
+  onCurrencyChange: (c: DisplayCurrency) => void
+}) {
   function jumpTo(id: string) {
     const el = document.getElementById(id)
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   return (
-    <div
-      className="sticky z-10"
-      style={{
-        top: 0,
-        background: 'var(--color-bg)',
-        borderBottom: '1px solid var(--color-border-subtle)',
-        marginLeft: 'calc(var(--space-5) * -1)',
-        marginRight: 'calc(var(--space-5) * -1)',
-        paddingLeft: 'var(--space-5)',
-        paddingRight: 'var(--space-5)',
-      }}
-    >
+    <div className="sticky-section-nav">
       <div
-        className="flex overflow-x-auto scrollbar-hide"
-        style={{ gap: 'var(--space-0-5)' }}
+        className="flex items-center"
+        style={{ gap: 'var(--space-3)' }}
       >
-        {REPORTS_SECTIONS.map(s => (
-          <button
-            key={s.id}
-            onClick={() => jumpTo(s.id)}
-            className="whitespace-nowrap flex-shrink-0"
+        {/* Tabs: scroll on mobile, center on md+ */}
+        <div
+          className="flex-1 h-scroll scrollbar-hide md:flex md:justify-center"
+          style={{ minWidth: 0 }}
+        >
+          <div className="flex" style={{ gap: 'var(--space-0-5)' }}>
+            {REPORTS_SECTIONS.map(s => (
+              <button
+                key={s.id}
+                onClick={() => jumpTo(s.id)}
+                className="whitespace-nowrap flex-shrink-0"
+                style={{
+                  padding: 'var(--space-3) var(--space-4)',
+                  fontSize: 'var(--text-sm)',
+                  fontWeight: 500,
+                  color: 'var(--color-text-muted)',
+                  background: 'transparent',
+                  border: 'none',
+                  borderBottom: '2px solid transparent',
+                  transition: 'color 150ms ease, border-color 150ms ease',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.color = 'var(--color-brand)'
+                  e.currentTarget.style.borderBottomColor = 'var(--color-brand)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.color = 'var(--color-text-muted)'
+                  e.currentTarget.style.borderBottomColor = 'transparent'
+                }}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Currency dropdown, pinned right */}
+        <div className="relative flex-shrink-0">
+          <select
+            value={displayCurrency}
+            onChange={(e) => onCurrencyChange(e.target.value as DisplayCurrency)}
+            aria-label="Display currency"
             style={{
-              padding: 'var(--space-3) var(--space-4)',
-              fontSize: 'var(--text-sm)',
-              fontWeight: 500,
-              color: 'var(--color-text-muted)',
-              background: 'transparent',
-              border: 'none',
-              borderBottom: '2px solid transparent',
-              transition: 'color 150ms ease, border-color 150ms ease',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.color = 'var(--color-brand)'
-              e.currentTarget.style.borderBottomColor = 'var(--color-brand)'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.color = 'var(--color-text-muted)'
-              e.currentTarget.style.borderBottomColor = 'transparent'
+              appearance: 'none',
+              padding: 'var(--space-1-5) var(--space-8) var(--space-1-5) var(--space-3)',
+              fontSize: 'var(--text-xs)',
+              fontWeight: 600,
+              background: 'var(--color-bg)',
+              border: '1px solid var(--color-border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--color-text)',
+              cursor: 'pointer',
+              height: '2rem',
             }}
           >
-            {s.label}
-          </button>
-        ))}
+            {CURRENCY_OPTIONS.map(c => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+          <ChevronDown
+            size={12}
+            aria-hidden="true"
+            style={{ position: 'absolute', right: 'var(--space-2)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)', pointerEvents: 'none' }}
+          />
+        </div>
       </div>
     </div>
   )
@@ -3563,6 +3609,7 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
           for accurate cash flow projection.
         </p>
       ) : (
+        <div className="h-scroll">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs font-medium text-[var(--color-text-muted)] border-b" style={{ borderColor: 'var(--color-border)' }}>
@@ -3621,6 +3668,7 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
             })}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   )

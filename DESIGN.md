@@ -112,10 +112,32 @@ One color = one meaning across the entire app.
 - Touch targets min 44px
 - Bottom padding on main content: 5rem+ to clear bottom nav
 - Sidebars collapse to bottom sheets
-- Tables → card stacks or horizontal scroll with sticky first column
+- Tables → wrap in `.h-scroll` (horizontal scroll, never wrap text)
 - Multi-column grids → single column
 - Modals → full-screen takeover
 - Headers with multiple actions: stack on mobile if cramped
+
+### Table / list overflow rule
+**Never let cells wrap awkwardly** (e.g. "Closed Won" or "Webflow Partner" splitting mid-word). Wrap the table in `.h-scroll` which forces `min-width: max-content` on the child and adds `overflow-x: auto`. Works for both `<table>` and custom grid-row layouts.
+
+### Sticky section nav
+Pages with many vertical sections (Reports, Settings) get a sticky tab bar right below the top nav:
+- Use the `.sticky-section-nav` class
+- Auto-bleeds to the edges of `.dashboard-main` padding at each breakpoint
+- Sticks at `top: 0` of the scroll container so it's flush with the top nav
+- Tab scroller uses `md:justify-center` so tabs center on desktop but scroll on mobile
+- If the page has a currency/filter control, **nest it inside the sticky nav on the right** instead of in the page header — stays visible while scrolling.
+
+### Chart colour rule
+All chart fills/strokes go through a single `CHART` constant (hex values — Recharts SVG doesn't resolve CSS vars):
+- `CHART.positive` = brand green (revenue, net profit, won, on-time)
+- `CHART.negative` = muted red (expenses, lost, overdue)
+- `CHART.neutral` = muted slate
+- `CHART.grid` / `CHART.axis` = subtle border + muted text
+- `CHART.categorical` = 8-colour palette for sources / stages / arbitrary groupings — **the first categorical colour is always brand green**, so "stage 1" matches the positive colour
+- `CHART.aging` = green → amber → orange → red gradient for past-due buckets
+
+One colour = one meaning across every chart. "Projected revenue" and "MRR" and "Net profit" should all use the same green.
 
 ---
 
@@ -138,6 +160,10 @@ One color = one meaning across the entire app.
 - [x] Pagination pattern (`<Pagination>` + `usePagination` hook, applied to Pipeline list)
 - [x] Skeleton primitives (`SkeletonKPIStrip`, `SkeletonTable`, `SkeletonChart`, `SkeletonList`, `SkeletonProgressList`)
 - [x] Skeleton audit: 6 Reports blobs replaced with shape-matching skeletons
+- [x] Reports sticky section nav: full-bleed, flush below top nav, centered, with built-in currency dropdown
+- [x] `.h-scroll` utility: horizontal scroll with `min-width: max-content` on child (stops "Webflow Partner" / "Closed Won" wrapping)
+- [x] `CHART` constant: unified chart colour system (positive / negative / neutral / categorical / aging)
+- [x] Invoice aging: mobile-friendly bucket rows + scrollable expanded table + wrapping legend
 
 **Foundation is done. Next session begins per-page redesigns.**
 
@@ -189,6 +215,11 @@ Things noticed but not currently being worked on. Fix during the right page's re
 - New: `components/tahi/skeletons.tsx` (SkeletonBar/Card/KPIStrip/Table/Chart/List/ProgressList)
 - Reports: 6 blob skeletons replaced with structure-matching skeletons (Retainer Health, Cash Flow, Team Utilisation, Xero P&L, Client Profitability, Fixed Costs)
 - `DESIGN.md` created as living working doc
+- Reports jump nav: refactored to `.sticky-section-nav` utility (full-bleed at each dashboard-main breakpoint, flush `top: 0` below top nav, tabs center on md+, currency dropdown nested on right). Currency selector removed from page header.
+- `CHART` constant: one source of truth for every Recharts colour on Reports (positive / negative / neutral / grid / axis / categorical / aging). FUNNEL_COLORS, SOURCE_CHART_COLORS, VELOCITY_COLORS now alias `CHART.categorical` so a given stage/source is the same colour in every chart.
+- Projected revenue, Xero revenue, and net profit now all use brand green instead of the too-bright `--color-success` (#4ade80).
+- `.h-scroll` utility added: wraps any table or wide row so it scrolls horizontally on mobile instead of wrapping cells ("Webflow Partner Source" no longer breaks mid-cell). Applied across Reports (7 tables) and Pipeline list view.
+- Invoice Aging mobile polish: bucket row uses tabular-nums + hides "invoices" word on sm, expanded table wrapped in `.h-scroll` with minWidth, legend wraps instead of `justify-between`.
 
 ---
 
