@@ -7,6 +7,7 @@ import { MobileBottomNav } from '@/components/tahi/mobile-bottom-nav'
 import { ProductTour } from '@/components/tahi/product-tour'
 import { ToastProvider } from '@/components/tahi/toast'
 import { KeyboardShortcuts } from '@/components/tahi/keyboard-shortcuts'
+import { DisplayCurrencyProvider } from '@/lib/display-currency-context'
 
 export default async function DashboardLayout({
   children,
@@ -20,6 +21,7 @@ export default async function DashboardLayout({
 
   return (
     <ToastProvider>
+    <DisplayCurrencyProvider>
       <div className="flex h-screen overflow-hidden" style={{ background: 'var(--color-bg-secondary)' }}>
         <div className="hidden md:flex">
           <AppSidebar isAdmin={isAdmin} />
@@ -37,6 +39,7 @@ export default async function DashboardLayout({
         <ProductTour isAdmin={isAdmin} />
         <KeyboardShortcuts />
       </div>
+    </DisplayCurrencyProvider>
     </ToastProvider>
   )
 }

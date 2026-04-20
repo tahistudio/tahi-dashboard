@@ -11,6 +11,7 @@ import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { formatCurrency } from '@/lib/currency'
+import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { PageHeader } from '@/components/tahi/page-header'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -517,6 +518,7 @@ interface InvoiceListProps {
 export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
   const { isImpersonatingClient } = useImpersonation()
   const { showToast } = useToast()
+  const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
   const router = useRouter()
@@ -846,7 +848,12 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
                       </td>
                     )}
                     <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
-                      {formatInvoiceCurrency(inv.totalAmount, inv.currency)}
+                      <div>{formatInvoiceCurrency(inv.totalAmount, inv.currency)}</div>
+                      {inv.currency && inv.currency !== displayCurrency && (
+                        <div style={{ fontSize: '0.7rem', fontWeight: 400, color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
+                          {formatNativeWithDisplay(inv.totalAmount, inv.currency).split('\u2248 ')[1] ?? ''}
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '0.875rem 1rem' }}>
                       <StatusBadge status={inv.status} dueDate={inv.dueDate} />

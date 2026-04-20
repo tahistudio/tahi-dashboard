@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { apiPath } from '@/lib/api'
+import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { stageColour } from '@/lib/chart-colors'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { ActivityTimeline, ActivityItem, type ActivityType } from '@/components/tahi/activity-timeline'
@@ -644,6 +645,7 @@ interface TeamMemberPm {
 }
 
 function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () => void }) {
+  const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [teamMembers, setTeamMembers] = useState<TeamMemberPm[]>([])
@@ -953,18 +955,32 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
             <div>
               <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">MRR</dt>
               <dd className="text-[var(--color-text)] font-medium">
-                {org.customMrr
-                  ? new Intl.NumberFormat('en-NZ', { style: 'currency', currency: org.preferredCurrency ?? 'NZD', maximumFractionDigits: 0 }).format(org.customMrr)
-                  : '--'}
+                {org.customMrr ? (
+                  <>
+                    <span>{new Intl.NumberFormat('en-NZ', { style: 'currency', currency: org.preferredCurrency ?? 'NZD', maximumFractionDigits: 0 }).format(org.customMrr)}</span>
+                    {(org.preferredCurrency ?? 'NZD') !== displayCurrency && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginLeft: '0.5rem', fontWeight: 400 }}>
+                        {formatNativeWithDisplay(org.customMrr, org.preferredCurrency ?? 'NZD').split('\u2248 ')[1] ?? ''}
+                      </span>
+                    )}
+                  </>
+                ) : '--'}
               </dd>
             </div>
           ) : org.billingModel === 'hourly' ? (
             <div>
               <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Hourly rate</dt>
               <dd className="text-[var(--color-text)] font-medium">
-                {org.defaultHourlyRate
-                  ? `${org.preferredCurrency ?? 'NZD'} ${org.defaultHourlyRate}/hr`
-                  : '--'}
+                {org.defaultHourlyRate ? (
+                  <>
+                    <span>{`${org.preferredCurrency ?? 'NZD'} ${org.defaultHourlyRate}/hr`}</span>
+                    {(org.preferredCurrency ?? 'NZD') !== displayCurrency && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginLeft: '0.5rem', fontWeight: 400 }}>
+                        {`\u2248 ${formatNativeWithDisplay(org.defaultHourlyRate, org.preferredCurrency ?? 'NZD').split('\u2248 ')[1] ?? ''}/hr`}
+                      </span>
+                    )}
+                  </>
+                ) : '--'}
               </dd>
             </div>
           ) : null}

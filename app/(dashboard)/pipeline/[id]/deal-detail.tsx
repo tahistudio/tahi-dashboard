@@ -9,6 +9,8 @@ import {
   UserCheck, ExternalLink, Activity, DollarSign, TrendingUp, User, Target, Archive, RefreshCw, Sparkles,
 } from 'lucide-react'
 import { parseActivityMetadata } from '@/lib/activity-meta'
+import { useDisplayCurrency } from '@/lib/display-currency-context'
+import { SUPPORTED_CURRENCIES } from '@/lib/currency'
 import { apiPath } from '@/lib/api'
 import { sourceBadge } from '@/lib/chart-colors'
 import { REQUEST_STATUS_CONFIG } from '@/lib/status-config'
@@ -1209,12 +1211,17 @@ function EditableValue({ dealId, value, valueMin, valueMax, currency, onUpdated 
   currency: string
   onUpdated: () => void
 }) {
+  const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()
   const [editing, setEditing] = useState(false)
   const initialHasRange = valueMin != null && valueMax != null && valueMin !== valueMax
   const [isRange, setIsRange] = useState(initialHasRange)
   const [editVal, setEditVal] = useState(String(value))
   const [editMin, setEditMin] = useState(valueMin != null ? String(valueMin) : '')
   const [editMax, setEditMax] = useState(valueMax != null ? String(valueMax) : '')
+  // Currency for THIS edit. On first open: nav preference if deal has zero/no
+  // currency, otherwise the deal's existing currency so we don't silently
+  // change what the client sees. Override is one dropdown click away.
+  const [editCurrency, setEditCurrency] = useState(currency || displayCurrency)
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -1223,6 +1230,7 @@ function EditableValue({ dealId, value, valueMin, valueMax, currency, onUpdated 
     setEditMin(valueMin != null ? String(valueMin) : '')
     setEditMax(valueMax != null ? String(valueMax) : '')
     setIsRange(initialHasRange)
+    setEditCurrency(currency || displayCurrency)
     setNote('')
     setEditing(true)
   }
@@ -1230,7 +1238,10 @@ function EditableValue({ dealId, value, valueMin, valueMax, currency, onUpdated 
   const handleSave = async () => {
     setSaving(true)
     try {
-      const payload: Record<string, unknown> = { valueChangeNote: note.trim() || null }
+      const payload: Record<string, unknown> = {
+        valueChangeNote: note.trim() || null,
+        currency: editCurrency,
+      }
       if (isRange) {
         const minNum = parseFloat(editMin) || 0
         const maxNum = parseFloat(editMax) || 0
@@ -1269,10 +1280,16 @@ function EditableValue({ dealId, value, valueMin, valueMax, currency, onUpdated 
       ? `${formatCurrency(valueMin!, currency)}\u2013${formatCurrency(valueMax!, currency)}`
       : formatCurrency(value, currency)
     const midpointLabel = initialHasRange ? `midpoint ${formatCurrency(value, currency)}` : null
+    // Show the display-currency equivalent as a secondary line when the deal
+    // isn't already in the nav-preferred currency.
+    const altLabel = currency && currency !== displayCurrency && value > 0
+      ? formatNativeWithDisplay(value, currency).replace(formatCurrency(value, currency), '').trim().replace(/^\u2248\s*/, '')
+      : null
     return (
       <div>
         <button
           onClick={openEditor}
+          title={currency && currency !== displayCurrency ? `Billed in ${currency}. Click to edit.` : 'Click to edit value'}
           className="font-semibold transition-colors"
           style={{ fontSize: '1.125rem', color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
           onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark)' }}
@@ -1280,9 +1297,11 @@ function EditableValue({ dealId, value, valueMin, valueMax, currency, onUpdated 
         >
           {displayLabel}
         </button>
-        {midpointLabel && (
+        {(midpointLabel || altLabel) && (
           <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>
             {midpointLabel}
+            {midpointLabel && altLabel ? ' \u00b7 ' : ''}
+            {altLabel ? `\u2248 ${altLabel}` : ''}
           </p>
         )}
       </div>
@@ -1292,21 +1311,43 @@ function EditableValue({ dealId, value, valueMin, valueMax, currency, onUpdated 
   return (
     <div className="flex flex-col" style={{ gap: '0.5rem' }}>
       {/* Range toggle */}
-      <button
-        type="button"
-        onClick={() => setIsRange(!isRange)}
-        style={{
-          fontSize: '0.75rem',
-          color: 'var(--color-brand)',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          padding: 0,
-          alignSelf: 'flex-start',
-        }}
-      >
-        {isRange ? 'Use single value' : 'Set as range'}
-      </button>
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => setIsRange(!isRange)}
+          style={{
+            fontSize: '0.75rem',
+            color: 'var(--color-brand)',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+          }}
+        >
+          {isRange ? 'Use single value' : 'Set as range'}
+        </button>
+        {/* Currency selector \u2014 defaults to nav preference, override for billing currency. */}
+        <select
+          value={editCurrency}
+          onChange={e => setEditCurrency(e.target.value)}
+          aria-label="Deal currency"
+          title="Currency this deal is billed in"
+          style={{
+            padding: '0.125rem 0.375rem',
+            fontSize: '0.7rem',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg-secondary)',
+            color: 'var(--color-text-muted)',
+            borderRadius: 'var(--radius-sm)',
+            cursor: 'pointer',
+            height: '1.5rem',
+          }}
+        >
+          {SUPPORTED_CURRENCIES.map(c => (
+            <option key={c.code} value={c.code}>{c.code}</option>
+          ))}
+        </select>
+      </div>
 
       {/* Value input(s) */}
       {isRange ? (

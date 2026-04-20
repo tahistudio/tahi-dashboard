@@ -8,6 +8,7 @@ import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { apiPath } from '@/lib/api'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { formatCurrency } from '@/lib/currency'
+import { useDisplayCurrency } from '@/lib/display-currency-context'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -91,6 +92,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
   const { isImpersonatingClient } = useImpersonation()
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
+  const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()
   const [invoice, setInvoice] = useState<InvoiceRow | null>(null)
   const [items, setItems] = useState<LineItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -228,6 +230,11 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
             >
               {formatInvoiceCurrency(invoice.totalUsd, invoice.currency)}
             </p>
+            {invoice.currency && invoice.currency !== displayCurrency && invoice.totalUsd > 0 && (
+              <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>
+                {formatNativeWithDisplay(invoice.totalUsd, invoice.currency).split('\u2248 ')[1] ?? ''}
+              </p>
+            )}
           </div>
           <span
             style={{

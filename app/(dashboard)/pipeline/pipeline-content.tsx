@@ -11,23 +11,14 @@ import {
   Trophy, XCircle, Filter, X, Bell, BellOff,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
-import { convertFromNzd } from '@/lib/currency'
 import { calculatePipelineTotals, formatDealValue, rangeConfidenceLevel } from '@/lib/pipeline-math'
+import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { Pagination, usePagination } from '@/components/tahi/pagination'
 import { stageColour, sourceBadge } from '@/lib/chart-colors'
 import { PageHeader } from '@/components/tahi/page-header'
 import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
 import { ViewToggle } from '@/components/tahi/view-toggle'
-import { Select } from '@/components/tahi/input'
 
-type DisplayCurrency = 'NZD' | 'USD' | 'AUD' | 'GBP' | 'EUR'
-const CURRENCY_OPTIONS: { code: DisplayCurrency; label: string }[] = [
-  { code: 'NZD', label: 'NZD' },
-  { code: 'USD', label: 'USD' },
-  { code: 'AUD', label: 'AUD' },
-  { code: 'GBP', label: 'GBP' },
-  { code: 'EUR', label: 'EUR' },
-]
 
 // ---- Types ---------------------------------------------------------------
 
@@ -201,8 +192,7 @@ export function PipelineContent() {
   const [filterValueMax, setFilterValueMax] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([])
-  const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>('NZD')
-  const [exchangeRates, setExchangeRates] = useState<{ currency: string; rateToUsd: number }[]>([])
+  const { displayCurrency, toDisplay } = useDisplayCurrency()
 
   // Open new deal dialog from query params (T361)
   useEffect(() => {
@@ -226,27 +216,6 @@ export function PipelineContent() {
     }
     void loadTeam()
   }, [])
-
-  // Fetch exchange rates for currency conversion
-  useEffect(() => {
-    async function loadRates() {
-      try {
-        const res = await fetch(apiPath('/api/admin/exchange-rates'))
-        if (!res.ok) return
-        const data = await res.json() as { rates?: { currency: string; rateToUsd: number }[] }
-        setExchangeRates(data.rates ?? [])
-      } catch {
-        // silent - will show NZD values as fallback
-      }
-    }
-    void loadRates()
-  }, [])
-
-  /** Convert NZD amount to display currency */
-  function toDisplay(nzdAmount: number): number {
-    if (displayCurrency === 'NZD' || exchangeRates.length === 0) return nzdAmount
-    return convertFromNzd(nzdAmount, displayCurrency, exchangeRates)
-  }
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -319,13 +288,6 @@ export function PipelineContent() {
         title="Sales Pipeline"
         subtitle="Track and manage deals through your sales process"
       >
-        <Select
-          value={displayCurrency}
-          onChange={e => setDisplayCurrency(e.target.value as DisplayCurrency)}
-          aria-label="Display currency"
-          selectSize="sm"
-          options={CURRENCY_OPTIONS.map(opt => ({ value: opt.code, label: opt.code }))}
-        />
         <button
           onClick={() => setShowNewDeal(true)}
           className="inline-flex items-center font-medium hover:-translate-y-px"
@@ -1489,6 +1451,7 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
   onClose: () => void
   onCreated: () => void
 }) {
+  const { displayCurrency: navCurrency } = useDisplayCurrency()
   const [title, setTitle] = useState('')
   const [stageId, setStageId] = useState(() => {
     const def = stages.find(s => s.isDefault)
@@ -1498,7 +1461,8 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
   const [valueMin, setValueMin] = useState('')
   const [valueMax, setValueMax] = useState('')
   const [isRange, setIsRange] = useState(false)
-  const [currency, setCurrency] = useState('NZD')
+  // Default new-deal currency to the user's nav preference. Override per-deal.
+  const [currency, setCurrency] = useState<string>(navCurrency)
   const [source, setSource] = useState('')
   const [expectedCloseDate, setExpectedCloseDate] = useState('')
   const [orgId] = useState(initialOrgId ?? '')

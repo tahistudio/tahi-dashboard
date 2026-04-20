@@ -16,6 +16,7 @@ import { AIDailyBriefing } from '@/components/tahi/ai-briefing-card'
 import { KPIStrip as SharedKPIStrip, KPICell } from '@/components/tahi/kpi-strip'
 import { apiPath } from '@/lib/api'
 import { calculatePipelineTotals } from '@/lib/pipeline-math'
+import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { formatDistanceToNow } from 'date-fns'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 
@@ -218,6 +219,7 @@ interface StageSummary {
 }
 
 function PipelineSummaryCard() {
+  const { format } = useDisplayCurrency()
   const [deals, setDeals] = useState<DealSummary[]>([])
   const [stages, setStages] = useState<StageSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -280,9 +282,9 @@ function PipelineSummaryCard() {
   const closingThisMonthValue = closingThisMonth.reduce((sum, d) => sum + (d.valueNzd ?? d.value ?? 0), 0)
 
   const pipelineItems = [
-    { label: 'Pipeline Value', value: formatNzd(totalPipelineValue), sub: `${openDeals.length} open deal${openDeals.length !== 1 ? 's' : ''}`, icon: <Target size={14} aria-hidden="true" /> },
-    { label: 'Weighted Value', value: formatNzd(weightedValue), sub: 'probability-adjusted', icon: <Scale size={14} aria-hidden="true" /> },
-    { label: 'Closing This Month', value: formatNzd(closingThisMonthValue), sub: `${closingThisMonth.length} deal${closingThisMonth.length !== 1 ? 's' : ''}`, icon: <Timer size={14} aria-hidden="true" /> },
+    { label: 'Pipeline Value', value: format(totalPipelineValue), sub: `${openDeals.length} open deal${openDeals.length !== 1 ? 's' : ''}`, icon: <Target size={14} aria-hidden="true" /> },
+    { label: 'Weighted Value', value: format(weightedValue), sub: 'probability-adjusted', icon: <Scale size={14} aria-hidden="true" /> },
+    { label: 'Closing This Month', value: format(closingThisMonthValue), sub: `${closingThisMonth.length} deal${closingThisMonth.length !== 1 ? 's' : ''}`, icon: <Timer size={14} aria-hidden="true" /> },
   ]
 
   return (
@@ -355,11 +357,6 @@ function PipelineSummaryCard() {
       </div>
     </Link>
   )
-}
-
-function formatNzd(n: number) {
-  if (n === 0) return '$0'
-  return new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD', maximumFractionDigits: 0 }).format(n)
 }
 
 // ─── Pipeline Capacity Card ──────────────────────────────────────────────────
@@ -752,6 +749,7 @@ function OnboardingChecklistWrapper() {
 // ─── KPI Strip (grouped panel with dividers) ────────────────────────────────
 
 function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
+  const { format } = useDisplayCurrency()
   const outstanding = kpis?.outstandingInvoicesNzd ?? 0
   return (
     <div data-tour="overview-kpis">
@@ -773,7 +771,7 @@ function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
         <KPICell
           icon={FileText}
           label="Outstanding"
-          value={loading ? '—' : formatNzd(outstanding)}
+          value={loading ? '—' : format(outstanding)}
           sub="invoices"
           tone={outstanding > 0 ? 'warning' : 'brand'}
           href="/invoices"
@@ -781,7 +779,7 @@ function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
         <KPICell
           icon={BarChart3}
           label="MRR"
-          value={loading ? '—' : formatNzd(kpis?.mrr ?? 0)}
+          value={loading ? '—' : format(kpis?.mrr ?? 0)}
           sub="recurring retainers"
           href="/reports"
         />

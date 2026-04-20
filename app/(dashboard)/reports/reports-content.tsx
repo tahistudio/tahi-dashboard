@@ -19,12 +19,15 @@ import { CHART, stageColour, sourceColour, STATUS_COLORS } from '@/lib/chart-col
 import { PageHeader } from '@/components/tahi/page-header'
 import { SectionTabs } from '@/components/tahi/section-tabs'
 import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
-import { Select } from '@/components/tahi/input'
+import { useDisplayCurrency } from '@/lib/display-currency-context'
 
 // ── Currency options ─────────────────────────────────────────────────────────
 
-const CURRENCY_OPTIONS = ['NZD', 'USD', 'AUD', 'GBP', 'EUR'] as const
-type DisplayCurrency = typeof CURRENCY_OPTIONS[number]
+// Currencies the commitment form can be entered in (not a display-currency type).
+const CURRENCY_OPTIONS = ['NZD', 'USD', 'AUD', 'GBP', 'EUR', 'CAD', 'SGD', 'HKD', 'JPY', 'CHF'] as const
+// Widened display-currency type — reports sub-components accept anything the
+// nav-bar switcher might pass.
+type DisplayCurrency = string
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -73,7 +76,7 @@ export function ReportsContent() {
   const [data, setData] = useState<ReportData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
-  const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>('NZD')
+  const { displayCurrency } = useDisplayCurrency()
   const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({})
 
   // Fetch exchange rates for currency conversion
@@ -229,18 +232,7 @@ export function ReportsContent() {
       />
 
       {/* Sticky jump nav with currency selector nested on the right */}
-      <SectionTabs
-        items={REPORTS_SECTIONS}
-        rightSlot={
-          <Select
-            value={displayCurrency}
-            onChange={e => setDisplayCurrency(e.target.value as DisplayCurrency)}
-            aria-label="Display currency"
-            selectSize="sm"
-            options={CURRENCY_OPTIONS.map(c => ({ value: c, label: c }))}
-          />
-        }
-      />
+      <SectionTabs items={REPORTS_SECTIONS} />
 
       {/* KPI strip */}
       <div id="overview" className="scroll-mt-20">

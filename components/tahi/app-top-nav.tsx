@@ -6,6 +6,7 @@ import { UserButton, OrganizationSwitcher } from '@clerk/nextjs'
 import { Search, X, Eye, UserCog } from 'lucide-react'
 import { NotificationBell } from './notification-bell'
 import { useImpersonation } from './impersonation-banner'
+import { CurrencySwitcher } from './currency-switcher'
 
 interface AppTopNavProps {
   isAdmin: boolean
@@ -162,6 +163,7 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
 
       {/* Right */}
       <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
+        {isAdmin && <CurrencySwitcher />}
         <NotificationBell />
         <UserButton
           appearance={{
