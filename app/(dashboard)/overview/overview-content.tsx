@@ -225,11 +225,12 @@ function PipelineSummaryCard() {
   useEffect(() => {
     Promise.all([
       fetch(apiPath('/api/admin/deals?limit=100')).then(r => r.ok ? r.json() as Promise<{ items: DealSummary[] }> : { items: [] }),
-      fetch(apiPath('/api/admin/pipeline/stages')).then(r => r.ok ? r.json() as Promise<{ items: StageSummary[] }> : { items: [] }),
+      // NB: /api/admin/pipeline/stages returns { stages: [...] }, not { items: [...] }.
+      fetch(apiPath('/api/admin/pipeline/stages')).then(r => r.ok ? r.json() as Promise<{ stages: StageSummary[] }> : { stages: [] }),
     ])
       .then(([dealsData, stagesData]) => {
         setDeals(dealsData.items ?? [])
-        setStages(stagesData.items ?? [])
+        setStages(stagesData.stages ?? [])
       })
       .catch(() => {
         setDeals([])
