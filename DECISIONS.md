@@ -861,3 +861,52 @@ Every entry includes structured `metadata` (before/after snapshots) so the UI ca
 - Shared math helper with unit tests beats duplicated inline formulas (Decision #040).
 
 ---
+
+## #042 - Global Display Currency Toggle
+
+**Date:** 2026-04-21
+
+**Problem:** The currency preview toggle existed on two pages (Pipeline, Reports) as local state, so changing it on one didn't carry over to the other, and every other page that shows money (Overview, Invoices, Deal Detail, Client Detail) either hard-coded NZD or showed native currency with no conversion. Users had to mentally re-do currency math when moving between pages.
+
+**Decision:** One React Context at the dashboard layout level, one switcher in the top nav, persisted to `localStorage` under `tahi-display-currency`. Every page that shows money reads from the context. Rules:
+
+- **Canonical totals** (weighted pipeline, MRR, outstanding, reports KPIs) use the display currency. These are the "what does this look like in the currency I care about?" numbers.
+- **Legal records** (invoices, deal values) keep the native billed currency as the primary display. The display-currency equivalent appears as a secondary `\u2248 $X` line below. We never hide what the client was actually charged.
+- **Deal value editor**: the currency selector defaults to the nav preference (so creating a new deal Just Works in whatever currency you're looking at), but can be overridden per-deal. Editing an existing deal keeps its existing currency unless you change it.
+- **Client detail MRR/hourly rate**: primary display is the org's `preferredCurrency` (what we invoice them in). Display-currency equivalent is shown as secondary when different.
+- **Client portal and emails**: not affected. Clients always see native currency; emails render in the recipient's context.
+
+**Implementation:**
+- `lib/display-currency-context.tsx` exposes `displayCurrency`, `setDisplayCurrency`, `exchangeRates`, `toDisplay(nzd)`, `format(nzd)`, and `formatNativeWithDisplay(amount, currency)` \u2014 the last of which produces `"NZ$X \u2248 US$Y"` automatically when the currencies differ.
+- `components/tahi/currency-switcher.tsx` is the nav dropdown.
+- Exchange rates are fetched once per session via `/api/admin/exchange-rates`.
+- SSR prints NZD on first paint; `useEffect` hydrates to the stored preference on mount. Acceptable one-frame flash; not worth a cookie round-trip.
+
+**Replaced:** The per-page `<Select>` + local `displayCurrency` state + duplicate exchange-rate fetches on Pipeline and Reports. Reports' `DisplayCurrency` type widened from 5 currencies to the full 10 supported by `lib/currency.ts`.
+
+**Lessons reused:** SSR-safe context hydration from `localStorage`, same pattern as the briefing-collapsed preference.
+
+---
+
+## #043 - Scheduled AI Daily Briefing
+
+**Date:** 2026-04-21
+
+**Problem:** The daily AI briefing only generated when the user clicked Generate. Needed it automatic every weekday morning at 8am NZ, regardless of DST.
+
+**Decision:** GitHub Actions cron fires twice per weekday (19:00 UTC and 20:00 UTC, Sun\u2013Thu). The endpoint checks the current hour in `Pacific/Auckland` and only actually generates when it's 7 or 8. The off-cycle fire no-ops. Dedup window of 3 hours prevents double-generation if the user clicked Generate manually at 7:58am.
+
+**Implementation:**
+- `POST /api/admin/ai/briefing/cron` \u2014 new endpoint, authed via `x-cron-secret` header against `TAHI_CRON_SECRET` env var. Uses `Intl.DateTimeFormat` with timezone `Pacific/Auckland` to read the current NZ local hour + weekday cleanly. Forwards to the existing `POST /api/admin/ai/briefing` using bearer auth with `TAHI_API_TOKEN` so we don't duplicate the 180+ lines of data-gathering + Claude call + XML parsing.
+- `.github/workflows/ai-briefing-cron.yml` fires the cron and passes both `TAHI_DASHBOARD_URL` and `TAHI_CRON_SECRET` from GitHub repo secrets.
+
+**Cost:** ~$0.04 per briefing (Claude Sonnet 4: ~4.4k input tokens + ~1.5k output tokens). Per month (~22 weekdays) = ~$0.90. Per year = ~$10.40.
+
+**What to set up on the repo:**
+1. Add `TAHI_CRON_SECRET` to Webflow Cloud env vars (any random string).
+2. Add `TAHI_DASHBOARD_URL` GitHub secret = `https://tahi-test-dashboard.webflow.io` (no trailing slash).
+3. Add `TAHI_CRON_SECRET` GitHub secret (same value as step 1).
+
+**Why Github Actions over Cloudflare cron:** Webflow Cloud's builder overwrites wrangler.json (Decision #039). Adding a cron trigger there would fight the platform. GitHub Actions is free, reliable, and external \u2014 nothing for the Webflow Cloud builder to clobber.
+
+---
