@@ -22,7 +22,9 @@ jobs:
     steps:
       - name: Call briefing cron endpoint
         env:
-          DASHBOARD_URL: ${{ secrets.TAHI_DASHBOARD_URL }}
+          # The dashboard URL is stored as a GitHub repo variable (public,
+          # not a secret). The cron secret is stored as a secret.
+          DASHBOARD_URL: ${{ vars.TAHI_DASHBOARD_URL }}
           CRON_SECRET: ${{ secrets.TAHI_CRON_SECRET }}
         run: |
           if [ -z "$DASHBOARD_URL" ] || [ -z "$CRON_SECRET" ]; then
