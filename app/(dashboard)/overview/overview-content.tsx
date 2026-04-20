@@ -15,6 +15,7 @@ import { BookingWidget } from '@/components/tahi/booking-widget'
 import { AIDailyBriefing } from '@/components/tahi/ai-briefing-card'
 import { KPIStrip as SharedKPIStrip, KPICell } from '@/components/tahi/kpi-strip'
 import { apiPath } from '@/lib/api'
+import { calculatePipelineTotals } from '@/lib/pipeline-math'
 import { formatDistanceToNow } from 'date-fns'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 
@@ -195,6 +196,7 @@ export function AdminOverview({ userName }: { userName: string }) {
 interface DealSummary {
   id: string
   title: string
+  stageId: string
   value: number | null
   valueNzd: number | null
   currency: string | null
@@ -207,18 +209,32 @@ interface DealSummary {
   orgName: string | null
 }
 
+interface StageSummary {
+  id: string
+  probability: number | null
+  historicalProbability: number | null
+  isClosedWon: number | boolean | null
+  isClosedLost: number | boolean | null
+}
+
 function PipelineSummaryCard() {
   const [deals, setDeals] = useState<DealSummary[]>([])
+  const [stages, setStages] = useState<StageSummary[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch(apiPath('/api/admin/deals?limit=100'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ items: DealSummary[] }>
+    Promise.all([
+      fetch(apiPath('/api/admin/deals?limit=100')).then(r => r.ok ? r.json() as Promise<{ items: DealSummary[] }> : { items: [] }),
+      fetch(apiPath('/api/admin/pipeline/stages')).then(r => r.ok ? r.json() as Promise<{ items: StageSummary[] }> : { items: [] }),
+    ])
+      .then(([dealsData, stagesData]) => {
+        setDeals(dealsData.items ?? [])
+        setStages(stagesData.items ?? [])
       })
-      .then(data => setDeals(data.items ?? []))
-      .catch(() => setDeals([]))
+      .catch(() => {
+        setDeals([])
+        setStages([])
+      })
       .finally(() => setLoading(false))
   }, [])
 
@@ -243,14 +259,13 @@ function PipelineSummaryCard() {
   }
   if (deals.length === 0) return null
 
-  // Calculate totals: only open deals (not won/lost)
+  // Calculate totals via the shared pipeline-math helper so this agrees
+  // with the Pipeline page and Reports. Historical close rates take
+  // precedence over static stage probability. See Decision #040.
+  const totals = calculatePipelineTotals(deals, stages)
+  const totalPipelineValue = totals.totalValue
+  const weightedValue = totals.weightedValue
   const openDeals = deals.filter(d => !d.stageIsClosedWon && !d.stageIsClosedLost)
-  const totalPipelineValue = openDeals.reduce((sum, d) => sum + (d.valueNzd ?? d.value ?? 0), 0)
-  const weightedValue = openDeals.reduce((sum, d) => {
-    const val = d.valueNzd ?? d.value ?? 0
-    const prob = d.stageProbability ?? 0
-    return sum + (val * prob / 100)
-  }, 0)
 
   // Deals closing this month
   const now = new Date()

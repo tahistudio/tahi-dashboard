@@ -135,6 +135,19 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE team_members ADD COLUMN annual_salary real`,
     ],
   },
+  {
+    name: '0017',
+    description: 'deal value range (min/max) + value_nzd range + activity metadata JSON',
+    statements: [
+      `ALTER TABLE deals ADD COLUMN value_min integer`,
+      `ALTER TABLE deals ADD COLUMN value_max integer`,
+      `ALTER TABLE deals ADD COLUMN value_min_nzd integer`,
+      `ALTER TABLE deals ADD COLUMN value_max_nzd integer`,
+      `ALTER TABLE activities ADD COLUMN metadata text`,
+      `CREATE INDEX IF NOT EXISTS idx_activities_type ON activities(type)`,
+      `CREATE INDEX IF NOT EXISTS idx_activities_created_at ON activities(created_at)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

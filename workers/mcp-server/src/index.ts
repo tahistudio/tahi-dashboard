@@ -345,19 +345,26 @@ const TOOLS: ToolDef[] = [
   // ── Deals / Pipeline ──────────────────────────────────────────────────
   tool('list_deals', 'List all sales pipeline deals with stage, value, owner, company'),
   tool('get_pipeline_stages', 'Get all pipeline stages'),
-  tool('create_deal', 'Create a new deal in the sales pipeline', {
+  tool('create_deal', 'Create a new deal. Use value for a point estimate or valueMin+valueMax for a range (midpoint drives the weighted forecast).', {
     title: prop('string', 'Deal title'),
     orgId: prop('string', 'Client organisation ID'),
-    value: prop('number', 'Deal value in dollars'),
+    value: prop('number', 'Point-estimate deal value'),
+    valueMin: prop('number', 'Low end of range (use with valueMax)'),
+    valueMax: prop('number', 'High end of range (use with valueMin)'),
     currency: prop('string', 'Currency code (e.g. USD, NZD)'),
     stageId: prop('string', 'Pipeline stage ID'),
     source: prop('string', 'Lead source'),
+    expectedCloseDate: prop('string', 'Expected close date (YYYY-MM-DD)'),
+    notes: prop('string', 'Freeform notes'),
   }, ['title']),
-  tool('update_deal', 'Update a deal in the sales pipeline', {
+  tool('update_deal', 'Update a deal. Pass valueMin+valueMax to switch to a range, or value alone to switch to a point. valueChangeNote is logged in the timeline (e.g. "Scope grew").', {
     dealId: prop('string', 'Deal ID'),
     stageId: prop('string', 'New pipeline stage ID'),
-    value: prop('number', 'Updated deal value'),
-    status: prop('string', 'Updated status'),
+    value: prop('number', 'Updated single-value deal value'),
+    valueMin: prop('number', 'Low end of range (pass null to clear)'),
+    valueMax: prop('number', 'High end of range (pass null to clear)'),
+    valueChangeNote: prop('string', 'Why did the estimate change? Shown in timeline.'),
+    status: prop('string', 'Updated status (won or lost)'),
     ownerId: prop('string', 'New owner team member ID'),
     orgId: prop('string', 'Client organisation ID to link'),
     source: prop('string', 'Lead source'),
@@ -367,6 +374,8 @@ const TOOLS: ToolDef[] = [
     hoursPerMonth: prop('number', 'Monthly retainer hours'),
     engagementStartDate: prop('string', 'Engagement start date (YYYY-MM-DD)'),
     engagementEndDate: prop('string', 'Engagement end date (YYYY-MM-DD)'),
+    expectedCloseDate: prop('string', 'Expected close date (YYYY-MM-DD)'),
+    currency: prop('string', 'Currency code'),
     autoNudgesDisabled: prop('boolean', 'Disable auto-nudges for this deal'),
   }, ['dealId']),
   tool('delete_deal', 'Delete a deal from the sales pipeline', {

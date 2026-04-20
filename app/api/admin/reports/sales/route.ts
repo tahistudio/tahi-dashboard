@@ -2,7 +2,8 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { count, sql } from 'drizzle-orm'
+import { count, sql, eq } from 'drizzle-orm'
+import { calculatePipelineTotals, type StageForMath, type DealForMath } from '@/lib/pipeline-math'
 
 // ── GET /api/admin/reports/sales ───────────────────────────────────────────
 // Returns pipeline value by stage, weighted pipeline, win rate, avg deal size,
@@ -35,38 +36,67 @@ export async function GET(req: NextRequest) {
     .groupBy(schema.pipelineStages.id)
     .orderBy(schema.pipelineStages.position)
 
-  // Compute derived metrics
-  let totalPipelineValue = 0
-  let weightedPipelineValue = 0
-  let wonCount = 0
-  let lostCount = 0
-  let totalDealCount = 0
+  // Compute weighted totals via the shared pipeline-math helper using
+  // historical close rates where available (Decision #040). Fetch the
+  // actual deals and their stages rather than aggregating by stage with
+  // static probability only.
+  const allDeals = await database
+    .select({
+      id: schema.deals.id,
+      stageId: schema.deals.stageId,
+      value: schema.deals.value,
+      valueNzd: schema.deals.valueNzd,
+      stageProbability: schema.pipelineStages.probability,
+      stageIsClosedWon: schema.pipelineStages.isClosedWon,
+      stageIsClosedLost: schema.pipelineStages.isClosedLost,
+    })
+    .from(schema.deals)
+    .leftJoin(schema.pipelineStages, eq(schema.deals.stageId, schema.pipelineStages.id))
+    .where(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)
 
+  // Historical probability per stage: reuse the same formula as the
+  // pipeline-stages endpoint (won / deals-reached) when >=3 deals.
+  const stageProbMap: Map<string, number | null> = new Map()
   for (const stage of pipelineByStage) {
-    const stageValue = Number(stage.totalValue ?? 0)
-    const stageProbability = stage.probability ?? 0
-    totalDealCount += stage.dealCount
-
-    // Only include open deals in pipeline totals
-    if (!stage.isClosedWon && !stage.isClosedLost) {
-      totalPipelineValue += stageValue
-      weightedPipelineValue += stageValue * (stageProbability / 100)
+    if (stage.isClosedWon || stage.isClosedLost) {
+      stageProbMap.set(stage.stageId, null)
+      continue
     }
-
-    if (stage.isClosedWon) {
-      wonCount += stage.dealCount
-    }
-    if (stage.isClosedLost) {
-      lostCount += stage.dealCount
+    const reachedOrBeyond = pipelineByStage.filter(s => (s.position ?? 0) >= (stage.position ?? 0))
+    const reachCount = reachedOrBeyond.reduce((sum, s) => sum + s.dealCount, 0)
+    const wonAtOrBeyond = pipelineByStage.filter(s => s.isClosedWon).reduce((sum, s) => sum + s.dealCount, 0)
+    if (reachCount >= 3) {
+      stageProbMap.set(stage.stageId, Math.round((wonAtOrBeyond / reachCount) * 100))
+    } else {
+      stageProbMap.set(stage.stageId, null)
     }
   }
 
-  const closedTotal = wonCount + lostCount
-  const winRate = closedTotal > 0 ? Math.round((wonCount / closedTotal) * 10000) / 100 : 0
-  const openDealCount = totalDealCount - wonCount - lostCount
-  const avgDealSize = openDealCount > 0
-    ? Math.round(totalPipelineValue / openDealCount)
-    : 0
+  const stagesForMath: StageForMath[] = pipelineByStage.map(s => ({
+    id: s.stageId,
+    probability: s.probability ?? null,
+    historicalProbability: stageProbMap.get(s.stageId) ?? null,
+    isClosedWon: !!s.isClosedWon,
+    isClosedLost: !!s.isClosedLost,
+  }))
+
+  const dealsForMath: DealForMath[] = allDeals.map(d => ({
+    stageId: d.stageId,
+    value: d.value,
+    valueNzd: d.valueNzd,
+    stageProbability: d.stageProbability ?? null,
+    stageIsClosedWon: !!d.stageIsClosedWon,
+    stageIsClosedLost: !!d.stageIsClosedLost,
+  }))
+
+  const totals = calculatePipelineTotals(dealsForMath, stagesForMath)
+  const totalPipelineValue = totals.totalValue
+  const weightedPipelineValue = totals.weightedValue
+  const wonCount = totals.wonCount
+  const lostCount = totals.lostCount
+  const totalDealCount = allDeals.length
+  const winRate = totals.winRate
+  const avgDealSize = totals.avgDealSize
 
   // Avg days to close for won deals (exclude archived)
   const wonDeals = await database

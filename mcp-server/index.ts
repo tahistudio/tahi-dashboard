@@ -830,14 +830,18 @@ server.tool(
 
 server.tool(
   'create_deal',
-  'Create a new deal in the sales pipeline',
+  'Create a new deal in the sales pipeline. Supply either `value` (point estimate) OR `valueMin` + `valueMax` (range \u2014 midpoint used for weighted forecast).',
   {
     title: z.string().describe('Deal title'),
     orgId: z.string().optional().describe('Client organisation ID'),
-    value: z.number().optional().describe('Deal value in dollars'),
+    value: z.number().optional().describe('Point-estimate deal value in dollars'),
+    valueMin: z.number().optional().describe('Low end of range estimate (use with valueMax)'),
+    valueMax: z.number().optional().describe('High end of range estimate (use with valueMin)'),
     currency: z.string().optional().describe('Currency code (e.g. USD, NZD)'),
     stageId: z.string().optional().describe('Pipeline stage ID'),
     source: z.string().optional().describe('Lead source'),
+    expectedCloseDate: z.string().optional().describe('Expected close date (ISO)'),
+    notes: z.string().optional().describe('Freeform notes'),
   },
   async (args) => {
     const data = await apiFetch('/api/admin/deals', { method: 'POST', body: args })
@@ -847,13 +851,25 @@ server.tool(
 
 server.tool(
   'update_deal',
-  'Update a deal in the sales pipeline',
+  'Update a deal in the sales pipeline. Pass `valueMin` + `valueMax` to switch to a range, or just `value` (with valueMin/valueMax null) to switch to a single point. Optional `valueChangeNote` is logged in the activity timeline.',
   {
     dealId: z.string().describe('Deal ID'),
     stageId: z.string().optional().describe('New pipeline stage ID'),
-    value: z.number().optional().describe('Updated deal value'),
-    status: z.string().optional().describe('Updated status'),
+    value: z.number().optional().describe('Updated single-value deal value'),
+    valueMin: z.number().nullable().optional().describe('Low end of range (null to clear)'),
+    valueMax: z.number().nullable().optional().describe('High end of range (null to clear)'),
+    valueChangeNote: z.string().optional().describe('Why did the estimate change? Shown in timeline (e.g. "Scope grew")'),
+    currency: z.string().optional().describe('Currency code'),
+    status: z.string().optional().describe("Updated status ('won' or 'lost')"),
     ownerId: z.string().optional().describe('New owner team member ID'),
+    orgId: z.string().optional().describe('Reassign to a different org'),
+    source: z.string().optional().describe('Lead source'),
+    expectedCloseDate: z.string().optional().describe('Expected close date (ISO)'),
+    notes: z.string().optional().describe('Freeform notes'),
+    engagementType: z.string().optional().describe("'project' or 'retainer'"),
+    totalHours: z.number().optional().describe('Project: total hours'),
+    hoursPerMonth: z.number().optional().describe('Retainer: hours per month'),
+    autoNudgesDisabled: z.boolean().optional().describe('Disable auto-nudges for this deal'),
   },
   async (args) => {
     const { dealId, ...body } = args

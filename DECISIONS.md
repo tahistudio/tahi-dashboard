@@ -794,3 +794,70 @@ Builder 1.2.0 skips this step entirely, just printing "Copying wrangler.json tem
 5. Do NOT use `migrations_dir` in the wrangler config. We run migrations via our own endpoint with idempotent DDL.
 
 ---
+
+## #040 - Pipeline Math: Single Source of Truth via `lib/pipeline-math.ts`
+
+**Date:** 2026-04-21
+
+**Problem:** Overview and Pipeline pages showed different weighted forecasts (~$61k vs ~$42k). Root cause: Overview used the static `stageProbability` from the stage config; the Pipeline page used `historicalProbability` (actual close rate derived from won/reached deals), and Reports/Sales used static too. Three different numbers, one pipeline.
+
+**Decision:** All pipeline/weighted math routes through `lib/pipeline-math.ts`:
+
+- `pointEstimate(deal)` \u2014 canonical dollar value (midpoint when range, single value otherwise; prefers `valueNzd` over `value`).
+- `effectiveProbability(deal, stages)` \u2014 prefers `stage.historicalProbability` \u2192 falls back to `stage.probability` \u2192 falls back to denormalised `deal.stageProbability` \u2192 falls back to 0.
+- `calculatePipelineTotals(deals, stages)` \u2014 returns `{ totalValue, weightedValue, openDealCount, wonCount, lostCount, avgDealSize, winRate }`. This is the ONLY function that should be used to compute weighted pipeline totals anywhere in the codebase.
+- `rangeConfidence(deal)` + `rangeConfidenceLevel(deal)` \u2014 quantifies how wide a range is relative to its midpoint.
+- `formatDealValue(deal, formatter)` \u2014 renders `$10k\u2013$15k` for ranges, `$12.5k` for singles.
+
+27 unit tests (`lib/__tests__/pipeline-math.test.ts`) guard against regression, including a scenario that explicitly reproduces the pre-fix overview-vs-pipeline discrepancy.
+
+**Wired into:**
+- `app/(dashboard)/overview/overview-content.tsx` \u2014 `PipelineSummaryCard` fetches `/api/admin/pipeline/stages` so the helper can read `historicalProbability`.
+- `app/(dashboard)/pipeline/pipeline-content.tsx` \u2014 replaces inline `getEffectiveProbability` + weighted reducer.
+- `app/api/admin/reports/sales/route.ts` \u2014 computes historical probability the same way `/api/admin/pipeline/stages` does, then aggregates via `calculatePipelineTotals`.
+
+**Why historical wins by default:** Your actual close rate is more honest than an optimistic stage configuration. If a stage has <3 deals that reached it we fall back to the static probability so new pipelines aren't zeroed out.
+
+---
+
+## #041 - Deal Value Range + Comprehensive Activity Timeline
+
+**Date:** 2026-04-21
+
+**Context:** Leads often come in with a range (Webflow estimate $2k\u2013$4k, or a gut-feel $10k\u2013$15k). Forcing a single number hides uncertainty and the dashboard loses the history of how the estimate evolved. Separately, most deal mutations (owner changes, value changes, source changes, auto-nudges toggled) were invisible \u2014 only stage transitions were logged.
+
+**Decision:**
+
+### Data model (migration 0017)
+- `deals.value_min`, `deals.value_max`, `deals.value_min_nzd`, `deals.value_max_nzd` \u2014 nullable. `deals.value` remains the point estimate (= midpoint when range, = user-entered when single).
+- `activities.metadata` \u2014 JSON text column for structured before/after payloads on every timeline entry.
+- All new columns are accessed via raw SQL until migration 0017 is applied on every environment (Decision #039 lesson #1).
+
+### UX
+- **Range input:** New Deal dialog and Deal Detail both have a "Set as range" toggle. Range mode shows two inputs (Min/Max) side-by-side. Midpoint is computed and labelled.
+- **Display:** Kanban cards show `$10k\u2013$15k` when range is set, else the single value. Totals (pipeline value, weighted forecast) always use midpoint so aggregates stay scalar.
+- **Confidence dot:** Small coloured dot next to ranged values \u2014 green (tight, width <20% of midpoint), amber (rough, <50%), red (speculative).
+- **Last-touched label:** Replaces the per-card probability badge (which was redundant with the column header). Fresh = brand colour, stale = amber, very stale = red.
+- **Stage-advance guard:** When moving a deal forward into Proposal / Negotiation / Verbal Commit with a range wider than 30% of midpoint, a dialog prompts to tighten the estimate before advancing.
+- **Smart note chips:** Editing value in deal detail shows quick chips (`Scope grew`, `Scope shrunk`, `Budget confirmed`, `Discount applied`, `Webflow estimate`, `Client counter-offer`) plus a free-text field. Stored in `activities.metadata.note` and rendered inline on the timeline entry.
+- **Value trendline:** Sparkline on the deal detail Value card plotting the estimate over time (deal creation + every value change). Up-arrow green when estimate grew, down-arrow red when shrunk.
+
+### Activity logging
+One helper: `lib/deal-activity.ts` \u2192 `logActivity(db, input)`. Wired into every deal mutation path:
+
+- `POST /api/admin/deals` \u2192 `deal_created`
+- `PATCH /api/admin/deals/[id]` \u2192 any of `value_change`, `currency_change`, `stage_change` (with days-in-previous-stage), `owner_change`, `org_change`, `source_change`, `engagement_change`, `close_date_change` (with shift-in-days), `notes_change`, `auto_nudges_toggled`, `won`, `lost`, `unarchived`
+- `DELETE /api/admin/deals/[id]` \u2192 `archived`
+- `POST /api/admin/deals/[id]/nudges` \u2192 `nudge_sent` (with recipient preview, subject, template ID)
+
+Every entry includes structured `metadata` (before/after snapshots) so the UI can render diffs without parsing strings.
+
+### MCP parity
+`create_deal` and `update_deal` both accept `valueMin`/`valueMax`. `update_deal` also accepts `valueChangeNote` so AI assistants can explain why an estimate changed. Both MCP servers (stdio + HTTP) updated in lockstep (Decision #036).
+
+**Lessons reused:**
+- Raw SQL for new columns until migration is applied everywhere (Decision #039).
+- MCP tool + dashboard must update together (Decision #036).
+- Shared math helper with unit tests beats duplicated inline formulas (Decision #040).
+
+---

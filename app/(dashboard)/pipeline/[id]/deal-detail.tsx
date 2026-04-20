@@ -6,8 +6,9 @@ import {
   ArrowLeft, Building2, Calendar, Clock,
   Phone, Mail, FileText, MessageSquare,
   Plus, Loader2, Check, ChevronDown, Inbox, X, Search, UserPlus, Send, BellOff,
-  UserCheck, ExternalLink,
+  UserCheck, ExternalLink, Activity, DollarSign, TrendingUp, User, Target, Archive, RefreshCw, Sparkles,
 } from 'lucide-react'
+import { parseActivityMetadata } from '@/lib/activity-meta'
 import { apiPath } from '@/lib/api'
 import { sourceBadge } from '@/lib/chart-colors'
 import { REQUEST_STATUS_CONFIG } from '@/lib/status-config'
@@ -24,6 +25,10 @@ interface DealData {
   value: number
   currency: string
   valueNzd: number
+  valueMin: number | null
+  valueMax: number | null
+  valueMinNzd: number | null
+  valueMaxNzd: number | null
   source: string | null
   estimatedHoursPerWeek: number | null
   engagementType: string | null
@@ -71,6 +76,8 @@ interface DealActivity {
   outcome: string | null
   createdAt: string
   createdByName: string | null
+  /** JSON text stored in activities.metadata (migration 0017). */
+  metadata: string | null
 }
 
 interface Stage {
@@ -115,11 +122,33 @@ function getInitials(name: string): string {
 }
 
 const ACTIVITY_ICONS: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
+  // Base types
   call: Phone,
   meeting: Calendar,
   email: Mail,
   note: FileText,
   task: Check,
+  status: Activity,
+  // Deal-specific types — mapped so the timeline reads like a journal of
+  // what happened, not a generic "Status" stream.
+  deal_created: Sparkles,
+  stage_change: TrendingUp,
+  value_change: DollarSign,
+  currency_change: DollarSign,
+  owner_change: User,
+  org_change: Building2,
+  source_change: Target,
+  engagement_change: Clock,
+  close_date_change: Calendar,
+  notes_change: FileText,
+  won: Check,
+  lost: X,
+  archived: Archive,
+  unarchived: RefreshCw,
+  auto_nudges_toggled: BellOff,
+  nudge_sent: Send,
+  contact_added: UserPlus,
+  contact_removed: UserPlus,
 }
 
 const ACTIVITY_COLORS: Record<string, string> = {
@@ -128,6 +157,25 @@ const ACTIVITY_COLORS: Record<string, string> = {
   email: 'var(--status-delivered-dot)',
   note: 'var(--status-in-review-dot)',
   task: 'var(--color-warning)',
+  status: 'var(--color-text-subtle)',
+  deal_created: 'var(--color-brand)',
+  stage_change: 'var(--color-brand)',
+  value_change: 'var(--color-brand)',
+  currency_change: 'var(--color-brand-light)',
+  owner_change: 'var(--color-text-muted)',
+  org_change: 'var(--color-text-muted)',
+  source_change: 'var(--color-text-muted)',
+  engagement_change: 'var(--color-text-muted)',
+  close_date_change: 'var(--color-warning)',
+  notes_change: 'var(--color-text-muted)',
+  won: 'var(--color-success)',
+  lost: 'var(--color-danger)',
+  archived: 'var(--color-text-subtle)',
+  unarchived: 'var(--color-text-muted)',
+  auto_nudges_toggled: 'var(--color-text-muted)',
+  nudge_sent: 'var(--status-delivered-dot)',
+  contact_added: 'var(--color-brand-light)',
+  contact_removed: 'var(--color-text-subtle)',
 }
 
 // Source labels only; colours come from the shared sourceBadge() helper
@@ -369,6 +417,11 @@ export function DealDetail({ dealId }: { dealId: string }) {
                   const Icon = ACTIVITY_ICONS[act.type] ?? FileText
                   const iconColor = ACTIVITY_COLORS[act.type] ?? 'var(--color-text-subtle)'
                   const isLast = i === activities.length - 1
+                  const meta = parseActivityMetadata(act.metadata)
+                  // Small helper to render the "note" that user left on a
+                  // value change — we want it visible, not hidden behind a
+                  // click. Note takes precedence over description for this type.
+                  const noteFromMeta = typeof meta?.note === 'string' ? (meta.note as string) : null
 
                   return (
                     <div key={act.id} className="flex gap-3" style={{ position: 'relative' }}>
@@ -395,13 +448,30 @@ export function DealDetail({ dealId }: { dealId: string }) {
                             className="rounded-full font-medium uppercase"
                             style={{ padding: '0.0625rem 0.375rem', fontSize: '0.625rem', background: `${iconColor}20`, color: iconColor }}
                           >
-                            {act.type}
+                            {act.type.replace(/_/g, ' ')}
                           </span>
                         </div>
                         {act.description && (
                           <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
                             {act.description}
                           </p>
+                        )}
+                        {noteFromMeta && act.type === 'value_change' && (
+                          <div
+                            style={{
+                              display: 'inline-block',
+                              padding: '0.125rem 0.5rem',
+                              marginTop: '0.125rem',
+                              marginBottom: '0.25rem',
+                              fontSize: '0.75rem',
+                              fontStyle: 'italic',
+                              background: 'var(--color-brand-50)',
+                              color: 'var(--color-brand-dark)',
+                              borderRadius: 'var(--radius-full)',
+                            }}
+                          >
+                            {noteFromMeta}
+                          </div>
                         )}
                         <div className="flex items-center gap-3" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
                           {act.createdByName && <span>{act.createdByName}</span>}
@@ -438,6 +508,10 @@ export function DealDetail({ dealId }: { dealId: string }) {
               dealId={dealId}
               stages={stages}
               currentStageId={deal.stageId}
+              dealValue={deal.value}
+              dealValueMin={deal.valueMin}
+              dealValueMax={deal.valueMax}
+              currency={deal.currency}
               onUpdated={fetchDeal}
             />
           </SidebarCard>
@@ -457,8 +531,16 @@ export function DealDetail({ dealId }: { dealId: string }) {
             <EditableValue
               dealId={dealId}
               value={deal.value}
+              valueMin={deal.valueMin}
+              valueMax={deal.valueMax}
               currency={deal.currency}
               onUpdated={fetchDeal}
+            />
+            <ValueTrendline
+              currentValue={deal.value}
+              createdAt={deal.createdAt}
+              activities={activities}
+              currency={deal.currency}
             />
           </SidebarCard>
 
@@ -744,29 +826,78 @@ function SidebarCard({ title, children }: { title: string; children: React.React
 
 // ---- Stage Selector -----------------------------------------------------
 
-function StageSelector({ dealId, stages, currentStageId, onUpdated }: {
+/** Stage slugs where we nag the user to tighten the range before advancing.
+ *  Reading the name is imperfect but matches the default Tahi stages; if
+ *  you rename these in settings, the prompt will just stop firing for those
+ *  stages (which is acceptable). */
+const TIGHTEN_AT_STAGE_SLUGS = new Set(['proposal', 'negotiation', 'verbal_commit', 'verbal-commit'])
+
+function StageSelector({ dealId, stages, currentStageId, dealValue, dealValueMin, dealValueMax, currency, onUpdated }: {
   dealId: string
   stages: Stage[]
   currentStageId: string
+  dealValue: number
+  dealValueMin: number | null
+  dealValueMax: number | null
+  currency: string
   onUpdated: () => void
 }) {
   const [saving, setSaving] = useState(false)
+  const [guard, setGuard] = useState<{ newStageId: string; newStageName: string } | null>(null)
+  const [tightenMin, setTightenMin] = useState('')
+  const [tightenMax, setTightenMax] = useState('')
+  const [tightenValue, setTightenValue] = useState(String(dealValue))
+  const [tightenMode, setTightenMode] = useState<'range' | 'single'>(dealValueMin != null && dealValueMax != null ? 'range' : 'single')
 
-  const handleChange = async (newStageId: string) => {
-    if (newStageId === currentStageId) return
+  const hasWideRange = dealValueMin != null && dealValueMax != null && dealValueMin !== dealValueMax
+    ? (() => {
+        const mid = (dealValueMin + dealValueMax) / 2
+        const width = dealValueMax - dealValueMin
+        return mid > 0 && width / mid > 0.3
+      })()
+    : false
+
+  const advance = async (newStageId: string, rangeOverride?: { valueMin: number | null; valueMax: number | null; value: number | null }) => {
     setSaving(true)
     try {
+      const body: Record<string, unknown> = { stageId: newStageId }
+      if (rangeOverride) {
+        body.valueMin = rangeOverride.valueMin
+        body.valueMax = rangeOverride.valueMax
+        if (rangeOverride.value != null) body.value = rangeOverride.value
+        body.valueChangeNote = 'Tightened on stage advance'
+      }
       await fetch(apiPath(`/api/admin/deals/${dealId}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stageId: newStageId }),
+        body: JSON.stringify(body),
       })
       onUpdated()
+      setGuard(null)
     } catch {
       // silent
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleChange = (newStageId: string) => {
+    if (newStageId === currentStageId) return
+    const newStage = stages.find(s => s.id === newStageId)
+    if (!newStage) return
+    const slug = newStage.name.toLowerCase().replace(/\s+/g, '_')
+    // Only prompt when advancing INTO a commitment stage AND the range is wide.
+    const currentStage = stages.find(s => s.id === currentStageId)
+    const movingForward = (newStage.position ?? 0) > (currentStage?.position ?? 0)
+    if (movingForward && hasWideRange && TIGHTEN_AT_STAGE_SLUGS.has(slug)) {
+      setGuard({ newStageId, newStageName: newStage.name })
+      setTightenMin(dealValueMin != null ? String(dealValueMin) : '')
+      setTightenMax(dealValueMax != null ? String(dealValueMax) : '')
+      setTightenValue(String(dealValue))
+      setTightenMode(dealValueMin != null && dealValueMax != null ? 'range' : 'single')
+      return
+    }
+    advance(newStageId)
   }
 
   return (
@@ -793,31 +924,336 @@ function StageSelector({ dealId, stages, currentStageId, onUpdated }: {
         className="absolute pointer-events-none"
         style={{ width: '0.875rem', height: '0.875rem', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)' }}
       />
+
+      {/* Tighten-range guard dialog */}
+      {guard && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+          onClick={e => { if (e.target === e.currentTarget) setGuard(null) }}
+        >
+          <div
+            className="rounded-xl shadow-lg w-full"
+            style={{
+              maxWidth: '24rem',
+              background: 'var(--color-bg)',
+              border: '1px solid var(--color-border)',
+              padding: '1.25rem',
+            }}
+          >
+            <h3 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)', marginBottom: '0.25rem' }}>
+              Tighten the estimate?
+            </h3>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
+              {`You're moving this deal to ${guard.newStageName}. Your current range is ${formatCurrency(dealValueMin ?? 0, currency)}\u2013${formatCurrency(dealValueMax ?? 0, currency)}. Want to tighten it first?`}
+            </p>
+
+            {/* Mode toggle */}
+            <button
+              type="button"
+              onClick={() => setTightenMode(tightenMode === 'range' ? 'single' : 'range')}
+              style={{
+                fontSize: '0.75rem',
+                color: 'var(--color-brand)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 0,
+                marginBottom: '0.5rem',
+              }}
+            >
+              {tightenMode === 'range' ? 'Use single value' : 'Keep as range'}
+            </button>
+
+            {tightenMode === 'range' ? (
+              <div className="grid grid-cols-2 gap-2" style={{ marginBottom: '1rem' }}>
+                <input
+                  type="number"
+                  value={tightenMin}
+                  onChange={e => setTightenMin(e.target.value)}
+                  placeholder="Min"
+                  className="rounded-lg"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.875rem',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                  }}
+                />
+                <input
+                  type="number"
+                  value={tightenMax}
+                  onChange={e => setTightenMax(e.target.value)}
+                  placeholder="Max"
+                  className="rounded-lg"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.875rem',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                  }}
+                />
+              </div>
+            ) : (
+              <input
+                type="number"
+                value={tightenValue}
+                onChange={e => setTightenValue(e.target.value)}
+                placeholder="Value"
+                className="w-full rounded-lg"
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  fontSize: '0.875rem',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  color: 'var(--color-text)',
+                  marginBottom: '1rem',
+                }}
+              />
+            )}
+
+            {/* Actions */}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  if (guard) advance(guard.newStageId)
+                }}
+                disabled={saving}
+                className="rounded-lg"
+                style={{
+                  padding: '0.5rem 0.875rem',
+                  fontSize: '0.8125rem',
+                  background: 'var(--color-bg)',
+                  color: 'var(--color-text-muted)',
+                  border: '1px solid var(--color-border)',
+                  cursor: 'pointer',
+                }}
+              >
+                Keep as-is
+              </button>
+              <button
+                onClick={() => {
+                  if (!guard) return
+                  if (tightenMode === 'range') {
+                    const min = parseFloat(tightenMin) || 0
+                    const max = parseFloat(tightenMax) || 0
+                    if (min === 0 && max === 0) return
+                    advance(guard.newStageId, {
+                      valueMin: Math.min(min, max),
+                      valueMax: Math.max(min, max),
+                      value: null,
+                    })
+                  } else {
+                    const num = parseFloat(tightenValue)
+                    if (isNaN(num)) return
+                    advance(guard.newStageId, { valueMin: null, valueMax: null, value: num })
+                  }
+                }}
+                disabled={saving}
+                className="rounded-lg"
+                style={{
+                  padding: '0.5rem 0.875rem',
+                  fontSize: '0.8125rem',
+                  background: 'var(--color-brand)',
+                  color: 'white',
+                  border: 'none',
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {saving ? 'Saving\u2026' : 'Tighten & advance'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 // ---- Editable Value -----------------------------------------------------
 
-function EditableValue({ dealId, value, currency, onUpdated }: {
+// ---- Value Trendline ----------------------------------------------------
+
+/**
+ * Tiny sparkline showing how a deal's estimate has moved over time.
+ * Each data point is a value_change activity's "after.value" plus the
+ * initial deal_created value. A straight line = value unchanged.
+ */
+function ValueTrendline({
+  currentValue,
+  createdAt,
+  activities,
+  currency,
+}: {
+  currentValue: number
+  createdAt: string
+  activities: DealActivity[]
+  currency: string
+}) {
+  // Build series from deal_created (initial) + every value_change event.
+  const points: Array<{ at: number; value: number }> = []
+  // Walk activities in reverse chronological order (they come newest-first)
+  // so we can extract the creation value and every value change in order.
+  const valueChanges = activities
+    .filter(a => a.type === 'deal_created' || a.type === 'value_change')
+    .slice()
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+
+  for (const act of valueChanges) {
+    const meta = parseActivityMetadata(act.metadata)
+    if (!meta) continue
+    if (act.type === 'deal_created') {
+      const initial = (meta.initial as { value?: number } | undefined)?.value
+      if (typeof initial === 'number') {
+        points.push({ at: new Date(act.createdAt).getTime(), value: initial })
+      }
+    } else if (act.type === 'value_change') {
+      const after = (meta.after as { value?: number } | undefined)?.value
+      if (typeof after === 'number') {
+        points.push({ at: new Date(act.createdAt).getTime(), value: after })
+      }
+    }
+  }
+
+  // Always finish the series with the current value (so the line reaches
+  // the right edge of the chart).
+  const nowMs = Date.now()
+  if (points.length === 0 || points[points.length - 1].value !== currentValue) {
+    points.push({ at: nowMs, value: currentValue })
+  }
+
+  // Need at least two points to draw something interesting.
+  if (points.length < 2) {
+    // If we only have one point, fake an origin using the deal createdAt so
+    // the line still renders flat (useful visual context).
+    points.unshift({ at: new Date(createdAt).getTime(), value: currentValue })
+  }
+
+  const minX = points[0].at
+  const maxX = points[points.length - 1].at
+  const xSpan = Math.max(1, maxX - minX)
+  const values = points.map(p => p.value)
+  const minY = Math.min(...values)
+  const maxY = Math.max(...values)
+  const ySpan = Math.max(1, maxY - minY)
+  const W = 220
+  const H = 48
+  const pad = 4
+
+  const polyline = points
+    .map(p => {
+      const x = pad + ((p.at - minX) / xSpan) * (W - pad * 2)
+      const y = H - pad - ((p.value - minY) / ySpan) * (H - pad * 2)
+      return `${x},${y}`
+    })
+    .join(' ')
+
+  const first = points[0].value
+  const last = points[points.length - 1].value
+  const delta = last - first
+  const deltaPct = first > 0 ? Math.round((delta / first) * 100) : 0
+  const trend = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'
+  const trendColor = trend === 'up'
+    ? 'var(--color-success)'
+    : trend === 'down'
+      ? 'var(--color-danger)'
+      : 'var(--color-text-subtle)'
+
+  return (
+    <div style={{ marginTop: '0.75rem' }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: '0.25rem' }}>
+        <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Estimate history</span>
+        <span style={{ fontSize: '0.75rem', color: trendColor, fontWeight: 500 }}>
+          {trend === 'flat'
+            ? 'unchanged'
+            : `${delta > 0 ? '+' : ''}${formatCurrency(Math.abs(delta), currency)}${first > 0 ? ` (${deltaPct > 0 ? '+' : ''}${deltaPct}%)` : ''}`}
+        </span>
+      </div>
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Value trend over time">
+        <polyline
+          points={polyline}
+          fill="none"
+          stroke={trendColor}
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {points.map((p, i) => {
+          const x = pad + ((p.at - minX) / xSpan) * (W - pad * 2)
+          const y = H - pad - ((p.value - minY) / ySpan) * (H - pad * 2)
+          return <circle key={i} cx={x} cy={y} r={2} fill={trendColor} />
+        })}
+      </svg>
+    </div>
+  )
+}
+
+/** Quick chip options shown when user changes a deal value. These feed
+ *  into the activity timeline as the "why" behind the change. */
+const VALUE_CHANGE_REASONS = [
+  'Scope grew',
+  'Scope shrunk',
+  'Budget confirmed',
+  'Discount applied',
+  'Webflow estimate',
+  'Client counter-offer',
+] as const
+
+function EditableValue({ dealId, value, valueMin, valueMax, currency, onUpdated }: {
   dealId: string
   value: number
+  valueMin: number | null
+  valueMax: number | null
   currency: string
   onUpdated: () => void
 }) {
   const [editing, setEditing] = useState(false)
+  const initialHasRange = valueMin != null && valueMax != null && valueMin !== valueMax
+  const [isRange, setIsRange] = useState(initialHasRange)
   const [editVal, setEditVal] = useState(String(value))
+  const [editMin, setEditMin] = useState(valueMin != null ? String(valueMin) : '')
+  const [editMax, setEditMax] = useState(valueMax != null ? String(valueMax) : '')
+  const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
 
+  const openEditor = () => {
+    setEditVal(String(value))
+    setEditMin(valueMin != null ? String(valueMin) : '')
+    setEditMax(valueMax != null ? String(valueMax) : '')
+    setIsRange(initialHasRange)
+    setNote('')
+    setEditing(true)
+  }
+
   const handleSave = async () => {
-    const num = parseFloat(editVal)
-    if (isNaN(num)) return
     setSaving(true)
     try {
+      const payload: Record<string, unknown> = { valueChangeNote: note.trim() || null }
+      if (isRange) {
+        const minNum = parseFloat(editMin) || 0
+        const maxNum = parseFloat(editMax) || 0
+        if (minNum === 0 && maxNum === 0) {
+          setSaving(false)
+          return
+        }
+        payload.valueMin = Math.min(minNum, maxNum)
+        payload.valueMax = Math.max(minNum, maxNum)
+      } else {
+        const num = parseFloat(editVal)
+        if (isNaN(num)) {
+          setSaving(false)
+          return
+        }
+        payload.value = num
+        payload.valueMin = null
+        payload.valueMax = null
+      }
       await fetch(apiPath(`/api/admin/deals/${dealId}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: num }),
+        body: JSON.stringify(payload),
       })
       onUpdated()
       setEditing(false)
@@ -829,55 +1265,178 @@ function EditableValue({ dealId, value, currency, onUpdated }: {
   }
 
   if (!editing) {
+    const displayLabel = initialHasRange
+      ? `${formatCurrency(valueMin!, currency)}\u2013${formatCurrency(valueMax!, currency)}`
+      : formatCurrency(value, currency)
+    const midpointLabel = initialHasRange ? `midpoint ${formatCurrency(value, currency)}` : null
     return (
-      <button
-        onClick={() => { setEditVal(String(value)); setEditing(true) }}
-        className="font-semibold transition-colors"
-        style={{ fontSize: '1.125rem', color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-        onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark)' }}
-        onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-brand)' }}
-      >
-        {formatCurrency(value, currency)}
-      </button>
+      <div>
+        <button
+          onClick={openEditor}
+          className="font-semibold transition-colors"
+          style={{ fontSize: '1.125rem', color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
+          onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark)' }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-brand)' }}
+        >
+          {displayLabel}
+        </button>
+        {midpointLabel && (
+          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>
+            {midpointLabel}
+          </p>
+        )}
+      </div>
     )
   }
 
   return (
-    <div className="flex gap-2">
-      <input
-        type="number"
-        value={editVal}
-        onChange={e => setEditVal(e.target.value)}
-        className="flex-1 rounded-lg"
-        style={{
-          padding: '0.375rem 0.5rem',
-          fontSize: '0.875rem',
-          border: '1px solid var(--color-brand)',
-          background: 'var(--color-bg)',
-          color: 'var(--color-text)',
-          minWidth: 0,
-        }}
-        autoFocus
-        onKeyDown={e => {
-          if (e.key === 'Enter') handleSave()
-          if (e.key === 'Escape') setEditing(false)
-        }}
-      />
+    <div className="flex flex-col" style={{ gap: '0.5rem' }}>
+      {/* Range toggle */}
       <button
-        onClick={handleSave}
-        disabled={saving}
-        className="rounded-lg transition-colors"
+        type="button"
+        onClick={() => setIsRange(!isRange)}
         style={{
-          padding: '0.375rem 0.625rem',
           fontSize: '0.75rem',
-          background: 'var(--color-brand)',
-          color: 'white',
+          color: 'var(--color-brand)',
+          background: 'none',
           border: 'none',
           cursor: 'pointer',
+          padding: 0,
+          alignSelf: 'flex-start',
         }}
       >
-        {saving ? '...' : 'Save'}
+        {isRange ? 'Use single value' : 'Set as range'}
       </button>
+
+      {/* Value input(s) */}
+      {isRange ? (
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            type="number"
+            value={editMin}
+            onChange={e => setEditMin(e.target.value)}
+            placeholder="Min"
+            className="rounded-lg"
+            style={{
+              padding: '0.375rem 0.5rem',
+              fontSize: '0.875rem',
+              border: '1px solid var(--color-brand)',
+              background: 'var(--color-bg)',
+              color: 'var(--color-text)',
+              minWidth: 0,
+            }}
+            autoFocus
+          />
+          <input
+            type="number"
+            value={editMax}
+            onChange={e => setEditMax(e.target.value)}
+            placeholder="Max"
+            className="rounded-lg"
+            style={{
+              padding: '0.375rem 0.5rem',
+              fontSize: '0.875rem',
+              border: '1px solid var(--color-brand)',
+              background: 'var(--color-bg)',
+              color: 'var(--color-text)',
+              minWidth: 0,
+            }}
+          />
+        </div>
+      ) : (
+        <input
+          type="number"
+          value={editVal}
+          onChange={e => setEditVal(e.target.value)}
+          className="rounded-lg"
+          style={{
+            padding: '0.375rem 0.5rem',
+            fontSize: '0.875rem',
+            border: '1px solid var(--color-brand)',
+            background: 'var(--color-bg)',
+            color: 'var(--color-text)',
+            minWidth: 0,
+          }}
+          autoFocus
+          onKeyDown={e => {
+            if (e.key === 'Enter') handleSave()
+            if (e.key === 'Escape') setEditing(false)
+          }}
+        />
+      )}
+
+      {/* Smart note chips */}
+      <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>Why did it change?</div>
+      <div className="flex flex-wrap" style={{ gap: '0.25rem' }}>
+        {VALUE_CHANGE_REASONS.map(reason => {
+          const selected = note === reason
+          return (
+            <button
+              key={reason}
+              type="button"
+              onClick={() => setNote(selected ? '' : reason)}
+              style={{
+                padding: '0.25rem 0.5rem',
+                fontSize: '0.7rem',
+                border: `1px solid ${selected ? 'var(--color-brand)' : 'var(--color-border)'}`,
+                background: selected ? 'var(--color-brand-50)' : 'var(--color-bg)',
+                color: selected ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                borderRadius: 'var(--radius-full)',
+                cursor: 'pointer',
+              }}
+            >
+              {reason}
+            </button>
+          )
+        })}
+      </div>
+      <input
+        type="text"
+        value={VALUE_CHANGE_REASONS.includes(note as typeof VALUE_CHANGE_REASONS[number]) ? '' : note}
+        onChange={e => setNote(e.target.value)}
+        placeholder="Or a short custom note"
+        className="rounded-lg"
+        style={{
+          padding: '0.375rem 0.5rem',
+          fontSize: '0.8rem',
+          border: '1px solid var(--color-border)',
+          background: 'var(--color-bg)',
+          color: 'var(--color-text)',
+        }}
+      />
+
+      {/* Actions */}
+      <div className="flex gap-2" style={{ justifyContent: 'flex-end' }}>
+        <button
+          onClick={() => setEditing(false)}
+          className="rounded-lg"
+          style={{
+            padding: '0.375rem 0.625rem',
+            fontSize: '0.75rem',
+            background: 'var(--color-bg)',
+            color: 'var(--color-text-muted)',
+            border: '1px solid var(--color-border)',
+            cursor: 'pointer',
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-lg transition-colors"
+          style={{
+            padding: '0.375rem 0.625rem',
+            fontSize: '0.75rem',
+            background: 'var(--color-brand)',
+            color: 'white',
+            border: 'none',
+            cursor: saving ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {saving ? 'Saving\u2026' : 'Save'}
+        </button>
+      </div>
     </div>
   )
 }

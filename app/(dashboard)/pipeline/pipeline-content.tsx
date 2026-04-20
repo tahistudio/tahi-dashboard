@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { convertFromNzd } from '@/lib/currency'
+import { calculatePipelineTotals, formatDealValue, rangeConfidenceLevel } from '@/lib/pipeline-math'
 import { Pagination, usePagination } from '@/components/tahi/pagination'
 import { stageColour, sourceBadge } from '@/lib/chart-colors'
 import { PageHeader } from '@/components/tahi/page-header'
@@ -56,6 +57,10 @@ interface Deal {
   value: number
   currency: string
   valueNzd: number
+  valueMin: number | null
+  valueMax: number | null
+  valueMinNzd: number | null
+  valueMaxNzd: number | null
   source: string | null
   estimatedHoursPerWeek: number | null
   expectedCloseDate: string | null
@@ -124,6 +129,34 @@ function daysInStage(stageEnteredAt: string | null, updatedAt: string): number {
   if (!ref) return 0
   const diff = Date.now() - new Date(ref).getTime()
   return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)))
+}
+
+/** Short "last touched" label — returns "now", "3h", "2d", "3w", "2mo". */
+function lastTouchedLabel(iso: string | null | undefined): string {
+  if (!iso) return '\u2014'
+  const diffMs = Date.now() - new Date(iso).getTime()
+  if (diffMs < 60 * 1000) return 'now'
+  const mins = Math.floor(diffMs / (60 * 1000))
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(diffMs / (60 * 60 * 1000))
+  if (hours < 24) return `${hours}h`
+  const days = Math.floor(diffMs / (24 * 60 * 60 * 1000))
+  if (days < 14) return `${days}d`
+  const weeks = Math.floor(days / 7)
+  if (weeks < 9) return `${weeks}w`
+  const months = Math.floor(days / 30)
+  return `${months}mo`
+}
+
+/** Colour a "last touched" indicator — fresh → brand, stale → warning,
+ *  very stale → danger. Tuned to match the typical cadence of a sales
+ *  deal: within 3 days fresh, 3–10 stale, 10+ danger. */
+function lastTouchedColor(iso: string | null | undefined): string {
+  if (!iso) return 'var(--color-text-subtle)'
+  const days = (Date.now() - new Date(iso).getTime()) / (24 * 60 * 60 * 1000)
+  if (days < 3) return 'var(--color-brand)'
+  if (days < 10) return 'var(--color-warning)'
+  return 'var(--color-danger)'
 }
 
 // Source chip labels. Colours come from the shared sourceBadge() helper so
@@ -270,28 +303,15 @@ export function PipelineContent() {
     setFilterValueMax('')
   }
 
-  // Non-closed deals for summary
+  // Non-closed deals for summary. Math routed through lib/pipeline-math
+  // so overview/reports/pipeline all agree (Decision #040).
   const openDeals = filtered.filter(d => !d.stageIsClosedWon && !d.stageIsClosedLost)
   const closedDeals = filtered.filter(d => d.stageIsClosedWon || d.stageIsClosedLost)
-  const wonDeals = filtered.filter(d => d.stageIsClosedWon)
-  const totalValue = openDeals.reduce((s, d) => s + (d.valueNzd ?? d.value), 0)
-  // Use historical probability when available, fallback to static
-  function getEffectiveProbability(deal: Deal): number {
-    const stage = stages.find(st => st.id === deal.stageId)
-    if (stage?.historicalProbability != null) return stage.historicalProbability
-    return deal.stageProbability ?? stage?.probability ?? 0
-  }
-
-  const weightedForecast = openDeals.reduce((s, d) => {
-    const prob = getEffectiveProbability(d)
-    return s + ((d.valueNzd ?? d.value) * prob / 100)
-  }, 0)
-  const winRate = closedDeals.length > 0
-    ? Math.round((wonDeals.length / closedDeals.length) * 100)
-    : 0
-  const avgDealSize = openDeals.length > 0
-    ? Math.round(totalValue / openDeals.length)
-    : 0
+  const pipelineTotals = calculatePipelineTotals(filtered, stages)
+  const totalValue = pipelineTotals.totalValue
+  const weightedForecast = pipelineTotals.weightedValue
+  const winRate = pipelineTotals.winRate
+  const avgDealSize = pipelineTotals.avgDealSize
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
@@ -866,7 +886,7 @@ function KanbanView({ deals, stages, onStageChange, displayCurrency, toDisplay }
                 </div>
               ) : (
                 cards.map(deal => (
-                  <DealCard key={deal.id} deal={deal} stages={stages} displayCurrency={displayCurrency} toDisplay={toDisplay} />
+                  <DealCard key={deal.id} deal={deal} displayCurrency={displayCurrency} toDisplay={toDisplay} />
                 ))
               )}
             </div>
@@ -1091,12 +1111,34 @@ function DealCloseDialog({ type, dealTitle, onConfirm, onCancel }: {
 
 // ---- Deal Card -----------------------------------------------------------
 
-function DealCard({ deal, stages, displayCurrency, toDisplay }: { deal: Deal; stages: PipelineStage[]; displayCurrency: string; toDisplay: (nzd: number) => number }) {
-  const stage = stages.find(s => s.id === deal.stageId)
-  const probability = deal.stageProbability ?? stage?.probability ?? 0
+function DealCard({ deal, displayCurrency, toDisplay }: { deal: Deal; displayCurrency: string; toDisplay: (nzd: number) => number }) {
   const days = daysInStage(deal.stageEnteredAt ?? null, deal.updatedAt)
   const srcLabel = deal.source ? (SOURCE_LABELS[deal.source] ?? deal.source) : null
   const srcStyle = deal.source ? sourceBadge(deal.source) : null
+  const hasRange = deal.valueMinNzd != null && deal.valueMaxNzd != null && deal.valueMinNzd !== deal.valueMaxNzd
+  const pointValue = deal.valueNzd ?? deal.value ?? 0
+  // Format the value display — range uses min/max in NZD, single uses midpoint.
+  const valueLabel = hasRange
+    ? formatDealValue(
+        { value: pointValue, valueMin: deal.valueMinNzd, valueMax: deal.valueMaxNzd },
+        n => formatCurrency(toDisplay(n), displayCurrency),
+      )
+    : (pointValue > 0 ? formatCurrency(toDisplay(pointValue), displayCurrency) : 'TBD')
+  // Range confidence dot: tight = green, rough = amber, speculative = red.
+  const confLevel = hasRange
+    ? rangeConfidenceLevel({ stageId: deal.stageId, valueMin: deal.valueMinNzd, valueMax: deal.valueMaxNzd })
+    : 'unknown'
+  const confDot = confLevel === 'tight'
+    ? { title: 'Tight estimate', bg: 'var(--color-success)' }
+    : confLevel === 'rough'
+      ? { title: 'Rough estimate', bg: 'var(--color-warning)' }
+      : confLevel === 'speculative'
+        ? { title: 'Speculative range', bg: 'var(--color-danger)' }
+        : null
+  // Last touched — replaces the redundant probability badge (the column
+  // header already carries the stage probability).
+  const touchedLabel = lastTouchedLabel(deal.updatedAt)
+  const touchedColor = lastTouchedColor(deal.updatedAt)
 
   return (
     <Link
@@ -1132,26 +1174,39 @@ function DealCard({ deal, stages, displayCurrency, toDisplay }: { deal: Deal; st
     >
       {/* Value + Probability header */}
       <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-2)' }}>
-        <p className="font-semibold tabular-nums" style={{
-          fontSize: 'var(--text-base)',
-          color: (deal.valueNzd ?? deal.value) > 0 ? 'var(--color-text)' : 'var(--color-text-subtle)',
-        }}>
-          {(deal.valueNzd ?? deal.value) > 0
-            ? formatCurrency(toDisplay(deal.valueNzd ?? deal.value), displayCurrency)
-            : 'TBD'}
-        </p>
+        <div className="flex items-center" style={{ gap: 'var(--space-1-5)', minWidth: 0 }}>
+          <p className="font-semibold tabular-nums truncate" style={{
+            fontSize: 'var(--text-base)',
+            color: pointValue > 0 ? 'var(--color-text)' : 'var(--color-text-subtle)',
+          }}>
+            {valueLabel}
+          </p>
+          {confDot && (
+            <span
+              title={confDot.title}
+              aria-label={confDot.title}
+              style={{
+                display: 'inline-block',
+                width: '0.4rem',
+                height: '0.4rem',
+                borderRadius: '50%',
+                background: confDot.bg,
+                flexShrink: 0,
+              }}
+            />
+          )}
+        </div>
         <span
-          className="inline-flex items-center justify-center tabular-nums"
+          title={`Last touched ${new Date(deal.updatedAt).toLocaleString()}`}
+          className="inline-flex items-center tabular-nums"
           style={{
-            padding: 'var(--space-0-5) var(--space-1-5)',
             fontSize: 'var(--text-xs)',
-            fontWeight: 600,
-            borderRadius: 'var(--radius-full)',
-            background: probability >= 60 ? 'var(--status-delivered-bg)' : probability >= 25 ? 'var(--status-in-review-bg)' : 'var(--status-submitted-bg)',
-            color: probability >= 60 ? 'var(--status-delivered-text)' : probability >= 25 ? 'var(--status-in-review-text)' : 'var(--status-submitted-text)',
+            fontWeight: 500,
+            color: touchedColor,
+            flexShrink: 0,
           }}
         >
-          {probability}%
+          {touchedLabel}
         </span>
       </div>
 
@@ -1440,6 +1495,9 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
     return def?.id ?? stages[0]?.id ?? ''
   })
   const [value, setValue] = useState('')
+  const [valueMin, setValueMin] = useState('')
+  const [valueMax, setValueMax] = useState('')
+  const [isRange, setIsRange] = useState(false)
   const [currency, setCurrency] = useState('NZD')
   const [source, setSource] = useState('')
   const [expectedCloseDate, setExpectedCloseDate] = useState('')
@@ -1467,18 +1525,26 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
 
     setSaving(true)
     try {
+      const payload: Record<string, unknown> = {
+        title: title.trim(),
+        stageId,
+        currency,
+        source: source || undefined,
+        expectedCloseDate: expectedCloseDate || undefined,
+        orgId: orgId || undefined,
+      }
+      if (isRange) {
+        const min = parseFloat(valueMin) || 0
+        const max = parseFloat(valueMax) || 0
+        payload.valueMin = Math.min(min, max)
+        payload.valueMax = Math.max(min, max)
+      } else {
+        payload.value = parseFloat(value) || 0
+      }
       const res = await fetch(apiPath('/api/admin/deals'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: title.trim(),
-          stageId,
-          value: parseFloat(value) || 0,
-          currency,
-          source: source || undefined,
-          expectedCloseDate: expectedCloseDate || undefined,
-          orgId: orgId || undefined,
-        }),
+        body: JSON.stringify(payload),
       })
       if (res.ok) {
         onCreated()
@@ -1558,64 +1624,138 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
           </div>
 
           {/* Value + Currency */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-medium" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
-                Value
+          <div>
+            <div className="flex items-center justify-between" style={{ marginBottom: '0.375rem' }}>
+              <label className="block font-medium" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+                {isRange ? 'Value range' : 'Value'}
               </label>
-              <input
-                type="number"
-                value={value}
-                onChange={e => setValue(e.target.value)}
-                placeholder="0"
-                className="w-full rounded-lg"
+              <button
+                type="button"
+                onClick={() => setIsRange(!isRange)}
                 style={{
-                  padding: '0.5rem 0.75rem',
-                  fontSize: '0.875rem',
-                  border: '1px solid var(--color-border)',
-                  background: 'var(--color-bg)',
-                  color: 'var(--color-text)',
-                  minHeight: '2.75rem',
-                }}
-              />
-            </div>
-            <div>
-              <label className="block font-medium" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
-                Currency
-              </label>
-              <select
-                value={currency}
-                onChange={e => setCurrency(e.target.value)}
-                className="w-full rounded-lg cursor-pointer"
-                style={{
-                  padding: '0.5rem 0.75rem',
-                  fontSize: '0.875rem',
-                  border: '1px solid var(--color-border)',
-                  background: 'var(--color-bg)',
-                  color: 'var(--color-text)',
-                  minHeight: '2.75rem',
+                  fontSize: '0.75rem',
+                  color: 'var(--color-brand)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                  fontWeight: 500,
                 }}
               >
-                {['NZD', 'USD', 'AUD', 'GBP', 'EUR', 'CAD', 'SGD', 'HKD', 'JPY', 'CHF'].map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+                {isRange ? 'Use single value' : 'Set as range'}
+              </button>
             </div>
+            {isRange ? (
+              <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
+                <input
+                  type="number"
+                  value={valueMin}
+                  onChange={e => setValueMin(e.target.value)}
+                  placeholder="Min"
+                  className="w-full rounded-lg"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.875rem',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    minHeight: '2.75rem',
+                  }}
+                />
+                <input
+                  type="number"
+                  value={valueMax}
+                  onChange={e => setValueMax(e.target.value)}
+                  placeholder="Max"
+                  className="w-full rounded-lg"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.875rem',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    minHeight: '2.75rem',
+                  }}
+                />
+                <select
+                  value={currency}
+                  onChange={e => setCurrency(e.target.value)}
+                  className="rounded-lg cursor-pointer"
+                  style={{
+                    padding: '0.5rem 0.5rem',
+                    fontSize: '0.875rem',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    minHeight: '2.75rem',
+                  }}
+                >
+                  {['NZD', 'USD', 'AUD', 'GBP', 'EUR', 'CAD', 'SGD', 'HKD', 'JPY', 'CHF'].map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  type="number"
+                  value={value}
+                  onChange={e => setValue(e.target.value)}
+                  placeholder="0"
+                  className="w-full rounded-lg"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.875rem',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    minHeight: '2.75rem',
+                  }}
+                />
+                <select
+                  value={currency}
+                  onChange={e => setCurrency(e.target.value)}
+                  className="w-full rounded-lg cursor-pointer"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.875rem',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    minHeight: '2.75rem',
+                  }}
+                >
+                  {['NZD', 'USD', 'AUD', 'GBP', 'EUR', 'CAD', 'SGD', 'HKD', 'JPY', 'CHF'].map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {/* Range midpoint + conversion preview */}
+            {isRange && valueMin && valueMax && (() => {
+              const min = parseFloat(valueMin)
+              const max = parseFloat(valueMax)
+              if (isNaN(min) || isNaN(max) || min <= 0 || max <= 0) return null
+              const mid = Math.round((min + max) / 2)
+              return (
+                <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginTop: '0.375rem' }}>
+                  {`Midpoint: ${currency} ${mid.toLocaleString()} \u00b7 weighted forecast uses this amount`}
+                </p>
+              )
+            })()}
+            {!isRange && value && currency !== 'NZD' && !loadingRates && (() => {
+              const numVal = parseFloat(value)
+              if (isNaN(numVal) || numVal <= 0) return null
+              const rate = exchangeRates[currency]
+              if (!rate || rate <= 0) return null
+              const nzdValue = Math.round(numVal / rate)
+              return (
+                <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginTop: '0.375rem' }}>
+                  {`${currency} ${numVal.toLocaleString()} \u2248 NZD ${nzdValue.toLocaleString()}`}
+                </p>
+              )
+            })()}
           </div>
-
-          {/* Conversion preview (T341) */}
-          {value && currency !== 'NZD' && !loadingRates && (() => {
-            const numVal = parseFloat(value)
-            if (isNaN(numVal) || numVal <= 0) return null
-            const rate = exchangeRates[currency]
-            if (!rate || rate <= 0) return null
-            const nzdValue = Math.round(numVal / rate)
-            return (
-              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginTop: '-0.5rem' }}>
-                {currency} {numVal.toLocaleString()} ≈ NZD {nzdValue.toLocaleString()}
-              </p>
-            )
-          })()}
 
           {/* Source */}
           <div>

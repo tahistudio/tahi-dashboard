@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { eq, desc, and, inArray, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { convertToNzd } from '@/lib/currency'
+import { logActivity, formatMoney } from '@/lib/deal-activity'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -82,26 +83,61 @@ export async function GET(req: NextRequest) {
     .limit(limit)
     .offset(offset)
 
+  // Fetch value_min/value_max via raw SQL. These columns were added in
+  // migration 0017 and are not declared in the Drizzle schema until the
+  // migration has run everywhere (Decision #039 lesson #1).
+  type RangeRow = { id: string; value_min: number | null; value_max: number | null; value_min_nzd: number | null; value_max_nzd: number | null }
+  let rangeMap: Record<string, { valueMin: number | null; valueMax: number | null; valueMinNzd: number | null; valueMaxNzd: number | null }> = {}
+  const allDealIds = items.map(d => d.id)
+  if (allDealIds.length > 0) {
+    try {
+      // UUIDs from our own DB — safe to interpolate. Still validate format.
+      const safeIds = allDealIds.filter(id => /^[a-f0-9-]{36}$/i.test(id))
+      if (safeIds.length > 0) {
+        const list = safeIds.map(id => `'${id}'`).join(',')
+        const res = await database.all(sql.raw(
+          `SELECT id, value_min, value_max, value_min_nzd, value_max_nzd FROM deals WHERE id IN (${list})`,
+        )) as unknown as RangeRow[] | { results?: RangeRow[] }
+        const rows: RangeRow[] = Array.isArray(res) ? res : (res?.results ?? [])
+        rangeMap = Object.fromEntries(rows.map(r => [r.id, {
+          valueMin: r.value_min,
+          valueMax: r.value_max,
+          valueMinNzd: r.value_min_nzd,
+          valueMaxNzd: r.value_max_nzd,
+        }]))
+      }
+    } catch {
+      // Migration 0017 not yet applied — skip range data.
+      rangeMap = {}
+    }
+  }
+
   // Get contact counts per deal
-  const dealIds = items.map(d => d.id)
   let contactCounts: Record<string, number> = {}
-  if (dealIds.length > 0) {
+  if (allDealIds.length > 0) {
     const counts = await database
       .select({
         dealId: schema.dealContacts.dealId,
         count: sql<number>`count(*)`.as('count'),
       })
       .from(schema.dealContacts)
-      .where(inArray(schema.dealContacts.dealId, dealIds))
+      .where(inArray(schema.dealContacts.dealId, allDealIds))
       .groupBy(schema.dealContacts.dealId)
 
     contactCounts = Object.fromEntries(counts.map(c => [c.dealId, c.count]))
   }
 
-  const enriched = items.map(item => ({
-    ...item,
-    contactCount: contactCounts[item.id] ?? 0,
-  }))
+  const enriched = items.map(item => {
+    const range = rangeMap[item.id]
+    return {
+      ...item,
+      valueMin: range?.valueMin ?? null,
+      valueMax: range?.valueMax ?? null,
+      valueMinNzd: range?.valueMinNzd ?? null,
+      valueMaxNzd: range?.valueMaxNzd ?? null,
+      contactCount: contactCounts[item.id] ?? 0,
+    }
+  })
 
   return NextResponse.json({ items: enriched, page, limit })
 }
@@ -122,6 +158,8 @@ export async function POST(req: NextRequest) {
     stageId?: string
     ownerId?: string
     value?: number
+    valueMin?: number | null
+    valueMax?: number | null
     currency?: string
     source?: string
     estimatedHoursPerWeek?: number
@@ -140,19 +178,28 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
-  const dealValue = body.value ?? 0
+  // Range handling: if both min and max supplied, compute midpoint as
+  // the primary value. Otherwise use the supplied single value.
+  const hasRange = body.valueMin != null && body.valueMax != null && body.valueMin !== body.valueMax
+  const valueMin = hasRange ? Math.min(body.valueMin!, body.valueMax!) : null
+  const valueMax = hasRange ? Math.max(body.valueMin!, body.valueMax!) : null
+  const midpoint = hasRange ? Math.round((valueMin! + valueMax!) / 2) : null
+  const dealValue = midpoint ?? body.value ?? 0
   const dealCurrency = body.currency ?? 'NZD'
 
-  // Convert value to NZD using exchange rates
-  let valueNzd = dealValue
-  if (dealCurrency !== 'NZD' && dealValue > 0) {
+  // Convert to NZD using exchange rates
+  async function toNzd(amount: number): Promise<number> {
+    if (amount === 0 || dealCurrency === 'NZD') return amount
     const rates = await database
       .select({ currency: schema.exchangeRates.currency, rateToUsd: schema.exchangeRates.rateToUsd })
       .from(schema.exchangeRates)
-    if (rates.length > 0) {
-      valueNzd = Math.round(convertToNzd(dealValue, dealCurrency, rates))
-    }
+    if (rates.length === 0) return amount
+    return Math.round(convertToNzd(amount, dealCurrency, rates))
   }
+
+  const valueNzd = await toNzd(dealValue)
+  const valueMinNzd = valueMin != null ? await toNzd(valueMin) : null
+  const valueMaxNzd = valueMax != null ? await toNzd(valueMax) : null
 
   await database.insert(schema.deals).values({
     id,
@@ -169,6 +216,56 @@ export async function POST(req: NextRequest) {
     notes: body.notes ?? null,
     createdAt: now,
     updatedAt: now,
+  })
+
+  // Write the range columns via raw SQL (not in Drizzle schema yet)
+  if (hasRange) {
+    try {
+      await database.run(sql`
+        UPDATE deals
+        SET value_min = ${valueMin},
+            value_max = ${valueMax},
+            value_min_nzd = ${valueMinNzd},
+            value_max_nzd = ${valueMaxNzd}
+        WHERE id = ${id}
+      `)
+    } catch (err) {
+      // Migration 0017 not applied — log and continue.
+      console.warn('[deals POST] range columns not yet available:', err instanceof Error ? err.message : err)
+    }
+  }
+
+  // Fetch stage name for activity log
+  const [stage] = await database
+    .select({ name: schema.pipelineStages.name })
+    .from(schema.pipelineStages)
+    .where(eq(schema.pipelineStages.id, body.stageId))
+    .limit(1)
+
+  const valueLabel = hasRange
+    ? `${formatMoney(valueMin!, dealCurrency)}\u2013${formatMoney(valueMax!, dealCurrency)}`
+    : formatMoney(dealValue, dealCurrency)
+
+  await logActivity(database, {
+    dealId: id,
+    orgId: body.orgId ?? null,
+    type: 'deal_created',
+    title: `Deal created in ${stage?.name ?? 'pipeline'}${dealValue > 0 ? ` \u00b7 ${valueLabel}` : ''}`,
+    description: body.source ? `Source: ${body.source}` : null,
+    createdById: userId,
+    metadata: {
+      initial: {
+        stageId: body.stageId,
+        value: dealValue,
+        valueMin,
+        valueMax,
+        currency: dealCurrency,
+        source: body.source ?? null,
+        ownerId: body.ownerId ?? null,
+        orgId: body.orgId ?? null,
+        expectedCloseDate: body.expectedCloseDate ?? null,
+      },
+    },
   })
 
   return NextResponse.json({ id }, { status: 201 })

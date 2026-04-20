@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc } from 'drizzle-orm'
+import { logActivity } from '@/lib/deal-activity'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -105,6 +106,27 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       }, { status: 500 })
     }
   }
+
+  // Log to timeline (status-informed).
+  const recipientPreview = body.contactEmails.slice(0, 2).join(', ') + (body.contactEmails.length > 2 ? `, +${body.contactEmails.length - 2}` : '')
+  await logActivity(database, {
+    dealId,
+    type: 'nudge_sent',
+    title: body.sendNow
+      ? `Nudge sent to ${recipientPreview}`
+      : body.scheduledAt
+        ? `Nudge scheduled for ${body.scheduledAt.slice(0, 16).replace('T', ' ')}`
+        : `Nudge drafted`,
+    description: body.subject,
+    metadata: {
+      subject: body.subject,
+      templateId: body.templateId ?? null,
+      recipients: body.contactEmails,
+      status,
+      scheduledAt: body.scheduledAt ?? null,
+    },
+    createdById: userId ?? 'system',
+  })
 
   return NextResponse.json({ id: nudgeId, status }, { status: 201 })
 }
