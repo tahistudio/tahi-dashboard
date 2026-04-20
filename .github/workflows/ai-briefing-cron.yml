@@ -31,8 +31,17 @@ jobs:
             echo "::error::Missing TAHI_DASHBOARD_URL or TAHI_CRON_SECRET secret"
             exit 1
           fi
+          # The app is mounted at /dashboard (Webflow Cloud COSMIC_MOUNT_PATH).
+          # Auto-append it if the configured URL doesn't already include it so
+          # the variable can be set either as the bare domain or the full path.
+          base="${DASHBOARD_URL%/}"
+          case "$base" in
+            */dashboard) url="$base/api/admin/ai/briefing/cron" ;;
+            *)           url="$base/dashboard/api/admin/ai/briefing/cron" ;;
+          esac
+          echo "POSTing to $url"
           response=$(curl -sS -w "\n%{http_code}" -X POST \
-            "${DASHBOARD_URL%/}/api/admin/ai/briefing/cron" \
+            "$url" \
             -H "x-cron-secret: ${CRON_SECRET}" \
             -H "Content-Type: application/json")
           body=$(echo "$response" | sed '$d')
