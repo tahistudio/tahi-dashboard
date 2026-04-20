@@ -11,6 +11,10 @@ const isPublicRoute = createRouteMatcher([
   '/api/webhooks/(.*)',
   '/api/case-study/(.*)',
   '/api/admin/docs/seed(.*)',
+  // Scheduled-trigger endpoints — they authenticate themselves via
+  // x-cron-secret in the route handler (Decision #043). Clerk's middleware
+  // doesn't know about that header so must let the request through.
+  '/api/admin/ai/briefing/cron(.*)',
 ])
 
 // Admin-only routes : if a client hits these, redirect them to /requests
