@@ -533,16 +533,30 @@ export const timeEntries = sqliteTable('time_entries', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   orgId: text('org_id').notNull().references(() => organisations.id, { onDelete: 'cascade' }),
   requestId: text('request_id').references(() => requests.id, { onDelete: 'set null' }),
+  // NEW : allow tracking against a task too (mutually exclusive with requestId
+  // in practice, but the DB is permissive — validation lives in the API).
+  taskId: text('task_id'),
   teamMemberId: text('team_member_id').notNull().references(() => teamMembers.id),
   hours: real('hours').notNull(),
   hourlyRate: real('hourly_rate'),
   billable: integer('billable', { mode: 'boolean' }).default(true),
   notes: text('notes'),
   date: text('date').notNull(),
+  // NEW : exact range when known. Both nullable because some entries are
+  // logged as scalar "I spent 6 hours on this" without a specific range.
+  // When set, the UI shows "10:15 AM — 1:29 PM (3h 14m)" instead of just the hours.
+  startedAt: text('started_at'),
+  endedAt: text('ended_at'),
+  // NEW : how the entry was created. Drives UX (e.g. live-tracked entries
+  // get a subtle "⏱ tracked" label; manual entries don't).
+  // 'manual' | 'live_timer' | 'imported'
+  source: text('source').notNull().default('manual'),
   ...timestamps,
 }, (table) => [
   index('idx_time_org').on(table.orgId),
   index('idx_time_member').on(table.teamMemberId),
+  index('idx_time_request').on(table.requestId),
+  index('idx_time_task').on(table.taskId),
 ])
 
 // ============================================================

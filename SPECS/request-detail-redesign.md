@@ -255,7 +255,20 @@ activeTimers: {
    - **Active on THIS request**: shows the live ticking timer inline + "⏸ Pause" / "■ Stop + log" buttons
    - **Active on ANOTHER request**: shows "⏱ Currently tracking: [Other request title]" as a warning banner, with "Stop that and start on this one" action button
 
-3. **Manual entry**: below the live tracker, always a "Log past time" button for historical entries ("I worked on this yesterday for 2h, forgot to track"). Opens a small form: hours + date + optional note + billable toggle.
+3. **Manual entry** — three logging modes, all stored on a single `timeEntry` row :
+   - **Scalar** : "I spent 6 hours on this" — enter total hours + date. `startedAt` / `endedAt` left null. Simple and fast.
+   - **Time range** : "From 10:15 AM to 1:29 PM yesterday" — enter start + end datetimes, the system calculates `hours = (endedAt - startedAt) / 3600000` automatically. Both timestamps stored on the row. Good for people who work in blocks and remember exact times.
+   - **Live-tracked** : started when the user clicked Track, ended when they clicked Stop + Log. Source marked `'live_timer'`. The exact `startedAt` (editable — see below) and the `endedAt` (= stop time) are both saved.
+
+   All three render in the Time section the same way ("2h 15m · Yesterday · 10:15–12:30"), with a small `⏱ tracked` label for live-timer entries.
+
+4. **In-flight timer editing** — users commonly realise "I started 15 minutes ago, not right now". The active timer's `startedAt` is editable via a small "Edit start time" link in the timer's dropdown :
+   - Click → shows the current start time in a datetime input
+   - User adjusts (e.g. "now − 15 min")
+   - On save, the active timer row's `startedAt` updates. The live clock re-renders with the new elapsed value.
+   - Limit : you can't set `startedAt` in the future, and you can't set it earlier than 12 hours ago without a confirmation prompt ("This seems a long time — are you sure?").
+
+5. **Editing a logged entry after the fact** — once logged, a time entry is a normal editable row. Admin / the entry's owner can open it from the Time section or the client's Time tab and adjust `hours`, `startedAt`, `endedAt`, or `notes`.
 
 4. **Auto-recovery**: the active timer writes a `lastPingAt` heartbeat every 30 seconds via a lightweight `/api/admin/timers/ping` endpoint. If a user's browser dies while a timer is active, the next time they load the app we show: "Your timer on [X] was still running when you last closed. Log 2h 14m? [Yes, log it] [Discard]". This prevents "forgot I left it running overnight" issues.
 
