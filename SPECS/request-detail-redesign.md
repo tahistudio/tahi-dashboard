@@ -1,25 +1,35 @@
-# Request Detail + Request System — Redesign Spec (V2)
+# Request Detail + Request System — Redesign Spec (V3 — APPROVED)
 
-**Status:** Idea stage — locked after feedback round 1.
-**Scope grew from:** "visual redesign of Request Detail page"
-**to:** "rearchitect requests as nestable + multi-participant, rebuild composer, redesign detail page, update AI wizard"
+**Status:** All decisions locked after feedback round 2. Ready for Phase 1.
+**Scope:** "Rearchitect requests as nestable + multi-participant, rebuild composer, redesign detail page, update AI wizard, live time tracker"
 
 This spec covers **both the data model and the UI**. The data model changes are needed before the UI can be built, so we ship them in that order.
 
 ---
 
-## Decisions locked from round 1
+## Decisions locked
 
+### Round 1
 | Question | Decision |
 |---|---|
-| Description collapse | Persist collapsed state per `(userId, requestId)` in localStorage, user can override via a toggle |
-| Activity log placement | Bottom of left column, collapsed by default |
-| Related deal / invoice surfacing | **Skip** — lives on client/company detail, not per-request |
-| Mobile stepper | Collapse to a single chip ("In Progress · 3 of 5"), tap opens a popover with the full stepper |
-| Keyboard shortcuts | **Skip V1**, revisit later |
-| CTA when checklists incomplete | See Pattern B below (progress-aware button) |
+| Description collapse | Persist collapsed state per `(userId, requestId)` in localStorage, user-controlled toggle |
+| Activity log placement | Bottom of left column, collapsed by default, migrated to `<ActivityTimeline>` |
+| Related deal / invoice surfacing | **Skip** — lives on client / company detail, not per-request |
+| Mobile stepper | Collapse to a single chip, tap opens popover with full stepper |
+| Keyboard shortcuts | **Skip V1** |
+| CTA when checklists incomplete | Pattern B — progress-aware label, clickable to jump focus |
 | Primary CTA placement | Header card, full-width on mobile |
-| Task type system | **Drop the fine-grained types.** Only `small` or `large`. Drag-to-nest preserves size. |
+| Task type system | **Only `small` or `large`.** Drop all other values. |
+
+### Round 2
+| Question | Decision |
+|---|---|
+| Sub-request nesting depth | **One level only** (parent + children). No grandchildren. |
+| Project manager role | **Optional, zero or one.** Never required, never implicit. Default is "unset". |
+| Follower notifications | Notify on : status moves to submitted / in_review / client_review, and on public messages + client feedback. **Do NOT notify the person who performed the action.** |
+| Time tracking UX | **Live ticking timer** (stopwatch-style) + manual "log past time" entry. One active timer per user globally. Top-nav indicator when active. |
+| Scope flag | **Move to a small icon button in the request header area**, not a full sidebar card. Click to flag / unflag. |
+| Status change UX | **Replace the 4 "Move to X" buttons with a single `<Select>` dropdown** ("Set status: In Progress ▾") |
 
 ---
 
@@ -184,6 +194,53 @@ Drop `type` granularity. One binary: **small** or **large**. This flows through:
 - Capacity math: track slots can still multiply small vs large appropriately
 - Task estimation: small ≈ 1–4h, large ≈ 4h+ (no exact bounds, design decision per request)
 
+### E) Live time tracker
+
+**Problem today:** time entries are logged retroactively via a "Log time" button that opens a form. Easy to forget, easy to fudge numbers. The user wants a live stopwatch — click "Track now" and a timer ticks up on-screen while you work.
+
+**Schema addition** — `activeTimers` table:
+
+```ts
+activeTimers: {
+  id: text pk,
+  userId: text,                       // teamMember.id — one active timer per user globally
+  requestId: text,                    // request being tracked
+  startedAt: text,                    // ISO timestamp
+  lastPingAt: text,                   // heartbeat for recovery (see below)
+  notes: text nullable,               // optional running notes
+}
+```
+
+**Unique constraint:** `(userId)` — one active timer per person. Starting a second timer auto-stops and logs the first.
+
+**UX:**
+
+1. **Global top-nav indicator** — when a timer is active, a compact chip appears in the top nav:
+   ```
+   [⏱ 01:23:45 · Acme website ▾]
+   ```
+   Click the chip → dropdown with:
+   - "Go to request" → navigates to the tracked request
+   - "Pause" → pauses timer (keeps it active but frozen — useful for breaks)
+   - "Stop + log" → stops timer, opens a confirm modal prefilling hours, adds optional billable toggle + note, creates a `timeEntry` row, clears the `activeTimers` row
+   - "Discard" → stops timer without logging (confirm first)
+   - On mobile the chip compresses to just the icon + time
+
+2. **Per-request Time section** (sidebar) — three states:
+   - **Idle** (no timer on any request): button "▶ Track time on this request"
+   - **Active on THIS request**: shows the live ticking timer inline + "⏸ Pause" / "■ Stop + log" buttons
+   - **Active on ANOTHER request**: shows "⏱ Currently tracking: [Other request title]" as a warning banner, with "Stop that and start on this one" action button
+
+3. **Manual entry**: below the live tracker, always a "Log past time" button for historical entries ("I worked on this yesterday for 2h, forgot to track"). Opens a small form: hours + date + optional note + billable toggle.
+
+4. **Auto-recovery**: the active timer writes a `lastPingAt` heartbeat every 30 seconds via a lightweight `/api/admin/timers/ping` endpoint. If a user's browser dies while a timer is active, the next time they load the app we show: "Your timer on [X] was still running when you last closed. Log 2h 14m? [Yes, log it] [Discard]". This prevents "forgot I left it running overnight" issues.
+
+5. **Accumulation**: timer + any time entry already logged for this request show as one number in the sidebar: **"Logged: 2h 15m (+ 34m running)"** while active. Once stopped, just "Logged: 2h 49m".
+
+**Notification:** no notifications for timer state changes — this is purely personal.
+
+**Billable default:** the client's default billable rate (from `organisations.hourlyRate`) pre-fills; can be toggled off before save.
+
 ---
 
 ## 2. UI / UX changes
@@ -196,12 +253,15 @@ Drop `type` granularity. One binary: **small** or **large**. This flows through:
 ├──────────────────────────────────────────────────────────────────────┤
 │  HEADER CARD                                                         │
 │  ┌───────────────────────────────────────────────────────────────┐ │
-│  │ #023 • Acme website hero refresh          [Follow] [size: L] │ │
+│  │ #023 • Acme website hero refresh     [🚩] [Follow] [size: L] │ │  ← scope flag is here now (small)
 │  │ 🏢 Acme Corp · PM: Liam · 2 assignees · Due 18 May           │ │
 │  │                                                               │ │
 │  │ ────── Stepper (mobile: single chip) ──────                  │ │
 │  │                                                               │ │
-│  │ ★ PRIMARY CTA (role-aware, see Pattern B below)              │ │
+│  │ ★ PRIMARY CTA (progress-aware per Pattern B)                 │ │
+│  │                                                               │ │
+│  │ ─ admin-only toolbar row ─                                   │ │
+│  │ [Set status: In Progress ▾] [⏱ Track time] [··· more]       │ │  ← status is now a dropdown
 │  └───────────────────────────────────────────────────────────────┘ │
 ├──────────────────────────────────────────────────────────────────────┤
 │  MAIN (2/3)                          │  SIDEBAR (1/3)               │
@@ -210,22 +270,22 @@ Drop `type` granularity. One binary: **small** or **large**. This flows through:
 │  │ Description (collapsed ↓)       │ │  │ DETAILS                  ││
 │  └────────────────────────────────┘ │  │ Size · Category · Due    ││
 │                                       │  │ Created · Estimated      ││
-│  ┌────────────────────────────────┐ │  │ Logged time              ││
-│  │ SUB-REQUESTS (if parent)        │ │  │                          ││
-│  │ ● Wireframes           3/5 done │ │  │ PEOPLE                   ││
-│  │ ○ Visual direction     Sarah    │ │  │ Project manager          ││
-│  │ ○ Webflow build        Liam     │ │  │ Assignees (multi)        ││
-│  │ ○ QA + launch          unassgnd │ │  │ Followers (multi)        ││
-│  │ [+ New sub-request]             │ │  │                          ││
-│  └────────────────────────────────┘ │  │ CHECKLISTS               ││
-│                                       │  │ (for THIS request)       ││
 │  ┌────────────────────────────────┐ │  │                          ││
-│  │ MESSAGES (12 · 3 unread)        │ │  │ SCOPE (admin only)       ││
-│  │                                 │ │  │ [Flag]                   ││
-│  │ [Thread w/ unread divider]      │ │  │                          ││
-│  │                                 │ │  │ TIME (admin only)        ││
-│  │ [Public / Internal seg ctrl]    │ │  │ [+ Log]                  ││
-│  │ [Composer]                      │ │  └──────────────────────────┘│
+│  │ SUB-REQUESTS (if parent)        │ │  │ PEOPLE                   ││
+│  │ ● Wireframes           3/5 done │ │  │ Project manager          ││
+│  │ ○ Visual direction     Sarah    │ │  │ Assignees (multi)        ││
+│  │ ○ Webflow build        Liam     │ │  │ Followers (multi)        ││
+│  │ ○ QA + launch          unassgnd │ │  │                          ││
+│  │ [+ New sub-request]             │ │  │ CHECKLISTS               ││
+│  └────────────────────────────────┘ │  │ (for THIS request)       ││
+│                                       │  │                          ││
+│  ┌────────────────────────────────┐ │  │ TIME                     ││
+│  │ MESSAGES (12 · 3 unread)        │ │  │ Logged: 2h 15m           ││
+│  │                                 │ │  │ [▶ Track time]           ││
+│  │ [Thread w/ unread divider]      │ │  │ [+ Log past time]        ││
+│  │                                 │ │  └──────────────────────────┘│
+│  │ [Public / Internal seg ctrl]    │ │                                │
+│  │ [Composer]                      │ │                                │
 │  └────────────────────────────────┘ │                                │
 │                                       │                                │
 │  ┌────────────────────────────────┐ │                                │
@@ -238,12 +298,38 @@ Drop `type` granularity. One binary: **small** or **large**. This flows through:
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-Key structural decisions:
-- **Sub-requests render inside the page** as a dedicated section under Description when the current request IS a parent. If it's not a parent, this section doesn't render.
+Key structural decisions (updated):
+- **Sub-requests render inside the page** as a dedicated section under Description when the current request IS a parent.
 - **People lives in the sidebar** with three distinct slots (PM / assignees / followers).
-- **Checklists stay in the sidebar** (for the request itself). These are NOT the same as sub-requests. Checklists = "inside this one request, things to do." Sub-requests = "child requests that are separate deliverables."
+- **Checklists stay in the sidebar** (for the request itself).
+- **Scope flag** moved from a sidebar card to a small icon button in the header action row (see spec below).
+- **Status changes** now a single `<Select>` dropdown in an admin-only toolbar row in the header (replaces 4 "Move to X" buttons).
+- **Time** lives in the sidebar — live ticking when active, "▶ Track time" idle button otherwise, "+ Log past time" always.
 - **Related deal/invoice REMOVED** per your feedback.
 - **Messaging composer lives in the Messages card** but is a rewrite (see composer spec above).
+
+### Scope flag — compact header button
+
+Replaces the full sidebar "Admin" card. Rendered in the header action row next to Follow and size badge:
+
+- **Unflagged:** small neutral icon button `🚩` with tooltip "Flag as scope creep"
+- **Flagged:** red-tinted button with the flag filled, tooltip shows flag reason + "Flagged 3d ago by Liam"
+- Click: opens a tiny popover with "Flag scope creep" or "Remove scope flag" + optional reason text field
+- Admin-only — hidden entirely for team members without admin rights and for clients
+
+### Status dropdown — replaces the 4 buttons
+
+Admin-only toolbar row in the header card:
+
+```
+[Set status: ● In Progress ▾]   [⏱ Track time]   [··· more]
+```
+
+- Compact `<Select>` with status dot + current label
+- Open: all 6 status options (submitted, in_review, in_progress, client_review, delivered, archived) with dots
+- Selecting a new status triggers confirmation toast + logs to activity
+- Disabled for non-admins (they use the primary CTA to advance)
+- `[··· more]` opens a small overflow menu with the secondary actions (archive, duplicate, delete, export as markdown, etc.) that otherwise clutter the header
 
 ### Primary CTA — Pattern B (progress-aware button)
 
@@ -332,18 +418,23 @@ When the user views a request detail page, after 2 seconds on the page, we upser
 1. Add `parentRequestId` to `requests` (migration).
 2. Create `requestParticipants` table (migration).
 3. Create `requestReads` table (migration).
-4. Backfill `requestParticipants` from existing `assigneeId`.
-5. Keep `assigneeId` column for now; new UI reads from participants, old UI still works.
-6. Type-check, test.
+4. Create `activeTimers` table (migration).
+5. Add `requests.size` column (migration + backfill from existing `type`).
+6. Backfill `requestParticipants` from existing `assigneeId`.
+7. Keep `assigneeId` + `type` columns for now; new UI reads from participants + size, old UI still works.
+8. Type-check, test.
 
-### Phase 2 — API routes — 1 session
+### Phase 2 — API routes + MCP parity — 1 session
 1. `/api/admin/requests/[id]/participants` GET + POST + DELETE
 2. `/api/admin/requests/[id]/sub-requests` GET + POST + reorder
 3. `/api/admin/requests/[id]/reads` POST (mark read)
 4. `/api/admin/requests/bulk-assign` POST
 5. `/api/admin/requests/[id]/nest` POST (drag-to-nest)
-6. Update existing `/api/admin/requests/[id]` GET to include `participants[]` + `subRequests[]` + `parent` + `unreadCount`.
-7. MCP tools for all of the above (per DESIGN.md MCP parity rule).
+6. `/api/admin/requests/[id]/scope-flag` POST + DELETE (reason field in payload)
+7. `/api/admin/timers` GET (own active timer) + POST (start) + PATCH (pause / unpause) + DELETE (stop + log or discard)
+8. `/api/admin/timers/ping` POST (heartbeat)
+9. Update existing `/api/admin/requests/[id]` GET to include `participants[]` + `subRequests[]` + `parent` + `unreadCount` + `activeTimer`.
+10. MCP tools for all of the above (per DESIGN.md MCP parity rule).
 
 ### Phase 3 — new composer — 1 session
 1. Build `components/tahi/message-composer.tsx` with the segmented Public/Internal control, file-attach-on-send, Cmd+Enter, drag-drop, tokenised colours.
@@ -359,38 +450,51 @@ When the user views a request detail page, after 2 seconds on the page, we upser
 
 ### Phase 5 — people sidebar + bulk assign — 1 session
 1. People sidebar section (PM / assignees / followers slots).
-2. Add/remove participant inline.
+2. Add / remove participant inline.
 3. Bulk assign from requests list.
-4. Update notification logic: notify assignees on client replies, followers on status changes.
+4. Update notification logic per locked rules :
+   - Followers get notified on : status moves to submitted / in_review / client_review, public messages, client feedback.
+   - Actors never get notified of their own actions.
+5. Unread markers + read tracking integration.
 
-### Phase 6 — header + CTA + stepper + activity log migration — 1 session
-1. Rebuild the header card with new PageHeader + primary CTA pattern.
-2. Mobile stepper single-chip + popover.
-3. Migrate Activity Log to `<ActivityTimeline>` + collapsed-by-default.
-4. Delete all `SidebarCard` local wrappers, use the shared primitive.
-5. Everything moves to the primitive library (`<Card>`, `<Badge>`, `<KPIStrip>` if needed).
+### Phase 6 — header redesign (CTA + status dropdown + scope flag + stepper + activity log) — 1 session
+1. Rebuild the header card with new `<PageHeader>` + Pattern B primary CTA.
+2. Admin toolbar row : status `<Select>` dropdown + "Track time" quick-start button + overflow `[···]` menu.
+3. Scope flag as compact icon button in the header action row (popover for reason).
+4. Mobile stepper single-chip + popover.
+5. Migrate Activity Log to `<ActivityTimeline>` + collapsed-by-default.
+6. Delete all local `SidebarCard` wrappers, use the shared primitive.
 
-### Phase 7 — polish + QA pass — 1 session
+### Phase 7 — live time tracker — 1 session
+1. Build `components/tahi/time-tracker.tsx` — the live ticking display + start / pause / stop controls, used inside the sidebar Time section.
+2. Build `components/tahi/global-timer-indicator.tsx` — the top-nav chip with ticking display + dropdown menu.
+3. Wire ping-every-30s heartbeat.
+4. Auto-recovery flow on app load (lastPingAt older than 2 minutes → "was your timer on X still running?" prompt).
+5. Manual "Log past time" quick-form modal.
+6. Conflict handling : starting a timer on Request B while A is active → confirm-and-switch prompt.
+
+### Phase 8 — polish + QA pass — 1 session
 1. Walk all 4 personas via impersonation.
 2. Mobile 375px + 768px checks.
 3. Unread markers live test.
 4. Description collapse state.
-5. Drag-to-nest edge cases (sub of sub, different-org drop, etc.)
-6. Accessibility: screen reader through a full request flow.
+5. Drag-to-nest edge cases (nest with incompatible orgs, nest into a child, etc.).
+6. Accessibility : screen reader through a full request flow, live-region announcements for the timer.
+7. Timer heartbeat + recovery happy path + failure path.
 
-**Total estimated: 7 sessions.** Big but appropriately scoped for a Tier-1 page + the structural changes behind it.
+**Total estimated: 8 sessions.**
 
 ---
 
-## 4. Open questions remaining for you
+## 4. All questions answered. Ready for Phase 1.
 
-The round-1 decisions are locked. These 3 are new and I need your call before Phase 1:
-
-1. **Sub-request nesting depth** — V1 is **one level deep** (parent + children, no grandchildren). Agree? Or do you want arbitrary depth from day 1?
-2. **Project manager role — is it optional or required?** If a request has no PM, does the primary assignee implicitly act as PM? Or should the system nag "assign a PM" when a request has ≥2 assignees?
-3. **Follower notifications** — followers get status change emails by default. Should they ALSO get all public messages by default, or only when @mentioned?
-
-Once these three are answered, I start Phase 1.
+Round-2 decisions (all locked):
+- Nesting : one level deep only.
+- PM role : optional zero-or-one, never implicit, never nagged.
+- Follower notifications : on status moves to submitted / in_review / client_review + on public messages + on client feedback; actors don't get notified of their own actions.
+- Time tracking : live stopwatch + global top-nav indicator + manual "log past time" fallback + auto-recovery on app reload.
+- Scope flag : small icon button in the header, not a sidebar card.
+- Status : single `<Select>` dropdown in an admin toolbar row, replaces the 4 buttons.
 
 ---
 
