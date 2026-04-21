@@ -19,6 +19,7 @@ import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { useToast } from '@/components/tahi/toast'
 import { Card } from '@/components/tahi/card'
 import { SubRequestsPanel, type SubRequestRow } from '@/components/tahi/sub-requests-panel'
+import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -153,6 +154,8 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const [checklists, setChecklists] = useState<Checklist[]>([])
   const [isFollowing, setIsFollowing] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
+  const [newSubOpen, setNewSubOpen] = useState(false)
+  const [unlinkingParent, setUnlinkingParent] = useState(false)
   const threadBottomRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
 
@@ -359,6 +362,31 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       body: JSON.stringify({ scopeFlagged: !request.scopeFlagged }),
     })
     await loadRequest()
+  }
+
+  // Un-link this sub-request from its parent — promotes it to a top-level
+  // request. Uses the same /nest endpoint that drag-to-nest does.
+  async function handleUnlinkFromParent() {
+    if (!request?.parentRequestId || unlinkingParent) return
+    setUnlinkingParent(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/requests/${requestId}/nest`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentRequestId: null }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        showToast(j.error ?? 'Failed to unlink from parent')
+        return
+      }
+      showToast('Promoted to top-level request')
+      await loadRequest()
+    } catch {
+      showToast('Network error — try again')
+    } finally {
+      setUnlinkingParent(false)
+    }
   }
 
   async function handlePriorityChange(priority: string | null) {
@@ -776,7 +804,62 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             <AlertTriangle size={13} aria-hidden="true" />
             {request.scopeFlagged ? 'Scope flagged' : 'Flag scope creep'}
           </button>
+
+          {/* Unlink / promote to top-level — only visible for sub-requests */}
+          {request.parentRequestId && (
+            <button
+              type="button"
+              onClick={handleUnlinkFromParent}
+              disabled={unlinkingParent}
+              className="inline-flex items-center transition-colors"
+              style={{
+                gap: '0.375rem',
+                padding: '0.375rem 0.75rem',
+                fontSize: '0.75rem',
+                fontWeight: 500,
+                borderRadius: 'var(--radius-button)',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text-muted)',
+                cursor: unlinkingParent ? 'not-allowed' : 'pointer',
+                opacity: unlinkingParent ? 0.6 : 1,
+                minHeight: '2rem',
+              }}
+              onMouseEnter={e => {
+                if (!unlinkingParent) {
+                  e.currentTarget.style.borderColor = 'var(--color-brand)'
+                  e.currentTarget.style.background = 'var(--color-brand-50)'
+                  e.currentTarget.style.color = 'var(--color-brand-dark)'
+                }
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = 'var(--color-border)'
+                e.currentTarget.style.background = 'var(--color-bg)'
+                e.currentTarget.style.color = 'var(--color-text-muted)'
+              }}
+              aria-label="Promote to top-level request"
+            >
+              {unlinkingParent ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : <RefreshCw size={13} aria-hidden="true" />}
+              Make top-level
+            </button>
+          )}
         </div>
+      )}
+
+      {/* Sub-request creation dialog — opened from the <SubRequestsPanel>
+          "New sub-request" button. Client is locked to parent's org. */}
+      {isAdmin && !request.parentRequestId && (
+        <NewRequestDialog
+          open={newSubOpen}
+          onClose={() => setNewSubOpen(false)}
+          isAdmin
+          parentRequestId={request.id}
+          forceOrgId={request.orgId}
+          onCreated={() => {
+            loadRequest()
+            showToast('Sub-request created')
+          }}
+        />
       )}
 
       {/* Two-column layout */}
@@ -879,6 +962,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
               alwaysShow={isAdmin}
               canCreate={isAdmin}
               onCreated={loadRequest}
+              onRequestNew={() => setNewSubOpen(true)}
             />
           )}
 

@@ -14,14 +14,12 @@
  * passes `alwaysShow` (useful during initial wiring of a parent).
  */
 
-import React, { useState, useCallback } from 'react'
+import React from 'react'
 import Link from 'next/link'
-import { Plus, Loader2 } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { Card } from '@/components/tahi/card'
 import { Badge, statusTone } from '@/components/tahi/badge'
-import { Input } from '@/components/tahi/input'
 import { TahiButton } from '@/components/tahi/tahi-button'
-import { apiPath } from '@/lib/api'
 
 export interface SubRequestRow {
   id: string
@@ -44,6 +42,11 @@ interface SubRequestsPanelProps {
   onCreated?: () => void
   /** Whether the current user can create sub-requests. Defaults to true. */
   canCreate?: boolean
+  /** Raised when the user clicks the "New sub-request" button. The detail
+   *  page listens for this and opens the full <NewRequestDialog> with
+   *  parentRequestId pre-filled, so sub-request creation has the same
+   *  rich form as top-level creation. */
+  onRequestNew?: () => void
 }
 
 function Initials({ name }: { name: string | null }) {
@@ -90,46 +93,13 @@ function Initials({ name }: { name: string | null }) {
 }
 
 export function SubRequestsPanel({
-  parentRequestId,
   subRequests,
   alwaysShow = false,
-  onCreated,
   canCreate = true,
+  onRequestNew,
 }: SubRequestsPanelProps) {
-  const [showForm, setShowForm] = useState(false)
-  const [title, setTitle] = useState('')
-  const [size, setSize] = useState<'small' | 'large'>('small')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
   const doneCount = subRequests.filter(s => s.status === 'delivered').length
   const total = subRequests.length
-
-  const handleCreate = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!title.trim() || submitting) return
-    setSubmitting(true)
-    setError(null)
-    try {
-      const res = await fetch(apiPath(`/api/admin/requests/${parentRequestId}/sub-requests`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title.trim(), size }),
-      })
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({})) as { error?: string }
-        throw new Error(j.error ?? 'Failed to create sub-request')
-      }
-      setTitle('')
-      setSize('small')
-      setShowForm(false)
-      onCreated?.()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create')
-    } finally {
-      setSubmitting(false)
-    }
-  }, [title, size, submitting, parentRequestId, onCreated])
 
   if (total === 0 && !alwaysShow && !canCreate) return null
 
@@ -162,8 +132,8 @@ export function SubRequestsPanel({
             </p>
           )}
         </div>
-        {canCreate && !showForm && (
-          <TahiButton variant="secondary" size="sm" onClick={() => setShowForm(true)} iconLeft={<Plus size={13} />}>
+        {canCreate && onRequestNew && (
+          <TahiButton variant="secondary" size="sm" onClick={onRequestNew} iconLeft={<Plus size={13} />}>
             New sub-request
           </TahiButton>
         )}
@@ -232,91 +202,6 @@ export function SubRequestsPanel({
         </ul>
       )}
 
-      {/* Inline quick-add form */}
-      {showForm && canCreate && (
-        <form
-          onSubmit={handleCreate}
-          style={{
-            padding: 'var(--space-4) var(--space-5)',
-            borderTop: total > 0 ? '1px solid var(--color-border-subtle)' : undefined,
-            background: 'var(--color-bg-secondary)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--space-3)',
-          }}
-        >
-          <Input
-            value={title}
-            onChange={e => setTitle(e.target.value)}
-            placeholder="Sub-request title…"
-            autoFocus
-          />
-
-          {/* Size selector */}
-          <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontWeight: 500 }}>
-              Size:
-            </span>
-            <div
-              role="radiogroup"
-              aria-label="Sub-request size"
-              style={{
-                display: 'inline-flex',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-md)',
-                overflow: 'hidden',
-              }}
-            >
-              {(['small', 'large'] as const).map(s => (
-                <button
-                  key={s}
-                  type="button"
-                  role="radio"
-                  aria-checked={size === s}
-                  onClick={() => setSize(s)}
-                  style={{
-                    padding: '0.3125rem 0.75rem',
-                    fontSize: 'var(--text-xs)',
-                    fontWeight: 500,
-                    background: size === s ? 'var(--color-brand-50)' : 'var(--color-bg)',
-                    color: size === s ? 'var(--color-brand)' : 'var(--color-text-muted)',
-                    border: 'none',
-                    cursor: 'pointer',
-                    textTransform: 'capitalize',
-                  }}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {error && (
-            <p role="alert" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-danger)', margin: 0 }}>
-              {error}
-            </p>
-          )}
-
-          <div className="flex items-center justify-end" style={{ gap: 'var(--space-2)' }}>
-            <TahiButton
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => { setShowForm(false); setTitle(''); setError(null) }}
-            >
-              Cancel
-            </TahiButton>
-            <TahiButton
-              type="submit"
-              size="sm"
-              disabled={!title.trim() || submitting}
-              iconLeft={submitting ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-            >
-              {submitting ? 'Creating…' : 'Create sub-request'}
-            </TahiButton>
-          </div>
-        </form>
-      )}
     </Card>
   )
 }

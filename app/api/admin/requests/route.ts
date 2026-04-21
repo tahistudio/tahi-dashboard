@@ -71,6 +71,7 @@ export async function GET(req: NextRequest) {
       updatedAt: schema.requests.updatedAt,
       deliveredAt: schema.requests.deliveredAt,
       requestNumber: schema.requests.requestNumber,
+      parentRequestId: schema.requests.parentRequestId,
       // Join org name
       orgName: schema.organisations.name,
     })

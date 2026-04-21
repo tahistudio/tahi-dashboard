@@ -33,11 +33,13 @@ interface Request {
   dueDate: string | null
   revisionCount: number | null
   scopeFlagged: boolean | null
+  orgId?: string | null
   orgName?: string | null
   assigneeId?: string | null
   updatedAt: string | null
   createdAt: string | null
   requestNumber?: number | null
+  parentRequestId?: string | null
 }
 
 type ViewMode = 'list' | 'board' | 'workload'
@@ -943,7 +945,24 @@ function ListRow({
 // ─── Board View ───────────────────────────────────────────────────────────────
 
 function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: Request[]; columns: BoardColumn[]; isAdmin: boolean; onStatusChange: () => void }) {
-  const byStatus = (status: string) => requests.filter(r => r.status === status)
+  // Top-level requests group by status. Children nest visually under their
+  // parent card and do NOT appear as separate column entries.
+  const topLevel = requests.filter(r => !r.parentRequestId)
+  const childrenByParent = new Map<string, Request[]>()
+  for (const r of requests) {
+    if (r.parentRequestId) {
+      const list = childrenByParent.get(r.parentRequestId) ?? []
+      list.push(r)
+      childrenByParent.set(r.parentRequestId, list)
+    }
+  }
+  const byStatus = (status: string) => topLevel.filter(r => r.status === status)
+
+  // Source-of-drag context used by card dragover handlers for the
+  // cross-client guard. dataTransfer.getData is empty during dragover (browser
+  // security), so we mirror orgId + parentRequestId + source id into a ref at
+  // dragstart and read it during dragover.
+  const dragSource = useRef<{ id: string; orgId: string | null; parentId: string | null } | null>(null)
 
   // Drag-to-nest state : when a card is dropped onto another card, we stash
   // source + target here and show a ConfirmDialog. User confirms → POST /nest.
@@ -964,15 +983,28 @@ function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: R
     if (e.dataTransfer.getData('nestHandled') === '1') return
     const requestId = e.dataTransfer.getData('requestId')
     const fromStatus = e.dataTransfer.getData('fromStatus')
-    if (!requestId || fromStatus === newStatus) return
+    const fromParent = e.dataTransfer.getData('fromParent') || null
+    if (!requestId) return
     if (!isAdmin) return
     try {
-      await fetch(apiPath(`/api/admin/requests/${requestId}`), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      })
-      onStatusChange()
+      // If this card was a sub-request, un-nest first. Dropping into a column
+      // implies "break me out of my parent". If the user wanted to keep it as
+      // a child, they'd drop onto another parent card instead.
+      if (fromParent) {
+        await fetch(apiPath(`/api/admin/requests/${requestId}/nest`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ parentRequestId: null }),
+        })
+      }
+      if (fromStatus !== newStatus) {
+        await fetch(apiPath(`/api/admin/requests/${requestId}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus }),
+        })
+      }
+      if (fromParent || fromStatus !== newStatus) onStatusChange()
     } catch {
       // silent
     }
@@ -983,6 +1015,9 @@ function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: R
     if (!isAdmin || sourceId === targetReq.id) return
     const source = requests.find(r => r.id === sourceId)
     if (!source) return
+    // Cross-client drops are rejected before the ConfirmDialog opens — same
+    // guard the backend enforces, but faster feedback for the user.
+    if (source.orgId && targetReq.orgId && source.orgId !== targetReq.orgId) return
     setNestError(null)
     setNestPrompt({
       sourceId,
@@ -1101,6 +1136,8 @@ function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: R
                     req={req}
                     canNest={isAdmin}
                     onNestDrop={sourceId => handleNestDrop(sourceId, req)}
+                    nestedChildren={childrenByParent.get(req.id) ?? []}
+                    dragSource={dragSource}
                   />
                 ))
               )}
@@ -1133,78 +1170,102 @@ function KanbanCard({
   req,
   canNest = false,
   onNestDrop,
+  nestedChildren = [],
+  dragSource,
 }: {
   req: Request
   canNest?: boolean
   onNestDrop?: (sourceId: string) => void
+  nestedChildren?: Request[]
+  dragSource?: React.MutableRefObject<{ id: string; orgId: string | null; parentId: string | null } | null>
 }) {
   const cat = CAT_CFG[req.category ?? ''] ?? { bg: 'var(--cat-admin-bg)', color: 'var(--cat-admin-text)' }
   const [nestHover, setNestHover] = useState(false)
 
+  const handleDragStart = (e: React.DragEvent, r: Request) => {
+    e.dataTransfer.setData('requestId', r.id)
+    e.dataTransfer.setData('fromStatus', r.status)
+    e.dataTransfer.setData('fromParent', r.parentRequestId ?? '')
+    e.dataTransfer.effectAllowed = 'move'
+    if (dragSource) dragSource.current = { id: r.id, orgId: r.orgId ?? null, parentId: r.parentRequestId ?? null }
+    ;(e.currentTarget as HTMLElement).style.opacity = '0.5'
+  }
+  const handleDragEnd = (e: React.DragEvent) => {
+    ;(e.currentTarget as HTMLElement).style.opacity = '1'
+    if (dragSource) dragSource.current = null
+  }
+
   return (
-    <Link
-      href={`/requests/${req.id}`}
-      className="block rounded-lg transition-all"
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData('requestId', req.id)
-        e.dataTransfer.setData('fromStatus', req.status)
-        e.dataTransfer.effectAllowed = 'move'
-        ;(e.currentTarget as HTMLElement).style.opacity = '0.5'
-      }}
-      onDragEnd={(e) => {
-        ;(e.currentTarget as HTMLElement).style.opacity = '1'
-      }}
-      // Drop-on-card : treat as "nest this request under the target"
-      onDragOver={(e) => {
-        if (!canNest) return
-        const sourceId = e.dataTransfer.getData('requestId')
-        // dataTransfer.getData in dragover is empty in most browsers for
-        // security reasons, so we can't early-out on same-card here. We
-        // still highlight on any drag-over; the drop handler checks
-        // source !== target.
-        e.preventDefault()
-        e.dataTransfer.dropEffect = 'move'
-        void sourceId
-        if (!nestHover) setNestHover(true)
-      }}
-      onDragLeave={() => {
-        if (nestHover) setNestHover(false)
-      }}
-      onDrop={(e) => {
-        if (!canNest || !onNestDrop) return
-        const sourceId = e.dataTransfer.getData('requestId')
-        if (!sourceId || sourceId === req.id) {
+    <div>
+      <Link
+        href={`/requests/${req.id}`}
+        className="block rounded-lg transition-all"
+        draggable
+        onDragStart={(e) => handleDragStart(e, req)}
+        onDragEnd={handleDragEnd}
+        // Drop-on-card : treat as "nest this request under the target".
+        // Cross-client drops are blocked at dragover so the browser shows the
+        // "no-drop" cursor and we never paint the green dashed border.
+        onDragOver={(e) => {
+          if (!canNest) return
+          const src = dragSource?.current
+          if (!src) return
+          if (src.id === req.id) return
+          // Same-client check — backend rejects these, but we also refuse to
+          // show any hover animation for a cross-client drag so the affordance
+          // reads "not allowed" instantly.
+          if (src.orgId && req.orgId && src.orgId !== req.orgId) {
+            e.dataTransfer.dropEffect = 'none'
+            return
+          }
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+          if (!nestHover) setNestHover(true)
+        }}
+        onDragLeave={() => {
+          if (nestHover) setNestHover(false)
+        }}
+        onDrop={(e) => {
+          if (!canNest || !onNestDrop) return
+          const sourceId = e.dataTransfer.getData('requestId') || dragSource?.current?.id || ''
+          if (!sourceId || sourceId === req.id) {
+            setNestHover(false)
+            return
+          }
+          const src = dragSource?.current
+          if (src?.orgId && req.orgId && src.orgId !== req.orgId) {
+            setNestHover(false)
+            return
+          }
+          // Prevent the column's drop handler from also firing (status change)
+          e.stopPropagation()
+          e.preventDefault()
+          e.dataTransfer.setData('nestHandled', '1')
           setNestHover(false)
-          return
-        }
-        // Prevent the column's drop handler from also firing (status change)
-        e.stopPropagation()
-        e.preventDefault()
-        e.dataTransfer.setData('nestHandled', '1')
-        setNestHover(false)
-        onNestDrop(sourceId)
-      }}
-      style={{
-        padding: '0.75rem',
-        background: nestHover ? 'var(--color-brand-50)' : 'var(--color-bg)',
-        border: `${nestHover ? '2px dashed var(--color-brand)' : '1px solid var(--color-border)'}`,
-        boxShadow: 'var(--shadow-sm)',
-        textDecoration: 'none',
-        cursor: 'grab',
-        transition: 'background 150ms ease, border-color 150ms ease',
-      }}
-      onMouseEnter={e => {
-        if (nestHover) return
-        e.currentTarget.style.borderColor = 'var(--color-brand)'
-        e.currentTarget.style.boxShadow = 'var(--shadow-md)'
-      }}
-      onMouseLeave={e => {
-        if (nestHover) return
-        e.currentTarget.style.borderColor = 'var(--color-border)'
-        e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
-      }}
-    >
+          onNestDrop(sourceId)
+        }}
+        style={{
+          padding: '0.75rem',
+          background: nestHover ? 'var(--color-brand-50)' : 'var(--color-bg)',
+          border: `${nestHover ? '2px dashed var(--color-brand)' : '1px solid var(--color-border)'}`,
+          boxShadow: 'var(--shadow-sm)',
+          textDecoration: 'none',
+          cursor: 'grab',
+          transition: 'background 150ms ease, border-color 150ms ease',
+          borderBottomLeftRadius: nestedChildren.length > 0 ? 0 : undefined,
+          borderBottomRightRadius: nestedChildren.length > 0 ? 0 : undefined,
+        }}
+        onMouseEnter={e => {
+          if (nestHover) return
+          e.currentTarget.style.borderColor = 'var(--color-brand)'
+          e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+        }}
+        onMouseLeave={e => {
+          if (nestHover) return
+          e.currentTarget.style.borderColor = 'var(--color-border)'
+          e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
+        }}
+      >
       {/* Type + scope flag */}
       <div className="flex items-center justify-between" style={{ marginBottom: '0.5rem' }}>
         <span
@@ -1250,6 +1311,93 @@ function KanbanCard({
           <PriorityBadge priority={req.priority} />
         </div>
       </div>
+    </Link>
+
+      {/* Nested sub-request rows — only on top-level cards. Each child is
+          independently draggable (drop on a column = un-nest + move; drop on
+          another parent = re-nest if same client). */}
+      {nestedChildren.length > 0 && (
+        <div
+          role="list"
+          aria-label={`${nestedChildren.length} sub-request${nestedChildren.length === 1 ? '' : 's'}`}
+          style={{
+            borderLeft: '1px solid var(--color-border)',
+            borderRight: '1px solid var(--color-border)',
+            borderBottom: '1px solid var(--color-border)',
+            borderBottomLeftRadius: '0.5rem',
+            borderBottomRightRadius: '0.5rem',
+            background: 'var(--color-bg-secondary)',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          {nestedChildren.map((c, idx) => (
+            <KanbanChildRow
+              key={c.id}
+              req={c}
+              isLast={idx === nestedChildren.length - 1}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function KanbanChildRow({
+  req,
+  isLast,
+  onDragStart,
+  onDragEnd,
+}: {
+  req: Request
+  isLast: boolean
+  onDragStart: (e: React.DragEvent, r: Request) => void
+  onDragEnd: (e: React.DragEvent) => void
+}) {
+  const statusDot = STATUS_CFG[req.status]?.dot ?? 'var(--color-text-subtle)'
+  return (
+    <Link
+      href={`/requests/${req.id}`}
+      draggable
+      onDragStart={(e) => { e.stopPropagation(); onDragStart(e, req) }}
+      onDragEnd={onDragEnd}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.5rem',
+        padding: '0.4375rem 0.75rem 0.4375rem 1.25rem',
+        fontSize: '0.75rem',
+        color: 'var(--color-text)',
+        textDecoration: 'none',
+        borderBottom: isLast ? undefined : '1px solid var(--color-border-subtle)',
+        cursor: 'grab',
+        transition: 'background 120ms ease',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+      aria-label={`Sub-request: ${req.title}`}
+    >
+      <span
+        aria-hidden="true"
+        style={{ width: '0.375rem', height: '0.375rem', borderRadius: '9999px', background: statusDot, flexShrink: 0 }}
+      />
+      <span
+        className="truncate"
+        style={{ flex: 1, minWidth: 0 }}
+      >
+        {req.requestNumber != null && (
+          <span style={{ color: 'var(--color-text-subtle)', marginRight: '0.3125rem' }}>
+            #{String(req.requestNumber).padStart(3, '0')}
+          </span>
+        )}
+        {req.title}
+      </span>
+      {req.scopeFlagged && (
+        <AlertTriangle size={10} style={{ color: 'var(--color-danger)', flexShrink: 0 }} aria-label="Scope flagged" />
+      )}
     </Link>
   )
 }

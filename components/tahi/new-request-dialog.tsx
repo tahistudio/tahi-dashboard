@@ -27,6 +27,18 @@ interface NewRequestDialogProps {
   canUseLargeTrack?: boolean
   /** Pre-select a client org when opening from a client's page */
   defaultOrgId?: string
+  /** When set: the new request will be created as a sub-request of this parent.
+   *  Posts to /api/admin/requests/{parentRequestId}/sub-requests, locks client
+   *  to parent's org, and hides the client picker. */
+  parentRequestId?: string
+  /** When set together with parentRequestId: locks client picker to this org
+   *  and hides it. Use for the "New sub-request" button on a parent's detail
+   *  page. */
+  forceOrgId?: string
+  /** Optional callback invoked after a successful creation. If provided we
+   *  skip the default navigation to /requests/[id] — the caller typically
+   *  wants to stay on the parent page and refresh. */
+  onCreated?: (newRequestId: string) => void
 }
 
 const REQUEST_TYPES = [
@@ -60,7 +72,9 @@ const CATEGORIES = [
 
 export function NewRequestDialog({
   open, onClose, isAdmin, canUseLargeTrack = true, defaultOrgId,
+  parentRequestId, forceOrgId, onCreated,
 }: NewRequestDialogProps) {
+  const isSubRequest = !!parentRequestId
   const router = useRouter()
   const { showToast } = useToast()
   const [submitting, setSubmitting] = useState(false)
@@ -168,7 +182,7 @@ export function NewRequestDialog({
       setStartDate('')
       setDueDate('')
       setEstimatedHours('')
-      setClientOrgId(defaultOrgId ?? '')
+      setClientOrgId(forceOrgId ?? defaultOrgId ?? '')
       setBrandId('')
       setBrandOptions([])
       setError(null)
@@ -187,7 +201,7 @@ export function NewRequestDialog({
   async function handleSubmit(e: React.FormEvent, saveAndCreateAnother = false) {
     e.preventDefault()
     if (!title.trim()) return
-    if (isAdmin && !clientOrgId) {
+    if (isAdmin && !isSubRequest && !clientOrgId) {
       setError('Please select a client.')
       return
     }
@@ -196,8 +210,25 @@ export function NewRequestDialog({
     setSubmitting(true)
 
     try {
-      const url = isAdmin ? apiPath('/api/admin/requests') : apiPath('/api/portal/requests')
-      const reqBody = isAdmin
+      // Sub-request creation uses the dedicated endpoint which forces orgId
+      // from parent + enforces the one-level-only nesting rule. Top-level
+      // creation uses the normal requests endpoints.
+      const url = isSubRequest
+        ? apiPath(`/api/admin/requests/${parentRequestId}/sub-requests`)
+        : (isAdmin ? apiPath('/api/admin/requests') : apiPath('/api/portal/requests'))
+
+      const reqBody = isSubRequest
+        ? {
+            title: title.trim(),
+            description,
+            // sub-requests endpoint expects `size` not `type`; map small_task→small, large_task→large.
+            size: (type === 'large_task' ? 'large' : 'small') as 'small' | 'large',
+            category,
+            priority,
+            dueDate: dueDate || null,
+            estimatedHours: estimatedHours ? Number(estimatedHours) : null,
+          }
+        : isAdmin
         ? {
             clientOrgId, title: title.trim(), type, category, description, priority,
             isInternal: isInternal ? 1 : 0,
@@ -237,6 +268,9 @@ export function NewRequestDialog({
         setEstimatedHours('')
         setSuccessMessage('Request created successfully. Create another one below.')
         setCreateAnother(true)
+      } else if (onCreated) {
+        onCreated(data.id)
+        onClose()
       } else {
         onClose()
         router.push(`/requests/${data.id}`)
@@ -333,8 +367,30 @@ export function NewRequestDialog({
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
-            {/* Client selector (admin only) */}
-            {isAdmin && (
+            {/* Sub-request indicator — locks client to parent's org */}
+            {isSubRequest && (
+              <div
+                role="note"
+                style={{
+                  padding: '0.625rem 0.75rem',
+                  borderRadius: 'var(--radius-card)',
+                  background: 'var(--color-brand-50)',
+                  border: '1px solid var(--color-brand-100)',
+                  fontSize: '0.75rem',
+                  color: 'var(--color-brand-dark)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                }}
+              >
+                <Layers size={13} aria-hidden="true" />
+                <span>This will be created as a <strong>sub-request</strong> of the current request. Client is locked to the parent&rsquo;s organisation.</span>
+              </div>
+            )}
+
+            {/* Client selector (admin only) — hidden for sub-requests since
+                org is forced to parent's. */}
+            {isAdmin && !isSubRequest && (
               <FieldGroup label="Client" required htmlFor="req-client">
                 {clientsLoading ? (
                   <div style={{
