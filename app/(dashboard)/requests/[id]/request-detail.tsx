@@ -6,7 +6,7 @@ import {
   Clock, AlertTriangle, RefreshCw,
   User, CheckCircle2, Loader2, Activity,
   FileText, Image as ImageIcon, Download, Paperclip,
-  Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud, Eye, EyeOff,
+  Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud, Eye, EyeOff, ChevronDown,
 } from 'lucide-react'
 import Link from 'next/link'
 import { RequestThread } from '@/components/tahi/request-thread'
@@ -152,6 +152,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [checklists, setChecklists] = useState<Checklist[]>([])
   const [isFollowing, setIsFollowing] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
   const threadBottomRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
 
@@ -206,10 +207,12 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           request: Request
           subRequests?: SubRequestRow[]
           parent?: ParentRequestRef | null
+          unreadCount?: number
         }
         setRequest(data.request)
         setSubRequests(data.subRequests ?? [])
         setParentRequest(data.parent ?? null)
+        setUnreadCount(data.unreadCount ?? 0)
         try {
           setChecklists(JSON.parse(data.request.checklists || '[]') as Checklist[])
         } catch {
@@ -260,6 +263,18 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   useEffect(() => {
     threadBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
+
+  // Mark the request as read 2s after load. A quick glance shouldn't count —
+  // if the user leaves sooner, we preserve the unread badge for next time.
+  useEffect(() => {
+    if (!isAdmin || loading || !request) return
+    const t = setTimeout(() => {
+      fetch(apiPath(`/api/admin/requests/${requestId}/reads`), { method: 'POST' })
+        .then(() => setUnreadCount(0))
+        .catch(() => { /* non-fatal */ })
+    }, 2000)
+    return () => clearTimeout(t)
+  }, [isAdmin, loading, request, requestId])
 
   async function handleSendMessage(
     html: string,
@@ -643,48 +658,133 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         </div>
       </div>
 
+      {/* Admin quick actions row — status dropdown + scope flag icon. Kept in
+          its own row below the header card so it's always visible without
+          scrolling but doesn't compete with the stepper. */}
+      {isAdmin && (
+        <div
+          className="flex items-center flex-wrap"
+          style={{ gap: '0.75rem', marginTop: '-0.5rem' }}
+        >
+          <div className="flex items-center" style={{ gap: '0.375rem' }}>
+            <label
+              htmlFor="status-select"
+              className="text-xs font-medium"
+              style={{ color: 'var(--color-text-subtle)' }}
+            >
+              Status
+            </label>
+            <div style={{ position: 'relative' }}>
+              <select
+                id="status-select"
+                value={request.status}
+                onChange={e => handleStatusChange(e.target.value)}
+                disabled={statusUpdating}
+                style={{
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  padding: '0.375rem 2rem 0.375rem 0.75rem',
+                  fontSize: '0.8125rem',
+                  fontWeight: 500,
+                  color: 'var(--color-text)',
+                  background: 'var(--color-bg)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-button)',
+                  cursor: statusUpdating ? 'not-allowed' : 'pointer',
+                  opacity: statusUpdating ? 0.6 : 1,
+                  minHeight: '2rem',
+                  outline: 'none',
+                }}
+                onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
+                onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+              >
+                {STATUS_FLOW.map(s => (
+                  <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+                ))}
+                {!STATUS_FLOW.includes(request.status as typeof STATUS_FLOW[number]) && (
+                  <option value={request.status}>{STATUS_LABELS[request.status] ?? request.status}</option>
+                )}
+              </select>
+              <ChevronDown
+                size={13}
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  right: '0.625rem',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--color-text-subtle)',
+                  pointerEvents: 'none',
+                }}
+              />
+              {statusUpdating && (
+                <Loader2
+                  size={12}
+                  className="animate-spin"
+                  style={{
+                    position: 'absolute',
+                    right: '2rem',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: 'var(--color-text-subtle)',
+                    pointerEvents: 'none',
+                  }}
+                />
+              )}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleScopeFlagToggle}
+            className="inline-flex items-center transition-colors"
+            style={{
+              gap: '0.375rem',
+              padding: '0.375rem 0.75rem',
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              borderRadius: 'var(--radius-button)',
+              border: request.scopeFlagged
+                ? '1px solid var(--color-danger)'
+                : '1px solid var(--color-border)',
+              background: request.scopeFlagged
+                ? 'var(--color-danger-bg)'
+                : 'var(--color-bg)',
+              color: request.scopeFlagged
+                ? 'var(--color-danger)'
+                : 'var(--color-text-muted)',
+              cursor: 'pointer',
+              minHeight: '2rem',
+            }}
+            onMouseEnter={e => {
+              if (!request.scopeFlagged) {
+                e.currentTarget.style.borderColor = 'var(--color-warning)'
+                e.currentTarget.style.background = 'var(--color-warning-bg)'
+                e.currentTarget.style.color = 'var(--color-warning)'
+              }
+            }}
+            onMouseLeave={e => {
+              if (!request.scopeFlagged) {
+                e.currentTarget.style.borderColor = 'var(--color-border)'
+                e.currentTarget.style.background = 'var(--color-bg)'
+                e.currentTarget.style.color = 'var(--color-text-muted)'
+              }
+            }}
+            aria-pressed={request.scopeFlagged}
+            aria-label={request.scopeFlagged ? 'Remove scope flag' : 'Flag as scope creep'}
+          >
+            <AlertTriangle size={13} aria-hidden="true" />
+            {request.scopeFlagged ? 'Scope flagged' : 'Flag scope creep'}
+          </button>
+        </div>
+      )}
+
       {/* Two-column layout */}
       <div className="grid grid-cols-1 md:grid-cols-[1fr_16rem] lg:grid-cols-[1fr_20rem] gap-6">
-        {/* Left column */}
+        {/* Left column — thread-first, description / sub-requests / files below,
+            activity collapsed at the bottom */}
         <div className="flex flex-col gap-6">
-          {/* Description */}
-          {request.description && (
-            <div
-              className="bg-[var(--color-bg)] rounded-xl"
-              style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
-            >
-              <div
-                style={{
-                  padding: '0.875rem 1.25rem',
-                  borderBottom: '1px solid var(--color-row-border)',
-                }}
-              >
-                <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
-                  Description
-                </h2>
-              </div>
-              <div
-                className="prose prose-sm max-w-none"
-                style={{ padding: '1.25rem', color: 'var(--color-text)', fontSize: '0.875rem', lineHeight: 1.6 }}
-                dangerouslySetInnerHTML={{ __html: request.description }}
-              />
-            </div>
-          )}
-
-          {/* Sub-requests — shows when this request IS a parent, or when admin
-              wants to start breaking work down. Only render for top-level
-              requests (children can't have grandchildren in V1). */}
-          {!request.parentRequestId && (
-            <SubRequestsPanel
-              parentRequestId={request.id}
-              subRequests={subRequests}
-              alwaysShow={isAdmin}
-              canCreate={isAdmin}
-              onCreated={loadRequest}
-            />
-          )}
-
-          {/* Thread */}
+          {/* Thread — first for immediate comms context */}
           <div
             className="bg-[var(--color-bg)] rounded-xl"
             style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
@@ -705,6 +805,19 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     }}
                   >
                     {messages.length}
+                  </span>
+                )}
+                {unreadCount > 0 && (
+                  <span
+                    className="text-xs font-semibold rounded-full"
+                    style={{
+                      padding: '0.0625rem 0.5rem',
+                      background: 'var(--color-brand)',
+                      color: '#ffffff',
+                    }}
+                    aria-label={`${unreadCount} unread`}
+                  >
+                    {unreadCount} new
                   </span>
                 )}
               </h2>
@@ -734,15 +847,40 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             </div>
           </div>
 
-          {/* Activity Log */}
-          <ActivityLog request={request} messages={messages} files={files} />
+          {/* Description */}
+          {request.description && (
+            <div
+              className="bg-[var(--color-bg)] rounded-xl"
+              style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
+            >
+              <div
+                style={{
+                  padding: '0.875rem 1.25rem',
+                  borderBottom: '1px solid var(--color-row-border)',
+                }}
+              >
+                <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                  Description
+                </h2>
+              </div>
+              <div
+                className="prose prose-sm max-w-none"
+                style={{ padding: '1.25rem', color: 'var(--color-text)', fontSize: '0.875rem', lineHeight: 1.6 }}
+                dangerouslySetInnerHTML={{ __html: request.description }}
+              />
+            </div>
+          )}
 
-          {/* Checklists */}
-          <ChecklistsPanel
-            checklists={checklists}
-            onSave={saveChecklists}
-            isAdmin={isAdmin}
-          />
+          {/* Sub-requests — only for top-level requests (V1 disallows grandchildren) */}
+          {!request.parentRequestId && (
+            <SubRequestsPanel
+              parentRequestId={request.id}
+              subRequests={subRequests}
+              alwaysShow={isAdmin}
+              canCreate={isAdmin}
+              onCreated={loadRequest}
+            />
+          )}
 
           {/* Files */}
           <FilesPanel
@@ -752,67 +890,13 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             orgId={request.orgId}
             isAdmin={isAdmin}
           />
+
+          {/* Activity log — collapsed by default at the bottom */}
+          <ActivityLog request={request} messages={messages} files={files} />
         </div>
 
         {/* Right column: Metadata sidebar */}
         <div className="flex flex-col gap-4">
-          {/* Status actions (admin only) */}
-          {isAdmin && (
-            <SidebarCard title="Status">
-              <div className="flex flex-col" style={{ gap: '0.375rem' }}>
-                {STATUS_FLOW.filter(s => s !== request.status).map(s => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => handleStatusChange(s)}
-                    disabled={statusUpdating}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      padding: '0.5rem 0.75rem',
-                      fontSize: '0.8125rem',
-                      fontWeight: 500,
-                      color: 'var(--color-text)',
-                      background: 'var(--color-bg)',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 'var(--radius-button)',
-                      cursor: statusUpdating ? 'not-allowed' : 'pointer',
-                      opacity: statusUpdating ? 0.5 : 1,
-                      transition: 'all 0.15s',
-                    }}
-                    onMouseEnter={e => {
-                      if (!statusUpdating) {
-                        e.currentTarget.style.borderColor = 'var(--color-brand)'
-                        e.currentTarget.style.background = 'var(--color-brand-50)'
-                        e.currentTarget.style.color = 'var(--color-brand-dark)'
-                      }
-                    }}
-                    onMouseLeave={e => {
-                      e.currentTarget.style.borderColor = 'var(--color-border)'
-                      e.currentTarget.style.background = 'var(--color-bg)'
-                      e.currentTarget.style.color = 'var(--color-text)'
-                    }}
-                  >
-                    {statusUpdating ? (
-                      <Loader2 size={13} className="animate-spin" style={{ flexShrink: 0 }} />
-                    ) : (
-                      <span
-                        style={{
-                          width: 6, height: 6, borderRadius: '50%',
-                          background: 'var(--color-brand)', flexShrink: 0,
-                        }}
-                      />
-                    )}
-                    Move to {STATUS_LABELS[s]}
-                  </button>
-                ))}
-              </div>
-            </SidebarCard>
-          )}
-
           {/* Details card */}
           <SidebarCard title="Details">
             <div className="flex flex-col" style={{ gap: '0.875rem' }}>
@@ -960,53 +1044,12 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             </div>
           </SidebarCard>
 
-          {/* Admin actions */}
-          {isAdmin && (
-            <SidebarCard title="Admin">
-              <button
-                type="button"
-                onClick={handleScopeFlagToggle}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  padding: '0.5rem 0.75rem',
-                  fontSize: '0.8125rem',
-                  fontWeight: 500,
-                  borderRadius: 'var(--radius-button)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                  border: request.scopeFlagged
-                    ? '1px solid var(--color-danger)'
-                    : '1px solid var(--color-border)',
-                  background: request.scopeFlagged
-                    ? 'var(--color-danger-bg)'
-                    : 'var(--color-bg)',
-                  color: request.scopeFlagged
-                    ? 'var(--color-danger)'
-                    : 'var(--color-text)',
-                }}
-                onMouseEnter={e => {
-                  if (!request.scopeFlagged) {
-                    e.currentTarget.style.borderColor = 'var(--color-warning)'
-                    e.currentTarget.style.background = 'var(--color-warning-bg)'
-                    e.currentTarget.style.color = 'var(--color-warning)'
-                  }
-                }}
-                onMouseLeave={e => {
-                  if (!request.scopeFlagged) {
-                    e.currentTarget.style.borderColor = 'var(--color-border)'
-                    e.currentTarget.style.background = 'var(--color-bg)'
-                    e.currentTarget.style.color = 'var(--color-text)'
-                  }
-                }}
-              >
-                <AlertTriangle size={13} />
-                {request.scopeFlagged ? 'Remove scope flag' : 'Flag as scope creep'}
-              </button>
-            </SidebarCard>
-          )}
+          {/* Checklists — moved from left column to reduce main-rail noise */}
+          <ChecklistsPanel
+            checklists={checklists}
+            onSave={saveChecklists}
+            isAdmin={isAdmin}
+          />
 
           {/* Time entry logging (admin only) */}
           {isAdmin && (
@@ -1040,6 +1083,8 @@ function ActivityLog({
   messages: Message[]
   files: RequestFile[]
 }) {
+  // `open` toggles the whole card; `expanded` toggles Show more inside it.
+  const [open, setOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
 
   // Build activity events from available data
@@ -1115,11 +1160,27 @@ function ActivityLog({
       className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
       style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
     >
-      <div
-        className="flex items-center justify-between"
-        style={{ padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        aria-controls="activity-log-body"
+        className="flex items-center justify-between w-full transition-colors"
+        style={{
+          padding: '0.875rem 1.25rem',
+          borderBottom: open ? '1px solid var(--color-row-border)' : 'none',
+          background: 'transparent',
+          border: 'none',
+          borderBottomWidth: open ? 1 : 0,
+          borderBottomStyle: 'solid',
+          borderBottomColor: 'var(--color-row-border)',
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
       >
-        <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+        <span className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
           <Activity size={14} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
           Activity
           {events.length > 0 && (
@@ -1134,10 +1195,20 @@ function ActivityLog({
               {events.length}
             </span>
           )}
-        </h2>
-      </div>
+        </span>
+        <ChevronDown
+          size={14}
+          aria-hidden="true"
+          style={{
+            color: 'var(--color-text-subtle)',
+            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 0.15s',
+          }}
+        />
+      </button>
 
-      <div style={{ padding: '0.75rem 1.25rem' }}>
+      {open && (
+      <div id="activity-log-body" style={{ padding: '0.75rem 1.25rem' }}>
         {events.length === 0 ? (
           <p className="text-xs" style={{ color: 'var(--color-text-subtle)', padding: '0.5rem 0' }}>
             No activity yet.
@@ -1195,6 +1266,7 @@ function ActivityLog({
           </button>
         )}
       </div>
+      )}
     </div>
   )
 }
