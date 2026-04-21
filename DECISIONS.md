@@ -978,3 +978,37 @@ Three small changes that together make the multi-currency experience feel lighte
 **Left for a follow-up commit:** AI wizard on requests. The task AI wizard (`components/tahi/ai-task-wizard.tsx`) is unchanged; we'll mirror its pattern into `ai-request-wizard.tsx` next so both surfaces get AI help, for clients and for us.
 
 ---
+
+## #047 - Per-User, Per-Surface UI Preferences Persist Across Sessions
+
+**Date:** 2026-04-21
+
+**Decision:** Any UI toggle that the user cares about (view mode, tab selection, sort order) persists to `localStorage` so leaving and coming back to a page restores the same layout.
+
+**Implementation:** `lib/use-user-preference.ts` exports a drop-in `useState` replacement:
+
+```ts
+const [view, setView] = useUserPreference<'kanban' | 'list'>(
+  'pipeline.viewMode', 'kanban',
+  { validator: oneOf<'kanban' | 'list'>(['kanban', 'list']) },
+)
+```
+
+- Keys are namespaced under `tahi-pref:` to avoid colliding with the currency preference, theme, or any other local state.
+- SSR-safe: first render returns the default, then hydrates from storage inside a `useEffect` (one-frame flash, imperceptible for toggles).
+- `validator` (optional) gates stored values to a closed set. If a stored value fails validation we fall back to the default AND clear the bad key \u2014 useful when tab enums change over time.
+- `oneOf(['a','b','c'])` is a helper for tab-style enums.
+
+**Wired into:**
+- Pipeline: `viewMode` (kanban/list), `sortKey`.
+- Tasks: `typeTab` (all / for us / for a client), `statusTab`, `viewMode` (list/board).
+- Requests: `viewMode` (list/board/workload), `sortKey`, `activeTab`. Replaced the pre-existing bespoke `getStoredPreference` implementation so all preferences now go through one codepath.
+- Invoices: `activeTab` (all / draft / sent / overdue / paid / written off).
+
+**Not wired (intentional):**
+- Search input (ephemeral, resets on reload).
+- Date-range pickers (usually task-specific).
+- Priority/source filters (case-by-case; can be added via the same hook later).
+- Selected IDs for bulk actions (ephemeral).
+
+---

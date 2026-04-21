@@ -18,6 +18,7 @@ import { useToast } from '@/components/tahi/toast'
 import { PageHeader } from '@/components/tahi/page-header'
 import { ViewToggle } from '@/components/tahi/view-toggle'
 import { Input, Select } from '@/components/tahi/input'
+import { useUserPreference, oneOf } from '@/lib/use-user-preference'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -312,8 +313,22 @@ function BlockedIndicator() {
 // ── Main component ───────────────────────────────────────────────────────────
 
 export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
-  const [typeTab, setTypeTab] = useState('all')
-  const [statusTab, setStatusTab] = useState('all')
+  // Persisted UI preferences \u2014 remembered per user, per surface.
+  const [typeTab, setTypeTab] = useUserPreference(
+    'tasks.typeTab',
+    'all',
+    { validator: oneOf(['all', 'for_us', 'for_client']) },
+  )
+  const [statusTab, setStatusTab] = useUserPreference(
+    'tasks.statusTab',
+    'all',
+    { validator: oneOf(['all', 'todo', 'in_progress', 'blocked', 'done']) },
+  )
+  const [viewMode, setViewMode] = useUserPreference<'list' | 'board'>(
+    'tasks.viewMode',
+    'list',
+    { validator: oneOf<'list' | 'board'>(['list', 'board']) },
+  )
   const [search, setSearch] = useState('')
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
@@ -323,7 +338,6 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
   const [priorityFilter, setPriorityFilter] = useState('all')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
-  const [viewMode, setViewMode] = useState<'list' | 'board'>('list')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   // Decision #046: always load every task, filter client-side. That way the

@@ -13,6 +13,7 @@ import {
 import { apiPath } from '@/lib/api'
 import { calculatePipelineTotals, formatDealValue, rangeConfidenceLevel } from '@/lib/pipeline-math'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
+import { useUserPreference, oneOf } from '@/lib/use-user-preference'
 import { Pagination, usePagination } from '@/components/tahi/pagination'
 import { stageColour, sourceBadge } from '@/lib/chart-colors'
 import { PageHeader } from '@/components/tahi/page-header'
@@ -176,12 +177,20 @@ interface TeamMemberOption {
 
 export function PipelineContent() {
   const searchParams = useSearchParams()
-  const [view, setView] = useState<ViewMode>('kanban')
+  const [view, setView] = useUserPreference<ViewMode>(
+    'pipeline.viewMode',
+    'kanban',
+    { validator: oneOf<ViewMode>(['kanban', 'list']) },
+  )
   const [search, setSearch] = useState('')
   const [stages, setStages] = useState<PipelineStage[]>([])
   const [deals, setDeals] = useState<Deal[]>([])
   const [loading, setLoading] = useState(true)
-  const [sortKey, setSortKey] = useState<SortKey>('updatedAt')
+  const [sortKey, setSortKey] = useUserPreference<SortKey>(
+    'pipeline.sortKey',
+    'updatedAt',
+    { validator: oneOf<SortKey>(['updatedAt', 'value', 'expectedCloseDate', 'title']) },
+  )
   const [showNewDeal, setShowNewDeal] = useState(false)
   const [initialOrgId, setInitialOrgId] = useState<string | null>(null)
 

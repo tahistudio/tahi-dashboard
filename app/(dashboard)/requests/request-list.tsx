@@ -15,6 +15,7 @@ import { apiPath } from '@/lib/api'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { ViewToggle } from '@/components/tahi/view-toggle'
 import { Input, Select } from '@/components/tahi/input'
+import { useUserPreference, oneOf } from '@/lib/use-user-preference'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -286,16 +287,6 @@ interface BoardColumn {
   label?: string
 }
 
-function getStoredPreference<T>(key: string, fallback: T): T {
-  if (typeof window === 'undefined') return fallback
-  try {
-    const stored = localStorage.getItem(key)
-    return stored ? (stored as T) : fallback
-  } catch {
-    return fallback
-  }
-}
-
 export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
   // Only switch to client view when impersonating a client, not a team member
@@ -305,20 +296,23 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     impersonatedAccessRules.length > 0 &&
     impersonatedAccessRules.every(r => r.role === 'viewer')
   const searchParams = useSearchParams()
-  const [view, setViewRaw] = useState<ViewMode>(() => getStoredPreference<ViewMode>('tahi-request-view', 'list'))
-  const [activeTab, setActiveTab] = useState('active')
+  // Persisted per-user preferences (Decision #047).
+  const [view, setView] = useUserPreference<ViewMode>(
+    'requests.viewMode',
+    'list',
+    { validator: oneOf<ViewMode>(['list', 'board', 'workload']) },
+  )
+  const [sortKey, setSortKey] = useUserPreference<SortKey>(
+    'requests.sortKey',
+    'updatedAt',
+    { validator: oneOf<SortKey>(['updatedAt', 'dueDate', 'priority', 'status']) },
+  )
+  const [activeTab, setActiveTab] = useUserPreference(
+    'requests.activeTab',
+    'active',
+    { validator: oneOf(['active', 'submitted', 'in_progress', 'in_review', 'client_review', 'delivered', 'on_hold', 'cancelled', 'all']) },
+  )
   const [search, setSearch] = useState(() => searchParams.get('q') ?? '')
-  const [sortKey, setSortKeyRaw] = useState<SortKey>(() => getStoredPreference<SortKey>('tahi-request-sort', 'updatedAt'))
-
-  const setView = useCallback((v: ViewMode) => {
-    setViewRaw(v)
-    try { localStorage.setItem('tahi-request-view', v) } catch { /* noop */ }
-  }, [])
-
-  const setSortKey = useCallback((k: SortKey) => {
-    setSortKeyRaw(k)
-    try { localStorage.setItem('tahi-request-sort', k) } catch { /* noop */ }
-  }, [])
   const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')

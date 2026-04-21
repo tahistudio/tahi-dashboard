@@ -13,6 +13,7 @@ import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { formatCurrency } from '@/lib/currency'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { PageHeader } from '@/components/tahi/page-header'
+import { useUserPreference, oneOf } from '@/lib/use-user-preference'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -525,7 +526,11 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
-  const [activeTab, setActiveTab] = useState('all')
+  const [activeTab, setActiveTab] = useUserPreference(
+    'invoices.activeTab',
+    'all',
+    { validator: oneOf(['all', 'draft', 'sent', 'overdue', 'paid', 'written_off']) },
+  )
   const [sourceFilter, setSourceFilter] = useState('all')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [importing, setImporting] = useState(false)
