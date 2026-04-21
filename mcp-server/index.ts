@@ -527,9 +527,9 @@ server.tool(
   'list_tasks',
   'List tasks with optional filters for status, type, and client org',
   {
-    status: z.string().optional().describe('Filter by task status'),
-    type: z.string().optional().describe('Filter by task type: client_external, internal_client, tahi_internal'),
-    orgId: z.string().optional().describe('Filter by client organisation ID'),
+    status: z.string().optional().describe('Filter by task status: todo, in_progress, blocked, done'),
+    type: z.string().optional().describe('Filter by legacy task type (client_task, internal_client_task, tahi_internal). Prefer orgId instead.'),
+    orgId: z.string().optional().describe('Filter by client organisation ID. Omit + omit type to get ALL tasks.'),
   },
   async (args) => {
     const params = new URLSearchParams()
@@ -544,13 +544,13 @@ server.tool(
 
 server.tool(
   'create_task',
-  'Create a new task',
+  'Create a new task. Decision #046: tasks are always Tahi-internal (clients never see them). If `orgId` is set, the task is "for that client"; if omitted, it\'s a Tahi-internal task. The legacy `type` field is optional and auto-derived when omitted.',
   {
     title: z.string().describe('Task title'),
     description: z.string().optional().describe('Task description'),
-    type: z.string().describe('Task type: client_external, internal_client, tahi_internal'),
-    priority: z.string().optional().describe('Priority: low, medium, high, urgent'),
-    orgId: z.string().optional().describe('Client organisation ID'),
+    orgId: z.string().optional().describe('Client organisation ID. Present = task is for that client; absent = Tahi-internal task.'),
+    type: z.string().optional().describe('Legacy type. Optional. Auto-derives from orgId when omitted: orgId set \u2192 client_task; orgId unset \u2192 tahi_internal.'),
+    priority: z.string().optional().describe('Priority: low, standard, high, urgent. Default standard.'),
     assigneeId: z.string().optional().describe('Team member ID to assign'),
     dueDate: z.string().optional().describe('Due date in YYYY-MM-DD format'),
   },
@@ -1335,16 +1335,39 @@ server.tool(
 
 server.tool(
   'ai_task_wizard',
-  'Use AI to help break down work into tasks, estimate effort, and suggest assignments',
+  'Conversational AI wizard that drafts Tahi-internal task(s) from a natural-language description. Multi-turn: call repeatedly with accumulating messages until `done: true`, then create the returned task drafts.',
   {
     messages: z.array(z.object({
       role: z.string().describe('Message role: user or assistant'),
       content: z.string().describe('Message content'),
-    })).describe('Conversation messages for the AI wizard'),
-    context: z.string().optional().describe('Additional context about the client or project'),
+    })).describe('Conversation history. Pass the full array each call.'),
+    context: z.object({
+      orgId: z.string().optional().describe('Client organisation ID (present = tasks are "for a client")'),
+      trackType: z.string().optional().describe('Plan track type: small or large'),
+    }).optional().describe('Optional context about the client or plan.'),
   },
   async (args) => {
     const data = await apiFetch('/api/admin/ai/task-wizard', { method: 'POST', body: args })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'ai_request_wizard',
+  'Conversational AI wizard that drafts client-facing request(s) from a natural-language description. Decision #048. Multi-turn: call repeatedly with accumulating messages until `done: true`, then submit the returned request drafts to create_request. Use this for client work; use ai_task_wizard for internal tasks.',
+  {
+    messages: z.array(z.object({
+      role: z.string().describe('Message role: user or assistant'),
+      content: z.string().describe('Message content'),
+    })).describe('Conversation history. Pass the full array each call.'),
+    context: z.object({
+      orgId: z.string().optional().describe('Client organisation ID the request will be for'),
+      speaker: z.string().optional().describe('"client" (portal user) or "admin" (Tahi team member drafting on behalf)'),
+      planType: z.string().optional().describe('Client plan (maintain, scale, etc.) so the wizard can nudge track sizing'),
+    }).optional().describe('Optional context so drafts suit the client.'),
+  },
+  async (args) => {
+    const data = await apiFetch('/api/admin/ai/request-wizard', { method: 'POST', body: args })
     return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
   }
 )

@@ -7,9 +7,10 @@ import {
   Plus, Search, LayoutList, Columns3, BarChart3,
   AlertTriangle, ChevronDown, Inbox, RefreshCw,
   Calendar, Zap, Clock, ArrowUpDown, Download,
-  CheckSquare, Square, Users, Loader2, X,
+  CheckSquare, Square, Users, Loader2, X, Sparkles,
 } from 'lucide-react'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
+import { AiRequestWizard } from '@/components/tahi/ai-request-wizard'
 import { DateRangePicker, type DateRange } from '@/components/tahi/date-range-picker'
 import { apiPath } from '@/lib/api'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
@@ -321,6 +322,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   const [dialogOpen, setDialogOpen] = useState(() => searchParams.get('new') === '1')
   const defaultClientId = searchParams.get('client') ?? undefined
   const [bulkCreateOpen, setBulkCreateOpen] = useState(false)
+  const [aiWizardOpen, setAiWizardOpen] = useState(false)
 
   // Listen for keyboard shortcut events
   useEffect(() => {
@@ -444,6 +446,13 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         defaultOrgId={defaultClientId}
       />
 
+      <AiRequestWizard
+        open={aiWizardOpen}
+        onClose={() => setAiWizardOpen(false)}
+        onRequestsCreated={() => { setAiWizardOpen(false); fetchRequests() }}
+        context={{ orgId: defaultClientId, speaker: 'admin' }}
+      />
+
       {/* Page header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -492,6 +501,25 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
             >
               <Users className="w-4 h-4" />
               Bulk Create
+            </button>
+          )}
+          {isAdmin && !isViewerImpersonation && (
+            <button
+              onClick={() => setAiWizardOpen(true)}
+              className="hidden sm:flex items-center gap-2 font-medium transition-opacity hover:opacity-80"
+              style={{
+                padding: '0.5rem 0.875rem',
+                fontSize: '0.875rem',
+                background: 'var(--color-brand-50)',
+                border: '1px solid var(--color-brand-100)',
+                borderRadius: '0.5rem',
+                cursor: 'pointer',
+                color: 'var(--color-brand-dark)',
+              }}
+              title="Draft a request with AI"
+            >
+              <Sparkles className="w-4 h-4" />
+              AI draft
             </button>
           )}
           {!isViewerImpersonation && (

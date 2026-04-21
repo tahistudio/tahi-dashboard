@@ -208,9 +208,9 @@ const TOOLS: ToolDef[] = [
   }, ['requestId', 'content']),
 
   // ── Read: Tasks ───────────────────────────────────────────────────────
-  tool('list_tasks', 'List tasks with optional filters', {
-    status: prop('string', 'Filter by task status'),
-    type: prop('string', 'Filter by type: client_external, internal_client, tahi_internal'),
+  tool('list_tasks', 'List tasks with optional filters. Decision #046: tasks are always Tahi-internal. Filter by orgId for client-specific tasks; omit both orgId and type for everything.', {
+    status: prop('string', 'Filter by task status: todo, in_progress, blocked, done'),
+    type: prop('string', 'Filter by legacy type (client_task, internal_client_task, tahi_internal). Prefer orgId.'),
     orgId: prop('string', 'Filter by client organisation ID'),
   }),
   tool('get_task', 'Get full detail for a specific task', {
@@ -222,15 +222,15 @@ const TOOLS: ToolDef[] = [
   tool('list_task_templates', 'List all task templates'),
 
   // ── Write: Tasks ──────────────────────────────────────────────────────
-  tool('create_task', 'Create a new task', {
+  tool('create_task', 'Create a new Tahi-internal task. Decision #046: orgId presence is the source of truth \u2014 set it for tasks "for a client", omit it for Tahi-internal tasks. The legacy `type` field is optional and auto-derived when omitted.', {
     title: prop('string', 'Task title'),
     description: prop('string', 'Task description'),
-    type: prop('string', 'Task type: client_external, internal_client, tahi_internal'),
-    priority: prop('string', 'Priority: low, medium, high, urgent'),
-    orgId: prop('string', 'Client organisation ID'),
+    orgId: prop('string', 'Client organisation ID. Present = task is for that client; absent = Tahi-internal.'),
+    type: prop('string', 'Legacy type. Optional. Auto-derived from orgId when omitted.'),
+    priority: prop('string', 'Priority: low, standard, high, urgent. Default standard.'),
     assigneeId: prop('string', 'Team member ID to assign'),
     dueDate: prop('string', 'Due date in YYYY-MM-DD format'),
-  }, ['title', 'type']),
+  }, ['title']),
   tool('update_task', 'Update an existing task', {
     taskId: prop('string', 'Task ID'),
     status: prop('string', 'New status'),
@@ -518,9 +518,13 @@ const TOOLS: ToolDef[] = [
   tool('get_xero_branding_themes', 'Get available Xero branding themes'),
 
   // ── AI ────────────────────────────────────────────────────────────
-  tool('ai_task_wizard', 'Use AI to break down work into tasks, estimate effort, and suggest assignments', {
-    messages: { type: 'array', items: { type: 'object', properties: { role: { type: 'string' }, content: { type: 'string' } } }, description: 'Conversation messages for the AI wizard' },
-    context: prop('string', 'Additional context about the client or project'),
+  tool('ai_task_wizard', 'Conversational AI wizard that drafts Tahi-internal task(s) from a natural-language description. Multi-turn: call repeatedly until done:true, then create the returned task drafts.', {
+    messages: { type: 'array', items: { type: 'object', properties: { role: { type: 'string' }, content: { type: 'string' } } }, description: 'Conversation history (pass full array each call)' },
+    context: { type: 'object', properties: { orgId: { type: 'string' }, trackType: { type: 'string' } }, description: 'Optional context: orgId (present = for a client), trackType (small/large)' },
+  }, ['messages']),
+  tool('ai_request_wizard', 'Conversational AI wizard that drafts client-facing request(s) from a natural-language description. Decision #048. Use for client work; use ai_task_wizard for internal tasks.', {
+    messages: { type: 'array', items: { type: 'object', properties: { role: { type: 'string' }, content: { type: 'string' } } }, description: 'Conversation history (pass full array each call)' },
+    context: { type: 'object', properties: { orgId: { type: 'string' }, speaker: { type: 'string' }, planType: { type: 'string' } }, description: 'Optional context: orgId the request is for, speaker ("client" or "admin"), planType' },
   }, ['messages']),
 
   // ── Finance reporting (Phase 10) ──────────────────────────────────
@@ -887,6 +891,8 @@ async function executeTool(
     // ── AI ────────────────────────────────────────────────────────────
     case 'ai_task_wizard':
       return json(await apiWrite('/api/admin/ai/task-wizard', token, 'POST', args as Record<string, unknown>))
+    case 'ai_request_wizard':
+      return json(await apiWrite('/api/admin/ai/request-wizard', token, 'POST', args as Record<string, unknown>))
 
     // ── Finance reporting (Phase 10) ──────────────────────────────────
     case 'get_invoice_aging':

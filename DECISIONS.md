@@ -1012,3 +1012,24 @@ const [view, setView] = useUserPreference<'kanban' | 'list'>(
 - Selected IDs for bulk actions (ephemeral).
 
 ---
+
+## #048 - AI Wizard on Requests + MCP Parity Maintained
+
+**Date:** 2026-04-21
+
+**Decision:** Requests get an AI wizard with the same shape as the existing task wizard. Both are reachable via MCP under their respective tool names so AI assistants can draft requests or tasks depending on whether the work is client-facing or internal.
+
+**Request wizard (`POST /api/admin/ai/request-wizard` + `components/tahi/ai-request-wizard.tsx`):**
+- Conversational, multi-turn. Asks 2\u20133 scoping questions then returns one or more request drafts with `title`, `description`, `category`, `type`, `priority`, `estimatedHours`.
+- Claude Haiku 4.5 when `ANTHROPIC_API_KEY` is set. Same deterministic fallback as the task wizard (category keyword detection, type inference, size heuristics) when the key is absent or the API is rate-limited.
+- Category set: `design | development | content | strategy`. Type set: `small_task | large_task | bug_fix | new_feature`. Priority set: `standard | high` (matches the request schema).
+- Wired into the Requests list page as an "AI draft" button next to "Create Request". Admin-only for now; client-portal surface is a Phase 2 follow-up.
+
+**MCP parity (Decision #036):**
+- Added `ai_request_wizard` tool to both MCP servers (stdio at `mcp-server/index.ts`, HTTP worker at `workers/mcp-server/src/index.ts`).
+- Fixed `ai_task_wizard` schema: previously `context` was typed as a string, now correctly an object with `orgId` and `trackType`.
+- Updated `create_task` and `list_tasks` docstrings to reflect Decision #046: `type` is no longer required, auto-derives from `orgId` presence, and the legacy enum is now advisory rather than enforced. Stops AI callers from getting rejected for leaving `type` off a task create.
+
+**Deferred:** Portal-side wizard (clients drafting their own requests through the AI flow). Needs a portal-scoped endpoint with client-safe prompts and no access to admin-only context. Noted in TASKS, not started.
+
+---
