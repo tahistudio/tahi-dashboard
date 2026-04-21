@@ -1,28 +1,36 @@
 'use client'
 
 /**
- * <PeoplePanel> — sidebar block on a request detail page. Shows the people
- * attached to this request broken into three role slots:
+ * <PeoplePanel> — sidebar block on a request detail page. Three role
+ * slots (PM / Assignees / Followers) with optimistic multi-select adds.
  *
- *   PM         single team member, can be reassigned
- *   Assignees  many team members, add multiple in one session
- *   Followers  many contacts from the request's client org + optionally
- *              other team members who want updates
+ * Concurrency story — why we don't call back to the parent for refetch
+ * between mutations:
  *
- * Each slot (except PM) supports multi-select adds: the picker stays open
- * while the user checks off multiple people, then closes on Done. All
- * mutations are optimistic — we mutate local state, fire the server call,
- * roll back on error.
+ *   Early versions called `onChange()` after every POST/DELETE, which
+ *   triggered a full /requests/[id] refetch. That races badly with fast
+ *   clicks: user does add→delete before the add's refetch lands, the
+ *   late refetch restores the deleted row. So we ditched the refetch.
  *
- * The caller owns the participants list and passes an `onChange` callback
- * that's invoked after successful writes (in case the parent wants to
- * reconcile). If `onOptimisticChange` is provided we prefer that for instant
- * UI updates without a refetch.
+ *   Now the parent passes `setParticipants` (React's state dispatcher),
+ *   and this component uses functional updates everywhere:
+ *
+ *     setParticipants(prev => [...prev, optimistic])
+ *
+ *   so each handler always composes on the latest state, regardless of
+ *   how fast the user is clicking. When the server confirms, we swap the
+ *   temp row with the real row via a single map() on prev. No refetch
+ *   needed — the parent's full refetch happens on page load only, and
+ *   we're authoritative from that point forward.
+ *
+ * The MultiPicker is rendered through a <Popover> so it overlays the
+ * page instead of pushing sidebar cards around when it opens.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, X, Loader2, UserCog, Users, Eye, Check } from 'lucide-react'
 import { Card } from '@/components/tahi/card'
+import { Popover } from '@/components/tahi/popover'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 
@@ -44,19 +52,14 @@ interface PeoplePanelProps {
   requestId: string
   orgId: string
   participants: Participant[]
-  /** Called after a successful server mutation — parent can refetch if it
-   *  wants reconciliation, but optimistic state has already been applied. */
-  onChange: () => void
-  /** If provided, we optimistically apply the new participants list here
-   *  instead of waiting for onChange/refetch. */
-  onOptimisticChange?: (next: Participant[]) => void
+  /** React state dispatcher from the parent — we call it with functional
+   *  updaters so optimistic writes always compose on latest state. */
+  setParticipants: React.Dispatch<React.SetStateAction<Participant[]>>
   isAdmin: boolean
-  /** Hide the internal card chrome so the panel can be embedded directly
-   *  in a parent card without a double border. */
+  /** Hide the outer Card chrome so this can be embedded directly. */
   embedded?: boolean
 }
 
-// Tiny avatar cell — reused by each row.
 function Avatar({ name, avatar, size = 24 }: { name: string | null; avatar: string | null; size?: number }) {
   if (avatar) {
     // eslint-disable-next-line @next/next/no-img-element
@@ -118,6 +121,7 @@ function Row({
   removing: boolean
   canRemove: boolean
 }) {
+  const isPending = p.id.startsWith('temp-')
   return (
     <div
       className="flex items-center"
@@ -125,6 +129,8 @@ function Row({
         gap: '0.5rem',
         padding: '0.3125rem 0',
         minHeight: '1.875rem',
+        opacity: isPending ? 0.7 : 1,
+        transition: 'opacity 150ms ease',
       }}
     >
       <Avatar name={p.name} avatar={p.avatar} />
@@ -148,8 +154,9 @@ function Row({
         <button
           type="button"
           onClick={onRemove}
-          disabled={removing}
+          disabled={removing || isPending}
           aria-label={`Remove ${p.name ?? 'participant'}`}
+          title={isPending ? 'Saving…' : 'Remove'}
           style={{
             width: '1.5rem', height: '1.5rem',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -157,11 +164,11 @@ function Row({
             background: 'transparent',
             border: 'none',
             color: 'var(--color-text-subtle)',
-            cursor: removing ? 'not-allowed' : 'pointer',
+            cursor: (removing || isPending) ? 'not-allowed' : 'pointer',
             flexShrink: 0,
           }}
           onMouseEnter={e => {
-            if (!removing) {
+            if (!removing && !isPending) {
               e.currentTarget.style.background = 'var(--color-danger-bg)'
               e.currentTarget.style.color = 'var(--color-danger)'
             }
@@ -178,24 +185,17 @@ function Row({
   )
 }
 
-/**
- * Multi-select picker used by Assignees + Followers. Renders a compact
- * checkbox list inline in the panel — the picker stays open while the
- * user checks multiple people. Each check immediately fires an add
- * (optimistic); uncheck doesn't do anything inside the picker (we don't
- * remove from here — use the row X). Done button just closes.
- */
-function MultiPicker({
+function MultiPickerContent({
   options,
   existingIds,
   placeholder,
   onPick,
   onClose,
 }: {
-  options: Array<{ value: string; label: string; subtitle?: string; avatar?: string | null }>
+  options: Array<{ value: string; label: string; subtitle?: string }>
   existingIds: Set<string>
   placeholder?: string
-  onPick: (value: string) => void | Promise<void>
+  onPick: (value: string) => void
   onClose: () => void
 }) {
   const [query, setQuery] = useState('')
@@ -205,22 +205,13 @@ function MultiPicker({
     return o.label.toLowerCase().includes(q) || (o.subtitle?.toLowerCase().includes(q) ?? false)
   })
   return (
-    <div
-      role="dialog"
-      aria-label="Add people"
-      style={{
-        marginTop: '0.5rem',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-md)',
-        background: 'var(--color-bg)',
-        overflow: 'hidden',
-      }}
-    >
+    <>
       <div
         style={{
           padding: '0.375rem 0.5rem',
           borderBottom: '1px solid var(--color-border-subtle)',
           background: 'var(--color-bg-secondary)',
+          flexShrink: 0,
         }}
       >
         <input
@@ -231,7 +222,7 @@ function MultiPicker({
           autoFocus
           style={{
             width: '100%',
-            padding: '0.25rem 0.5rem',
+            padding: '0.3125rem 0.5rem',
             fontSize: '0.75rem',
             background: 'var(--color-bg)',
             border: '1px solid var(--color-border-subtle)',
@@ -242,20 +233,21 @@ function MultiPicker({
         />
       </div>
 
-      <div role="list" style={{ maxHeight: '13rem', overflowY: 'auto' }}>
+      <div role="list" style={{ overflowY: 'auto', flex: 1 }}>
         {filtered.length === 0 ? (
           <p style={{ padding: '0.75rem', fontSize: '0.75rem', color: 'var(--color-text-subtle)', textAlign: 'center', margin: 0 }}>
             No matches.
           </p>
         ) : (
           filtered.map(opt => {
-            const alreadyAdded = existingIds.has(opt.value.split(':').pop() ?? opt.value)
+            const id = opt.value.includes(':') ? (opt.value.split(':').pop() ?? opt.value) : opt.value
+            const alreadyAdded = existingIds.has(id)
             return (
               <button
                 key={opt.value}
                 type="button"
+                onClick={() => { if (!alreadyAdded) onPick(opt.value) }}
                 disabled={alreadyAdded}
-                onClick={() => void onPick(opt.value)}
                 className="flex items-center w-full transition-colors"
                 style={{
                   gap: '0.5rem',
@@ -265,7 +257,7 @@ function MultiPicker({
                   border: 'none',
                   borderBottom: '1px solid var(--color-border-subtle)',
                   cursor: alreadyAdded ? 'default' : 'pointer',
-                  opacity: alreadyAdded ? 0.5 : 1,
+                  opacity: alreadyAdded ? 0.55 : 1,
                   textAlign: 'left',
                   color: 'var(--color-text)',
                 }}
@@ -307,6 +299,7 @@ function MultiPicker({
           borderTop: '1px solid var(--color-border-subtle)',
           background: 'var(--color-bg-secondary)',
           gap: '0.375rem',
+          flexShrink: 0,
         }}
       >
         <button
@@ -325,7 +318,7 @@ function MultiPicker({
           Done
         </button>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -333,18 +326,22 @@ export function PeoplePanel({
   requestId,
   orgId,
   participants,
-  onChange,
-  onOptimisticChange,
+  setParticipants,
   isAdmin,
   embedded = false,
 }: PeoplePanelProps) {
   const { showToast } = useToast()
   const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([])
   const [contacts, setContacts] = useState<ContactOption[]>([])
-  const [pickingPm, setPickingPm] = useState(false)
-  const [pickingAssignee, setPickingAssignee] = useState(false)
-  const [pickingFollower, setPickingFollower] = useState(false)
   const [removingId, setRemovingId] = useState<string | null>(null)
+
+  // Each slot has its own trigger + popover open state.
+  const [pmOpen, setPmOpen] = useState(false)
+  const [assigneeOpen, setAssigneeOpen] = useState(false)
+  const [followerOpen, setFollowerOpen] = useState(false)
+  const pmTrigger = useRef<HTMLButtonElement>(null)
+  const assigneeTrigger = useRef<HTMLButtonElement>(null)
+  const followerTrigger = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     if (!isAdmin) return
@@ -369,7 +366,8 @@ export function PeoplePanel({
   const assigneeIds = useMemo(() => new Set(assignees.map(p => p.participantId)), [assignees])
   const followerIds = useMemo(() => new Set(followers.map(p => p.participantId)), [followers])
 
-  // Optimistic apply helper — inserts a temp row until the server confirms.
+  // --- server actions, always functional state updates --------------------
+
   const applyAdd = useCallback(async (
     role: 'pm' | 'assignee' | 'follower',
     participantId: string,
@@ -377,7 +375,7 @@ export function PeoplePanel({
     displayName: string | null,
     email: string | null,
   ) => {
-    const tempId = `temp-${participantId}-${role}`
+    const tempId = `temp-${role}-${participantId}-${Date.now()}`
     const optimistic: Participant = {
       id: tempId,
       participantId,
@@ -388,11 +386,19 @@ export function PeoplePanel({
       email,
       addedAt: new Date().toISOString(),
     }
-    // For PM role, remove any existing PM first in local state.
-    const next = role === 'pm'
-      ? [...participants.filter(p => p.role !== 'pm'), optimistic]
-      : [...participants, optimistic]
-    onOptimisticChange?.(next)
+
+    // Optimistic insert — functional update so we compose on latest state
+    // even when the user is clicking faster than the server can respond.
+    setParticipants(prev => {
+      // Short-circuit if that person is already in this role (fast double-clicks).
+      if (prev.some(p => p.participantId === participantId && p.role === role && !p.id.startsWith('temp-'))) {
+        return prev
+      }
+      if (role === 'pm') {
+        return [...prev.filter(p => p.role !== 'pm'), optimistic]
+      }
+      return [...prev, optimistic]
+    })
 
     try {
       const res = await fetch(apiPath(`/api/admin/requests/${requestId}/participants`), {
@@ -401,45 +407,64 @@ export function PeoplePanel({
         body: JSON.stringify({ participantId, participantType, role }),
       })
       if (!res.ok) {
-        // Roll back
-        onOptimisticChange?.(participants)
+        setParticipants(prev => prev.filter(p => p.id !== tempId))
         const j = await res.json().catch(() => ({})) as { error?: string }
         showToast(j.error ?? 'Failed to add person')
         return
       }
-      // Server returns the real row — let caller refetch to swap the temp id.
-      onChange()
+      const data = await res.json() as {
+        participant: {
+          id: string
+          participantId: string
+          participantType: 'team_member' | 'contact'
+          role: 'pm' | 'assignee' | 'follower'
+          addedAt: string
+        }
+      }
+      // Swap temp row with the real row id, keep the display name we already
+      // resolved so no flicker.
+      setParticipants(prev => prev.map(p =>
+        p.id === tempId
+          ? { ...p, id: data.participant.id, addedAt: data.participant.addedAt }
+          : p,
+      ))
     } catch {
-      onOptimisticChange?.(participants)
+      setParticipants(prev => prev.filter(p => p.id !== tempId))
       showToast('Network error — try again')
     }
-  }, [requestId, participants, onOptimisticChange, onChange, showToast])
+  }, [requestId, setParticipants, showToast])
 
   const applyRemove = useCallback(async (rowId: string) => {
+    if (rowId.startsWith('temp-')) return // still saving, ignore
+    // Optimistic: take it out of the list immediately.
+    let snapshotRow: Participant | null = null
     setRemovingId(rowId)
-    const next = participants.filter(p => p.id !== rowId)
-    onOptimisticChange?.(next)
+    setParticipants(prev => {
+      snapshotRow = prev.find(p => p.id === rowId) ?? null
+      return prev.filter(p => p.id !== rowId)
+    })
     try {
       const res = await fetch(apiPath(`/api/admin/requests/${requestId}/participants/${rowId}`), {
         method: 'DELETE',
       })
       if (!res.ok) {
-        onOptimisticChange?.(participants)
+        // Roll back — put the row back where it was.
+        if (snapshotRow) setParticipants(prev => [...prev, snapshotRow!])
         showToast('Failed to remove')
-        return
       }
-      onChange()
     } catch {
-      onOptimisticChange?.(participants)
+      if (snapshotRow) setParticipants(prev => [...prev, snapshotRow!])
       showToast('Network error — try again')
     } finally {
       setRemovingId(null)
     }
-  }, [requestId, participants, onOptimisticChange, onChange, showToast])
+  }, [requestId, setParticipants, showToast])
+
+  // --- render -------------------------------------------------------------
 
   const body = (
     <div style={{ padding: embedded ? 0 : '0.875rem 1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      {/* PM slot */}
+      {/* PM */}
       <section aria-label="Project manager">
         <RoleHeader icon={<UserCog size={12} />} label="Project manager" count={pm ? 1 : 0} />
         {pm ? (
@@ -449,23 +474,34 @@ export function PeoplePanel({
             removing={removingId === pm.id}
             canRemove={isAdmin}
           />
-        ) : pickingPm ? (
-          <MultiPicker
+        ) : isAdmin ? (
+          <AddButton
+            ref={pmTrigger}
+            label="Set PM"
+            onClick={() => setPmOpen(v => !v)}
+          />
+        ) : (
+          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No PM assigned.</p>
+        )}
+
+        <Popover
+          anchorRef={pmTrigger}
+          open={pmOpen}
+          onClose={() => setPmOpen(false)}
+          width="15rem"
+        >
+          <MultiPickerContent
             options={teamMembers.map(tm => ({ value: tm.id, label: tm.name }))}
-            existingIds={new Set<string>()}
+            existingIds={new Set()}
             placeholder="Pick a PM…"
             onPick={v => {
               const tm = teamMembers.find(m => m.id === v)
               void applyAdd('pm', v, 'team_member', tm?.name ?? null, null)
-              setPickingPm(false)
+              setPmOpen(false)
             }}
-            onClose={() => setPickingPm(false)}
+            onClose={() => setPmOpen(false)}
           />
-        ) : isAdmin ? (
-          <AddButton label="Set PM" onClick={() => setPickingPm(true)} />
-        ) : (
-          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No PM assigned.</p>
-        )}
+        </Popover>
       </section>
 
       {/* Assignees */}
@@ -484,29 +520,36 @@ export function PeoplePanel({
             ))}
           </div>
         )}
-        {pickingAssignee ? (
-          <MultiPicker
+        {isAdmin ? (
+          <AddButton
+            ref={assigneeTrigger}
+            label={assignees.length === 0 ? 'Add assignees' : 'Add more'}
+            onClick={() => setAssigneeOpen(v => !v)}
+            style={{ marginTop: assignees.length > 0 ? '0.375rem' : 0 }}
+          />
+        ) : assignees.length === 0 ? (
+          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No assignees yet.</p>
+        ) : null}
+
+        <Popover
+          anchorRef={assigneeTrigger}
+          open={assigneeOpen}
+          onClose={() => setAssigneeOpen(false)}
+          width="15rem"
+        >
+          <MultiPickerContent
             options={teamMembers
               .filter(tm => tm.id !== pm?.participantId)
               .map(tm => ({ value: tm.id, label: tm.name }))}
             existingIds={assigneeIds}
             placeholder="Search team…"
             onPick={v => {
-              if (assigneeIds.has(v)) return
               const tm = teamMembers.find(m => m.id === v)
               void applyAdd('assignee', v, 'team_member', tm?.name ?? null, null)
             }}
-            onClose={() => setPickingAssignee(false)}
+            onClose={() => setAssigneeOpen(false)}
           />
-        ) : isAdmin ? (
-          <AddButton
-            label={assignees.length === 0 ? 'Add assignees' : 'Add more'}
-            onClick={() => setPickingAssignee(true)}
-            style={{ marginTop: assignees.length > 0 ? '0.375rem' : 0 }}
-          />
-        ) : assignees.length === 0 ? (
-          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No assignees yet.</p>
-        ) : null}
+        </Popover>
       </section>
 
       {/* Followers */}
@@ -525,19 +568,32 @@ export function PeoplePanel({
             ))}
           </div>
         )}
-        {pickingFollower ? (
-          <MultiPicker
+        {isAdmin ? (
+          <AddButton
+            ref={followerTrigger}
+            label={followers.length === 0 ? 'Add followers' : 'Add more'}
+            onClick={() => setFollowerOpen(v => !v)}
+            style={{ marginTop: followers.length > 0 ? '0.375rem' : 0 }}
+          />
+        ) : followers.length === 0 ? (
+          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No followers yet.</p>
+        ) : null}
+
+        <Popover
+          anchorRef={followerTrigger}
+          open={followerOpen}
+          onClose={() => setFollowerOpen(false)}
+          width="16rem"
+        >
+          <MultiPickerContent
             options={[
-              ...contacts
-                .map(c => ({ value: `contact:${c.id}`, label: c.name, subtitle: c.email ?? undefined })),
-              ...teamMembers
-                .map(tm => ({ value: `team:${tm.id}`, label: tm.name, subtitle: 'Tahi team' })),
+              ...contacts.map(c => ({ value: `contact:${c.id}`, label: c.name, subtitle: c.email ?? undefined })),
+              ...teamMembers.map(tm => ({ value: `team:${tm.id}`, label: tm.name, subtitle: 'Tahi team' })),
             ]}
             existingIds={followerIds}
             placeholder="Search people…"
             onPick={v => {
               const [type, id] = v.split(':')
-              if (followerIds.has(id)) return
               if (type === 'contact') {
                 const c = contacts.find(x => x.id === id)
                 void applyAdd('follower', id, 'contact', c?.name ?? null, c?.email ?? null)
@@ -546,17 +602,9 @@ export function PeoplePanel({
                 void applyAdd('follower', id, 'team_member', tm?.name ?? null, null)
               }
             }}
-            onClose={() => setPickingFollower(false)}
+            onClose={() => setFollowerOpen(false)}
           />
-        ) : isAdmin ? (
-          <AddButton
-            label={followers.length === 0 ? 'Add followers' : 'Add more'}
-            onClick={() => setPickingFollower(true)}
-            style={{ marginTop: followers.length > 0 ? '0.375rem' : 0 }}
-          />
-        ) : followers.length === 0 ? (
-          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No followers yet.</p>
-        ) : null}
+        </Popover>
       </section>
     </div>
   )
@@ -583,19 +631,17 @@ export function PeoplePanel({
   )
 }
 
-function AddButton({
-  label,
-  onClick,
-  disabled,
-  style,
-}: {
+/** Small dashed "+ Label" button used as the trigger for each slot's
+ *  Popover. forwardRef so the Popover can measure it. */
+const AddButton = React.forwardRef<HTMLButtonElement, {
   label: string
   onClick: () => void
   disabled?: boolean
   style?: React.CSSProperties
-}) {
+}>(function AddButton({ label, onClick, disabled, style }, ref) {
   return (
     <button
+      ref={ref}
       type="button"
       onClick={onClick}
       disabled={disabled}
@@ -628,4 +674,4 @@ function AddButton({
       {label}
     </button>
   )
-}
+})

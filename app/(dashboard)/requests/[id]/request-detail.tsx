@@ -599,18 +599,24 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             )}
           </div>
 
-          {/* Title */}
-          <h1
-            className="font-bold tracking-tight"
-            style={{
-              color: 'var(--color-text)',
-              margin: 0,
-              fontSize: '1.5rem',
-              lineHeight: 1.25,
-            }}
-          >
-            {request.title}
-          </h1>
+          {/* Title row — title on the left, compact people stack on the
+              right so the header is balanced and you can tell at a glance
+              who's on this request. */}
+          <div className="flex items-start" style={{ gap: '1rem' }}>
+            <h1
+              className="font-bold tracking-tight flex-1"
+              style={{
+                color: 'var(--color-text)',
+                margin: 0,
+                fontSize: '1.5rem',
+                lineHeight: 1.25,
+                minWidth: 0,
+              }}
+            >
+              {request.title}
+            </h1>
+            <PeopleStack participants={participants} />
+          </div>
 
           {/* Client + created */}
           <div
@@ -992,8 +998,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             requestId={requestId}
             orgId={request.orgId}
             participants={participants}
-            onChange={loadRequest}
-            onOptimisticChange={setParticipants}
+            setParticipants={setParticipants}
             isAdmin={isAdmin}
           />
 
@@ -1378,6 +1383,110 @@ function formatActivityDate(iso: string) {
   } catch {
     return iso
   }
+}
+
+// ---- People Stack (header) ---------------------------------------------------
+
+/**
+ * Compact overlapping avatar stack shown in the request detail header.
+ * PM first, then assignees, then followers if we still have room. Extra
+ * people collapse into a "+N" chip. Purely visual — the full list of
+ * people is managed in the sidebar People panel.
+ */
+function PeopleStack({ participants }: { participants: Participant[] }) {
+  const pm = participants.find(p => p.role === 'pm') ?? null
+  const assignees = participants.filter(p => p.role === 'assignee')
+  const followers = participants.filter(p => p.role === 'follower')
+
+  // Visual order: PM on the left, then assignees, then followers.
+  const ordered: Array<{ p: Participant; accent: 'pm' | 'normal' }> = []
+  if (pm) ordered.push({ p: pm, accent: 'pm' })
+  for (const a of assignees) ordered.push({ p: a, accent: 'normal' })
+  for (const f of followers) ordered.push({ p: f, accent: 'normal' })
+
+  if (ordered.length === 0) {
+    return (
+      <span
+        className="flex items-center flex-shrink-0"
+        style={{
+          fontSize: '0.6875rem',
+          color: 'var(--color-text-subtle)',
+          gap: '0.25rem',
+          padding: '0.125rem 0.5rem',
+          background: 'var(--color-bg-secondary)',
+          border: '1px dashed var(--color-border)',
+          borderRadius: '9999px',
+        }}
+        title="No people assigned yet"
+      >
+        <User size={11} aria-hidden="true" />
+        Unassigned
+      </span>
+    )
+  }
+
+  const VISIBLE = 4
+  const visible = ordered.slice(0, VISIBLE)
+  const overflow = ordered.length - visible.length
+
+  return (
+    <div
+      className="flex items-center flex-shrink-0"
+      style={{ marginLeft: 'auto' }}
+      aria-label={`${ordered.length} ${ordered.length === 1 ? 'person' : 'people'}`}
+    >
+      <div
+        className="flex items-center"
+        style={{ paddingRight: overflow > 0 ? '0.25rem' : 0 }}
+      >
+        {visible.map(({ p, accent }, i) => (
+          <span
+            key={p.id}
+            title={`${p.name ?? 'Unknown'}${p.role === 'pm' ? ' — PM' : p.role === 'assignee' ? ' — Assignee' : ' — Follower'}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '1.75rem',
+              height: '1.75rem',
+              borderRadius: '9999px',
+              background: accent === 'pm' ? 'var(--color-brand-100)' : 'var(--color-bg-tertiary)',
+              color: accent === 'pm' ? 'var(--color-brand-dark)' : 'var(--color-text)',
+              fontSize: '0.625rem',
+              fontWeight: 600,
+              border: `2px solid var(--color-bg)`,
+              marginLeft: i === 0 ? 0 : '-0.4375rem',
+              position: 'relative',
+              zIndex: visible.length - i,
+              boxShadow: accent === 'pm' ? '0 0 0 1px var(--color-brand)' : undefined,
+            }}
+          >
+            {(p.name ?? '?')
+              .split(' ')
+              .map(s => s[0])
+              .slice(0, 2)
+              .join('')
+              .toUpperCase()}
+          </span>
+        ))}
+      </div>
+      {overflow > 0 && (
+        <span
+          style={{
+            fontSize: '0.6875rem',
+            fontWeight: 600,
+            color: 'var(--color-text-muted)',
+            padding: '0.125rem 0.4375rem',
+            background: 'var(--color-bg-tertiary)',
+            borderRadius: '9999px',
+          }}
+          title={`${overflow} more`}
+        >
+          +{overflow}
+        </span>
+      )}
+    </div>
+  )
 }
 
 // ---- Sidebar Card ------------------------------------------------------------
