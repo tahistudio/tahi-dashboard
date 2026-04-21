@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq } from 'drizzle-orm'
-import { stopAndLogTimer } from '../route'
+import { stopAndLogTimer } from '@/lib/timer-helpers'
 
 type Params = { params: Promise<{ id: string }> }
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>

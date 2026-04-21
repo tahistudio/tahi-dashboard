@@ -20,7 +20,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
-import { elapsedSeconds, secondsToHours } from '@/lib/timer-helpers'
+import { elapsedSeconds, secondsToHours, stopAndLogTimer } from '@/lib/timer-helpers'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -152,56 +152,4 @@ export async function POST(req: NextRequest) {
   })
 
   return NextResponse.json({ id: newId, startedAt: now }, { status: 201 })
-}
-
-/**
- * Shared helper : stop an active timer and create a timeEntry row.
- * Used by POST (when switching timers) and by DELETE ?action=log.
- */
-export async function stopAndLogTimer(
-  drizzle: Drizzle,
-  timer: typeof schema.activeTimers.$inferSelect,
-  userId: string,
-  orgIdHint: string | null,
-) {
-  const seconds = elapsedSeconds(timer)
-  const hours = secondsToHours(seconds)
-
-  // Derive orgId for the timeEntry. If target is a task without an org,
-  // we can't create a per-org time entry — skip logging in that case.
-  let orgId = orgIdHint
-  if (!orgId && timer.requestId) {
-    const [r] = await drizzle
-      .select({ orgId: schema.requests.orgId })
-      .from(schema.requests)
-      .where(eq(schema.requests.id, timer.requestId))
-      .limit(1)
-    orgId = r?.orgId ?? null
-  }
-
-  const startedAt = timer.startedAt
-  const endedAt = new Date().toISOString()
-  const date = startedAt.slice(0, 10) // YYYY-MM-DD
-
-  if (orgId && hours > 0) {
-    await drizzle.insert(schema.timeEntries).values({
-      id: crypto.randomUUID(),
-      orgId,
-      requestId: timer.requestId ?? null,
-      taskId: timer.taskId ?? null,
-      teamMemberId: userId,
-      hours,
-      billable: true,
-      notes: timer.notes ?? null,
-      date,
-      startedAt,
-      endedAt,
-      source: 'live_timer',
-    })
-  }
-
-  // Delete the active timer row regardless.
-  await drizzle.delete(schema.activeTimers).where(eq(schema.activeTimers.id, timer.id))
-
-  return { hours, startedAt, endedAt }
 }

@@ -18,6 +18,7 @@ import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { useToast } from '@/components/tahi/toast'
 import { Card } from '@/components/tahi/card'
+import { SubRequestsPanel, type SubRequestRow } from '@/components/tahi/sub-requests-panel'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -70,9 +71,20 @@ interface Request {
   tags: string
   requestNumber: number | null
   checklists: string
+  // V3 additions
+  size: 'small' | 'large' | null
+  parentRequestId: string | null
+  subPosition: number | null
+  scopeFlagReason: string | null
   createdAt: string
   updatedAt: string
   deliveredAt: string | null
+}
+
+interface ParentRequestRef {
+  id: string
+  title: string
+  requestNumber: number | null
 }
 
 interface Message {
@@ -126,6 +138,8 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
   const [request, setRequest] = useState<Request | null>(null)
+  const [subRequests, setSubRequests] = useState<SubRequestRow[]>([])
+  const [parentRequest, setParentRequest] = useState<ParentRequestRef | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [files, setFiles] = useState<RequestFile[]>([])
   const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([])
@@ -188,8 +202,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         ),
       ])
       if (reqRes.ok) {
-        const data = await reqRes.json() as { request: Request }
+        const data = await reqRes.json() as {
+          request: Request
+          subRequests?: SubRequestRow[]
+          parent?: ParentRequestRef | null
+        }
         setRequest(data.request)
+        setSubRequests(data.subRequests ?? [])
+        setParentRequest(data.parent ?? null)
         try {
           setChecklists(JSON.parse(data.request.checklists || '[]') as Checklist[])
         } catch {
@@ -429,10 +449,16 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
   return (
     <div className="flex flex-col" style={{ gap: '1.5rem', maxWidth: '68.75rem' }}>
-      {/* Breadcrumb */}
+      {/* Breadcrumb — includes parent when this request is a sub-request */}
       <Breadcrumb
         items={[
           { label: 'Requests', href: '/requests' },
+          ...(parentRequest ? [{
+            label: parentRequest.requestNumber != null
+              ? `#${String(parentRequest.requestNumber).padStart(3, '0')} ${parentRequest.title}`
+              : parentRequest.title,
+            href: `/requests/${parentRequest.id}`,
+          }] : []),
           { label: request.requestNumber != null
             ? `#${String(request.requestNumber).padStart(3, '0')} ${request.title}`
             : request.title
@@ -643,6 +669,19 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 dangerouslySetInnerHTML={{ __html: request.description }}
               />
             </div>
+          )}
+
+          {/* Sub-requests — shows when this request IS a parent, or when admin
+              wants to start breaking work down. Only render for top-level
+              requests (children can't have grandchildren in V1). */}
+          {!request.parentRequestId && (
+            <SubRequestsPanel
+              parentRequestId={request.id}
+              subRequests={subRequests}
+              alwaysShow={isAdmin}
+              canCreate={isAdmin}
+              onCreated={loadRequest}
+            />
           )}
 
           {/* Thread */}
