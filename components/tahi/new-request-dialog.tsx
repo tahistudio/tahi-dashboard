@@ -560,36 +560,12 @@ export function NewRequestDialog({
               )}
             </div>
 
-            {/* Internal toggle (admin only) */}
-            {isAdmin && (
-              <div
-                className="flex items-center justify-between"
-                style={{
-                  padding: '0.75rem 1rem',
-                  borderRadius: 'var(--radius-card)',
-                  border: '1px solid var(--color-border-subtle)',
-                  background: isInternal ? 'var(--color-bg-tertiary)' : 'var(--color-bg)',
-                }}
-              >
-                <div>
-                  <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>Internal only</p>
-                  <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Hidden from client portal</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsInternal(!isInternal)}
-                  className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
-                  style={{ background: isInternal ? 'var(--color-brand)' : 'var(--color-border)' }}
-                  role="switch"
-                  aria-checked={isInternal}
-                >
-                  <span
-                    className="inline-block h-4 w-4 rounded-full bg-white transition-transform"
-                    style={{ transform: isInternal ? 'translateX(1.375rem)' : 'translateX(0.25rem)' }}
-                  />
-                </button>
-              </div>
-            )}
+            {/* "Internal only" toggle removed — per-message visibility is now
+                handled by the Public/Internal segmented control in the
+                <MessageComposer>. Creating a request is always a client-facing
+                action; admins can still post internal notes within the
+                thread. The isInternal state is kept on the form for backend
+                compat but defaults to false. */}
 
             {/* Dates + hours (admin only) */}
             {isAdmin && (
