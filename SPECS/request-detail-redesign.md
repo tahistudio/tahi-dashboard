@@ -215,16 +215,40 @@ activeTimers: {
 
 **UX:**
 
-1. **Global top-nav indicator** — when a timer is active, a compact chip appears in the top nav:
+1. **Global top-nav timer** — always present in the top-right, two states :
+
+   **Idle (no active timer)** : a small play icon button `[ ▶ ]`
+   - Click → opens a compact searchable picker :
+     ```
+     ┌───────────────────────────────────┐
+     │ 🔍 Search requests or tasks…     │
+     ├───────────────────────────────────┤
+     │ RECENT                             │
+     │ #023 Acme website hero refresh    │
+     │ #021 Stride brand refresh          │
+     │ [task] Fix dark-mode token bug    │
+     │ ─────                              │
+     │ PINNED                             │
+     │ #018 Glasswall ongoing retainer   │
+     └───────────────────────────────────┘
+     ```
+   - Keyboard : `⌘T` opens the picker, arrow keys navigate, Enter starts the timer, Esc closes.
+   - Picks default : top 5 most-recently-opened requests/tasks for this user + anything starred.
+   - Pick result → timer starts on that item, the top-right button switches to the active state below.
+
+   **Active (timer running)** : the play icon becomes a compact chip with a pause button + live ticking clock :
    ```
-   [⏱ 01:23:45 · Acme website ▾]
+   [⏸ 01:23:45]   ← click the pause icon to pause
+       ↑ clicking the time (or the chip body) opens a dropdown :
    ```
-   Click the chip → dropdown with:
-   - "Go to request" → navigates to the tracked request
-   - "Pause" → pauses timer (keeps it active but frozen — useful for breaks)
-   - "Stop + log" → stops timer, opens a confirm modal prefilling hours, adds optional billable toggle + note, creates a `timeEntry` row, clears the `activeTimers` row
-   - "Discard" → stops timer without logging (confirm first)
-   - On mobile the chip compresses to just the icon + time
+   - Dropdown on chip click :
+     - "Go to Acme website" → navigates to the tracked request / task
+     - "Pause" (or "Resume" if currently paused)
+     - "Stop + log" → stops timer, opens a confirm modal prefilling hours, billable toggle + optional note, creates a `timeEntry` row, clears `activeTimers`
+     - "Switch to a different item" → reopens the picker above (with confirm : "Stop and switch to [new item]?")
+     - "Discard" → confirm, then clear without logging
+
+   On mobile the chip compresses to just `[⏸ 01:23]` — tap expands the dropdown as a bottom sheet.
 
 2. **Per-request Time section** (sidebar) — three states:
    - **Idle** (no timer on any request): button "▶ Track time on this request"
