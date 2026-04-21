@@ -37,6 +37,7 @@ import {
   type ExchangeRate,
   type RateMap,
   SUPPORTED_CURRENCIES,
+  DISPLAY_CURRENCIES,
 } from '@/lib/currency'
 import { apiPath } from '@/lib/api'
 
@@ -62,8 +63,13 @@ interface DisplayCurrencyContextValue {
   formatNative: (amount: number, currency: string) => string
   /** Native amount as primary, display-currency equivalent as ` (\u2248 $X)` suffix when different. */
   formatNativeWithDisplay: (amount: number, currency: string) => string
-  /** All supported currency options, for dropdowns. */
-  options: typeof SUPPORTED_CURRENCIES
+  /** Currency options surfaced in the switcher. Narrower than
+   *  SUPPORTED_CURRENCIES \u2014 only the 5 we actually use day-to-day. */
+  options: typeof DISPLAY_CURRENCIES
+  /** Full list of currencies the system understands, including ones that
+   *  don't appear in the nav switcher (CAD, SGD, HKD, JPY, CHF). Useful
+   *  for forms that need to record what a client is billed in. */
+  allCurrencies: typeof SUPPORTED_CURRENCIES
 }
 
 const DisplayCurrencyContext = createContext<DisplayCurrencyContextValue | null>(null)
@@ -185,7 +191,8 @@ export function DisplayCurrencyProvider({ children, initial }: ProviderProps) {
     format,
     formatNative,
     formatNativeWithDisplay,
-    options: SUPPORTED_CURRENCIES,
+    options: DISPLAY_CURRENCIES,
+    allCurrencies: SUPPORTED_CURRENCIES,
   }), [displayCurrency, setDisplayCurrency, ratesLoaded, exchangeRates, rateMap, toDisplay, format, formatNative, formatNativeWithDisplay])
 
   return <DisplayCurrencyContext.Provider value={value}>{children}</DisplayCurrencyContext.Provider>
@@ -212,6 +219,7 @@ export function useDisplayCurrency(): DisplayCurrencyContextValue {
     format: (n) => formatCurrencyBase(n, DEFAULT_CURRENCY),
     formatNative: (n, c) => formatCurrencyBase(n, c),
     formatNativeWithDisplay: (n, c) => formatCurrencyBase(n, c),
-    options: SUPPORTED_CURRENCIES,
+    options: DISPLAY_CURRENCIES,
+    allCurrencies: SUPPORTED_CURRENCIES,
   }
 }

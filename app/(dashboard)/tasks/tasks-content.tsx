@@ -98,17 +98,29 @@ const TASK_STATUS_CONFIG: Record<string, { label: string; dot: string; bg: strin
   done:        { label: 'Done',        dot: 'var(--status-delivered-dot)',    bg: 'var(--status-delivered-bg)',    text: 'var(--status-delivered-text)',    border: 'var(--status-delivered-border)'    },
 }
 
+// Decision #046 (2026-04-21): tasks are always Tahi-internal. Clients
+// never see them. The only distinction is whether a task is for a client
+// (orgId present) or for us (orgId null). We keep the legacy `type` column
+// in the DB populated for backward compat but never show the distinction
+// in the UI.
 const TASK_TYPE_LABELS: Record<string, string> = {
-  client_task: 'Client Tasks',
-  internal_client_task: 'Internal Client',
-  tahi_internal: 'Tahi Internal',
+  client_task: 'For a client',
+  internal_client_task: 'For a client',
+  tahi_internal: 'For us',
+}
+
+/** UI helper: is this task "for a client" or "for us"? */
+export function taskBucket(task: { orgId: string | null; type?: string }): 'for_client' | 'for_us' {
+  // orgId presence is the source of truth; legacy `type` is a fallback.
+  if (task.orgId) return 'for_client'
+  if (task.type === 'tahi_internal') return 'for_us'
+  return 'for_us'
 }
 
 const TYPE_TABS = [
-  { label: 'All Tasks',        value: 'all',                    icon: Briefcase },
-  { label: 'Client Tasks',     value: 'client_task',            icon: Users },
-  { label: 'Internal Client',  value: 'internal_client_task',   icon: Building2 },
-  { label: 'Tahi Internal',    value: 'tahi_internal',          icon: Shield },
+  { label: 'All tasks',    value: 'all',        icon: Briefcase },
+  { label: 'For us',       value: 'for_us',     icon: Shield },
+  { label: 'For a client', value: 'for_client', icon: Users },
 ]
 
 const STATUS_TABS = [
@@ -117,12 +129,6 @@ const STATUS_TABS = [
   { label: 'In Progress', value: 'in_progress' },
   { label: 'Blocked',     value: 'blocked'     },
   { label: 'Done',        value: 'done'        },
-]
-
-const TASK_TYPES = [
-  { value: 'client_task',          label: 'Client Task',          desc: 'Visible to the client' },
-  { value: 'internal_client_task', label: 'Internal Client Task', desc: 'Hidden from client' },
-  { value: 'tahi_internal',        label: 'Tahi Internal',        desc: 'Studio-only task' },
 ]
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -147,6 +153,12 @@ function getDueDateState(dueDate: string | null, status: string): 'overdue' | 'd
 
 function formatType(type: string): string {
   return TASK_TYPE_LABELS[type] ?? type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function formatBucket(task: { orgId: string | null; orgName?: string | null; type?: string }): string {
+  return taskBucket(task) === 'for_client'
+    ? (task.orgName ? `For ${task.orgName}` : 'For a client')
+    : 'For us'
 }
 
 function getInitials(name: string): string {
@@ -314,12 +326,14 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
   const [viewMode, setViewMode] = useState<'list' | 'board'>('list')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
+  // Decision #046: always load every task, filter client-side. That way the
+  // tab count next to "For us" or "For a client" always reflects the true
+  // total regardless of which tab is currently selected.
   const fetchTasks = useCallback(async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
       if (statusTab !== 'all') params.set('status', statusTab)
-      if (typeTab !== 'all') params.set('type', typeTab)
       const endpoint = apiPath('/api/admin/tasks')
       const res = await fetch(`${endpoint}?${params}`)
       if (!res.ok) throw new Error('Failed to fetch')
@@ -330,7 +344,7 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
     } finally {
       setLoading(false)
     }
-  }, [statusTab, typeTab])
+  }, [statusTab])
 
   // Load team members for assignee display
   useEffect(() => {
@@ -358,6 +372,7 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
   const teamMap = new Map(teamMembers.map(m => [m.id, m]))
 
   const filtered = tasks.filter(t => {
+    if (typeTab !== 'all' && taskBucket(t) !== typeTab) return false
     if (search.trim()) {
       const q = search.toLowerCase()
       if (!t.title.toLowerCase().includes(q) && !(t.orgName ?? '').toLowerCase().includes(q)) return false
@@ -370,10 +385,12 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
     return true
   })
 
-  // Type tab counts
-  const typeCounts: Record<string, number> = { all: tasks.length }
+  // Tab counts \u2014 always computed from the full task list, NOT the active
+  // tab's filtered view. This way "For a client" shows its true count even
+  // when you're currently viewing "For us".
+  const typeCounts: Record<string, number> = { all: tasks.length, for_us: 0, for_client: 0 }
   for (const t of tasks) {
-    typeCounts[t.type] = (typeCounts[t.type] ?? 0) + 1
+    typeCounts[taskBucket(t)]++
   }
 
   const toggleSelectAll = useCallback(() => {
@@ -1880,7 +1897,8 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
 
   // Form fields
   const [title, setTitle] = useState('')
-  const [type, setType] = useState('client_task')
+  // Decision #046: "for a client" or "for us". The old 3-way picker is gone.
+  const [isForClient, setIsForClient] = useState(false)
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState('standard')
   const [dueDate, setDueDate] = useState('')
@@ -1900,7 +1918,7 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
   const [templates, setTemplates] = useState<TaskTemplate[]>([])
   const [, setTemplatesLoading] = useState(false)
 
-  const showClientPicker = type === 'client_task' || type === 'internal_client_task'
+  const showClientPicker = isForClient
 
   // Load clients, team, and templates on open
   useEffect(() => {
@@ -1935,7 +1953,9 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
     if (!tpl) return
     if (tpl.description) setDescription(tpl.description)
     if (tpl.defaultPriority) setPriority(tpl.defaultPriority)
-    if (tpl.type) setType(tpl.type)
+    // Legacy templates may have type = client_task / internal_client_task / tahi_internal.
+    // Map to the new binary: anything non-tahi_internal is "for a client".
+    if (tpl.type) setIsForClient(tpl.type !== 'tahi_internal')
     try {
       const subs = JSON.parse(tpl.subtasks || '[]') as string[]
       if (Array.isArray(subs) && subs.length > 0) setSubtaskTitles(subs)
@@ -1968,8 +1988,11 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: title.trim(),
-          type,
-          orgId: showClientPicker ? clientOrgId : null,
+          // Auto-derive legacy type from orgId presence (Decision #046).
+          // API will also do this server-side so MCP callers get the same
+          // treatment when they don't pass `type`.
+          type: isForClient ? 'client_task' : 'tahi_internal',
+          orgId: isForClient ? clientOrgId : null,
           description: description || null,
           priority,
           assigneeId: assigneeId || null,
@@ -2102,26 +2125,30 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
               </FieldGroup>
             )}
 
-            {/* Task type selector */}
-            <FieldGroup label="Task type" required>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
-                {TASK_TYPES.map(t => {
-                  const active = type === t.value
+            {/* Who is this for? Binary picker \u2014 clients never see tasks
+                either way, this just tags it internally. */}
+            <FieldGroup label="Who is this for?" required>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                {[
+                  { value: false, label: 'For us',       desc: 'Tahi internal \u2014 not tied to a client' },
+                  { value: true,  label: 'For a client', desc: 'Work we\u2019re doing on a client\u2019s behalf' },
+                ].map(opt => {
+                  const active = isForClient === opt.value
                   return (
                     <button
-                      key={t.value}
+                      key={String(opt.value)}
                       type="button"
                       onClick={() => {
-                        setType(t.value)
-                        if (t.value === 'tahi_internal') setClientOrgId('')
+                        setIsForClient(opt.value)
+                        if (!opt.value) setClientOrgId('')
                       }}
                       style={{
-                        padding: '0.625rem 0.5rem',
+                        padding: '0.75rem',
                         borderRadius: 'var(--radius-card)',
                         border: active ? '2px solid var(--color-brand)' : '2px solid var(--color-border)',
                         background: active ? 'var(--color-brand-50)' : 'var(--color-bg)',
                         cursor: 'pointer',
-                        textAlign: 'center',
+                        textAlign: 'left',
                         transition: 'border-color 0.1s, background 0.1s',
                       }}
                       onMouseEnter={e => {
@@ -2138,14 +2165,14 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
                       }}
                     >
                       <p style={{
-                        fontSize: '0.8125rem', fontWeight: 600,
+                        fontSize: '0.875rem', fontWeight: 600,
                         color: active ? 'var(--color-brand-dark)' : 'var(--color-text)',
                         margin: 0,
                       }}>
-                        {t.label}
+                        {opt.label}
                       </p>
-                      <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', margin: '0.125rem 0 0', lineHeight: 1.4 }}>
-                        {t.desc}
+                      <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: '0.25rem 0 0', lineHeight: 1.4 }}>
+                        {opt.desc}
                       </p>
                     </button>
                   )

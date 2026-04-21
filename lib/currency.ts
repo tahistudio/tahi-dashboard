@@ -19,6 +19,16 @@ export const SUPPORTED_CURRENCIES = [
   { code: 'CHF', symbol: 'CHF', name: 'Swiss Franc' },
 ] as const
 
+/**
+ * Currencies surfaced in the nav-bar switcher + New Deal dialog + any other
+ * "pick a currency for me" UI. Kept intentionally short so the dropdown is
+ * scannable. `SUPPORTED_CURRENCIES` (above) stays at 10 entries so invoices
+ * billed in, say, JPY still render with the right symbol + decimals.
+ */
+export const DISPLAY_CURRENCIES = SUPPORTED_CURRENCIES.filter(c =>
+  ['NZD', 'USD', 'AUD', 'GBP', 'EUR'].includes(c.code),
+)
+
 export type CurrencyCode = typeof SUPPORTED_CURRENCIES[number]['code']
 
 export interface ExchangeRate {
@@ -122,16 +132,28 @@ export function convertFromNzd(
 
 /**
  * Format a currency amount for display.
+ *
+ * Decision #045 (2026-04-21): defaults to whole dollars \u2014 cents are noise
+ * on KPIs and cramped on mobile. Pass `{ decimals: 2 }` explicitly when you
+ * need precision (invoice line items that aren't a round number, per-unit
+ * prices, etc.). JPY is always whole-unit because the currency has no sub-
+ * denomination.
  */
+export interface FormatCurrencyOptions {
+  /** Force a specific decimal precision. Default: 0 (whole units). */
+  decimals?: number
+}
+
 export function formatCurrency(
   amount: number,
   currency: string = 'NZD',
+  options: FormatCurrencyOptions = {},
 ): string {
   const info = SUPPORTED_CURRENCIES.find(c => c.code === currency)
   const symbol = info?.symbol ?? currency
 
-  // JPY has no decimal places
-  const decimals = currency === 'JPY' ? 0 : 2
+  // JPY has no decimal places regardless of caller preference.
+  const decimals = currency === 'JPY' ? 0 : (options.decimals ?? 0)
 
   const formatted = amount.toLocaleString('en-NZ', {
     minimumFractionDigits: decimals,
@@ -147,6 +169,7 @@ export function formatCurrency(
 export function formatCurrencyWithCode(
   amount: number,
   currency: string = 'NZD',
+  options: FormatCurrencyOptions = {},
 ): string {
-  return `${formatCurrency(amount, currency)} ${currency}`
+  return `${formatCurrency(amount, currency, options)} ${currency}`
 }

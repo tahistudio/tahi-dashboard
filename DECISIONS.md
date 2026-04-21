@@ -937,3 +937,44 @@ A non-linear stage is identified by slug: `stalled`, `on_hold`, `on-hold`, `paus
 **Data maturity:** With only today's activity log to draw from, most answers will still come from the linear fallback. As more `stage_change` activities accumulate the `journey` source will dominate and numbers will tighten toward reality.
 
 ---
+
+## #045 - Currency UX Cleanup
+
+**Date:** 2026-04-21
+
+Three small changes that together make the multi-currency experience feel lighter:
+
+1. **Trimmed display-currency switcher.** `lib/currency.ts` now exports a secondary `DISPLAY_CURRENCIES` array (NZD, USD, AUD, GBP, EUR) used by the nav switcher, the New Deal dialog currency picker, the Deal Detail per-edit currency override, and the commitment form. `SUPPORTED_CURRENCIES` still carries all 10 entries so invoices, deals, and costs billed in CAD / SGD / HKD / JPY / CHF still render with the right symbols and decimals.
+
+2. **Whole-dollar displays by default.** `formatCurrency(amount, currency, options?)` defaults to `decimals: 0`. KPI cards (Outstanding, MRR, pipeline value, weighted forecast) and most money displays round to the nearest dollar. Invoice line items can opt back into cents with `{ decimals: 2 }` if a specific number needs precision. JPY stays 0-decimal regardless.
+
+3. **Invoice list + detail already show native currency primary / display-currency secondary** (Decision #042). No change needed there.
+
+---
+
+## #046 - Tasks Are Always Internal; One Question: Is It For a Client?
+
+**Date:** 2026-04-21
+
+**Problem:** The tasks table had three type values (`client_task`, `internal_client_task`, `tahi_internal`) and three UI tabs, which was clunky. Clients never see tasks regardless of the type \u2014 the internal/external distinction was a leftover from an earlier model. The type tabs also mis-computed counts: when a type filter was active, the server returned only matching tasks, so the counts on the other tabs dropped to zero.
+
+**Decision:** Collapse tasks to a binary distinction:
+
+- **Tasks are always Tahi-internal.** Clients never see them, full stop.
+- **Requests are the client-facing channel.** Anything on a request is visible to the client.
+- Each task is either **"for us"** (Tahi-internal work like "build a new landing page") or **"for a client"** (work we're doing on their behalf, like "send onboarding email to Acme"). The source of truth is `task.orgId`: present \u2192 for a client, null \u2192 for us.
+- The legacy `type` column remains populated (no migration needed). Both legacy client-flavoured values (`client_task`, `internal_client_task`) collapse into `client_task` going forward; `tahi_internal` stays. Historical data keeps its original value and maps to the new bucket by `orgId` presence.
+
+**UI changes (`app/(dashboard)/tasks/tasks-content.tsx`):**
+- Three tabs: **All tasks** / **For us** / **For a client**. Counts are always computed from the full task list client-side, so switching tabs never zeroes out the other tab's count.
+- List view fetches *all* tasks (type filter dropped from the server query) and buckets client-side via the `taskBucket()` helper.
+- New task dialog replaces the 3-way radio grid with a 2-way "Who is this for?" picker.
+- Legacy templates that set `type: 'internal_client_task'` auto-map to "for a client".
+
+**API changes (`app/api/admin/tasks` POST):**
+- Auto-derives the stored `type` from `orgId` presence when the caller omits it, so MCP and older clients keep working without a migration.
+- Still rejects a client task that has no `orgId` so we never orphan a task with no client.
+
+**Left for a follow-up commit:** AI wizard on requests. The task AI wizard (`components/tahi/ai-task-wizard.tsx`) is unchanged; we'll mirror its pattern into `ai-request-wizard.tsx` next so both surfaces get AI help, for clients and for us.
+
+---

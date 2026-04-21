@@ -156,18 +156,25 @@ export async function POST(req: NextRequest) {
     requestId?: string | null
   }
 
-  const { title, type, description, priority, assigneeId, assigneeType, dueDate } = body
+  const { title, description, priority, assigneeId, assigneeType, dueDate } = body
 
   if (!title?.trim()) {
     return NextResponse.json({ error: 'Title is required' }, { status: 400 })
   }
-  if (!type || !['client_task', 'internal_client_task', 'tahi_internal'].includes(type)) {
-    return NextResponse.json({ error: 'Invalid task type' }, { status: 400 })
-  }
 
-  // client_task and internal_client_task require orgId
-  if (type !== 'tahi_internal' && !body.orgId) {
-    return NextResponse.json({ error: 'Client is required for this task type' }, { status: 400 })
+  // Decision #046: tasks are always Tahi-internal; the only distinction
+  // is whether the work is for a client. Source of truth is `orgId` presence.
+  // Legacy `type` is still accepted from callers (MCP, old clients) but
+  // auto-derived when omitted. Both legacy client-flavoured types collapse
+  // to the single `client_task` value now.
+  const resolvedType: string = body.orgId
+    ? 'client_task'
+    : (body.type === 'client_task' || body.type === 'internal_client_task' ? 'client_task' : 'tahi_internal')
+
+  // If the caller chose a client-flavoured type but didn't supply orgId,
+  // that's still an error \u2014 we need to know which client.
+  if (resolvedType === 'client_task' && !body.orgId) {
+    return NextResponse.json({ error: 'Client is required for a client task' }, { status: 400 })
   }
 
   const database = await db()
@@ -178,8 +185,8 @@ export async function POST(req: NextRequest) {
 
   await drizzle.insert(schema.tasks).values({
     id,
-    type,
-    orgId: type === 'tahi_internal' ? null : (body.orgId ?? null),
+    type: resolvedType,
+    orgId: resolvedType === 'tahi_internal' ? null : (body.orgId ?? null),
     title: title.trim(),
     description: description ?? null,
     status: 'todo',
