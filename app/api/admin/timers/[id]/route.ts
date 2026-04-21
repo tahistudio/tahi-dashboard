@@ -110,7 +110,9 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return NextResponse.json({ ok: true, logged: false })
   }
 
-  // Default: log + stop
+  // Default: log + stop. The helper resolves Clerk userId → team_members
+  // row and returns { logged, reason, hours, startedAt, endedAt } so the
+  // UI can show a real error if logging failed.
   const result = await stopAndLogTimer(drizzle, timer, userId, null)
-  return NextResponse.json({ ok: true, logged: true, ...result })
+  return NextResponse.json({ ok: true, ...result })
 }

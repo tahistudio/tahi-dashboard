@@ -161,16 +161,21 @@ export function TimeCard({ requestId }: Props) {
         method: 'DELETE',
       })
       if (res.ok) {
-        const data = await res.json() as { hours?: number; logged?: boolean }
+        const data = await res.json() as { hours?: number; logged?: boolean; reason?: string }
         setTimer(null)
         if (data.logged && typeof data.hours === 'number') {
-          showToast(`Logged ${data.hours}h`)
+          // Refresh entries so the new row appears in the list immediately.
           await fetchEntries()
+          const pretty = data.hours >= 0.01 ? `${data.hours.toFixed(2)}h` : `${Math.round((data.hours ?? 0) * 3600)}s`
+          showToast(`Logged ${pretty}`)
+        } else if (data.reason) {
+          showToast(`Timer stopped — not logged (${data.reason})`)
         } else {
-          showToast('Timer stopped')
+          showToast('Timer stopped — not logged')
         }
       } else {
-        showToast('Couldn\'t stop timer')
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        showToast(j.error ?? 'Couldn\'t stop timer')
       }
     } catch {
       showToast('Network error — try again')

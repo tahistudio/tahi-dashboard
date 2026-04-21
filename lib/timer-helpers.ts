@@ -56,15 +56,32 @@ export function isStaleTimer(lastPingAt: string, thresholdMs = 2 * 60 * 1000, no
  *
  * Returns the derived hours + the resolved range so callers can surface
  * them to the user.
+ *
+ * `userId` is the Clerk user ID. timeEntries.teamMemberId has a FK to
+ * team_members.id, so we resolve the Clerk ID to the team_members row
+ * before inserting. If there's no matching team_members row (shouldn't
+ * happen for an admin starting a timer, but we handle it anyway) we
+ * skip logging — the active timer is still cleared.
  */
 export async function stopAndLogTimer(
   drizzle: Drizzle,
   timer: typeof schema.activeTimers.$inferSelect,
   userId: string,
   orgIdHint: string | null,
-): Promise<{ hours: number; startedAt: string; endedAt: string }> {
+): Promise<{ hours: number; startedAt: string; endedAt: string; logged: boolean; reason?: string }> {
   const seconds = elapsedSeconds(timer)
-  const hours = secondsToHours(seconds)
+  // Store hours to 4 decimal places so a 10-second timer logs 0.0028h
+  // instead of rounding to 0 and silently disappearing. The UI can round
+  // for display; the DB keeps the truth.
+  const hours = Math.round((seconds / 3600) * 10000) / 10000
+
+  // Resolve Clerk userId → team_members.id (FK target for teamMemberId).
+  const [member] = await drizzle
+    .select({ id: schema.teamMembers.id })
+    .from(schema.teamMembers)
+    .where(eq(schema.teamMembers.clerkUserId, userId))
+    .limit(1)
+  const teamMemberId = member?.id ?? null
 
   // Derive orgId for the timeEntry. If the target is a task without an org,
   // we skip logging (active timer row still cleared).
@@ -82,25 +99,37 @@ export async function stopAndLogTimer(
   const endedAt = new Date().toISOString()
   const date = startedAt.slice(0, 10) // YYYY-MM-DD
 
-  if (orgId && hours > 0) {
-    await drizzle.insert(schema.timeEntries).values({
-      id: crypto.randomUUID(),
-      orgId,
-      requestId: timer.requestId ?? null,
-      taskId: timer.taskId ?? null,
-      teamMemberId: userId,
-      hours,
-      billable: true,
-      notes: timer.notes ?? null,
-      date,
-      startedAt,
-      endedAt,
-      source: 'live_timer',
-    })
+  let logged = false
+  let reason: string | undefined
+  if (!orgId) {
+    reason = 'no_org_id'
+  } else if (!teamMemberId) {
+    reason = 'no_team_member_row_for_user'
+  } else {
+    try {
+      await drizzle.insert(schema.timeEntries).values({
+        id: crypto.randomUUID(),
+        orgId,
+        requestId: timer.requestId ?? null,
+        taskId: timer.taskId ?? null,
+        teamMemberId,
+        hours,
+        billable: true,
+        notes: timer.notes ?? null,
+        date,
+        startedAt,
+        endedAt,
+        source: 'live_timer',
+      })
+      logged = true
+    } catch (err) {
+      reason = err instanceof Error ? err.message : String(err)
+    }
   }
 
-  // Delete the active timer row regardless of whether we could log.
+  // Delete the active timer row regardless of whether we could log, so
+  // the user isn't stuck with a zombie timer after a schema issue.
   await drizzle.delete(schema.activeTimers).where(eq(schema.activeTimers.id, timer.id))
 
-  return { hours, startedAt, endedAt }
+  return { hours, startedAt, endedAt, logged, reason }
 }
