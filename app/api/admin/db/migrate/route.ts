@@ -148,26 +148,44 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_activities_created_at ON activities(created_at)`,
     ],
   },
+  // Request V3 architecture is split across 0018 → 0021 so no single
+  // invocation runs into D1's per-request timeout. Apply individually
+  // (not via "all") : 0018, 0019, 0020, 0021.
   {
     name: '0018',
-    description: 'Request V3 architecture: nested requests, multi-participant (PM/assignee/follower), read tracking, active timers, simplified size',
+    description: 'Request V3 : new columns on requests (size, parent_request_id, sub_position, scope_flag_reason) + size backfill',
     statements: [
-      // requests : new columns for V3
       `ALTER TABLE requests ADD COLUMN size text DEFAULT 'small'`,
       `ALTER TABLE requests ADD COLUMN parent_request_id text`,
       `ALTER TABLE requests ADD COLUMN sub_position integer`,
       `ALTER TABLE requests ADD COLUMN scope_flag_reason text`,
       `CREATE INDEX IF NOT EXISTS idx_requests_parent ON requests(parent_request_id)`,
-      // Backfill size from legacy type (small_task/bug_fix/content_update/consultation → small, else large).
-      // Only touches rows where size is still the default so re-runs are safe.
+      // Backfill size from legacy type. Idempotent : touches all 'small'
+      // (default) rows and assigns 'large' where appropriate.
       `UPDATE requests
          SET size = CASE
            WHEN type IN ('small_task', 'bug_fix', 'content_update', 'consultation') THEN 'small'
            ELSE 'large'
          END
-         WHERE size = 'small'`,
-
-      // request_participants : multi-assignee / PM / follower model (replaces single assignee_id)
+         WHERE size IS NULL OR size = 'small'`,
+    ],
+  },
+  {
+    name: '0019',
+    description: 'time_entries supports scalar / range / live-tracked modes + task_id',
+    statements: [
+      `ALTER TABLE time_entries ADD COLUMN task_id text`,
+      `ALTER TABLE time_entries ADD COLUMN started_at text`,
+      `ALTER TABLE time_entries ADD COLUMN ended_at text`,
+      `ALTER TABLE time_entries ADD COLUMN source text NOT NULL DEFAULT 'manual'`,
+      `CREATE INDEX IF NOT EXISTS idx_time_request ON time_entries(request_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_time_task ON time_entries(task_id)`,
+    ],
+  },
+  {
+    name: '0020',
+    description: 'Request V3 : request_participants table (multi-assignee / PM / follower model) + backfill from requests.assignee_id',
+    statements: [
       `CREATE TABLE IF NOT EXISTS request_participants (
         id text PRIMARY KEY NOT NULL,
         request_id text NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
@@ -182,8 +200,8 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_req_part_request ON request_participants(request_id)`,
       `CREATE INDEX IF NOT EXISTS idx_req_part_participant ON request_participants(participant_id, participant_type)`,
       `CREATE INDEX IF NOT EXISTS idx_req_part_role ON request_participants(role)`,
-      // Backfill existing requests.assignee_id into participants (role='assignee').
-      // UUID generated via SQLite randomblob trick (no native uuid()).
+      // Backfill existing requests.assignee_id rows into participants.
+      // UUID generated via SQLite randomblob trick.  NOT EXISTS makes it safe to re-run.
       `INSERT INTO request_participants (id, request_id, participant_id, participant_type, role, added_at)
          SELECT
            lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))),
@@ -197,8 +215,12 @@ const MIGRATIONS: Migration[] = [
                AND rp.participant_type = 'team_member'
                AND rp.role = 'assignee'
            )`,
-
-      // request_reads : per-user unread tracking
+    ],
+  },
+  {
+    name: '0021',
+    description: 'Request V3 : request_reads (per-user unread tracking) + active_timers (live time tracker, one per user)',
+    statements: [
       `CREATE TABLE IF NOT EXISTS request_reads (
         id text PRIMARY KEY NOT NULL,
         request_id text NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
@@ -208,8 +230,6 @@ const MIGRATIONS: Migration[] = [
       )`,
       `CREATE INDEX IF NOT EXISTS idx_req_reads_request ON request_reads(request_id)`,
       `CREATE INDEX IF NOT EXISTS idx_req_reads_user ON request_reads(user_id, user_type)`,
-
-      // active_timers : one per user, heartbeat-driven recovery
       `CREATE TABLE IF NOT EXISTS active_timers (
         id text PRIMARY KEY NOT NULL,
         user_id text NOT NULL REFERENCES team_members(id) ON DELETE CASCADE,
@@ -223,18 +243,6 @@ const MIGRATIONS: Migration[] = [
       )`,
       `CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_timer_per_user ON active_timers(user_id)`,
       `CREATE INDEX IF NOT EXISTS idx_active_timers_request ON active_timers(request_id)`,
-    ],
-  },
-  {
-    name: '0019',
-    description: 'time_entries supports scalar / range / live-tracked modes + task_id',
-    statements: [
-      `ALTER TABLE time_entries ADD COLUMN task_id text`,
-      `ALTER TABLE time_entries ADD COLUMN started_at text`,
-      `ALTER TABLE time_entries ADD COLUMN ended_at text`,
-      `ALTER TABLE time_entries ADD COLUMN source text NOT NULL DEFAULT 'manual'`,
-      `CREATE INDEX IF NOT EXISTS idx_time_request ON time_entries(request_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_time_task ON time_entries(task_id)`,
     ],
   },
 ]
