@@ -11,8 +11,9 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, Sparkles, Send, Loader2 } from 'lucide-react'
+import { Sparkles, Send, Loader2 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { SlideOver } from '@/components/tahi/slide-over'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -212,93 +213,24 @@ export function AiRequestWizard({
     }
   }, [latestDrafts, creating, context.orgId, context.speaker, submitEndpoint, onRequestsCreated])
 
-  if (!open) return null
-
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        style={{
-          position: 'fixed', inset: 0, zIndex: 60,
-          background: 'rgba(0, 0, 0, 0.3)',
-          transition: 'opacity 200ms ease',
-        }}
-        onClick={onClose}
-      />
-
-      {/* Drawer */}
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="ai-request-wizard-title"
-        style={{
-          position: 'fixed',
-          top: 0, right: 0, bottom: 0,
-          width: '100%',
-          maxWidth: '34rem',
-          background: 'var(--color-bg)',
-          boxShadow: 'var(--shadow-lg)',
-          zIndex: 70,
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        {/* Header */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '1rem 1.25rem',
-          borderBottom: '1px solid var(--color-border-subtle)',
-          flexShrink: 0,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
-            <div
-              style={{
-                width: '2rem', height: '2rem',
-                borderRadius: 'var(--radius-leaf-sm)',
-                background: 'var(--color-brand-50)',
-                color: 'var(--color-brand)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}
-            >
-              <Sparkles size={15} aria-hidden="true" />
-            </div>
-            <div>
-              <h2 id="ai-request-wizard-title" style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600, color: 'var(--color-text)' }}>
-                Draft a request with AI
-              </h2>
-              <p style={{ margin: '0.125rem 0 0', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                Describe what you need in plain English. I\u2019ll scope it.
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close wizard"
-            style={{
-              width: '1.75rem', height: '1.75rem',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'var(--color-bg-secondary)',
-              border: 'none',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--color-text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <X size={14} aria-hidden="true" />
-          </button>
-        </div>
-
-        {/* Messages */}
-        <div style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '1rem 1.25rem',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '0.875rem',
-        }}>
+    <SlideOver
+      open={open}
+      onClose={onClose}
+      icon={<Sparkles size={15} />}
+      title="Draft a request with AI"
+      subtitle="Describe what you need in plain English. I’ll scope it."
+      maxWidth="34rem"
+    >
+      {/* Messages */}
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: 'var(--space-4) var(--space-5)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.875rem',
+      }}>
           {messages.map((msg, i) => (
             <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
               <div
@@ -436,8 +368,7 @@ export function AiRequestWizard({
             </button>
           </div>
         </div>
-      </div>
-    </>
+    </SlideOver>
   )
 }
 

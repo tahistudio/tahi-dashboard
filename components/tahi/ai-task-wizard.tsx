@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
-import { X, Sparkles, Send, Loader2, Pencil, Check, ChevronDown } from 'lucide-react'
+import { Sparkles, Send, Loader2, Pencil, Check, ChevronDown } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { SlideOver } from '@/components/tahi/slide-over'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -248,105 +249,16 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
   if (!open) return null
 
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 60,
-          background: 'rgba(0, 0, 0, 0.3)',
-          transition: 'opacity 200ms ease',
-        }}
-        onClick={handleClose}
-      />
-
-      {/* Slide-over panel */}
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="AI Task Wizard"
-        style={{
-          position: 'fixed',
-          top: 0,
-          right: 0,
-          bottom: 0,
-          zIndex: 70,
-          width: '100%',
-          maxWidth: '28rem',
-          background: 'var(--color-bg)',
-          boxShadow: '-8px 0 30px rgba(0, 0, 0, 0.12)',
-          display: 'flex',
-          flexDirection: 'column',
-          animation: 'aiWizardSlideIn 250ms ease-out',
-        }}
-      >
-        {/* Header */}
-        <div
-          style={{
-            padding: '1rem 1.25rem',
-            borderBottom: '1px solid var(--color-border)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-            flexShrink: 0,
-          }}
-        >
-          <div
-            style={{
-              width: '2.25rem',
-              height: '2.25rem',
-              borderRadius: '0 0.625rem 0 0.625rem',
-              background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <Sparkles style={{ width: '1.125rem', height: '1.125rem', color: '#ffffff' }} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <h2
-              style={{
-                fontSize: '1rem',
-                fontWeight: 700,
-                color: 'var(--color-text)',
-                margin: 0,
-              }}
-            >
-              AI Task Wizard
-            </h2>
-            <p
-              style={{
-                fontSize: '0.75rem',
-                color: 'var(--color-text-subtle)',
-                margin: 0,
-              }}
-            >
-              Describe what you need and I will create tasks
-            </p>
-          </div>
-          <button
-            onClick={handleClose}
-            onMouseEnter={() => setHoveredButton('close')}
-            onMouseLeave={() => setHoveredButton(null)}
-            style={{
-              padding: '0.375rem',
-              borderRadius: '0.5rem',
-              border: 'none',
-              background: hoveredButton === 'close' ? 'var(--color-bg-tertiary)' : 'transparent',
-              cursor: 'pointer',
-              color: 'var(--color-text-muted)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'background 150ms ease',
-            }}
-            aria-label="Close wizard"
-          >
-            <X style={{ width: '1.25rem', height: '1.25rem' }} />
-          </button>
+    <SlideOver
+      open={open}
+      onClose={handleClose}
+      icon={<Sparkles size={15} />}
+      title="AI Task Wizard"
+      subtitle="Describe what you need and I will create tasks"
+      maxWidth="28rem"
+    >
+      {/* Header is now part of SlideOver. Keep the wrapper empty to satisfy JSX structure. */}
+      <div style={{ display: 'none' }}>
         </div>
 
         {/* Messages area */}
@@ -545,21 +457,7 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
             Press Enter to send, Shift+Enter for new line
           </p>
         </div>
-      </div>
-
-      {/* Slide-in animation */}
-      <style>{`
-        @keyframes aiWizardSlideIn {
-          from { transform: translateX(100%); }
-          to { transform: translateX(0); }
-        }
-        @media (max-width: 640px) {
-          [aria-label="AI Task Wizard"] {
-            max-width: 100% !important;
-          }
-        }
-      `}</style>
-    </>
+    </SlideOver>
   )
 }
 
