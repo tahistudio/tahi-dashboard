@@ -150,7 +150,7 @@ const MIGRATIONS: Migration[] = [
   },
   // Request V3 architecture is split across 0018 → 0021 so no single
   // invocation runs into D1's per-request timeout. Apply individually
-  // (not via "all") : 0018, 0019, 0020, 0021.
+  // (not via "all") : 0018, 0019, 0020, 0021, 0022.
   {
     name: '0018',
     description: 'Request V3 : new columns on requests (size, parent_request_id, sub_position, scope_flag_reason) + size backfill',
@@ -245,6 +245,34 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_active_timers_request ON active_timers(request_id)`,
     ],
   },
+  {
+    name: '0022',
+    description: 'Fix active_timers.user_id FK — it was pointing at team_members(id) but user_id is actually a Clerk user ID (same as request_reads.user_id). Rebuild without the FK.',
+    statements: [
+      // SQLite can't DROP a FOREIGN KEY, so we rebuild the table. If the
+      // table doesn't exist yet (fresh db), these guards all no-op and
+      // migration 0021 handled creation. If it does exist with the bad
+      // FK, we rename → create fresh → copy rows → drop rename → recreate
+      // indexes.
+      `ALTER TABLE active_timers RENAME TO active_timers_old`,
+      `CREATE TABLE active_timers (
+        id text PRIMARY KEY NOT NULL,
+        user_id text NOT NULL,
+        request_id text REFERENCES requests(id) ON DELETE CASCADE,
+        task_id text,
+        started_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        paused_at text,
+        paused_seconds integer NOT NULL DEFAULT 0,
+        last_ping_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        notes text
+      )`,
+      `INSERT INTO active_timers (id, user_id, request_id, task_id, started_at, paused_at, paused_seconds, last_ping_at, notes)
+       SELECT id, user_id, request_id, task_id, started_at, paused_at, paused_seconds, last_ping_at, notes FROM active_timers_old`,
+      `DROP TABLE active_timers_old`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_timer_per_user ON active_timers(user_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_active_timers_request ON active_timers(request_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
@@ -323,7 +351,7 @@ export async function GET(req: NextRequest) {
         description: m.description,
         statementCount: m.statements.length,
       })),
-      hint: 'Append ?run=<name> to execute a single migration. For V3 schema apply 0018, 0019, 0020, 0021 one at a time.',
+      hint: 'Append ?run=<name> to execute a single migration. For V3 schema apply 0018, 0019, 0020, 0021, then 0022 (fixes timer FK bug). One at a time.',
     })
   }
 

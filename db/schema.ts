@@ -324,7 +324,10 @@ export const requestReads = sqliteTable('request_reads', {
 
 export const activeTimers = sqliteTable('active_timers', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  userId: text('user_id').notNull().references(() => teamMembers.id, { onDelete: 'cascade' }),
+  // Clerk user ID — NOT a team_members.id. Same semantics as
+  // request_reads.user_id and other Clerk-sourced user columns. No FK
+  // because Clerk user IDs live outside the D1 schema.
+  userId: text('user_id').notNull(),
   // One of requestId or taskId MUST be set (check enforced in API layer).
   requestId: text('request_id').references(() => requests.id, { onDelete: 'cascade' }),
   taskId: text('task_id'),
