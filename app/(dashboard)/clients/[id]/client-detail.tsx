@@ -8,6 +8,8 @@ import { stageColour } from '@/lib/chart-colors'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { ActivityTimeline, ActivityItem, type ActivityType } from '@/components/tahi/activity-timeline'
 import { Badge } from '@/components/tahi/badge'
+import { EmptyState } from '@/components/tahi/empty-state'
+import { SkeletonList, SkeletonTable } from '@/components/tahi/skeletons'
 import {
   Globe,
   Building2,
@@ -1419,10 +1421,11 @@ function RecentRequestsCard({ requests, orgId }: { requests: Request[]; orgId: s
       </div>
 
       {requests.length === 0 ? (
-        <div className="text-center py-8">
-          <FileText className="w-8 h-8 text-[var(--color-text-muted)] mx-auto mb-2 opacity-50" />
-          <p className="text-sm text-[var(--color-text-muted)]">No requests yet</p>
-        </div>
+        <EmptyState
+          variant="inline"
+          icon={<FileText className="w-8 h-8" />}
+          title="No requests yet"
+        />
       ) : (
         <div className="flex flex-col gap-2">
           {requests.map(req => (
@@ -1463,7 +1466,7 @@ function RequestsTab({ clientId }: { clientId: string }) {
 
   useEffect(() => { void load() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (loading) return <div className="text-sm text-[var(--color-text-muted)]">Loading requests…</div>
+  if (loading) return <SkeletonList rows={3} />
 
   return (
     <>
@@ -1483,10 +1486,11 @@ function RequestsTab({ clientId }: { clientId: string }) {
       </div>
 
       {requests.length === 0 ? (
-        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
-          <FileText className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
-          <p className="text-sm text-[var(--color-text-muted)]">No requests for this client yet</p>
-        </div>
+        <EmptyState
+          variant="inline"
+          icon={<FileText className="w-8 h-8" />}
+          title="No requests for this client yet"
+        />
       ) : (
         <div className="flex flex-col gap-2">
           {requests.map(req => (
@@ -1547,10 +1551,7 @@ function InvoicesTab({ clientId }: { clientId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        Loading invoices...
-      </div>
+      <SkeletonTable rows={4} columns={4} />
     )
   }
 
@@ -1565,10 +1566,11 @@ function InvoicesTab({ clientId }: { clientId: string }) {
       </div>
 
       {invoices.length === 0 ? (
-        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
-          <DollarSign className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
-          <p className="text-sm text-[var(--color-text-muted)]">No invoices for this client yet</p>
-        </div>
+        <EmptyState
+          variant="inline"
+          icon={<DollarSign className="w-8 h-8" />}
+          title="No invoices for this client yet"
+        />
       ) : (
         <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-x-auto">
           <table className="w-full text-sm">
@@ -1793,11 +1795,12 @@ function ContactsTab({
 
       {/* Contact list */}
       {contacts.length === 0 ? (
-        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
-          <Users className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
-          <p className="text-sm text-[var(--color-text-muted)]">No contacts for this client yet</p>
-          <p className="text-xs text-[var(--color-text-subtle)] mt-1">Add a contact to get started.</p>
-        </div>
+        <EmptyState
+          variant="inline"
+          icon={<Users className="w-8 h-8" />}
+          title="No contacts for this client yet"
+          description="Add a contact to get started."
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {contacts.map(contact => (
@@ -2000,18 +2003,11 @@ function TrackQueueTab({ clientId }: { clientId: string }) {
 
   if (tracks.length === 0) {
     return (
-      <div className="text-center py-12">
-        <div
-          className="mx-auto w-14 h-14 flex items-center justify-center mb-4"
-          style={{ borderRadius: '0 16px 0 16px', background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))' }}
-        >
-          <ListOrdered className="w-7 h-7 text-white" />
-        </div>
-        <h3 className="text-base font-semibold text-[var(--color-text)] mb-1">No tracks found</h3>
-        <p className="text-sm text-[var(--color-text-muted)]">
-          This client does not have any active tracks.
-        </p>
-      </div>
+      <EmptyState
+        icon={<ListOrdered className="w-7 h-7" />}
+        title="No tracks found"
+        description="This client does not have any active tracks."
+      />
     )
   }
 
@@ -2058,10 +2054,7 @@ function FilesTab({ clientId }: { clientId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        Loading files...
-      </div>
+      <SkeletonList rows={4} />
     )
   }
 
@@ -2079,10 +2072,11 @@ function FilesTab({ clientId }: { clientId: string }) {
       </div>
 
       {files.length === 0 ? (
-        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
-          <File className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
-          <p className="text-sm text-[var(--color-text-muted)]">No files uploaded for this client yet</p>
-        </div>
+        <EmptyState
+          variant="inline"
+          icon={<File className="w-8 h-8" />}
+          title="No files uploaded for this client yet"
+        />
       ) : (
         <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-x-auto">
           <table className="w-full text-sm">
@@ -2264,10 +2258,7 @@ function BrandsTab({ clientId }: { clientId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        Loading brands...
-      </div>
+      <SkeletonList rows={4} />
     )
   }
 
@@ -2403,13 +2394,12 @@ function BrandsTab({ clientId }: { clientId: string }) {
       )}
 
       {brands.length === 0 && !showCreate ? (
-        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
-          <Palette className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
-          <p className="text-sm text-[var(--color-text-muted)]">No brands for this client yet</p>
-          <p className="text-xs text-[var(--color-text-subtle)] mt-1">
-            Add brands to organise requests by sub-brand or product line.
-          </p>
-        </div>
+        <EmptyState
+          variant="inline"
+          icon={<Palette className="w-8 h-8" />}
+          title="No brands for this client yet"
+          description="Add brands to organise requests by sub-brand or product line."
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {brands.map(brand => (
@@ -2574,10 +2564,7 @@ function ContractsTab({ clientId }: { clientId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        Loading contracts...
-      </div>
+      <SkeletonList rows={4} />
     )
   }
 
@@ -2588,11 +2575,12 @@ function ContractsTab({ clientId }: { clientId: string }) {
       </div>
 
       {contracts.length === 0 ? (
-        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
-          <ScrollText className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
-          <p className="text-sm text-[var(--color-text-muted)]">No contracts for this client yet</p>
-          <p className="text-xs text-[var(--color-text-subtle)] mt-1">Upload contracts from the contracts page.</p>
-        </div>
+        <EmptyState
+          variant="inline"
+          icon={<ScrollText className="w-8 h-8" />}
+          title="No contracts for this client yet"
+          description="Upload contracts from the contracts page."
+        />
       ) : (
         <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-x-auto">
           <table className="w-full text-sm">
@@ -2986,10 +2974,7 @@ function TimeTab({ clientId }: { clientId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        Loading time entries...
-      </div>
+      <SkeletonTable rows={4} columns={4} />
     )
   }
 
@@ -3013,10 +2998,11 @@ function TimeTab({ clientId }: { clientId: string }) {
       </div>
 
       {entries.length === 0 ? (
-        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
-          <Clock className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
-          <p className="text-sm text-[var(--color-text-muted)]">No time entries for this client yet</p>
-        </div>
+        <EmptyState
+          variant="inline"
+          icon={<Clock className="w-8 h-8" />}
+          title="No time entries for this client yet"
+        />
       ) : (
         <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-x-auto">
           <table className="w-full text-sm">
@@ -3111,10 +3097,7 @@ function DealsTab({ clientId, orgName }: { clientId: string; orgName: string }) 
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        Loading deals...
-      </div>
+      <SkeletonList rows={4} />
     )
   }
 
@@ -3138,10 +3121,11 @@ function DealsTab({ clientId, orgName }: { clientId: string; orgName: string }) 
       </div>
 
       {deals.length === 0 ? (
-        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
-          <Handshake className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
-          <p className="text-sm text-[var(--color-text-muted)]">No deals for {orgName} yet</p>
-        </div>
+        <EmptyState
+          variant="inline"
+          icon={<Handshake className="w-8 h-8" />}
+          title="No deals for {orgName} yet"
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {deals.map((deal, i) => {
@@ -3271,10 +3255,7 @@ function CrmActivitiesTab({ clientId }: { clientId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        Loading activities...
-      </div>
+      <SkeletonList rows={4} />
     )
   }
 
@@ -3345,10 +3326,11 @@ function CrmActivitiesTab({ clientId }: { clientId: string }) {
       )}
 
       {items.length === 0 ? (
-        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
-          <CalendarDays className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
-          <p className="text-sm text-[var(--color-text-muted)]">No CRM activities for this client yet</p>
-        </div>
+        <EmptyState
+          variant="inline"
+          icon={<CalendarDays className="w-8 h-8" />}
+          title="No CRM activities for this client yet"
+        />
       ) : (
         <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-4">
           <ActivityTimeline>
@@ -3413,10 +3395,7 @@ function RevenueTab({ clientId }: { clientId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        Loading revenue data...
-      </div>
+      <SkeletonList rows={4} />
     )
   }
 
@@ -3632,10 +3611,7 @@ function ProfitabilityTab({ clientId }: { clientId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        Loading profitability data...
-      </div>
+      <SkeletonList rows={4} />
     )
   }
 
@@ -3847,10 +3823,7 @@ function ActivityTab({ clientId }: { clientId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-8">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        Loading activity...
-      </div>
+      <SkeletonList rows={4} />
     )
   }
 
@@ -3859,10 +3832,11 @@ function ActivityTab({ clientId }: { clientId: string }) {
       <h2 className="font-semibold text-[var(--color-text)] mb-4">Activity Log</h2>
 
       {entries.length === 0 ? (
-        <div className="text-center py-16 bg-[var(--color-bg-secondary)] rounded-xl">
-          <Activity className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40" />
-          <p className="text-sm text-[var(--color-text-muted)]">No activity recorded for this client yet</p>
-        </div>
+        <EmptyState
+          variant="inline"
+          icon={<Activity className="w-8 h-8" />}
+          title="No activity recorded for this client yet"
+        />
       ) : (
         <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-x-auto">
           <div className="divide-y divide-[var(--color-border-subtle)]">

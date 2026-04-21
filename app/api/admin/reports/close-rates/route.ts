@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { sql, eq } from 'drizzle-orm'
+import { isNonLinearStage, buildJourneyMap, inferStagesVisited, type StageInfo, type ActivityStageEvent } from '@/lib/pipeline-probability'
 
 // ── GET /api/admin/reports/close-rates ─────────────────────────────────────
 // Returns stage conversion rates, win/loss counts over time, and revenue per stage.
@@ -35,22 +36,63 @@ export async function GET(req: NextRequest) {
     .from(schema.deals)
     .innerJoin(schema.pipelineStages, sql`${schema.deals.stageId} = ${schema.pipelineStages.id}`)
 
-  // 3. Compute stage conversion rates
-  // A deal has "passed through" stage N if its current stage position >= N.
-  // Conversion from stage N to N+1 = deals at position >= N+1 / deals at position >= N.
-  const stageConversions = []
-  for (let i = 0; i < stages.length - 1; i++) {
-    const currentPos = stages[i].position
-    const nextPos = stages[i + 1].position
+  // 3. Compute stage conversion rates.
+  //
+  // Decision #044: use the actual stage-history journeys from the activity
+  // log where available, and exclude non-linear stages (Stalled, etc.) from
+  // the "next stage" progression. Previously the linear ordinal assumption
+  // made the table report "Stalled \u2192 Closed Won: 52%" because position 6
+  // >= position 5, which isn't how the pipeline actually flows.
+  const linearStages = stages.filter(s => !isNonLinearStage(s))
+  const stageInfos: StageInfo[] = stages.map(s => ({
+    id: s.id,
+    slug: s.slug,
+    position: s.position,
+    isClosedWon: s.isClosedWon,
+    isClosedLost: s.isClosedLost,
+  }))
 
-    const enteredCurrent = allDeals.filter(d => d.stagePosition >= currentPos).length
-    const reachedNext = allDeals.filter(d => d.stagePosition >= nextPos).length
+  // Pull stage events from activity log (Decision #041).
+  let stageEvents: ActivityStageEvent[] = []
+  try {
+    const dealIds = allDeals.map(d => d.id).filter(id => /^[a-f0-9-]{36}$/i.test(id))
+    if (dealIds.length > 0) {
+      const list = dealIds.map(id => `'${id}'`).join(',')
+      const res = await database.all(sql.raw(
+        `SELECT deal_id, type, metadata, created_at FROM activities
+         WHERE type IN ('deal_created', 'stage_change') AND deal_id IN (${list})`,
+      )) as unknown as Array<{ deal_id: string; type: string; metadata: string | null; created_at: string }>
+        | { results?: Array<{ deal_id: string; type: string; metadata: string | null; created_at: string }> }
+      const rows = Array.isArray(res) ? res : (res?.results ?? [])
+      stageEvents = rows.map(r => ({ dealId: r.deal_id, type: r.type, metadata: r.metadata, createdAt: r.created_at }))
+    }
+  } catch {
+    stageEvents = []
+  }
+
+  const journeys = buildJourneyMap(stageEvents)
+  const perDealVisited = new Map<string, Set<string>>()
+  for (const d of allDeals) {
+    perDealVisited.set(d.id, inferStagesVisited(
+      { id: d.id, stageId: d.stageId, stagePosition: d.stagePosition },
+      stageInfos,
+      journeys.get(d.id),
+    ))
+  }
+
+  const stageConversions = []
+  for (let i = 0; i < linearStages.length - 1; i++) {
+    const from = linearStages[i]
+    const to = linearStages[i + 1]
+
+    const enteredCurrent = allDeals.filter(d => perDealVisited.get(d.id)?.has(from.id)).length
+    const reachedNext = allDeals.filter(d => perDealVisited.get(d.id)?.has(to.id)).length
 
     stageConversions.push({
-      fromStage: stages[i].name,
-      fromSlug: stages[i].slug,
-      toStage: stages[i + 1].name,
-      toSlug: stages[i + 1].slug,
+      fromStage: from.name,
+      fromSlug: from.slug,
+      toStage: to.name,
+      toSlug: to.slug,
       entered: enteredCurrent,
       converted: reachedNext,
       conversionRate: enteredCurrent > 0

@@ -2,7 +2,8 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { asc, eq, sql } from 'drizzle-orm'
+import { asc, eq, sql, inArray } from 'drizzle-orm'
+import { computeStageProbabilities, type StageInfo, type ActivityStageEvent } from '@/lib/pipeline-probability'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -63,31 +64,64 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Compute historical conversion probabilities from deal data
+  // Load all non-archived deals with their stage info.
   const allDeals = await database
     .select({
+      id: schema.deals.id,
+      stageId: schema.deals.stageId,
       stagePosition: schema.pipelineStages.position,
-      isClosedWon: schema.pipelineStages.isClosedWon,
-      isClosedLost: schema.pipelineStages.isClosedLost,
     })
     .from(schema.deals)
     .innerJoin(schema.pipelineStages, eq(schema.deals.stageId, schema.pipelineStages.id))
     .where(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)
 
-  const wonCount = allDeals.filter(d => d.isClosedWon).length
-  const totalDeals = allDeals.length
+  // Pull stage-history events from the activity log (Decision #041) so we
+  // can compute historical probability via true journeys where available.
+  // Read metadata via raw SQL \u2014 the column was added in migration 0017 and
+  // isn't in the Drizzle schema yet (Decision #039 lesson).
+  let stageEvents: ActivityStageEvent[] = []
+  if (allDeals.length > 0) {
+    try {
+      const dealIds = allDeals.map(d => d.id).filter(id => /^[a-f0-9-]{36}$/i.test(id))
+      if (dealIds.length > 0) {
+        const list = dealIds.map(id => `'${id}'`).join(',')
+        const res = await database.all(sql.raw(
+          `SELECT deal_id, type, metadata, created_at FROM activities
+           WHERE type IN ('deal_created', 'stage_change') AND deal_id IN (${list})`,
+        )) as unknown as Array<{ deal_id: string; type: string; metadata: string | null; created_at: string }>
+          | { results?: Array<{ deal_id: string; type: string; metadata: string | null; created_at: string }> }
+        const rows = Array.isArray(res) ? res : (res?.results ?? [])
+        stageEvents = rows.map(r => ({ dealId: r.deal_id, type: r.type, metadata: r.metadata, createdAt: r.created_at }))
+      }
+    } catch {
+      // Migration 0017 not applied yet \u2014 fall back to linear inference only.
+      stageEvents = []
+    }
+  }
 
-  // For each stage: deals that reached at least this position = those currently at this position or beyond
-  // Since deals move forward, current position >= stage position means they passed through it
+  const stageInfos: StageInfo[] = stages.map(s => ({
+    id: s.id,
+    slug: s.slug,
+    position: s.position,
+    isClosedWon: s.isClosedWon,
+    isClosedLost: s.isClosedLost,
+  }))
+
+  const probMap = computeStageProbabilities({
+    stages: stageInfos,
+    deals: allDeals.map(d => ({ id: d.id, stageId: d.stageId, stagePosition: d.stagePosition })),
+    stageEvents,
+  })
+
+  const totalDeals = allDeals.length
   const stagesWithHistory = stages.map(stage => {
-    const dealsAtOrPast = allDeals.filter(d => d.stagePosition >= stage.position).length
-    const historicalProbability = dealsAtOrPast >= 3
-      ? Math.round((wonCount / dealsAtOrPast) * 100)
-      : null // Not enough data, return null to use static probability
+    const prob = probMap.get(stage.id)
     return {
       ...stage,
-      historicalProbability,
-      dealsSampled: dealsAtOrPast,
+      historicalProbability: prob?.historicalProbability ?? null,
+      dealsSampled: prob?.dealsSampled ?? 0,
+      wonSampled: prob?.wonCount ?? 0,
+      probabilitySource: prob?.source ?? 'insufficient',
       totalDeals,
     }
   })

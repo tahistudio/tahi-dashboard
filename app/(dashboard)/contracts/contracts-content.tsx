@@ -444,9 +444,12 @@ export function ContractsContent() {
             onCtaClick={() => setShowCreateDialog(true)}
           />
         ) : (
-          <div className="text-center py-12">
-            <p className="text-sm text-[var(--color-text-muted)]">No contracts match your filters.</p>
-          </div>
+          <EmptyState
+            variant="inline"
+            icon={<FileText className="w-8 h-8" />}
+            title="No contracts match your filters"
+            description="Try clearing the search or changing the status tab."
+          />
         )
       ) : (
         <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-hidden">

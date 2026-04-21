@@ -910,3 +910,30 @@ Every entry includes structured `metadata` (before/after snapshots) so the UI ca
 **Why Github Actions over Cloudflare cron:** Webflow Cloud's builder overwrites wrangler.json (Decision #039). Adding a cron trigger there would fight the platform. GitHub Actions is free, reliable, and external \u2014 nothing for the Webflow Cloud builder to clobber.
 
 ---
+
+## #044 - Pipeline Probability Uses Journey, Not Ordinal Position
+
+**Date:** 2026-04-21
+
+**Bug:** The `historicalProbability` on each stage was computed as `wonDeals / dealsAtOrPastThisPosition` using the `position` column. Default stages put Stalled at position 5, between Verbal Commit (4) and Closed Won (6). The formula assumed every closed-won deal "passed through" Stalled because `position 6 >= position 5`. That gave Stalled an inflated 52% win rate and flattened every other stage's win rate around 25%, regardless of where in the pipeline it sat. Verbal Commit reported 27% (should be much higher) and Stalled reported 29% (higher than Verbal Commit), which is backwards.
+
+**Decision:** Replace the ordinal-position formula with a journey-based one:
+
+> **For each stage S**: of all deals that were ever at S in their journey, what percentage are now at a closed-won stage?
+
+Implementation in `lib/pipeline-probability.ts`:
+- `buildJourneyMap(events)` reads `deal_created` and `stage_change` activity rows (Decision #041) and returns a `Map<dealId, Set<stageId>>` of every stage each deal has actually been in.
+- `inferStagesVisited(deal, stages, journey)` uses that journey when present, or falls back to linear inference for deals with no history \u2014 **excluding non-linear stages** (Stalled, On Hold, Paused) from the backfill so being at a linear stage doesn't imply a deal passed through a side detour.
+- `computeStageProbabilities({ stages, deals, stageEvents, minSample })` returns `{ stageId \u2192 { historicalProbability, dealsSampled, wonCount, source } }`. `source` tells you whether the number came from `'journey'`, `'linear'` fallback, or is `'insufficient'` (sample < 3).
+
+A non-linear stage is identified by slug: `stalled`, `on_hold`, `on-hold`, `paused`. This is tolerant of user-customised stage names.
+
+**Wired into:**
+- `/api/admin/pipeline/stages` \u2014 emits `historicalProbability` per stage using the new math. Also now returns `wonSampled` and `probabilitySource` for UI debugging.
+- `/api/admin/reports/close-rates` \u2014 "Stage Conversion Rates" table now progresses only through linear stages, so the previous "Verbal Commit \u2192 Stalled: 95%" and "Stalled \u2192 Closed Won: 52%" rows no longer appear. The table now reads like the real funnel: Lead \u2192 Discovery \u2192 Proposal \u2192 Negotiation \u2192 Verbal Commit \u2192 Closed Won.
+
+**Tests:** `lib/__tests__/pipeline-probability.test.ts` (16 tests) guards the fix, including a regression test that reproduces the exact 21-deal/52% Stalled bug and verifies the new math gives Verbal Commit > Stalled.
+
+**Data maturity:** With only today's activity log to draw from, most answers will still come from the linear fallback. As more `stage_change` activities accumulate the `journey` source will dominate and numbers will tighten toward reality.
+
+---
