@@ -142,6 +142,30 @@ Don't extract when:
 - The component would need 10+ optional props to cover variations
 - The pattern is genuinely one-off (hero sections, specific flows)
 
+### Empty / Loading / Error state rules
+
+**Empty states** use `<EmptyState>` — never ad-hoc `<div className="text-center py-16">`. Two variants:
+- `variant="full"` (default) — large leaf-gradient icon, optional CTA. For full-page empty states (request list, client list, tracks).
+- `variant="inline"` — muted icon, compact. For per-section / per-tab empty states (Clients detail tabs, Deal detail thread blocks).
+
+**Loading states** use shape-matching skeletons, not spinners. Per-page guide:
+- List of rows → `<SkeletonList rows={4} />`
+- Table → `<SkeletonTable rows={4} columns={4} />`
+- KPI strip → `<SkeletonKPIStrip cells={4} />`
+- Chart → `<SkeletonChart />`
+- Single card → `<SkeletonCard height="10rem" />`
+
+Button-level spinners (saving, uploading, adding) stay as `<Loader2 className="animate-spin" />` — those are correct usage. Page-level / tab-level "full content area is loading" states must be skeletons.
+
+**Error states** use `<EmptyState>` with a relevant icon + retry action (see Capacity page for the pattern).
+
+### Mobile rules (reinforced)
+
+- Every `<table>` must be wrapped in a `.h-scroll` div so it scrolls horizontally on mobile instead of wrapping cells ("Webflow Partner" / "Closed Won" must never break mid-cell).
+- `<PageHeader>` actions slot uses `flex-wrap` so multi-action headers stack on mobile.
+- `<KPIStrip>` is responsive by default: 2-col mobile / N-col desktop with correct internal dividers.
+- `.dashboard-main` has no top padding — sticky descendants (`<SectionTabs>`, table headers) sit flush below the top nav.
+
 ### Layout shell: no padding-top on `.dashboard-main`
 `.dashboard-main` is the scroll container. It deliberately carries **no `padding-top`** so `position: sticky; top: 0` descendants (section navs, table headers) can sit flush against the top nav with no visible bg-secondary gap. Per-page top spacing lives on the inner `.dashboard-page-inner` wrapper (max-w-7xl) in `app/(dashboard)/layout.tsx`. Pages must NOT put `className="dashboard-main"` on their own wrapper — that doubles the padding.
 

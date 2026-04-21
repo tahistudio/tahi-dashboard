@@ -10,11 +10,12 @@ import {
 } from 'lucide-react'
 import { parseActivityMetadata } from '@/lib/activity-meta'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
-import { SUPPORTED_CURRENCIES } from '@/lib/currency'
+import { DISPLAY_CURRENCIES } from '@/lib/currency'
 import { apiPath } from '@/lib/api'
 import { sourceBadge } from '@/lib/chart-colors'
 import { REQUEST_STATUS_CONFIG } from '@/lib/status-config'
 import { SidebarSection, SidebarCard as SharedSidebarCard } from '@/components/tahi/sidebar-card'
+import { SkeletonCard, SkeletonList } from '@/components/tahi/skeletons'
 
 // ---- Types ---------------------------------------------------------------
 
@@ -276,8 +277,14 @@ export function DealDetail({ dealId }: { dealId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center" style={{ padding: '4rem 0' }}>
-        <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--color-brand)' }} />
+      <div className="grid grid-cols-1 lg:grid-cols-3" style={{ gap: 'var(--space-4)' }}>
+        <div className="lg:col-span-2 flex flex-col" style={{ gap: 'var(--space-4)' }}>
+          <SkeletonCard height="9rem" />
+          <SkeletonList rows={5} />
+        </div>
+        <div>
+          <SkeletonCard height="18rem" />
+        </div>
       </div>
     )
   }
@@ -1343,7 +1350,7 @@ function EditableValue({ dealId, value, valueMin, valueMax, currency, onUpdated 
             height: '1.5rem',
           }}
         >
-          {SUPPORTED_CURRENCIES.map(c => (
+          {DISPLAY_CURRENCIES.map(c => (
             <option key={c.code} value={c.code}>{c.code}</option>
           ))}
         </select>

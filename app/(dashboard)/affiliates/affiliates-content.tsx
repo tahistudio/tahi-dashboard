@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Users, Link2, DollarSign, Loader2 } from 'lucide-react'
+import { Users, Link2, DollarSign } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { SkeletonKPIStrip, SkeletonCard } from '@/components/tahi/skeletons'
 
 interface AffiliateData {
   connected: boolean
@@ -42,8 +43,9 @@ export function AffiliatesContent() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-6 h-6 animate-spin text-[var(--color-text-subtle)]" aria-hidden="true" />
+        <div className="flex flex-col" style={{ gap: 'var(--space-6)' }}>
+          <SkeletonKPIStrip cells={3} />
+          <SkeletonCard height="10rem" />
         </div>
       ) : !data?.connected ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">

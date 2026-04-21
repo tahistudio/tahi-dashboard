@@ -485,7 +485,7 @@ function ByClientView({
 
             {isExpanded && (
               <div style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
-                <div style={{ overflowX: 'auto' }}>
+                <div className="h-scroll">
                   <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 500 }}>
                     <thead>
                       <tr style={{ background: 'var(--color-bg-secondary)' }}>
@@ -789,7 +789,7 @@ export function TimeList() {
             onCtaClick={() => setShowModal(true)}
           />
         ) : (
-          <div style={{ overflowX: 'auto' }}>
+          <div className="h-scroll">
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
               <thead>
                 <tr style={{ background: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>

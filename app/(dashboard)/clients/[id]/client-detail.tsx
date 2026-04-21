@@ -3762,6 +3762,7 @@ function ProfitabilityTab({ clientId }: { clientId: string }) {
             No costs logged yet. Add subcontractor fees, software subscriptions, or other client-specific costs to compute real gross margin.
           </p>
         ) : (
+          <div className="h-scroll">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs font-medium text-[var(--color-text-muted)] border-b" style={{ borderColor: 'var(--color-border)' }}>
@@ -3792,6 +3793,7 @@ function ProfitabilityTab({ clientId }: { clientId: string }) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

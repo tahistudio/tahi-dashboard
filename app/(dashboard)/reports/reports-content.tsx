@@ -24,7 +24,7 @@ import { useDisplayCurrency } from '@/lib/display-currency-context'
 // ── Currency options ─────────────────────────────────────────────────────────
 
 // Currencies the commitment form can be entered in (not a display-currency type).
-const CURRENCY_OPTIONS = ['NZD', 'USD', 'AUD', 'GBP', 'EUR', 'CAD', 'SGD', 'HKD', 'JPY', 'CHF'] as const
+const CURRENCY_OPTIONS = ['NZD', 'USD', 'AUD', 'GBP', 'EUR'] as const
 // Widened display-currency type — reports sub-components accept anything the
 // nav-bar switcher might pass.
 type DisplayCurrency = string

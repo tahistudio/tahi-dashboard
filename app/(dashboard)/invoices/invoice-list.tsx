@@ -791,7 +791,7 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
             onCtaClick={isAdmin ? () => setShowCreateModal(true) : undefined}
           />
         ) : (
-          <div style={{ overflowX: 'auto' }}>
+          <div className="h-scroll">
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 600 }}>
               <thead>
                 <tr style={{ background: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>

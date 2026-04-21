@@ -457,7 +457,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
             No line items on this invoice.
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
+          <div className="h-scroll">
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 500 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)' }}>

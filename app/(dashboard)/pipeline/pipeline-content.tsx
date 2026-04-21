@@ -1654,7 +1654,7 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
                     minHeight: '2.75rem',
                   }}
                 >
-                  {['NZD', 'USD', 'AUD', 'GBP', 'EUR', 'CAD', 'SGD', 'HKD', 'JPY', 'CHF'].map(c => (
+                  {['NZD', 'USD', 'AUD', 'GBP', 'EUR'].map(c => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
@@ -1689,7 +1689,7 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
                     minHeight: '2.75rem',
                   }}
                 >
-                  {['NZD', 'USD', 'AUD', 'GBP', 'EUR', 'CAD', 'SGD', 'HKD', 'JPY', 'CHF'].map(c => (
+                  {['NZD', 'USD', 'AUD', 'GBP', 'EUR'].map(c => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>

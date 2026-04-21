@@ -234,7 +234,7 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
               />
             ) : (
               <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-hidden">
-                <div className="overflow-x-auto">
+                <div className="h-scroll">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-[var(--color-border-subtle)]">
@@ -421,7 +421,7 @@ function AdminBillingView() {
               />
             ) : (
               <div style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-card)', overflow: 'hidden' }}>
-                <div className="overflow-x-auto">
+                <div className="h-scroll">
                   <table className="w-full text-sm">
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
@@ -487,7 +487,7 @@ function AdminBillingView() {
               />
             ) : (
               <div style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-card)', overflow: 'hidden' }}>
-                <div className="overflow-x-auto">
+                <div className="h-scroll">
                   <table className="w-full text-sm">
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>

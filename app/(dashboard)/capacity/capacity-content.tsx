@@ -300,7 +300,7 @@ export function CapacityContent() {
               </div>
             </div>
             {forecast.months.length > 0 && (
-              <div style={{ overflowX: 'auto' }}>
+              <div className="h-scroll">
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>

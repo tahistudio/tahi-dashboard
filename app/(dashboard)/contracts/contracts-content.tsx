@@ -452,7 +452,7 @@ export function ContractsContent() {
           />
         )
       ) : (
-        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-hidden">
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl h-scroll">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--color-border)]">
