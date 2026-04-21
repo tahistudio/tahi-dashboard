@@ -1,315 +1,403 @@
-# Request Detail — Redesign Spec
+# Request Detail + Request System — Redesign Spec (V2)
 
-**Status:** Idea stage. Approve before code.
-**Current file:** `app/(dashboard)/requests/[id]/request-detail.tsx` (1,961 lines)
-**Why redesign:** Tier 1 multi-persona page (admin + team + client). Most-opened page in the app per the pipeline. First place that "feels off" is felt most.
+**Status:** Idea stage — locked after feedback round 1.
+**Scope grew from:** "visual redesign of Request Detail page"
+**to:** "rearchitect requests as nestable + multi-participant, rebuild composer, redesign detail page, update AI wizard"
 
----
-
-## 1. Persona + purpose
-
-Four roles open this page with distinct mental models. The redesign has to serve **all four without forcing anyone to scroll past what they don't care about.**
-
-### 🎯 Role A — Admin (Liam / founder)
-**Opens the page to:** triage, unblock, make a decision, move the request forward.
-
-- **3-minute task:** "Is this moving? Anything blocking? Who's on it? When's it due?" → scan status, assignee, last update, blockers.
-- **30-minute task:** Review scope creep, change assignee, nudge client, log time, reconcile with invoice.
-
-What matters: status stepper, assignee/owner, scope-flag state, unread internal notes, days-since-last-update, client mood (tone of last client message), time logged vs estimate, related deal/invoice.
-
-### 🎯 Role B — Team member assigned to the request
-**Opens the page to:** do the work, answer the client, upload deliverables.
-
-- **3-minute task:** "What's the latest from the client? What am I expected to reply to?" → thread with unread markers.
-- **30-minute task:** Upload files, update checklist, mark ready for client review, log time.
-
-What matters: **the thread** (70% of their time is here), the checklist (their personal to-do inside the request), file uploads, status advance button, @mentions.
-
-### 🎯 Role C — Team member not assigned (helping / reviewing)
-**Opens the page to:** comment, add context, review deliverables.
-
-- **3-minute task:** Read description + scan thread, leave an internal note.
-- **30-minute task:** Review a deliverable, advise on direction, tag the assignee.
-
-What matters: description (context), thread (read-only vibe), internal notes toggle, @mention suggestions.
-
-### 🎯 Role D — Client contact
-**Opens the page to:** follow progress, send feedback, approve deliverables, ask questions.
-
-- **3-minute task:** "Where are they at? Any questions for me?" → status, latest reply.
-- **30-minute task:** Approve deliverable, upload source files, request revisions.
-
-What matters: clear status (plain English, not jargon), clear owner ("Liam is working on this"), the thread (only non-internal messages), approve/request-revision CTA, file uploads, **never see internal notes or scope flags or time entries**.
-
-### The #1/#2/#3 actions per role
-
-| Role | #1 | #2 | #3 |
-|---|---|---|---|
-| Admin | Scan status + blockers | Change status / assignee | Reply to client OR add internal note |
-| Team assigned | Reply to client | Update checklist / upload file | Move to Client Review |
-| Team unassigned | Read thread | Leave internal note | @mention assignee |
-| Client | Read latest status | Reply in thread | Approve or upload file |
+This spec covers **both the data model and the UI**. The data model changes are needed before the UI can be built, so we ship them in that order.
 
 ---
 
-## 2. Information architecture audit
+## Decisions locked from round 1
 
-### What's on the page today (by card, top→bottom)
-
-| Block | What it shows | Who needs it | Verdict |
-|---|---|---|---|
-| **Header**: title, request#, follow button, client name, status stepper (5 steps) | ID + status-at-a-glance | All | ✅ Keep. Stepper is excellent. |
-| **Description** card | Rich-text brief | All (esp. assignee + unassigned team) | ✅ Keep. But collapse for assignee (they've read it). |
-| **Thread** (messages + composer) | Conversation | All | ✅ Keep. This is the page's centre of gravity. |
-| **Activity Log** | Audit trail: status changes, assignments, etc. | Admin + assignee | ⚠️ Currently full card. Should be collapsible. Client probably doesn't need it. |
-| **Checklists** panel | Sub-tasks for the assignee | Assigned team | ⚠️ Keep, but move up — it's an action item, not an afterthought. |
-| **Files** panel | Uploads | All | ✅ Keep. |
-| **Sidebar: Status actions** (admin) | 4 "Move to X" buttons | Admin only | ⚠️ Redundant with the stepper for admins who can click a step. Consolidate. |
-| **Sidebar: Details** | Type, category, priority, assignee, due date, estimated, created, delivered | All | ✅ Keep. |
-| **Sidebar: Admin / scope flag** | Flag as scope creep | Admin only | ✅ Keep. |
-| **Sidebar: Time entry** | Log hours (admin) | Admin only | ✅ Keep. |
-
-### What's missing today
-
-1. **Plain-English status for clients.** The stepper shows "Submitted → In Review → In Progress → Client Review → Delivered" but a client opening the page still has to interpret what "In Review" means. Add a one-line "Liam is working on this. Expected delivery 18 May." under the header for clients.
-2. **"What am I expected to do next?" CTA.** Admin should see "Move to Client Review" as a big button when all checklist items are done. Client should see "Approve" or "Request revision" when status is Client Review. Team assignee should see "Mark ready for Client Review" when checklists are done. Today the action is buried in the sidebar or stepper.
-3. **Related deal + related invoice.** If this request is billed against a deal or has invoice line items, surface them. Today you have to bounce between pages.
-4. **Unread indicator on the thread.** A team member opens 20 requests a day — they need to know which ones have new client messages without scrolling.
-5. **Client's last-reply age ("2 days ago, 3 days since you responded").** Stale client conversation = urgent. Invisible today.
-6. **Mobile status stepper.** 5 steps don't fit at 375px. Currently horizontal-scrolls, which is OK, but there's no "you are here" marker visible without scroll.
-
-### What's redundant today
-
-1. **Sidebar Status action buttons ARE redundant with the stepper for admin.** Kill the buttons; make stepper steps clickable for admin.
-2. **Thread title shows "Thread" + count badge.** "Thread" is obvious; replace with "Messages (12, 3 unread)" which is informative.
-3. **Description card always expanded.** On repeat visits by assigned team, the description is noise. Collapse by default if user has opened the request before (persist to localStorage). First-time visitors see it expanded.
-
-### What should move
-
-1. **Checklist** → up, above Activity Log. It's an action area, not a log.
-2. **Activity Log** → bottom of left column OR into the sidebar as a collapsible section. Not important enough for prime real estate.
-3. **Time entry panel (admin)** → collapsed by default. Open only when logging time.
-4. **Follow button** → keep in header but shrink; it's a minor action.
-
-### What's persona-gated today that we should gate more aggressively
-
-| Block | Admin | Team assigned | Team unassigned | Client |
-|---|---|---|---|---|
-| Status stepper | ✅ clickable | ✅ clickable to "Client Review" | 👁 read-only | 👁 read-only |
-| Internal note toggle in composer | ✅ | ✅ | ✅ | ❌ hide entirely |
-| Scope flag card | ✅ | ❌ | ❌ | ❌ |
-| Time entry | ✅ | ⚠️ own entries only | ❌ | ❌ |
-| Activity Log | ✅ full | ✅ full | ✅ full | ⚠️ client-visible events only |
-| Checklist edit | ✅ | ✅ own items | ❌ read | ❌ hide |
-| File delete | ✅ | ✅ own uploads | ❌ | ✅ own uploads |
-
-Today, **scope flag + time entry + internal messages are visibly hidden from clients, but the internal-note toggle state is exposed** in the composer via `isInternal` which can leak between renders. Tighten this.
+| Question | Decision |
+|---|---|
+| Description collapse | Persist collapsed state per `(userId, requestId)` in localStorage, user can override via a toggle |
+| Activity log placement | Bottom of left column, collapsed by default |
+| Related deal / invoice surfacing | **Skip** — lives on client/company detail, not per-request |
+| Mobile stepper | Collapse to a single chip ("In Progress · 3 of 5"), tap opens a popover with the full stepper |
+| Keyboard shortcuts | **Skip V1**, revisit later |
+| CTA when checklists incomplete | See Pattern B below (progress-aware button) |
+| Primary CTA placement | Header card, full-width on mobile |
+| Task type system | **Drop the fine-grained types.** Only `small` or `large`. Drag-to-nest preserves size. |
 
 ---
 
-## 3. Layout sketch
+## 1. Architecture changes
 
-### Desktop (≥1024px)
+### A) Sub-requests (parent ↔ child)
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ Breadcrumb: Requests > [ClientName] > #023 title                            │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  Header Card                                                                 │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │ #023 • Website redesign hero refresh            [Follow] [Priority] │   │
-│  │ 🏢 Acme Corp · Assigned to Liam · Due 18 May                        │   │
-│  │ ────── Stepper: Submitted ─●─ In Review ─●─ In Progress ○ CR ○ Del ─│   │
-│  │                                                                       │   │
-│  │ 💡 Client view: "Liam is working on this. Expected 18 May."          │   │
-│  │ 🎯 Admin view:  "All checklists done — ready to move to Client      │   │
-│  │                  Review. [Move →]"                                   │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  Main (2/3)                              │ Sidebar (1/3)                    │
-│                                           │                                  │
-│  ┌─────────────────────────────────┐    │ ┌───────────────────────────┐   │
-│  │ Description (collapsed if you've │    │ │ DETAILS                    │   │
-│  │  opened it before — one click to │    │ │ • Type: Small Task         │   │
-│  │  expand)                         │    │ │ • Category: Design         │   │
-│  └─────────────────────────────────┘    │ │ • Priority: [High ▾]       │   │
-│                                           │ │ • Owner: [Liam ▾]          │   │
-│  ┌─────────────────────────────────┐    │ │ • Due: 18 May 2026         │   │
-│  │ Messages (12 · 3 unread)         │    │ │ • Estimated: 4h            │   │
-│  │ ┌───────────────────────────┐  │    │ │ • Logged: 2.5h             │   │
-│  │ │ Thread (messages + unread  │  │    │ │                            │   │
-│  │ │  divider, internal-note    │  │    │ │ RELATED                    │   │
-│  │ │  toggle shown to team)     │  │    │ │ • Deal: Acme redesign ($5k)│   │
-│  │ └───────────────────────────┘  │    │ │ • Invoice: INV-045 ($2,500)│   │
-│  │                                 │    │ │                            │   │
-│  │ [Composer + file picker]        │    │ │ CHECKLISTS                 │   │
-│  └─────────────────────────────────┘    │ │ • 3 / 5 complete           │   │
-│                                           │ │ (inline list, click to     │   │
-│  ┌─────────────────────────────────┐    │ │  toggle)                   │   │
-│  │ Files (5 attached)               │    │ │                            │   │
-│  │ [thumbnail grid + upload CTA]    │    │ │ SCOPE (admin only)         │   │
-│  └─────────────────────────────────┘    │ │ [Flag scope creep]         │   │
-│                                           │ │                            │   │
-│  ┌─────────────────────────────────┐    │ │ TIME (admin only)          │   │
-│  │ Activity Log [▾ collapsed]       │    │ │ [+ Log time]              │   │
-│  │ 23 events                        │    │ └───────────────────────────┘   │
-│  └─────────────────────────────────┘    │                                  │
-└─────────────────────────────────────────────────────────────────────────────┘
+**Schema change** — add to `requests` table:
+
+```ts
+parentRequestId: text('parent_request_id').references(() => requests.id, { onDelete: 'cascade' }),
+// Null = top-level request.
+// Set = this request is a sub-request of the parent.
 ```
 
-Key changes from today:
-- **Single consolidated sidebar card** (`<SidebarCard>`) with labelled sections — matches the deal-detail pattern we already ship.
-- **Checklist moved into the sidebar** (right column, under Related) — it's a metadata + actions thing, not a main-column block.
-- **Files panel moves up** above Activity Log.
-- **Activity Log is collapsed by default**, expands on click.
-- **"Related" section** surfaces linked deal + invoice (data we already have, just never showed).
-- **Primary action CTA** moved into the header card — "Move to Client Review" / "Approve" / whatever the next step is for this user's role.
+**Rules:**
+- A parent can have many sub-requests.
+- Sub-requests belong to the **same `orgId`** as the parent. Enforced on insert.
+- Sub-requests inherit the parent's `orgId`, `category` (unless overridden), and follower list (unless explicitly narrowed).
+- **Parent status is auto-derived** from children:
+  - Any child `in_progress` → parent `in_progress`
+  - All children `delivered` → parent auto-moves to `client_review` (admin can then mark parent delivered)
+  - Any child `blocked` → parent visually shows a blocked indicator but keeps its own status
+  - If a parent has no children, it behaves like a standalone request (today's behaviour)
 
-### Mobile (375px)
+**UI where sub-requests surface:**
+
+1. **Parent Request Detail** — sub-requests render as a checklist-style list inside the detail page, right under the description. Each line: status dot + title + assignee avatars + size badge (S/L) + click-through link. A "+ New sub-request" button at the end.
+2. **Child Request Detail** — breadcrumb shows `Requests > [Parent title] > [Child title]`. A "Back to parent" link.
+3. **Requests list** — parent rows render a nested count ("5 sub-requests, 3 done"). Children don't appear in the top-level list unless a "Include sub-requests" filter is toggled.
+4. **Requests board (kanban)** — only top-level requests show as cards by default. A parent card shows "3/5 done" in its footer. Optional "Expand" toggle shows children as indented cards under their parent (experimental — may cut if it's visually busy).
+5. **Drag-to-nest** — on the requests list or board, dragging request A onto request B (same `orgId`) opens a confirm: "Make '[A title]' a sub-request of '[B title]'?" Click to confirm.
+6. **Create sub-request from inside parent** — the "+ New sub-request" button in the parent detail opens the new-request dialog pre-filled with `parentRequestId` and the client locked.
+
+**AI wizard update:**
+- Wizard can output a single top-level request (today's behaviour) **or** a parent + sub-requests batch.
+- User prompt: "New website for Acme" → wizard proposes:
+  - Parent: "Acme website" (size: large)
+  - Sub-requests: "Gather brief + assets", "Wireframes", "Visual direction", "Webflow build", "QA + launch" (each sized S or L)
+- User confirms → all created in one call.
+- The request wizard `RequestDraft` type gains `subRequests: RequestDraft[]` (recursive one level only — no sub-sub-requests in V1).
+
+**Simplified type system:**
+- Today: `small_task` / `large_task` / other variants.
+- New: `size: 'small' | 'large'`. The `type` column is renamed/simplified. Internal vs external visibility handled by `isInternal` as today (stays).
+- Migration: everything that was `small_task` → `small`; everything else → `large`. One-time backfill.
+
+### B) Multi-assignee + PM + followers
+
+**Problem today:** `requests.assigneeId` is a single team member. No project manager slot. Followers exist but are single-person tied to one user via `/follow` API.
+
+**New model** — one junction table replaces both:
+
+```ts
+requestParticipants: {
+  id: text pk,
+  requestId: text FK → requests,
+  participantId: text,                       // teamMember.id or contact.id
+  participantType: 'team_member' | 'contact',
+  role: 'assignee' | 'pm' | 'follower',
+  addedAt: text,
+  addedById: text,
+  addedByType: 'team_member' | 'contact',
+}
+```
+
+**Rules:**
+- `role = 'pm'` — zero or one per request. Project manager, shown prominently.
+- `role = 'assignee'` — zero or many. The people doing the work. All get notified on client replies.
+- `role = 'follower'` — zero or many. Get notified on status changes and (optionally) all replies. Can be team members OR client contacts.
+- A single person can have only one role per request (no "PM and assignee" at the same time). If PM should also "do the work", they can be just an assignee and someone else is PM.
+- Client contacts can only be followers (not PM or assignee).
+- Removing a participant is soft — we keep the row for audit but mark `removedAt` so mention history resolves correctly.
+
+**Migration path:**
+1. Add the table.
+2. Backfill: each existing `assigneeId` → `requestParticipants` row with `role='assignee'`, `participantType='team_member'`.
+3. Backfill followers from the existing follow mechanism (wherever it lives today — need to audit that).
+4. Drop the `requests.assigneeId` column only after UI is fully swapped (phase 2).
+
+**UI — the "People" sidebar section:**
 
 ```
-┌──────────────────────────────────┐
-│ Breadcrumb (condensed to ←)     │
-├──────────────────────────────────┤
-│ #023 title                       │
-│ 🏢 Acme · Liam · Due 18 May      │
-│ ←Stepper: horizontal scroll→     │
-│ Primary action CTA (full width)  │
-├──────────────────────────────────┤
-│ Description (collapsed)          │
-├──────────────────────────────────┤
-│ Details accordion [▾]            │
-│  — Metadata, Related, Checklist  │
-├──────────────────────────────────┤
-│ Messages (12, 3 unread)          │
-│ [Thread]                         │
-│ [Composer]                       │
-├──────────────────────────────────┤
-│ Files (5)                        │
-├──────────────────────────────────┤
-│ Activity Log [▾]                 │
-├──────────────────────────────────┤
-│ Admin actions accordion [▾]      │
-│  (scope flag + time entry)       │
-└──────────────────────────────────┘
+PEOPLE
+────────────────────────
+Project manager
+  [● Liam  ⓧ ]          ← single slot, click to change
+  
+Assignees  (2)
+  [● Sarah  ⓧ ]
+  [● Mark   ⓧ ]
+  [+ Add assignee]        ← opens SearchableSelect for team members only
+  
+Followers  (3)
+  [● Jenna (Acme)  ⓧ ]   ← client contact
+  [● James         ⓧ ]   ← team member
+  [● Priya (Acme)  ⓧ ]
+  [+ Add follower]        ← opens SearchableSelect with team members AND contacts from this request's org
 ```
 
-Single column. Sidebar collapses into a single "Details" accordion above the thread (so metadata is one tap away, never buried below the scroll).
+Everything is a compact chip-with-avatar-and-remove-X. Click "Add" → a searchable dropdown (use the existing `<SearchableSelect>` component).
+
+**Bulk assign UI** (user called this out explicitly): from the requests list, select multiple requests with checkboxes, then "Assign to..." bulk action lets you pick one or more people and assign them as assignees to all selected requests in one call.
+
+### C) Messaging composer overhaul
+
+Current state (TiptapEditor): rich-text editor with @mentions, file attach, and an "Internal" toggle button rendered as a small pill with a 🔒 emoji + amber highlight. User reports it's buggy and confusing.
+
+**Problems to fix:**
+1. Internal state isn't obvious at a glance — is amber = on or off?
+2. No clear "who will see this" feedback — a team member can forget they're about to post internally.
+3. Emoji 🔒 is not our design language.
+4. The 🔒 pill uses hardcoded Tailwind amber classes (not our semantic tokens).
+5. Failure states use hardcoded Tailwind red classes too.
+6. File attach flow has edge cases: upload kicks off before the draft is ready, if you close the tab mid-upload the file is orphaned, no way to re-order attached files.
+7. Cmd/Ctrl+Enter to send isn't documented or tested (user reports "buggy").
+
+**New composer — spec:**
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│ ┌─────────────┐ ┌──────────────┐                               │
+│ │ 👁 Public   │ │ 🔒 Internal  │    (segmented control, left)   │
+│ └─────────────┘ └──────────────┘                               │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ Reply to Acme Corp, or add an internal note…             │  │
+│  │ (Tiptap content area, ~3 rows default, grows to 12)      │  │
+│  │                                                          │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│  [B] [I] [•] [1.] [<>] [🔗]          [📎 Attach]  [Cmd+↵ Send] │
+│  Attached:                                                     │
+│  [📄 hero-v2.fig 234kb ⓧ]  [🖼 brief.jpg 54kb ⓧ]              │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**Key changes:**
+- **Segmented control** for Public / Internal — clear binary state, always visible, uses `--color-brand` for Public (client-visible) and `--status-in-review-*` (amber) for Internal.
+- Internal state gets a **persistent banner** above the content area when active: "💡 Only the Tahi team will see this message. Your client (Acme Corp) won't be notified."
+- Client role: segmented control is hidden entirely — clients can only post public messages.
+- Toolbar tokens: all buttons use our design-system classes (no more raw `amber-400` / `red-200`).
+- Attached files list uses `<Badge>` component.
+- Send = primary `<TahiButton>` with keyboard shortcut "Cmd+↵" shown inline on the button at ≥md breakpoint.
+- Upload is **deferred until send** — files stay in local state until the message is submitted. This fixes the orphaned-file bug.
+- Cmd+Enter / Ctrl+Enter to send, Enter for new line (inverse of today — today Enter sends, Shift+Enter for new line, which trips people up on long replies).
+- File attach: drag-and-drop onto the composer works (today it doesn't).
+- When `isInternal` is active, the visual theme of the editor box shifts: amber left-border bar + amber banner. Impossible to miss you're posting internally.
+
+**Bugs we fix by rewriting this component:**
+- Send-on-Enter trapping in the middle of a paragraph
+- "🔒 Internal" pill that doesn't persist across re-renders in some cases
+- Orphaned uploads on tab close
+- Red/amber hardcoded classes don't follow dark-mode tokens
+
+**File to write:** replace `components/tahi/tiptap-editor.tsx` with `components/tahi/message-composer.tsx` (cleaner name). Old file deleted.
+
+### D) Simplified task type system
+
+Drop `type` granularity. One binary: **small** or **large**. This flows through:
+- `requests.size` column (rename from `type`)
+- AI wizard emits `size: 'small' | 'large'`
+- Badges: one `<Badge>` with size value
+- Capacity math: track slots can still multiply small vs large appropriately
+- Task estimation: small ≈ 1–4h, large ≈ 4h+ (no exact bounds, design decision per request)
 
 ---
 
-## 4. Navigation map
+## 2. UI / UX changes
 
-### In-links (how users arrive here)
-- Requests list → click a row
-- Overview → "Recent requests" panel
-- Client detail → Requests tab
-- Notifications → "New message on Request X"
-- Search → type title or #request-number
-- Tasks → "related request" link
-- Invoice detail → "requests billed under this invoice"
+### The full page layout (role-aware)
 
-### Out-links (where users go from here)
-- Client name → `/clients/[orgId]`
-- Assignee name → `/team/[memberId]` or impersonate
-- Related deal → `/pipeline/[dealId]`
-- Related invoice → `/invoices/[invoiceId]`
-- File → inline preview or download
-- @mention in a message → `/team/[id]` or `/clients/contacts/[id]`
-- Checklist sub-task → if linked to a Task, `/tasks/[taskId]`
-- "View in client portal" (admin impersonation shortcut)
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ Breadcrumb: Requests › [Parent title if child] › [This title]      │
+├──────────────────────────────────────────────────────────────────────┤
+│  HEADER CARD                                                         │
+│  ┌───────────────────────────────────────────────────────────────┐ │
+│  │ #023 • Acme website hero refresh          [Follow] [size: L] │ │
+│  │ 🏢 Acme Corp · PM: Liam · 2 assignees · Due 18 May           │ │
+│  │                                                               │ │
+│  │ ────── Stepper (mobile: single chip) ──────                  │ │
+│  │                                                               │ │
+│  │ ★ PRIMARY CTA (role-aware, see Pattern B below)              │ │
+│  └───────────────────────────────────────────────────────────────┘ │
+├──────────────────────────────────────────────────────────────────────┤
+│  MAIN (2/3)                          │  SIDEBAR (1/3)               │
+│                                       │                              │
+│  ┌────────────────────────────────┐ │  ┌──────────────────────────┐│
+│  │ Description (collapsed ↓)       │ │  │ DETAILS                  ││
+│  └────────────────────────────────┘ │  │ Size · Category · Due    ││
+│                                       │  │ Created · Estimated      ││
+│  ┌────────────────────────────────┐ │  │ Logged time              ││
+│  │ SUB-REQUESTS (if parent)        │ │  │                          ││
+│  │ ● Wireframes           3/5 done │ │  │ PEOPLE                   ││
+│  │ ○ Visual direction     Sarah    │ │  │ Project manager          ││
+│  │ ○ Webflow build        Liam     │ │  │ Assignees (multi)        ││
+│  │ ○ QA + launch          unassgnd │ │  │ Followers (multi)        ││
+│  │ [+ New sub-request]             │ │  │                          ││
+│  └────────────────────────────────┘ │  │ CHECKLISTS               ││
+│                                       │  │ (for THIS request)       ││
+│  ┌────────────────────────────────┐ │  │                          ││
+│  │ MESSAGES (12 · 3 unread)        │ │  │ SCOPE (admin only)       ││
+│  │                                 │ │  │ [Flag]                   ││
+│  │ [Thread w/ unread divider]      │ │  │                          ││
+│  │                                 │ │  │ TIME (admin only)        ││
+│  │ [Public / Internal seg ctrl]    │ │  │ [+ Log]                  ││
+│  │ [Composer]                      │ │  └──────────────────────────┘│
+│  └────────────────────────────────┘ │                                │
+│                                       │                                │
+│  ┌────────────────────────────────┐ │                                │
+│  │ FILES (5)                       │ │                                │
+│  └────────────────────────────────┘ │                                │
+│                                       │                                │
+│  ┌────────────────────────────────┐ │                                │
+│  │ ACTIVITY LOG ↓ (collapsed)      │ │                                │
+│  └────────────────────────────────┘ │                                │
+└──────────────────────────────────────────────────────────────────────┘
+```
 
-**No dead ends.** Every entity is clickable. Every data field that represents something has a link to the source of truth for that thing.
+Key structural decisions:
+- **Sub-requests render inside the page** as a dedicated section under Description when the current request IS a parent. If it's not a parent, this section doesn't render.
+- **People lives in the sidebar** with three distinct slots (PM / assignees / followers).
+- **Checklists stay in the sidebar** (for the request itself). These are NOT the same as sub-requests. Checklists = "inside this one request, things to do." Sub-requests = "child requests that are separate deliverables."
+- **Related deal/invoice REMOVED** per your feedback.
+- **Messaging composer lives in the Messages card** but is a rewrite (see composer spec above).
+
+### Primary CTA — Pattern B (progress-aware button)
+
+The header card shows a **single big CTA** appropriate to your role + the request state:
+
+| Role | State | CTA |
+|---|---|---|
+| Admin | status = submitted | "Start reviewing →" (moves to in_review) |
+| Admin | status = in_review, no assignees | "Assign someone first →" (scrolls to sidebar) |
+| Admin | status = in_review, has assignees | "Start work →" (moves to in_progress) |
+| Admin | status = in_progress, all checklists done | **"Move to Client Review"** (brand colour, bold) |
+| Admin | status = in_progress, partial checklists | **"2 of 5 checklists done · Complete to advance"** (neutral colour, not disabled — still clickable to jump focus to the checklist) |
+| Admin | status = in_progress, parent request with incomplete sub-requests | "3 of 5 sub-requests done · Complete to advance" (same neutral treatment) |
+| Admin | status = client_review | "Waiting on client · Nudge" (secondary button) |
+| Admin | status = delivered | none (done) |
+| Team assignee | status = in_progress | Same "Move to Client Review" or progress-aware label |
+| Client | status = client_review | **"Approve & close"** (brand) + **"Request revision"** (secondary, side by side) |
+| Client | any other state | none |
+
+**Pattern B rationale:** progress-aware button text tells the user *what's blocking* rather than just greying out a disabled button. If a user clicks a "partial" label, we scroll-jump to the checklist (friendly nudge, not punishment).
+
+### Sub-request section UI (when current request is a parent)
+
+Inline checklist style, not a nested mini-kanban (keeps the page scannable):
+
+```
+SUB-REQUESTS   3 of 5 done
+──────────────────────────────────────────────────
+● Wireframes                    Sarah   [S] [In Progress]
+● Gather brief + assets         Liam    [S] [Delivered ✓]
+● Visual direction              —       [S] [Submitted]
+● Webflow build                 Liam    [L] [Submitted]
+● QA + launch                   —       [S] [Submitted]
+[+ New sub-request]
+```
+
+Each row: status dot (coloured via `stageColour`) + title (link) + assignee avatar + size badge + status badge. Click anywhere on a row → opens the child request.
+
+A parent row can be dragged to re-order sub-requests. Sub-requests use a `position` integer to preserve order.
+
+### Kanban / list drag-to-nest
+
+On the requests list or kanban board:
+- Dragging request A onto request B (same `orgId`) shows a drop zone highlight on B.
+- On drop: open confirm dialog "Make '[A title]' a sub-request of '[B title]'?" with cancel + confirm buttons.
+- Confirm → set `A.parentRequestId = B.id`. A disappears from top-level list, appears in B's sub-request section.
+- If A already has sub-requests of its own (a grandparent attempt) → block and show an error: "V1 only supports one level of nesting. Move A's sub-requests out first, then try again."
+
+### Mobile stepper — single-chip mode
+
+At widths `< 640px`, the 5-step stepper collapses to:
+
+```
+[ ● In Progress · 3 of 5  ⓘ ]
+```
+
+Tap the chip → small popover with the full stepper (dots + labels) + keyboard-style arrow navigation. Saves ~180px of vertical header space on small phones.
+
+### Description collapse — persisted + user-controlled
+
+- Key: `localStorage['tahi:request-desc:{requestId}']` = `'expanded' | 'collapsed' | undefined`
+- **First visit** (key undefined): expanded.
+- **Subsequent visits**: use stored value. Default to collapsed (1-line preview + "Show more") if key is undefined AND the user has opened this request at least once in the last 30 days.
+- A toggle button at the top-right of the description card lets the user flip + persist state.
+- Collapsed render: one-line preview (description truncated to ~200 chars, no HTML).
+
+### Unread markers
+
+New optional column on the upcoming participants / reads table:
+
+```ts
+requestReads: {
+  id, requestId, userId, lastReadAt
+}
+```
+
+When the user views a request detail page, after 2 seconds on the page, we upsert `lastReadAt = now()` for that user. Messages with `createdAt > lastReadAt` are "unread." Rendered as:
+- A red-dot count badge on the Messages card header: "Messages (12 · 3 unread)"
+- A horizontal divider inside the thread above the first unread message: "─── 3 unread messages ───"
 
 ---
 
-## 5. Interaction details
+## 3. Migration plan
 
-### Primary action CTA (header, role-aware)
-- **Admin, status = in_review:** "Start working → (moves to in_progress)"
-- **Admin, status = in_progress, checklists done:** "Move to Client Review" (highlighted, brand colour)
-- **Admin, status = in_progress, checklists NOT done:** grey-out the button, tooltip "Complete all checklists first"
-- **Client, status = client_review:** "Approve & close" OR "Request revision" (2 buttons)
-- **Team assigned, status = in_progress:** "Ready for client review" (same as admin's primary)
-- **Otherwise:** hide the CTA
+### Phase 1 — schema only (no UI changes) — 1 session
+1. Add `parentRequestId` to `requests` (migration).
+2. Create `requestParticipants` table (migration).
+3. Create `requestReads` table (migration).
+4. Backfill `requestParticipants` from existing `assigneeId`.
+5. Keep `assigneeId` column for now; new UI reads from participants, old UI still works.
+6. Type-check, test.
 
-### Description collapse state
-- Persisted per `(userId, requestId)` in localStorage under key `tahi:request-desc:{id}`
-- First visit: expanded
-- Subsequent visits: collapsed (1-line preview + "Show more")
-- Collapse state overridden by a toggle button at the top-right of the description card
+### Phase 2 — API routes — 1 session
+1. `/api/admin/requests/[id]/participants` GET + POST + DELETE
+2. `/api/admin/requests/[id]/sub-requests` GET + POST + reorder
+3. `/api/admin/requests/[id]/reads` POST (mark read)
+4. `/api/admin/requests/bulk-assign` POST
+5. `/api/admin/requests/[id]/nest` POST (drag-to-nest)
+6. Update existing `/api/admin/requests/[id]` GET to include `participants[]` + `subRequests[]` + `parent` + `unreadCount`.
+7. MCP tools for all of the above (per DESIGN.md MCP parity rule).
 
-### Unread message detection
-- Use `request.lastReadAt` per user (new field, needs schema addition)
-- Messages with `createdAt > lastReadAt` → "3 unread" badge on Messages header + a divider above the first unread
-- Visiting the request marks all client messages as read after 2 seconds (so a quick glance doesn't count)
+### Phase 3 — new composer — 1 session
+1. Build `components/tahi/message-composer.tsx` with the segmented Public/Internal control, file-attach-on-send, Cmd+Enter, drag-drop, tokenised colours.
+2. Wire it into request-detail, replace TiptapEditor.
+3. Keep TiptapEditor file until one session later (for rollback safety), then delete.
 
-### Checklist moved to sidebar
-- Compact rendering: title + N of M + inline bulleted list (each checkbox-toggleable)
-- Admin/assignee: direct click toggles + optimistic update
-- Unassigned team/client: read-only, see progress but can't toggle
+### Phase 4 — sub-request UI — 1 session
+1. Sub-request section in request-detail (inline list).
+2. New sub-request button → opens pre-filled `NewRequestDialog`.
+3. Parent breadcrumb on child detail.
+4. Drag-to-nest on list + board views.
+5. AI wizard `subRequests` output.
 
-### Activity log collapsed by default
-- Show count ("23 events")
-- Click to expand in place — no navigation
-- Newest first
+### Phase 5 — people sidebar + bulk assign — 1 session
+1. People sidebar section (PM / assignees / followers slots).
+2. Add/remove participant inline.
+3. Bulk assign from requests list.
+4. Update notification logic: notify assignees on client replies, followers on status changes.
 
-### Scope flag UX
-- Admin-only sidebar section
-- When flagged: red border, icon, timestamp ("Flagged 3d ago by Liam")
-- Click to unflag
-- When someone flags, emit an automation event (already wired in the codebase)
+### Phase 6 — header + CTA + stepper + activity log migration — 1 session
+1. Rebuild the header card with new PageHeader + primary CTA pattern.
+2. Mobile stepper single-chip + popover.
+3. Migrate Activity Log to `<ActivityTimeline>` + collapsed-by-default.
+4. Delete all `SidebarCard` local wrappers, use the shared primitive.
+5. Everything moves to the primitive library (`<Card>`, `<Badge>`, `<KPIStrip>` if needed).
 
-### @mention in composer
-- Already works via `MentionInput`
-- Keep the current behaviour — no redesign needed
-- Internal note toggle: keep, but render as a **segmented control** (Public / Internal) instead of a checkbox — clearer state
+### Phase 7 — polish + QA pass — 1 session
+1. Walk all 4 personas via impersonation.
+2. Mobile 375px + 768px checks.
+3. Unread markers live test.
+4. Description collapse state.
+5. Drag-to-nest edge cases (sub of sub, different-org drop, etc.)
+6. Accessibility: screen reader through a full request flow.
 
-### Mobile stepper "you are here" fix
-- Current step gets a sticky left-edge marker on mobile while the rest scrolls past
-- OR on mobile, replace the 5-step stepper with a single chip: "● In Progress (step 3 of 5)" + a "Show all" toggle
-
-### Keyboard shortcuts (new)
-- `r` — focus the reply composer
-- `j` / `k` — next / previous message
-- `u` — upload a file
-- `.` — open the sidebar details accordion (mobile)
-- These only work when the composer is NOT focused
-
----
-
-## 6. Primitive + composite usage
-
-This redesign composes from the library we built, no new primitives needed:
-
-- `<PageHeader>` — title + subtitle (client name) + actions slot for Follow button
-- `<Card>` — every main-column block (Description, Messages, Files, Activity Log)
-- `<Card.Header bordered>` + `<Card.Title>` for each of the above
-- `<SidebarCard>` + `<SidebarSection label>` — Details, Related, Checklist, Scope, Time
-- `<Badge tone/stage/source>` — priority, category, status, unread count
-- `<SectionTabs>` — not needed; page is short enough
-- `<ActivityTimeline>` + `<ActivityItem>` — the Activity Log section (currently custom, migrate)
-- `<SlideOver>` — if we want a "Log time" panel that doesn't leave the page (nice-to-have, not core to redesign)
+**Total estimated: 7 sessions.** Big but appropriately scoped for a Tier-1 page + the structural changes behind it.
 
 ---
 
-## 7. Questions for you
+## 4. Open questions remaining for you
 
-Before I build, I need 6 decisions:
+The round-1 decisions are locked. These 3 are new and I need your call before Phase 1:
 
-1. **Primary CTA behaviour when checklists are incomplete.** Grey-out with tooltip, OR hide entirely, OR show a different text like "Complete checklists to advance"?
-2. **Description collapse.** Keep it collapsed by default on repeat visits (my proposal)? Or always expanded? Or let each user toggle as they please with no persistence?
-3. **Activity log placement.** Bottom of left column (my proposal — it's audit trail, low priority), or in the sidebar as a collapsible section?
-4. **Related deal/invoice surfacing.** My proposal shows them in the sidebar as a "Related" section. Agree, or would you prefer inline breadcrumb-style at the top?
-5. **Mobile stepper.** Horizontal scroll with sticky current-step marker, OR collapse to single chip with "Show all" reveal?
-6. **Keyboard shortcuts.** Ship with the 4 I proposed (r / j / k / u / .), or skip for V1 and add later?
+1. **Sub-request nesting depth** — V1 is **one level deep** (parent + children, no grandchildren). Agree? Or do you want arbitrary depth from day 1?
+2. **Project manager role — is it optional or required?** If a request has no PM, does the primary assignee implicitly act as PM? Or should the system nag "assign a PM" when a request has ≥2 assignees?
+3. **Follower notifications** — followers get status change emails by default. Should they ALSO get all public messages by default, or only when @mentioned?
 
-Once you answer these, I'll:
-1. Wire up any schema additions needed (`lastReadAt` for unread detection)
-2. Rebuild the page in order: Header → Sidebar → Thread → Description → Files → Activity Log
-3. Write it composed from the primitive library (~500 lines vs current 1,961)
-4. Test all 4 personas via impersonation
-5. Deploy to main, live review
+Once these three are answered, I start Phase 1.
 
-Expected diff: **−1,500 lines** (current 1,961 → ~500), most of the shrinkage from composing via primitives rather than re-rolling cards/sections/sidebars inline.
+---
+
+## 5. What this spec does NOT cover (future tickets)
+
+- **Sub-sub-requests** (nesting beyond 1 level) — defer to V2 once we know if anyone wants it.
+- **Cross-org request linking** (blocking request at client A depends on request at client B) — defer; rare edge case.
+- **Assignee workload visualization inside a request** — belongs on the Capacity page, not here.
+- **Client-side sub-request rendering polish** — clients see sub-requests too, but V1 just renders the same list; custom client-friendly UI is future work.
+- **Automated PM assignment** based on access-scoping rules — future work.
