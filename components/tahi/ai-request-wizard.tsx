@@ -41,6 +41,12 @@ interface AiRequestWizardProps {
     speaker?: 'client' | 'admin'
     planType?: string
   }
+  /** Which wizard endpoint to call. Defaults to the admin endpoint;
+   *  clients pass `/api/portal/ai/request-wizard`. */
+  wizardEndpoint?: string
+  /** Where to POST the final request(s). Defaults to the admin endpoint;
+   *  clients pass `/api/portal/requests`. */
+  submitEndpoint?: string
 }
 
 // ── Styling maps (match AiTaskWizard palette) ────────────────────────────────
@@ -71,7 +77,14 @@ const INITIAL_MESSAGE: ChatMessage = {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function AiRequestWizard({ open, onClose, onRequestsCreated, context = {} }: AiRequestWizardProps) {
+export function AiRequestWizard({
+  open,
+  onClose,
+  onRequestsCreated,
+  context = {},
+  wizardEndpoint = '/api/admin/ai/request-wizard',
+  submitEndpoint = '/api/admin/requests',
+}: AiRequestWizardProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_MESSAGE])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -114,7 +127,7 @@ export function AiRequestWizard({ open, onClose, onRequestsCreated, context = {}
     setInput('')
     setSending(true)
     try {
-      const res = await fetch(apiPath('/api/admin/ai/request-wizard'), {
+      const res = await fetch(apiPath(wizardEndpoint), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -144,7 +157,11 @@ export function AiRequestWizard({ open, onClose, onRequestsCreated, context = {}
 
   const handleCreate = useCallback(async () => {
     if (!latestDrafts || creating) return
-    if (!context.orgId) {
+    // Admin flows need an explicit orgId passed in (they're drafting on
+    // behalf of a client). Portal flows derive orgId server-side from
+    // Clerk auth, so the front end doesn't need to send one.
+    const isAdminFlow = context.speaker !== 'client'
+    if (isAdminFlow && !context.orgId) {
       setMessages(prev => [
         ...prev,
         { role: 'assistant', content: 'I need a client to submit this against. Close the wizard and open the New Request dialog with a client selected.' },
@@ -155,19 +172,22 @@ export function AiRequestWizard({ open, onClose, onRequestsCreated, context = {}
     try {
       const results: boolean[] = []
       for (const draft of latestDrafts) {
-        const res = await fetch(apiPath('/api/admin/requests'), {
+        const body: Record<string, unknown> = {
+          title: draft.title,
+          description: draft.description,
+          category: draft.category,
+          type: draft.type === 'large_task' || draft.type === 'new_feature' ? 'large_task' : 'small_task',
+          priority: draft.priority,
+          estimatedHours: draft.estimatedHours,
+        }
+        if (isAdminFlow) {
+          body.orgId = context.orgId
+          body.isInternal = true
+        }
+        const res = await fetch(apiPath(submitEndpoint), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            orgId: context.orgId,
-            title: draft.title,
-            description: draft.description,
-            category: draft.category,
-            type: draft.type === 'large_task' || draft.type === 'new_feature' ? 'large_task' : 'small_task',
-            priority: draft.priority,
-            estimatedHours: draft.estimatedHours,
-            isInternal: context.speaker === 'admin',
-          }),
+          body: JSON.stringify(body),
         })
         results.push(res.ok)
       }
@@ -190,7 +210,7 @@ export function AiRequestWizard({ open, onClose, onRequestsCreated, context = {}
     } finally {
       setCreating(false)
     }
-  }, [latestDrafts, creating, context.orgId, context.speaker, onRequestsCreated])
+  }, [latestDrafts, creating, context.orgId, context.speaker, submitEndpoint, onRequestsCreated])
 
   if (!open) return null
 

@@ -450,7 +450,11 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         open={aiWizardOpen}
         onClose={() => setAiWizardOpen(false)}
         onRequestsCreated={() => { setAiWizardOpen(false); fetchRequests() }}
-        context={{ orgId: defaultClientId, speaker: 'admin' }}
+        context={isAdmin
+          ? { orgId: defaultClientId, speaker: 'admin' }
+          : { speaker: 'client' }}
+        wizardEndpoint={isAdmin ? '/api/admin/ai/request-wizard' : '/api/portal/ai/request-wizard'}
+        submitEndpoint={isAdmin ? '/api/admin/requests' : '/api/portal/requests'}
       />
 
       {/* Page header */}
@@ -503,7 +507,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
               Bulk Create
             </button>
           )}
-          {isAdmin && !isViewerImpersonation && (
+          {!isViewerImpersonation && (
             <button
               onClick={() => setAiWizardOpen(true)}
               className="hidden sm:flex items-center gap-2 font-medium transition-opacity hover:opacity-80"

@@ -1030,6 +1030,8 @@ const [view, setView] = useUserPreference<'kanban' | 'list'>(
 - Fixed `ai_task_wizard` schema: previously `context` was typed as a string, now correctly an object with `orgId` and `trackType`.
 - Updated `create_task` and `list_tasks` docstrings to reflect Decision #046: `type` is no longer required, auto-derives from `orgId` presence, and the legacy enum is now advisory rather than enforced. Stops AI callers from getting rejected for leaving `type` off a task create.
 
-**Deferred:** Portal-side wizard (clients drafting their own requests through the AI flow). Needs a portal-scoped endpoint with client-safe prompts and no access to admin-only context. Noted in TASKS, not started.
+**Portal-side wizard (shipped same day):** `POST /api/portal/ai/request-wizard` uses portal auth (denies the Tahi admin org, derives the client's `orgId` from Clerk) and a client-safe system prompt that never mentions internal hours, pricing, plan tiers, tracks, or "our team will". Priority defaults to `standard` and only escalates to `high` when the client explicitly uses urgent / ASAP language. The submit path bypasses `orgId` / `isInternal` because the portal's `/api/portal/requests` endpoint already scopes writes to the authenticated user's org.
+
+The `AiRequestWizard` React component now takes optional `wizardEndpoint` + `submitEndpoint` props so one component drives both admin and portal flows. The request-list page chooses the right pair based on `isAdmin`. Clients see the same "AI draft" button they need it to feel like the rest of the portal.
 
 ---
