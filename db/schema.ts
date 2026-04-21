@@ -195,8 +195,12 @@ export const requests = sqliteTable('requests', {
   trackId: text('track_id').references(() => tracks.id),
   projectId: text('project_id'),
   brandId: text('brand_id'),
-  // small_task | large_task | bug_fix | content_update | new_feature | consultation | custom
+  // Legacy: small_task | large_task | bug_fix | ...  — replaced by `size` below.
+  // Kept on the row for read-compat until all callers are migrated off it.
   type: text('type').notNull().default('small_task'),
+  // NEW : simplified size system. 'small' | 'large'.
+  // Backfill = small_task/bug_fix/content_update/consultation -> 'small', everything else -> 'large'.
+  size: text('size').default('small'),
   // design | development | content | strategy | admin | bug
   category: text('category'),
   title: text('title').notNull(),
@@ -207,6 +211,13 @@ export const requests = sqliteTable('requests', {
   // standard | high
   priority: text('priority').notNull().default('standard'),
   assigneeId: text('assignee_id').references(() => teamMembers.id),
+  // NEW : one level of nesting. Null = top-level request.
+  // Must share orgId with the parent (enforced at insert/update time in API layer).
+  // Cascading delete: removing a parent cascades to its children.
+  parentRequestId: text('parent_request_id'),
+  // NEW : position among sibling sub-requests (lower = earlier in the list).
+  // Drag-reorder inside a parent updates this value. Null for top-level requests.
+  subPosition: integer('sub_position'),
   // Contact ID or team_member ID
   submittedById: text('submitted_by_id'),
   submittedByType: text('submitted_by_type').default('contact'),
@@ -219,6 +230,8 @@ export const requests = sqliteTable('requests', {
   revisionCount: integer('revision_count').default(0),
   maxRevisions: integer('max_revisions').default(3),
   scopeFlagged: integer('scope_flagged', { mode: 'boolean' }).default(false),
+  // Optional reason given by admin when flagging
+  scopeFlagReason: text('scope_flag_reason'),
   // Admin-created on behalf of client (not visible in portal as "client submitted")
   isInternal: integer('is_internal', { mode: 'boolean' }).default(false),
   // JSON: form field responses
@@ -237,6 +250,101 @@ export const requests = sqliteTable('requests', {
   index('idx_requests_assignee').on(table.assigneeId),
   index('idx_requests_track').on(table.trackId),
   index('idx_requests_number').on(table.requestNumber),
+  index('idx_requests_parent').on(table.parentRequestId),
+])
+
+// ============================================================
+// REQUEST PARTICIPANTS (multi-assignee + PM + followers)
+// ============================================================
+// Replaces the single requests.assigneeId with a junction table that
+// supports multiple assignees, one optional project manager, and any
+// number of followers (team members OR client contacts).
+//
+// Roles :
+//   'pm'        : zero or one per request. Shown prominently.
+//   'assignee'  : zero or many. Notified on client replies + status moves.
+//   'follower'  : zero or many. Team members OR client contacts. Notified
+//                 on status moves (to submitted/in_review/client_review)
+//                 and public messages + client feedback. Never notified
+//                 of their own actions.
+//
+// A single person (by participantId + participantType) can have at most
+// one role per request. Enforced via unique index.
+
+export const requestParticipants = sqliteTable('request_participants', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  requestId: text('request_id').notNull().references(() => requests.id, { onDelete: 'cascade' }),
+  participantId: text('participant_id').notNull(),
+  // 'team_member' | 'contact'
+  participantType: text('participant_type').notNull(),
+  // 'pm' | 'assignee' | 'follower'
+  role: text('role').notNull(),
+  addedById: text('added_by_id'),
+  addedByType: text('added_by_type'),
+  addedAt: text('added_at')
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+  // Soft-delete. When a participant is removed, we mark instead of deleting
+  // so @mention history and audit logs still resolve their identity.
+  removedAt: text('removed_at'),
+}, (table) => [
+  index('idx_req_part_request').on(table.requestId),
+  index('idx_req_part_participant').on(table.participantId, table.participantType),
+  index('idx_req_part_role').on(table.role),
+])
+
+// ============================================================
+// REQUEST READS (per-user unread message tracking)
+// ============================================================
+// Tracks when each user last "fully read" a request. Messages created
+// after lastReadAt are "unread" for that user. Updated 2 seconds after
+// a user lands on the request detail page.
+
+export const requestReads = sqliteTable('request_reads', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  requestId: text('request_id').notNull().references(() => requests.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull(),
+  userType: text('user_type').notNull(), // 'team_member' | 'contact'
+  lastReadAt: text('last_read_at')
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_req_reads_request').on(table.requestId),
+  index('idx_req_reads_user').on(table.userId, table.userType),
+])
+
+// ============================================================
+// ACTIVE TIMERS (live time tracking, one per user)
+// ============================================================
+// A running stopwatch attached to a specific request OR task. Exactly
+// one active timer per user globally (enforced by unique index on
+// userId). Heartbeat via lastPingAt every 30 seconds; if the app reopens
+// with lastPingAt > 2 minutes old we prompt the user to log the elapsed
+// time or discard.
+
+export const activeTimers = sqliteTable('active_timers', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text('user_id').notNull().references(() => teamMembers.id, { onDelete: 'cascade' }),
+  // One of requestId or taskId MUST be set (check enforced in API layer).
+  requestId: text('request_id').references(() => requests.id, { onDelete: 'cascade' }),
+  taskId: text('task_id'),
+  startedAt: text('started_at')
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+  // When paused, we freeze the elapsed clock at this moment.
+  // When null, timer is actively running.
+  pausedAt: text('paused_at'),
+  // Cumulative paused duration in seconds (for correct elapsed calculation
+  // across multiple pause/resume cycles).
+  pausedSeconds: integer('paused_seconds').notNull().default(0),
+  lastPingAt: text('last_ping_at')
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+  notes: text('notes'),
+}, (table) => [
+  // One active timer per user, globally.
+  index('uniq_active_timer_per_user').on(table.userId),
+  index('idx_active_timers_request').on(table.requestId),
 ])
 
 // ============================================================
