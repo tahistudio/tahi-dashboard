@@ -298,15 +298,72 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ results })
 }
 
-// GET returns the list of available migrations without running anything
+/**
+ * GET without args → list available migrations.
+ * GET with ?run=0018 (or any name) → apply that single migration (same as
+ * POST body). Useful so admins can run migrations by visiting a URL in
+ * the browser without needing devtools / curl.
+ *
+ *   GET /api/admin/db/migrate
+ *   GET /api/admin/db/migrate?run=0018
+ *   GET /api/admin/db/migrate?run=0019
+ *   ...
+ */
 export async function GET(req: NextRequest) {
   const { orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  return NextResponse.json({
-    migrations: MIGRATIONS.map(m => ({
-      name: m.name,
-      description: m.description,
-      statementCount: m.statements.length,
-    })),
-  })
+
+  const { searchParams } = new URL(req.url)
+  const run = searchParams.get('run')
+
+  if (!run) {
+    return NextResponse.json({
+      migrations: MIGRATIONS.map(m => ({
+        name: m.name,
+        description: m.description,
+        statementCount: m.statements.length,
+      })),
+      hint: 'Append ?run=<name> to execute a single migration. For V3 schema apply 0018, 0019, 0020, 0021 one at a time.',
+    })
+  }
+
+  const targets = run === 'all' ? MIGRATIONS : MIGRATIONS.filter(m => m.name === run)
+  if (targets.length === 0) {
+    return NextResponse.json({
+      error: `Unknown migration "${run}". Known: ${MIGRATIONS.map(m => m.name).join(', ')} or "all".`,
+    }, { status: 400 })
+  }
+
+  const drizzle = (await db()) as D1
+  const results: Array<{ name: string; status: 'applied' | 'error'; error?: string; statementCount?: number; skippedAlreadyExists?: number }> = []
+
+  for (const m of targets) {
+    let applied = 0
+    let skippedAlreadyExists = 0
+    try {
+      for (const stmt of m.statements) {
+        try {
+          await drizzle.run(sql.raw(stmt))
+          applied++
+        } catch (stmtErr) {
+          const msg = stmtErr instanceof Error ? stmtErr.message : String(stmtErr)
+          if (msg.includes('duplicate column name') || msg.includes('already exists')) {
+            skippedAlreadyExists++
+          } else {
+            throw stmtErr
+          }
+        }
+      }
+      results.push({ name: m.name, status: 'applied', statementCount: applied, skippedAlreadyExists })
+    } catch (err) {
+      results.push({
+        name: m.name,
+        status: 'error',
+        error: err instanceof Error ? err.message : 'Unknown error',
+        statementCount: applied,
+      })
+    }
+  }
+
+  return NextResponse.json({ results })
 }
