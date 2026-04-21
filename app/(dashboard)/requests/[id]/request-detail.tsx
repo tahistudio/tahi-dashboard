@@ -20,6 +20,7 @@ import { useToast } from '@/components/tahi/toast'
 import { Card } from '@/components/tahi/card'
 import { SubRequestsPanel, type SubRequestRow } from '@/components/tahi/sub-requests-panel'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
+import { PeoplePanel, type Participant } from '@/components/tahi/people-panel'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -156,6 +157,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const [unreadCount, setUnreadCount] = useState(0)
   const [newSubOpen, setNewSubOpen] = useState(false)
   const [unlinkingParent, setUnlinkingParent] = useState(false)
+  const [participants, setParticipants] = useState<Participant[]>([])
   const threadBottomRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
 
@@ -211,11 +213,13 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           subRequests?: SubRequestRow[]
           parent?: ParentRequestRef | null
           unreadCount?: number
+          participants?: Participant[]
         }
         setRequest(data.request)
         setSubRequests(data.subRequests ?? [])
         setParentRequest(data.parent ?? null)
         setUnreadCount(data.unreadCount ?? 0)
+        setParticipants(data.participants ?? [])
         try {
           setChecklists(JSON.parse(data.request.checklists || '[]') as Checklist[])
         } catch {
@@ -981,6 +985,15 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
         {/* Right column: Metadata sidebar */}
         <div className="flex flex-col gap-4">
+          {/* People — PM / Assignees / Followers */}
+          <PeoplePanel
+            requestId={requestId}
+            orgId={request.orgId}
+            participants={participants}
+            onChange={loadRequest}
+            isAdmin={isAdmin}
+          />
+
           {/* Details card */}
           <SidebarCard title="Details">
             <div className="flex flex-col" style={{ gap: '0.875rem' }}>

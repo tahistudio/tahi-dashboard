@@ -1664,6 +1664,17 @@ function BulkActionBar({
 }) {
   const [actionLoading, setActionLoading] = useState(false)
   const [statusDropdown, setStatusDropdown] = useState(false)
+  const [assignDropdown, setAssignDropdown] = useState(false)
+  const [assignRole, setAssignRole] = useState<'pm' | 'assignee' | 'follower'>('assignee')
+  const [teamMembers, setTeamMembers] = useState<Array<{ id: string; name: string }>>([])
+
+  useEffect(() => {
+    if (!assignDropdown || teamMembers.length > 0) return
+    fetch(apiPath('/api/admin/team-members'))
+      .then(r => r.json() as Promise<{ items: Array<{ id: string; name: string }> }>)
+      .then(d => setTeamMembers(d.items ?? []))
+      .catch(() => setTeamMembers([]))
+  }, [assignDropdown, teamMembers.length])
 
   const handleBulkStatus = async (status: string) => {
     setActionLoading(true)
@@ -1673,6 +1684,24 @@ function BulkActionBar({
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids: Array.from(selectedIds), status }),
+      })
+      if (res.ok) onDone()
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleBulkAssign = async (memberId: string) => {
+    setActionLoading(true)
+    setAssignDropdown(false)
+    try {
+      const res = await fetch(apiPath('/api/admin/requests/bulk-assign'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestIds: Array.from(selectedIds),
+          participants: [{ participantId: memberId, participantType: 'team_member', role: assignRole }],
+        }),
       })
       if (res.ok) onDone()
     } finally {
@@ -1752,6 +1781,112 @@ function BulkActionBar({
                 </button>
               )
             })}
+          </div>
+        )}
+      </div>
+
+      {/* Bulk assign people */}
+      <div className="relative">
+        <button
+          onClick={() => setAssignDropdown(v => !v)}
+          disabled={actionLoading}
+          className="flex items-center gap-1 text-sm font-medium transition-colors"
+          style={{
+            padding: '0.25rem 0.625rem',
+            borderRadius: '0.375rem',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg)',
+            cursor: 'pointer',
+            color: 'var(--color-text)',
+          }}
+          aria-label="Assign people to selected requests"
+        >
+          <Users className="w-3.5 h-3.5" aria-hidden="true" />
+          Assign
+          <ChevronDown className="w-3 h-3" aria-hidden="true" />
+        </button>
+        {assignDropdown && (
+          <div
+            className="absolute z-[70] mt-1"
+            style={{
+              background: 'var(--color-bg)',
+              border: '1px solid var(--color-border)',
+              borderRadius: '0.5rem',
+              boxShadow: 'var(--shadow-md)',
+              minWidth: '14rem',
+              padding: '0.5rem',
+            }}
+          >
+            {/* Role tabs */}
+            <div
+              role="tablist"
+              aria-label="Role"
+              style={{
+                display: 'flex',
+                gap: '0.25rem',
+                marginBottom: '0.5rem',
+                padding: '0.25rem',
+                background: 'var(--color-bg-secondary)',
+                borderRadius: '0.375rem',
+              }}
+            >
+              {(['pm', 'assignee', 'follower'] as const).map(r => (
+                <button
+                  key={r}
+                  type="button"
+                  role="tab"
+                  aria-selected={assignRole === r}
+                  onClick={() => setAssignRole(r)}
+                  style={{
+                    flex: 1,
+                    padding: '0.25rem 0.5rem',
+                    fontSize: '0.6875rem',
+                    fontWeight: 500,
+                    borderRadius: '0.25rem',
+                    background: assignRole === r ? 'var(--color-bg)' : 'transparent',
+                    color: assignRole === r ? 'var(--color-brand)' : 'var(--color-text-muted)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    textTransform: 'capitalize',
+                    boxShadow: assignRole === r ? 'var(--shadow-xs)' : 'none',
+                  }}
+                >
+                  {r === 'pm' ? 'PM' : r}
+                </button>
+              ))}
+            </div>
+            {/* Team member list */}
+            <div style={{ maxHeight: '16rem', overflowY: 'auto' }}>
+              {teamMembers.length === 0 ? (
+                <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', padding: '0.5rem', margin: 0 }}>
+                  Loading team members…
+                </p>
+              ) : (
+                teamMembers.map(tm => (
+                  <button
+                    key={tm.id}
+                    onClick={() => handleBulkAssign(tm.id)}
+                    className="w-full text-left text-sm transition-colors"
+                    style={{
+                      padding: '0.375rem 0.5rem',
+                      borderRadius: '0.25rem',
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      color: 'var(--color-text)',
+                      fontSize: '0.8125rem',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    {tm.name}
+                  </button>
+                ))
+              )}
+            </div>
+            <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', padding: '0.375rem 0.5rem 0', margin: 0 }}>
+              Adds this person as <strong>{assignRole === 'pm' ? 'PM' : assignRole}</strong> on all {selectedCount} selected.
+            </p>
           </div>
         )}
       </div>
