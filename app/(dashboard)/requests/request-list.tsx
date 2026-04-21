@@ -12,6 +12,7 @@ import {
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { AiRequestWizard } from '@/components/tahi/ai-request-wizard'
 import { DateRangePicker, type DateRange } from '@/components/tahi/date-range-picker'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { ViewToggle } from '@/components/tahi/view-toggle'
@@ -944,10 +945,23 @@ function ListRow({
 function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: Request[]; columns: BoardColumn[]; isAdmin: boolean; onStatusChange: () => void }) {
   const byStatus = (status: string) => requests.filter(r => r.status === status)
 
+  // Drag-to-nest state : when a card is dropped onto another card, we stash
+  // source + target here and show a ConfirmDialog. User confirms → POST /nest.
+  const [nestPrompt, setNestPrompt] = useState<{
+    sourceId: string
+    sourceTitle: string
+    targetId: string
+    targetTitle: string
+  } | null>(null)
+  const [nestError, setNestError] = useState<string | null>(null)
+
   const handleDrop = async (e: React.DragEvent, newStatus: string) => {
     e.preventDefault()
     const el = e.currentTarget as HTMLElement
     el.style.borderColor = 'var(--color-border)'
+    // If the drop already triggered a nest onto a card, skip the status change
+    // (the card handler called stopPropagation but belt-and-braces).
+    if (e.dataTransfer.getData('nestHandled') === '1') return
     const requestId = e.dataTransfer.getData('requestId')
     const fromStatus = e.dataTransfer.getData('fromStatus')
     if (!requestId || fromStatus === newStatus) return
@@ -963,6 +977,41 @@ function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: R
       // silent
     }
   }
+
+  /** Drop-on-card handler : A dropped onto B → nest A under B. Only admins. */
+  const handleNestDrop = useCallback((sourceId: string, targetReq: Request) => {
+    if (!isAdmin || sourceId === targetReq.id) return
+    const source = requests.find(r => r.id === sourceId)
+    if (!source) return
+    setNestError(null)
+    setNestPrompt({
+      sourceId,
+      sourceTitle: source.title,
+      targetId: targetReq.id,
+      targetTitle: targetReq.title,
+    })
+  }, [isAdmin, requests])
+
+  const confirmNest = useCallback(async () => {
+    if (!nestPrompt) return
+    setNestError(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/requests/${nestPrompt.sourceId}/nest`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentRequestId: nestPrompt.targetId }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        setNestError(j.error ?? 'Failed to nest request')
+        return
+      }
+      setNestPrompt(null)
+      onStatusChange() // refresh list
+    } catch {
+      setNestError('Failed to nest request (network)')
+    }
+  }, [nestPrompt, onStatusChange])
 
   return (
     <div
@@ -1046,18 +1095,51 @@ function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: R
                   No requests
                 </div>
               ) : (
-                cards.map(req => <KanbanCard key={req.id} req={req} />)
+                cards.map(req => (
+                  <KanbanCard
+                    key={req.id}
+                    req={req}
+                    canNest={isAdmin}
+                    onNestDrop={sourceId => handleNestDrop(sourceId, req)}
+                  />
+                ))
               )}
             </div>
           </div>
         )
       })}
+
+      {/* Drag-to-nest confirm dialog */}
+      {nestPrompt && (
+        <ConfirmDialog
+          open
+          title="Make this a sub-request?"
+          description={
+            nestError
+              ? `${nestError}`
+              : `Make "${nestPrompt.sourceTitle}" a sub-request of "${nestPrompt.targetTitle}"? Only works when both belong to the same client.`
+          }
+          confirmLabel={nestError ? 'Try again' : 'Make sub-request'}
+          variant="warning"
+          onConfirm={confirmNest}
+          onCancel={() => { setNestPrompt(null); setNestError(null) }}
+        />
+      )}
     </div>
   )
 }
 
-function KanbanCard({ req }: { req: Request }) {
+function KanbanCard({
+  req,
+  canNest = false,
+  onNestDrop,
+}: {
+  req: Request
+  canNest?: boolean
+  onNestDrop?: (sourceId: string) => void
+}) {
   const cat = CAT_CFG[req.category ?? ''] ?? { bg: 'var(--cat-admin-bg)', color: 'var(--cat-admin-text)' }
+  const [nestHover, setNestHover] = useState(false)
 
   return (
     <Link
@@ -1073,19 +1155,52 @@ function KanbanCard({ req }: { req: Request }) {
       onDragEnd={(e) => {
         ;(e.currentTarget as HTMLElement).style.opacity = '1'
       }}
+      // Drop-on-card : treat as "nest this request under the target"
+      onDragOver={(e) => {
+        if (!canNest) return
+        const sourceId = e.dataTransfer.getData('requestId')
+        // dataTransfer.getData in dragover is empty in most browsers for
+        // security reasons, so we can't early-out on same-card here. We
+        // still highlight on any drag-over; the drop handler checks
+        // source !== target.
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        void sourceId
+        if (!nestHover) setNestHover(true)
+      }}
+      onDragLeave={() => {
+        if (nestHover) setNestHover(false)
+      }}
+      onDrop={(e) => {
+        if (!canNest || !onNestDrop) return
+        const sourceId = e.dataTransfer.getData('requestId')
+        if (!sourceId || sourceId === req.id) {
+          setNestHover(false)
+          return
+        }
+        // Prevent the column's drop handler from also firing (status change)
+        e.stopPropagation()
+        e.preventDefault()
+        e.dataTransfer.setData('nestHandled', '1')
+        setNestHover(false)
+        onNestDrop(sourceId)
+      }}
       style={{
         padding: '0.75rem',
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border)',
+        background: nestHover ? 'var(--color-brand-50)' : 'var(--color-bg)',
+        border: `${nestHover ? '2px dashed var(--color-brand)' : '1px solid var(--color-border)'}`,
         boxShadow: 'var(--shadow-sm)',
         textDecoration: 'none',
         cursor: 'grab',
+        transition: 'background 150ms ease, border-color 150ms ease',
       }}
       onMouseEnter={e => {
+        if (nestHover) return
         e.currentTarget.style.borderColor = 'var(--color-brand)'
         e.currentTarget.style.boxShadow = 'var(--shadow-md)'
       }}
       onMouseLeave={e => {
+        if (nestHover) return
         e.currentTarget.style.borderColor = 'var(--color-border)'
         e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
       }}
