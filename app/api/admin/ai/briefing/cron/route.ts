@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { generateBriefing } from '@/lib/ai-briefing'
 
 export const dynamic = 'force-dynamic'
 
@@ -101,43 +102,21 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Forward to the main POST handler. This avoids duplicating the 180+
-  // lines of data-gathering + Claude call + XML parsing logic.
-  const url = new URL(req.url)
-  const internalUrl = `${url.protocol}//${url.host}${url.pathname.replace(/\/cron$/, '')}`
-  const apiToken = process.env.TAHI_API_TOKEN
-  if (!apiToken) {
-    return NextResponse.json({ error: 'TAHI_API_TOKEN not configured' }, { status: 500 })
-  }
-
+  // Call the shared generator directly. We used to self-fetch the POST
+  // handler over HTTP, but Cloudflare rejects workers looping back through
+  // their own public hostname with error 1014, so the shared function is
+  // the right pattern.
   try {
-    const res = await fetch(internalUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // Bearer auth on the same dashboard origin \u2014 uses the shared API
-        // token that also powers MCP calls.
-        Authorization: `Bearer ${apiToken}`,
-      },
-      body: JSON.stringify({}),
-    })
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '')
-      return NextResponse.json(
-        { error: 'Briefing generation failed', status: res.status, detail },
-        { status: 502 },
-      )
-    }
-    const body = await res.json().catch(() => ({}))
+    const briefing = await generateBriefing()
     return NextResponse.json({
       generated: true,
       nzHour: hour,
       dayOfWeek: dow,
-      briefing: body,
+      briefing,
     })
   } catch (err) {
     return NextResponse.json(
-      { error: 'Briefing cron failed', detail: err instanceof Error ? err.message : 'Unknown' },
+      { error: 'Briefing generation failed', detail: err instanceof Error ? err.message : 'Unknown' },
       { status: 500 },
     )
   }
