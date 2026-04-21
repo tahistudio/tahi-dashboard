@@ -64,8 +64,9 @@ const STAGE_COLOUR_MAP: Record<string, string> = {
   proposal:        '#fbbf24', // amber : needs review
   quote:           '#fbbf24',
   negotiation:     '#06b6d4', // teal : active back-and-forth
-  'verbal commit': '#06b6d4',
-  verbal_commit:   '#06b6d4',
+  'verbal commit': '#fb923c', // orange : warming up, close to won (distinct from teal)
+  verbal_commit:   '#fb923c',
+  verbal:          '#fb923c',
   stalled:         '#9ca3af', // gray : paused
   paused:          '#9ca3af',
   on_hold:         '#9ca3af',
