@@ -79,7 +79,12 @@ export function RequestTimerControl({ requestId }: Props) {
       } else if (res.ok) {
         await fetchTimer()
         showToast('Timer started')
+      } else {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        showToast(j.error ?? `Couldn't start timer (${res.status})`)
       }
+    } catch {
+      showToast('Network error — timer not started')
     } finally {
       setActing(false)
     }
@@ -97,7 +102,12 @@ export function RequestTimerControl({ requestId }: Props) {
       if (res.ok) {
         await fetchTimer()
         showToast(timer.isPaused ? 'Timer resumed' : 'Timer paused')
+      } else {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        showToast(j.error ?? `Couldn't ${timer.isPaused ? 'resume' : 'pause'} timer`)
       }
+    } catch {
+      showToast('Network error — try again')
     } finally {
       setActing(false)
     }
@@ -118,7 +128,12 @@ export function RequestTimerControl({ requestId }: Props) {
         } else {
           showToast('Timer stopped')
         }
+      } else {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        showToast(j.error ?? `Couldn't stop timer`)
       }
+    } catch {
+      showToast('Network error — try again')
     } finally {
       setActing(false)
     }

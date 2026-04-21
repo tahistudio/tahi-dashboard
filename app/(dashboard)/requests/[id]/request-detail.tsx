@@ -6,7 +6,7 @@ import {
   Clock, AlertTriangle, RefreshCw,
   User, CheckCircle2, Loader2, Activity,
   FileText, Image as ImageIcon, Download, Paperclip,
-  Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud, Eye, EyeOff, ChevronDown,
+  Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud, ChevronDown,
 } from 'lucide-react'
 import Link from 'next/link'
 import { RequestThread } from '@/components/tahi/request-thread'
@@ -21,7 +21,7 @@ import { Card } from '@/components/tahi/card'
 import { SubRequestsPanel, type SubRequestRow } from '@/components/tahi/sub-requests-panel'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { PeoplePanel, type Participant } from '@/components/tahi/people-panel'
-import { RequestTimerControl } from '@/components/tahi/request-timer-control'
+import { TimeCard } from '@/components/tahi/time-card'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -154,7 +154,6 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const [dueDateInput, setDueDateInput] = useState('')
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [checklists, setChecklists] = useState<Checklist[]>([])
-  const [isFollowing, setIsFollowing] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const [newSubOpen, setNewSubOpen] = useState(false)
   const [unlinkingParent, setUnlinkingParent] = useState(false)
@@ -162,25 +161,10 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const threadBottomRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
 
-  // Load following state from localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem(`tahi-following-${requestId}`)
-      setIsFollowing(stored === 'true')
-    }
-  }, [requestId])
-
-  function toggleFollowing() {
-    const next = !isFollowing
-    setIsFollowing(next)
-    if (typeof window !== 'undefined') {
-      if (next) {
-        localStorage.setItem(`tahi-following-${requestId}`, 'true')
-      } else {
-        localStorage.removeItem(`tahi-following-${requestId}`)
-      }
-    }
-  }
+  // Following is now handled via the People panel's Followers slot —
+  // the user adds themselves as a follower if they want notifications.
+  // The old localStorage-based per-device "Follow" button was removed
+  // (duplicated the Followers participants list + wasn't server-backed).
 
   const apiBase = isAdmin ? apiPath('/api/admin') : apiPath('/api/portal')
 
@@ -338,42 +322,79 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     }
   }
 
+  // Optimistic patch helper — updates local state immediately, PATCHes the
+  // server in the background, rolls back + toasts on failure. Every field-
+  // level mutation below goes through this so the UI never blinks.
+  const patchRequest = useCallback(async (
+    patch: Partial<Request>,
+    successMsg?: string,
+  ) => {
+    if (!request) return
+    const previous = request
+    // Apply optimistically
+    setRequest({ ...previous, ...patch })
+    try {
+      const res = await fetch(apiPath(`/api/admin/requests/${requestId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      if (!res.ok) {
+        setRequest(previous)
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        showToast(j.error ?? 'Update failed — please retry')
+        return
+      }
+      if (successMsg) showToast(successMsg)
+    } catch {
+      setRequest(previous)
+      showToast('Network error — try again')
+    }
+  }, [request, requestId, showToast])
+
   async function handleStatusChange(newStatus: string) {
+    if (!request || request.status === newStatus) return
     setStatusUpdating(true)
-    await fetch(apiPath(`/api/admin/requests/${requestId}`), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus }),
-    })
-    await loadRequest()
+    await patchRequest({ status: newStatus }, `Moved to ${STATUS_LABELS[newStatus] ?? newStatus}`)
     setStatusUpdating(false)
-    showToast(`Status updated to ${STATUS_LABELS[newStatus] ?? newStatus}`)
   }
 
   async function saveChecklists(updated: Checklist[]) {
+    const previous = checklists
     setChecklists(updated)
-    await fetch(apiPath(`/api/admin/requests/${requestId}`), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ checklists: JSON.stringify(updated) }),
-    })
+    try {
+      const res = await fetch(apiPath(`/api/admin/requests/${requestId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ checklists: JSON.stringify(updated) }),
+      })
+      if (!res.ok) {
+        setChecklists(previous)
+        showToast('Checklist update failed')
+      }
+    } catch {
+      setChecklists(previous)
+      showToast('Network error — try again')
+    }
   }
 
   async function handleScopeFlagToggle() {
     if (!request) return
-    await fetch(apiPath(`/api/admin/requests/${requestId}`), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scopeFlagged: !request.scopeFlagged }),
-    })
-    await loadRequest()
+    await patchRequest(
+      { scopeFlagged: !request.scopeFlagged },
+      request.scopeFlagged ? 'Scope flag removed' : 'Scope flagged',
+    )
   }
 
   // Un-link this sub-request from its parent — promotes it to a top-level
-  // request. Uses the same /nest endpoint that drag-to-nest does.
+  // request. Uses the same /nest endpoint that drag-to-nest does. Optimistic.
   async function handleUnlinkFromParent() {
     if (!request?.parentRequestId || unlinkingParent) return
+    const previous = { request, parent: parentRequest }
     setUnlinkingParent(true)
+    // Apply optimistically
+    setRequest({ ...request, parentRequestId: null })
+    setParentRequest(null)
     try {
       const res = await fetch(apiPath(`/api/admin/requests/${requestId}/nest`), {
         method: 'POST',
@@ -381,13 +402,16 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         body: JSON.stringify({ parentRequestId: null }),
       })
       if (!res.ok) {
+        setRequest(previous.request)
+        setParentRequest(previous.parent)
         const j = await res.json().catch(() => ({})) as { error?: string }
         showToast(j.error ?? 'Failed to unlink from parent')
         return
       }
-      showToast('Promoted to top-level request')
-      await loadRequest()
+      showToast('Promoted to top-level')
     } catch {
+      setRequest(previous.request)
+      setParentRequest(previous.parent)
       showToast('Network error — try again')
     } finally {
       setUnlinkingParent(false)
@@ -396,31 +420,20 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
   async function handlePriorityChange(priority: string | null) {
     if (!priority) return
-    await fetch(apiPath(`/api/admin/requests/${requestId}`), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ priority }),
-    })
-    await loadRequest()
+    await patchRequest({ priority }, 'Priority updated')
   }
 
   async function handleAssigneeChange(assigneeId: string | null) {
-    await fetch(apiPath(`/api/admin/requests/${requestId}`), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assigneeId }),
-    })
-    await loadRequest()
+    const name = assigneeId ? teamMembers.find(tm => tm.id === assigneeId)?.name ?? null : null
+    await patchRequest(
+      { assigneeId, assigneeName: name },
+      assigneeId ? `Assigned to ${name ?? 'team member'}` : 'Unassigned',
+    )
   }
 
   async function handleDueDateChange(dueDate: string | null) {
-    await fetch(apiPath(`/api/admin/requests/${requestId}`), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dueDate }),
-    })
     setEditingDueDate(false)
-    await loadRequest()
+    await patchRequest({ dueDate }, dueDate ? 'Due date set' : 'Due date cleared')
   }
 
   // ---- Loading / Error / Not Found ------------------------------------------
@@ -514,342 +527,165 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         ]}
       />
 
-      {/* Header card */}
+      {/* Header card — minimal, modern dashboard style. Meta row up top
+          (request number + status badge + small indicator pills), then the
+          title owns the full width, then a compact progress bar below
+          instead of a chunky stepper. */}
       <div
         className="bg-[var(--color-bg)] rounded-xl"
         style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
       >
-        <div style={{ padding: '1.5rem' }}>
-          {/* Badges row */}
-          <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: '0.75rem' }}>
+        <div style={{ padding: '1.5rem 1.5rem 1.25rem' }}>
+          {/* Meta row */}
+          <div
+            className="flex items-center flex-wrap"
+            style={{ gap: '0.5rem', marginBottom: '0.625rem', fontSize: '0.75rem' }}
+          >
+            {request.requestNumber != null && (
+              <span
+                className="font-mono"
+                style={{ color: 'var(--color-text-subtle)', fontWeight: 500 }}
+              >
+                #{String(request.requestNumber).padStart(3, '0')}
+              </span>
+            )}
+            {request.requestNumber != null && (
+              <span style={{ color: 'var(--color-border)' }} aria-hidden="true">·</span>
+            )}
             <StatusBadge status={request.status} />
             {request.priority === 'high' && (
               <span
-                className="inline-flex items-center text-xs font-medium rounded-full"
+                className="inline-flex items-center rounded-full"
                 style={{
                   padding: '0.125rem 0.5rem',
+                  fontSize: '0.6875rem',
+                  fontWeight: 500,
                   background: 'var(--priority-high-bg)',
                   color: 'var(--priority-high-text)',
                   border: '1px solid var(--priority-high-border)',
                 }}
               >
-                High Priority
+                High priority
               </span>
             )}
             {request.scopeFlagged && (
               <span
-                className="inline-flex items-center gap-1 text-xs font-medium rounded-full"
+                className="inline-flex items-center gap-1 rounded-full"
                 style={{
                   padding: '0.125rem 0.5rem',
+                  fontSize: '0.6875rem',
+                  fontWeight: 500,
                   background: 'var(--color-danger-bg)',
                   color: 'var(--color-danger)',
                 }}
               >
-                <AlertTriangle size={10} />
+                <AlertTriangle size={10} aria-hidden="true" />
                 Scope flagged
               </span>
             )}
             {request.revisionCount > 0 && (
               <span
-                className="inline-flex items-center gap-1 text-xs rounded-full"
+                className="inline-flex items-center gap-1 rounded-full"
                 style={{
                   padding: '0.125rem 0.5rem',
-                  background: 'var(--status-submitted-bg)',
-                  color: 'var(--status-submitted-text)',
-                  border: '1px solid var(--status-submitted-border)',
+                  fontSize: '0.6875rem',
+                  background: 'var(--color-bg-tertiary)',
+                  color: 'var(--color-text-muted)',
                 }}
               >
-                <RefreshCw size={10} />
-                Revision {request.revisionCount}/{request.maxRevisions}
+                <RefreshCw size={10} aria-hidden="true" />
+                Rev {request.revisionCount}/{request.maxRevisions}
               </span>
             )}
           </div>
 
-          {/* Title + Follow */}
-          <div className="flex items-start gap-3">
-            <h1
-              className="text-2xl font-bold tracking-tight flex-1"
-              style={{ color: 'var(--color-text)', margin: 0, lineHeight: 1.3 }}
-            >
-              {isFollowing && (
-                <Eye
-                  size={16}
-                  className="inline-block align-text-top"
-                  style={{ color: 'var(--color-brand)', marginRight: '0.375rem' }}
-                  aria-label="Following this request"
-                />
-              )}
-              {request.requestNumber != null && (
-                <span className="font-mono" style={{ color: 'var(--color-text-subtle)', marginRight: '0.375rem' }}>
-                  #{String(request.requestNumber).padStart(3, '0')}
-                </span>
-              )}
-              {request.title}
-            </h1>
-            <button
-              onClick={toggleFollowing}
-              className="flex items-center gap-1.5 text-xs font-medium transition-colors flex-shrink-0"
-              style={{
-                padding: '0.375rem 0.75rem',
-                borderRadius: 'var(--radius-button)',
-                border: '1px solid var(--color-border)',
-                background: isFollowing ? 'var(--color-brand-50)' : 'var(--color-bg)',
-                color: isFollowing ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-                cursor: 'pointer',
-                minHeight: '2rem',
-              }}
-              aria-label={isFollowing ? 'Unfollow this request' : 'Follow this request'}
-            >
-              {isFollowing ? (
-                <>
-                  <EyeOff size={13} aria-hidden="true" />
-                  Unfollow
-                </>
-              ) : (
-                <>
-                  <Eye size={13} aria-hidden="true" />
-                  Follow
-                </>
-              )}
-            </button>
-          </div>
+          {/* Title */}
+          <h1
+            className="font-bold tracking-tight"
+            style={{
+              color: 'var(--color-text)',
+              margin: 0,
+              fontSize: '1.5rem',
+              lineHeight: 1.25,
+            }}
+          >
+            {request.title}
+          </h1>
 
-          {/* Client name + avatar */}
-          {request.orgName && (
-            <div className="flex items-center gap-2" style={{ marginTop: '0.5rem' }}>
-              <div
-                className="flex items-center justify-center rounded-full flex-shrink-0"
-                style={{ width: 24, height: 24, background: 'var(--color-bg-tertiary)', color: 'var(--color-text-subtle)' }}
-              >
-                <User size={12} />
-              </div>
-              <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+          {/* Client + created */}
+          <div
+            className="flex items-center flex-wrap"
+            style={{ gap: '0.875rem', marginTop: '0.625rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}
+          >
+            {request.orgName && (
+              <span className="flex items-center" style={{ gap: '0.375rem' }}>
+                <User size={12} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
                 {request.orgName}
               </span>
-            </div>
-          )}
+            )}
+            <span className="flex items-center" style={{ gap: '0.375rem' }}>
+              <Calendar size={12} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
+              Created {formatDate(request.createdAt)}
+            </span>
+            {request.dueDate && (
+              <span className="flex items-center" style={{ gap: '0.375rem' }}>
+                <Clock size={12} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
+                Due {formatDate(request.dueDate)}
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Status stepper */}
+        {/* Minimal progress bar — replaces the chunky stepper. A single
+            horizontal line with breakpoints; current step highlighted.
+            Less visual weight than the numbered stepper and reads cleaner. */}
         <div
           style={{
-            padding: '0 1.5rem 1.25rem',
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 0,
-            overflowX: 'auto',
+            padding: '0.75rem 1.5rem 1rem',
+            borderTop: '1px solid var(--color-border-subtle)',
+            background: 'var(--color-bg-secondary)',
+            borderBottomLeftRadius: '0.75rem',
+            borderBottomRightRadius: '0.75rem',
           }}
         >
-          {STATUS_FLOW.map((s, i) => {
-            const isDone = currentStatusIdx > i
-            const isCurrent = currentStatusIdx === i
-            const isLast = i === STATUS_FLOW.length - 1
-            return (
-              <div key={s} className="flex items-center flex-shrink-0">
-                <div className="flex flex-col items-center" style={{ minWidth: '3.5rem' }}>
-                  <div
-                    className="flex items-center justify-center rounded-full"
-                    style={{
-                      width: 28,
-                      height: 28,
-                      border: `2px solid ${isDone || isCurrent ? 'var(--color-brand)' : 'var(--color-border)'}`,
-                      background: isDone ? 'var(--color-brand)' : 'var(--color-bg)',
-                      color: isDone ? '#ffffff' : isCurrent ? 'var(--color-brand)' : 'var(--color-text-subtle)',
-                      fontSize: '0.75rem',
-                      fontWeight: 600,
-                      transition: 'all 0.2s',
-                    }}
-                  >
-                    {isDone ? <CheckCircle2 size={14} /> : i + 1}
-                  </div>
+          <div
+            className="flex items-center"
+            style={{ gap: '0.375rem', fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}
+          >
+            {STATUS_FLOW.map((s, i) => {
+              const isDone = currentStatusIdx > i
+              const isCurrent = currentStatusIdx === i
+              return (
+                <span
+                  key={s}
+                  className="flex-1 flex flex-col"
+                  style={{ gap: '0.25rem', minWidth: 0 }}
+                >
                   <span
                     style={{
-                      fontSize: '0.625rem',
-                      marginTop: '0.3125rem',
-                      whiteSpace: 'nowrap',
-                      color: isCurrent ? 'var(--color-brand)' : 'var(--color-text-subtle)',
+                      height: 3,
+                      borderRadius: 2,
+                      background: isDone || isCurrent
+                        ? 'var(--color-brand)'
+                        : 'var(--color-border)',
+                      transition: 'background 200ms ease',
+                    }}
+                  />
+                  <span
+                    className="truncate"
+                    style={{
+                      color: isCurrent ? 'var(--color-brand-dark)' : 'var(--color-text-subtle)',
                       fontWeight: isCurrent ? 600 : 400,
                     }}
                   >
                     {STATUS_LABELS[s]}
                   </span>
-                </div>
-                {!isLast && (
-                  <div
-                    style={{
-                      width: '2rem',
-                      height: 2,
-                      background: isDone ? 'var(--color-brand)' : 'var(--color-border)',
-                      marginTop: '-0.875rem',
-                      flexShrink: 0,
-                    }}
-                  />
-                )}
-              </div>
-            )
-          })}
+                </span>
+              )
+            })}
+          </div>
         </div>
       </div>
-
-      {/* Admin quick actions row — status dropdown + scope flag icon. Kept in
-          its own row below the header card so it's always visible without
-          scrolling but doesn't compete with the stepper. */}
-      {isAdmin && (
-        <div
-          className="flex items-center flex-wrap"
-          style={{ gap: '0.75rem', marginTop: '-0.5rem' }}
-        >
-          <div className="flex items-center" style={{ gap: '0.375rem' }}>
-            <label
-              htmlFor="status-select"
-              className="text-xs font-medium"
-              style={{ color: 'var(--color-text-subtle)' }}
-            >
-              Status
-            </label>
-            <div style={{ position: 'relative' }}>
-              <select
-                id="status-select"
-                value={request.status}
-                onChange={e => handleStatusChange(e.target.value)}
-                disabled={statusUpdating}
-                style={{
-                  appearance: 'none',
-                  WebkitAppearance: 'none',
-                  padding: '0.375rem 2rem 0.375rem 0.75rem',
-                  fontSize: '0.8125rem',
-                  fontWeight: 500,
-                  color: 'var(--color-text)',
-                  background: 'var(--color-bg)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius-button)',
-                  cursor: statusUpdating ? 'not-allowed' : 'pointer',
-                  opacity: statusUpdating ? 0.6 : 1,
-                  minHeight: '2rem',
-                  outline: 'none',
-                }}
-                onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
-                onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
-              >
-                {STATUS_FLOW.map(s => (
-                  <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-                ))}
-                {!STATUS_FLOW.includes(request.status as typeof STATUS_FLOW[number]) && (
-                  <option value={request.status}>{STATUS_LABELS[request.status] ?? request.status}</option>
-                )}
-              </select>
-              <ChevronDown
-                size={13}
-                aria-hidden="true"
-                style={{
-                  position: 'absolute',
-                  right: '0.625rem',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'var(--color-text-subtle)',
-                  pointerEvents: 'none',
-                }}
-              />
-              {statusUpdating && (
-                <Loader2
-                  size={12}
-                  className="animate-spin"
-                  style={{
-                    position: 'absolute',
-                    right: '2rem',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    color: 'var(--color-text-subtle)',
-                    pointerEvents: 'none',
-                  }}
-                />
-              )}
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleScopeFlagToggle}
-            className="inline-flex items-center transition-colors"
-            style={{
-              gap: '0.375rem',
-              padding: '0.375rem 0.75rem',
-              fontSize: '0.75rem',
-              fontWeight: 500,
-              borderRadius: 'var(--radius-button)',
-              border: request.scopeFlagged
-                ? '1px solid var(--color-danger)'
-                : '1px solid var(--color-border)',
-              background: request.scopeFlagged
-                ? 'var(--color-danger-bg)'
-                : 'var(--color-bg)',
-              color: request.scopeFlagged
-                ? 'var(--color-danger)'
-                : 'var(--color-text-muted)',
-              cursor: 'pointer',
-              minHeight: '2rem',
-            }}
-            onMouseEnter={e => {
-              if (!request.scopeFlagged) {
-                e.currentTarget.style.borderColor = 'var(--color-warning)'
-                e.currentTarget.style.background = 'var(--color-warning-bg)'
-                e.currentTarget.style.color = 'var(--color-warning)'
-              }
-            }}
-            onMouseLeave={e => {
-              if (!request.scopeFlagged) {
-                e.currentTarget.style.borderColor = 'var(--color-border)'
-                e.currentTarget.style.background = 'var(--color-bg)'
-                e.currentTarget.style.color = 'var(--color-text-muted)'
-              }
-            }}
-            aria-pressed={request.scopeFlagged}
-            aria-label={request.scopeFlagged ? 'Remove scope flag' : 'Flag as scope creep'}
-          >
-            <AlertTriangle size={13} aria-hidden="true" />
-            {request.scopeFlagged ? 'Scope flagged' : 'Flag scope creep'}
-          </button>
-
-          {/* Unlink / promote to top-level — only visible for sub-requests */}
-          {request.parentRequestId && (
-            <button
-              type="button"
-              onClick={handleUnlinkFromParent}
-              disabled={unlinkingParent}
-              className="inline-flex items-center transition-colors"
-              style={{
-                gap: '0.375rem',
-                padding: '0.375rem 0.75rem',
-                fontSize: '0.75rem',
-                fontWeight: 500,
-                borderRadius: 'var(--radius-button)',
-                border: '1px solid var(--color-border)',
-                background: 'var(--color-bg)',
-                color: 'var(--color-text-muted)',
-                cursor: unlinkingParent ? 'not-allowed' : 'pointer',
-                opacity: unlinkingParent ? 0.6 : 1,
-                minHeight: '2rem',
-              }}
-              onMouseEnter={e => {
-                if (!unlinkingParent) {
-                  e.currentTarget.style.borderColor = 'var(--color-brand)'
-                  e.currentTarget.style.background = 'var(--color-brand-50)'
-                  e.currentTarget.style.color = 'var(--color-brand-dark)'
-                }
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.borderColor = 'var(--color-border)'
-                e.currentTarget.style.background = 'var(--color-bg)'
-                e.currentTarget.style.color = 'var(--color-text-muted)'
-              }}
-              aria-label="Promote to top-level request"
-            >
-              {unlinkingParent ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : <RefreshCw size={13} aria-hidden="true" />}
-              Make top-level
-            </button>
-          )}
-        </div>
-      )}
 
       {/* Sub-request creation dialog — opened from the <SubRequestsPanel>
           "New sub-request" button. Client is locked to parent's org. */}
@@ -861,6 +697,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           parentRequestId={request.id}
           forceOrgId={request.orgId}
           onCreated={() => {
+            // Refresh sub-requests list without a full page load
             loadRequest()
             showToast('Sub-request created')
           }}
@@ -984,18 +821,190 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           <ActivityLog request={request} messages={messages} files={files} />
         </div>
 
-        {/* Right column: Metadata sidebar */}
+        {/* Right column: Metadata sidebar — primary-use blocks first.
+            Time → Actions → People → Checklists → Details. */}
         <div className="flex flex-col gap-4">
+          {/* Time (admin only): live timer + manual log + recent entries */}
+          {isAdmin && <TimeCard requestId={requestId} />}
+
+          {/* Actions: status dropdown, scope flag toggle, make top-level */}
+          {isAdmin && (
+            <SidebarCard title="Actions">
+              <div className="flex flex-col" style={{ gap: '0.5rem' }}>
+                {/* Status */}
+                <div className="flex items-center" style={{ gap: '0.5rem' }}>
+                  <span
+                    className="text-xs font-medium"
+                    style={{
+                      color: 'var(--color-text-subtle)',
+                      width: '4.5rem', flexShrink: 0,
+                    }}
+                  >
+                    Status
+                  </span>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <select
+                      value={request.status}
+                      onChange={e => handleStatusChange(e.target.value)}
+                      disabled={statusUpdating}
+                      style={{
+                        width: '100%',
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        padding: '0.375rem 2rem 0.375rem 0.625rem',
+                        fontSize: '0.75rem',
+                        fontWeight: 500,
+                        color: 'var(--color-text)',
+                        background: 'var(--color-bg)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius-button)',
+                        cursor: statusUpdating ? 'not-allowed' : 'pointer',
+                        opacity: statusUpdating ? 0.6 : 1,
+                        minHeight: '2rem',
+                        outline: 'none',
+                      }}
+                      onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
+                      onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+                    >
+                      {STATUS_FLOW.map(s => (
+                        <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+                      ))}
+                      {!STATUS_FLOW.includes(request.status as typeof STATUS_FLOW[number]) && (
+                        <option value={request.status}>{STATUS_LABELS[request.status] ?? request.status}</option>
+                      )}
+                    </select>
+                    {statusUpdating ? (
+                      <Loader2
+                        size={12}
+                        className="animate-spin"
+                        style={{
+                          position: 'absolute', right: '0.5rem',
+                          top: '50%', transform: 'translateY(-50%)',
+                          color: 'var(--color-text-subtle)',
+                          pointerEvents: 'none',
+                        }}
+                      />
+                    ) : (
+                      <ChevronDown
+                        size={12}
+                        aria-hidden="true"
+                        style={{
+                          position: 'absolute', right: '0.5rem',
+                          top: '50%', transform: 'translateY(-50%)',
+                          color: 'var(--color-text-subtle)',
+                          pointerEvents: 'none',
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Scope flag toggle */}
+                <button
+                  type="button"
+                  onClick={handleScopeFlagToggle}
+                  className="flex items-center transition-colors"
+                  style={{
+                    gap: '0.375rem',
+                    padding: '0.3125rem 0.625rem',
+                    fontSize: '0.75rem',
+                    fontWeight: 500,
+                    borderRadius: 'var(--radius-button)',
+                    border: request.scopeFlagged
+                      ? '1px solid var(--color-danger)'
+                      : '1px solid var(--color-border)',
+                    background: request.scopeFlagged
+                      ? 'var(--color-danger-bg)'
+                      : 'var(--color-bg)',
+                    color: request.scopeFlagged
+                      ? 'var(--color-danger)'
+                      : 'var(--color-text-muted)',
+                    cursor: 'pointer',
+                    minHeight: '2rem',
+                    justifyContent: 'flex-start',
+                  }}
+                  onMouseEnter={e => {
+                    if (!request.scopeFlagged) {
+                      e.currentTarget.style.borderColor = 'var(--color-warning)'
+                      e.currentTarget.style.background = 'var(--color-warning-bg)'
+                      e.currentTarget.style.color = 'var(--color-warning)'
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (!request.scopeFlagged) {
+                      e.currentTarget.style.borderColor = 'var(--color-border)'
+                      e.currentTarget.style.background = 'var(--color-bg)'
+                      e.currentTarget.style.color = 'var(--color-text-muted)'
+                    }
+                  }}
+                  aria-pressed={request.scopeFlagged}
+                >
+                  <AlertTriangle size={12} aria-hidden="true" />
+                  {request.scopeFlagged ? 'Scope flagged' : 'Flag scope creep'}
+                </button>
+
+                {/* Make top-level — only for sub-requests */}
+                {request.parentRequestId && (
+                  <button
+                    type="button"
+                    onClick={handleUnlinkFromParent}
+                    disabled={unlinkingParent}
+                    className="flex items-center transition-colors"
+                    style={{
+                      gap: '0.375rem',
+                      padding: '0.3125rem 0.625rem',
+                      fontSize: '0.75rem',
+                      fontWeight: 500,
+                      borderRadius: 'var(--radius-button)',
+                      border: '1px solid var(--color-border)',
+                      background: 'var(--color-bg)',
+                      color: 'var(--color-text-muted)',
+                      cursor: unlinkingParent ? 'not-allowed' : 'pointer',
+                      opacity: unlinkingParent ? 0.6 : 1,
+                      minHeight: '2rem',
+                      justifyContent: 'flex-start',
+                    }}
+                    onMouseEnter={e => {
+                      if (!unlinkingParent) {
+                        e.currentTarget.style.borderColor = 'var(--color-brand)'
+                        e.currentTarget.style.background = 'var(--color-brand-50)'
+                        e.currentTarget.style.color = 'var(--color-brand-dark)'
+                      }
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.borderColor = 'var(--color-border)'
+                      e.currentTarget.style.background = 'var(--color-bg)'
+                      e.currentTarget.style.color = 'var(--color-text-muted)'
+                    }}
+                  >
+                    {unlinkingParent
+                      ? <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+                      : <RefreshCw size={12} aria-hidden="true" />}
+                    Make top-level
+                  </button>
+                )}
+              </div>
+            </SidebarCard>
+          )}
+
           {/* People — PM / Assignees / Followers */}
           <PeoplePanel
             requestId={requestId}
             orgId={request.orgId}
             participants={participants}
             onChange={loadRequest}
+            onOptimisticChange={setParticipants}
             isAdmin={isAdmin}
           />
 
-          {/* Details card */}
+          {/* Checklists */}
+          <ChecklistsPanel
+            checklists={checklists}
+            onSave={saveChecklists}
+            isAdmin={isAdmin}
+          />
+
+          {/* Details — reference info at the bottom since it changes less */}
           <SidebarCard title="Details">
             <div className="flex flex-col" style={{ gap: '0.875rem' }}>
               <DetailRow label="Type">
@@ -1130,10 +1139,6 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 </DetailRow>
               )}
 
-              <DetailRow label="Created">
-                {formatDate(request.createdAt)}
-              </DetailRow>
-
               {request.deliveredAt && (
                 <DetailRow label="Delivered">
                   {formatDate(request.deliveredAt)}
@@ -1141,23 +1146,6 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
               )}
             </div>
           </SidebarCard>
-
-          {/* Checklists — moved from left column to reduce main-rail noise */}
-          <ChecklistsPanel
-            checklists={checklists}
-            onSave={saveChecklists}
-            isAdmin={isAdmin}
-          />
-
-          {/* Live timer (admin only) */}
-          {isAdmin && (
-            <RequestTimerControl requestId={requestId} />
-          )}
-
-          {/* Time entry logging (admin only) */}
-          {isAdmin && (
-            <TimeEntryPanel requestId={requestId} />
-          )}
         </div>
       </div>
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { Search, X, ChevronDown, Check } from 'lucide-react'
 
 const BRAND_HEX = 'var(--color-brand)'
@@ -38,9 +39,14 @@ export function SearchableSelect({
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [highlightIdx, setHighlightIdx] = useState(0)
+  const [mounted, setMounted] = useState(false)
+  const [triggerRect, setTriggerRect] = useState<{ left: number; top: number; width: number; bottom: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => { setMounted(true) }, [])
 
   const filtered = options.filter(o => {
     const q = query.toLowerCase()
@@ -49,17 +55,40 @@ export function SearchableSelect({
 
   const selectedOption = options.find(o => o.value === value)
 
-  // Close on outside click
+  // Close on outside click (include portal'd dropdown so clicks inside it
+  // aren't treated as "outside").
   useEffect(() => {
     if (!open) return
     function handleClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false)
-        setQuery('')
-      }
+      const t = e.target as Node
+      if (containerRef.current?.contains(t)) return
+      if (dropdownRef.current?.contains(t)) return
+      setOpen(false)
+      setQuery('')
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  // Position the portal'd dropdown and keep it aligned with the trigger on
+  // scroll / resize. If the trigger scrolls off-screen, close.
+  useEffect(() => {
+    if (!open) return
+    function measure() {
+      const el = containerRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      setTriggerRect({ left: r.left, top: r.top, width: r.width, bottom: r.bottom })
+    }
+    measure()
+    const onScroll = () => measure()
+    const onResize = () => measure()
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onResize)
+    }
   }, [open])
 
   // Focus search on open
@@ -319,62 +348,72 @@ export function SearchableSelect({
         </span>
       </button>
 
-      {/* Dropdown: bottom sheet on mobile, absolute positioned on desktop */}
-      {open && (
+      {/* Dropdown: bottom sheet on mobile, portal'd fixed popover on desktop.
+          Rendering to document.body keeps us clear of any overflow:hidden
+          ancestor (e.g. rounded Card bodies) that would otherwise clip us. */}
+      {open && mounted && (
         isMobile ? (
-          <div
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: 200,
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'flex-end',
-            }}
-          >
+          createPortal(
             <div
               style={{
-                position: 'absolute',
+                position: 'fixed',
                 inset: 0,
-                background: 'rgba(0,0,0,0.3)',
-              }}
-              onClick={() => { setOpen(false); setQuery('') }}
-            />
-            <div
-              style={{
-                position: 'relative',
-                background: 'var(--color-bg)',
-                borderRadius: '1rem 1rem 0 0',
-                boxShadow: '0 -4px 24px rgba(0,0,0,0.15)',
-                overflow: 'hidden',
-                maxHeight: '70vh',
-                paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+                zIndex: 200,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'flex-end',
               }}
             >
-              {/* Handle bar */}
-              <div style={{ display: 'flex', justifyContent: 'center', padding: '0.5rem 0' }}>
-                <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--color-border)' }} />
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: 'rgba(0,0,0,0.3)',
+                }}
+                onClick={() => { setOpen(false); setQuery('') }}
+              />
+              <div
+                ref={dropdownRef}
+                style={{
+                  position: 'relative',
+                  background: 'var(--color-bg)',
+                  borderRadius: '1rem 1rem 0 0',
+                  boxShadow: '0 -4px 24px rgba(0,0,0,0.15)',
+                  overflow: 'hidden',
+                  maxHeight: '70vh',
+                  paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+                }}
+              >
+                {/* Handle bar */}
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '0.5rem 0' }}>
+                  <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--color-border)' }} />
+                </div>
+                {dropdownContent}
               </div>
-              {dropdownContent}
-            </div>
-          </div>
+            </div>,
+            document.body,
+          )
         ) : (
-          <div
-            style={{
-              position: 'absolute',
-              top: 'calc(100% + 4px)',
-              left: 0,
-              right: 0,
-              zIndex: 100,
-              background: 'var(--color-bg)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-card)',
-              boxShadow: 'var(--shadow-lg)',
-              overflow: 'hidden',
-            }}
-          >
-            {dropdownContent}
-          </div>
+          triggerRect && createPortal(
+            <div
+              ref={dropdownRef}
+              style={{
+                position: 'fixed',
+                top: triggerRect.bottom + 4,
+                left: triggerRect.left,
+                width: triggerRect.width,
+                zIndex: 1000,
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-card)',
+                boxShadow: 'var(--shadow-lg)',
+                overflow: 'hidden',
+              }}
+            >
+              {dropdownContent}
+            </div>,
+            document.body,
+          )
         )
       )}
     </div>

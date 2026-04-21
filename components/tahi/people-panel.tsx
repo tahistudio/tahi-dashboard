@@ -5,22 +5,26 @@
  * attached to this request broken into three role slots:
  *
  *   PM         single team member, can be reassigned
- *   Assignees  many team members, add + remove inline
+ *   Assignees  many team members, add multiple in one session
  *   Followers  many contacts from the request's client org + optionally
  *              other team members who want updates
  *
- * Each role has its own picker that calls POST /participants with the
- * appropriate role. Removal calls DELETE on the row id.
+ * Each slot (except PM) supports multi-select adds: the picker stays open
+ * while the user checks off multiple people, then closes on Done. All
+ * mutations are optimistic — we mutate local state, fire the server call,
+ * roll back on error.
  *
- * The caller owns the participants list (so the parent page can refetch the
- * request after mutations and keep a single source of truth).
+ * The caller owns the participants list and passes an `onChange` callback
+ * that's invoked after successful writes (in case the parent wants to
+ * reconcile). If `onOptimisticChange` is provided we prefer that for instant
+ * UI updates without a refetch.
  */
 
-import React, { useEffect, useMemo, useState } from 'react'
-import { Plus, X, Loader2, UserCog, Users, Eye } from 'lucide-react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Plus, X, Loader2, UserCog, Users, Eye, Check } from 'lucide-react'
 import { Card } from '@/components/tahi/card'
-import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { apiPath } from '@/lib/api'
+import { useToast } from '@/components/tahi/toast'
 
 export interface Participant {
   id: string               // requestParticipants.id (row id, used for DELETE)
@@ -40,15 +44,23 @@ interface PeoplePanelProps {
   requestId: string
   orgId: string
   participants: Participant[]
+  /** Called after a successful server mutation — parent can refetch if it
+   *  wants reconciliation, but optimistic state has already been applied. */
   onChange: () => void
+  /** If provided, we optimistically apply the new participants list here
+   *  instead of waiting for onChange/refetch. */
+  onOptimisticChange?: (next: Participant[]) => void
   isAdmin: boolean
+  /** Hide the internal card chrome so the panel can be embedded directly
+   *  in a parent card without a double border. */
+  embedded?: boolean
 }
 
 // Tiny avatar cell — reused by each row.
-function Avatar({ name, avatar }: { name: string | null; avatar: string | null }) {
+function Avatar({ name, avatar, size = 24 }: { name: string | null; avatar: string | null; size?: number }) {
   if (avatar) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={avatar} alt="" style={{ width: '1.5rem', height: '1.5rem', borderRadius: '9999px', objectFit: 'cover' }} />
+    return <img src={avatar} alt="" style={{ width: size, height: size, borderRadius: '9999px', objectFit: 'cover', flexShrink: 0 }} />
   }
   const initials = (name ?? '?')
     .split(' ')
@@ -61,11 +73,12 @@ function Avatar({ name, avatar }: { name: string | null; avatar: string | null }
       aria-hidden="true"
       style={{
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        width: '1.5rem', height: '1.5rem',
+        width: size, height: size,
         borderRadius: '9999px',
         background: 'var(--color-brand-50)',
         color: 'var(--color-brand)',
-        fontSize: '0.625rem', fontWeight: 600,
+        fontSize: size <= 20 ? '0.5625rem' : '0.625rem',
+        fontWeight: 600,
         flexShrink: 0,
       }}
     >{initials}</span>
@@ -165,12 +178,172 @@ function Row({
   )
 }
 
-export function PeoplePanel({ requestId, orgId, participants, onChange, isAdmin }: PeoplePanelProps) {
+/**
+ * Multi-select picker used by Assignees + Followers. Renders a compact
+ * checkbox list inline in the panel — the picker stays open while the
+ * user checks multiple people. Each check immediately fires an add
+ * (optimistic); uncheck doesn't do anything inside the picker (we don't
+ * remove from here — use the row X). Done button just closes.
+ */
+function MultiPicker({
+  options,
+  existingIds,
+  placeholder,
+  onPick,
+  onClose,
+}: {
+  options: Array<{ value: string; label: string; subtitle?: string; avatar?: string | null }>
+  existingIds: Set<string>
+  placeholder?: string
+  onPick: (value: string) => void | Promise<void>
+  onClose: () => void
+}) {
+  const [query, setQuery] = useState('')
+  const filtered = options.filter(o => {
+    const q = query.toLowerCase()
+    if (!q) return true
+    return o.label.toLowerCase().includes(q) || (o.subtitle?.toLowerCase().includes(q) ?? false)
+  })
+  return (
+    <div
+      role="dialog"
+      aria-label="Add people"
+      style={{
+        marginTop: '0.5rem',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-md)',
+        background: 'var(--color-bg)',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          padding: '0.375rem 0.5rem',
+          borderBottom: '1px solid var(--color-border-subtle)',
+          background: 'var(--color-bg-secondary)',
+        }}
+      >
+        <input
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder={placeholder ?? 'Search…'}
+          autoFocus
+          style={{
+            width: '100%',
+            padding: '0.25rem 0.5rem',
+            fontSize: '0.75rem',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            outline: 'none',
+            color: 'var(--color-text)',
+          }}
+        />
+      </div>
+
+      <div role="list" style={{ maxHeight: '13rem', overflowY: 'auto' }}>
+        {filtered.length === 0 ? (
+          <p style={{ padding: '0.75rem', fontSize: '0.75rem', color: 'var(--color-text-subtle)', textAlign: 'center', margin: 0 }}>
+            No matches.
+          </p>
+        ) : (
+          filtered.map(opt => {
+            const alreadyAdded = existingIds.has(opt.value.split(':').pop() ?? opt.value)
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                disabled={alreadyAdded}
+                onClick={() => void onPick(opt.value)}
+                className="flex items-center w-full transition-colors"
+                style={{
+                  gap: '0.5rem',
+                  padding: '0.375rem 0.5rem',
+                  fontSize: '0.75rem',
+                  background: 'transparent',
+                  border: 'none',
+                  borderBottom: '1px solid var(--color-border-subtle)',
+                  cursor: alreadyAdded ? 'default' : 'pointer',
+                  opacity: alreadyAdded ? 0.5 : 1,
+                  textAlign: 'left',
+                  color: 'var(--color-text)',
+                }}
+                onMouseEnter={e => { if (!alreadyAdded) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: '1rem', height: '1rem',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    borderRadius: 'var(--radius-sm)',
+                    border: alreadyAdded ? '1px solid var(--color-brand)' : '1px solid var(--color-border)',
+                    background: alreadyAdded ? 'var(--color-brand)' : 'var(--color-bg)',
+                    color: '#fff',
+                    flexShrink: 0,
+                  }}
+                >
+                  {alreadyAdded && <Check size={10} aria-hidden="true" />}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="truncate" style={{ fontWeight: 500 }}>{opt.label}</div>
+                  {opt.subtitle && (
+                    <div className="truncate" style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+                      {opt.subtitle}
+                    </div>
+                  )}
+                </div>
+              </button>
+            )
+          })
+        )}
+      </div>
+
+      <div
+        className="flex items-center justify-end"
+        style={{
+          padding: '0.375rem 0.5rem',
+          borderTop: '1px solid var(--color-border-subtle)',
+          background: 'var(--color-bg-secondary)',
+          gap: '0.375rem',
+        }}
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs font-medium"
+          style={{
+            padding: '0.25rem 0.625rem',
+            borderRadius: 'var(--radius-sm)',
+            border: 'none',
+            background: 'var(--color-brand)',
+            color: '#fff',
+            cursor: 'pointer',
+          }}
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export function PeoplePanel({
+  requestId,
+  orgId,
+  participants,
+  onChange,
+  onOptimisticChange,
+  isAdmin,
+  embedded = false,
+}: PeoplePanelProps) {
+  const { showToast } = useToast()
   const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([])
   const [contacts, setContacts] = useState<ContactOption[]>([])
-  const [adding, setAdding] = useState<'pm' | 'assignee' | 'follower' | null>(null)
-  const [addingValue, setAddingValue] = useState('')
-  const [saving, setSaving] = useState(false)
+  const [pickingPm, setPickingPm] = useState(false)
+  const [pickingAssignee, setPickingAssignee] = useState(false)
+  const [pickingFollower, setPickingFollower] = useState(false)
   const [removingId, setRemovingId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -193,48 +366,205 @@ export function PeoplePanel({ requestId, orgId, participants, onChange, isAdmin 
   const assignees = participants.filter(p => p.role === 'assignee')
   const followers = participants.filter(p => p.role === 'follower')
 
-  // IDs already in a given role — used to filter the add picker so we don't
-  // offer people who are already on the request in that role.
   const assigneeIds = useMemo(() => new Set(assignees.map(p => p.participantId)), [assignees])
   const followerIds = useMemo(() => new Set(followers.map(p => p.participantId)), [followers])
 
-  async function addParticipant(
+  // Optimistic apply helper — inserts a temp row until the server confirms.
+  const applyAdd = useCallback(async (
     role: 'pm' | 'assignee' | 'follower',
     participantId: string,
     participantType: 'team_member' | 'contact',
-  ) {
-    if (!participantId) return
-    setSaving(true)
+    displayName: string | null,
+    email: string | null,
+  ) => {
+    const tempId = `temp-${participantId}-${role}`
+    const optimistic: Participant = {
+      id: tempId,
+      participantId,
+      participantType,
+      role,
+      name: displayName,
+      avatar: null,
+      email,
+      addedAt: new Date().toISOString(),
+    }
+    // For PM role, remove any existing PM first in local state.
+    const next = role === 'pm'
+      ? [...participants.filter(p => p.role !== 'pm'), optimistic]
+      : [...participants, optimistic]
+    onOptimisticChange?.(next)
+
     try {
       const res = await fetch(apiPath(`/api/admin/requests/${requestId}/participants`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ participantId, participantType, role }),
       })
-      if (res.ok) {
-        setAdding(null)
-        setAddingValue('')
-        onChange()
+      if (!res.ok) {
+        // Roll back
+        onOptimisticChange?.(participants)
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        showToast(j.error ?? 'Failed to add person')
+        return
       }
-    } finally {
-      setSaving(false)
+      // Server returns the real row — let caller refetch to swap the temp id.
+      onChange()
+    } catch {
+      onOptimisticChange?.(participants)
+      showToast('Network error — try again')
     }
-  }
+  }, [requestId, participants, onOptimisticChange, onChange, showToast])
 
-  async function removeParticipant(rowId: string) {
+  const applyRemove = useCallback(async (rowId: string) => {
     setRemovingId(rowId)
+    const next = participants.filter(p => p.id !== rowId)
+    onOptimisticChange?.(next)
     try {
       const res = await fetch(apiPath(`/api/admin/requests/${requestId}/participants/${rowId}`), {
         method: 'DELETE',
       })
-      if (res.ok) onChange()
+      if (!res.ok) {
+        onOptimisticChange?.(participants)
+        showToast('Failed to remove')
+        return
+      }
+      onChange()
+    } catch {
+      onOptimisticChange?.(participants)
+      showToast('Network error — try again')
     } finally {
       setRemovingId(null)
     }
-  }
+  }, [requestId, participants, onOptimisticChange, onChange, showToast])
+
+  const body = (
+    <div style={{ padding: embedded ? 0 : '0.875rem 1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      {/* PM slot */}
+      <section aria-label="Project manager">
+        <RoleHeader icon={<UserCog size={12} />} label="Project manager" count={pm ? 1 : 0} />
+        {pm ? (
+          <Row
+            p={pm}
+            onRemove={() => applyRemove(pm.id)}
+            removing={removingId === pm.id}
+            canRemove={isAdmin}
+          />
+        ) : pickingPm ? (
+          <MultiPicker
+            options={teamMembers.map(tm => ({ value: tm.id, label: tm.name }))}
+            existingIds={new Set<string>()}
+            placeholder="Pick a PM…"
+            onPick={v => {
+              const tm = teamMembers.find(m => m.id === v)
+              void applyAdd('pm', v, 'team_member', tm?.name ?? null, null)
+              setPickingPm(false)
+            }}
+            onClose={() => setPickingPm(false)}
+          />
+        ) : isAdmin ? (
+          <AddButton label="Set PM" onClick={() => setPickingPm(true)} />
+        ) : (
+          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No PM assigned.</p>
+        )}
+      </section>
+
+      {/* Assignees */}
+      <section aria-label="Assignees">
+        <RoleHeader icon={<Users size={12} />} label="Assignees" count={assignees.length} />
+        {assignees.length > 0 && (
+          <div>
+            {assignees.map(a => (
+              <Row
+                key={a.id}
+                p={a}
+                onRemove={() => applyRemove(a.id)}
+                removing={removingId === a.id}
+                canRemove={isAdmin}
+              />
+            ))}
+          </div>
+        )}
+        {pickingAssignee ? (
+          <MultiPicker
+            options={teamMembers
+              .filter(tm => tm.id !== pm?.participantId)
+              .map(tm => ({ value: tm.id, label: tm.name }))}
+            existingIds={assigneeIds}
+            placeholder="Search team…"
+            onPick={v => {
+              if (assigneeIds.has(v)) return
+              const tm = teamMembers.find(m => m.id === v)
+              void applyAdd('assignee', v, 'team_member', tm?.name ?? null, null)
+            }}
+            onClose={() => setPickingAssignee(false)}
+          />
+        ) : isAdmin ? (
+          <AddButton
+            label={assignees.length === 0 ? 'Add assignees' : 'Add more'}
+            onClick={() => setPickingAssignee(true)}
+            style={{ marginTop: assignees.length > 0 ? '0.375rem' : 0 }}
+          />
+        ) : assignees.length === 0 ? (
+          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No assignees yet.</p>
+        ) : null}
+      </section>
+
+      {/* Followers */}
+      <section aria-label="Followers">
+        <RoleHeader icon={<Eye size={12} />} label="Followers" count={followers.length} />
+        {followers.length > 0 && (
+          <div>
+            {followers.map(f => (
+              <Row
+                key={f.id}
+                p={f}
+                onRemove={() => applyRemove(f.id)}
+                removing={removingId === f.id}
+                canRemove={isAdmin}
+              />
+            ))}
+          </div>
+        )}
+        {pickingFollower ? (
+          <MultiPicker
+            options={[
+              ...contacts
+                .map(c => ({ value: `contact:${c.id}`, label: c.name, subtitle: c.email ?? undefined })),
+              ...teamMembers
+                .map(tm => ({ value: `team:${tm.id}`, label: tm.name, subtitle: 'Tahi team' })),
+            ]}
+            existingIds={followerIds}
+            placeholder="Search people…"
+            onPick={v => {
+              const [type, id] = v.split(':')
+              if (followerIds.has(id)) return
+              if (type === 'contact') {
+                const c = contacts.find(x => x.id === id)
+                void applyAdd('follower', id, 'contact', c?.name ?? null, c?.email ?? null)
+              } else if (type === 'team') {
+                const tm = teamMembers.find(m => m.id === id)
+                void applyAdd('follower', id, 'team_member', tm?.name ?? null, null)
+              }
+            }}
+            onClose={() => setPickingFollower(false)}
+          />
+        ) : isAdmin ? (
+          <AddButton
+            label={followers.length === 0 ? 'Add followers' : 'Add more'}
+            onClick={() => setPickingFollower(true)}
+            style={{ marginTop: followers.length > 0 ? '0.375rem' : 0 }}
+          />
+        ) : followers.length === 0 ? (
+          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No followers yet.</p>
+        ) : null}
+      </section>
+    </div>
+  )
+
+  if (embedded) return body
 
   return (
-    <Card padding="none" style={{ overflow: 'hidden' }}>
+    <Card padding="none">
       <div
         style={{
           padding: '0.75rem 1rem',
@@ -248,180 +578,7 @@ export function PeoplePanel({ requestId, orgId, participants, onChange, isAdmin 
           People
         </h3>
       </div>
-
-      <div style={{ padding: '0.875rem 1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {/* PM slot */}
-        <section aria-label="Project manager">
-          <RoleHeader icon={<UserCog size={12} />} label="Project manager" count={pm ? 1 : 0} />
-          {pm ? (
-            <Row
-              p={pm}
-              onRemove={() => removeParticipant(pm.id)}
-              removing={removingId === pm.id}
-              canRemove={isAdmin}
-            />
-          ) : adding === 'pm' ? (
-            <div className="flex items-center" style={{ gap: '0.375rem' }}>
-              <div style={{ flex: 1 }}>
-                <SearchableSelect
-                  options={teamMembers.map(tm => ({ value: tm.id, label: tm.name }))}
-                  value={addingValue || null}
-                  onChange={v => {
-                    if (v) void addParticipant('pm', v, 'team_member')
-                    else setAddingValue('')
-                  }}
-                  placeholder="Pick a PM…"
-                  size="sm"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => { setAdding(null); setAddingValue('') }}
-                aria-label="Cancel"
-                style={{
-                  width: '1.5rem', height: '1.5rem',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--color-text-subtle)',
-                  cursor: 'pointer',
-                }}
-              ><X size={12} /></button>
-            </div>
-          ) : isAdmin ? (
-            <AddButton label="Set PM" onClick={() => { setAdding('pm'); setAddingValue('') }} disabled={saving} />
-          ) : (
-            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No PM assigned.</p>
-          )}
-        </section>
-
-        {/* Assignees slot */}
-        <section aria-label="Assignees">
-          <RoleHeader icon={<Users size={12} />} label="Assignees" count={assignees.length} />
-          {assignees.length > 0 && (
-            <div>
-              {assignees.map(a => (
-                <Row
-                  key={a.id}
-                  p={a}
-                  onRemove={() => removeParticipant(a.id)}
-                  removing={removingId === a.id}
-                  canRemove={isAdmin}
-                />
-              ))}
-            </div>
-          )}
-          {adding === 'assignee' ? (
-            <div className="flex items-center" style={{ gap: '0.375rem', marginTop: assignees.length > 0 ? '0.375rem' : 0 }}>
-              <div style={{ flex: 1 }}>
-                <SearchableSelect
-                  options={teamMembers
-                    .filter(tm => !assigneeIds.has(tm.id) && tm.id !== pm?.participantId)
-                    .map(tm => ({ value: tm.id, label: tm.name }))}
-                  value={addingValue || null}
-                  onChange={v => {
-                    if (v) void addParticipant('assignee', v, 'team_member')
-                    else setAddingValue('')
-                  }}
-                  placeholder="Add assignee…"
-                  size="sm"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => { setAdding(null); setAddingValue('') }}
-                aria-label="Cancel"
-                style={{
-                  width: '1.5rem', height: '1.5rem',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--color-text-subtle)',
-                  cursor: 'pointer',
-                }}
-              ><X size={12} /></button>
-            </div>
-          ) : isAdmin ? (
-            <AddButton
-              label="Add assignee"
-              onClick={() => { setAdding('assignee'); setAddingValue('') }}
-              disabled={saving}
-              style={{ marginTop: assignees.length > 0 ? '0.375rem' : 0 }}
-            />
-          ) : assignees.length === 0 ? (
-            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No assignees yet.</p>
-          ) : null}
-        </section>
-
-        {/* Followers slot — contacts + team members */}
-        <section aria-label="Followers">
-          <RoleHeader icon={<Eye size={12} />} label="Followers" count={followers.length} />
-          {followers.length > 0 && (
-            <div>
-              {followers.map(f => (
-                <Row
-                  key={f.id}
-                  p={f}
-                  onRemove={() => removeParticipant(f.id)}
-                  removing={removingId === f.id}
-                  canRemove={isAdmin}
-                />
-              ))}
-            </div>
-          )}
-          {adding === 'follower' ? (
-            <div className="flex items-center" style={{ gap: '0.375rem', marginTop: followers.length > 0 ? '0.375rem' : 0 }}>
-              <div style={{ flex: 1 }}>
-                <SearchableSelect
-                  options={[
-                    ...contacts
-                      .filter(c => !followerIds.has(c.id))
-                      .map(c => ({ value: `contact:${c.id}`, label: c.name, subtitle: c.email ?? undefined })),
-                    ...teamMembers
-                      .filter(tm => !followerIds.has(tm.id))
-                      .map(tm => ({ value: `team:${tm.id}`, label: tm.name, subtitle: 'Tahi team' })),
-                  ]}
-                  value={addingValue || null}
-                  onChange={v => {
-                    if (!v) { setAddingValue(''); return }
-                    const [type, id] = v.split(':')
-                    if (type === 'contact') void addParticipant('follower', id, 'contact')
-                    else if (type === 'team') void addParticipant('follower', id, 'team_member')
-                  }}
-                  placeholder="Add a follower…"
-                  searchPlaceholder="Search people…"
-                  size="sm"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => { setAdding(null); setAddingValue('') }}
-                aria-label="Cancel"
-                style={{
-                  width: '1.5rem', height: '1.5rem',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--color-text-subtle)',
-                  cursor: 'pointer',
-                }}
-              ><X size={12} /></button>
-            </div>
-          ) : isAdmin ? (
-            <AddButton
-              label="Add follower"
-              onClick={() => { setAdding('follower'); setAddingValue('') }}
-              disabled={saving}
-              style={{ marginTop: followers.length > 0 ? '0.375rem' : 0 }}
-            />
-          ) : followers.length === 0 ? (
-            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No followers yet.</p>
-          ) : null}
-        </section>
-      </div>
+      {body}
     </Card>
   )
 }

@@ -361,38 +361,14 @@ export function MessageComposer({
       style={{
         position: 'relative',
         background: 'var(--color-bg)',
-        border: `1px solid ${isInternal ? 'var(--status-in-review-border)' : 'var(--color-border)'}`,
-        borderLeft: isInternal
-          ? `4px solid var(--status-in-review-dot)`
-          : `1px solid var(--color-border)`,
+        // When internal, we tint the border subtly rather than painting a
+        // thick coloured slab. The visibility toggle + Send button copy
+        // communicate the state; the border is just a quiet echo.
+        border: `1px solid ${isInternal ? 'var(--color-warning)' : 'var(--color-border)'}`,
         borderRadius: 'var(--radius-lg)',
         transition: 'border-color 150ms ease',
       }}
     >
-      {/* Internal banner — ALWAYS present when internal so users never post internal by accident */}
-      {isInternal && (
-        <div
-          style={{
-            padding: 'var(--space-2) var(--space-4)',
-            background: 'var(--status-in-review-bg)',
-            color: 'var(--status-in-review-text)',
-            fontSize: 'var(--text-xs)',
-            borderTopLeftRadius: 'calc(var(--radius-lg) - 4px)',
-            borderTopRightRadius: 'var(--radius-lg)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--space-2)',
-          }}
-          role="status"
-          aria-live="polite"
-        >
-          <Lock size={12} aria-hidden="true" />
-          <span>
-            Internal note. {clientName ? `${clientName} won't see this.` : 'Only your team will see this.'}
-          </span>
-        </div>
-      )}
-
       {/* Visibility segmented control (admin only) */}
       {canBeInternal && (
         <div
@@ -416,9 +392,9 @@ export function MessageComposer({
             }}
           >
             {[
-              { value: 'public' as const,   label: 'Public',   Icon: Eye,  tooltip: 'Client can see this' },
-              { value: 'internal' as const, label: 'Internal', Icon: Lock, tooltip: 'Team only' },
-            ].map(({ value, label, Icon }) => {
+              { value: 'public' as const,   label: 'Public',   Icon: Eye,  tooltip: clientName ? `${clientName} will see this` : 'Client will see this' },
+              { value: 'internal' as const, label: 'Internal', Icon: Lock, tooltip: clientName ? `${clientName} won't see this — team only` : 'Team only — client can\'t see this' },
+            ].map(({ value, label, Icon, tooltip }) => {
               const active = visibility === value
               return (
                 <button
@@ -426,6 +402,7 @@ export function MessageComposer({
                   type="button"
                   role="radio"
                   aria-checked={active}
+                  title={tooltip}
                   onClick={() => setVisibility(value)}
                   style={{
                     padding: '0.3125rem 0.625rem',
@@ -435,10 +412,10 @@ export function MessageComposer({
                     fontSize: 'var(--text-xs)',
                     fontWeight: 500,
                     background: active
-                      ? value === 'internal' ? 'var(--status-in-review-bg)' : 'var(--color-brand-50)'
+                      ? value === 'internal' ? 'var(--color-warning-bg)' : 'var(--color-brand-50)'
                       : 'var(--color-bg)',
                     color: active
-                      ? value === 'internal' ? 'var(--status-in-review-text)' : 'var(--color-brand)'
+                      ? value === 'internal' ? 'var(--color-warning)' : 'var(--color-brand)'
                       : 'var(--color-text-muted)',
                     border: 'none',
                     cursor: 'pointer',
@@ -451,6 +428,19 @@ export function MessageComposer({
               )
             })}
           </div>
+          {/* Inline hint when internal, so the state is readable at a glance
+              without a shouting banner. */}
+          {isInternal && (
+            <span
+              style={{
+                fontSize: 'var(--text-xs)',
+                color: 'var(--color-text-subtle)',
+                fontStyle: 'italic',
+              }}
+            >
+              {clientName ? `${clientName} won't see this` : "Client can't see this"}
+            </span>
+          )}
         </div>
       )}
 
