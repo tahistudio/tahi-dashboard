@@ -11,7 +11,7 @@ import {
 import Link from 'next/link'
 import { RequestThread } from '@/components/tahi/request-thread'
 import dynamic from 'next/dynamic'
-const TiptapEditor = dynamic(() => import('@/components/tahi/tiptap-editor').then(m => ({ default: m.TiptapEditor })), { ssr: false })
+const MessageComposer = dynamic(() => import('@/components/tahi/message-composer').then(m => ({ default: m.MessageComposer })), { ssr: false })
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
@@ -131,7 +131,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([])
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState(false)
-  const [isInternal, setIsInternal] = useState(false)
+  // Visibility is now owned by <MessageComposer> and passed back through handleSendMessage.
   const [statusUpdating, setStatusUpdating] = useState(false)
   const [editingDueDate, setEditingDueDate] = useState(false)
   const [dueDateInput, setDueDateInput] = useState('')
@@ -241,7 +241,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     threadBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
 
-  async function handleSendMessage(html: string) {
+  async function handleSendMessage(
+    html: string,
+    _json: unknown,
+    _uploadedFiles: Array<{ fileId: string; filename: string }>,
+    visibility: 'public' | 'internal' = 'public',
+  ) {
+    const messageIsInternal = visibility === 'internal'
+
     // Create a request_thread conversation on first message if none exists
     let convId = conversationId
     if (!convId && isAdmin && request) {
@@ -254,7 +261,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             name: request.title,
             orgId: request.orgId,
             requestId,
-            visibility: isInternal ? 'internal' : 'external',
+            visibility: messageIsInternal ? 'internal' : 'external',
             participantIds: [],
           }),
         })
@@ -276,11 +283,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         body: html,
-        isInternal,
+        isInternal: messageIsInternal,
         conversationId: convId ?? undefined,
       }),
     })
     if (res.ok) {
+      // Uploaded files have already been attached to the request via the
+      // /api/uploads/confirm step inside the composer. We just need to
+      // re-fetch the files panel + messages to show the new state.
       await Promise.all([loadRequest(), loadFiles()])
     }
   }
@@ -674,12 +684,11 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 background: 'var(--color-bg-secondary)',
               }}
             >
-              <TiptapEditor
+              <MessageComposer
                 onSubmit={handleSendMessage}
-                isInternal={isInternal}
-                onInternalToggle={isAdmin ? setIsInternal : undefined}
-                placeholder={isAdmin ? 'Reply to client or add an internal note...' : 'Add a comment or question...'}
-                isAdmin={isAdmin}
+                placeholder={isAdmin ? 'Reply to client or add an internal note…' : 'Add a comment or question…'}
+                canBeInternal={isAdmin}
+                clientName={request?.orgName ?? undefined}
                 requestId={requestId}
                 orgId={request?.orgId}
               />
