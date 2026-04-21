@@ -7,6 +7,7 @@ import { Search, X, Eye, UserCog } from 'lucide-react'
 import { NotificationBell } from './notification-bell'
 import { useImpersonation } from './impersonation-banner'
 import { CurrencySwitcher } from './currency-switcher'
+import { TimerChip } from './timer-chip'
 
 interface AppTopNavProps {
   isAdmin: boolean
@@ -163,6 +164,7 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
 
       {/* Right */}
       <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
+        {isAdmin && <TimerChip />}
         {isAdmin && <CurrencySwitcher />}
         <NotificationBell />
         <UserButton

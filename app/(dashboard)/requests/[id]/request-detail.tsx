@@ -21,6 +21,7 @@ import { Card } from '@/components/tahi/card'
 import { SubRequestsPanel, type SubRequestRow } from '@/components/tahi/sub-requests-panel'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { PeoplePanel, type Participant } from '@/components/tahi/people-panel'
+import { RequestTimerControl } from '@/components/tahi/request-timer-control'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -1147,6 +1148,11 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             onSave={saveChecklists}
             isAdmin={isAdmin}
           />
+
+          {/* Live timer (admin only) */}
+          {isAdmin && (
+            <RequestTimerControl requestId={requestId} />
+          )}
 
           {/* Time entry logging (admin only) */}
           {isAdmin && (
