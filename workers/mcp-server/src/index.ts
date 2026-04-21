@@ -604,6 +604,92 @@ const TOOLS: ToolDef[] = [
   tool('delete_commitment', 'Delete an expense commitment', {
     id: prop('string', 'Commitment ID'),
   }, ['id']),
+
+  // ── Request V3 : participants, sub-requests, nest, scope flag, reads, bulk assign ──
+  tool('list_request_participants', "List a request's active participants (PM, assignees, followers)", {
+    requestId: prop('string', 'Request ID'),
+  }, ['requestId']),
+  tool('add_request_participant', 'Add a participant (PM, assignee, or follower). Contacts can only be followers. Only one PM per request.', {
+    requestId: prop('string', 'Request ID'),
+    participantId: prop('string', 'teamMember.id or contact.id'),
+    participantType: prop('string', "'team_member' or 'contact'"),
+    role: prop('string', "'pm', 'assignee', or 'follower'"),
+  }, ['requestId', 'participantId', 'participantType', 'role']),
+  tool('remove_request_participant', 'Soft-remove a participant from a request. Preserves history.', {
+    requestId: prop('string', 'Request ID'),
+    participantRowId: prop('string', 'requestParticipants row ID (from list_request_participants)'),
+  }, ['requestId', 'participantRowId']),
+  tool('list_sub_requests', "List a request's sub-requests (direct children) ordered by subPosition", {
+    requestId: prop('string', 'Parent request ID'),
+  }, ['requestId']),
+  tool('create_sub_request', 'Create a sub-request under a parent. Inherits parent orgId. One level of nesting only.', {
+    parentRequestId: prop('string', 'Parent request ID'),
+    title: prop('string', 'Title'),
+    description: prop('string', 'Description'),
+    size: prop('string', "'small' or 'large' (default small)"),
+    category: prop('string', 'design | development | content | strategy | admin | bug'),
+    priority: prop('string', "'standard' or 'high'"),
+    assigneeId: prop('string', 'Team member to assign'),
+    dueDate: prop('string', 'YYYY-MM-DD'),
+    estimatedHours: prop('number', 'Estimated hours'),
+  }, ['parentRequestId', 'title']),
+  tool('reorder_sub_requests', 'Reorder sub-requests by setting explicit subPosition on each', {
+    parentRequestId: prop('string', 'Parent request ID'),
+    order: prop('array', 'Array of {id: string, subPosition: number}'),
+  }, ['parentRequestId', 'order']),
+  tool('nest_request', 'Nest a request under a parent, or un-nest (parentRequestId=null). Same-org rule + one-level-only rule enforced.', {
+    requestId: prop('string', 'Request being moved'),
+    parentRequestId: prop('string', 'New parent ID, or null to un-nest'),
+  }, ['requestId']),
+  tool('flag_scope_creep', 'Flag a request as scope creep', {
+    requestId: prop('string', 'Request ID'),
+    reason: prop('string', 'Optional reason'),
+  }, ['requestId']),
+  tool('unflag_scope_creep', 'Remove the scope-creep flag from a request', {
+    requestId: prop('string', 'Request ID'),
+  }, ['requestId']),
+  tool('mark_request_read', 'Mark a request read for the current user (clears unread-message badge)', {
+    requestId: prop('string', 'Request ID'),
+  }, ['requestId']),
+  tool('bulk_assign_requests', 'Assign the same set of participants to multiple requests at once', {
+    requestIds: prop('array', 'Array of request IDs'),
+    participants: prop('array', 'Array of {participantId, participantType, role}'),
+  }, ['requestIds', 'participants']),
+
+  // ── Live time tracker ─────────────────────────────────────────────────
+  tool('get_active_timer', "Get current user's active timer (null if none). Includes elapsed seconds + target title + paused state."),
+  tool('start_timer', 'Start a timer on a request or task. Exactly one of requestId / taskId. If another timer is active, pass confirmed=true to auto-stop+log it first.', {
+    requestId: prop('string', 'Request to track'),
+    taskId: prop('string', 'Task to track'),
+    notes: prop('string', 'Running notes'),
+    confirmed: prop('boolean', 'Auto-stop+log existing active timer'),
+  }),
+  tool('pause_timer', 'Pause the active timer', {
+    timerId: prop('string', 'Active timer ID'),
+  }, ['timerId']),
+  tool('resume_timer', 'Resume a paused timer', {
+    timerId: prop('string', 'Active timer ID'),
+  }, ['timerId']),
+  tool('edit_timer', "Edit the active timer's startedAt or notes (e.g. 'I started 15 min ago'). Cannot set future startedAt.", {
+    timerId: prop('string', 'Active timer ID'),
+    startedAt: prop('string', 'ISO timestamp'),
+    notes: prop('string', 'Notes'),
+  }, ['timerId']),
+  tool('stop_timer', "Stop the active timer. Default logs a timeEntry (source='live_timer'). Use action='discard' to drop without logging.", {
+    timerId: prop('string', 'Active timer ID'),
+    action: prop('string', "'log' (default) or 'discard'"),
+  }, ['timerId']),
+  tool('log_time_entry', 'Create a time entry manually. 3 modes: scalar (hours only), range (startedAt+endedAt derives hours), or mixed.', {
+    requestId: prop('string', 'Request ID'),
+    taskId: prop('string', 'Task ID'),
+    hours: prop('number', 'Hours (required if no range)'),
+    startedAt: prop('string', 'ISO start (for range mode)'),
+    endedAt: prop('string', 'ISO end (for range mode)'),
+    date: prop('string', 'YYYY-MM-DD (default today)'),
+    notes: prop('string', 'Notes'),
+    billable: prop('boolean', 'Default true'),
+    hourlyRate: prop('number', 'Override default rate'),
+  }),
 ]
 
 // ---------------------------------------------------------------------------
@@ -970,6 +1056,71 @@ async function executeTool(
       if (!id) throw new Error('id is required')
       return json(await apiWrite(`/api/admin/commitments/${id}`, token, 'DELETE'))
     }
+
+    // ── Request V3 : participants, sub-requests, nest, scope flag, reads, bulk assign ──
+    case 'list_request_participants':
+      return json(await apiGet(`/api/admin/requests/${s('requestId')}/participants`, token))
+    case 'add_request_participant':
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/participants`, token, 'POST', {
+        participantId: s('participantId'),
+        participantType: s('participantType'),
+        role: s('role'),
+      }))
+    case 'remove_request_participant':
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/participants/${s('participantRowId')}`, token, 'DELETE'))
+    case 'list_sub_requests':
+      return json(await apiGet(`/api/admin/requests/${s('requestId')}/sub-requests`, token))
+    case 'create_sub_request': {
+      const { parentRequestId, ...body } = args
+      if (!parentRequestId) throw new Error('parentRequestId is required')
+      return json(await apiWrite(`/api/admin/requests/${parentRequestId}/sub-requests`, token, 'POST', body))
+    }
+    case 'reorder_sub_requests':
+      return json(await apiWrite(`/api/admin/requests/${s('parentRequestId')}/sub-requests/reorder`, token, 'PATCH', {
+        order: args.order,
+      }))
+    case 'nest_request':
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/nest`, token, 'POST', {
+        parentRequestId: args.parentRequestId ?? null,
+      }))
+    case 'flag_scope_creep':
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/scope-flag`, token, 'POST', {
+        reason: s('reason') ?? undefined,
+      }))
+    case 'unflag_scope_creep':
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/scope-flag`, token, 'DELETE'))
+    case 'mark_request_read':
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/reads`, token, 'POST'))
+    case 'bulk_assign_requests':
+      return json(await apiWrite(`/api/admin/requests/bulk-assign`, token, 'POST', {
+        requestIds: args.requestIds,
+        participants: args.participants,
+      }))
+
+    // ── Live time tracker ─────────────────────────────────────────────
+    case 'get_active_timer':
+      return json(await apiGet('/api/admin/timers', token))
+    case 'start_timer': {
+      const { confirmed, ...body } = args
+      const qs = confirmed ? { confirmed: 'true' } : undefined
+      return json(await apiWrite('/api/admin/timers' + (qs ? '?confirmed=true' : ''), token, 'POST', body as Record<string, unknown>))
+    }
+    case 'pause_timer':
+      return json(await apiWrite(`/api/admin/timers/${s('timerId')}`, token, 'PATCH', { action: 'pause' }))
+    case 'resume_timer':
+      return json(await apiWrite(`/api/admin/timers/${s('timerId')}`, token, 'PATCH', { action: 'resume' }))
+    case 'edit_timer':
+      return json(await apiWrite(`/api/admin/timers/${s('timerId')}`, token, 'PATCH', {
+        action: 'edit',
+        startedAt: s('startedAt') ?? undefined,
+        notes: 'notes' in args ? args.notes : undefined,
+      }))
+    case 'stop_timer': {
+      const action = s('action') ?? 'log'
+      return json(await apiWrite(`/api/admin/timers/${s('timerId')}?action=${action}`, token, 'DELETE'))
+    }
+    case 'log_time_entry':
+      return json(await apiWrite('/api/admin/time-entries', token, 'POST', args as Record<string, unknown>))
 
     default:
       throw new Error(`Unknown tool: ${name}`)

@@ -1655,6 +1655,262 @@ server.tool(
 )
 
 // ---------------------------------------------------------------------------
+// Request V3 : participants, sub-requests, nest, scope flag, reads, bulk assign
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'list_request_participants',
+  "List a request's active participants (PM, assignees, followers)",
+  { requestId: z.string().describe('Request ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/requests/${args.requestId}/participants`)
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'add_request_participant',
+  'Add a participant (PM, assignee, or follower) to a request. Contacts can only be followers. Only one PM per request (replaces existing).',
+  {
+    requestId: z.string().describe('Request ID'),
+    participantId: z.string().describe('teamMember.id or contact.id'),
+    participantType: z.enum(['team_member', 'contact']).describe('Whether this is a team member or client contact'),
+    role: z.enum(['pm', 'assignee', 'follower']).describe('Participant role'),
+  },
+  async (args) => {
+    const { requestId, ...body } = args
+    const data = await apiFetch(`/api/admin/requests/${requestId}/participants`, { method: 'POST', body })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'remove_request_participant',
+  'Soft-remove a participant from a request (preserves row for @mention + audit history)',
+  {
+    requestId: z.string().describe('Request ID'),
+    participantRowId: z.string().describe('The requestParticipants row ID (not the personal ID) — get from list_request_participants'),
+  },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/requests/${args.requestId}/participants/${args.participantRowId}`, { method: 'DELETE' })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_sub_requests',
+  "List a request's sub-requests (direct children), ordered by subPosition",
+  { requestId: z.string().describe('Parent request ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/requests/${args.requestId}/sub-requests`)
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'create_sub_request',
+  'Create a sub-request under a parent request. Inherits orgId from the parent. Parent must be top-level (not itself a sub-request).',
+  {
+    parentRequestId: z.string().describe('Parent request ID'),
+    title: z.string().describe('Title'),
+    description: z.string().optional().describe('Description (Tiptap HTML or plain)'),
+    size: z.enum(['small', 'large']).optional().describe("Size — 'small' or 'large' (default small)"),
+    category: z.string().optional().describe('Category : design | development | content | strategy | admin | bug'),
+    priority: z.enum(['standard', 'high']).optional().describe('Priority'),
+    assigneeId: z.string().optional().describe('Assign to a team member'),
+    dueDate: z.string().optional().describe('Due date YYYY-MM-DD'),
+    estimatedHours: z.number().optional().describe('Estimated hours'),
+  },
+  async (args) => {
+    const { parentRequestId, ...body } = args
+    const data = await apiFetch(`/api/admin/requests/${parentRequestId}/sub-requests`, { method: 'POST', body })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'reorder_sub_requests',
+  'Reorder sub-requests by setting explicit subPosition on each',
+  {
+    parentRequestId: z.string().describe('Parent request ID'),
+    order: z.array(z.object({
+      id: z.string(),
+      subPosition: z.number(),
+    })).describe('Array of {id, subPosition} for each child'),
+  },
+  async (args) => {
+    const { parentRequestId, order } = args
+    const data = await apiFetch(`/api/admin/requests/${parentRequestId}/sub-requests/reorder`, { method: 'PATCH', body: { order } })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'nest_request',
+  'Nest a request under a parent, or un-nest (parentRequestId=null). Parent and child must share orgId. One level only — cannot nest a request that already has children.',
+  {
+    requestId: z.string().describe('ID of the request being moved'),
+    parentRequestId: z.string().nullable().describe('New parent ID, or null to un-nest'),
+  },
+  async (args) => {
+    const { requestId, parentRequestId } = args
+    const data = await apiFetch(`/api/admin/requests/${requestId}/nest`, { method: 'POST', body: { parentRequestId } })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'flag_scope_creep',
+  'Flag a request as scope creep',
+  {
+    requestId: z.string().describe('Request ID'),
+    reason: z.string().optional().describe('Reason for flagging'),
+  },
+  async (args) => {
+    const { requestId, reason } = args
+    const data = await apiFetch(`/api/admin/requests/${requestId}/scope-flag`, { method: 'POST', body: { reason } })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'unflag_scope_creep',
+  'Remove the scope-creep flag from a request',
+  { requestId: z.string().describe('Request ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/requests/${args.requestId}/scope-flag`, { method: 'DELETE' })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'mark_request_read',
+  'Mark a request as read (updates lastReadAt for the current user). Clears the unread-message badge.',
+  { requestId: z.string().describe('Request ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/requests/${args.requestId}/reads`, { method: 'POST' })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'bulk_assign_requests',
+  'Assign the same set of participants to multiple requests at once. Contacts can only be followers. Only one PM per request (replaces existing).',
+  {
+    requestIds: z.array(z.string()).describe('Array of request IDs'),
+    participants: z.array(z.object({
+      participantId: z.string(),
+      participantType: z.enum(['team_member', 'contact']),
+      role: z.enum(['pm', 'assignee', 'follower']),
+    })).describe('Participants to add to all listed requests'),
+  },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/requests/bulk-assign`, { method: 'POST', body: args })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+// ---------------------------------------------------------------------------
+// Live time tracker
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'get_active_timer',
+  "Get the current user's active timer (null if none). Includes computed elapsed seconds + the target's title/type + paused state.",
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/timers')
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'start_timer',
+  "Start a live timer on a request or task. Exactly one of requestId / taskId required. If another timer is already active, call again with confirmed=true to auto-stop + log the previous timer first.",
+  {
+    requestId: z.string().optional().describe('Request ID to track'),
+    taskId: z.string().optional().describe('Task ID to track'),
+    notes: z.string().optional().describe('Optional running notes'),
+    confirmed: z.boolean().optional().describe('If true, auto-stop + log any existing active timer and start a new one'),
+  },
+  async (args) => {
+    const { confirmed, ...body } = args
+    const qs = confirmed ? '?confirmed=true' : ''
+    const data = await apiFetch(`/api/admin/timers${qs}`, { method: 'POST', body })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'pause_timer',
+  'Pause the active timer (freezes elapsed until resume)',
+  { timerId: z.string().describe('Active timer ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/timers/${args.timerId}`, { method: 'PATCH', body: { action: 'pause' } })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'resume_timer',
+  'Resume a paused timer',
+  { timerId: z.string().describe('Active timer ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/timers/${args.timerId}`, { method: 'PATCH', body: { action: 'resume' } })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'edit_timer',
+  "Edit the active timer's startedAt or notes (e.g. 'I actually started 15 min ago'). Cannot set startedAt in the future.",
+  {
+    timerId: z.string().describe('Active timer ID'),
+    startedAt: z.string().optional().describe('ISO timestamp — new start time'),
+    notes: z.string().nullable().optional().describe('Running notes'),
+  },
+  async (args) => {
+    const { timerId, ...rest } = args
+    const data = await apiFetch(`/api/admin/timers/${timerId}`, { method: 'PATCH', body: { action: 'edit', ...rest } })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'stop_timer',
+  "Stop the active timer. By default logs a timeEntry (source='live_timer') with hours derived from elapsed - paused. Use action='discard' to stop without logging.",
+  {
+    timerId: z.string().describe('Active timer ID'),
+    action: z.enum(['log', 'discard']).optional().describe("Default 'log'. Use 'discard' to drop without logging."),
+  },
+  async (args) => {
+    const qs = `?action=${args.action ?? 'log'}`
+    const data = await apiFetch(`/api/admin/timers/${args.timerId}${qs}`, { method: 'DELETE' })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'log_time_entry',
+  "Create a time entry manually. Supports 3 modes : (1) scalar — just hours + date, (2) range — startedAt + endedAt, server derives hours, (3) mixed — both. Exactly one of requestId / taskId required.",
+  {
+    requestId: z.string().optional().describe('Request ID'),
+    taskId: z.string().optional().describe('Task ID'),
+    hours: z.number().optional().describe('Total hours worked (required if no startedAt+endedAt range)'),
+    startedAt: z.string().optional().describe('ISO start timestamp (for range mode)'),
+    endedAt: z.string().optional().describe('ISO end timestamp (for range mode)'),
+    date: z.string().optional().describe('YYYY-MM-DD (default today, or derived from startedAt)'),
+    notes: z.string().optional().describe('Notes'),
+    billable: z.boolean().optional().describe('Default true'),
+    hourlyRate: z.number().optional().describe('Override the default hourly rate'),
+  },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/time-entries`, { method: 'POST', body: args })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+// ---------------------------------------------------------------------------
 // Start server
 // ---------------------------------------------------------------------------
 
