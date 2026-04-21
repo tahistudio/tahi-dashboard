@@ -152,6 +152,13 @@ export function MessageComposer({
   const [submitting, setSubmitting] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * React doesn't re-render when TipTap's editor content changes, so we
+   * mirror the empty state into React state via the editor's `update`
+   * callback. Without this, the Send button never lights up when the
+   * user types and Cmd+Enter is the only way to dispatch.
+   */
+  const [isEditorEmpty, setIsEditorEmpty] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const isInternal = visibility === 'internal'
@@ -240,6 +247,14 @@ export function MessageComposer({
         style: 'min-height:4.5rem;padding:var(--space-3) var(--space-4);font-size:var(--text-sm);color:var(--color-text);',
       },
     },
+    onUpdate: ({ editor }) => {
+      // Mirror the editor's empty state into React so the Send button can
+      // reactively light up as the user types.
+      setIsEditorEmpty(editor.isEmpty)
+    },
+    onCreate: ({ editor }) => {
+      setIsEditorEmpty(editor.isEmpty)
+    },
   })
 
   // ── File pick + drag-drop ────────────────────────────────────────────────
@@ -307,6 +322,8 @@ export function MessageComposer({
       await onSubmit(editor.getHTML(), editor.getJSON(), uploaded, visibility)
       editor.commands.clearContent()
       setStaged([])
+      setIsEditorEmpty(true) // editor.commands.clearContent() fires onUpdate, but set it explicitly in case the listener races
+      setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send')
     } finally {
@@ -330,7 +347,10 @@ export function MessageComposer({
 
   if (!editor) return null
 
-  const isEmpty = editor.isEmpty && staged.length === 0
+  // Use the React-mirrored isEditorEmpty so this re-renders as the user
+  // types. Reading `editor.isEmpty` directly would stay stale until the
+  // next unrelated re-render.
+  const isEmpty = isEditorEmpty && staged.length === 0
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (
