@@ -1016,8 +1016,9 @@ function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: R
     const source = requests.find(r => r.id === sourceId)
     if (!source) return
     // Cross-client drops are rejected before the ConfirmDialog opens — same
-    // guard the backend enforces, but faster feedback for the user.
-    if (source.orgId && targetReq.orgId && source.orgId !== targetReq.orgId) return
+    // guard the backend enforces, but faster feedback for the user. Treat
+    // null orgId as its own bucket so null↔client-org is also refused.
+    if ((source.orgId ?? null) !== (targetReq.orgId ?? null)) return
     setNestError(null)
     setNestPrompt({
       sourceId,
@@ -1213,8 +1214,8 @@ function KanbanCard({
           if (src.id === req.id) return
           // Same-client check — backend rejects these, but we also refuse to
           // show any hover animation for a cross-client drag so the affordance
-          // reads "not allowed" instantly.
-          if (src.orgId && req.orgId && src.orgId !== req.orgId) {
+          // reads "not allowed" instantly. null orgId is its own bucket.
+          if ((src.orgId ?? null) !== (req.orgId ?? null)) {
             e.dataTransfer.dropEffect = 'none'
             return
           }
@@ -1233,7 +1234,7 @@ function KanbanCard({
             return
           }
           const src = dragSource?.current
-          if (src?.orgId && req.orgId && src.orgId !== req.orgId) {
+          if (src && (src.orgId ?? null) !== (req.orgId ?? null)) {
             setNestHover(false)
             return
           }
@@ -1368,7 +1369,8 @@ function KanbanChildRow({
         display: 'flex',
         alignItems: 'center',
         gap: '0.5rem',
-        padding: '0.4375rem 0.75rem 0.4375rem 1.25rem',
+        padding: '0.625rem 0.75rem 0.625rem 1.25rem',
+        minHeight: '2.75rem', // 44px WCAG AA / mobile touch target
         fontSize: '0.75rem',
         color: 'var(--color-text)',
         textDecoration: 'none',

@@ -165,7 +165,13 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
       {/* Right */}
       <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
         {isAdmin && <TimerChip />}
-        {isAdmin && <CurrencySwitcher />}
+        {/* Currency switcher is noisy on mobile; the settings page has the
+            equivalent control. Hide below md (≥768px). */}
+        {isAdmin && (
+          <div className="hidden md:block">
+            <CurrencySwitcher />
+          </div>
+        )}
         <NotificationBell />
         <UserButton
           appearance={{

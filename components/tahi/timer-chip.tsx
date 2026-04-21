@@ -206,8 +206,10 @@ export function TimerChip() {
                   background: 'var(--color-brand)',
                 }}
               />}
-          <span className="font-mono tabular-nums">{formatElapsed(seconds)}</span>
-          <ChevronDown size={10} aria-hidden="true" />
+          {/* Full HH:MM:SS on desktop; mobile gets just the indicator to keep
+              the nav under 375px. Screen readers still hear the aria-label. */}
+          <span className="hidden sm:inline font-mono tabular-nums">{formatElapsed(seconds)}</span>
+          <ChevronDown size={10} aria-hidden="true" className="hidden sm:inline-block" />
         </button>
 
         {menuOpen && (
