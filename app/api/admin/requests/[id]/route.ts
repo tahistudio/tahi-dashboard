@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, asc, count, gt, isNull, inArray } from 'drizzle-orm'
 import { createNotifications } from '@/lib/notifications'
 import { requireAccessToOrg } from '@/lib/require-access'
 
@@ -51,6 +51,11 @@ export async function GET(req: NextRequest, { params }: Params) {
       tags: schema.requests.tags,
       requestNumber: schema.requests.requestNumber,
       checklists: schema.requests.checklists,
+      // V3 additions
+      size: schema.requests.size,
+      parentRequestId: schema.requests.parentRequestId,
+      subPosition: schema.requests.subPosition,
+      scopeFlagReason: schema.requests.scopeFlagReason,
       createdAt: schema.requests.createdAt,
       updatedAt: schema.requests.updatedAt,
       deliveredAt: schema.requests.deliveredAt,
@@ -65,7 +70,124 @@ export async function GET(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
-  return NextResponse.json({ request })
+  // --- V3 enrichments: participants, sub-requests, parent, unread count, active timer ---
+
+  // Participants (active only)
+  const participantRows = await drizzle
+    .select()
+    .from(schema.requestParticipants)
+    .where(and(
+      eq(schema.requestParticipants.requestId, id),
+      isNull(schema.requestParticipants.removedAt),
+    ))
+
+  // Resolve names
+  const memberIds = participantRows.filter(p => p.participantType === 'team_member').map(p => p.participantId)
+  const contactIds = participantRows.filter(p => p.participantType === 'contact').map(p => p.participantId)
+  const memberMap = memberIds.length
+    ? new Map((await drizzle.select({ id: schema.teamMembers.id, name: schema.teamMembers.name, avatar: schema.teamMembers.avatarUrl }).from(schema.teamMembers).where(inArray(schema.teamMembers.id, memberIds))).map(m => [m.id, m]))
+    : new Map()
+  const contactMap = contactIds.length
+    ? new Map((await drizzle.select({ id: schema.contacts.id, name: schema.contacts.name, email: schema.contacts.email }).from(schema.contacts).where(inArray(schema.contacts.id, contactIds))).map(c => [c.id, c]))
+    : new Map()
+
+  const participants = participantRows.map(p => ({
+    id: p.id,
+    participantId: p.participantId,
+    participantType: p.participantType,
+    role: p.role,
+    addedAt: p.addedAt,
+    name: p.participantType === 'team_member'
+      ? memberMap.get(p.participantId)?.name ?? null
+      : contactMap.get(p.participantId)?.name ?? null,
+    avatar: p.participantType === 'team_member' ? memberMap.get(p.participantId)?.avatar ?? null : null,
+    email: p.participantType === 'contact' ? contactMap.get(p.participantId)?.email ?? null : null,
+  }))
+
+  // Sub-requests (direct children only)
+  const subRequests = await drizzle
+    .select({
+      id: schema.requests.id,
+      title: schema.requests.title,
+      status: schema.requests.status,
+      size: schema.requests.size,
+      assigneeId: schema.requests.assigneeId,
+      assigneeName: schema.teamMembers.name,
+      dueDate: schema.requests.dueDate,
+      requestNumber: schema.requests.requestNumber,
+      subPosition: schema.requests.subPosition,
+    })
+    .from(schema.requests)
+    .leftJoin(schema.teamMembers, eq(schema.requests.assigneeId, schema.teamMembers.id))
+    .where(eq(schema.requests.parentRequestId, id))
+    .orderBy(asc(schema.requests.subPosition), asc(schema.requests.createdAt))
+
+  // Parent (if this request has one)
+  let parent: { id: string; title: string; requestNumber: number | null } | null = null
+  if (request.parentRequestId) {
+    const [p] = await drizzle
+      .select({ id: schema.requests.id, title: schema.requests.title, requestNumber: schema.requests.requestNumber })
+      .from(schema.requests)
+      .where(eq(schema.requests.id, request.parentRequestId))
+      .limit(1)
+    parent = p ?? null
+  }
+
+  // Unread count — messages created after this user's lastReadAt on this request.
+  let unreadCount = 0
+  if (userId) {
+    const [readRow] = await drizzle
+      .select({ lastReadAt: schema.requestReads.lastReadAt })
+      .from(schema.requestReads)
+      .where(and(
+        eq(schema.requestReads.requestId, id),
+        eq(schema.requestReads.userId, userId),
+        eq(schema.requestReads.userType, 'team_member'),
+      ))
+      .limit(1)
+    const since = readRow?.lastReadAt ?? '1970-01-01T00:00:00Z'
+    const [cnt] = await drizzle
+      .select({ n: count() })
+      .from(schema.messages)
+      .where(and(
+        eq(schema.messages.requestId, id),
+        gt(schema.messages.createdAt, since),
+      ))
+    unreadCount = Number(cnt?.n ?? 0)
+  }
+
+  // Active timer (current user's timer if it's on THIS request)
+  let activeTimer: {
+    id: string
+    startedAt: string
+    pausedAt: string | null
+    pausedSeconds: number
+  } | null = null
+  if (userId) {
+    const [t] = await drizzle
+      .select({
+        id: schema.activeTimers.id,
+        startedAt: schema.activeTimers.startedAt,
+        pausedAt: schema.activeTimers.pausedAt,
+        pausedSeconds: schema.activeTimers.pausedSeconds,
+      })
+      .from(schema.activeTimers)
+      .where(and(
+        eq(schema.activeTimers.userId, userId),
+        eq(schema.activeTimers.requestId, id),
+      ))
+      .limit(1)
+    activeTimer = t ?? null
+  }
+
+  return NextResponse.json({
+    request,
+    participants,
+    subRequests,
+    parent,
+    unreadCount,
+    activeTimer,
+  })
 }
 
 // ── PATCH /api/admin/requests/[id] ───────────────────────────────────────────
