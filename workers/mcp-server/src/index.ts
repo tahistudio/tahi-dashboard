@@ -1214,8 +1214,9 @@ async function handleJsonRpc(body: JsonRpcRequest, env: Env): Promise<Response> 
 // OAuth 2.1 Authorization Code Flow with PKCE
 // ---------------------------------------------------------------------------
 
-const TOKEN_EXPIRY_SECONDS = 3600 // 1 hour
-const CODE_EXPIRY_SECONDS = 600   // 10 minutes
+const TOKEN_EXPIRY_SECONDS = 60 * 60 * 24      // 24 hours (Decision #049)
+const REFRESH_EXPIRY_SECONDS = 60 * 60 * 24 * 30 // 30 days
+const CODE_EXPIRY_SECONDS = 600                  // 10 minutes
 
 /** Sign a payload with HMAC-SHA256 using the client secret */
 async function hmacSign(payload: string, secret: string): Promise<string> {
@@ -1270,11 +1271,32 @@ async function createAccessToken(clientId: string, secret: string): Promise<{ to
   return { token, expiresIn: TOKEN_EXPIRY_SECONDS }
 }
 
+/** Create a signed refresh token (Decision #049). Long-lived so Claude can
+ *  silently mint a new access token instead of forcing the user to re-auth. */
+async function createRefreshToken(clientId: string, secret: string): Promise<{ token: string; expiresIn: number }> {
+  const token = await createSignedToken({
+    sub: clientId,
+    exp: Math.floor(Date.now() / 1000) + REFRESH_EXPIRY_SECONDS,
+    type: 'refresh_token',
+  }, secret)
+  return { token, expiresIn: REFRESH_EXPIRY_SECONDS }
+}
+
 /** Validate an access token */
 async function validateAccessToken(token: string, env: Env): Promise<boolean> {
   const payload = await validateSignedToken(token, env.OAUTH_CLIENT_SECRET)
   if (!payload) return false
   return payload.sub === env.OAUTH_CLIENT_ID && payload.type === 'access_token'
+}
+
+/** Validate a refresh token. Returns the payload (so callers can check sub)
+ *  or null if invalid/expired. */
+async function validateRefreshToken(token: string, env: Env): Promise<Record<string, unknown> | null> {
+  const payload = await validateSignedToken(token, env.OAUTH_CLIENT_SECRET)
+  if (!payload) return null
+  if (payload.type !== 'refresh_token') return null
+  if (payload.sub !== env.OAUTH_CLIENT_ID) return null
+  return payload
 }
 
 /** Create a signed authorization code (contains PKCE challenge + redirect_uri for validation) */
@@ -1398,11 +1420,49 @@ async function handleOAuthToken(request: Request, env: Env): Promise<Response> {
       return corsResponse({ error: 'invalid_grant', error_description: 'PKCE verification failed' }, 400)
     }
 
-    const { token, expiresIn } = await createAccessToken(clientId, env.OAUTH_CLIENT_SECRET)
+    const { token: accessToken, expiresIn } = await createAccessToken(clientId, env.OAUTH_CLIENT_SECRET)
+    const { token: refreshToken } = await createRefreshToken(clientId, env.OAUTH_CLIENT_SECRET)
     return corsResponse({
-      access_token: token,
+      access_token: accessToken,
       token_type: 'bearer',
       expires_in: expiresIn,
+      refresh_token: refreshToken,
+      scope: 'mcp:tools',
+    })
+  }
+
+  // ── Refresh token exchange (Decision #049) ─────────────────────────
+  // Lets Claude silently mint a new access token without forcing the user
+  // through the consent screen every hour. RFC 6749 §6.
+  if (grantType === 'refresh_token') {
+    const refreshToken = params.get('refresh_token')
+    const clientId = params.get('client_id')
+
+    if (!refreshToken) {
+      return corsResponse({ error: 'invalid_request', error_description: 'refresh_token is required' }, 400)
+    }
+
+    // client_id is optional in RFC 6749 §6 but we accept it for legacy
+    // clients. If supplied it must match.
+    if (clientId && clientId !== env.OAUTH_CLIENT_ID) {
+      return corsResponse({ error: 'invalid_client' }, 401)
+    }
+
+    const payload = await validateRefreshToken(refreshToken, env)
+    if (!payload) {
+      return corsResponse({ error: 'invalid_grant', error_description: 'Refresh token invalid or expired' }, 400)
+    }
+
+    // Mint a fresh access token. Rotate the refresh token too (recommended
+    // by OAuth 2.1 security BCP) so a leaked one expires sooner.
+    const { token: newAccess, expiresIn } = await createAccessToken(env.OAUTH_CLIENT_ID, env.OAUTH_CLIENT_SECRET)
+    const { token: newRefresh } = await createRefreshToken(env.OAUTH_CLIENT_ID, env.OAUTH_CLIENT_SECRET)
+    return corsResponse({
+      access_token: newAccess,
+      token_type: 'bearer',
+      expires_in: expiresIn,
+      refresh_token: newRefresh,
+      scope: 'mcp:tools',
     })
   }
 
@@ -1482,7 +1542,9 @@ function handleAuthServerMetadata(origin: string): Response {
     issuer: origin,
     authorization_endpoint: `${origin}/authorize`,
     token_endpoint: `${origin}/oauth/token`,
-    grant_types_supported: ['authorization_code', 'client_credentials'],
+    // Decision #049: advertise refresh_token so Claude knows it can silently
+    // mint a new access token instead of forcing reauth every hour.
+    grant_types_supported: ['authorization_code', 'refresh_token', 'client_credentials'],
     response_types_supported: ['code'],
     token_endpoint_auth_methods_supported: ['client_secret_post', 'none'],
     code_challenge_methods_supported: ['S256'],

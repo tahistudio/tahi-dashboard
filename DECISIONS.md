@@ -1035,3 +1035,27 @@ const [view, setView] = useUserPreference<'kanban' | 'list'>(
 The `AiRequestWizard` React component now takes optional `wizardEndpoint` + `submitEndpoint` props so one component drives both admin and portal flows. The request-list page chooses the right pair based on `isAdmin`. Clients see the same "AI draft" button they need it to feel like the rest of the portal.
 
 ---
+
+## #049 - MCP OAuth Now Issues Refresh Tokens
+
+**Date:** 2026-04-22
+
+**Bug:** The Tahi Dashboard MCP server (Cloudflare Worker at `workers/mcp-server`) issued bearer access tokens that expired after 1 hour, did not return refresh tokens, did not handle the `refresh_token` grant type, and did not advertise refresh in its OAuth discovery metadata. Result: every hour Claude's token died and there was no silent recovery path, so the user had to manually reconnect the MCP multiple times a day.
+
+**Decision:** Implement the standard OAuth 2.1 refresh-token flow.
+
+**Changes (workers/mcp-server/src/index.ts):**
+- `TOKEN_EXPIRY_SECONDS` raised from 3,600 (1 hour) to 86,400 (24 hours).
+- New constant `REFRESH_EXPIRY_SECONDS = 30 days`.
+- New helper `createRefreshToken(clientId, secret)` mirroring `createAccessToken`. Same HMAC-signed envelope, just `type: 'refresh_token'`.
+- New helper `validateRefreshToken(token, env)` that checks signature, expiry, type, and `sub` matches `OAUTH_CLIENT_ID`.
+- `authorization_code` grant now returns both `access_token` and `refresh_token` (plus the existing `expires_in` and `scope`).
+- New `refresh_token` grant handler at `POST /oauth/token`. Validates the supplied refresh token, mints a fresh access token AND a rotated refresh token (OAuth 2.1 BCP recommends rotation so leaked refreshes invalidate sooner). Returns the same response shape.
+- `/.well-known/oauth-authorization-server` now lists `refresh_token` in `grant_types_supported` so Claude knows the server speaks it.
+- `client_credentials` flow unchanged — it's used for direct service calls that don't need refresh.
+
+**Why 24 hours for access tokens:** Long enough to survive a workday without churn, short enough that a leaked token has limited blast radius. Combined with refresh-on-use rotation, the typical session ends with everything expired.
+
+**Deploy:** This is in `workers/mcp-server/` which is a separate Cloudflare Worker, not the main dashboard. To ship: `cd workers/mcp-server && npm run deploy`. Existing MCP connections will keep their current 1-hour tokens until they expire, then need one more reconnect to pick up a refresh token. After that, no further reconnects required (until the 30-day refresh expires, at which point Claude will silently re-do the OAuth dance).
+
+---
