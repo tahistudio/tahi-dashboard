@@ -693,18 +693,82 @@ textarea,
   margin: 1rem 0;
 }
 
+/* Suppress browser-default ::marker so our ::before bullet doesn't double up */
+.tahi-doc-prose ul,
+.tahi-doc-prose ol {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.5rem 0;
+}
+
 .tahi-doc-prose li {
   position: relative;
   padding-left: 1rem;
   margin: 0.125rem 0;
 }
 
-.tahi-doc-prose li::before {
+.tahi-doc-prose ul > li::before {
   content: '\2022';
   position: absolute;
   left: 0;
   color: var(--color-brand);
   font-weight: 700;
+}
+
+/* Ordered lists use a counter so we get "1." "2." etc. with brand colour
+   instead of the bullet character. */
+.tahi-doc-prose ol {
+  counter-reset: doc-ol;
+}
+
+.tahi-doc-prose ol > li {
+  padding-left: 1.5rem;
+  counter-increment: doc-ol;
+}
+
+.tahi-doc-prose ol > li::before {
+  content: counter(doc-ol) '.';
+  position: absolute;
+  left: 0;
+  color: var(--color-brand);
+  font-weight: 700;
+}
+
+/* Tables: render markdown GFM tables as proper UI columns */
+.tahi-doc-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.813rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.375rem;
+  overflow: hidden;
+}
+
+.tahi-doc-prose thead {
+  background: var(--color-bg-tertiary);
+}
+
+.tahi-doc-prose th {
+  text-align: left;
+  font-weight: 600;
+  padding: 0.5rem 0.75rem;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tahi-doc-prose td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--color-border-subtle);
+  vertical-align: top;
+}
+
+.tahi-doc-prose tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.tahi-doc-prose tbody tr:hover {
+  background: var(--color-bg-tertiary);
 }
 
 .tahi-doc-prose strong {

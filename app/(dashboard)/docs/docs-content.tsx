@@ -36,35 +36,121 @@ interface DocVersion {
   savedAt: string
 }
 
-/** Lightweight markdown to HTML for doc content display */
+/**
+ * Lightweight markdown to HTML for doc content display.
+ *
+ * Stateful line walker so we can group consecutive structures into
+ * proper block elements (lists wrapped in <ul>/<ol>, GFM tables,
+ * etc.). The previous version emitted orphan <li> tags with no <ul>
+ * wrapper, which caused browsers to render them with their default
+ * ::marker and the docs CSS to render a second bullet on top — the
+ * "two sets of bullets" symptom. It also had no table support, so
+ * GFM tables fell through to the paragraph case and rendered as
+ * literal pipes.
+ *
+ * Supported syntax:
+ *   - Headings #, ##, ###, ####
+ *   - Horizontal rule ---
+ *   - Unordered list (-, *) with consecutive items grouped in <ul>
+ *   - Ordered list (1.) with consecutive items grouped in <ol>
+ *   - GFM table: header row, |---|---|---| separator, body rows
+ *   - Paragraphs, blank lines = paragraph breaks
+ *   - Inline: bold, italic, bold+italic, code, links
+ *
+ * Not supported (out of scope for the docs surface today):
+ *   - Code blocks (```), blockquotes (>), images, nested lists,
+ *     task lists, footnotes, definition lists.
+ */
 function renderMarkdown(md: string): string {
   const escaped = md
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
 
-  return escaped
-    .split('\n')
-    .map(line => {
-      // Headings
-      if (line.startsWith('# ')) return `<h1>${line.slice(2)}</h1>`
-      if (line.startsWith('## ')) return `<h2>${line.slice(3)}</h2>`
-      if (line.startsWith('### ')) return `<h3>${line.slice(4)}</h3>`
-      if (line.startsWith('#### ')) return `<h4>${line.slice(5)}</h4>`
-      // Horizontal rule
-      if (/^---+$/.test(line.trim())) return '<hr />'
-      // Unordered list
-      if (/^[-*] /.test(line.trim())) {
-        const indent = line.match(/^(\s*)/)?.[1]?.length ?? 0
-        const content = line.replace(/^\s*[-*] /, '')
-        return `<li style="margin-left:${indent * 0.5}rem">${inlineFormat(content)}</li>`
+  const lines = escaped.split('\n')
+  const out: string[] = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+    const trimmed = line.trim()
+
+    // GFM table: a `|...|` row followed by a `|---|---|` separator.
+    // We detect the header + separator together; if the second row
+    // isn't a separator it's not a table, just rows of pipes.
+    if (trimmed.startsWith('|') && trimmed.endsWith('|') && i + 1 < lines.length) {
+      const next = lines[i + 1].trim()
+      const isSeparator = /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?$/.test(next)
+      if (isSeparator) {
+        const headerCells = splitTableRow(trimmed)
+        const bodyRows: string[][] = []
+        let j = i + 2
+        while (j < lines.length) {
+          const t = lines[j].trim()
+          if (!t.startsWith('|') || !t.endsWith('|')) break
+          bodyRows.push(splitTableRow(t))
+          j++
+        }
+        out.push(renderTable(headerCells, bodyRows))
+        i = j
+        continue
       }
-      // Empty line = paragraph break
-      if (line.trim() === '') return '<br />'
-      // Regular paragraph
-      return `<p>${inlineFormat(line)}</p>`
-    })
-    .join('\n')
+    }
+
+    // Unordered list block — collect all consecutive `-` or `*` items.
+    if (/^[-*] /.test(trimmed)) {
+      const items: string[] = []
+      while (i < lines.length && /^[-*] /.test(lines[i].trim())) {
+        const content = lines[i].replace(/^\s*[-*] /, '')
+        items.push(`<li>${inlineFormat(content)}</li>`)
+        i++
+      }
+      out.push(`<ul>${items.join('')}</ul>`)
+      continue
+    }
+
+    // Ordered list block — collect all consecutive `1.`, `2.` items.
+    if (/^\d+\.\s/.test(trimmed)) {
+      const items: string[] = []
+      while (i < lines.length && /^\d+\.\s/.test(lines[i].trim())) {
+        const content = lines[i].replace(/^\s*\d+\.\s/, '')
+        items.push(`<li>${inlineFormat(content)}</li>`)
+        i++
+      }
+      out.push(`<ol>${items.join('')}</ol>`)
+      continue
+    }
+
+    if (line.startsWith('# '))    { out.push(`<h1>${inlineFormat(line.slice(2))}</h1>`);   i++; continue }
+    if (line.startsWith('## '))   { out.push(`<h2>${inlineFormat(line.slice(3))}</h2>`);   i++; continue }
+    if (line.startsWith('### '))  { out.push(`<h3>${inlineFormat(line.slice(4))}</h3>`);   i++; continue }
+    if (line.startsWith('#### ')) { out.push(`<h4>${inlineFormat(line.slice(5))}</h4>`);   i++; continue }
+
+    if (/^---+$/.test(trimmed)) { out.push('<hr />'); i++; continue }
+
+    if (trimmed === '') { out.push(''); i++; continue }
+
+    // Default: paragraph.
+    out.push(`<p>${inlineFormat(line)}</p>`)
+    i++
+  }
+
+  return out.join('\n')
+}
+
+/** Split a `| a | b | c |` row into its cells, trimming each. */
+function splitTableRow(row: string): string[] {
+  // Strip leading/trailing pipe, split on |, trim each cell.
+  return row.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim())
+}
+
+/** Build a GFM table with headers + body rows. Inline-formats cells. */
+function renderTable(header: string[], body: string[][]): string {
+  const head = header.map(c => `<th>${inlineFormat(c)}</th>`).join('')
+  const rows = body
+    .map(row => `<tr>${row.map(c => `<td>${inlineFormat(c)}</td>`).join('')}</tr>`)
+    .join('')
+  return `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`
 }
 
 function inlineFormat(text: string): string {
