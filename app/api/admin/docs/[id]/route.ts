@@ -83,7 +83,18 @@ export async function PATCH(
     updates.category = body.category
   }
   if (body.contentMd !== undefined) {
-    updates.contentTiptap = body.contentMd
+    // contentTiptap is intentionally null on markdown-only updates.
+    // The renderer treats a null contentTiptap as the signal to fall
+    // back to parsing the markdown in contentText. Stuffing raw
+    // markdown into contentTiptap was a bug: the renderer expects
+    // Tiptap rich-text JSON in that field and renders the markdown
+    // literally when it can't parse it. Mirrors the import endpoint
+    // and the POST /api/admin/docs (create) shape for consistency.
+    //
+    // Side effect: any existing Tiptap JSON in contentTiptap is wiped
+    // when a markdown update lands. That's the correct semantics —
+    // contentMd is the new source of truth.
+    updates.contentTiptap = null
     updates.contentText = body.contentMd
   }
 
@@ -92,12 +103,14 @@ export async function PATCH(
     .set(updates)
     .where(eq(schema.docPages.id, id))
 
-  // Create a new version if content was updated
+  // Create a new version if content was updated. contentTiptap is
+  // null because the version record only carries Tiptap JSON when
+  // the UI editor saves a version; markdown-only saves leave it null.
   if (body.contentMd !== undefined) {
     await drizzle.insert(schema.docVersions).values({
       id: crypto.randomUUID(),
       pageId: id,
-      contentTiptap: body.contentMd,
+      contentTiptap: null,
       savedById: userId,
       savedAt: now,
     })
