@@ -109,7 +109,9 @@ export async function POST(req: NextRequest) {
     updatedAt: now,
   })
 
-  // Seed rows if provided (e.g. from a template)
+  // Seed rows if provided (e.g. from a template). Chunked to stay under
+  // D1's per-statement bind-variable cap (100 vars per query). Each row
+  // takes 11 placeholders, so 9 rows per chunk = 99 vars (safe).
   if (body.rows?.length) {
     const seeded = body.rows.map((r, idx) => ({
       id: crypto.randomUUID(),
@@ -124,7 +126,11 @@ export async function POST(req: NextRequest) {
       createdAt: now,
       updatedAt: now,
     }))
-    await database.insert(schema.scheduleRows).values(seeded)
+    const CHUNK = 9
+    for (let i = 0; i < seeded.length; i += CHUNK) {
+      const slice = seeded.slice(i, i + CHUNK)
+      await database.insert(schema.scheduleRows).values(slice)
+    }
   }
 
   return NextResponse.json({ id }, { status: 201 })
