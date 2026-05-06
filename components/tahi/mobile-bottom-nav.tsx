@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Inbox, MessageSquare, FileText, Users, FolderOpen,
   Menu, X, CheckSquare, TrendingUp, Star, CreditCard, Clock, BarChart2,
-  Gauge, UserCog, FileSignature, BookOpen, Settings, ShoppingBag,
+  Gauge, UserCog, FileSignature, BookOpen, Settings, ShoppingBag, Calendar,
 } from 'lucide-react'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 
@@ -68,6 +68,7 @@ const ADMIN_DRAWER: DrawerNavGroup[] = [
       { label: 'Reports', href: '/reports', icon: BarChart2 },
       { label: 'Capacity', href: '/capacity', icon: Gauge },
       { label: 'Team', href: '/team', icon: UserCog },
+      { label: 'Schedules', href: '/schedules', icon: Calendar },
       { label: 'Contracts', href: '/contracts', icon: FileSignature },
     ],
   },
