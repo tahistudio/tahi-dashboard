@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Building2, Calendar, Clock,
   Phone, Mail, FileText, MessageSquare,
@@ -243,7 +244,25 @@ export function DealDetail({ dealId }: { dealId: string }) {
   // Activity row that is currently asking "are you sure?". Only one at a time.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  // Whole-deal archive confirm + in-flight state.
+  const [confirmingArchive, setConfirmingArchive] = useState(false)
+  const [archiving, setArchiving] = useState(false)
   const { showToast } = useToast()
+  const router = useRouter()
+
+  async function archiveDeal() {
+    setArchiving(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/deals/${dealId}`), { method: 'DELETE' })
+      if (!res.ok) throw new Error(`Status ${res.status}`)
+      showToast('Deal archived', 'success')
+      router.push('/pipeline')
+    } catch {
+      showToast('Failed to archive deal', 'error')
+      setArchiving(false)
+      setConfirmingArchive(false)
+    }
+  }
 
   async function deleteActivity(id: string) {
     const previous = activities
@@ -374,7 +393,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
               <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 600, color: 'var(--color-text)' }}>
                 Activity Timeline
               </h2>
-              <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
+              <div className="flex flex-wrap items-center" style={{ gap: 'var(--space-2)' }}>
                 <button
                   onClick={() => setShowNudgeDialog(true)}
                   className="inline-flex items-center"
@@ -485,12 +504,13 @@ export function DealDetail({ dealId }: { dealId: string }) {
                           >
                             {act.type.replace(/_/g, ' ')}
                           </span>
-                          {/* Trash + inline confirm. Hidden until row hover/focus. */}
+                          {/* Trash + inline confirm. Always visible on mobile (touch has no hover);
+                              dim by default on desktop, full opacity on row hover/focus. */}
                           <div
                             className={
                               isConfirming
                                 ? 'ml-auto flex items-center gap-1.5'
-                                : 'ml-auto flex items-center gap-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity'
+                                : 'ml-auto flex items-center gap-1.5 opacity-100 sm:opacity-30 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity'
                             }
                           >
                             {isConfirming ? (
@@ -838,6 +858,89 @@ export function DealDetail({ dealId }: { dealId: string }) {
               )}
             </div>
           </SidebarCard>
+
+          {/* Archive deal — soft-deletes via DELETE endpoint (sets closeReason='archived').
+              Hidden if the deal is already archived. Two-step inline confirm to prevent
+              accidental clicks. */}
+          {deal.closeReason !== 'archived' && (
+            <SidebarCard title="Danger zone">
+              {confirmingArchive ? (
+                <div className="flex flex-col gap-2">
+                  <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                    This removes the deal from your pipeline. The record is kept for reporting.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { void archiveDeal() }}
+                      disabled={archiving}
+                      style={{
+                        flex: '1 1 auto',
+                        minHeight: '2.25rem',
+                        fontSize: '0.8125rem',
+                        fontWeight: 600,
+                        padding: '0.375rem 0.75rem',
+                        background: 'var(--color-danger)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: 'var(--radius-md)',
+                        cursor: archiving ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {archiving ? 'Archiving...' : 'Archive deal'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingArchive(false)}
+                      disabled={archiving}
+                      style={{
+                        flex: '1 1 auto',
+                        minHeight: '2.25rem',
+                        fontSize: '0.8125rem',
+                        fontWeight: 500,
+                        padding: '0.375rem 0.75rem',
+                        background: 'var(--color-bg-secondary)',
+                        color: 'var(--color-text-muted)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius-md)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmingArchive(true)}
+                  className="inline-flex items-center justify-center gap-1.5 w-full transition-colors"
+                  style={{
+                    minHeight: '2.5rem',
+                    fontSize: '0.8125rem',
+                    fontWeight: 500,
+                    padding: '0.5rem 0.75rem',
+                    background: 'transparent',
+                    color: 'var(--color-danger)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius-md)',
+                    cursor: 'pointer',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'var(--color-danger-bg, #fef2f2)'
+                    e.currentTarget.style.borderColor = 'var(--color-danger)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent'
+                    e.currentTarget.style.borderColor = 'var(--color-border)'
+                  }}
+                >
+                  <Archive className="w-3.5 h-3.5" />
+                  Archive deal
+                </button>
+              )}
+            </SidebarCard>
+          )}
         </SharedSidebarCard>
       </div>
 
@@ -2439,24 +2542,40 @@ function NudgeDialog({ dealId, dealTitle, contacts, onClose, onSent }: {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.4)' }}
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.4)', padding: '0' }}
       onClick={onClose}
     >
       <div
-        className="rounded-xl shadow-lg border flex flex-col"
+        className="rounded-t-xl sm:rounded-xl shadow-lg border flex flex-col w-full"
         style={{
-          width: '32rem', maxWidth: '95vw', maxHeight: '90vh',
-          background: 'var(--color-bg)', borderColor: 'var(--color-border)',
+          maxWidth: '32rem',
+          maxHeight: '92dvh',
+          background: 'var(--color-bg)',
+          borderColor: 'var(--color-border)',
         }}
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--color-border)' }}>
-          <h2 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)' }}>
-            <Send className="inline w-4 h-4" style={{ marginRight: '0.5rem', color: 'var(--color-brand)' }} />
-            Send Nudge
+        <div className="flex items-center justify-between gap-3" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--color-border)' }}>
+          <h2 className="font-semibold flex items-center gap-2 min-w-0" style={{ fontSize: '1rem', color: 'var(--color-text)' }}>
+            <Send className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--color-brand)' }} />
+            <span className="truncate">Send Nudge</span>
           </h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-subtle)' }}>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="flex items-center justify-center flex-shrink-0 transition-colors rounded-md"
+            style={{
+              width: '2.25rem',
+              height: '2.25rem',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--color-text-subtle)',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -2547,19 +2666,30 @@ function NudgeDialog({ dealId, dealTitle, contacts, onClose, onSent }: {
           )}
         </div>
 
-        <div className="flex justify-end gap-2" style={{ padding: '1rem 1.25rem', borderTop: '1px solid var(--color-border)' }}>
+        <div className="flex flex-wrap justify-end gap-2" style={{ padding: '1rem 1.25rem', borderTop: '1px solid var(--color-border)' }}>
           <button
             onClick={onClose}
             className="rounded-lg font-medium transition-colors"
-            style={{ padding: '0.5rem 1rem', fontSize: '0.8125rem', background: 'var(--color-bg-tertiary)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)', cursor: 'pointer' }}
+            style={{
+              flex: '1 1 auto',
+              minHeight: '2.5rem',
+              padding: '0.5rem 1rem',
+              fontSize: '0.8125rem',
+              background: 'var(--color-bg-tertiary)',
+              color: 'var(--color-text-muted)',
+              border: '1px solid var(--color-border)',
+              cursor: 'pointer',
+            }}
           >
             Cancel
           </button>
           <button
             onClick={handleSend}
             disabled={sending || !to.trim() || !subject.trim() || !body.trim()}
-            className="rounded-lg font-medium transition-colors inline-flex items-center gap-1.5"
+            className="rounded-lg font-medium transition-colors inline-flex items-center justify-center gap-1.5"
             style={{
+              flex: '2 1 auto',
+              minHeight: '2.5rem',
               padding: '0.5rem 1rem',
               fontSize: '0.8125rem',
               background: sending ? 'var(--color-text-subtle)' : 'var(--color-brand)',
