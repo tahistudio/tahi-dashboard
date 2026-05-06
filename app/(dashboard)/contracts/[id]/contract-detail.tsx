@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -376,21 +376,17 @@ export function ContractDetail({ id }: { id: string }) {
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={sig.signatureDataUrl} alt="signature" style={{ height: '2.25rem', maxWidth: '8rem' }} />
                       </div>
-                      <div className="text-[0.6875rem] font-mono text-[var(--color-text-subtle)] mt-2 break-all">
-                        chain: {sig.chainHash}
+                      <div className="mt-2 grid gap-1">
+                        <HashRow label="Chain" value={sig.chainHash} />
+                        {sig.ipHash && <HashRow label="IP hash" value={sig.ipHash} truncate={true} />}
                       </div>
-                      {sig.ipHash && (
-                        <div className="text-[0.6875rem] font-mono text-[var(--color-text-subtle)] break-all">
-                          ip-hash: {sig.ipHash.slice(0, 16)}…
-                        </div>
-                      )}
                     </div>
                   )
                 })}
               </div>
               {contract.finalHash && (
-                <div className="mt-3 text-[0.6875rem] font-mono text-[var(--color-brand-dark)] break-all border-t border-[var(--color-border-subtle)] pt-3">
-                  final-hash: {contract.finalHash}
+                <div className="mt-3 border-t border-[var(--color-border-subtle)] pt-3">
+                  <HashRow label="Final hash" value={contract.finalHash} accent />
                 </div>
               )}
             </div>
@@ -519,7 +515,7 @@ export function ContractDetail({ id }: { id: string }) {
             id: s.id,
             name: s.name,
             email: s.email,
-            badge: s.role === 'tahi' ? 'Tahi' : s.role === 'witness' ? 'Witness' : undefined,
+            badge: s.role === 'tahi' ? 'Tahi' : undefined,
           }))}
         postUrl={`/api/admin/contracts/${id}/email`}
         mode="signers"
@@ -534,6 +530,73 @@ export function ContractDetail({ id }: { id: string }) {
   )
 }
 
+/**
+ * <HashRow> — compact display for SHA-256 hashes.
+ *
+ * The full hash overflows on mobile and is hard to scan at a glance, so we
+ * show a labelled prefix + truncated middle + ellipsis. Tap once to expand
+ * to the full value, tap again to copy. Solves the original "screen too
+ * wide" mobile bug while making the hash chain look intentional rather
+ * than like an accident.
+ */
+function HashRow({ label, value, accent = false, truncate = false }: {
+  label: string
+  value: string
+  accent?: boolean
+  /** When true (used for IP hash), show only the first 12 chars without expand. */
+  truncate?: boolean
+}) {
+  const [expanded, setExpanded] = React.useState(false)
+  const [copied, setCopied] = React.useState(false)
+  const display = truncate
+    ? `${value.slice(0, 12)}…`
+    : expanded
+      ? value
+      : `${value.slice(0, 12)}…${value.slice(-6)}`
+  const colour = accent ? 'var(--color-brand-dark)' : 'var(--color-text-subtle)'
+
+  function onClick() {
+    if (truncate) {
+      navigator.clipboard.writeText(value).then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      })
+      return
+    }
+    if (!expanded) {
+      setExpanded(true)
+      return
+    }
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="text-left flex items-baseline gap-2 max-w-full"
+      title={truncate ? 'Click to copy' : expanded ? 'Click to copy' : 'Click to expand'}
+    >
+      <span className="text-[0.625rem] font-semibold uppercase tracking-wide flex-shrink-0" style={{ color: colour }}>
+        {label}
+      </span>
+      <span
+        className="text-[0.6875rem] font-mono min-w-0"
+        style={{
+          color: colour,
+          overflowWrap: 'anywhere',
+          wordBreak: 'break-all',
+        }}
+      >
+        {copied ? 'Copied!' : display}
+      </span>
+    </button>
+  )
+}
+
 function AddSignerDialog({
   contractId, onClose, onAdded,
 }: {
@@ -541,7 +604,7 @@ function AddSignerDialog({
   onClose: () => void
   onAdded: () => void
 }) {
-  const [role, setRole] = useState<'tahi' | 'client' | 'witness' | 'other'>('client')
+  const [role, setRole] = useState<'tahi' | 'client' | 'other'>('client')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [saving, setSaving] = useState(false)
@@ -589,7 +652,6 @@ function AddSignerDialog({
             <select id="signer-role" value={role} onChange={e => setRole(e.target.value as typeof role)} className={inputCn}>
               <option value="tahi">Tahi Studio</option>
               <option value="client">Client</option>
-              <option value="witness">Witness</option>
               <option value="other">Other</option>
             </select>
           </div>

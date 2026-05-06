@@ -4,7 +4,7 @@ import {
 
 interface ContractSignEmailProps {
   signerName: string
-  signerRole: string                // 'tahi' | 'client' | 'witness' | 'other'
+  signerRole: string                // 'tahi' | 'client' | 'other'
   contractName: string
   contractType: string              // 'sow' | 'msa' | etc
   signUrl: string

@@ -861,7 +861,7 @@ server.tool(
   'Add a signer to a contract. Returns the new signer ID.',
   {
     contractId: z.string().describe('Contract ID'),
-    role: z.string().describe('tahi | client | witness | other'),
+    role: z.string().describe('tahi | client | other'),
     name: z.string().describe('Signer full name'),
     email: z.string().describe('Signer email'),
     position: z.number().optional().describe('Position in signing order (auto-appended if omitted)'),

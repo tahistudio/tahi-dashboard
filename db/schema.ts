@@ -1790,7 +1790,7 @@ export const contractDocuments = sqliteTable('contract_documents', {
 export const contractSigners = sqliteTable('contract_signers', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   contractId: text('contract_id').notNull().references(() => contractDocuments.id, { onDelete: 'cascade' }),
-  // tahi | client | witness | other
+  // tahi | client | other  (witness retired May 2026 — never used in practice)
   role: text('role').notNull(),
   name: text('name').notNull(),
   email: text('email').notNull(),

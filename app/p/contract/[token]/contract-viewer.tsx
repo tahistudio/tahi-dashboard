@@ -455,7 +455,6 @@ function labelForRole(r: string): string {
   return ({
     tahi: 'Tahi Studio',
     client: 'Client',
-    witness: 'Witness',
     other: 'Signatory',
   } as Record<string, string>)[r] ?? r
 }

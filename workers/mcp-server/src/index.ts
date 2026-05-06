@@ -360,7 +360,7 @@ const TOOLS: ToolDef[] = [
   }, ['contractId']),
   tool('add_contract_signer', 'Add a signer to a contract. Returns the new signer ID.', {
     contractId: prop('string', 'Contract ID'),
-    role: prop('string', 'tahi | client | witness | other'),
+    role: prop('string', 'tahi | client | other'),
     name: prop('string', 'Signer full name'),
     email: prop('string', 'Signer email'),
     position: prop('number', 'Position in signing order (optional, auto-appended)'),
