@@ -1,0 +1,610 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink } from 'lucide-react'
+import { apiPath } from '@/lib/api'
+import { useToast } from '@/components/tahi/toast'
+import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
+
+interface Proposal {
+  id: string
+  orgId: string | null
+  dealId: string | null
+  title: string
+  subtitle: string | null
+  preparedFor: string | null
+  preparedBy: string | null
+  effectiveDate: string | null
+  expiresAt: string | null
+  status: string
+  publicShareToken: string | null
+  publicSharedAt: string | null
+  decidedAt: string | null
+  decidedVariantId: string | null
+  orgName: string | null
+  dealTitle: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+interface Section {
+  id: string
+  proposalId: string
+  type: string
+  title: string | null
+  subtitle: string | null
+  data: string | null
+  position: number
+}
+
+interface Variant {
+  id: string
+  proposalId: string
+  name: string
+  tagline: string | null
+  oneOffAmount: number
+  monthlyAmount: number
+  currency: string
+  scopeHtml: string | null
+  pricingNotesHtml: string | null
+  timelineScheduleId: string | null
+  ctaLabel: string | null
+  isFeatured: number
+  position: number
+}
+
+interface Acceptance {
+  id: string
+  variantId: string | null
+  status: string
+  acceptorName: string | null
+  acceptorEmail: string | null
+  acceptorRole: string | null
+  comment: string | null
+  acceptorCountry: string | null
+  acceptedAt: string
+}
+
+const SECTION_TYPES = [
+  { value: 'cover', label: 'Cover' },
+  { value: 'overview', label: 'Overview' },
+  { value: 'terms', label: 'Terms' },
+  { value: 'about', label: 'About Tahi' },
+  { value: 'testimonial', label: 'Testimonial' },
+  { value: 'scope_shared', label: 'Shared scope' },
+  { value: 'text', label: 'Custom text' },
+] as const
+
+export function ProposalDetail({ proposalId }: { proposalId: string }) {
+  const router = useRouter()
+  const { showToast } = useToast()
+  const [proposal, setProposal] = useState<Proposal | null>(null)
+  const [sections, setSections] = useState<Section[]>([])
+  const [variants, setVariants] = useState<Variant[]>([])
+  const [acceptances, setAcceptances] = useState<Acceptance[]>([])
+  const [loading, setLoading] = useState(true)
+  const [sharing, setSharing] = useState(false)
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/proposals/${proposalId}`))
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as { proposal: Proposal; sections: Section[]; variants: Variant[]; acceptances: Acceptance[] }
+      setProposal(data.proposal)
+      setSections(data.sections ?? [])
+      setVariants(data.variants ?? [])
+      setAcceptances(data.acceptances ?? [])
+    } catch {
+      // silent
+    } finally {
+      setLoading(false)
+    }
+  }, [proposalId])
+
+  useEffect(() => { void fetchAll() }, [fetchAll])
+
+  // ── Top-level patch (save on blur) ───────────────────────────────────
+  async function patchProposal(changes: Partial<Proposal>) {
+    setProposal(prev => prev ? { ...prev, ...changes } : prev)
+    try {
+      await fetch(apiPath(`/api/admin/proposals/${proposalId}`), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+      })
+    } catch {
+      showToast('Failed to save', 'error')
+    }
+  }
+
+  // ── Section CRUD ─────────────────────────────────────────────────────
+  async function addSection(type: string) {
+    const defaults: Record<string, { title: string; subtitle: string | null; data: unknown }> = {
+      cover: { title: 'Cover', subtitle: null, data: { html: '' } },
+      overview: { title: 'Executive overview', subtitle: 'How we approach this', data: { html: '' } },
+      terms: { title: 'Terms', subtitle: 'Engagement terms', data: { html: '' } },
+      about: { title: 'About Tahi Studio', subtitle: 'Who we are', data: { html: '' } },
+      testimonial: { title: 'What clients say', subtitle: null, data: { quote: '', author: '', role: '' } },
+      scope_shared: { title: 'Scope', subtitle: 'What every package includes', data: { html: '' } },
+      text: { title: 'New section', subtitle: null, data: { html: '' } },
+    }
+    const seed = defaults[type] ?? defaults.text
+    try {
+      const res = await fetch(apiPath(`/api/admin/proposals/${proposalId}/sections`), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, ...seed }),
+      })
+      if (!res.ok) throw new Error('Failed')
+      await fetchAll()
+    } catch {
+      showToast('Failed to add section', 'error')
+    }
+  }
+  async function patchSection(sectionId: string, changes: SectionPatch) {
+    setSections(prev => prev.map(s => {
+      if (s.id !== sectionId) return s
+      const next: Section = { ...s }
+      if (changes.type !== undefined) next.type = changes.type
+      if (changes.title !== undefined) next.title = changes.title
+      if (changes.subtitle !== undefined) next.subtitle = changes.subtitle
+      if (changes.position !== undefined) next.position = changes.position
+      if (changes.data !== undefined) next.data = JSON.stringify(changes.data)
+      return next
+    }))
+    try {
+      await fetch(apiPath(`/api/admin/proposals/${proposalId}/sections/${sectionId}`), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+      })
+    } catch {
+      showToast('Failed to save section', 'error')
+    }
+  }
+  async function deleteSection(sectionId: string) {
+    setSections(prev => prev.filter(s => s.id !== sectionId))
+    try {
+      await fetch(apiPath(`/api/admin/proposals/${proposalId}/sections/${sectionId}`), { method: 'DELETE' })
+    } catch {
+      await fetchAll()
+      showToast('Failed to delete section', 'error')
+    }
+  }
+
+  // ── Variant CRUD ─────────────────────────────────────────────────────
+  async function addVariant() {
+    try {
+      const res = await fetch(apiPath(`/api/admin/proposals/${proposalId}/variants`), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: `Package ${variants.length + 1}`,
+          oneOffAmount: 0,
+          monthlyAmount: 0,
+          currency: 'NZD',
+        }),
+      })
+      if (!res.ok) throw new Error('Failed')
+      await fetchAll()
+    } catch {
+      showToast('Failed to add variant', 'error')
+    }
+  }
+  async function patchVariant(variantId: string, changes: Partial<Variant>) {
+    setVariants(prev => prev.map(v => v.id === variantId ? { ...v, ...changes } : v))
+    try {
+      await fetch(apiPath(`/api/admin/proposals/${proposalId}/variants/${variantId}`), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+      })
+    } catch {
+      showToast('Failed to save variant', 'error')
+    }
+  }
+  async function deleteVariant(variantId: string) {
+    setVariants(prev => prev.filter(v => v.id !== variantId))
+    try {
+      await fetch(apiPath(`/api/admin/proposals/${proposalId}/variants/${variantId}`), { method: 'DELETE' })
+    } catch {
+      await fetchAll()
+      showToast('Failed to delete variant', 'error')
+    }
+  }
+
+  // ── Sharing ──────────────────────────────────────────────────────────
+  async function handleShare() {
+    setSharing(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/proposals/${proposalId}/share`), { method: 'POST' })
+      const data = await res.json() as { token?: string }
+      if (!res.ok || !data.token) throw new Error('Failed')
+      setProposal(prev => prev ? { ...prev, status: 'shared', publicShareToken: data.token! } : prev)
+      const url = `${window.location.origin}/dashboard/p/proposal/${data.token}`
+      try { await navigator.clipboard.writeText(url); showToast('Public link copied', 'success') }
+      catch { showToast('Public link ready', 'success') }
+    } catch {
+      showToast('Failed to share', 'error')
+    } finally {
+      setSharing(false)
+    }
+  }
+  async function handleUnshare() {
+    setSharing(true)
+    try {
+      await fetch(apiPath(`/api/admin/proposals/${proposalId}/share`), { method: 'DELETE' })
+      setProposal(prev => prev ? { ...prev, status: 'draft', publicShareToken: null } : prev)
+      showToast('Public link revoked', 'success')
+    } catch {
+      showToast('Failed to revoke', 'error')
+    } finally {
+      setSharing(false)
+    }
+  }
+
+  async function deleteProposal() {
+    try {
+      const res = await fetch(apiPath(`/api/admin/proposals/${proposalId}`), { method: 'DELETE' })
+      if (!res.ok) throw new Error('Failed')
+      showToast('Proposal deleted', 'success')
+      router.push('/proposals')
+    } catch {
+      showToast('Failed to delete', 'error')
+    }
+  }
+
+  if (loading || !proposal) {
+    return (
+      <div style={{ padding: '1.5rem' }}>
+        <div className="animate-pulse rounded-xl" style={{ height: '8rem', background: 'var(--color-bg-secondary)', marginBottom: '1rem' }} />
+        <div className="animate-pulse rounded-xl" style={{ height: '20rem', background: 'var(--color-bg-secondary)' }} />
+      </div>
+    )
+  }
+
+  const publicUrl = proposal.publicShareToken
+    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/dashboard/p/proposal/${proposal.publicShareToken}`
+    : null
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+      <Link href="/proposals" className="inline-flex items-center" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', textDecoration: 'none', gap: '0.375rem' }}>
+        <ArrowLeft size={14} />
+        All proposals
+      </Link>
+
+      {/* Cover header — editable */}
+      <div style={{ padding: '1.5rem 1.75rem', background: 'var(--color-bg)', border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-lg)' }}>
+        <input
+          type="text"
+          value={proposal.subtitle ?? ''}
+          onChange={e => setProposal(p => p ? { ...p, subtitle: e.target.value } : p)}
+          onBlur={e => patchProposal({ subtitle: e.currentTarget.value || null })}
+          placeholder="PROPOSAL"
+          style={{ display: 'block', width: '100%', fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', background: 'transparent', border: 'none', padding: 0, marginBottom: '0.5rem', outline: 'none' }}
+        />
+        <input
+          type="text"
+          value={proposal.title}
+          onChange={e => setProposal(p => p ? { ...p, title: e.target.value } : p)}
+          onBlur={e => patchProposal({ title: e.currentTarget.value || 'Untitled' })}
+          style={{ display: 'block', width: '100%', fontSize: '1.5rem', fontWeight: 800, color: 'var(--color-text)', background: 'transparent', border: 'none', padding: 0, outline: 'none', marginBottom: '1rem' }}
+        />
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '1rem' }}>
+          <FieldGroup label="Prepared for">
+            <input type="text" value={proposal.preparedFor ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedFor: e.target.value } : p)} onBlur={e => patchProposal({ preparedFor: e.currentTarget.value || null })} style={metaInputStyle} />
+          </FieldGroup>
+          <FieldGroup label="Prepared by">
+            <input type="text" value={proposal.preparedBy ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedBy: e.target.value } : p)} onBlur={e => patchProposal({ preparedBy: e.currentTarget.value || null })} style={metaInputStyle} />
+          </FieldGroup>
+          <FieldGroup label="Effective">
+            <input type="date" value={proposal.effectiveDate ?? ''} onChange={e => patchProposal({ effectiveDate: e.currentTarget.value || null })} style={metaInputStyle} />
+          </FieldGroup>
+          <FieldGroup label="Expires">
+            <input type="date" value={proposal.expiresAt ?? ''} onChange={e => patchProposal({ expiresAt: e.currentTarget.value || null })} style={metaInputStyle} />
+          </FieldGroup>
+        </div>
+      </div>
+
+      {/* Toolbar — share + delete */}
+      <div className="flex flex-wrap items-center" style={{ gap: '0.5rem' }}>
+        <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '0.25rem 0.625rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-full)', border: '1px solid var(--color-border-subtle)' }}>
+          Status: {proposal.status}
+        </span>
+        <div style={{ flex: 1 }} />
+        {publicUrl ? (
+          <>
+            <button onClick={() => { navigator.clipboard.writeText(publicUrl).then(() => showToast('Public link copied', 'success')) }} className="inline-flex items-center" style={toolbarBtn} title={publicUrl}>
+              <Copy size={13} />
+              Copy public link
+            </button>
+            <a href={publicUrl} target="_blank" rel="noreferrer" className="inline-flex items-center" style={toolbarBtn}>
+              <ExternalLink size={13} />
+              Open
+            </a>
+            <button onClick={handleUnshare} disabled={sharing} className="inline-flex items-center" style={{ ...toolbarBtn, color: 'var(--color-danger)' }}>
+              Revoke
+            </button>
+          </>
+        ) : (
+          <button onClick={handleShare} disabled={sharing} className="inline-flex items-center" style={toolbarPrimary}>
+            <Share2 size={13} />
+            {sharing ? 'Generating…' : 'Get public link'}
+          </button>
+        )}
+        <button onClick={() => { if (window.confirm('Delete this proposal? Cannot be undone.')) deleteProposal() }} className="inline-flex items-center" style={{ ...toolbarBtn, color: 'var(--color-text-subtle)' }}>
+          <Trash2 size={13} />
+          Delete
+        </button>
+      </div>
+
+      {/* Sections */}
+      <div>
+        <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
+          <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>Shared sections</h2>
+          <select
+            onChange={e => { if (e.target.value) { addSection(e.target.value); e.target.value = '' } }}
+            defaultValue=""
+            style={{ ...metaInputStyle, width: 'auto', minWidth: '12rem', cursor: 'pointer' }}
+          >
+            <option value="" disabled>+ Add section…</option>
+            {SECTION_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+        </div>
+        {sections.length === 0 ? (
+          <div style={emptyHint}>No sections yet. Use the dropdown to add one.</div>
+        ) : (
+          <div className="flex flex-col" style={{ gap: '0.75rem' }}>
+            {sections.map(s => (
+              <SectionEditor
+                key={s.id}
+                section={s}
+                onChange={changes => patchSection(s.id, changes)}
+                onDelete={() => deleteSection(s.id)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Variants */}
+      <div>
+        <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
+          <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>Packages (variants)</h2>
+          <button onClick={addVariant} className="inline-flex items-center" style={toolbarBtn}>
+            <Plus size={13} />
+            Add package
+          </button>
+        </div>
+        {variants.length === 0 ? (
+          <div style={emptyHint}>No packages yet. Add at least one.</div>
+        ) : (
+          <div className="flex flex-col" style={{ gap: '0.75rem' }}>
+            {variants.map(v => (
+              <VariantEditor
+                key={v.id}
+                variant={v}
+                onChange={changes => patchVariant(v.id, changes)}
+                onDelete={() => deleteVariant(v.id)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Acceptances log */}
+      {acceptances.length > 0 && (
+        <div>
+          <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)', margin: '0 0 0.75rem 0' }}>
+            Decisions
+          </h2>
+          <div className="flex flex-col" style={{ gap: '0.5rem' }}>
+            {acceptances.map(a => {
+              const variantName = a.variantId ? variants.find(v => v.id === a.variantId)?.name : null
+              return (
+                <div key={a.id} style={{ padding: '0.75rem 1rem', border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-md)', fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+                  <strong style={{ color: a.status === 'accepted' ? '#15803d' : '#dc2626' }}>{a.status}</strong>
+                  {variantName ? ` · ${variantName}` : ''}
+                  {a.acceptorName ? ` · by ${a.acceptorName}` : ''}
+                  {a.acceptorEmail ? ` (${a.acceptorEmail})` : ''}
+                  {' · '}
+                  <span style={{ color: 'var(--color-text-subtle)' }}>{new Date(a.acceptedAt).toLocaleString()}</span>
+                  {a.comment && <p style={{ margin: '0.25rem 0 0 0', color: 'var(--color-text)' }}>“{a.comment}”</p>}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Analytics */}
+      {proposal.publicShareToken && (
+        <ShareAnalyticsCard resourceType="proposal" resourceId={proposalId} />
+      )}
+    </div>
+  )
+}
+
+// ─── Section editor (per-type) ───────────────────────────────────────────
+
+interface SectionPatch {
+  type?: string
+  title?: string | null
+  subtitle?: string | null
+  position?: number
+  data?: unknown
+}
+
+function SectionEditor({ section, onChange, onDelete }: {
+  section: Section
+  onChange: (changes: SectionPatch) => void
+  onDelete: () => void
+}) {
+  const [data, setData] = useState<Record<string, unknown>>(() => {
+    if (!section.data) return {}
+    try { return JSON.parse(section.data) as Record<string, unknown> } catch { return {} }
+  })
+
+  const setField = (key: string, value: unknown) => {
+    setData(prev => ({ ...prev, [key]: value }))
+  }
+  const flush = () => onChange({ data })
+
+  return (
+    <details open style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)' }}>
+      <summary style={{ padding: '0.625rem 0.875rem', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between', listStyle: 'none' }}>
+        <span>
+          <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: '0.5rem' }}>
+            {section.type}
+          </span>
+          {section.title || '(no title)'}
+        </span>
+        <button onClick={(e) => { e.preventDefault(); onDelete() }} style={{ ...toolbarBtn, padding: '0.25rem 0.625rem' }}>
+          <Trash2 size={12} />
+        </button>
+      </summary>
+      <div style={{ padding: '0.75rem 0.875rem', borderTop: '1px solid var(--color-border-subtle)', display: 'grid', gap: '0.625rem' }}>
+        <FieldGroup label="Title">
+          <input type="text" value={section.title ?? ''} onChange={e => onChange({ title: e.target.value })} style={metaInputStyle} />
+        </FieldGroup>
+        <FieldGroup label="Subtitle (eyebrow)">
+          <input type="text" value={section.subtitle ?? ''} onChange={e => onChange({ subtitle: e.target.value })} style={metaInputStyle} />
+        </FieldGroup>
+        {section.type === 'testimonial' ? (
+          <>
+            <FieldGroup label="Quote">
+              <textarea value={String(data.quote ?? '')} onChange={e => setField('quote', e.target.value)} onBlur={flush} rows={3} style={{ ...metaInputStyle, fontFamily: 'inherit' }} />
+            </FieldGroup>
+            <FieldGroup label="Author">
+              <input type="text" value={String(data.author ?? '')} onChange={e => setField('author', e.target.value)} onBlur={flush} style={metaInputStyle} />
+            </FieldGroup>
+            <FieldGroup label="Author role">
+              <input type="text" value={String(data.role ?? '')} onChange={e => setField('role', e.target.value)} onBlur={flush} style={metaInputStyle} />
+            </FieldGroup>
+          </>
+        ) : (
+          <FieldGroup label="HTML content (paste or type — supports <p>, <strong>, <ul>, etc.)">
+            <textarea
+              value={String(data.html ?? '')}
+              onChange={e => setField('html', e.target.value)}
+              onBlur={flush}
+              rows={6}
+              placeholder="<p>Your content here...</p>"
+              style={{ ...metaInputStyle, fontFamily: 'monospace', fontSize: '0.75rem', lineHeight: 1.5 }}
+            />
+          </FieldGroup>
+        )}
+      </div>
+    </details>
+  )
+}
+
+function VariantEditor({ variant, onChange, onDelete }: {
+  variant: Variant
+  onChange: (changes: Partial<Variant>) => void
+  onDelete: () => void
+}) {
+  return (
+    <details open style={{ border: variant.isFeatured ? '2px solid var(--color-brand)' : '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)' }}>
+      <summary style={{ padding: '0.625rem 0.875rem', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between', listStyle: 'none' }}>
+        <span>
+          {variant.isFeatured ? <Star size={12} style={{ color: 'var(--color-brand)', marginRight: '0.25rem' }} /> : null}
+          {variant.name} · {variant.currency} {variant.oneOffAmount.toLocaleString()}{variant.monthlyAmount > 0 ? ` + ${variant.monthlyAmount.toLocaleString()}/mo` : ''}
+        </span>
+        <button onClick={(e) => { e.preventDefault(); onDelete() }} style={{ ...toolbarBtn, padding: '0.25rem 0.625rem' }}>
+          <Trash2 size={12} />
+        </button>
+      </summary>
+      <div style={{ padding: '0.75rem 0.875rem', borderTop: '1px solid var(--color-border-subtle)', display: 'grid', gap: '0.625rem' }}>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))', gap: '0.625rem' }}>
+          <FieldGroup label="Name">
+            <input type="text" value={variant.name} onChange={e => onChange({ name: e.target.value })} style={metaInputStyle} />
+          </FieldGroup>
+          <FieldGroup label="Tagline">
+            <input type="text" value={variant.tagline ?? ''} onChange={e => onChange({ tagline: e.target.value })} style={metaInputStyle} />
+          </FieldGroup>
+          <FieldGroup label="One-off amount">
+            <input type="number" value={variant.oneOffAmount} onChange={e => onChange({ oneOffAmount: parseInt(e.target.value, 10) || 0 })} style={metaInputStyle} />
+          </FieldGroup>
+          <FieldGroup label="Monthly amount">
+            <input type="number" value={variant.monthlyAmount} onChange={e => onChange({ monthlyAmount: parseInt(e.target.value, 10) || 0 })} style={metaInputStyle} />
+          </FieldGroup>
+          <FieldGroup label="Currency">
+            <select value={variant.currency} onChange={e => onChange({ currency: e.target.value })} style={{ ...metaInputStyle, cursor: 'pointer' }}>
+              {['NZD', 'USD', 'AUD', 'GBP', 'EUR'].map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </FieldGroup>
+          <FieldGroup label="CTA label">
+            <input type="text" value={variant.ctaLabel ?? ''} placeholder="Accept this package" onChange={e => onChange({ ctaLabel: e.target.value })} style={metaInputStyle} />
+          </FieldGroup>
+        </div>
+        <FieldGroup label="Scope HTML — what's included in this package">
+          <textarea value={variant.scopeHtml ?? ''} onChange={e => onChange({ scopeHtml: e.target.value })} rows={6} placeholder="<ul><li>Discovery & sitemap</li><li>...</li></ul>" style={{ ...metaInputStyle, fontFamily: 'monospace', fontSize: '0.75rem', lineHeight: 1.5 }} />
+        </FieldGroup>
+        <FieldGroup label="Pricing notes (optional, HTML)">
+          <textarea value={variant.pricingNotesHtml ?? ''} onChange={e => onChange({ pricingNotesHtml: e.target.value })} rows={3} placeholder="<p>50% on signing, 50% on launch.</p>" style={{ ...metaInputStyle, fontFamily: 'monospace', fontSize: '0.75rem', lineHeight: 1.5 }} />
+        </FieldGroup>
+        <label className="inline-flex items-center" style={{ gap: '0.5rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)', cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!variant.isFeatured} onChange={e => onChange({ isFeatured: e.target.checked ? 1 : 0 })} />
+          Featured / recommended
+        </label>
+      </div>
+    </details>
+  )
+}
+
+const metaInputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '0.375rem 0.5rem',
+  fontSize: '0.8125rem',
+  fontWeight: 500,
+  background: 'var(--color-bg-secondary)',
+  border: '1px solid var(--color-border-subtle)',
+  borderRadius: 'var(--radius-sm)',
+  color: 'var(--color-text)',
+}
+
+function FieldGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.25rem' }}>
+        {label}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+const toolbarBtn: React.CSSProperties = {
+  padding: '0.4375rem 0.75rem',
+  fontSize: '0.75rem',
+  fontWeight: 500,
+  background: 'var(--color-bg)',
+  color: 'var(--color-text-muted)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-md)',
+  gap: '0.375rem',
+  cursor: 'pointer',
+  textDecoration: 'none',
+}
+
+const toolbarPrimary: React.CSSProperties = {
+  padding: '0.4375rem 0.75rem',
+  fontSize: '0.75rem',
+  fontWeight: 600,
+  background: 'var(--color-brand)',
+  color: 'white',
+  border: 'none',
+  borderRadius: 'var(--radius-md)',
+  gap: '0.375rem',
+  cursor: 'pointer',
+}
+
+const emptyHint: React.CSSProperties = {
+  padding: '1rem',
+  textAlign: 'center',
+  background: 'var(--color-bg-secondary)',
+  border: '1px dashed var(--color-border)',
+  borderRadius: 'var(--radius-md)',
+  fontSize: '0.8125rem',
+  color: 'var(--color-text-subtle)',
+}

@@ -71,6 +71,7 @@ const ADMIN_NAV: NavGroup[] = [
       { label: 'Capacity',  href: '/capacity',  icon: Gauge,         adminOnly: true },
       { label: 'Team',      href: '/team',      icon: UserCog,       adminOnly: true },
       { label: 'Schedules', href: '/schedules', icon: Calendar,      adminOnly: true },
+      { label: 'Proposals', href: '/proposals', icon: FileText,      adminOnly: true },
       { label: 'Contracts', href: '/contracts', icon: FileSignature, adminOnly: true },
     ],
   },

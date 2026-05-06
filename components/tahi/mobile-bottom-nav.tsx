@@ -69,6 +69,7 @@ const ADMIN_DRAWER: DrawerNavGroup[] = [
       { label: 'Capacity', href: '/capacity', icon: Gauge },
       { label: 'Team', href: '/team', icon: UserCog },
       { label: 'Schedules', href: '/schedules', icon: Calendar },
+      { label: 'Proposals', href: '/proposals', icon: FileText },
       { label: 'Contracts', href: '/contracts', icon: FileSignature },
     ],
   },
