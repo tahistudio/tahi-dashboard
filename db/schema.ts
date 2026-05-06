@@ -1588,6 +1588,14 @@ export const proposals = sqliteTable('proposals', {
   // When status flips to accepted / declined.
   decidedAt: text('decided_at'),
   decidedVariantId: text('decided_variant_id'),
+  // Draft / Publish model (Phase 9). The admin edits live values freely;
+  // the public viewer reads `publishedSnapshot` if present so unpublished
+  // edits don't leak. Snapshot shape mirrors the template snapshot:
+  //   { proposal: {...}, sections: [...], variants: [...] }
+  // null means "no published version yet" — viewer can fall back to live
+  // OR show a "not yet published" state, depending on context.
+  publishedSnapshot: text('published_snapshot'),
+  publishedAt: text('published_at'),
   createdById: text('created_by_id').notNull(),
   ...timestamps,
 }, (table) => [

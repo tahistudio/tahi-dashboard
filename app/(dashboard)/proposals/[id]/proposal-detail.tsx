@@ -27,6 +27,7 @@ interface Proposal {
   publicSharedAt: string | null
   decidedAt: string | null
   decidedVariantId: string | null
+  publishedAt: string | null
   orgName: string | null
   dealTitle: string | null
   createdAt: string
@@ -268,6 +269,26 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
     }
   }
 
+  // ── Publish (draft / publish model — Phase 9) ───────────────────────
+  // Admin edits sections/variants live (auto-save). The public viewer
+  // reads from the published snapshot, so changes don't leak until the
+  // admin clicks Publish.
+  const [publishing, setPublishing] = useState(false)
+  async function handlePublish() {
+    setPublishing(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/proposals/${proposalId}/publish`), { method: 'POST' })
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as { publishedAt: string }
+      setProposal(prev => prev ? { ...prev, publishedAt: data.publishedAt } : prev)
+      showToast('Published. Public viewer now shows the latest version.', 'success')
+    } catch {
+      showToast('Failed to publish', 'error')
+    } finally {
+      setPublishing(false)
+    }
+  }
+
   // ── Sharing ──────────────────────────────────────────────────────────
   async function handleShare() {
     setSharing(true)
@@ -381,11 +402,58 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
         </div>
       </div>
 
+      {/* Publish indicator — shows when admin has unpublished edits */}
+      {(() => {
+        const hasUnpublished =
+          !proposal.publishedAt ||
+          (proposal.updatedAt && new Date(proposal.updatedAt).getTime() > new Date(proposal.publishedAt).getTime() + 1000)
+        if (!hasUnpublished) return null
+        return (
+          <div className="flex flex-wrap items-center justify-between" style={{
+            padding: '0.625rem 0.875rem',
+            background: '#fff7ed',
+            color: '#9a3412',
+            border: '1px solid #fed7aa',
+            borderRadius: 'var(--radius-lg)',
+            gap: '0.75rem',
+          }}>
+            <div style={{ fontSize: '0.8125rem', fontWeight: 500 }}>
+              <strong>Unpublished changes.</strong> The public viewer is still showing
+              {proposal.publishedAt ? ' the last published version' : ' nothing — publish to share with the client'}.
+            </div>
+            <button
+              onClick={handlePublish}
+              disabled={publishing}
+              className="inline-flex items-center"
+              style={{
+                padding: '0.4375rem 0.875rem',
+                fontSize: '0.8125rem',
+                fontWeight: 600,
+                background: 'var(--color-brand)',
+                color: 'white',
+                border: 'none',
+                borderRadius: 'var(--radius-leaf-sm)',
+                cursor: publishing ? 'wait' : 'pointer',
+                opacity: publishing ? 0.7 : 1,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {publishing ? 'Publishing…' : 'Publish'}
+            </button>
+          </div>
+        )
+      })()}
+
       {/* Toolbar — share + delete */}
       <div className="flex flex-wrap items-center" style={{ gap: '0.5rem' }}>
         <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '0.25rem 0.625rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-full)', border: '1px solid var(--color-border-subtle)' }}>
           Status: {proposal.status}
         </span>
+        {proposal.publishedAt && (
+          <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>
+            Published {new Date(proposal.publishedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
+          </span>
+        )}
         <div style={{ flex: 1 }} />
         {publicUrl ? (
           <>

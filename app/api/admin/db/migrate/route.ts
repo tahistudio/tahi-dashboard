@@ -627,6 +627,14 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE deals ADD COLUMN next_action_due_at text`,
     ],
   },
+  {
+    name: '0032',
+    description: 'Phase 9 proposal draft/publish model: published_snapshot (JSON) + published_at. Public viewer reads from the snapshot so admin edits do not leak until Publish.',
+    statements: [
+      `ALTER TABLE proposals ADD COLUMN published_snapshot text`,
+      `ALTER TABLE proposals ADD COLUMN published_at text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
