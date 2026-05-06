@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const filterOrgId = url.searchParams.get('orgId')
   const filterDealId = url.searchParams.get('dealId')
+  const filterProposalId = url.searchParams.get('proposalId')
   const filterStatus = url.searchParams.get('status')
 
   const database = await db() as unknown as D1
@@ -24,6 +25,7 @@ export async function GET(req: NextRequest) {
   const conditions = []
   if (filterOrgId) conditions.push(eq(schema.projectSchedules.orgId, filterOrgId))
   if (filterDealId) conditions.push(eq(schema.projectSchedules.dealId, filterDealId))
+  if (filterProposalId) conditions.push(eq(schema.projectSchedules.proposalId, filterProposalId))
   if (filterStatus) conditions.push(eq(schema.projectSchedules.status, filterStatus))
 
   const items = await database
@@ -31,6 +33,7 @@ export async function GET(req: NextRequest) {
       id: schema.projectSchedules.id,
       orgId: schema.projectSchedules.orgId,
       dealId: schema.projectSchedules.dealId,
+      proposalId: schema.projectSchedules.proposalId,
       title: schema.projectSchedules.title,
       subtitle: schema.projectSchedules.subtitle,
       preparedFor: schema.projectSchedules.preparedFor,
@@ -67,6 +70,7 @@ export async function POST(req: NextRequest) {
     subtitle?: string
     orgId?: string | null
     dealId?: string | null
+    proposalId?: string | null
     preparedFor?: string
     preparedBy?: string
     effectiveDate?: string
@@ -95,6 +99,7 @@ export async function POST(req: NextRequest) {
     id,
     orgId: body.orgId ?? null,
     dealId: body.dealId ?? null,
+    proposalId: body.proposalId ?? null,
     title: body.title.trim(),
     subtitle: body.subtitle?.trim() ?? null,
     preparedFor: body.preparedFor?.trim() ?? null,

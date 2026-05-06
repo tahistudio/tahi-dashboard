@@ -18,6 +18,7 @@ import { apiPath } from '@/lib/api'
 import { sourceBadge } from '@/lib/chart-colors'
 import { REQUEST_STATUS_CONFIG } from '@/lib/status-config'
 import { SidebarSection, SidebarCard as SharedSidebarCard } from '@/components/tahi/sidebar-card'
+import { DealSalesKit } from '@/components/tahi/deal-sales-kit'
 import { SkeletonCard, SkeletonList } from '@/components/tahi/skeletons'
 
 // ---- Types ---------------------------------------------------------------
@@ -655,8 +656,14 @@ export function DealDetail({ dealId }: { dealId: string }) {
           )}
         </div>
 
-        {/* Right column (1/3) - sidebar: one card, many sections */}
-        <SharedSidebarCard className="flex flex-col">
+        {/* Right column (1/3) — sales kit on top, then sidebar card */}
+        <div className="flex flex-col" style={{ gap: 'var(--space-4)', alignSelf: 'flex-start' }}>
+          <DealSalesKit
+            dealId={dealId}
+            orgId={deal.orgId ?? null}
+            dealTitle={deal.title}
+          />
+          <SharedSidebarCard className="flex flex-col">
           {/* Stage selector */}
           <SidebarCard title="Stage">
             <StageSelector
@@ -966,6 +973,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
             </SidebarCard>
           )}
         </SharedSidebarCard>
+        </div>
       </div>
 
       {/* Activity form dialog */}
