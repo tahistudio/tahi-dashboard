@@ -482,8 +482,9 @@ const TOOLS: ToolDef[] = [
   tool('delete_schedule', 'Delete a schedule and all its rows', {
     scheduleId: prop('string', 'Schedule ID'),
   }, ['scheduleId']),
-  tool('add_schedule_row', 'Append a row to a schedule. rowType drives rendering: section_header (full-width band), task (bar), gate (diamond), critical_gate (red-bordered diamond). Owner: tahi | client | joint | tahi_parallel (only for tasks).', {
+  tool('add_schedule_row', 'Append a row to a gantt section of a schedule. rowType drives rendering: section_header (full-width band), task (bar), gate (diamond), critical_gate (red-bordered diamond). Owner: tahi | client | joint | tahi_parallel (only for tasks). If sectionId is omitted, the row attaches to the schedule\'s first gantt section.', {
     scheduleId: prop('string', 'Schedule ID'),
+    sectionId: prop('string', 'Optional gantt section ID. Defaults to the schedules first gantt section.'),
     rowType: prop('string', 'section_header | task | gate | critical_gate'),
     label: prop('string', 'Row label'),
     owner: prop('string', 'Owner: tahi | client | joint | tahi_parallel'),
@@ -523,6 +524,37 @@ const TOOLS: ToolDef[] = [
     resourceId: prop('string', 'Resource ID'),
     limit: prop('number', 'Number of recent events to return (default 20, max 100)'),
   }, ['resourceType', 'resourceId']),
+
+  // ── Schedule Sections (1.10) ─────────────────────────────────────────
+  tool('add_schedule_section', 'Append a new section to a schedule. Type values: overview (Tiptap HTML in data.html), gantt (rows live separately, optional start_week/end_week zoom), risk_register (data.rows = [{risk,owner,impact,mitigation,contractualImplication}]), raci_matrix (data = {columns:[{id,label}], rows:[{id,label,group?,cells:{[colId]:R|A|C|I}}]}), text (Tiptap HTML).', {
+    scheduleId: prop('string', 'Schedule ID'),
+    type: prop('string', 'overview | gantt | risk_register | raci_matrix | text'),
+    title: prop('string', 'Slide title shown to viewers'),
+    subtitle: prop('string', 'Eyebrow / subtitle text'),
+    startWeek: prop('number', 'Optional gantt zoom start week (1-based)'),
+    endWeek: prop('number', 'Optional gantt zoom end week'),
+    data: { type: 'object', description: 'Type-specific JSON payload (see tool description).' },
+    position: prop('number', 'Display order (defaults to append)'),
+  }, ['scheduleId', 'type']),
+  tool('update_schedule_section', 'Update a section. Pass any subset of fields.', {
+    scheduleId: prop('string', 'Schedule ID'),
+    sectionId: prop('string', 'Section ID'),
+    type: prop('string', 'overview | gantt | risk_register | raci_matrix | text'),
+    title: prop('string', 'Title'),
+    subtitle: prop('string', 'Subtitle'),
+    startWeek: prop('number', 'Gantt zoom start week'),
+    endWeek: prop('number', 'Gantt zoom end week'),
+    data: { type: 'object', description: 'Type-specific JSON payload' },
+    position: prop('number', 'Display order'),
+  }, ['scheduleId', 'sectionId']),
+  tool('delete_schedule_section', 'Delete a section and its rows (gantt sections cascade to their rows).', {
+    scheduleId: prop('string', 'Schedule ID'),
+    sectionId: prop('string', 'Section ID'),
+  }, ['scheduleId', 'sectionId']),
+  tool('reorder_schedule_sections', 'Bulk-reorder sections in a schedule. Pass `order` as an array of section IDs in desired order.', {
+    scheduleId: prop('string', 'Schedule ID'),
+    order: { type: 'array', description: 'Section IDs in new order', items: { type: 'string' } },
+  }, ['scheduleId', 'order']),
 
   // ── Subscriptions ─────────────────────────────────────────────────────
   tool('get_subscription', 'Get detail for a specific subscription', {
@@ -1059,6 +1091,22 @@ async function executeTool(
       })
       if (typeof args.limit === 'number') params.set('limit', String(args.limit))
       return json(await apiGet(`/api/admin/views?${params.toString()}`, token))
+    }
+
+    // ── Schedule Sections ────────────────────────────────────────────
+    case 'add_schedule_section': {
+      const { scheduleId, ...body } = args
+      return json(await apiWrite(`/api/admin/schedules/${scheduleId}/sections`, token, 'POST', body))
+    }
+    case 'update_schedule_section': {
+      const { scheduleId, sectionId, ...body } = args
+      return json(await apiWrite(`/api/admin/schedules/${scheduleId}/sections/${sectionId}`, token, 'PATCH', body))
+    }
+    case 'delete_schedule_section':
+      return json(await apiWrite(`/api/admin/schedules/${s('scheduleId')}/sections/${s('sectionId')}`, token, 'DELETE'))
+    case 'reorder_schedule_sections': {
+      const { scheduleId, order } = args
+      return json(await apiWrite(`/api/admin/schedules/${scheduleId}/sections/reorder`, token, 'POST', { order }))
     }
 
     // ── Subscriptions ─────────────────────────────────────────────────
