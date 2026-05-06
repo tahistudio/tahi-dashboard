@@ -445,6 +445,80 @@ const TOOLS: ToolDef[] = [
     recordingUrl: prop('string', 'Recording URL'),
   }, ['callId']),
 
+  // ── Project Schedules (Gantt) ────────────────────────────────────────
+  tool('list_schedules', 'List project schedules (gantt timelines). Filter by orgId, dealId, or status.', {
+    orgId: prop('string', 'Filter by client organisation ID'),
+    dealId: prop('string', 'Filter by deal ID'),
+    status: prop('string', 'Filter by status: draft, shared, archived'),
+  }),
+  tool('get_schedule', 'Get a single project schedule with all rows in display order', {
+    scheduleId: prop('string', 'Schedule ID'),
+  }, ['scheduleId']),
+  tool('create_schedule', 'Create a new project schedule. Optionally seed with a `rows` array (templates). Each row: { rowType, label, owner?, startWeek?, endWeek?, riskFlag? }', {
+    title: prop('string', 'Schedule title'),
+    subtitle: prop('string', 'Subtitle / eyebrow text (default "PROJECT SCHEDULE, GANTT")'),
+    orgId: prop('string', 'Client org ID this schedule belongs to'),
+    dealId: prop('string', 'Deal ID this schedule is attached to'),
+    preparedFor: prop('string', 'Recipient name (e.g. "Michael Day, Giant Group")'),
+    preparedBy: prop('string', 'Author name (e.g. "Liam Miller, Tahi Studio")'),
+    effectiveDate: prop('string', 'Effective date (YYYY-MM-DD)'),
+    targetLaunchDate: prop('string', 'Target launch date (YYYY-MM-DD)'),
+    numberOfWeeks: prop('number', 'Number of weeks in the gantt (default 12, max 52)'),
+    overviewHtml: prop('string', 'Tiptap HTML for executive overview'),
+    rows: { type: 'array', description: 'Optional initial rows', items: { type: 'object' } },
+  }, ['title']),
+  tool('update_schedule', 'Update a schedule\'s top-level metadata. Pass any subset.', {
+    scheduleId: prop('string', 'Schedule ID'),
+    title: prop('string', 'New title'),
+    subtitle: prop('string', 'New subtitle'),
+    preparedFor: prop('string', 'Recipient name'),
+    preparedBy: prop('string', 'Author name'),
+    effectiveDate: prop('string', 'Effective date (YYYY-MM-DD)'),
+    targetLaunchDate: prop('string', 'Target launch date (YYYY-MM-DD)'),
+    numberOfWeeks: prop('number', 'Total weeks (1-52)'),
+    overviewHtml: prop('string', 'Tiptap HTML overview'),
+    status: prop('string', 'draft | shared | archived'),
+  }, ['scheduleId']),
+  tool('delete_schedule', 'Delete a schedule and all its rows', {
+    scheduleId: prop('string', 'Schedule ID'),
+  }, ['scheduleId']),
+  tool('add_schedule_row', 'Append a row to a schedule. rowType drives rendering: section_header (full-width band), task (bar), gate (diamond), critical_gate (red-bordered diamond). Owner: tahi | client | joint | tahi_parallel (only for tasks).', {
+    scheduleId: prop('string', 'Schedule ID'),
+    rowType: prop('string', 'section_header | task | gate | critical_gate'),
+    label: prop('string', 'Row label'),
+    owner: prop('string', 'Owner: tahi | client | joint | tahi_parallel'),
+    startWeek: prop('number', '1-based start week'),
+    endWeek: prop('number', '1-based end week (gates: equals startWeek)'),
+    riskFlag: prop('boolean', 'Add red hatched risk overlay'),
+    position: prop('number', 'Display order (defaults to append)'),
+  }, ['scheduleId', 'rowType', 'label']),
+  tool('update_schedule_row', 'Update a row in a schedule. Pass any subset.', {
+    scheduleId: prop('string', 'Schedule ID'),
+    rowId: prop('string', 'Row ID'),
+    rowType: prop('string', 'section_header | task | gate | critical_gate'),
+    label: prop('string', 'Row label'),
+    owner: prop('string', 'Owner: tahi | client | joint | tahi_parallel'),
+    startWeek: prop('number', '1-based start week'),
+    endWeek: prop('number', '1-based end week'),
+    riskFlag: prop('boolean', 'Risk overlay flag'),
+    position: prop('number', 'Display order'),
+  }, ['scheduleId', 'rowId']),
+  tool('delete_schedule_row', 'Delete a row from a schedule', {
+    scheduleId: prop('string', 'Schedule ID'),
+    rowId: prop('string', 'Row ID'),
+  }, ['scheduleId', 'rowId']),
+  tool('reorder_schedule_rows', 'Bulk-reorder rows in a schedule. Pass `order` as an array of row IDs in the desired display order.', {
+    scheduleId: prop('string', 'Schedule ID'),
+    order: { type: 'array', description: 'Row IDs in new order', items: { type: 'string' } },
+  }, ['scheduleId', 'order']),
+  tool('share_schedule', 'Mint (or rotate via rotate=true) a public share token. Returns the token; the public URL is /dashboard/p/schedule/<token>.', {
+    scheduleId: prop('string', 'Schedule ID'),
+    rotate: prop('boolean', 'If true, generate a new token and revoke the previous one'),
+  }, ['scheduleId']),
+  tool('unshare_schedule', 'Revoke the public share token. Existing public links 404 after this.', {
+    scheduleId: prop('string', 'Schedule ID'),
+  }, ['scheduleId']),
+
   // ── Subscriptions ─────────────────────────────────────────────────────
   tool('get_subscription', 'Get detail for a specific subscription', {
     subscriptionId: prop('string', 'Subscription ID'),
@@ -933,6 +1007,46 @@ async function executeTool(
       const { callId, ...body } = args
       return json(await apiWrite(`/api/admin/calls/${callId}`, token, 'PATCH', body))
     }
+
+    // ── Project Schedules (Gantt) ────────────────────────────────────
+    case 'list_schedules': {
+      const params = new URLSearchParams()
+      if (typeof args.orgId === 'string') params.set('orgId', args.orgId)
+      if (typeof args.dealId === 'string') params.set('dealId', args.dealId)
+      if (typeof args.status === 'string') params.set('status', args.status)
+      const qs = params.toString()
+      return json(await apiGet(`/api/admin/schedules${qs ? `?${qs}` : ''}`, token))
+    }
+    case 'get_schedule':
+      return json(await apiGet(`/api/admin/schedules/${s('scheduleId')}`, token))
+    case 'create_schedule':
+      return json(await apiWrite('/api/admin/schedules', token, 'POST', args as Record<string, unknown>))
+    case 'update_schedule': {
+      const { scheduleId, ...body } = args
+      return json(await apiWrite(`/api/admin/schedules/${scheduleId}`, token, 'PATCH', body))
+    }
+    case 'delete_schedule':
+      return json(await apiWrite(`/api/admin/schedules/${s('scheduleId')}`, token, 'DELETE'))
+    case 'add_schedule_row': {
+      const { scheduleId, ...body } = args
+      return json(await apiWrite(`/api/admin/schedules/${scheduleId}/rows`, token, 'POST', body))
+    }
+    case 'update_schedule_row': {
+      const { scheduleId, rowId, ...body } = args
+      return json(await apiWrite(`/api/admin/schedules/${scheduleId}/rows/${rowId}`, token, 'PATCH', body))
+    }
+    case 'delete_schedule_row':
+      return json(await apiWrite(`/api/admin/schedules/${s('scheduleId')}/rows/${s('rowId')}`, token, 'DELETE'))
+    case 'reorder_schedule_rows': {
+      const { scheduleId, order } = args
+      return json(await apiWrite(`/api/admin/schedules/${scheduleId}/rows/reorder`, token, 'POST', { order }))
+    }
+    case 'share_schedule': {
+      const rotate = args.rotate ? '?rotate=1' : ''
+      return json(await apiWrite(`/api/admin/schedules/${s('scheduleId')}/share${rotate}`, token, 'POST'))
+    }
+    case 'unshare_schedule':
+      return json(await apiWrite(`/api/admin/schedules/${s('scheduleId')}/share`, token, 'DELETE'))
 
     // ── Subscriptions ─────────────────────────────────────────────────
     case 'get_subscription':
