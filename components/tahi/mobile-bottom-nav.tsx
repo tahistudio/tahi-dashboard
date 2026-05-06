@@ -54,7 +54,7 @@ const ADMIN_DRAWER: DrawerNavGroup[] = [
       { label: 'Proposals', href: '/proposals', icon: FileText },
       { label: 'Schedules', href: '/schedules', icon: Calendar },
       { label: 'Contracts', href: '/contracts', icon: FileSignature },
-      { label: 'Reviews', href: '/reviews', icon: Star },
+      { label: 'Sales analytics', href: '/sales-analytics', icon: BarChart2 },
     ],
   },
   {
@@ -66,6 +66,7 @@ const ADMIN_DRAWER: DrawerNavGroup[] = [
   {
     group: 'Marketing',
     items: [
+      { label: 'Reviews', href: '/reviews', icon: Star },
       { label: 'Announcements', href: '/announcements', icon: Megaphone },
     ],
   },

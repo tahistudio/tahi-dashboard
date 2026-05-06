@@ -57,11 +57,11 @@ const ADMIN_NAV: NavGroup[] = [
   {
     group: 'Sales',
     items: [
-      { label: 'Pipeline',  href: '/pipeline',  icon: TrendingUp,    adminOnly: true },
-      { label: 'Proposals', href: '/proposals', icon: FileText,      adminOnly: true },
-      { label: 'Schedules', href: '/schedules', icon: Calendar,      adminOnly: true },
-      { label: 'Contracts', href: '/contracts', icon: FileSignature, adminOnly: true },
-      { label: 'Reviews',   href: '/reviews',   icon: Star,          adminOnly: true },
+      { label: 'Pipeline',        href: '/pipeline',        icon: TrendingUp,    adminOnly: true },
+      { label: 'Proposals',       href: '/proposals',       icon: FileText,      adminOnly: true },
+      { label: 'Schedules',       href: '/schedules',       icon: Calendar,      adminOnly: true },
+      { label: 'Contracts',       href: '/contracts',       icon: FileSignature, adminOnly: true },
+      { label: 'Sales analytics', href: '/sales-analytics', icon: BarChart2,     adminOnly: true },
     ],
   },
   {
@@ -73,6 +73,7 @@ const ADMIN_NAV: NavGroup[] = [
   {
     group: 'Marketing',
     items: [
+      { label: 'Reviews',       href: '/reviews',       icon: Star,      adminOnly: true },
       { label: 'Announcements', href: '/announcements', icon: Megaphone, adminOnly: true },
     ],
   },
