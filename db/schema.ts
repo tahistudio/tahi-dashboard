@@ -1406,3 +1406,84 @@ export const dealNudges = sqliteTable('deal_nudges', {
   index('idx_nudges_deal').on(table.dealId),
   index('idx_nudges_status').on(table.status),
 ])
+
+// ============================================================
+// PROJECT SCHEDULES (Gantt) — Phase 1 of proposal/contract suite
+// ============================================================
+//
+// A `projectSchedule` is one Gantt-style timeline (e.g. "Giant Group 12-week
+// build plan"). It can be standalone, or tied to a deal (pre-sale) or an org
+// (post-conversion). Rendered as a custom CSS-grid table that matches the
+// PDF reference: Phase | Owner | W1…Wn columns, with colored bars per row.
+//
+// Each schedule owns N `scheduleRows`. Row types:
+//   - section_header: a full-width dark band (e.g. "MAIN BUILD PHASES")
+//   - task:           a normal row with a colored bar from startWeek → endWeek
+//   - gate:           a single-week diamond (sign-off gate)
+//   - critical_gate:  red-bordered diamond (critical-path gate)
+//
+// Owner drives the bar colour:
+//   - tahi          → solid brand green
+//   - client        → dark green/black
+//   - joint         → amber
+//   - tahi_parallel → light brand green (parallel workstream)
+//
+// Public sharing: when shared, a `publicShareToken` is minted and the schedule
+// is viewable without auth at `/p/schedule/<token>`. Revoking clears the token.
+
+export const projectSchedules = sqliteTable('project_schedules', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // Linkage — at most one of these is typically set, but both are allowed
+  // (e.g. a schedule attached to a deal that later belongs to an org).
+  orgId: text('org_id').references(() => organisations.id, { onDelete: 'cascade' }),
+  dealId: text('deal_id').references(() => deals.id, { onDelete: 'set null' }),
+  // Cover-page metadata (mirrors the PDF cover)
+  title: text('title').notNull(),
+  subtitle: text('subtitle'), // e.g. "PROJECT SCHEDULE, GANTT"
+  preparedFor: text('prepared_for'),
+  preparedBy: text('prepared_by'),
+  effectiveDate: text('effective_date'),       // ISO date
+  targetLaunchDate: text('target_launch_date'), // ISO date
+  // Layout
+  numberOfWeeks: integer('number_of_weeks').notNull().default(12),
+  // Optional executive overview / notes shown above the gantt grid (Tiptap HTML)
+  overviewHtml: text('overview_html'),
+  // Status + sharing
+  status: text('status').notNull().default('draft'), // draft | shared | archived
+  publicShareToken: text('public_share_token'),       // null until shared
+  publicSharedAt: text('public_shared_at'),
+  // Audit
+  createdById: text('created_by_id').notNull(),
+  ...timestamps,
+}, (table) => [
+  index('idx_project_schedules_org').on(table.orgId),
+  index('idx_project_schedules_deal').on(table.dealId),
+  index('idx_project_schedules_token').on(table.publicShareToken),
+])
+
+export const scheduleRows = sqliteTable('schedule_rows', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  scheduleId: text('schedule_id')
+    .notNull()
+    .references(() => projectSchedules.id, { onDelete: 'cascade' }),
+  // section_header | task | gate | critical_gate
+  rowType: text('row_type').notNull(),
+  // Display
+  label: text('label').notNull(),
+  // Owner — only meaningful for `task` rows. Null for headers / gates.
+  // Allowed values: 'tahi' | 'client' | 'joint' | 'tahi_parallel'
+  owner: text('owner'),
+  // 1-based week indices. For `task`: startWeek <= endWeek. For `gate` /
+  // `critical_gate`: startWeek === endWeek (the diamond sits in one week).
+  // Null for `section_header` rows.
+  startWeek: integer('start_week'),
+  endWeek: integer('end_week'),
+  // Optional risk overlay (the hatched red diagonal stripes in the PDF).
+  riskFlag: integer('risk_flag').notNull().default(0),
+  // Display order within the schedule.
+  position: integer('position').notNull().default(0),
+  ...timestamps,
+}, (table) => [
+  index('idx_schedule_rows_schedule').on(table.scheduleId),
+  index('idx_schedule_rows_position').on(table.scheduleId, table.position),
+])

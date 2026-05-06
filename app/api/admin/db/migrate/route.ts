@@ -312,6 +312,49 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_deals_monthly_value ON deals(monthly_value)`,
     ],
   },
+  {
+    name: '0024',
+    description: 'Project schedules (gantt) — phase 1 of proposal/contract suite. Adds project_schedules + schedule_rows tables with public-share-token support.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS project_schedules (
+        id text PRIMARY KEY NOT NULL,
+        org_id text REFERENCES organisations(id) ON DELETE CASCADE,
+        deal_id text REFERENCES deals(id) ON DELETE SET NULL,
+        title text NOT NULL,
+        subtitle text,
+        prepared_for text,
+        prepared_by text,
+        effective_date text,
+        target_launch_date text,
+        number_of_weeks integer NOT NULL DEFAULT 12,
+        overview_html text,
+        status text NOT NULL DEFAULT 'draft',
+        public_share_token text,
+        public_shared_at text,
+        created_by_id text NOT NULL,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_project_schedules_org ON project_schedules(org_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_project_schedules_deal ON project_schedules(deal_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_project_schedules_token ON project_schedules(public_share_token)`,
+      `CREATE TABLE IF NOT EXISTS schedule_rows (
+        id text PRIMARY KEY NOT NULL,
+        schedule_id text NOT NULL REFERENCES project_schedules(id) ON DELETE CASCADE,
+        row_type text NOT NULL,
+        label text NOT NULL,
+        owner text,
+        start_week integer,
+        end_week integer,
+        risk_flag integer NOT NULL DEFAULT 0,
+        position integer NOT NULL DEFAULT 0,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_schedule_rows_schedule ON schedule_rows(schedule_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_schedule_rows_position ON schedule_rows(schedule_id, position)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

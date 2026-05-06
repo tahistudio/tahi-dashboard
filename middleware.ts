@@ -15,6 +15,11 @@ const isPublicRoute = createRouteMatcher([
   // x-cron-secret in the route handler (Decision #043). Clerk's middleware
   // doesn't know about that header so must let the request through.
   '/api/admin/ai/briefing/cron(.*)',
+  // Public-share routes for schedules / proposals / contracts. Token-based
+  // access — the route handler validates the token before returning data.
+  // Pages live under /p/<resource>/<token>; their data APIs under /api/public.
+  '/p/(.*)',
+  '/api/public/(.*)',
 ])
 
 // Admin-only routes : if a client hits these, redirect them to /requests
