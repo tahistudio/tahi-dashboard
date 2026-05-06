@@ -1676,6 +1676,136 @@ export const proposalAcceptances = sqliteTable('proposal_acceptances', {
 ])
 
 // ============================================================
+// CONTRACTS — E-SIGNATURE SYSTEM (Phase 3)
+// ============================================================
+//
+// Distinct from the legacy `contracts` table (which tracks file-uploaded
+// PDFs in R2). The e-sign system is composed of:
+//
+//   contract_templates    — reusable boilerplate with {{variable}} slots
+//   contract_documents    — a specific instance of a contract being signed,
+//                           HTML body after variable substitution, public
+//                           share token, status (draft|sent|partially_signed|
+//                           signed|expired|cancelled)
+//   contract_signers      — N signers per document (Tahi + client +
+//                           witnesses). Each has a position (sign order),
+//                           role, name, email, and per-signer status.
+//   contract_signatures   — the actual signature records: signature image
+//                           data URL, IP hash, UA, country, and a sha256
+//                           hash chain (each new signature includes the
+//                           previous hash) for tamper evidence.
+//
+// Variable substitution happens at draft → sent transition: variableValues
+// JSON is merged into bodyHtml using template's variableDefs to produce
+// the final HTML body that signers see.
+//
+// Multi-party flow: contract.status flips to 'partially_signed' on the
+// first signature, then 'signed' once every signer's status === 'signed'.
+//
+// Per-signer URL: /dashboard/p/contract/<token>/sign/<signerId> — same
+// public token for all signers, but signerId param tells the server which
+// row to mark as signed.
+
+export const contractTemplates = sqliteTable('contract_templates', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
+  // nda | sla | msa | sow | mou | other
+  type: text('type').notNull(),
+  // The HTML body with {{variable}} slots. Tiptap-style content; admin-authored.
+  bodyHtml: text('body_html').notNull(),
+  // JSON: array of variable defs the template references, e.g.
+  //   [{ key: 'client_name', label: 'Client name', required: true },
+  //    { key: 'deal_value',  label: 'Deal value',  required: true }]
+  variableDefs: text('variable_defs'),
+  isDefault: integer('is_default').notNull().default(0),
+  description: text('description'),
+  createdById: text('created_by_id').notNull(),
+  ...timestamps,
+}, (table) => [
+  index('idx_contract_templates_type').on(table.type),
+])
+
+export const contractDocuments = sqliteTable('contract_documents', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  orgId: text('org_id').references(() => organisations.id, { onDelete: 'cascade' }),
+  dealId: text('deal_id').references(() => deals.id, { onDelete: 'set null' }),
+  proposalId: text('proposal_id').references(() => proposals.id, { onDelete: 'set null' }),
+  templateId: text('template_id').references(() => contractTemplates.id, { onDelete: 'set null' }),
+  // nda | sla | msa | sow | mou | other
+  type: text('type').notNull(),
+  name: text('name').notNull(),
+  // draft | sent | partially_signed | signed | expired | cancelled
+  status: text('status').notNull().default('draft'),
+  // Snapshotted HTML body AFTER variable substitution. Static once the
+  // contract is sent; admin can edit the underlying values during draft.
+  bodyHtml: text('body_html').notNull(),
+  // JSON: { key: value } pairs that filled the template slots.
+  variableValues: text('variable_values'),
+  // Public share token. Same token used by every signer; the per-signer
+  // routing is via `signerId` URL param.
+  publicShareToken: text('public_share_token'),
+  publicSharedAt: text('public_shared_at'),
+  // R2 storage key for the final stamped PDF, populated after fully signed.
+  signedStorageKey: text('signed_storage_key'),
+  // Timestamps for the document lifecycle.
+  sentAt: text('sent_at'),
+  signedAt: text('signed_at'),
+  expiresAt: text('expires_at'),
+  // Final tamper-evident hash for the entire signing chain.
+  finalHash: text('final_hash'),
+  createdById: text('created_by_id').notNull(),
+  ...timestamps,
+}, (table) => [
+  index('idx_contract_documents_org').on(table.orgId),
+  index('idx_contract_documents_deal').on(table.dealId),
+  index('idx_contract_documents_token').on(table.publicShareToken),
+  index('idx_contract_documents_status').on(table.status),
+])
+
+export const contractSigners = sqliteTable('contract_signers', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  contractId: text('contract_id').notNull().references(() => contractDocuments.id, { onDelete: 'cascade' }),
+  // tahi | client | witness | other
+  role: text('role').notNull(),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  // 1-based position in the signing order. Some flows enforce sequential;
+  // for v1 we accept signatures in any order.
+  position: integer('position').notNull().default(0),
+  // pending | signed | skipped
+  status: text('status').notNull().default('pending'),
+  signedAt: text('signed_at'),
+  // signatureId points to the contract_signatures row when this signer has signed.
+  signatureId: text('signature_id'),
+  ...timestamps,
+}, (table) => [
+  index('idx_contract_signers_contract').on(table.contractId),
+  index('idx_contract_signers_email').on(table.email),
+])
+
+export const contractSignatures = sqliteTable('contract_signatures', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  contractId: text('contract_id').notNull().references(() => contractDocuments.id, { onDelete: 'cascade' }),
+  signerId: text('signer_id').notNull().references(() => contractSigners.id, { onDelete: 'cascade' }),
+  // Base64 PNG data URL of the canvas signature drawing. Stored inline —
+  // it's typically <30KB, way under D1's row size limits.
+  signatureDataUrl: text('signature_data_url').notNull(),
+  // Audit metadata. IP is hashed (sha256+ENCRYPTION_KEY).
+  ipHash: text('ip_hash'),
+  userAgent: text('user_agent'),
+  country: text('country'),
+  // Tamper-evident hash chain. Each new signature = sha256(prevChainHash
+  // || signerId || signatureDataUrl || timestamp). Changing ANY signature
+  // breaks the chain for all subsequent signatures.
+  chainHash: text('chain_hash').notNull(),
+  signedAt: text('signed_at').notNull(),
+  ...timestamps,
+}, (table) => [
+  index('idx_contract_signatures_contract').on(table.contractId),
+  index('idx_contract_signatures_signer').on(table.signerId),
+])
+
+// ============================================================
 // SHARE-VIEW ANALYTICS — generic across schedules/proposals/contracts
 // ============================================================
 //

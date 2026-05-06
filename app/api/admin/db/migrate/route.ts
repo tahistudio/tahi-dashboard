@@ -514,6 +514,84 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_proposal_acceptances_status ON proposal_acceptances(status)`,
     ],
   },
+  {
+    name: '0028',
+    description: 'Phase 3: contracts + e-signature. contract_templates (boilerplate with {{variables}}), contract_documents (signed instances with public token), contract_signers (per-document signers with order), contract_signatures (canvas signature data URL + sha256 chain hash for tamper evidence).',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS contract_templates (
+        id text PRIMARY KEY NOT NULL,
+        name text NOT NULL,
+        type text NOT NULL,
+        body_html text NOT NULL,
+        variable_defs text,
+        is_default integer NOT NULL DEFAULT 0,
+        description text,
+        created_by_id text NOT NULL,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_contract_templates_type ON contract_templates(type)`,
+
+      `CREATE TABLE IF NOT EXISTS contract_documents (
+        id text PRIMARY KEY NOT NULL,
+        org_id text REFERENCES organisations(id) ON DELETE CASCADE,
+        deal_id text REFERENCES deals(id) ON DELETE SET NULL,
+        proposal_id text REFERENCES proposals(id) ON DELETE SET NULL,
+        template_id text REFERENCES contract_templates(id) ON DELETE SET NULL,
+        type text NOT NULL,
+        name text NOT NULL,
+        status text NOT NULL DEFAULT 'draft',
+        body_html text NOT NULL,
+        variable_values text,
+        public_share_token text,
+        public_shared_at text,
+        signed_storage_key text,
+        sent_at text,
+        signed_at text,
+        expires_at text,
+        final_hash text,
+        created_by_id text NOT NULL,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_contract_documents_org ON contract_documents(org_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_contract_documents_deal ON contract_documents(deal_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_contract_documents_token ON contract_documents(public_share_token)`,
+      `CREATE INDEX IF NOT EXISTS idx_contract_documents_status ON contract_documents(status)`,
+
+      `CREATE TABLE IF NOT EXISTS contract_signers (
+        id text PRIMARY KEY NOT NULL,
+        contract_id text NOT NULL REFERENCES contract_documents(id) ON DELETE CASCADE,
+        role text NOT NULL,
+        name text NOT NULL,
+        email text NOT NULL,
+        position integer NOT NULL DEFAULT 0,
+        status text NOT NULL DEFAULT 'pending',
+        signed_at text,
+        signature_id text,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_contract_signers_contract ON contract_signers(contract_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_contract_signers_email ON contract_signers(email)`,
+
+      `CREATE TABLE IF NOT EXISTS contract_signatures (
+        id text PRIMARY KEY NOT NULL,
+        contract_id text NOT NULL REFERENCES contract_documents(id) ON DELETE CASCADE,
+        signer_id text NOT NULL REFERENCES contract_signers(id) ON DELETE CASCADE,
+        signature_data_url text NOT NULL,
+        ip_hash text,
+        user_agent text,
+        country text,
+        chain_hash text NOT NULL,
+        signed_at text NOT NULL,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_contract_signatures_contract ON contract_signatures(contract_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_contract_signatures_signer ON contract_signatures(signer_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

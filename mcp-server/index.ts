@@ -775,22 +775,52 @@ server.tool(
 
 server.tool(
   'list_contracts',
-  'List all contracts across clients',
-  {},
-  async () => {
-    const data = await apiFetch('/api/admin/contracts')
+  'List all contracts. Optional filters by orgId, dealId, status. Returns lightweight summaries — call get_contract for full body and signers.',
+  {
+    orgId: z.string().optional().describe('Filter by organisation ID'),
+    dealId: z.string().optional().describe('Filter by deal ID'),
+    status: z.string().optional().describe('Filter by status'),
+  },
+  async (args) => {
+    const qs = new URLSearchParams()
+    if (args.orgId) qs.set('orgId', args.orgId)
+    if (args.dealId) qs.set('dealId', args.dealId)
+    if (args.status) qs.set('status', args.status)
+    const path = qs.toString() ? `/api/admin/contracts?${qs.toString()}` : '/api/admin/contracts'
+    const data = await apiFetch(path)
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'get_contract',
+  'Full contract detail including signers and signatures (with chain hashes).',
+  { contractId: z.string().describe('Contract ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/contracts/${args.contractId}`)
     return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
   }
 )
 
 server.tool(
   'create_contract',
-  'Create a new contract for a client',
+  'Create a contract. Provide either templateId (with optional variableValues) OR bodyHtml. Optionally seed signers in one call.',
   {
-    orgId: z.string().describe('Client organisation ID'),
     name: z.string().describe('Contract name'),
-    type: z.string().describe('Contract type: nda, sla, msa, sow, other'),
-    status: z.string().optional().describe('Contract status: draft, sent, signed, expired, cancelled'),
+    type: z.string().describe('nda | sla | msa | sow | mou | other'),
+    orgId: z.string().optional().describe('Organisation ID'),
+    dealId: z.string().optional().describe('Deal ID'),
+    proposalId: z.string().optional().describe('Source proposal ID'),
+    templateId: z.string().optional().describe('Template to instantiate from'),
+    bodyHtml: z.string().optional().describe('Raw HTML body if not using a template'),
+    variableValues: z.record(z.string(), z.string()).optional().describe('Key/value pairs filling template {{slot}}s'),
+    expiresAt: z.string().optional().describe('ISO timestamp when contract expires'),
+    signers: z.array(z.object({
+      role: z.string(),
+      name: z.string(),
+      email: z.string(),
+      position: z.number().optional(),
+    })).optional().describe('Initial signers'),
   },
   async (args) => {
     const data = await apiFetch('/api/admin/contracts', { method: 'POST', body: args })
@@ -800,26 +830,110 @@ server.tool(
 
 server.tool(
   'update_contract',
-  'Update an existing contract',
+  'Patch an existing contract. Only provided fields are updated.',
   {
     contractId: z.string().describe('Contract ID'),
-    status: z.string().optional().describe('Updated status: draft, sent, signed, expired, cancelled'),
-    name: z.string().optional().describe('Updated contract name'),
-    type: z.string().optional().describe('Updated type: nda, sla, msa, sow, other'),
+    name: z.string().optional().describe('Updated name'),
+    status: z.string().optional().describe('Updated status'),
+    bodyHtml: z.string().optional().describe('Updated body HTML'),
+    expiresAt: z.string().optional().describe('Updated expiry timestamp'),
+    variableValues: z.record(z.string(), z.string()).optional().describe('Updated variable values'),
   },
   async (args) => {
     const { contractId, ...body } = args
-    const data = await apiFetch(`/api/admin/contracts/${contractId}`, { method: 'PUT', body })
+    const data = await apiFetch(`/api/admin/contracts/${contractId}`, { method: 'PATCH', body })
     return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
   }
 )
 
 server.tool(
   'delete_contract',
-  'Delete a contract',
+  'Delete a contract. Cascades to signers and signatures.',
   { contractId: z.string().describe('Contract ID') },
   async (args) => {
     const data = await apiFetch(`/api/admin/contracts/${args.contractId}`, { method: 'DELETE' })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'add_contract_signer',
+  'Add a signer to a contract. Returns the new signer ID.',
+  {
+    contractId: z.string().describe('Contract ID'),
+    role: z.string().describe('tahi | client | witness | other'),
+    name: z.string().describe('Signer full name'),
+    email: z.string().describe('Signer email'),
+    position: z.number().optional().describe('Position in signing order (auto-appended if omitted)'),
+  },
+  async (args) => {
+    const { contractId, ...body } = args
+    const data = await apiFetch(`/api/admin/contracts/${contractId}/signers`, { method: 'POST', body })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'remove_contract_signer',
+  'Remove a signer from a contract.',
+  {
+    contractId: z.string().describe('Contract ID'),
+    signerId: z.string().describe('Signer ID'),
+  },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/contracts/${args.contractId}/signers/${args.signerId}`, { method: 'DELETE' })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'send_contract',
+  'Mint a public share token (or rotate existing) and flip status to "sent". Returns per-signer URLs operators can paste into emails.',
+  {
+    contractId: z.string().describe('Contract ID'),
+    rotate: z.boolean().optional().describe('Force a new token even if one exists'),
+  },
+  async (args) => {
+    const path = args.rotate
+      ? `/api/admin/contracts/${args.contractId}/send?rotate=1`
+      : `/api/admin/contracts/${args.contractId}/send`
+    const data = await apiFetch(path, { method: 'POST' })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'revoke_contract_share',
+  'Clear the public share token. Pending signers can no longer sign until you re-send.',
+  { contractId: z.string().describe('Contract ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/contracts/${args.contractId}/send`, { method: 'DELETE' })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_contract_templates',
+  'List reusable contract templates.',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/contracts/templates')
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'create_contract_template',
+  'Create a reusable contract template. bodyHtml supports {{variable}} substitution.',
+  {
+    name: z.string().describe('Template name'),
+    type: z.string().describe('nda | sla | msa | sow | mou | other'),
+    bodyHtml: z.string().describe('Body HTML with {{variable}} placeholders'),
+    description: z.string().optional().describe('Short description'),
+    isDefault: z.boolean().optional().describe('Mark as default template for this type'),
+  },
+  async (args) => {
+    const data = await apiFetch('/api/admin/contracts/templates', { method: 'POST', body: args })
     return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
   }
 )

@@ -324,23 +324,67 @@ const TOOLS: ToolDef[] = [
     teamMemberId: prop('string', 'Team member ID'),
   }, ['teamMemberId']),
 
-  // ── Contracts ─────────────────────────────────────────────────────────
-  tool('list_contracts', 'List all contracts across clients'),
-  tool('create_contract', 'Create a new contract for a client', {
-    orgId: prop('string', 'Client organisation ID'),
+  // ── Contracts (e-signature) ──────────────────────────────────────────
+  // Statuses: draft | sent | partially_signed | signed | expired | cancelled
+  // Types:    nda | sla | msa | sow | mou | other
+  tool('list_contracts', 'List all contracts. Optional filters by orgId, dealId, status. Returns lightweight summaries — call get_contract for the full body, signers, signatures.', {
+    orgId: prop('string', 'Filter by organisation ID'),
+    dealId: prop('string', 'Filter by deal ID'),
+    status: prop('string', 'Filter by status'),
+  }),
+  tool('get_contract', 'Get full contract detail: bodyHtml, signers, signatures (with chain hashes).', {
+    contractId: prop('string', 'Contract ID'),
+  }, ['contractId']),
+  tool('create_contract', 'Create a new contract. Provide either templateId (with optional variableValues to fill template slots) OR bodyHtml directly. Optionally seed signers in one call.', {
     name: prop('string', 'Contract name'),
-    type: prop('string', 'Contract type: nda, sla, msa, sow, other'),
-    status: prop('string', 'Contract status: draft, sent, signed, expired, cancelled'),
-  }, ['orgId', 'name', 'type']),
-  tool('update_contract', 'Update an existing contract', {
+    type: prop('string', 'Contract type: nda, sla, msa, sow, mou, other'),
+    orgId: prop('string', 'Organisation ID (optional)'),
+    dealId: prop('string', 'Deal ID (optional)'),
+    proposalId: prop('string', 'Source proposal ID (optional)'),
+    templateId: prop('string', 'Template to instantiate from (optional)'),
+    bodyHtml: prop('string', 'Raw HTML body if not using a template'),
+    variableValues: { type: 'object', description: 'Key/value pairs filling template {{slot}}s' },
+    expiresAt: prop('string', 'ISO timestamp when contract expires (optional)'),
+    signers: { type: 'array', description: 'Initial signers [{role, name, email, position?}]', items: { type: 'object' } },
+  }, ['name']),
+  tool('update_contract', 'Patch an existing contract. Only provided fields are updated.', {
     contractId: prop('string', 'Contract ID'),
-    status: prop('string', 'Updated status'),
     name: prop('string', 'Updated name'),
-    type: prop('string', 'Updated type'),
+    status: prop('string', 'Updated status'),
+    bodyHtml: prop('string', 'Updated body HTML'),
+    expiresAt: prop('string', 'Updated expiry timestamp'),
+    variableValues: { type: 'object', description: 'Updated variable values' },
   }, ['contractId']),
-  tool('delete_contract', 'Delete a contract', {
+  tool('delete_contract', 'Delete a contract. Cascades to signers and signatures.', {
     contractId: prop('string', 'Contract ID'),
   }, ['contractId']),
+  tool('add_contract_signer', 'Add a signer to a contract. Returns the new signer ID.', {
+    contractId: prop('string', 'Contract ID'),
+    role: prop('string', 'tahi | client | witness | other'),
+    name: prop('string', 'Signer full name'),
+    email: prop('string', 'Signer email'),
+    position: prop('number', 'Position in signing order (optional, auto-appended)'),
+  }, ['contractId', 'role', 'name', 'email']),
+  tool('remove_contract_signer', 'Remove a signer from a contract.', {
+    contractId: prop('string', 'Contract ID'),
+    signerId: prop('string', 'Signer ID'),
+  }, ['contractId', 'signerId']),
+  tool('send_contract', 'Mint a public share token (or rotate existing) and flip status to "sent". Returns per-signer URLs operators can paste into emails.', {
+    contractId: prop('string', 'Contract ID'),
+    rotate: prop('boolean', 'Force a new token even if one exists'),
+  }, ['contractId']),
+  tool('revoke_contract_share', 'Clear the public share token. Pending signers can no longer sign until you re-send.', {
+    contractId: prop('string', 'Contract ID'),
+  }, ['contractId']),
+  tool('list_contract_templates', 'List reusable contract templates (NDA / SOW / MSA bodies with {{variable}} slots).'),
+  tool('create_contract_template', 'Create a reusable contract template. bodyHtml supports {{variable}} substitution at create-contract time.', {
+    name: prop('string', 'Template name'),
+    type: prop('string', 'Type: nda, sla, msa, sow, mou, other'),
+    bodyHtml: prop('string', 'Body HTML with optional {{variable}} placeholders'),
+    description: prop('string', 'Short description'),
+    variableDefs: { type: 'array', description: 'Variable definitions [{key, label, required?}]' },
+    isDefault: prop('boolean', 'Mark as default template for this type'),
+  }, ['name', 'type', 'bodyHtml']),
 
   // ── Deals / Pipeline ──────────────────────────────────────────────────
   tool('list_deals', 'List all sales pipeline deals with stage, value, owner, company'),
@@ -1074,17 +1118,43 @@ async function executeTool(
     case 'delete_team_member':
       return json(await apiWrite(`/api/admin/team/${s('teamMemberId')}`, token, 'DELETE'))
 
-    // ── Contracts ─────────────────────────────────────────────────────
-    case 'list_contracts':
-      return json(await apiGet('/api/admin/contracts', token))
+    // ── Contracts (e-signature) ──────────────────────────────────────
+    case 'list_contracts': {
+      const qs = new URLSearchParams()
+      if (typeof args.orgId === 'string') qs.set('orgId', args.orgId)
+      if (typeof args.dealId === 'string') qs.set('dealId', args.dealId)
+      if (typeof args.status === 'string') qs.set('status', args.status)
+      const path = qs.toString() ? `/api/admin/contracts?${qs.toString()}` : '/api/admin/contracts'
+      return json(await apiGet(path, token))
+    }
+    case 'get_contract':
+      return json(await apiGet(`/api/admin/contracts/${s('contractId')}`, token))
     case 'create_contract':
       return json(await apiWrite('/api/admin/contracts', token, 'POST', args as Record<string, unknown>))
     case 'update_contract': {
       const { contractId, ...body } = args
-      return json(await apiWrite(`/api/admin/contracts/${contractId}`, token, 'PUT', body))
+      return json(await apiWrite(`/api/admin/contracts/${contractId}`, token, 'PATCH', body))
     }
     case 'delete_contract':
       return json(await apiWrite(`/api/admin/contracts/${s('contractId')}`, token, 'DELETE'))
+    case 'add_contract_signer': {
+      const { contractId, ...body } = args
+      return json(await apiWrite(`/api/admin/contracts/${contractId}/signers`, token, 'POST', body))
+    }
+    case 'remove_contract_signer':
+      return json(await apiWrite(`/api/admin/contracts/${s('contractId')}/signers/${s('signerId')}`, token, 'DELETE'))
+    case 'send_contract': {
+      const path = args.rotate
+        ? `/api/admin/contracts/${s('contractId')}/send?rotate=1`
+        : `/api/admin/contracts/${s('contractId')}/send`
+      return json(await apiWrite(path, token, 'POST'))
+    }
+    case 'revoke_contract_share':
+      return json(await apiWrite(`/api/admin/contracts/${s('contractId')}/send`, token, 'DELETE'))
+    case 'list_contract_templates':
+      return json(await apiGet('/api/admin/contracts/templates', token))
+    case 'create_contract_template':
+      return json(await apiWrite('/api/admin/contracts/templates', token, 'POST', args as Record<string, unknown>))
 
     // ── Deals / Pipeline ──────────────────────────────────────────────
     case 'list_deals':
