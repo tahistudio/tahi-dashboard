@@ -148,7 +148,7 @@ function HtmlSection({ section }: { section: PublicSection }) {
   const data = safeParse<{ html?: string }>(section.data)
   const html = data?.html ?? ''
   return (
-    <section style={slideShell}>
+    <section style={slideShell} className="proposal-slide">
       {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
       {section.title && <h2 style={slideTitle}>{section.title}</h2>}
       <div style={proseStyle} dangerouslySetInnerHTML={{ __html: html }} />
@@ -160,7 +160,7 @@ function SingleTestimonial({ section }: { section: PublicSection }) {
   const data = safeParse<{ quote?: string; author?: string; role?: string; company?: string }>(section.data)
   if (!data?.quote) return null
   return (
-    <section style={slideShell}>
+    <section style={slideShell} className="proposal-slide">
       {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
       {section.title && <h2 style={slideTitle}>{section.title}</h2>}
       <blockquote style={{ fontSize: '1.375rem', lineHeight: 1.45, color: '#1f2c1a', margin: '1.25rem 0 1rem 0', fontStyle: 'italic', fontWeight: 500 }}>
@@ -192,7 +192,7 @@ function ValueAnchor({ section }: { section: PublicSection }) {
   const hi = alts.reduce((s, a) => s + a.hi, 0)
   const fmt = (n: number) => `$${n.toLocaleString()}`
   return (
-    <section style={slideShell}>
+    <section style={slideShell} className="proposal-slide">
       {(data?.eyebrow ?? section.subtitle) && <div style={slideEyebrow}>{data?.eyebrow ?? section.subtitle}</div>}
       {section.title && <h2 style={slideTitle}>{section.title}</h2>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(15rem, 1fr))', gap: '1rem', marginTop: '1rem' }}>
@@ -243,7 +243,7 @@ function Process({ section }: { section: PublicSection }) {
   const data = safeParse<{ steps?: { title: string; body: string; eyebrow?: string }[] }>(section.data)
   const steps = data?.steps ?? []
   return (
-    <section style={slideShell}>
+    <section style={slideShell} className="proposal-slide">
       {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
       {section.title && <h2 style={slideTitle}>{section.title}</h2>}
       <ol style={{ listStyle: 'none', padding: 0, margin: '1.25rem 0 0 0', display: 'grid', gap: '0.75rem' }}>
@@ -271,7 +271,7 @@ function Differentiators({ section }: { section: PublicSection }) {
   const data = safeParse<{ items?: Item[] }>(section.data)
   const items = data?.items ?? []
   return (
-    <section style={slideShell}>
+    <section style={slideShell} className="proposal-slide">
       {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
       {section.title && <h2 style={slideTitle}>{section.title}</h2>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(15rem, 1fr))', gap: '0.875rem', marginTop: '1.25rem' }}>
@@ -315,7 +315,7 @@ function CaseStudies({ section }: { section: PublicSection }) {
   const data = safeParse<{ items?: Item[] }>(section.data)
   const items = data?.items ?? []
   return (
-    <section style={slideShell}>
+    <section style={slideShell} className="proposal-slide">
       {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
       {section.title && <h2 style={slideTitle}>{section.title}</h2>}
       <div style={{ display: 'grid', gap: '0.875rem', marginTop: '1.25rem' }}>
@@ -357,7 +357,7 @@ function TestimonialStack({ section }: { section: PublicSection }) {
   const data = safeParse<{ items?: Item[] }>(section.data)
   const items = data?.items ?? []
   return (
-    <section style={slideShell}>
+    <section style={slideShell} className="proposal-slide">
       {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
       {section.title && <h2 style={slideTitle}>{section.title}</h2>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))', gap: '0.875rem', marginTop: '1.25rem' }}>
@@ -383,7 +383,7 @@ function FAQ({ section }: { section: PublicSection }) {
   const data = safeParse<{ items?: Item[] }>(section.data)
   const items = data?.items ?? []
   return (
-    <section style={slideShell}>
+    <section style={slideShell} className="proposal-slide">
       {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
       {section.title && <h2 style={slideTitle}>{section.title}</h2>}
       <div style={{ display: 'grid', gap: '0.625rem', marginTop: '1.25rem' }}>
@@ -405,7 +405,7 @@ function FAQ({ section }: { section: PublicSection }) {
 function Guarantee({ section }: { section: PublicSection }) {
   const data = safeParse<{ headline?: string; body?: string; badges?: string[] }>(section.data)
   return (
-    <section style={{ ...slideShell, background: 'linear-gradient(180deg, #f0f7ee 0%, #ffffff 100%)', borderColor: '#dcefd8' }}>
+    <section style={{ ...slideShell, background: 'linear-gradient(180deg, #f0f7ee 0%, #ffffff 100%)', borderColor: '#dcefd8' }} className="proposal-slide">
       {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
       <h2 style={{ ...slideTitle, color: '#1f2c1a' }}>{data?.headline ?? section.title ?? 'Our promise to you'}</h2>
       {data?.body && <p style={{ fontSize: '1rem', lineHeight: 1.6, color: '#1f2c1a', margin: '0.75rem 0 1rem 0', maxWidth: '40rem' }}>{data.body}</p>}
@@ -427,7 +427,7 @@ function RetainerOffer({ section }: { section: PublicSection }) {
   type Plan = { name: string; regular: number; discounted: number; currency: string; unit: string; tagline?: string }
   const data = safeParse<{ eyebrow?: string; headline?: string; body?: string; plans?: Plan[]; footnote?: string }>(section.data)
   return (
-    <section style={{ ...slideShell, background: '#1f2c1a', color: '#ffffff', border: 'none', boxShadow: '0 24px 48px rgba(31,44,26,0.18)' }}>
+    <section style={{ ...slideShell, background: '#1f2c1a', color: '#ffffff', border: 'none', boxShadow: '0 24px 48px rgba(31,44,26,0.18)' }} className="proposal-slide">
       <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#93c98a', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>
         {data?.eyebrow ?? section.subtitle ?? 'Already earned'}
       </div>
@@ -461,34 +461,50 @@ function RetainerOffer({ section }: { section: PublicSection }) {
 
 // ─── Shared styles (mirror proposal-viewer.tsx) ─────────────────────────────
 
+// Full-viewport slide on desktop, natural on mobile (the global stylesheet
+// in proposal-viewer.tsx overrides min-height + border on the .proposal-slide
+// class at <768px). Pure white per Brand Guidelines.
 const slideShell: React.CSSProperties = {
   width: '100%',
-  maxWidth: '64rem',
+  background: '#FFFFFF',
+  border: 'none',
+  borderRadius: 0,
+  borderTop: '1px solid #e8f0e6',
+  padding: 'clamp(2rem, 6vw, 5rem) clamp(1.25rem, 5vw, 3rem)',
+  minHeight: '100svh',
+  display: 'flex',
+  flexDirection: 'column',
+  justifyContent: 'center',
+  // Inner content rail.
+  ['--rail-max' as string]: '64rem',
+}
+const slideInner: React.CSSProperties = {
+  width: '100%',
+  maxWidth: 'var(--rail-max)',
   margin: '0 auto',
-  background: '#ffffff',
-  border: '1px solid #d4e0d0',
-  borderRadius: '1rem',
-  padding: 'clamp(1.25rem, 4vw, 2.5rem)',
-  boxShadow: '0 4px 16px rgba(31, 44, 26, 0.04)',
 }
 const slideEyebrow: React.CSSProperties = {
-  fontSize: '0.6875rem',
-  fontWeight: 600,
+  fontSize: '0.75rem',
+  fontWeight: 700,
   color: '#5A824E',
   textTransform: 'uppercase',
-  letterSpacing: '0.12em',
-  marginBottom: '0.5rem',
+  letterSpacing: '0.16em',
+  marginBottom: '1rem',
 }
 const slideTitle: React.CSSProperties = {
-  fontSize: 'clamp(1.25rem, 3vw, 1.875rem)',
-  fontWeight: 700,
-  lineHeight: 1.2,
-  color: '#1f2c1a',
+  // Larger, more confident type. Manrope at heavier weight, tighter
+  // letter spacing — the section title earns the slide.
+  fontSize: 'clamp(1.75rem, 4.5vw, 3rem)',
+  fontWeight: 800,
+  lineHeight: 1.05,
+  color: '#121A0F',
   margin: 0,
-  marginBottom: '0.5rem',
+  marginBottom: '1rem',
+  letterSpacing: '-0.02em',
 }
 const proseStyle: React.CSSProperties = {
-  fontSize: '0.9375rem',
+  fontSize: '1rem',
   lineHeight: 1.65,
-  color: '#1f2c1a',
+  color: '#121A0F',
+  maxWidth: '52rem',
 }

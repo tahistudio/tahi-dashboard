@@ -203,9 +203,25 @@ export function ProposalViewer({ token }: { token: string }) {
     : null
 
   return (
-    <div style={pageWrap}>
+    <div style={pageWrap} className="proposal-deck">
+      {/* Slide-deck behaviour: scroll-snap + viewport sizing on desktop,
+          natural long-scroll on mobile. Injected as a global stylesheet
+          because inline styles can't carry media queries or scroll-snap
+          on parent + child together. The deck container is the page body
+          itself so the snap works against the document scroll. */}
+      <style>{`
+        @media (min-width: 768px) {
+          html { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+          .proposal-slide { scroll-snap-align: start; scroll-snap-stop: always; }
+        }
+        @media (max-width: 767px) {
+          .proposal-slide { min-height: auto !important; border-top: none !important; padding: 2rem 1rem !important; }
+          .proposal-cover { min-height: auto !important; }
+        }
+      `}</style>
+
       {/* Cover slide */}
-      <section style={coverShell}>
+      <section style={coverShell} className="proposal-slide proposal-cover">
         <div style={coverBackdrop} aria-hidden="true" />
         <div style={coverInner}>
           <BrandMark />
@@ -240,7 +256,7 @@ export function ProposalViewer({ token }: { token: string }) {
 
       {/* Variants picker + active variant detail */}
       {variants.length > 0 && (
-        <section style={slideShell}>
+        <section style={slideShell} className="proposal-slide">
           <div style={slideEyebrow}>Choose your package</div>
           <h2 style={slideTitle}>{variants.length === 1 ? activeVariant?.name : 'Pick the package that fits.'}</h2>
           {variants.length > 1 && (
@@ -786,26 +802,35 @@ function BrandMark({ size = 'md' }: { size?: 'sm' | 'md' }) {
 // ─── Styles ──────────────────────────────────────────────────────────────
 
 const pageWrap: React.CSSProperties = {
+  // Pure white per Brand Guidelines (`#FFFFFF`). Replaces the off-white
+  // we used previously which read as "card on a tray" — the deck should
+  // feel like the surface itself, not a card on a surface.
   minHeight: '100vh',
-  background: '#f5f7f5',
+  background: '#FFFFFF',
   fontFamily: 'var(--font-manrope, system-ui)',
-  color: '#1f2c1a',
-  padding: 'clamp(1rem, 4vw, 2.5rem)',
+  // Brand text — true near-black with a green undertone (Brand Guidelines).
+  color: '#121A0F',
+  // No outer padding: slides own their own padding so they fill the viewport.
+  padding: 0,
   display: 'flex',
   flexDirection: 'column',
-  gap: 'clamp(1.25rem, 3vw, 2rem)',
+  gap: 0,
 }
 
 const coverShell: React.CSSProperties = {
   position: 'relative',
   width: '100%',
-  maxWidth: '76rem',
-  margin: '0 auto',
-  background: '#ffffff',
-  border: '1px solid #d4e0d0',
-  borderRadius: '1rem',
+  // Full bleed cover slide. No card border on desktop — the cover IS the
+  // surface. Subtle gradient + brand circle motif do the visual work.
+  background: '#FFFFFF',
   overflow: 'hidden',
-  boxShadow: '0 8px 32px rgba(31, 44, 26, 0.08)',
+  // Slides are viewport-sized on desktop so the deck genuinely feels like
+  // a presentation. svh respects mobile address-bar collapse better than vh.
+  minHeight: '100svh',
+  display: 'flex',
+  flexDirection: 'column',
+  // Tailwind snap utility classes are added on the JSX as
+  // `md:snap-start md:snap-always`.
 }
 
 const coverBackdrop: React.CSSProperties = {
@@ -821,9 +846,13 @@ const coverInner: React.CSSProperties = {
   position: 'relative',
   display: 'flex',
   flexDirection: 'column',
-  minHeight: 'clamp(20rem, 48vh, 32rem)',
-  padding: 'clamp(1.25rem, 4vw, 3rem)',
-  gap: '1.25rem',
+  minHeight: '100svh',
+  // Inner content rail — keeps long titles readable on huge displays.
+  width: '100%',
+  maxWidth: '76rem',
+  margin: '0 auto',
+  padding: 'clamp(2rem, 6vw, 5rem) clamp(1.25rem, 5vw, 3rem)',
+  gap: '2rem',
 }
 
 const coverEyebrow: React.CSSProperties = {
@@ -836,12 +865,13 @@ const coverEyebrow: React.CSSProperties = {
 }
 
 const coverTitle: React.CSSProperties = {
-  fontSize: 'clamp(1.5rem, 5vw, 3rem)',
+  // Premium hero size — the cover earns the screen.
+  fontSize: 'clamp(2.25rem, 7.5vw, 5.5rem)',
   fontWeight: 800,
-  lineHeight: 1.05,
-  color: '#1f2c1a',
+  lineHeight: 0.98,
+  color: '#121A0F',
   margin: 0,
-  letterSpacing: '-0.015em',
+  letterSpacing: '-0.025em',
   overflowWrap: 'break-word',
 }
 
@@ -855,14 +885,21 @@ const coverMetaGrid: React.CSSProperties = {
 }
 
 const slideShell: React.CSSProperties = {
+  // Each section is a true slide on desktop: full viewport, no card border,
+  // generous padding, content centred horizontally with a max-width band.
   width: '100%',
-  maxWidth: '76rem',
-  margin: '0 auto',
-  background: '#ffffff',
-  border: '1px solid #d4e0d0',
-  borderRadius: '1rem',
-  boxShadow: '0 4px 16px rgba(31, 44, 26, 0.05)',
-  padding: 'clamp(1.25rem, 3vw, 2rem)',
+  background: '#FFFFFF',
+  border: 'none',
+  borderRadius: 0,
+  boxShadow: 'none',
+  padding: 'clamp(2rem, 6vw, 5rem) clamp(1.25rem, 5vw, 3rem)',
+  minHeight: '100svh',
+  display: 'flex',
+  flexDirection: 'column',
+  justifyContent: 'center',
+  // Soft separator between slides on desktop (so the deck doesn't feel
+  // entirely seamless). Mobile drops this via a stylesheet override.
+  borderTop: '1px solid #e8f0e6',
 }
 
 const slideEyebrow: React.CSSProperties = {
