@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -53,6 +53,9 @@ interface DealData {
   autoNudgesDisabled: number | null
   closedAt: string | null
   closeReason: string | null
+  lostReason: string | null
+  nextActionLabel: string | null
+  nextActionDueAt: string | null
   notes: string | null
   stageEnteredAt: string | null
   createdAt: string
@@ -677,6 +680,18 @@ export function DealDetail({ dealId }: { dealId: string }) {
               onUpdated={fetchDeal}
             />
           </SidebarCard>
+
+          {/* Next action — single concrete next step */}
+          {!deal.stageIsClosedWon && !deal.stageIsClosedLost && (
+            <SidebarCard title="Next action">
+              <NextActionEditor
+                dealId={dealId}
+                label={deal.nextActionLabel ?? null}
+                dueAt={deal.nextActionDueAt ?? null}
+                onUpdated={fetchDeal}
+              />
+            </SidebarCard>
+          )}
 
           {/* Convert to Client (shown when Closed Won) */}
           {!!deal.stageIsClosedWon && (
@@ -1457,6 +1472,107 @@ function ValueTrendline({
  * Replaces both the read-only ValueBreakdown card and the inline-editable
  * EditableValue that previously sat side-by-side in the Value sidebar.
  */
+
+/**
+ * <NextActionEditor> — single concrete next step on a deal.
+ *
+ * Replaces "Liam keeps it in his head" with one field he can scan in two
+ * seconds: what's the next thing, when's it due. Save-on-blur.
+ *
+ * Visual cue: when the due date is past, the row goes red; when it's today
+ * or tomorrow, sage. Anything further out is neutral. This becomes the
+ * primary scanning signal in the pipeline list once we surface it there.
+ */
+function NextActionEditor({
+  dealId, label, dueAt, onUpdated,
+}: {
+  dealId: string
+  label: string | null
+  dueAt: string | null
+  onUpdated?: () => void
+}) {
+  const [draftLabel, setDraftLabel] = React.useState(label ?? '')
+  const [draftDue, setDraftDue] = React.useState(dueAt ? dueAt.slice(0, 10) : '')
+
+  React.useEffect(() => { setDraftLabel(label ?? ''); setDraftDue(dueAt ? dueAt.slice(0, 10) : '') }, [label, dueAt])
+
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const due = draftDue ? new Date(draftDue + 'T00:00:00') : null
+  const overdue = due && due.getTime() < today.getTime()
+  const dueToday = due && due.getTime() === today.getTime()
+  const dueColour = overdue
+    ? 'var(--color-danger)'
+    : dueToday
+      ? 'var(--color-brand-dark)'
+      : 'var(--color-text-muted)'
+
+  async function save(patch: { nextActionLabel?: string | null; nextActionDueAt?: string | null }) {
+    try {
+      await fetch(apiPath(`/api/admin/deals/${dealId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      onUpdated?.()
+    } catch { /* silent */ }
+  }
+
+  return (
+    <div className="flex flex-col" style={{ gap: 'var(--space-2)', padding: 'var(--space-3-5) var(--space-4)' }}>
+      <input
+        type="text"
+        value={draftLabel}
+        onChange={e => setDraftLabel(e.target.value)}
+        onBlur={() => { if ((label ?? '') !== draftLabel) save({ nextActionLabel: draftLabel.trim() || null }) }}
+        placeholder="e.g. Send updated SoW"
+        style={{
+          width: '100%',
+          padding: '0.5rem 0.625rem',
+          fontSize: '0.875rem',
+          fontWeight: 500,
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-md)',
+          color: 'var(--color-text)',
+          outline: 'none',
+        }}
+      />
+      <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
+        <input
+          type="date"
+          value={draftDue}
+          onChange={e => setDraftDue(e.target.value)}
+          onBlur={() => {
+            const next = draftDue ? new Date(draftDue + 'T00:00:00').toISOString() : null
+            const current = dueAt ?? null
+            if (next !== current) save({ nextActionDueAt: next })
+          }}
+          style={{
+            flex: 1,
+            padding: '0.4375rem 0.625rem',
+            fontSize: '0.8125rem',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            color: dueColour,
+            outline: 'none',
+          }}
+        />
+        {due && (
+          <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: dueColour, whiteSpace: 'nowrap' }}>
+            {overdue ? 'Overdue' : dueToday ? 'Today' : ''}
+          </span>
+        )}
+      </div>
+      {!draftLabel && !draftDue && (
+        <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+          One field, one date. Replaces keeping the next step in your head.
+        </p>
+      )}
+    </div>
+  )
+}
+
 function ValueBreakdown({
   dealId,
   upfrontValue,

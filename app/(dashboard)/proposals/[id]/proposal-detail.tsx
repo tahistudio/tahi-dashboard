@@ -71,22 +71,40 @@ interface Acceptance {
   acceptedAt: string
 }
 
-const SECTION_TYPES = [
-  { value: 'overview', label: 'Overview' },
-  { value: 'value_anchor', label: 'Value anchor (the math)' },
-  { value: 'process', label: 'Our process' },
-  { value: 'differentiators', label: 'Why us (icon grid)' },
-  { value: 'case_study', label: 'Case studies' },
-  { value: 'testimonial_stack', label: 'Testimonial stack' },
-  { value: 'testimonial', label: 'Testimonial (single)' },
-  { value: 'guarantee', label: 'Guarantee / promise' },
-  { value: 'faq', label: 'FAQ' },
-  { value: 'retainer_offer', label: 'Retainer offer (10% lifetime)' },
-  { value: 'about', label: 'About Tahi' },
-  { value: 'terms', label: 'Terms' },
-  { value: 'scope_shared', label: 'Shared scope' },
-  { value: 'text', label: 'Custom text' },
+// Two groups so the picker leads with the workhorses (sections that show up
+// in almost every proposal) and tucks the situational types under "More".
+// Testimonials + FAQ stay in the workhorse group because they earn their
+// place on $25k+ projects.
+const SECTION_TYPE_GROUPS = [
+  {
+    label: 'Workhorses',
+    items: [
+      { value: 'overview', label: 'Overview' },
+      { value: 'value_anchor', label: 'Value anchor (the math)' },
+      { value: 'process', label: 'Our process' },
+      { value: 'retainer_offer', label: 'Retainer offer (10% lifetime)' },
+      { value: 'case_study', label: 'Case studies' },
+      { value: 'testimonial_stack', label: 'Testimonial stack' },
+      { value: 'faq', label: 'FAQ' },
+      { value: 'terms', label: 'Terms' },
+    ],
+  },
+  {
+    label: 'Situational',
+    items: [
+      { value: 'differentiators', label: 'Why us (icon grid)' },
+      { value: 'guarantee', label: 'Guarantee / promise' },
+      { value: 'testimonial', label: 'Testimonial (single)' },
+      { value: 'about', label: 'About Tahi' },
+      { value: 'scope_shared', label: 'Shared scope' },
+      { value: 'text', label: 'Custom text' },
+    ],
+  },
 ] as const
+
+// Flat reference for any legacy code that needs the full list.
+const SECTION_TYPES: ReadonlyArray<{ value: string; label: string }> =
+  SECTION_TYPE_GROUPS.flatMap(g => [...g.items])
 
 // Section types that have structured editors (handled by TypedSectionFields).
 // All others fall back to the legacy HTML/quote inputs.
@@ -413,7 +431,11 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
             style={{ ...metaInputStyle, width: 'auto', minWidth: '12rem', cursor: 'pointer' }}
           >
             <option value="" disabled>+ Add section…</option>
-            {SECTION_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            {SECTION_TYPE_GROUPS.map(group => (
+              <optgroup key={group.label} label={group.label}>
+                {group.items.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </optgroup>
+            ))}
           </select>
         </div>
         {sections.length === 0 ? (
