@@ -40,7 +40,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   }
 
   // For gate rows, force endWeek === startWeek (single-week diamond).
-  let startWeek = body.startWeek ?? null
+  const startWeek = body.startWeek ?? null
   let endWeek = body.endWeek ?? null
   if ((body.rowType === 'gate' || body.rowType === 'critical_gate') && startWeek != null) {
     endWeek = startWeek
