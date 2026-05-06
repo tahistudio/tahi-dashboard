@@ -3,10 +3,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink, Mail } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
+import { EmailShareModal, type EmailRecipientSuggestion } from '@/components/tahi/email-share-modal'
 import { TypedSectionFields } from './section-editors'
 import { defaultDataForType, type SectionType } from '@/app/p/proposal/[token]/section-blocks'
 
@@ -102,6 +103,19 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
   const [acceptances, setAcceptances] = useState<Acceptance[]>([])
   const [loading, setLoading] = useState(true)
   const [sharing, setSharing] = useState(false)
+  const [showEmail, setShowEmail] = useState(false)
+  const [contacts, setContacts] = useState<Array<{ id: string; name: string; email: string; isPrimary: number }>>([])
+
+  // Lazy-load contacts the first time the email modal opens.
+  async function ensureContacts() {
+    if (!proposal?.orgId || contacts.length > 0) return
+    try {
+      const res = await fetch(apiPath(`/api/admin/clients/${proposal.orgId}/contacts`))
+      if (!res.ok) return
+      const data = await res.json() as { contacts: Array<{ id: string; name: string; email: string; isPrimary: number }> }
+      setContacts(data.contacts ?? [])
+    } catch { /* silent */ }
+  }
 
   const fetchAll = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!opts.silent) setLoading(true)
@@ -337,9 +351,13 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
         <div style={{ flex: 1 }} />
         {publicUrl ? (
           <>
+            <button onClick={() => { void ensureContacts(); setShowEmail(true) }} className="inline-flex items-center" style={toolbarPrimary}>
+              <Mail size={13} />
+              Email link
+            </button>
             <button onClick={() => { navigator.clipboard.writeText(publicUrl).then(() => showToast('Public link copied', 'success')) }} className="inline-flex items-center" style={toolbarBtn} title={publicUrl}>
               <Copy size={13} />
-              Copy public link
+              Copy link
             </button>
             <a href={publicUrl} target="_blank" rel="noreferrer" className="inline-flex items-center" style={toolbarBtn}>
               <ExternalLink size={13} />
@@ -462,6 +480,24 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
       {proposal.publicShareToken && (
         <ShareAnalyticsCard resourceType="proposal" resourceId={proposalId} />
       )}
+
+      <EmailShareModal
+        open={showEmail}
+        onClose={() => setShowEmail(false)}
+        resourceLabel="proposal"
+        resourceTitle={proposal.title}
+        suggestions={contacts.map<EmailRecipientSuggestion>(c => ({
+          id: c.id,
+          name: c.name,
+          email: c.email,
+          badge: c.isPrimary ? 'Primary' : undefined,
+        }))}
+        postUrl={`/api/admin/proposals/${proposalId}/email`}
+        mode="recipients"
+        onSent={({ sent }) => {
+          if (sent > 0) showToast(`Sent ${sent} email${sent === 1 ? '' : 's'}.`)
+        }}
+      />
     </div>
   )
 }

@@ -592,6 +592,16 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_contract_signatures_signer ON contract_signatures(signer_id)`,
     ],
   },
+  {
+    name: '0029',
+    description: 'Phase 5 cross-linking: project_schedules.proposal_id (a schedule can attach to a proposal as the delivery Gantt). Idempotent — D1 supports IF NOT EXISTS on ADD COLUMN via try/catch on duplicates only, so we use a defensive ALTER and let it no-op if already added.',
+    statements: [
+      // SQLite doesn't support IF NOT EXISTS on ADD COLUMN. Wrap in a no-op
+      // SELECT first so we can detect the column without throwing.
+      `ALTER TABLE project_schedules ADD COLUMN proposal_id text REFERENCES proposals(id) ON DELETE SET NULL`,
+      `CREATE INDEX IF NOT EXISTS idx_project_schedules_proposal ON project_schedules(proposal_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

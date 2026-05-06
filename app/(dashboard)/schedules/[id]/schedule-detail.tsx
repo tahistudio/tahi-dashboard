@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Trash2, AlertTriangle, Share2, Copy, Diamond, Calendar } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, AlertTriangle, Share2, Copy, Diamond, Calendar, Mail } from 'lucide-react'
+import { EmailShareModal, type EmailRecipientSuggestion } from '@/components/tahi/email-share-modal'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { GanttGrid, type GanttRow, type RowOwner, type RowType } from '@/components/tahi/gantt-grid'
@@ -58,6 +59,18 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   const [draft, setDraft] = useState<RowDraft | null>(null)
   const [savingDraft, setSavingDraft] = useState(false)
   const [sharing, setSharing] = useState(false)
+  const [showEmail, setShowEmail] = useState(false)
+  const [contacts, setContacts] = useState<Array<{ id: string; name: string; email: string; isPrimary: number }>>([])
+
+  async function ensureContacts() {
+    if (!schedule?.orgId || contacts.length > 0) return
+    try {
+      const res = await fetch(apiPath(`/api/admin/clients/${schedule.orgId}/contacts`))
+      if (!res.ok) return
+      const data = await res.json() as { contacts: Array<{ id: string; name: string; email: string; isPrimary: number }> }
+      setContacts(data.contacts ?? [])
+    } catch { /* silent */ }
+  }
 
   // Default gantt section = the first 'gantt'-typed section. The toolbar
   // adds rows here. Other sections (overview / risk_register / RACI /
@@ -406,6 +419,24 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         {publicUrl ? (
           <>
             <button
+              onClick={() => { void ensureContacts(); setShowEmail(true) }}
+              className="inline-flex items-center"
+              style={{
+                padding: '0.4375rem 0.75rem',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                background: 'var(--color-brand)',
+                color: 'white',
+                border: 'none',
+                borderRadius: 'var(--radius-md)',
+                gap: '0.375rem',
+                cursor: 'pointer',
+              }}
+            >
+              <Mail size={13} />
+              Email link
+            </button>
+            <button
               onClick={() => {
                 navigator.clipboard.writeText(publicUrl).then(
                   () => showToast('Public link copied', 'success'),
@@ -545,6 +576,24 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       {schedule.publicShareToken && (
         <ShareAnalyticsCard resourceType="schedule" resourceId={scheduleId} />
       )}
+
+      <EmailShareModal
+        open={showEmail}
+        onClose={() => setShowEmail(false)}
+        resourceLabel="schedule"
+        resourceTitle={schedule.title}
+        suggestions={contacts.map<EmailRecipientSuggestion>(c => ({
+          id: c.id,
+          name: c.name,
+          email: c.email,
+          badge: c.isPrimary ? 'Primary' : undefined,
+        }))}
+        postUrl={`/api/admin/schedules/${scheduleId}/email`}
+        mode="recipients"
+        onSent={({ sent }) => {
+          if (sent > 0) showToast(`Sent ${sent} email${sent === 1 ? '' : 's'}.`, 'success')
+        }}
+      />
     </div>
   )
 }

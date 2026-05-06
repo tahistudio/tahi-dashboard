@@ -4,13 +4,14 @@ import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  ArrowLeft, Save, Send, Eye, Copy, Trash2, RefreshCw, Plus, ShieldCheck, Globe,
+  ArrowLeft, Save, Send, Eye, Copy, Trash2, RefreshCw, Plus, ShieldCheck, Globe, Mail,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
+import { EmailShareModal, type EmailRecipientSuggestion } from '@/components/tahi/email-share-modal'
 
 interface ContractDoc {
   id: string
@@ -87,6 +88,7 @@ export function ContractDetail({ id }: { id: string }) {
   const [savingMeta, setSavingMeta] = useState(false)
   const [showAddSigner, setShowAddSigner] = useState(false)
   const [showRevoke, setShowRevoke] = useState(false)
+  const [showEmail, setShowEmail] = useState(false)
   const [signerLinks, setSignerLinks] = useState<Record<string, string>>({})
 
   const fetchAll = useCallback(async (opts: { silent?: boolean } = {}) => {
@@ -271,6 +273,11 @@ export function ContractDetail({ id }: { id: string }) {
               title={signers.length === 0 ? 'Add at least one signer first' : undefined}
             >
               {signers.length === 0 ? 'Add signers first' : 'Send for signing'}
+            </TahiButton>
+          )}
+          {!isLocked && signers.some(s => s.status === 'pending') && (
+            <TahiButton size="sm" onClick={() => setShowEmail(true)} iconLeft={<Mail className="w-3.5 h-3.5" />}>
+              Email signers
             </TahiButton>
           )}
           {contract.publicShareToken && !isLocked && (
@@ -494,6 +501,29 @@ export function ContractDetail({ id }: { id: string }) {
         variant="danger"
         onConfirm={revokeShare}
         onCancel={() => setShowRevoke(false)}
+      />
+
+      <EmailShareModal
+        open={showEmail}
+        onClose={() => setShowEmail(false)}
+        resourceLabel="contract"
+        resourceTitle={contract.name}
+        suggestions={signers
+          .filter(s => s.status === 'pending')
+          .map<EmailRecipientSuggestion>(s => ({
+            id: s.id,
+            name: s.name,
+            email: s.email,
+            badge: s.role === 'tahi' ? 'Tahi' : s.role === 'witness' ? 'Witness' : undefined,
+          }))}
+        postUrl={`/api/admin/contracts/${id}/email`}
+        mode="signers"
+        onSent={({ sent }) => {
+          if (sent > 0) {
+            showToast(`Sent ${sent} signing email${sent === 1 ? '' : 's'}.`)
+            void fetchAll({ silent: true })
+          }
+        }}
       />
     </div>
   )

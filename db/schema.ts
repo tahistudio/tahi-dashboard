@@ -1433,10 +1433,12 @@ export const dealNudges = sqliteTable('deal_nudges', {
 
 export const projectSchedules = sqliteTable('project_schedules', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  // Linkage — at most one of these is typically set, but both are allowed
-  // (e.g. a schedule attached to a deal that later belongs to an org).
+  // Linkage — any combination is allowed. A schedule can attach to a
+  // proposal (delivery plan inside a sales deck), a deal (pre-sale Gantt),
+  // and/or an org. Cross-linking is the basis for auto-fill across the kit.
   orgId: text('org_id').references(() => organisations.id, { onDelete: 'cascade' }),
   dealId: text('deal_id').references(() => deals.id, { onDelete: 'set null' }),
+  proposalId: text('proposal_id').references(() => proposals.id, { onDelete: 'set null' }),
   // Cover-page metadata (mirrors the PDF cover)
   title: text('title').notNull(),
   subtitle: text('subtitle'), // e.g. "PROJECT SCHEDULE, GANTT"
