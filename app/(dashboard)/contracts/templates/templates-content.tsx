@@ -9,6 +9,7 @@ import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
+import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
 
 interface Template {
   id: string
@@ -222,15 +223,14 @@ function TemplateDialog({
             <input id="tpl-desc" type="text" value={description} onChange={e => setDescription(e.target.value)} className={inputCn} />
           </div>
           <div>
-            <label htmlFor="tpl-body" className="block text-sm font-medium text-[var(--color-text)] mb-1">Body (HTML)</label>
-            <textarea
-              id="tpl-body"
-              rows={16}
-              value={bodyHtml}
-              onChange={e => setBodyHtml(e.target.value)}
-              className={`${inputCn} font-mono`}
-              style={{ fontSize: '0.8125rem', lineHeight: 1.5 }}
-              placeholder="<h2>Statement of Work</h2><p>This SOW is between {{provider_name}} and {{client_name}}...</p>"
+            <label htmlFor="tpl-body" className="block text-sm font-medium text-[var(--color-text)] mb-1">Body</label>
+            <p className="text-xs text-[var(--color-text-muted)] mb-2">
+              Use <code className="bg-[var(--color-bg-tertiary)] px-1 rounded">&#123;&#123;variable&#125;&#125;</code> placeholders for slots filled at create time (e.g. <code className="bg-[var(--color-bg-tertiary)] px-1 rounded">&#123;&#123;client_name&#125;&#125;</code>).
+            </p>
+            <TiptapDocEditor
+              content={bodyHtml}
+              onChange={(html) => setBodyHtml(html)}
+              placeholder="Statement of Work — write the boilerplate that every contract from this template starts from."
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">

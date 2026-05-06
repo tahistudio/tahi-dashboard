@@ -12,6 +12,7 @@ import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { EmailShareModal, type EmailRecipientSuggestion } from '@/components/tahi/email-share-modal'
+import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
 
 interface ContractDoc {
   id: string
@@ -317,21 +318,25 @@ export function ContractDetail({ id }: { id: string }) {
             />
 
             <label htmlFor="contract-body" className="block text-sm font-medium text-[var(--color-text)] mb-1.5 mt-4">
-              Contract body (HTML)
+              Contract body
             </label>
             <p className="text-xs text-[var(--color-text-muted)] mb-2">
               Renders inside the public viewer. Variables like <code className="bg-[var(--color-bg-tertiary)] px-1 rounded">&#123;&#123;client_name&#125;&#125;</code> are
-              substituted at create time.
+              substituted at create time. Locked when the contract is signed or cancelled.
             </p>
-            <textarea
-              id="contract-body"
-              rows={20}
-              value={bodyHtml}
-              onChange={e => setBodyHtml(e.target.value)}
-              disabled={isLocked}
-              className={`${inputCn} font-mono`}
-              style={{ fontSize: '0.8125rem', lineHeight: 1.5 }}
-            />
+            {isLocked ? (
+              <div
+                className="rounded-xl border p-4 bg-[var(--color-bg-tertiary)] text-sm text-[var(--color-text)]"
+                style={{ borderColor: 'var(--color-border)', minHeight: '20rem' }}
+                dangerouslySetInnerHTML={{ __html: bodyHtml }}
+              />
+            ) : (
+              <TiptapDocEditor
+                content={bodyHtml}
+                onChange={(html) => setBodyHtml(html)}
+                placeholder="Write the contract body. Headings, lists, links and emphasis all carry through to the public viewer."
+              />
+            )}
             <div className="flex justify-end mt-3">
               <TahiButton onClick={saveMeta} loading={savingMeta} disabled={isLocked} size="sm" iconLeft={<Save className="w-3.5 h-3.5" />}>
                 Save changes

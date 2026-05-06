@@ -10,6 +10,7 @@ import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
 import { EmailShareModal, type EmailRecipientSuggestion } from '@/components/tahi/email-share-modal'
 import { TypedSectionFields } from './section-editors'
 import { defaultDataForType, type SectionType } from '@/app/p/proposal/[token]/section-blocks'
+import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
 
 interface Proposal {
   id: string
@@ -566,14 +567,14 @@ function SectionEditor({ section, onChange, onDelete }: {
             </FieldGroup>
           </>
         ) : (
-          <FieldGroup label="HTML content (paste or type — supports <p>, <strong>, <ul>, etc.)">
-            <textarea
-              value={String(data.html ?? '')}
-              onChange={e => setField('html', e.target.value)}
-              onBlur={flush}
-              rows={6}
-              placeholder="<p>Your content here...</p>"
-              style={{ ...metaInputStyle, fontFamily: 'monospace', fontSize: '0.75rem', lineHeight: 1.5 }}
+          <FieldGroup label="Content">
+            <TiptapDocEditor
+              content={String(data.html ?? '')}
+              onChange={(html) => {
+                setData(prev => ({ ...prev, html }))
+                onChange({ data: { ...data, html } })
+              }}
+              placeholder="Start writing your section…"
             />
           </FieldGroup>
         )}
@@ -621,11 +622,19 @@ function VariantEditor({ variant, onChange, onDelete }: {
             <input type="text" value={variant.ctaLabel ?? ''} placeholder="Accept this package" onChange={e => onChange({ ctaLabel: e.target.value })} style={metaInputStyle} />
           </FieldGroup>
         </div>
-        <FieldGroup label="Scope HTML — what's included in this package">
-          <textarea value={variant.scopeHtml ?? ''} onChange={e => onChange({ scopeHtml: e.target.value })} rows={6} placeholder="<ul><li>Discovery & sitemap</li><li>...</li></ul>" style={{ ...metaInputStyle, fontFamily: 'monospace', fontSize: '0.75rem', lineHeight: 1.5 }} />
+        <FieldGroup label="Scope — what's included in this package">
+          <TiptapDocEditor
+            content={variant.scopeHtml ?? ''}
+            onChange={(html) => onChange({ scopeHtml: html })}
+            placeholder="Use bullet lists for the feature checklist that powers the variant compare table."
+          />
         </FieldGroup>
-        <FieldGroup label="Pricing notes (optional, HTML)">
-          <textarea value={variant.pricingNotesHtml ?? ''} onChange={e => onChange({ pricingNotesHtml: e.target.value })} rows={3} placeholder="<p>50% on signing, 50% on launch.</p>" style={{ ...metaInputStyle, fontFamily: 'monospace', fontSize: '0.75rem', lineHeight: 1.5 }} />
+        <FieldGroup label="Pricing notes (optional)">
+          <TiptapDocEditor
+            content={variant.pricingNotesHtml ?? ''}
+            onChange={(html) => onChange({ pricingNotesHtml: html })}
+            placeholder="e.g. 50% on signing, 50% on launch."
+          />
         </FieldGroup>
         <label className="inline-flex items-center" style={{ gap: '0.5rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)', cursor: 'pointer' }}>
           <input type="checkbox" checked={!!variant.isFeatured} onChange={e => onChange({ isFeatured: e.target.checked ? 1 : 0 })} />
