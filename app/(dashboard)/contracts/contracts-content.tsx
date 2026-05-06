@@ -136,7 +136,7 @@ export function ContractsContent() {
         <TahiButton variant="secondary" size="sm" onClick={fetchAll} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
           Refresh
         </TahiButton>
-        <Link href="/dashboard/contracts/templates">
+        <Link href="/contracts/templates">
           <TahiButton variant="secondary" size="sm">
             Templates
           </TahiButton>
@@ -231,7 +231,7 @@ export function ContractsContent() {
                   <tr
                     key={c.id}
                     className="border-b border-[var(--color-border-subtle)] last:border-0 hover:bg-[var(--color-bg-secondary)] transition-colors cursor-pointer"
-                    onClick={() => router.push(`/dashboard/contracts/${c.id}`)}
+                    onClick={() => router.push(`/contracts/${c.id}`)}
                   >
                     <td className="px-4 py-3">
                       <div className="font-medium text-[var(--color-text)]">{c.name}</div>
@@ -316,7 +316,7 @@ export function ContractsContent() {
           onClose={() => setShowCreate(false)}
           onCreated={(id) => {
             setShowCreate(false)
-            router.push(`/dashboard/contracts/${id}`)
+            router.push(`/contracts/${id}`)
           }}
         />
       )}

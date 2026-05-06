@@ -63,7 +63,7 @@ export function TemplatesContent() {
   return (
     <div className="space-y-6">
       <div>
-        <Link href="/dashboard/contracts" className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+        <Link href="/contracts" className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
           <ArrowLeft className="w-4 h-4" /> Back to contracts
         </Link>
       </div>

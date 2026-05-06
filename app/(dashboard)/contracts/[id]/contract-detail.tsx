@@ -198,7 +198,7 @@ export function ContractDetail({ id }: { id: string }) {
   if (!contract) {
     return (
       <div className="space-y-4">
-        <Link href="/dashboard/contracts" className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+        <Link href="/contracts" className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
           <ArrowLeft className="w-4 h-4" /> Back to contracts
         </Link>
         <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-8 text-center">
@@ -216,7 +216,7 @@ export function ContractDetail({ id }: { id: string }) {
   return (
     <div className="space-y-6">
       <div>
-        <Link href="/dashboard/contracts" className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+        <Link href="/contracts" className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
           <ArrowLeft className="w-4 h-4" /> Back to contracts
         </Link>
       </div>
