@@ -7,6 +7,7 @@ import { ArrowLeft, Plus, Trash2, AlertTriangle, Share2, Copy, Diamond, Calendar
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { GanttGrid, type GanttRow, type RowOwner, type RowType } from '@/components/tahi/gantt-grid'
+import { GanttLegend } from '@/components/tahi/gantt-legend'
 import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
 
 interface Schedule {
@@ -473,27 +474,8 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         />
       )}
 
-      {/* Legend */}
-      <div
-        className="flex flex-wrap"
-        style={{
-          gap: '1rem',
-          padding: '0.875rem 1rem',
-          fontSize: '0.6875rem',
-          background: 'var(--color-bg-secondary)',
-          border: '1px solid var(--color-border-subtle)',
-          borderRadius: 'var(--radius-md)',
-          color: 'var(--color-text-muted)',
-        }}
-      >
-        <LegendSwatch color="#5A824E" label="Tahi" />
-        <LegendSwatch color="#1f2c1a" label="Client" />
-        <LegendSwatch color="#d4a017" label="Joint" />
-        <LegendSwatch color="#a8c89e" label="Tahi parallel" />
-        <LegendSwatch riskOverlay label="Risk of delay" />
-        <LegendDiamond label="Sign-off gate" />
-        <LegendDiamond label="Critical gate" critical />
-      </div>
+      {/* Legend — shared with the public viewer for visual consistency. */}
+      <GanttLegend />
 
       {/* Analytics — appears once the schedule has been shared at least once. */}
       {schedule.publicShareToken && (
@@ -552,42 +534,8 @@ function ToolbarButton({
   )
 }
 
-function LegendSwatch({ color, label, riskOverlay }: { color?: string; label: string; riskOverlay?: boolean }) {
-  return (
-    <span className="inline-flex items-center" style={{ gap: '0.375rem' }}>
-      <span
-        style={{
-          width: '1rem',
-          height: '0.625rem',
-          background: riskOverlay
-            ? 'repeating-linear-gradient(45deg, rgba(248,113,113,0.95) 0 4px, transparent 4px 8px)'
-            : color,
-          backgroundColor: riskOverlay ? '#5A824E' : undefined,
-          borderRadius: '0.125rem',
-        }}
-      />
-      {label}
-    </span>
-  )
-}
-
-function LegendDiamond({ label, critical }: { label: string; critical?: boolean }) {
-  return (
-    <span className="inline-flex items-center" style={{ gap: '0.375rem' }}>
-      <span
-        style={{
-          width: '0.625rem',
-          height: '0.625rem',
-          transform: 'rotate(45deg)',
-          background: '#ffffff',
-          border: critical ? '1.5px solid #dc2626' : '1.5px solid #5A824E',
-          display: 'inline-block',
-        }}
-      />
-      {label}
-    </span>
-  )
-}
+// (LegendSwatch + LegendDiamond moved to components/tahi/gantt-legend.tsx
+//  so the public viewer and editor share the same visual language.)
 
 // ── Row editor ──────────────────────────────────────────────────────────
 function RowEditor({
