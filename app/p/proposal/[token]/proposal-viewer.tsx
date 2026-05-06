@@ -23,6 +23,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { apiPath } from '@/lib/api'
 import { useShareViewTracking } from '@/components/tahi/use-share-view-tracking'
+import { ProposalSectionBlock } from './section-blocks'
 
 interface PublicProposal {
   title: string
@@ -198,6 +199,7 @@ export function ProposalViewer({ token }: { token: string }) {
         <div style={coverBackdrop} aria-hidden="true" />
         <div style={coverInner}>
           <BrandMark />
+          <CoverHeroStats />
           <div style={{ marginTop: 'auto' }}>
             {proposal.subtitle && <div style={coverEyebrow}>{proposal.subtitle}</div>}
             <h1 style={coverTitle}>{proposal.title}</h1>
@@ -224,7 +226,7 @@ export function ProposalViewer({ token }: { token: string }) {
       )}
 
       {/* Shared sections in order */}
-      {sections.map(s => <ProposalSectionRender key={s.id} section={s} />)}
+      {sections.map(s => <ProposalSectionBlock key={s.id} section={s} />)}
 
       {/* Variants picker + active variant detail */}
       {variants.length > 0 && (
@@ -236,6 +238,9 @@ export function ProposalViewer({ token }: { token: string }) {
               {variants.length} options · same team, same approach, different scope and investment
             </p>
           )}
+
+          {/* Compare table (only when >1 variant) */}
+          {variants.length > 1 && <VariantCompareTable variants={variants} activeVariantId={activeVariantId} onSelect={setActiveVariantId} />}
 
           {/* Tabs (only when >1 variant) */}
           {variants.length > 1 && (
@@ -271,7 +276,7 @@ export function ProposalViewer({ token }: { token: string }) {
                         color: '#ffffff',
                         borderRadius: '999px',
                       }}>
-                        Recommended
+                        Most chosen
                       </span>
                     ) : null}
                   </button>
@@ -289,11 +294,11 @@ export function ProposalViewer({ token }: { token: string }) {
                 </p>
               )}
 
-              {/* Scope */}
+              {/* Scope — feature checklist (parsed from <li>) + remaining HTML */}
               {activeVariant.scopeHtml && (
                 <div>
                   <h3 style={subSlideHeader}>What&apos;s included</h3>
-                  <div style={proseStyle} dangerouslySetInnerHTML={{ __html: activeVariant.scopeHtml }} />
+                  <VariantScopeBody html={activeVariant.scopeHtml} />
                 </div>
               )}
 
@@ -352,6 +357,11 @@ export function ProposalViewer({ token }: { token: string }) {
             </div>
           )}
         </section>
+      )}
+
+      {/* Post-accept timeline — shown once the prospect has accepted */}
+      {submitted === 'accepted' && (
+        <PostAcceptTimeline variantName={decidedVariant?.name ?? null} />
       )}
 
       {/* Footer */}
@@ -460,31 +470,209 @@ function CoverMetaGrid({ proposal }: { proposal: PublicProposal }) {
   )
 }
 
-function ProposalSectionRender({ section }: { section: PublicSection }) {
-  const data = safeParse<{ html?: string; quote?: string; author?: string; role?: string }>(section.data)
-  // testimonial is the one structured type; everything else is HTML.
-  if (section.type === 'testimonial') {
-    return (
-      <section style={slideShell}>
-        {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
-        {section.title && <h2 style={slideTitle}>{section.title}</h2>}
-        <blockquote style={{ fontSize: '1.25rem', lineHeight: 1.5, color: '#1f2c1a', margin: '1.5rem 0 1rem 0', fontStyle: 'italic' }}>
-          “{data?.quote ?? ''}”
-        </blockquote>
-        <div style={{ fontSize: '0.875rem', color: '#5a6657' }}>
-          <strong style={{ color: '#1f2c1a' }}>{data?.author ?? ''}</strong>
-          {data?.role ? ` · ${data.role}` : ''}
-        </div>
-      </section>
-    )
-  }
-  // Default: render HTML content slide.
-  const html = data?.html ?? ''
+// ─── Cover hero — credibility row above the title ─────────────────────────
+
+function CoverHeroStats() {
+  const stats: { value: string; label: string }[] = [
+    { value: '12 days', label: 'median project → sign' },
+    { value: 'Premium', label: 'Webflow Partner' },
+    { value: 'Carbon-', label: 'negative since 2024' },
+    { value: 'Founder-', label: 'led by Liam + Staci' },
+  ]
   return (
-    <section style={slideShell}>
-      {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
-      {section.title && <h2 style={slideTitle}>{section.title}</h2>}
-      <div style={proseStyle} dangerouslySetInnerHTML={{ __html: html }} />
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))', gap: '0.625rem', marginTop: '0.875rem' }}>
+      {stats.map(s => (
+        <div key={s.label} style={{ background: 'rgba(255,255,255,0.65)', border: '1px solid #e8f0e6', borderRadius: '0 12px 0 12px', padding: '0.625rem 0.875rem', minWidth: 0 }}>
+          <div style={{ fontSize: '0.875rem', fontWeight: 800, color: '#1f2c1a', letterSpacing: '-0.01em' }}>{s.value}</div>
+          <div style={{ fontSize: '0.6875rem', color: '#5a6657' }}>{s.label}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─── Variant scope body — pulls <li> items out as a check-list ────────────
+
+function VariantScopeBody({ html }: { html: string }) {
+  // Extract <li> contents (stripped of nested HTML) from the FIRST <ul>/<ol>
+  // and render them as a leaf-radius checklist. Anything outside that list
+  // (or all of `html` if no list exists) renders as prose underneath.
+  const listMatch = html.match(/<(ul|ol)[\s\S]*?<\/\1>/i)
+  const features: string[] = []
+  let remainder = html
+  if (listMatch) {
+    const inner = listMatch[0]
+    const items = inner.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)
+    for (const m of items) {
+      const text = m[1].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
+      if (text) features.push(text)
+    }
+    remainder = html.replace(listMatch[0], '').trim()
+  }
+  return (
+    <div>
+      {features.length > 0 && (
+        <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '0.5rem' }}>
+          {features.map((f, i) => (
+            <li key={i} style={{ display: 'grid', gridTemplateColumns: '1.25rem 1fr', gap: '0.625rem', alignItems: 'baseline', fontSize: '0.9375rem', color: '#1f2c1a', lineHeight: 1.5 }}>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#5A824E" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: '0.25rem' }}>
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <span>{f}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {remainder && (
+        <div style={{ ...proseStyle, marginTop: features.length > 0 ? '1rem' : 0 }} dangerouslySetInnerHTML={{ __html: remainder }} />
+      )}
+    </div>
+  )
+}
+
+// ─── Variant compare table — shown when N≥2 variants ──────────────────────
+
+function VariantCompareTable({
+  variants, activeVariantId, onSelect,
+}: {
+  variants: PublicVariant[]
+  activeVariantId: string | null
+  onSelect: (id: string) => void
+}) {
+  // Build a feature matrix: for each variant, parse <li> items from scopeHtml.
+  // Union the labels in order of first appearance, then mark each variant
+  // as having a feature if its list contained that label.
+  const variantFeatures: { id: string; features: Set<string> }[] = variants.map(v => {
+    const set = new Set<string>()
+    const html = v.scopeHtml ?? ''
+    const list = html.match(/<(ul|ol)[\s\S]*?<\/\1>/i)?.[0] ?? ''
+    for (const m of list.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)) {
+      const text = m[1].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
+      if (text) set.add(text)
+    }
+    return { id: v.id, features: set }
+  })
+  const allFeatures: string[] = []
+  for (const vf of variantFeatures) {
+    for (const f of vf.features) {
+      if (!allFeatures.includes(f)) allFeatures.push(f)
+    }
+  }
+  if (allFeatures.length === 0) return null
+
+  return (
+    <div style={{ marginTop: '1.25rem', overflowX: 'auto', border: '1px solid #e8f0e6', borderRadius: '0.875rem' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+        <thead>
+          <tr>
+            <th style={compareTh}>What&apos;s included</th>
+            {variants.map(v => {
+              const isActive = v.id === activeVariantId
+              return (
+                <th
+                  key={v.id}
+                  onClick={() => onSelect(v.id)}
+                  style={{
+                    ...compareTh,
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                    color: isActive ? '#ffffff' : '#1f2c1a',
+                    background: isActive ? '#1f2c1a' : '#fdfefd',
+                    borderLeft: '1px solid #e8f0e6',
+                    minWidth: '8rem',
+                  }}
+                >
+                  <div style={{ fontWeight: 800 }}>{v.name}</div>
+                  <div style={{ fontWeight: 500, fontSize: '0.75rem', color: isActive ? '#a8c89e' : '#5a6657', marginTop: '0.125rem' }}>
+                    {priceLabel(v)}
+                  </div>
+                  {v.isFeatured ? (
+                    <div style={{ marginTop: '0.375rem', fontSize: '0.625rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: isActive ? '#93c98a' : '#5A824E' }}>
+                      Most chosen
+                    </div>
+                  ) : null}
+                </th>
+              )
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {allFeatures.map((f, i) => (
+            <tr key={i} style={{ borderTop: '1px solid #f0f4ee' }}>
+              <td style={compareTd}>{f}</td>
+              {variantFeatures.map(vf => {
+                const has = vf.features.has(f)
+                return (
+                  <td key={vf.id} style={{ ...compareTd, textAlign: 'center', borderLeft: '1px solid #f0f4ee' }}>
+                    {has ? (
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#5A824E" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ) : (
+                      <span style={{ color: '#c8d4c5', fontSize: '0.875rem' }}>—</span>
+                    )}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function priceLabel(v: PublicVariant): string {
+  const oneOff = v.oneOffAmount > 0 ? formatMoney(v.oneOffAmount, v.currency) : ''
+  const monthly = v.monthlyAmount > 0 ? `${formatMoney(v.monthlyAmount, v.currency)}/mo` : ''
+  return [oneOff, monthly].filter(Boolean).join(' + ') || 'TBC'
+}
+
+const compareTh: React.CSSProperties = {
+  textAlign: 'left',
+  padding: '0.875rem 1rem',
+  fontSize: '0.75rem',
+  fontWeight: 700,
+  color: '#1f2c1a',
+  background: '#fdfefd',
+}
+const compareTd: React.CSSProperties = {
+  padding: '0.625rem 1rem',
+  color: '#1f2c1a',
+  verticalAlign: 'middle',
+}
+
+// ─── Post-accept timeline ────────────────────────────────────────────────
+
+function PostAcceptTimeline({ variantName }: { variantName?: string | null }) {
+  const steps: { title: string; body: string }[] = [
+    { title: 'Right now', body: 'Liam gets the email and your dashboard project is created. We confirm receipt within one business day.' },
+    { title: 'Tomorrow', body: 'Personal Loom from Liam: a walkthrough of your client portal — how to make requests, what to expect, and the first tasks queued up.' },
+    { title: 'This week', body: 'Discovery items kick off. Tracks move through the dashboard, you see progress live and can request changes anytime.' },
+    { title: 'Around delivery', body: 'Two to three weeks before handoff we open the retainer conversation — your 10% lifetime discount is already earned.' },
+  ]
+  return (
+    <section style={{ ...slideShell, background: '#1f2c1a', color: '#ffffff', border: 'none' }}>
+      <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#93c98a', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>
+        What happens next
+      </div>
+      <h2 style={{ fontSize: 'clamp(1.5rem, 3vw, 2rem)', fontWeight: 800, color: '#ffffff', margin: 0, letterSpacing: '-0.015em' }}>
+        Welcome aboard{variantName ? ` · ${variantName}` : ''}.
+      </h2>
+      <p style={{ fontSize: '0.9375rem', color: '#dcefd8', maxWidth: '40rem', marginTop: '0.75rem', marginBottom: '1.5rem', lineHeight: 1.6 }}>
+        You&rsquo;ve done the hard part. Here&rsquo;s the next 14 days from your side.
+      </p>
+      <ol style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '0.625rem' }}>
+        {steps.map((s, i) => (
+          <li key={i} style={{ display: 'grid', gridTemplateColumns: '2rem 1fr', gap: '0.875rem', alignItems: 'flex-start', padding: '0.875rem 1rem', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(220,239,216,0.2)', borderRadius: '0.625rem' }}>
+            <div style={{ width: '2rem', height: '2rem', borderRadius: '0 10px 0 10px', background: '#5A824E', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 800 }}>{i + 1}</div>
+            <div>
+              <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#ffffff' }}>{s.title}</div>
+              <div style={{ fontSize: '0.8125rem', color: '#a8c89e', marginTop: '0.25rem', lineHeight: 1.5 }}>{s.body}</div>
+            </div>
+          </li>
+        ))}
+      </ol>
     </section>
   )
 }

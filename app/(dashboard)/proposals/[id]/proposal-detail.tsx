@@ -7,6 +7,8 @@ import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink } from 'lucid
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
+import { TypedSectionFields } from './section-editors'
+import { defaultDataForType, type SectionType } from '@/app/p/proposal/[token]/section-blocks'
 
 interface Proposal {
   id: string
@@ -68,14 +70,28 @@ interface Acceptance {
 }
 
 const SECTION_TYPES = [
-  { value: 'cover', label: 'Cover' },
   { value: 'overview', label: 'Overview' },
-  { value: 'terms', label: 'Terms' },
+  { value: 'value_anchor', label: 'Value anchor (the math)' },
+  { value: 'process', label: 'Our process' },
+  { value: 'differentiators', label: 'Why us (icon grid)' },
+  { value: 'case_study', label: 'Case studies' },
+  { value: 'testimonial_stack', label: 'Testimonial stack' },
+  { value: 'testimonial', label: 'Testimonial (single)' },
+  { value: 'guarantee', label: 'Guarantee / promise' },
+  { value: 'faq', label: 'FAQ' },
+  { value: 'retainer_offer', label: 'Retainer offer (10% lifetime)' },
   { value: 'about', label: 'About Tahi' },
-  { value: 'testimonial', label: 'Testimonial' },
+  { value: 'terms', label: 'Terms' },
   { value: 'scope_shared', label: 'Shared scope' },
   { value: 'text', label: 'Custom text' },
 ] as const
+
+// Section types that have structured editors (handled by TypedSectionFields).
+// All others fall back to the legacy HTML/quote inputs.
+const STRUCTURED_TYPES = new Set<string>([
+  'value_anchor', 'process', 'differentiators', 'case_study',
+  'testimonial_stack', 'faq', 'guarantee', 'retainer_offer',
+])
 
 export function ProposalDetail({ proposalId }: { proposalId: string }) {
   const router = useRouter()
@@ -121,20 +137,28 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
 
   // ── Section CRUD ─────────────────────────────────────────────────────
   async function addSection(type: string) {
-    const defaults: Record<string, { title: string; subtitle: string | null; data: unknown }> = {
-      cover: { title: 'Cover', subtitle: null, data: { html: '' } },
-      overview: { title: 'Executive overview', subtitle: 'How we approach this', data: { html: '' } },
-      terms: { title: 'Terms', subtitle: 'Engagement terms', data: { html: '' } },
-      about: { title: 'About Tahi Studio', subtitle: 'Who we are', data: { html: '' } },
-      testimonial: { title: 'What clients say', subtitle: null, data: { quote: '', author: '', role: '' } },
-      scope_shared: { title: 'Scope', subtitle: 'What every package includes', data: { html: '' } },
-      text: { title: 'New section', subtitle: null, data: { html: '' } },
+    const meta: Record<string, { title: string; subtitle: string | null }> = {
+      overview: { title: 'Executive overview', subtitle: 'How we approach this' },
+      value_anchor: { title: 'Why hiring separately costs more', subtitle: 'The math' },
+      process: { title: 'How we work', subtitle: 'Our process, end to end' },
+      differentiators: { title: 'Why teams pick Tahi', subtitle: 'What sets us apart' },
+      case_study: { title: 'Recent work', subtitle: 'Selected case studies' },
+      testimonial_stack: { title: 'What clients say', subtitle: 'In their words' },
+      testimonial: { title: 'What clients say', subtitle: null },
+      faq: { title: 'Common questions', subtitle: 'Things teams ask before signing' },
+      guarantee: { title: 'Our promise to you', subtitle: 'No surprises' },
+      retainer_offer: { title: 'Your 10% lifetime discount', subtitle: 'Already earned' },
+      about: { title: 'About Tahi Studio', subtitle: 'Who we are' },
+      terms: { title: 'Terms', subtitle: 'Engagement terms' },
+      scope_shared: { title: 'Scope', subtitle: 'What every package includes' },
+      text: { title: 'New section', subtitle: null },
     }
-    const seed = defaults[type] ?? defaults.text
+    const seed = meta[type] ?? meta.text
+    const data = defaultDataForType(type as SectionType)
     try {
       const res = await fetch(apiPath(`/api/admin/proposals/${proposalId}/sections`), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, ...seed }),
+        body: JSON.stringify({ type, title: seed.title, subtitle: seed.subtitle, data }),
       })
       if (!res.ok) throw new Error('Failed')
       await fetchAll()
@@ -469,7 +493,13 @@ function SectionEditor({ section, onChange, onDelete }: {
         <FieldGroup label="Subtitle (eyebrow)">
           <input type="text" value={section.subtitle ?? ''} onChange={e => onChange({ subtitle: e.target.value })} style={metaInputStyle} />
         </FieldGroup>
-        {section.type === 'testimonial' ? (
+        {STRUCTURED_TYPES.has(section.type) ? (
+          <TypedSectionFields
+            type={section.type}
+            data={data}
+            onChange={(next) => { setData(next); onChange({ data: next }) }}
+          />
+        ) : section.type === 'testimonial' ? (
           <>
             <FieldGroup label="Quote">
               <textarea value={String(data.quote ?? '')} onChange={e => setField('quote', e.target.value)} onBlur={flush} rows={3} style={{ ...metaInputStyle, fontFamily: 'inherit' }} />
