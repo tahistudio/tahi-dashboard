@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { GanttGrid, type GanttRow } from '@/components/tahi/gantt-grid'
-import { GanttLegend } from '@/components/tahi/gantt-legend'
+import { type GanttRow } from '@/components/tahi/gantt-grid'
+import { SectionRenderer, type ScheduleSection } from '@/components/tahi/schedule-section-renderers'
 import { apiPath } from '@/lib/api'
 import { useShareViewTracking } from '@/components/tahi/use-share-view-tracking'
 
@@ -37,7 +37,7 @@ interface PublicSchedule {
  */
 export function ScheduleViewer({ token }: { token: string }) {
   const [schedule, setSchedule] = useState<PublicSchedule | null>(null)
-  const [rows, setRows] = useState<GanttRow[]>([])
+  const [sections, setSections] = useState<ScheduleSection[]>([])
   const [analyticsResourceId, setAnalyticsResourceId] = useState<string | null>(null)
   const [state, setState] = useState<'loading' | 'ok' | 'not_found'>('loading')
 
@@ -52,12 +52,30 @@ export function ScheduleViewer({ token }: { token: string }) {
         }
         const data = await res.json() as {
           schedule: PublicSchedule
-          rows: GanttRow[]
+          sections?: ScheduleSection[]
+          rows?: GanttRow[]
           analyticsResourceId?: string
         }
         if (cancelled) return
         setSchedule(data.schedule)
-        setRows(data.rows ?? [])
+        // Sections is the new shape (post migration 0026). If missing
+        // (an unmigrated server somehow), fall back to a synthetic single
+        // gantt section built from the flat rows array.
+        if (data.sections && data.sections.length > 0) {
+          setSections(data.sections)
+        } else if (data.rows) {
+          setSections([{
+            id: 'fallback-gantt',
+            type: 'gantt',
+            title: 'Project schedule',
+            subtitle: null,
+            startWeek: null,
+            endWeek: null,
+            data: null,
+            position: 0,
+            rows: data.rows,
+          }])
+        }
         setAnalyticsResourceId(data.analyticsResourceId ?? null)
         setState('ok')
       } catch {
@@ -135,34 +153,17 @@ export function ScheduleViewer({ token }: { token: string }) {
         </div>
       </section>
 
-      {/* Optional overview — rendered only when set */}
-      {schedule.overviewHtml && schedule.overviewHtml.trim() && (
-        <section style={slideShell}>
-          <div style={slideEyebrow}>Executive overview</div>
-          <h2 style={slideTitle}>How it runs.</h2>
-          <div
-            style={overviewProse}
-            dangerouslySetInnerHTML={{ __html: schedule.overviewHtml }}
-          />
-        </section>
-      )}
-
-      {/* Gantt slide */}
-      <section style={slideShell}>
-        <div style={slideEyebrow}>Project schedule</div>
-        <h2 style={slideTitle}>Whole project, one view.</h2>
-        {schedule.orgName && (
-          <p style={slideSub}>
-            {schedule.orgName} · {schedule.numberOfWeeks} {schedule.numberOfWeeks === 1 ? 'week' : 'weeks'}
-          </p>
-        )}
-        <div style={{ marginTop: '1.25rem' }}>
-          <GanttGrid rows={rows} numberOfWeeks={schedule.numberOfWeeks} />
-        </div>
-        <div style={{ marginTop: '1rem' }}>
-          <GanttLegend compact />
-        </div>
-      </section>
+      {/* Sections — render each by type via the shared dispatcher.
+          Replaces the legacy hardcoded "overview slide + gantt slide"
+          pair. Schedules without a section list (legacy) fall through
+          via the synthetic gantt fallback we set up on load. */}
+      {sections.map(section => (
+        <SectionRenderer
+          key={section.id}
+          section={section}
+          numberOfWeeks={schedule.numberOfWeeks}
+        />
+      ))}
 
       {/* Footer */}
       <footer style={footer}>
@@ -183,9 +184,9 @@ function BrandMark({ size = 'md' }: { size?: 'sm' | 'md' }) {
   // tahi-logo.png wordmark is the inverted variant for dark backgrounds
   // like the dashboard sidebar — would disappear on this white cover.
   const dim = size === 'sm' ? '1.25rem' : '1.625rem'
-  /* eslint-disable-next-line @next/next/no-img-element */
   return (
     <div className="inline-flex items-center" style={{ gap: '0.5rem' }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/dashboard/favicon.png"
         alt=""
@@ -321,46 +322,7 @@ const coverMetaGrid: React.CSSProperties = {
   marginTop: 'auto',
 }
 
-const slideShell: React.CSSProperties = {
-  width: '100%',
-  maxWidth: '76rem',
-  margin: '0 auto',
-  background: '#ffffff',
-  border: '1px solid #d4e0d0',
-  borderRadius: '1rem',
-  boxShadow: '0 4px 16px rgba(31, 44, 26, 0.05)',
-  padding: 'clamp(1.25rem, 3vw, 2rem)',
-}
-
-const slideEyebrow: React.CSSProperties = {
-  fontSize: '0.6875rem',
-  fontWeight: 600,
-  color: '#8a9987',
-  textTransform: 'uppercase',
-  letterSpacing: '0.1em',
-  marginBottom: '0.375rem',
-}
-
-const slideTitle: React.CSSProperties = {
-  fontSize: 'clamp(1.25rem, 3vw, 1.875rem)',
-  fontWeight: 800,
-  color: '#1f2c1a',
-  margin: 0,
-  letterSpacing: '-0.015em',
-}
-
-const slideSub: React.CSSProperties = {
-  fontSize: '0.875rem',
-  color: '#5a6657',
-  marginTop: '0.375rem',
-}
-
-const overviewProse: React.CSSProperties = {
-  marginTop: '1rem',
-  fontSize: '0.9375rem',
-  lineHeight: 1.7,
-  color: '#1f2c1a',
-}
+// (slide-level styles moved into components/tahi/schedule-section-renderers.tsx)
 
 const footer: React.CSSProperties = {
   width: '100%',

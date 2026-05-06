@@ -8,6 +8,7 @@ import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { GanttGrid, type GanttRow, type RowOwner, type RowType } from '@/components/tahi/gantt-grid'
 import { GanttLegend } from '@/components/tahi/gantt-legend'
+import { SectionRenderer, type ScheduleSection } from '@/components/tahi/schedule-section-renderers'
 import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
 
 interface Schedule {
@@ -51,21 +52,49 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   const router = useRouter()
   const { showToast } = useToast()
   const [schedule, setSchedule] = useState<Schedule | null>(null)
-  const [rows, setRows] = useState<GanttRow[]>([])
+  const [sections, setSections] = useState<ScheduleSection[]>([])
   const [loading, setLoading] = useState(true)
   const [editingRowId, setEditingRowId] = useState<string | null>(null)
   const [draft, setDraft] = useState<RowDraft | null>(null)
   const [savingDraft, setSavingDraft] = useState(false)
   const [sharing, setSharing] = useState(false)
 
+  // Default gantt section = the first 'gantt'-typed section. The toolbar
+  // adds rows here. Other sections (overview / risk_register / RACI /
+  // text) are rendered read-only below in admin-preview mode for now;
+  // they're seedable + editable via API/MCP. A full per-type editor lives
+  // in a follow-up task.
+  const defaultGanttSection = sections.find(s => s.type === 'gantt') ?? null
+  const ganttRows: GanttRow[] = defaultGanttSection?.rows ?? []
+  // Sections that come AFTER the default gantt — rendered as read-only previews.
+  const otherSections = sections.filter(s => s.id !== defaultGanttSection?.id)
+
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
       const res = await fetch(apiPath(`/api/admin/schedules/${scheduleId}`))
       if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { schedule: Schedule; rows: GanttRow[] }
+      const data = await res.json() as { schedule: Schedule; sections?: ScheduleSection[]; rows?: GanttRow[] }
       setSchedule(data.schedule)
-      setRows(data.rows ?? [])
+      // New shape: sections (post 0026). Fall back to a synthetic gantt
+      // section built from flat rows if the server is older.
+      if (data.sections && data.sections.length > 0) {
+        setSections(data.sections)
+      } else if (data.rows) {
+        setSections([{
+          id: 'fallback-gantt',
+          type: 'gantt',
+          title: 'Project schedule',
+          subtitle: null,
+          startWeek: null,
+          endWeek: null,
+          data: null,
+          position: 0,
+          rows: data.rows,
+        }])
+      } else {
+        setSections([])
+      }
     } catch {
       // silent
     } finally {
@@ -133,11 +162,19 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
     })
   }
 
+  // Helpers to mutate rows inside the default gantt section optimistically.
+  function mutateGanttRows(updater: (rows: GanttRow[]) => GanttRow[]) {
+    setSections(prev => prev.map(s => {
+      if (s.id !== defaultGanttSection?.id) return s
+      return { ...s, rows: updater(s.rows ?? []) }
+    }))
+  }
+
   async function saveRowDraft() {
     if (!editingRowId || !draft) return
     setSavingDraft(true)
     // Optimistic update so the bar moves before the server round-trip.
-    setRows(prev => prev.map(r => r.id === editingRowId ? {
+    mutateGanttRows(rows => rows.map(r => r.id === editingRowId ? {
       ...r,
       rowType: draft.rowType,
       label: draft.label,
@@ -164,14 +201,14 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   }
 
   async function deleteRow(rowId: string) {
-    const previous = rows
-    setRows(prev => prev.filter(r => r.id !== rowId))
+    const previousSections = sections
+    mutateGanttRows(rows => rows.filter(r => r.id !== rowId))
     if (editingRowId === rowId) { setEditingRowId(null); setDraft(null) }
     try {
       const res = await fetch(apiPath(`/api/admin/schedules/${scheduleId}/rows/${rowId}`), { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed')
     } catch {
-      setRows(previous)
+      setSections(previousSections)
       showToast('Failed to delete row', 'error')
     }
   }
@@ -454,9 +491,9 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         </button>
       </div>
 
-      {/* Gantt grid */}
+      {/* Default gantt section — fully editable */}
       <GanttGrid
-        rows={rows}
+        rows={ganttRows}
         numberOfWeeks={schedule.numberOfWeeks}
         onRowClick={openRowEditor}
       />
@@ -476,6 +513,33 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
 
       {/* Legend — shared with the public viewer for visual consistency. */}
       <GanttLegend />
+
+      {/* Other sections — read-only previews. Risk register, RACI, overview,
+          and any extra gantts are managed via API/MCP for now; the user
+          can see them here exactly as the public viewer will render them.
+          A full per-type editor lives in a follow-up task. */}
+      {otherSections.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div
+            style={{
+              padding: '0.625rem 0.875rem',
+              fontSize: '0.6875rem',
+              fontWeight: 600,
+              color: 'var(--color-text-subtle)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              background: 'var(--color-bg-secondary)',
+              border: '1px dashed var(--color-border)',
+              borderRadius: 'var(--radius-md)',
+            }}
+          >
+            Additional sections (preview — edit via API / MCP for now)
+          </div>
+          {otherSections.map(s => (
+            <SectionRenderer key={s.id} section={s} numberOfWeeks={schedule.numberOfWeeks} />
+          ))}
+        </div>
+      )}
 
       {/* Analytics — appears once the schedule has been shared at least once. */}
       {schedule.publicShareToken && (
