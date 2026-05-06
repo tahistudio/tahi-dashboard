@@ -7,7 +7,13 @@ import { eq, sql } from 'drizzle-orm'
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
 
-const SECTION_TYPES = ['cover', 'overview', 'terms', 'about', 'testimonial', 'scope_shared', 'text'] as const
+const SECTION_TYPES = [
+  // Legacy / generic
+  'cover', 'overview', 'terms', 'about', 'testimonial', 'scope_shared', 'text',
+  // Phase 4 sales-led types (data shape lives in app/p/proposal/[token]/section-blocks.tsx)
+  'value_anchor', 'process', 'differentiators', 'case_study',
+  'testimonial_stack', 'faq', 'guarantee', 'retainer_offer',
+] as const
 
 // POST /api/admin/proposals/[id]/sections
 export async function POST(req: NextRequest, ctx: RouteContext) {
