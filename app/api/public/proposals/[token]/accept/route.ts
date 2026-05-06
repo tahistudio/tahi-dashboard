@@ -37,7 +37,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   }
 
   let body: {
-    status?: 'accepted' | 'declined'
+    status?: 'accepted' | 'declined' | 'question'
     variantId?: string
     acceptorName?: string
     acceptorEmail?: string
@@ -46,11 +46,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   }
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Invalid body' }, { status: 400 }) }
 
-  if (body.status !== 'accepted' && body.status !== 'declined') {
-    return NextResponse.json({ error: 'status must be accepted or declined' }, { status: 400 })
+  const VALID_STATUSES = ['accepted', 'declined', 'question'] as const
+  type Status = typeof VALID_STATUSES[number]
+  if (!VALID_STATUSES.includes(body.status as Status)) {
+    return NextResponse.json({ error: `status must be one of ${VALID_STATUSES.join(', ')}` }, { status: 400 })
   }
-  if (body.status === 'accepted' && !body.variantId) {
+  const status: Status = body.status as Status
+  if (status === 'accepted' && !body.variantId) {
     return NextResponse.json({ error: 'variantId is required when accepting' }, { status: 400 })
+  }
+  if (status === 'question' && !body.comment?.trim()) {
+    return NextResponse.json({ error: 'comment is required when asking a question' }, { status: 400 })
   }
 
   const database = await db() as unknown as D1
@@ -69,7 +75,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   }
 
   // If acceptance, verify variantId belongs to this proposal.
-  if (body.status === 'accepted' && body.variantId) {
+  if (status === 'accepted' && body.variantId) {
     const [variant] = await database
       .select({ id: schema.proposalVariants.id })
       .from(schema.proposalVariants)
@@ -93,7 +99,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     id: acceptanceId,
     proposalId: proposal.id,
     variantId: body.variantId ?? null,
-    status: body.status,
+    status: status,
     acceptorName: body.acceptorName?.trim() || null,
     acceptorEmail: body.acceptorEmail?.trim() || null,
     acceptorRole: body.acceptorRole?.trim() || null,
@@ -106,13 +112,20 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     updatedAt: now,
   })
 
-  // Update proposal status
-  await database.update(schema.proposals).set({
-    status: body.status,
-    decidedAt: now,
-    decidedVariantId: body.status === 'accepted' ? body.variantId : null,
-    updatedAt: now,
-  }).where(eq(schema.proposals.id, proposal.id))
+  // Update proposal status — questions don't lock the proposal; the prospect
+  // can still come back and accept or decline after the question is answered.
+  if (status === 'accepted' || status === 'declined') {
+    await database.update(schema.proposals).set({
+      status: status,
+      decidedAt: now,
+      decidedVariantId: status === 'accepted' ? (body.variantId ?? null) : null,
+      updatedAt: now,
+    }).where(eq(schema.proposals.id, proposal.id))
+  } else {
+    // Touch updatedAt so the admin sees activity on the proposal.
+    await database.update(schema.proposals).set({ updatedAt: now })
+      .where(eq(schema.proposals.id, proposal.id))
+  }
 
-  return NextResponse.json({ id: acceptanceId, status: body.status })
+  return NextResponse.json({ id: acceptanceId, status: status })
 }

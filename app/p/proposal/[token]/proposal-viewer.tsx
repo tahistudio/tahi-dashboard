@@ -87,11 +87,14 @@ export function ProposalViewer({ token }: { token: string }) {
   const [analyticsResourceId, setAnalyticsResourceId] = useState<string | null>(null)
   const [state, setState] = useState<'loading' | 'ok' | 'not_found'>('loading')
   const [activeVariantId, setActiveVariantId] = useState<string | null>(null)
-  // Accept modal state.
-  const [decisionMode, setDecisionMode] = useState<null | { kind: 'accepted' | 'declined'; variantId: string | null }>(null)
+  // Accept / decline / question modal state.
+  const [decisionMode, setDecisionMode] = useState<null | { kind: 'accepted' | 'declined' | 'question'; variantId: string | null }>(null)
   const [decisionForm, setDecisionForm] = useState({ name: '', email: '', role: '', comment: '' })
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState<null | 'accepted' | 'declined'>(null)
+  // Question state — non-locking. After submit we show a thank-you banner but
+  // keep the accept / decline buttons live so the prospect can still proceed.
+  const [questionAcked, setQuestionAcked] = useState(false)
 
   const reload = useCallback(async () => {
     try {
@@ -151,8 +154,15 @@ export function ProposalViewer({ token }: { token: string }) {
         alert(errData.error ?? 'Failed to submit. Please try again.')
         return
       }
-      setSubmitted(decisionMode.kind)
+      if (decisionMode.kind === 'question') {
+        // Non-locking — show a thank-you banner but keep buttons live so the
+        // prospect can still accept or decline once Liam replies.
+        setQuestionAcked(true)
+      } else {
+        setSubmitted(decisionMode.kind)
+      }
       setDecisionMode(null)
+      setDecisionForm({ name: '', email: '', role: '', comment: '' })
       // Refresh to pick up any server-side changes.
       void reload()
     } catch {
@@ -339,20 +349,45 @@ export function ProposalViewer({ token }: { token: string }) {
 
               {/* CTA */}
               {!submitted && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.625rem', marginTop: '0.5rem' }}>
-                  <button
-                    onClick={() => setDecisionMode({ kind: 'accepted', variantId: activeVariant.id })}
-                    style={primaryBtn}
-                  >
-                    {activeVariant.ctaLabel?.trim() || `Accept ${activeVariant.name}`}
-                  </button>
-                  <button
-                    onClick={() => setDecisionMode({ kind: 'declined', variantId: null })}
-                    style={secondaryBtn}
-                  >
-                    Decline
-                  </button>
-                </div>
+                <>
+                  {questionAcked && (
+                    <div style={{
+                      padding: '0.75rem 1rem',
+                      background: '#eff6ff',
+                      color: '#1e40af',
+                      border: '1px solid #bfdbfe',
+                      borderRadius: '0.625rem',
+                      fontSize: '0.875rem',
+                      fontWeight: 500,
+                      lineHeight: 1.5,
+                    }}>
+                      <strong>Question received.</strong> Liam will reply within one business day. You can still accept or decline below.
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.625rem', marginTop: '0.5rem' }}>
+                    <button
+                      onClick={() => setDecisionMode({ kind: 'accepted', variantId: activeVariant.id })}
+                      style={primaryBtn}
+                    >
+                      {activeVariant.ctaLabel?.trim() || `Accept ${activeVariant.name}`}
+                    </button>
+                    <button
+                      onClick={() => setDecisionMode({ kind: 'question', variantId: activeVariant.id })}
+                      style={tertiaryBtn}
+                    >
+                      Ask a question or request a tweak
+                    </button>
+                    <button
+                      onClick={() => setDecisionMode({ kind: 'declined', variantId: null })}
+                      style={secondaryBtn}
+                    >
+                      Decline
+                    </button>
+                  </div>
+                  <p style={{ fontSize: '0.75rem', color: '#8a9987', marginTop: '0.5rem', marginBottom: 0 }}>
+                    Not sure? Ask anything — we&apos;d rather refine than push.
+                  </p>
+                </>
               )}
             </div>
           )}
@@ -380,12 +415,16 @@ export function ProposalViewer({ token }: { token: string }) {
             <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1f2c1a', margin: 0, marginBottom: '0.375rem' }}>
               {decisionMode.kind === 'accepted'
                 ? `Accept ${variants.find(v => v.id === decisionMode.variantId)?.name ?? 'package'}`
-                : 'Decline this proposal'}
+                : decisionMode.kind === 'declined'
+                  ? 'Decline this proposal'
+                  : 'Ask a question or request a tweak'}
             </h3>
             <p style={{ fontSize: '0.8125rem', color: '#5a6657', margin: 0, marginBottom: '1.25rem' }}>
               {decisionMode.kind === 'accepted'
                 ? 'Confirm your name + email so we have a record. We\'ll be in touch within one business day to start the engagement.'
-                : 'Help us improve future proposals by sharing what didn\'t fit. Optional but appreciated.'}
+                : decisionMode.kind === 'declined'
+                  ? 'Help us improve future proposals by sharing what didn\'t fit. Optional but appreciated.'
+                  : 'Tell us what you\'d like to know or what you\'d like to change. Liam replies within one business day. The proposal stays open — no commitment.'}
             </p>
 
             <div style={{ display: 'grid', gap: '0.75rem' }}>
@@ -416,11 +455,20 @@ export function ProposalViewer({ token }: { token: string }) {
                   placeholder="Head of Marketing"
                 />
               </Field>
-              <Field label={decisionMode.kind === 'accepted' ? 'Anything to flag? (optional)' : 'Reason for declining (optional)'}>
+              <Field label={
+                decisionMode.kind === 'accepted'
+                  ? 'Anything to flag? (optional)'
+                  : decisionMode.kind === 'declined'
+                    ? 'Reason for declining (optional)'
+                    : 'Your question or tweak request'
+              }>
                 <textarea
-                  rows={3}
+                  rows={decisionMode.kind === 'question' ? 5 : 3}
                   value={decisionForm.comment}
                   onChange={(e) => setDecisionForm(f => ({ ...f, comment: e.target.value }))}
+                  placeholder={decisionMode.kind === 'question'
+                    ? "e.g. Can the Premium variant include CRO from month one? / What if we ship in two phases instead of three?"
+                    : ''}
                   style={{ ...inputStyle, fontFamily: 'inherit', resize: 'vertical' }}
                 />
               </Field>
@@ -432,10 +480,20 @@ export function ProposalViewer({ token }: { token: string }) {
               </button>
               <button
                 onClick={() => { void submitDecision() }}
-                disabled={submitting}
-                style={{ ...primaryBtn, opacity: submitting ? 0.6 : 1, cursor: submitting ? 'wait' : 'pointer' }}
+                disabled={submitting || (decisionMode.kind === 'question' && !decisionForm.comment.trim())}
+                style={{
+                  ...primaryBtn,
+                  opacity: (submitting || (decisionMode.kind === 'question' && !decisionForm.comment.trim())) ? 0.5 : 1,
+                  cursor: submitting ? 'wait' : 'pointer',
+                }}
               >
-                {submitting ? 'Submitting…' : (decisionMode.kind === 'accepted' ? 'Confirm acceptance' : 'Submit decline')}
+                {submitting
+                  ? 'Submitting…'
+                  : decisionMode.kind === 'accepted'
+                    ? 'Confirm acceptance'
+                    : decisionMode.kind === 'declined'
+                      ? 'Submit decline'
+                      : 'Send to Liam'}
               </button>
             </div>
           </div>
@@ -871,6 +929,17 @@ const secondaryBtn: React.CSSProperties = {
   background: '#ffffff',
   color: '#1f2c1a',
   border: '1px solid #d4e0d0',
+  borderRadius: '0.5rem',
+  cursor: 'pointer',
+}
+
+const tertiaryBtn: React.CSSProperties = {
+  padding: '0.75rem 1.25rem',
+  fontSize: '0.9375rem',
+  fontWeight: 600,
+  background: '#f0f7ee',
+  color: '#425F39',
+  border: '1px solid #dcefd8',
   borderRadius: '0.5rem',
   cursor: 'pointer',
 }

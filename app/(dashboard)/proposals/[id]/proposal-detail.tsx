@@ -415,24 +415,42 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
         )}
       </div>
 
-      {/* Acceptances log */}
+      {/* Decisions + questions log */}
       {acceptances.length > 0 && (
         <div>
           <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)', margin: '0 0 0.75rem 0' }}>
-            Decisions
+            Decisions &amp; questions
           </h2>
           <div className="flex flex-col" style={{ gap: '0.5rem' }}>
             {acceptances.map(a => {
               const variantName = a.variantId ? variants.find(v => v.id === a.variantId)?.name : null
+              const palette =
+                a.status === 'accepted' ? { color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0', label: 'Accepted' } :
+                a.status === 'declined' ? { color: '#dc2626', bg: '#fef2f2', border: '#fecaca', label: 'Declined' } :
+                a.status === 'question' ? { color: '#1e40af', bg: '#eff6ff', border: '#bfdbfe', label: 'Question / tweak request' } :
+                { color: 'var(--color-text-muted)', bg: 'var(--color-bg-tertiary)', border: 'var(--color-border-subtle)', label: a.status }
               return (
-                <div key={a.id} style={{ padding: '0.75rem 1rem', border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-md)', fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-                  <strong style={{ color: a.status === 'accepted' ? '#15803d' : '#dc2626' }}>{a.status}</strong>
-                  {variantName ? ` · ${variantName}` : ''}
-                  {a.acceptorName ? ` · by ${a.acceptorName}` : ''}
-                  {a.acceptorEmail ? ` (${a.acceptorEmail})` : ''}
-                  {' · '}
-                  <span style={{ color: 'var(--color-text-subtle)' }}>{new Date(a.acceptedAt).toLocaleString()}</span>
-                  {a.comment && <p style={{ margin: '0.25rem 0 0 0', color: 'var(--color-text)' }}>“{a.comment}”</p>}
+                <div key={a.id} style={{ padding: '0.75rem 1rem', border: `1px solid ${palette.border}`, background: palette.bg, borderRadius: 'var(--radius-md)', fontSize: '0.8125rem', color: 'var(--color-text)' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '0.5rem' }}>
+                    <strong style={{ color: palette.color }}>{palette.label}</strong>
+                    {variantName && <span style={{ color: 'var(--color-text-muted)' }}>· {variantName}</span>}
+                    {a.acceptorName && <span style={{ color: 'var(--color-text-muted)' }}>· {a.acceptorName}</span>}
+                    {a.acceptorEmail && <span style={{ color: 'var(--color-text-subtle)' }}>· {a.acceptorEmail}</span>}
+                    <span style={{ color: 'var(--color-text-subtle)', marginLeft: 'auto' }}>{new Date(a.acceptedAt).toLocaleString()}</span>
+                  </div>
+                  {a.comment && (
+                    <p style={{ margin: '0.5rem 0 0 0', color: 'var(--color-text)', whiteSpace: 'pre-wrap' }}>
+                      {a.status === 'question' ? a.comment : `“${a.comment}”`}
+                    </p>
+                  )}
+                  {a.status === 'question' && a.acceptorEmail && (
+                    <a
+                      href={`mailto:${a.acceptorEmail}?subject=${encodeURIComponent('Re: ' + (proposal?.title ?? 'your proposal'))}`}
+                      style={{ display: 'inline-block', marginTop: '0.5rem', fontSize: '0.75rem', fontWeight: 600, color: '#1e40af' }}
+                    >
+                      Reply via email →
+                    </a>
+                  )}
                 </div>
               )
             })}
