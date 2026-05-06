@@ -691,12 +691,6 @@ export function DealDetail({ dealId }: { dealId: string }) {
               engagementEndDate={deal.engagementEndDate}
               expectedCloseDate={deal.expectedCloseDate}
               closedAt={deal.closedAt}
-              currency={deal.currency}
-              onUpdated={fetchDeal}
-            />
-            <EditableValue
-              dealId={dealId}
-              value={deal.value}
               valueMin={deal.valueMin}
               valueMax={deal.valueMax}
               currency={deal.currency}
@@ -1440,13 +1434,20 @@ function ValueTrendline({
 }
 
 /**
- * Read-only breakdown of the split-value model (migration 0023). Shown
- * above the legacy EditableValue when either upfront or monthly is set.
+ * Unified value editor for a deal. Display state shows the split-value
+ * breakdown (upfront / monthly / recurring start / 12-mo total). Click
+ * "Edit value" (or any row) → single edit form covering all fields:
+ *   - Upfront (single number or min/max range)
+ *   - Currency
+ *   - Monthly retainer
+ *   - Recurring start date (when monthly > 0)
+ *   - Reason chips + freeform note (logged on the activity timeline)
  *
- * For commit 3 this is a display-only summary plus inline edit for the
- * monthly portion + recurring start. The upfront portion (with optional
- * range) keeps using the existing EditableValue below us so users can
- * still edit it the way they always have.
+ * One PATCH on save → one value_change activity entry with full before/
+ * after metadata, regardless of which fields were touched.
+ *
+ * Replaces both the read-only ValueBreakdown card and the inline-editable
+ * EditableValue that previously sat side-by-side in the Value sidebar.
  */
 function ValueBreakdown({
   dealId,
@@ -1456,6 +1457,8 @@ function ValueBreakdown({
   engagementEndDate,
   expectedCloseDate,
   closedAt,
+  valueMin,
+  valueMax,
   currency,
   onUpdated,
 }: {
@@ -1466,38 +1469,70 @@ function ValueBreakdown({
   engagementEndDate: string | null
   expectedCloseDate: string | null
   closedAt: string | null
+  valueMin: number | null
+  valueMax: number | null
   currency: string
   onUpdated: () => void
 }) {
-  const [editingMonthly, setEditingMonthly] = useState(false)
+  const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()
+  const initialHasRange = valueMin != null && valueMax != null && valueMin !== valueMax
+
+  const [editing, setEditing] = useState(false)
+  const [isRange, setIsRange] = useState(initialHasRange)
+  const [draftUpfront, setDraftUpfront] = useState(upfrontValue != null ? String(upfrontValue) : '')
+  const [draftMin, setDraftMin] = useState(valueMin != null ? String(valueMin) : '')
+  const [draftMax, setDraftMax] = useState(valueMax != null ? String(valueMax) : '')
   const [draftMonthly, setDraftMonthly] = useState(monthlyValue != null ? String(monthlyValue) : '')
   const [draftRecurringStart, setDraftRecurringStart] = useState(recurringStartDate ?? '')
+  const [editCurrency, setEditCurrency] = useState(currency || displayCurrency)
+  const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
 
-  // Hide the breakdown entirely for legacy deals that have neither field set.
-  const hasSplit = upfrontValue != null || monthlyValue != null
-  if (!hasSplit) return null
-
-  const monthly = monthlyValue ?? 0
   const upfront = upfrontValue ?? 0
+  const monthly = monthlyValue ?? 0
   const total12 = upfront + monthly * 12
-
   // Resolve the recurring start the same way the math lib does, for display.
   const resolvedStart =
     recurringStartDate ?? engagementEndDate ?? closedAt ?? expectedCloseDate ?? null
 
-  async function saveMonthly() {
+  function openEditor() {
+    setIsRange(initialHasRange)
+    setDraftUpfront(upfrontValue != null ? String(upfrontValue) : '')
+    setDraftMin(valueMin != null ? String(valueMin) : '')
+    setDraftMax(valueMax != null ? String(valueMax) : '')
+    setDraftMonthly(monthlyValue != null ? String(monthlyValue) : '')
+    setDraftRecurringStart(recurringStartDate ?? '')
+    setEditCurrency(currency || displayCurrency)
+    setNote('')
+    setEditing(true)
+  }
+
+  async function handleSave() {
     setSaving(true)
     try {
+      const payload: Record<string, unknown> = {
+        valueChangeNote: note.trim() || null,
+        currency: editCurrency,
+        monthlyValue: parseFloat(draftMonthly) || 0,
+        recurringStartDate: draftRecurringStart || null,
+      }
+      if (isRange) {
+        const minNum = parseFloat(draftMin) || 0
+        const maxNum = parseFloat(draftMax) || 0
+        payload.valueMin = Math.min(minNum, maxNum)
+        payload.valueMax = Math.max(minNum, maxNum)
+        // Server uses the midpoint as upfrontValue when a range is set.
+      } else {
+        payload.upfrontValue = parseFloat(draftUpfront) || 0
+        payload.valueMin = null
+        payload.valueMax = null
+      }
       await fetch(apiPath(`/api/admin/deals/${dealId}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          monthlyValue: parseFloat(draftMonthly) || 0,
-          recurringStartDate: draftRecurringStart || null,
-        }),
+        body: JSON.stringify(payload),
       })
-      setEditingMonthly(false)
+      setEditing(false)
       onUpdated()
     } catch {
       // silent
@@ -1506,158 +1541,348 @@ function ValueBreakdown({
     }
   }
 
-  return (
-    <div
-      className="flex flex-col"
-      style={{
-        gap: '0.375rem',
-        padding: '0.625rem 0.75rem',
-        marginBottom: '0.625rem',
-        background: 'var(--color-bg-secondary)',
-        borderRadius: 'var(--radius-md)',
-        border: '1px solid var(--color-border-subtle)',
-      }}
-    >
-      {/* Upfront row */}
-      <div className="flex items-center justify-between" style={{ fontSize: '0.8125rem' }}>
-        <span style={{ color: 'var(--color-text-subtle)' }}>Upfront</span>
-        <span style={{ color: 'var(--color-text)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-          {upfront > 0 ? formatCurrency(upfront, currency) : '—'}
-        </span>
-      </div>
+  // ── Display state ─────────────────────────────────────────────────────
+  if (!editing) {
+    const upfrontLabel = initialHasRange
+      ? `${formatCurrency(valueMin ?? 0, currency)}–${formatCurrency(valueMax ?? 0, currency)}`
+      : upfront > 0
+        ? formatCurrency(upfront, currency)
+        : '—'
+    const altLabel = currency && currency !== displayCurrency && total12 > 0
+      ? formatNativeWithDisplay(total12, currency).replace(formatCurrency(total12, currency), '').trim().replace(/^≈\s*/, '')
+      : null
 
-      {/* Monthly row — click to edit */}
-      <div className="flex items-center justify-between" style={{ fontSize: '0.8125rem' }}>
-        <span style={{ color: 'var(--color-text-subtle)' }}>Monthly</span>
-        {editingMonthly ? (
-          <input
-            type="number"
-            value={draftMonthly}
-            onChange={(e) => setDraftMonthly(e.target.value)}
-            placeholder="0"
-            autoFocus
-            style={{
-              width: '6rem',
-              padding: '0.125rem 0.375rem',
-              fontSize: '0.8125rem',
-              textAlign: 'right',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-sm)',
-              background: 'var(--color-bg)',
-              color: 'var(--color-text)',
-            }}
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              setDraftMonthly(monthlyValue != null ? String(monthlyValue) : '')
-              setDraftRecurringStart(recurringStartDate ?? '')
-              setEditingMonthly(true)
-            }}
-            title="Click to edit monthly retainer"
-            style={{
-              padding: 0,
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: '0.8125rem',
-              fontWeight: 600,
-              color: 'var(--color-text)',
-              fontVariantNumeric: 'tabular-nums',
-            }}
-          >
-            {monthly > 0 ? `${formatCurrency(monthly, currency)}/mo` : 'Add'}
-          </button>
-        )}
-      </div>
+    return (
+      <div
+        className="flex flex-col"
+        style={{
+          gap: '0.375rem',
+          padding: '0.625rem 0.75rem',
+          marginBottom: '0.625rem',
+          background: 'var(--color-bg-secondary)',
+          borderRadius: 'var(--radius-md)',
+          border: '1px solid var(--color-border-subtle)',
+        }}
+      >
+        {/* Upfront row */}
+        <div className="flex items-center justify-between" style={{ fontSize: '0.8125rem' }}>
+          <span style={{ color: 'var(--color-text-subtle)' }}>Upfront</span>
+          <span style={{ color: 'var(--color-text)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+            {upfrontLabel}
+            {initialHasRange && upfront > 0 && (
+              <span style={{ color: 'var(--color-text-subtle)', fontWeight: 400, marginLeft: '0.375rem' }}>
+                · midpoint {formatCurrency(upfront, currency)}
+              </span>
+            )}
+          </span>
+        </div>
 
-      {/* Recurring start row — only when monthly > 0 or editing */}
-      {(monthly > 0 || editingMonthly) && (
-        <div className="flex items-center justify-between" style={{ fontSize: '0.75rem' }}>
-          <span style={{ color: 'var(--color-text-subtle)' }}>Starts</span>
-          {editingMonthly ? (
-            <input
-              type="date"
-              value={draftRecurringStart}
-              onChange={(e) => setDraftRecurringStart(e.target.value)}
-              style={{
-                padding: '0.125rem 0.375rem',
-                fontSize: '0.75rem',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--color-bg)',
-                color: 'var(--color-text)',
-              }}
-            />
-          ) : (
+        {/* Monthly row */}
+        <div className="flex items-center justify-between" style={{ fontSize: '0.8125rem' }}>
+          <span style={{ color: 'var(--color-text-subtle)' }}>Monthly</span>
+          <span style={{ color: 'var(--color-text)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+            {monthly > 0 ? `${formatCurrency(monthly, currency)}/mo` : '—'}
+          </span>
+        </div>
+
+        {/* Recurring start (when monthly > 0) */}
+        {monthly > 0 && (
+          <div className="flex items-center justify-between" style={{ fontSize: '0.75rem' }}>
+            <span style={{ color: 'var(--color-text-subtle)' }}>Starts</span>
             <span style={{ color: 'var(--color-text-muted)' }}>
               {resolvedStart
                 ? new Date(resolvedStart).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
                 : 'on close'}
               {!recurringStartDate && resolvedStart ? (
-                <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.6875rem' }}>
-                  {' '}(inferred)
-                </span>
+                <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.6875rem' }}>{' '}(inferred)</span>
               ) : null}
             </span>
-          )}
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* Total 12-mo */}
-      <div
-        className="flex items-center justify-between"
-        style={{
-          fontSize: '0.75rem',
-          paddingTop: '0.375rem',
-          borderTop: '1px dashed var(--color-border-subtle)',
-        }}
-      >
-        <span style={{ color: 'var(--color-text-subtle)' }}>12-mo total</span>
-        <span style={{ color: 'var(--color-text-muted)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
-          {formatCurrency(total12, currency)}
-        </span>
+        {/* 12-mo total + alt currency */}
+        <div
+          className="flex items-center justify-between"
+          style={{ fontSize: '0.75rem', paddingTop: '0.375rem', borderTop: '1px dashed var(--color-border-subtle)' }}
+        >
+          <span style={{ color: 'var(--color-text-subtle)' }}>12-mo total</span>
+          <span style={{ color: 'var(--color-text-muted)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
+            {formatCurrency(total12, currency)}
+            {altLabel && (
+              <span style={{ color: 'var(--color-text-subtle)', marginLeft: '0.375rem' }}>{`≈ ${altLabel}`}</span>
+            )}
+          </span>
+        </div>
+
+        {/* Edit affordance */}
+        <button
+          type="button"
+          onClick={openEditor}
+          className="transition-colors"
+          style={{
+            marginTop: '0.5rem',
+            padding: '0.375rem 0.625rem',
+            fontSize: '0.75rem',
+            fontWeight: 500,
+            background: 'var(--color-bg)',
+            color: 'var(--color-brand)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-sm)',
+            cursor: 'pointer',
+            alignSelf: 'flex-start',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-brand-50)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-bg)' }}
+        >
+          Edit value
+        </button>
+      </div>
+    )
+  }
+
+  // ── Edit state ────────────────────────────────────────────────────────
+  return (
+    <div
+      className="flex flex-col"
+      style={{
+        gap: '0.625rem',
+        padding: '0.75rem',
+        marginBottom: '0.625rem',
+        background: 'var(--color-bg-secondary)',
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--color-border)',
+      }}
+    >
+      {/* Header row: range toggle + currency selector */}
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => setIsRange(!isRange)}
+          style={{
+            fontSize: '0.7rem',
+            color: 'var(--color-brand)',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+            fontWeight: 500,
+          }}
+        >
+          {isRange ? 'Use single upfront value' : 'Set upfront as range'}
+        </button>
+        <select
+          value={editCurrency}
+          onChange={(e) => setEditCurrency(e.target.value)}
+          aria-label="Deal currency"
+          title="Currency this deal is billed in"
+          style={{
+            padding: '0.125rem 0.375rem',
+            fontSize: '0.7rem',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg)',
+            color: 'var(--color-text-muted)',
+            borderRadius: 'var(--radius-sm)',
+            cursor: 'pointer',
+            height: '1.5rem',
+          }}
+        >
+          {DISPLAY_CURRENCIES.map(c => (
+            <option key={c.code} value={c.code}>{c.code}</option>
+          ))}
+        </select>
       </div>
 
-      {/* Save / Cancel for monthly edit */}
-      {editingMonthly && (
-        <div className="flex justify-end" style={{ gap: '0.375rem', marginTop: '0.25rem' }}>
-          <button
-            type="button"
-            onClick={() => setEditingMonthly(false)}
-            disabled={saving}
+      {/* Upfront */}
+      <div>
+        <label className="block" style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
+          Upfront (project)
+        </label>
+        {isRange ? (
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              type="number"
+              value={draftMin}
+              onChange={(e) => setDraftMin(e.target.value)}
+              placeholder="Min"
+              autoFocus
+              className="rounded-lg"
+              style={{
+                padding: '0.375rem 0.5rem',
+                fontSize: '0.875rem',
+                border: '1px solid var(--color-brand)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                minWidth: 0,
+              }}
+            />
+            <input
+              type="number"
+              value={draftMax}
+              onChange={(e) => setDraftMax(e.target.value)}
+              placeholder="Max"
+              className="rounded-lg"
+              style={{
+                padding: '0.375rem 0.5rem',
+                fontSize: '0.875rem',
+                border: '1px solid var(--color-brand)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                minWidth: 0,
+              }}
+            />
+          </div>
+        ) : (
+          <input
+            type="number"
+            value={draftUpfront}
+            onChange={(e) => setDraftUpfront(e.target.value)}
+            placeholder="0"
+            autoFocus
+            className="rounded-lg w-full"
             style={{
-              fontSize: '0.6875rem',
-              padding: '0.25rem 0.625rem',
+              padding: '0.375rem 0.5rem',
+              fontSize: '0.875rem',
+              border: '1px solid var(--color-brand)',
+              background: 'var(--color-bg)',
+              color: 'var(--color-text)',
+            }}
+          />
+        )}
+      </div>
+
+      {/* Monthly retainer */}
+      <div>
+        <label className="block" style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
+          Monthly retainer
+        </label>
+        <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
+          <input
+            type="number"
+            value={draftMonthly}
+            onChange={(e) => setDraftMonthly(e.target.value)}
+            placeholder="0"
+            className="rounded-lg w-full"
+            style={{
+              padding: '0.375rem 0.5rem',
+              fontSize: '0.875rem',
               border: '1px solid var(--color-border)',
               background: 'var(--color-bg)',
-              color: 'var(--color-text-muted)',
-              borderRadius: 'var(--radius-sm)',
-              cursor: 'pointer',
+              color: 'var(--color-text)',
+              minWidth: 0,
             }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => { void saveMonthly() }}
-            disabled={saving}
+          />
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
+            {editCurrency}/mo
+          </span>
+        </div>
+      </div>
+
+      {/* Recurring start (only when monthly > 0) */}
+      {parseFloat(draftMonthly) > 0 && (
+        <div>
+          <label className="block" style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
+            Recurring starts
+            <span style={{ color: 'var(--color-text-subtle)', marginLeft: '0.25rem' }}>
+              (optional; defaults to project end / deal close)
+            </span>
+          </label>
+          <input
+            type="date"
+            value={draftRecurringStart}
+            onChange={(e) => setDraftRecurringStart(e.target.value)}
+            className="rounded-lg w-full"
             style={{
-              fontSize: '0.6875rem',
-              fontWeight: 600,
-              padding: '0.25rem 0.625rem',
-              border: 'none',
-              background: 'var(--color-brand)',
-              color: 'white',
-              borderRadius: 'var(--radius-sm)',
-              cursor: saving ? 'not-allowed' : 'pointer',
+              padding: '0.375rem 0.5rem',
+              fontSize: '0.8125rem',
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-bg)',
+              color: 'var(--color-text)',
             }}
-          >
-            {saving ? 'Saving...' : 'Save'}
-          </button>
+          />
         </div>
       )}
+
+      {/* Reason chips */}
+      <div>
+        <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
+          Why did it change?
+        </div>
+        <div className="flex flex-wrap" style={{ gap: '0.25rem' }}>
+          {VALUE_CHANGE_REASONS.map(reason => {
+            const selected = note === reason
+            return (
+              <button
+                key={reason}
+                type="button"
+                onClick={() => setNote(selected ? '' : reason)}
+                style={{
+                  padding: '0.25rem 0.5rem',
+                  fontSize: '0.7rem',
+                  border: `1px solid ${selected ? 'var(--color-brand)' : 'var(--color-border)'}`,
+                  background: selected ? 'var(--color-brand-50)' : 'var(--color-bg)',
+                  color: selected ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                  borderRadius: 'var(--radius-full)',
+                  cursor: 'pointer',
+                }}
+              >
+                {reason}
+              </button>
+            )
+          })}
+        </div>
+        <input
+          type="text"
+          value={VALUE_CHANGE_REASONS.includes(note as typeof VALUE_CHANGE_REASONS[number]) ? '' : note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Or a short custom note"
+          className="rounded-lg w-full"
+          style={{
+            marginTop: '0.375rem',
+            padding: '0.375rem 0.5rem',
+            fontSize: '0.8rem',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg)',
+            color: 'var(--color-text)',
+          }}
+        />
+      </div>
+
+      {/* Actions */}
+      <div className="flex justify-end" style={{ gap: '0.375rem' }}>
+        <button
+          type="button"
+          onClick={() => setEditing(false)}
+          disabled={saving}
+          className="rounded-lg"
+          style={{
+            padding: '0.375rem 0.625rem',
+            fontSize: '0.75rem',
+            background: 'var(--color-bg)',
+            color: 'var(--color-text-muted)',
+            border: '1px solid var(--color-border)',
+            cursor: 'pointer',
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => { void handleSave() }}
+          disabled={saving}
+          className="rounded-lg transition-colors"
+          style={{
+            padding: '0.375rem 0.625rem',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            background: 'var(--color-brand)',
+            color: 'white',
+            border: 'none',
+            cursor: saving ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
     </div>
   )
 }
@@ -1673,284 +1898,9 @@ const VALUE_CHANGE_REASONS = [
   'Client counter-offer',
 ] as const
 
-function EditableValue({ dealId, value, valueMin, valueMax, currency, onUpdated }: {
-  dealId: string
-  value: number
-  valueMin: number | null
-  valueMax: number | null
-  currency: string
-  onUpdated: () => void
-}) {
-  const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()
-  const [editing, setEditing] = useState(false)
-  const initialHasRange = valueMin != null && valueMax != null && valueMin !== valueMax
-  const [isRange, setIsRange] = useState(initialHasRange)
-  const [editVal, setEditVal] = useState(String(value))
-  const [editMin, setEditMin] = useState(valueMin != null ? String(valueMin) : '')
-  const [editMax, setEditMax] = useState(valueMax != null ? String(valueMax) : '')
-  // Currency for THIS edit. On first open: nav preference if deal has zero/no
-  // currency, otherwise the deal's existing currency so we don't silently
-  // change what the client sees. Override is one dropdown click away.
-  const [editCurrency, setEditCurrency] = useState(currency || displayCurrency)
-  const [note, setNote] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  const openEditor = () => {
-    setEditVal(String(value))
-    setEditMin(valueMin != null ? String(valueMin) : '')
-    setEditMax(valueMax != null ? String(valueMax) : '')
-    setIsRange(initialHasRange)
-    setEditCurrency(currency || displayCurrency)
-    setNote('')
-    setEditing(true)
-  }
-
-  const handleSave = async () => {
-    setSaving(true)
-    try {
-      const payload: Record<string, unknown> = {
-        valueChangeNote: note.trim() || null,
-        currency: editCurrency,
-      }
-      if (isRange) {
-        const minNum = parseFloat(editMin) || 0
-        const maxNum = parseFloat(editMax) || 0
-        if (minNum === 0 && maxNum === 0) {
-          setSaving(false)
-          return
-        }
-        payload.valueMin = Math.min(minNum, maxNum)
-        payload.valueMax = Math.max(minNum, maxNum)
-      } else {
-        const num = parseFloat(editVal)
-        if (isNaN(num)) {
-          setSaving(false)
-          return
-        }
-        payload.value = num
-        payload.valueMin = null
-        payload.valueMax = null
-      }
-      await fetch(apiPath(`/api/admin/deals/${dealId}`), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      onUpdated()
-      setEditing(false)
-    } catch {
-      // silent
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  if (!editing) {
-    const displayLabel = initialHasRange
-      ? `${formatCurrency(valueMin!, currency)}\u2013${formatCurrency(valueMax!, currency)}`
-      : formatCurrency(value, currency)
-    const midpointLabel = initialHasRange ? `midpoint ${formatCurrency(value, currency)}` : null
-    // Show the display-currency equivalent as a secondary line when the deal
-    // isn't already in the nav-preferred currency.
-    const altLabel = currency && currency !== displayCurrency && value > 0
-      ? formatNativeWithDisplay(value, currency).replace(formatCurrency(value, currency), '').trim().replace(/^\u2248\s*/, '')
-      : null
-    return (
-      <div>
-        <button
-          onClick={openEditor}
-          title={currency && currency !== displayCurrency ? `Billed in ${currency}. Click to edit.` : 'Click to edit value'}
-          className="font-semibold transition-colors"
-          style={{ fontSize: '1.125rem', color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
-          onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark)' }}
-          onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-brand)' }}
-        >
-          {displayLabel}
-        </button>
-        {(midpointLabel || altLabel) && (
-          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>
-            {midpointLabel}
-            {midpointLabel && altLabel ? ' \u00b7 ' : ''}
-            {altLabel ? `\u2248 ${altLabel}` : ''}
-          </p>
-        )}
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex flex-col" style={{ gap: '0.5rem' }}>
-      {/* Range toggle */}
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => setIsRange(!isRange)}
-          style={{
-            fontSize: '0.75rem',
-            color: 'var(--color-brand)',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            padding: 0,
-          }}
-        >
-          {isRange ? 'Use single value' : 'Set as range'}
-        </button>
-        {/* Currency selector \u2014 defaults to nav preference, override for billing currency. */}
-        <select
-          value={editCurrency}
-          onChange={e => setEditCurrency(e.target.value)}
-          aria-label="Deal currency"
-          title="Currency this deal is billed in"
-          style={{
-            padding: '0.125rem 0.375rem',
-            fontSize: '0.7rem',
-            border: '1px solid var(--color-border)',
-            background: 'var(--color-bg-secondary)',
-            color: 'var(--color-text-muted)',
-            borderRadius: 'var(--radius-sm)',
-            cursor: 'pointer',
-            height: '1.5rem',
-          }}
-        >
-          {DISPLAY_CURRENCIES.map(c => (
-            <option key={c.code} value={c.code}>{c.code}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Value input(s) */}
-      {isRange ? (
-        <div className="grid grid-cols-2 gap-2">
-          <input
-            type="number"
-            value={editMin}
-            onChange={e => setEditMin(e.target.value)}
-            placeholder="Min"
-            className="rounded-lg"
-            style={{
-              padding: '0.375rem 0.5rem',
-              fontSize: '0.875rem',
-              border: '1px solid var(--color-brand)',
-              background: 'var(--color-bg)',
-              color: 'var(--color-text)',
-              minWidth: 0,
-            }}
-            autoFocus
-          />
-          <input
-            type="number"
-            value={editMax}
-            onChange={e => setEditMax(e.target.value)}
-            placeholder="Max"
-            className="rounded-lg"
-            style={{
-              padding: '0.375rem 0.5rem',
-              fontSize: '0.875rem',
-              border: '1px solid var(--color-brand)',
-              background: 'var(--color-bg)',
-              color: 'var(--color-text)',
-              minWidth: 0,
-            }}
-          />
-        </div>
-      ) : (
-        <input
-          type="number"
-          value={editVal}
-          onChange={e => setEditVal(e.target.value)}
-          className="rounded-lg"
-          style={{
-            padding: '0.375rem 0.5rem',
-            fontSize: '0.875rem',
-            border: '1px solid var(--color-brand)',
-            background: 'var(--color-bg)',
-            color: 'var(--color-text)',
-            minWidth: 0,
-          }}
-          autoFocus
-          onKeyDown={e => {
-            if (e.key === 'Enter') handleSave()
-            if (e.key === 'Escape') setEditing(false)
-          }}
-        />
-      )}
-
-      {/* Smart note chips */}
-      <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>Why did it change?</div>
-      <div className="flex flex-wrap" style={{ gap: '0.25rem' }}>
-        {VALUE_CHANGE_REASONS.map(reason => {
-          const selected = note === reason
-          return (
-            <button
-              key={reason}
-              type="button"
-              onClick={() => setNote(selected ? '' : reason)}
-              style={{
-                padding: '0.25rem 0.5rem',
-                fontSize: '0.7rem',
-                border: `1px solid ${selected ? 'var(--color-brand)' : 'var(--color-border)'}`,
-                background: selected ? 'var(--color-brand-50)' : 'var(--color-bg)',
-                color: selected ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-                borderRadius: 'var(--radius-full)',
-                cursor: 'pointer',
-              }}
-            >
-              {reason}
-            </button>
-          )
-        })}
-      </div>
-      <input
-        type="text"
-        value={VALUE_CHANGE_REASONS.includes(note as typeof VALUE_CHANGE_REASONS[number]) ? '' : note}
-        onChange={e => setNote(e.target.value)}
-        placeholder="Or a short custom note"
-        className="rounded-lg"
-        style={{
-          padding: '0.375rem 0.5rem',
-          fontSize: '0.8rem',
-          border: '1px solid var(--color-border)',
-          background: 'var(--color-bg)',
-          color: 'var(--color-text)',
-        }}
-      />
-
-      {/* Actions */}
-      <div className="flex gap-2" style={{ justifyContent: 'flex-end' }}>
-        <button
-          onClick={() => setEditing(false)}
-          className="rounded-lg"
-          style={{
-            padding: '0.375rem 0.625rem',
-            fontSize: '0.75rem',
-            background: 'var(--color-bg)',
-            color: 'var(--color-text-muted)',
-            border: '1px solid var(--color-border)',
-            cursor: 'pointer',
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="rounded-lg transition-colors"
-          style={{
-            padding: '0.375rem 0.625rem',
-            fontSize: '0.75rem',
-            background: 'var(--color-brand)',
-            color: 'white',
-            border: 'none',
-            cursor: saving ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {saving ? 'Saving\u2026' : 'Save'}
-        </button>
-      </div>
-    </div>
-  )
-}
+// (Legacy EditableValue component removed \u2014 its functionality has been
+// folded into ValueBreakdown above so users have a single editor for
+// upfront / monthly / recurring start / currency / reason.)
 
 // ---- Owner Selector -----------------------------------------------------
 
