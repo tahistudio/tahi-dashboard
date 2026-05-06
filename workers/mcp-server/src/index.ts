@@ -556,6 +556,101 @@ const TOOLS: ToolDef[] = [
     order: { type: 'array', description: 'Section IDs in new order', items: { type: 'string' } },
   }, ['scheduleId', 'order']),
 
+  // ── Proposals (Phase 2) ─────────────────────────────────────────────
+  tool('list_proposals', 'List proposals. Filter by orgId, dealId, or status (draft|shared|accepted|declined|withdrawn|expired).', {
+    orgId: prop('string', 'Filter by client org ID'),
+    dealId: prop('string', 'Filter by deal ID'),
+    status: prop('string', 'Filter by status'),
+  }),
+  tool('get_proposal', 'Get a single proposal with sections, variants, and acceptance audit trail.', {
+    proposalId: prop('string', 'Proposal ID'),
+  }, ['proposalId']),
+  tool('create_proposal', 'Create a new proposal. seedDefaults=true (default) creates a Standard variant + empty overview section so the editor has something to render.', {
+    title: prop('string', 'Proposal title'),
+    subtitle: prop('string', 'Subtitle / eyebrow'),
+    orgId: prop('string', 'Client org ID'),
+    dealId: prop('string', 'Deal ID'),
+    preparedFor: prop('string', 'Recipient name'),
+    preparedBy: prop('string', 'Author name'),
+    effectiveDate: prop('string', 'Effective date YYYY-MM-DD'),
+    expiresAt: prop('string', 'Expiry date YYYY-MM-DD'),
+    seedDefaults: prop('boolean', 'Seed a Standard variant + overview section (default true)'),
+  }, ['title']),
+  tool('update_proposal', 'Update a proposal\'s top-level fields. Pass any subset.', {
+    proposalId: prop('string', 'Proposal ID'),
+    title: prop('string', 'Title'),
+    subtitle: prop('string', 'Subtitle'),
+    preparedFor: prop('string', 'Prepared for'),
+    preparedBy: prop('string', 'Prepared by'),
+    effectiveDate: prop('string', 'Effective date'),
+    expiresAt: prop('string', 'Expiry date'),
+    status: prop('string', 'draft | shared | accepted | declined | withdrawn | expired'),
+  }, ['proposalId']),
+  tool('delete_proposal', 'Delete a proposal (cascades to sections + variants + acceptances).', {
+    proposalId: prop('string', 'Proposal ID'),
+  }, ['proposalId']),
+  tool('add_proposal_section', 'Add a shared section to a proposal. Type drives rendering: cover (Tiptap data.html) | overview (data.html) | terms (data.html) | about (data.html) | testimonial (data.quote+author+role) | scope_shared (data.html) | text (data.html). Per-variant scope/pricing/timeline lives on proposal_variants, not here.', {
+    proposalId: prop('string', 'Proposal ID'),
+    type: prop('string', 'cover | overview | terms | about | testimonial | scope_shared | text'),
+    title: prop('string', 'Slide title'),
+    subtitle: prop('string', 'Eyebrow / subtitle'),
+    data: { type: 'object', description: 'Type-specific JSON payload' },
+    position: prop('number', 'Display order'),
+  }, ['proposalId', 'type']),
+  tool('update_proposal_section', 'Update a proposal section.', {
+    proposalId: prop('string', 'Proposal ID'),
+    sectionId: prop('string', 'Section ID'),
+    type: prop('string', 'Section type'),
+    title: prop('string', 'Title'),
+    subtitle: prop('string', 'Subtitle'),
+    data: { type: 'object', description: 'Type-specific JSON payload' },
+    position: prop('number', 'Display order'),
+  }, ['proposalId', 'sectionId']),
+  tool('delete_proposal_section', 'Delete a proposal section.', {
+    proposalId: prop('string', 'Proposal ID'),
+    sectionId: prop('string', 'Section ID'),
+  }, ['proposalId', 'sectionId']),
+  tool('add_proposal_variant', 'Add a package variant to a proposal. Each variant has its own scope + pricing + optional timeline reference.', {
+    proposalId: prop('string', 'Proposal ID'),
+    name: prop('string', 'Variant name (e.g. "Standard build")'),
+    tagline: prop('string', 'Italic intro line'),
+    oneOffAmount: prop('number', 'One-off project amount'),
+    monthlyAmount: prop('number', 'Monthly retainer amount'),
+    currency: prop('string', 'Currency code (NZD, USD, etc)'),
+    scopeHtml: prop('string', 'Scope content as Tiptap-style HTML'),
+    pricingNotesHtml: prop('string', 'Pricing notes HTML'),
+    timelineScheduleId: prop('string', 'Optional FK to a project_schedule for embedded timeline'),
+    ctaLabel: prop('string', 'Custom accept-button text'),
+    isFeatured: prop('boolean', 'Recommended badge in the picker'),
+    position: prop('number', 'Display order'),
+  }, ['proposalId', 'name']),
+  tool('update_proposal_variant', 'Update a proposal variant. Pass any subset.', {
+    proposalId: prop('string', 'Proposal ID'),
+    variantId: prop('string', 'Variant ID'),
+    name: prop('string', 'Variant name'),
+    tagline: prop('string', 'Tagline'),
+    oneOffAmount: prop('number', 'One-off amount'),
+    monthlyAmount: prop('number', 'Monthly amount'),
+    currency: prop('string', 'Currency'),
+    scopeHtml: prop('string', 'Scope HTML'),
+    pricingNotesHtml: prop('string', 'Pricing notes HTML'),
+    timelineScheduleId: prop('string', 'Schedule reference'),
+    ctaLabel: prop('string', 'CTA label'),
+    isFeatured: prop('boolean', 'Featured flag'),
+    position: prop('number', 'Display order'),
+  }, ['proposalId', 'variantId']),
+  tool('delete_proposal_variant', 'Delete a proposal variant.', {
+    proposalId: prop('string', 'Proposal ID'),
+    variantId: prop('string', 'Variant ID'),
+  }, ['proposalId', 'variantId']),
+  tool('share_proposal', 'Mint or rotate a public share token for the proposal. URL is /dashboard/p/proposal/<token>.', {
+    proposalId: prop('string', 'Proposal ID'),
+    rotate: prop('boolean', 'Force a new token (revokes the previous one)'),
+  }, ['proposalId']),
+  tool('unshare_proposal', 'Revoke the public share token. Existing public links 404 after this.', {
+    proposalId: prop('string', 'Proposal ID'),
+  }, ['proposalId']),
+
   // ── Subscriptions ─────────────────────────────────────────────────────
   tool('get_subscription', 'Get detail for a specific subscription', {
     subscriptionId: prop('string', 'Subscription ID'),
@@ -1108,6 +1203,55 @@ async function executeTool(
       const { scheduleId, order } = args
       return json(await apiWrite(`/api/admin/schedules/${scheduleId}/sections/reorder`, token, 'POST', { order }))
     }
+
+    // ── Proposals ────────────────────────────────────────────────────
+    case 'list_proposals': {
+      const params = new URLSearchParams()
+      if (typeof args.orgId === 'string') params.set('orgId', args.orgId)
+      if (typeof args.dealId === 'string') params.set('dealId', args.dealId)
+      if (typeof args.status === 'string') params.set('status', args.status)
+      const qs = params.toString()
+      return json(await apiGet(`/api/admin/proposals${qs ? `?${qs}` : ''}`, token))
+    }
+    case 'get_proposal':
+      return json(await apiGet(`/api/admin/proposals/${s('proposalId')}`, token))
+    case 'create_proposal':
+      return json(await apiWrite('/api/admin/proposals', token, 'POST', args as Record<string, unknown>))
+    case 'update_proposal': {
+      const { proposalId, ...body } = args
+      return json(await apiWrite(`/api/admin/proposals/${proposalId}`, token, 'PATCH', body))
+    }
+    case 'delete_proposal':
+      return json(await apiWrite(`/api/admin/proposals/${s('proposalId')}`, token, 'DELETE'))
+
+    case 'add_proposal_section': {
+      const { proposalId, ...body } = args
+      return json(await apiWrite(`/api/admin/proposals/${proposalId}/sections`, token, 'POST', body))
+    }
+    case 'update_proposal_section': {
+      const { proposalId, sectionId, ...body } = args
+      return json(await apiWrite(`/api/admin/proposals/${proposalId}/sections/${sectionId}`, token, 'PATCH', body))
+    }
+    case 'delete_proposal_section':
+      return json(await apiWrite(`/api/admin/proposals/${s('proposalId')}/sections/${s('sectionId')}`, token, 'DELETE'))
+
+    case 'add_proposal_variant': {
+      const { proposalId, ...body } = args
+      return json(await apiWrite(`/api/admin/proposals/${proposalId}/variants`, token, 'POST', body))
+    }
+    case 'update_proposal_variant': {
+      const { proposalId, variantId, ...body } = args
+      return json(await apiWrite(`/api/admin/proposals/${proposalId}/variants/${variantId}`, token, 'PATCH', body))
+    }
+    case 'delete_proposal_variant':
+      return json(await apiWrite(`/api/admin/proposals/${s('proposalId')}/variants/${s('variantId')}`, token, 'DELETE'))
+
+    case 'share_proposal': {
+      const rotate = args.rotate ? '?rotate=1' : ''
+      return json(await apiWrite(`/api/admin/proposals/${s('proposalId')}/share${rotate}`, token, 'POST'))
+    }
+    case 'unshare_proposal':
+      return json(await apiWrite(`/api/admin/proposals/${s('proposalId')}/share`, token, 'DELETE'))
 
     // ── Subscriptions ─────────────────────────────────────────────────
     case 'get_subscription':
