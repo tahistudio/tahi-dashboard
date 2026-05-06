@@ -69,8 +69,8 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   // Sections that come AFTER the default gantt — rendered as read-only previews.
   const otherSections = sections.filter(s => s.id !== defaultGanttSection?.id)
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
+  const fetchAll = useCallback(async (opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) setLoading(true)
     try {
       const res = await fetch(apiPath(`/api/admin/schedules/${scheduleId}`))
       if (!res.ok) throw new Error('Failed')
@@ -98,7 +98,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
     } catch {
       // silent
     } finally {
-      setLoading(false)
+      if (!opts.silent) setLoading(false)
     }
   }, [scheduleId])
 
@@ -144,7 +144,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       const data = await res.json() as { id: string }
       setEditingRowId(data.id)
       setDraft(defaults)
-      await fetchAll()
+      await fetchAll({ silent: true })
     } catch {
       showToast('Failed to add row', 'error')
     }
@@ -194,7 +194,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       setDraft(null)
     } catch {
       showToast('Failed to save row', 'error')
-      await fetchAll() // restore
+      await fetchAll({ silent: true }) // restore
     } finally {
       setSavingDraft(false)
     }

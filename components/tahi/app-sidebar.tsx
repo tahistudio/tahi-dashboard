@@ -252,7 +252,7 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto" style={{ padding: '0.75rem 0.5rem' }}>
         {visibleNav.map((group, gi) => (
-          <div key={group.group} style={{ marginTop: gi > 0 ? '1.25rem' : 0 }}>
+          <div key={group.group} style={{ marginTop: gi > 0 ? '0.875rem' : 0 }}>
             {!collapsed && (
               <p style={{
                 fontSize: '0.625rem',

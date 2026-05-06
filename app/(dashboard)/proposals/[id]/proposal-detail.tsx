@@ -103,8 +103,8 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
   const [loading, setLoading] = useState(true)
   const [sharing, setSharing] = useState(false)
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
+  const fetchAll = useCallback(async (opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) setLoading(true)
     try {
       const res = await fetch(apiPath(`/api/admin/proposals/${proposalId}`))
       if (!res.ok) throw new Error('Failed')
@@ -116,7 +116,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
     } catch {
       // silent
     } finally {
-      setLoading(false)
+      if (!opts.silent) setLoading(false)
     }
   }, [proposalId])
 
@@ -161,7 +161,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
         body: JSON.stringify({ type, title: seed.title, subtitle: seed.subtitle, data }),
       })
       if (!res.ok) throw new Error('Failed')
-      await fetchAll()
+      await fetchAll({ silent: true })
     } catch {
       showToast('Failed to add section', 'error')
     }
@@ -191,7 +191,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
     try {
       await fetch(apiPath(`/api/admin/proposals/${proposalId}/sections/${sectionId}`), { method: 'DELETE' })
     } catch {
-      await fetchAll()
+      await fetchAll({ silent: true })
       showToast('Failed to delete section', 'error')
     }
   }
@@ -209,7 +209,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
         }),
       })
       if (!res.ok) throw new Error('Failed')
-      await fetchAll()
+      await fetchAll({ silent: true })
     } catch {
       showToast('Failed to add variant', 'error')
     }
@@ -230,7 +230,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
     try {
       await fetch(apiPath(`/api/admin/proposals/${proposalId}/variants/${variantId}`), { method: 'DELETE' })
     } catch {
-      await fetchAll()
+      await fetchAll({ silent: true })
       showToast('Failed to delete variant', 'error')
     }
   }

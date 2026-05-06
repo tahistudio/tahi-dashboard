@@ -89,8 +89,8 @@ export function ContractDetail({ id }: { id: string }) {
   const [showRevoke, setShowRevoke] = useState(false)
   const [signerLinks, setSignerLinks] = useState<Record<string, string>>({})
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
+  const fetchAll = useCallback(async (opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) setLoading(true)
     try {
       const res = await fetch(apiPath(`/api/admin/contracts/${id}`))
       if (!res.ok) throw new Error('not found')
@@ -112,9 +112,9 @@ export function ContractDetail({ id }: { id: string }) {
         setSignerLinks({})
       }
     } catch {
-      setContract(null)
+      if (!opts.silent) setContract(null)
     } finally {
-      setLoading(false)
+      if (!opts.silent) setLoading(false)
     }
   }, [id])
 
@@ -134,7 +134,7 @@ export function ContractDetail({ id }: { id: string }) {
       })
       if (!res.ok) throw new Error('save failed')
       showToast('Contract saved.')
-      void fetchAll()
+      void fetchAll({ silent: true })
     } catch {
       showToast('Could not save.', 'error')
     } finally {
@@ -143,11 +143,19 @@ export function ContractDetail({ id }: { id: string }) {
   }
 
   async function sendContract() {
+    if (signers.length === 0) {
+      showToast('Add at least one signer before sharing.', 'error')
+      return
+    }
     try {
       const res = await fetch(apiPath(`/api/admin/contracts/${id}/send`), { method: 'POST' })
       if (!res.ok) throw new Error('send failed')
-      showToast('Contract shared. Copy each signer link below.')
-      void fetchAll()
+      showToast(`Share link ready. Copy each signer's URL below to email it.`)
+      void fetchAll({ silent: true })
+      // Scroll to the signers panel so the freshly-minted URLs are in view.
+      setTimeout(() => {
+        document.getElementById('contract-signers-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 100)
     } catch {
       showToast('Could not share contract.', 'error')
     }
@@ -158,7 +166,7 @@ export function ContractDetail({ id }: { id: string }) {
       const res = await fetch(apiPath(`/api/admin/contracts/${id}/send?rotate=1`), { method: 'POST' })
       if (!res.ok) throw new Error('rotate failed')
       showToast('Share token rotated.')
-      void fetchAll()
+      void fetchAll({ silent: true })
     } catch {
       showToast('Could not rotate.', 'error')
     }
@@ -170,7 +178,7 @@ export function ContractDetail({ id }: { id: string }) {
       const res = await fetch(apiPath(`/api/admin/contracts/${id}/send`), { method: 'DELETE' })
       if (!res.ok) throw new Error('revoke failed')
       showToast('Share revoked.')
-      void fetchAll()
+      void fetchAll({ silent: true })
     } catch {
       showToast('Could not revoke.', 'error')
     }
@@ -180,7 +188,7 @@ export function ContractDetail({ id }: { id: string }) {
     try {
       const res = await fetch(apiPath(`/api/admin/contracts/${id}/signers/${signerId}`), { method: 'DELETE' })
       if (!res.ok) throw new Error('delete failed')
-      void fetchAll()
+      void fetchAll({ silent: true })
     } catch {
       showToast('Could not remove signer.', 'error')
     }
@@ -255,8 +263,14 @@ export function ContractDetail({ id }: { id: string }) {
             </a>
           )}
           {!contract.publicShareToken && contract.status === 'draft' && (
-            <TahiButton size="sm" onClick={sendContract} iconLeft={<Send className="w-3.5 h-3.5" />}>
-              Send for signing
+            <TahiButton
+              size="sm"
+              onClick={sendContract}
+              disabled={signers.length === 0}
+              iconLeft={<Send className="w-3.5 h-3.5" />}
+              title={signers.length === 0 ? 'Add at least one signer first' : undefined}
+            >
+              {signers.length === 0 ? 'Add signers first' : 'Send for signing'}
             </TahiButton>
           )}
           {contract.publicShareToken && !isLocked && (
@@ -372,7 +386,7 @@ export function ContractDetail({ id }: { id: string }) {
         </div>
 
         {/* Right: signers */}
-        <div className="space-y-4">
+        <div id="contract-signers-panel" className="space-y-4 scroll-mt-6">
           <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold text-[var(--color-text)]">Signers</h3>
