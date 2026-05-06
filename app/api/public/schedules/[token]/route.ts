@@ -64,8 +64,15 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     .where(eq(schema.scheduleRows.scheduleId, scheduleRow.id))
     .orderBy(asc(schema.scheduleRows.position))
 
-  // Don't leak the internal ID to public viewers.
-  const { id: _internalId, ...safeSchedule } = scheduleRow
-  void _internalId
-  return NextResponse.json({ schedule: safeSchedule, rows })
+  // Strip the internal ID from the shared schedule object — but expose it
+  // via a dedicated `analyticsResourceId` field so the view-tracking hook
+  // can attribute events server-side. The token alone is enough to revoke
+  // analytics access (validateToken is re-checked on each POST), so this
+  // doesn't expand attack surface.
+  const { id: internalId, ...safeSchedule } = scheduleRow
+  return NextResponse.json({
+    schedule: safeSchedule,
+    rows,
+    analyticsResourceId: internalId,
+  })
 }

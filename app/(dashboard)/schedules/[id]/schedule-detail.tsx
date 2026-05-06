@@ -7,6 +7,7 @@ import { ArrowLeft, Plus, Trash2, AlertTriangle, Share2, Copy, Diamond, Calendar
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { GanttGrid, type GanttRow, type RowOwner, type RowType } from '@/components/tahi/gantt-grid'
+import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
 
 interface Schedule {
   id: string
@@ -493,6 +494,11 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         <LegendDiamond label="Sign-off gate" />
         <LegendDiamond label="Critical gate" critical />
       </div>
+
+      {/* Analytics — appears once the schedule has been shared at least once. */}
+      {schedule.publicShareToken && (
+        <ShareAnalyticsCard resourceType="schedule" resourceId={scheduleId} />
+      )}
     </div>
   )
 }

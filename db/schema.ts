@@ -1487,3 +1487,57 @@ export const scheduleRows = sqliteTable('schedule_rows', {
   index('idx_schedule_rows_schedule').on(table.scheduleId),
   index('idx_schedule_rows_position').on(table.scheduleId, table.position),
 ])
+
+// ============================================================
+// SHARE-VIEW ANALYTICS — generic across schedules/proposals/contracts
+// ============================================================
+//
+// One row per "viewing session" of a public-shared resource. The browser
+// generates a stable sessionId (UUID in localStorage) the first time it
+// visits any /p/* link; that lets us count unique viewers without auth.
+//
+// Privacy: IPs are hashed (sha256 + ENCRYPTION_KEY) so analytics never
+// store the plaintext address. We keep the Cloudflare CF-IPCountry header
+// for country-level breakdowns.
+//
+// Lifecycle: the public viewer POSTs once on mount to create the event,
+// then heartbeats every 30s + on visibilitychange/beforeunload to update
+// endedAt + durationMs. For multi-slide resources (proposals), the
+// pagesViewed JSON array tracks which slides came into view.
+
+export const shareViewEvents = sqliteTable('share_view_events', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // Polymorphic target. No FK because cascading on resource delete is
+  // handled in the resource's own DELETE handler.
+  resourceType: text('resource_type').notNull(), // 'schedule' | 'proposal' | 'contract'
+  resourceId: text('resource_id').notNull(),
+  // The token used to access — useful when tokens are rotated and you
+  // want to attribute pre-rotation traffic separately.
+  shareToken: text('share_token').notNull(),
+  // Stable browser-generated UUID. Same browser → same sessionId across
+  // visits, so unique-viewer count is COUNT DISTINCT(sessionId).
+  sessionId: text('session_id').notNull(),
+  // Optional viewer self-identification (we never auto-collect this).
+  viewerName: text('viewer_name'),
+  viewerEmail: text('viewer_email'),
+  // sha256(ip + ENCRYPTION_KEY). Never stores plaintext IP.
+  viewerIpHash: text('viewer_ip_hash'),
+  // From Cloudflare CF-IPCountry header. Null if unavailable.
+  viewerCountry: text('viewer_country'),
+  // Truncated to 200 chars to avoid storing massive UAs.
+  viewerUa: text('viewer_ua'),
+  // document.referrer at first event creation.
+  referrer: text('referrer'),
+  // JSON array of slide/page IDs that came into view. Null/empty for
+  // single-page resources like schedules.
+  pagesViewed: text('pages_viewed'),
+  // Lifecycle timestamps. endedAt + durationMs are updated on heartbeats.
+  startedAt: text('started_at').notNull(),
+  endedAt: text('ended_at'),
+  durationMs: integer('duration_ms'),
+  createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_share_view_events_resource').on(table.resourceType, table.resourceId),
+  index('idx_share_view_events_session').on(table.sessionId),
+  index('idx_share_view_events_started_at').on(table.startedAt),
+])

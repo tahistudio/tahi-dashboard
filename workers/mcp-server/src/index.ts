@@ -518,6 +518,11 @@ const TOOLS: ToolDef[] = [
   tool('unshare_schedule', 'Revoke the public share token. Existing public links 404 after this.', {
     scheduleId: prop('string', 'Schedule ID'),
   }, ['scheduleId']),
+  tool('get_share_analytics', 'Read the share-view analytics for a public-shared resource (schedule / proposal / contract). Returns aggregate stats (totalViews, uniqueSessions, avgDurationMs, etc) plus the most recent N events with country, duration, pages viewed.', {
+    resourceType: prop('string', 'schedule | proposal | contract'),
+    resourceId: prop('string', 'Resource ID'),
+    limit: prop('number', 'Number of recent events to return (default 20, max 100)'),
+  }, ['resourceType', 'resourceId']),
 
   // ── Subscriptions ─────────────────────────────────────────────────────
   tool('get_subscription', 'Get detail for a specific subscription', {
@@ -1047,6 +1052,14 @@ async function executeTool(
     }
     case 'unshare_schedule':
       return json(await apiWrite(`/api/admin/schedules/${s('scheduleId')}/share`, token, 'DELETE'))
+    case 'get_share_analytics': {
+      const params = new URLSearchParams({
+        resourceType: s('resourceType') ?? '',
+        resourceId: s('resourceId') ?? '',
+      })
+      if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+      return json(await apiGet(`/api/admin/views?${params.toString()}`, token))
+    }
 
     // ── Subscriptions ─────────────────────────────────────────────────
     case 'get_subscription':

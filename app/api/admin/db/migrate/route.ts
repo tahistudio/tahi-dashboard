@@ -355,6 +355,33 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_schedule_rows_position ON schedule_rows(schedule_id, position)`,
     ],
   },
+  {
+    name: '0025',
+    description: 'Share-view analytics — track who viewed public-shared schedules / proposals / contracts, when, for how long, and which pages.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS share_view_events (
+        id text PRIMARY KEY NOT NULL,
+        resource_type text NOT NULL,
+        resource_id text NOT NULL,
+        share_token text NOT NULL,
+        session_id text NOT NULL,
+        viewer_name text,
+        viewer_email text,
+        viewer_ip_hash text,
+        viewer_country text,
+        viewer_ua text,
+        referrer text,
+        pages_viewed text,
+        started_at text NOT NULL,
+        ended_at text,
+        duration_ms integer,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_share_view_events_resource ON share_view_events(resource_type, resource_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_share_view_events_session ON share_view_events(session_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_share_view_events_started_at ON share_view_events(started_at)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

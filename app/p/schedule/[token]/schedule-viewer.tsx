@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { GanttGrid, type GanttRow } from '@/components/tahi/gantt-grid'
 import { apiPath } from '@/lib/api'
+import { useShareViewTracking } from '@/components/tahi/use-share-view-tracking'
 
 interface PublicSchedule {
   title: string
@@ -28,6 +29,7 @@ interface PublicSchedule {
 export function ScheduleViewer({ token }: { token: string }) {
   const [schedule, setSchedule] = useState<PublicSchedule | null>(null)
   const [rows, setRows] = useState<GanttRow[]>([])
+  const [analyticsResourceId, setAnalyticsResourceId] = useState<string | null>(null)
   const [state, setState] = useState<'loading' | 'ok' | 'not_found'>('loading')
 
   useEffect(() => {
@@ -39,10 +41,15 @@ export function ScheduleViewer({ token }: { token: string }) {
           if (!cancelled) setState('not_found')
           return
         }
-        const data = await res.json() as { schedule: PublicSchedule; rows: GanttRow[] }
+        const data = await res.json() as {
+          schedule: PublicSchedule
+          rows: GanttRow[]
+          analyticsResourceId?: string
+        }
         if (cancelled) return
         setSchedule(data.schedule)
         setRows(data.rows ?? [])
+        setAnalyticsResourceId(data.analyticsResourceId ?? null)
         setState('ok')
       } catch {
         if (!cancelled) setState('not_found')
@@ -51,6 +58,13 @@ export function ScheduleViewer({ token }: { token: string }) {
     void load()
     return () => { cancelled = true }
   }, [token])
+
+  // Instrument view tracking — fires only once analyticsResourceId loads.
+  useShareViewTracking({
+    resourceType: 'schedule',
+    resourceId: analyticsResourceId,
+    shareToken: token,
+  })
 
   if (state === 'loading') {
     return (
