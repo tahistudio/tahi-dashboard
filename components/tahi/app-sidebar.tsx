@@ -7,7 +7,7 @@ import {
   BarChart2, BookOpen, UserCog, Settings, MessageSquare,
   FolderOpen, ShoppingBag, PanelLeftClose, PanelLeftOpen,
   LayoutDashboard, Moon, Sun, Star, TrendingUp, FileSignature, Gauge,
-  Calendar,
+  Calendar, Megaphone, Briefcase,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
@@ -28,16 +28,22 @@ type NavGroup = {
   items: NavItem[]
 }
 
-// Sidebar IA (revised 2026-04-15, role-aware).
+// Sidebar IA (revised 2026-05-07, department-grouped).
 //
-// Two separate NAVs because group names that make sense to an internal team
-// member ("Operations") sound off to a client, and vice versa ("Your Work"
-// is patronising to a co-founder). Per-item visibility is still controlled
-// by the existing flags so we don't lose admin/client gating.
+// Pages are grouped by the department that owns them so each role can find
+// "all my stuff" in one place. A few cross-cutting pages (Tasks, Requests,
+// Messages, Overview) live up top in Workspace because they're used by
+// every department.
 //
-// Future hires (sales, designer, dev, marketing) all see the ADMIN_NAV but
-// filtered by their teamMemberAccess rule. Specific role-tailored sidebars
-// (e.g. designer-only) can be added later by adding a `roles` field per item.
+// Per-item visibility is still controlled by the existing flags so we don't
+// lose admin/client gating. Future role-aware filtering (e.g. hide Finance
+// from a designer) is on top of this — see teamMemberAccess.
+//
+// Sales-pipeline tooling lives together: deal pipeline, proposals (where
+// the sale closes), project schedules (Gantt deliverables agreed in the
+// proposal), contracts (e-signature), and Reviews (testimonials feeding
+// future proposals). Sales analytics + a contract calculator will land in
+// this group when they ship.
 const ADMIN_NAV: NavGroup[] = [
   {
     group: 'Workspace',
@@ -49,36 +55,52 @@ const ADMIN_NAV: NavGroup[] = [
     ],
   },
   {
-    group: 'Clients',
+    group: 'Sales',
     items: [
-      { label: 'Clients',   href: '/clients',   icon: Users,         adminOnly: true },
       { label: 'Pipeline',  href: '/pipeline',  icon: TrendingUp,    adminOnly: true },
+      { label: 'Proposals', href: '/proposals', icon: FileText,      adminOnly: true },
+      { label: 'Schedules', href: '/schedules', icon: Calendar,      adminOnly: true },
+      { label: 'Contracts', href: '/contracts', icon: FileSignature, adminOnly: true },
       { label: 'Reviews',   href: '/reviews',   icon: Star,          adminOnly: true },
     ],
   },
   {
-    group: 'Billing',
+    group: 'Clients',
+    items: [
+      { label: 'Clients',   href: '/clients',   icon: Users,         adminOnly: true },
+    ],
+  },
+  {
+    group: 'Marketing',
+    items: [
+      { label: 'Announcements', href: '/announcements', icon: Megaphone, adminOnly: true },
+    ],
+  },
+  {
+    group: 'Finance',
     items: [
       { label: 'Invoices',  href: '/invoices',  icon: FileText },
       { label: 'Billing',   href: '/billing',   icon: CreditCard,    adminOnly: true },
       { label: 'Time',      href: '/time',      icon: Clock,         adminOnly: true },
+      { label: 'Reports',   href: '/reports',   icon: BarChart2,     adminOnly: true },
     ],
   },
   {
     group: 'Operations',
     items: [
-      { label: 'Reports',   href: '/reports',   icon: BarChart2,     adminOnly: true },
       { label: 'Capacity',  href: '/capacity',  icon: Gauge,         adminOnly: true },
       { label: 'Team',      href: '/team',      icon: UserCog,       adminOnly: true },
-      { label: 'Schedules', href: '/schedules', icon: Calendar,      adminOnly: true },
-      { label: 'Proposals', href: '/proposals', icon: FileText,      adminOnly: true },
-      { label: 'Contracts', href: '/contracts', icon: FileSignature, adminOnly: true },
+    ],
+  },
+  {
+    group: 'Knowledge',
+    items: [
+      { label: 'Docs Hub',  href: '/docs',      icon: BookOpen,      adminOnly: true },
     ],
   },
   {
     group: 'Account',
     items: [
-      { label: 'Docs Hub',  href: '/docs',      icon: BookOpen,      adminOnly: true },
       { label: 'Settings',  href: '/settings',  icon: Settings,      adminOnly: true },
     ],
   },

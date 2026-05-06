@@ -7,6 +7,7 @@ import {
   LayoutDashboard, Inbox, MessageSquare, FileText, Users, FolderOpen,
   Menu, X, CheckSquare, TrendingUp, Star, CreditCard, Clock, BarChart2,
   Gauge, UserCog, FileSignature, BookOpen, Settings, ShoppingBag, Calendar,
+  Megaphone,
 } from 'lucide-react'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 
@@ -47,36 +48,52 @@ const ADMIN_DRAWER: DrawerNavGroup[] = [
     ],
   },
   {
-    group: 'Clients',
+    group: 'Sales',
     items: [
-      { label: 'Clients', href: '/clients', icon: Users },
       { label: 'Pipeline', href: '/pipeline', icon: TrendingUp },
+      { label: 'Proposals', href: '/proposals', icon: FileText },
+      { label: 'Schedules', href: '/schedules', icon: Calendar },
+      { label: 'Contracts', href: '/contracts', icon: FileSignature },
       { label: 'Reviews', href: '/reviews', icon: Star },
     ],
   },
   {
-    group: 'Billing',
+    group: 'Clients',
+    items: [
+      { label: 'Clients', href: '/clients', icon: Users },
+    ],
+  },
+  {
+    group: 'Marketing',
+    items: [
+      { label: 'Announcements', href: '/announcements', icon: Megaphone },
+    ],
+  },
+  {
+    group: 'Finance',
     items: [
       { label: 'Invoices', href: '/invoices', icon: FileText },
       { label: 'Billing', href: '/billing', icon: CreditCard },
       { label: 'Time', href: '/time', icon: Clock },
+      { label: 'Reports', href: '/reports', icon: BarChart2 },
     ],
   },
   {
     group: 'Operations',
     items: [
-      { label: 'Reports', href: '/reports', icon: BarChart2 },
       { label: 'Capacity', href: '/capacity', icon: Gauge },
       { label: 'Team', href: '/team', icon: UserCog },
-      { label: 'Schedules', href: '/schedules', icon: Calendar },
-      { label: 'Proposals', href: '/proposals', icon: FileText },
-      { label: 'Contracts', href: '/contracts', icon: FileSignature },
+    ],
+  },
+  {
+    group: 'Knowledge',
+    items: [
+      { label: 'Docs Hub', href: '/docs', icon: BookOpen },
     ],
   },
   {
     group: 'Account',
     items: [
-      { label: 'Docs Hub', href: '/docs', icon: BookOpen },
       { label: 'Settings', href: '/settings', icon: Settings },
     ],
   },
