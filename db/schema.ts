@@ -1542,6 +1542,140 @@ export const scheduleSections = sqliteTable('schedule_sections', {
 ])
 
 // ============================================================
+// PROPOSALS (Phase 2) — premium 16:9 slide-deck client proposals
+// ============================================================
+//
+// A `proposal` is a sectioned document like a schedule, but with
+// VARIANTS (1-3 packages — Good / Better / Best). Shared sections
+// (cover, overview, terms, about, testimonial, text) live on the
+// proposal itself. Per-variant content (scope, pricing, timeline,
+// CTA) lives in `proposal_variants`. The public viewer renders shared
+// sections then a variants picker that switches between package views.
+//
+// Status flow: draft → shared → (accepted | declined | withdrawn | expired)
+//
+// Public access: token-based (same pattern as schedules). Acceptance
+// creates a row in `proposal_acceptances` capturing who accepted/declined,
+// which variant they chose, and an audit trail (IP hash, UA, timestamp).
+
+export const proposals = sqliteTable('proposals', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // Linkage. Either or both.
+  orgId: text('org_id').references(() => organisations.id, { onDelete: 'cascade' }),
+  dealId: text('deal_id').references(() => deals.id, { onDelete: 'set null' }),
+  // Cover-page metadata
+  title: text('title').notNull(),
+  subtitle: text('subtitle'),
+  preparedFor: text('prepared_for'),
+  preparedBy: text('prepared_by'),
+  effectiveDate: text('effective_date'),
+  expiresAt: text('expires_at'),
+  // Status: draft | shared | accepted | declined | withdrawn | expired
+  status: text('status').notNull().default('draft'),
+  publicShareToken: text('public_share_token'),
+  publicSharedAt: text('public_shared_at'),
+  // When status flips to accepted / declined.
+  decidedAt: text('decided_at'),
+  decidedVariantId: text('decided_variant_id'),
+  createdById: text('created_by_id').notNull(),
+  ...timestamps,
+}, (table) => [
+  index('idx_proposals_org').on(table.orgId),
+  index('idx_proposals_deal').on(table.dealId),
+  index('idx_proposals_token').on(table.publicShareToken),
+  index('idx_proposals_status').on(table.status),
+])
+
+// ─── Sections shared across all variants (cover content, terms, etc.) ──
+//
+// Section types:
+//   - cover         (rendered on the public viewer's cover slide; data.html for body copy)
+//   - overview      (Tiptap HTML in data.html — executive summary)
+//   - terms         (Tiptap HTML — terms & conditions, payment, warranties)
+//   - about         (about Tahi Studio block, can include logo/imagery)
+//   - testimonial   (data.quote, data.author, data.role, data.avatarUrl)
+//   - scope_shared  (Tiptap HTML — scope content that's same across variants)
+//   - text          (free-form Tiptap, for any extra slide)
+//
+// Per-variant scope/pricing/timeline lives in `proposal_variants`, NOT here.
+
+export const proposalSections = sqliteTable('proposal_sections', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  proposalId: text('proposal_id')
+    .notNull()
+    .references(() => proposals.id, { onDelete: 'cascade' }),
+  type: text('type').notNull(),
+  title: text('title'),
+  subtitle: text('subtitle'),
+  data: text('data'), // JSON
+  position: integer('position').notNull().default(0),
+  ...timestamps,
+}, (table) => [
+  index('idx_proposal_sections_proposal').on(table.proposalId),
+  index('idx_proposal_sections_position').on(table.proposalId, table.position),
+])
+
+// ─── Variants (the "packages" — Good / Better / Best) ──────────────────
+//
+// Each variant has its own scope content, pricing block (split-value
+// model: oneOffAmount + monthlyAmount + currency), pricing notes, and
+// optional timeline reference (a project_schedule). Render order is
+// driven by `position`; an isFeatured flag bubbles the "recommended"
+// variant in the picker.
+
+export const proposalVariants = sqliteTable('proposal_variants', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  proposalId: text('proposal_id')
+    .notNull()
+    .references(() => proposals.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),                 // e.g. "Standard build"
+  tagline: text('tagline'),                      // optional subtitle/punchline
+  oneOffAmount: integer('one_off_amount').notNull().default(0),
+  monthlyAmount: integer('monthly_amount').notNull().default(0),
+  currency: text('currency').notNull().default('NZD'),
+  // Scope content as Tiptap HTML. Renderer trusts the HTML — only admin
+  // users author it, and the public viewer escapes via React's
+  // dangerouslySetInnerHTML which is intentional here for rich content.
+  scopeHtml: text('scope_html'),
+  pricingNotesHtml: text('pricing_notes_html'),
+  // Optional reference to a project_schedule for the timeline embed.
+  timelineScheduleId: text('timeline_schedule_id').references(() => projectSchedules.id, { onDelete: 'set null' }),
+  // CTA label (defaults to "Accept this package")
+  ctaLabel: text('cta_label'),
+  isFeatured: integer('is_featured').notNull().default(0),
+  position: integer('position').notNull().default(0),
+  ...timestamps,
+}, (table) => [
+  index('idx_proposal_variants_proposal').on(table.proposalId),
+  index('idx_proposal_variants_position').on(table.proposalId, table.position),
+])
+
+// ─── Acceptances (audit trail for accept/decline) ──────────────────────
+
+export const proposalAcceptances = sqliteTable('proposal_acceptances', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  proposalId: text('proposal_id')
+    .notNull()
+    .references(() => proposals.id, { onDelete: 'cascade' }),
+  variantId: text('variant_id').references(() => proposalVariants.id, { onDelete: 'set null' }),
+  // accepted | declined
+  status: text('status').notNull(),
+  acceptorName: text('acceptor_name'),
+  acceptorEmail: text('acceptor_email'),
+  acceptorRole: text('acceptor_role'),
+  comment: text('comment'),
+  // sha256(ip + ENCRYPTION_KEY) — never plaintext.
+  acceptorIpHash: text('acceptor_ip_hash'),
+  acceptorCountry: text('acceptor_country'),
+  acceptorUa: text('acceptor_ua'),
+  acceptedAt: text('accepted_at').notNull(),
+  ...timestamps,
+}, (table) => [
+  index('idx_proposal_acceptances_proposal').on(table.proposalId),
+  index('idx_proposal_acceptances_status').on(table.status),
+])
+
+// ============================================================
 // SHARE-VIEW ANALYTICS — generic across schedules/proposals/contracts
 // ============================================================
 //

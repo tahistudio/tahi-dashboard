@@ -432,6 +432,88 @@ const MIGRATIONS: Migration[] = [
          WHERE section_id IS NULL`,
     ],
   },
+  {
+    name: '0027',
+    description: 'Phase 2: proposals — premium 16:9 slide-deck client proposals with 1-3 variants (Good/Better/Best), public token link, accept/decline audit trail. Reuses sections + share-tracking primitives.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS proposals (
+        id text PRIMARY KEY NOT NULL,
+        org_id text REFERENCES organisations(id) ON DELETE CASCADE,
+        deal_id text REFERENCES deals(id) ON DELETE SET NULL,
+        title text NOT NULL,
+        subtitle text,
+        prepared_for text,
+        prepared_by text,
+        effective_date text,
+        expires_at text,
+        status text NOT NULL DEFAULT 'draft',
+        public_share_token text,
+        public_shared_at text,
+        decided_at text,
+        decided_variant_id text,
+        created_by_id text NOT NULL,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_proposals_org ON proposals(org_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_proposals_deal ON proposals(deal_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_proposals_token ON proposals(public_share_token)`,
+      `CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status)`,
+
+      `CREATE TABLE IF NOT EXISTS proposal_sections (
+        id text PRIMARY KEY NOT NULL,
+        proposal_id text NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+        type text NOT NULL,
+        title text,
+        subtitle text,
+        data text,
+        position integer NOT NULL DEFAULT 0,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_proposal_sections_proposal ON proposal_sections(proposal_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_proposal_sections_position ON proposal_sections(proposal_id, position)`,
+
+      `CREATE TABLE IF NOT EXISTS proposal_variants (
+        id text PRIMARY KEY NOT NULL,
+        proposal_id text NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        tagline text,
+        one_off_amount integer NOT NULL DEFAULT 0,
+        monthly_amount integer NOT NULL DEFAULT 0,
+        currency text NOT NULL DEFAULT 'NZD',
+        scope_html text,
+        pricing_notes_html text,
+        timeline_schedule_id text REFERENCES project_schedules(id) ON DELETE SET NULL,
+        cta_label text,
+        is_featured integer NOT NULL DEFAULT 0,
+        position integer NOT NULL DEFAULT 0,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_proposal_variants_proposal ON proposal_variants(proposal_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_proposal_variants_position ON proposal_variants(proposal_id, position)`,
+
+      `CREATE TABLE IF NOT EXISTS proposal_acceptances (
+        id text PRIMARY KEY NOT NULL,
+        proposal_id text NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+        variant_id text REFERENCES proposal_variants(id) ON DELETE SET NULL,
+        status text NOT NULL,
+        acceptor_name text,
+        acceptor_email text,
+        acceptor_role text,
+        comment text,
+        acceptor_ip_hash text,
+        acceptor_country text,
+        acceptor_ua text,
+        accepted_at text NOT NULL,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_proposal_acceptances_proposal ON proposal_acceptances(proposal_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_proposal_acceptances_status ON proposal_acceptances(status)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
