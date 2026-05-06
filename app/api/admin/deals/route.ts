@@ -6,6 +6,7 @@ import { eq, desc, and, inArray, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { convertToNzd } from '@/lib/currency'
 import { logActivity, formatMoney } from '@/lib/deal-activity'
+import { readForecastHorizonMonths } from '@/lib/pipeline-settings'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -56,9 +57,16 @@ export async function GET(req: NextRequest) {
       value: schema.deals.value,
       currency: schema.deals.currency,
       valueNzd: schema.deals.valueNzd,
+      // Split-value model (migration 0023)
+      upfrontValue: schema.deals.upfrontValue,
+      upfrontValueNzd: schema.deals.upfrontValueNzd,
+      monthlyValue: schema.deals.monthlyValue,
+      monthlyValueNzd: schema.deals.monthlyValueNzd,
+      recurringStartDate: schema.deals.recurringStartDate,
       source: schema.deals.source,
       estimatedHoursPerWeek: schema.deals.estimatedHoursPerWeek,
       autoNudgesDisabled: schema.deals.autoNudgesDisabled,
+      engagementEndDate: schema.deals.engagementEndDate,
       expectedCloseDate: schema.deals.expectedCloseDate,
       closedAt: schema.deals.closedAt,
       closeReason: schema.deals.closeReason,
@@ -157,9 +165,18 @@ export async function POST(req: NextRequest) {
     orgId?: string
     stageId?: string
     ownerId?: string
-    value?: number
+    /** Single-value upfront (project portion). Used when no range is set. */
+    upfrontValue?: number
+    /** Recurring monthly retainer portion. Optional. */
+    monthlyValue?: number
+    /** Optional explicit start date for the recurring portion. */
+    recurringStartDate?: string
+    /** Range on the upfront portion (kept names for backward compat). */
     valueMin?: number | null
     valueMax?: number | null
+    /** Legacy single value field — accepted for backward compat. Treated
+     *  as `upfrontValue` when no upfrontValue/monthlyValue is supplied. */
+    value?: number
     currency?: string
     source?: string
     estimatedHoursPerWeek?: number
@@ -199,13 +216,28 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Range handling: if both min and max supplied, compute midpoint as
-  // the primary value. Otherwise use the supplied single value.
+  // Resolve forecast horizon (default 12) for the legacy `value` rollup.
+  const horizonMonths = await readForecastHorizonMonths(database)
+
+  // Upfront range handling: ranges live on the upfront portion only.
+  // Midpoint feeds upfrontValue; valueMin/valueMax preserved alongside.
   const hasRange = body.valueMin != null && body.valueMax != null && body.valueMin !== body.valueMax
   const valueMin = hasRange ? Math.min(body.valueMin!, body.valueMax!) : null
   const valueMax = hasRange ? Math.max(body.valueMin!, body.valueMax!) : null
-  const midpoint = hasRange ? Math.round((valueMin! + valueMax!) / 2) : null
-  const dealValue = midpoint ?? body.value ?? 0
+  const upfrontMidpoint = hasRange ? Math.round((valueMin! + valueMax!) / 2) : null
+
+  // Resolve the split values. Falls back through: explicit upfrontValue →
+  // upfront range midpoint → legacy single `value` (for old API callers).
+  const upfrontValue = Math.max(0, Math.round(
+    body.upfrontValue ?? upfrontMidpoint ?? body.value ?? 0,
+  ))
+  const monthlyValue = Math.max(0, Math.round(body.monthlyValue ?? 0))
+
+  // Legacy `value` field stays populated as upfront + monthly × 12 so any
+  // pre-split-aware code (sorts, filters, charts) keeps producing a sensible
+  // headline number per deal.
+  const legacyValue = upfrontValue + monthlyValue * 12
+
   const dealCurrency = body.currency ?? 'NZD'
 
   // Convert to NZD using exchange rates
@@ -218,7 +250,9 @@ export async function POST(req: NextRequest) {
     return Math.round(convertToNzd(amount, dealCurrency, rates))
   }
 
-  const valueNzd = await toNzd(dealValue)
+  const valueNzd = await toNzd(legacyValue)
+  const upfrontValueNzd = await toNzd(upfrontValue)
+  const monthlyValueNzd = await toNzd(monthlyValue)
   const valueMinNzd = valueMin != null ? await toNzd(valueMin) : null
   const valueMaxNzd = valueMax != null ? await toNzd(valueMax) : null
 
@@ -228,9 +262,14 @@ export async function POST(req: NextRequest) {
     orgId: body.orgId ?? null,
     stageId: body.stageId,
     ownerId: resolvedOwnerId,
-    value: dealValue,
+    value: legacyValue,
     currency: dealCurrency,
     valueNzd,
+    upfrontValue,
+    upfrontValueNzd,
+    monthlyValue,
+    monthlyValueNzd,
+    recurringStartDate: body.recurringStartDate ?? null,
     source: body.source ?? null,
     estimatedHoursPerWeek: body.estimatedHoursPerWeek ?? 0,
     expectedCloseDate: body.expectedCloseDate ?? null,
@@ -255,6 +294,9 @@ export async function POST(req: NextRequest) {
       console.warn('[deals POST] range columns not yet available:', err instanceof Error ? err.message : err)
     }
   }
+  // Avoid unused-var warnings while we keep horizon available for potential
+  // activity-log rollup calculations later in this handler.
+  void horizonMonths
 
   // Fetch stage name for activity log
   const [stage] = await database
@@ -263,21 +305,35 @@ export async function POST(req: NextRequest) {
     .where(eq(schema.pipelineStages.id, body.stageId))
     .limit(1)
 
-  const valueLabel = hasRange
+  // Build the headline label: prefer the split-model "upfront + monthly/mo"
+  // form when either side is set, fall back to the legacy single number.
+  const upfrontLabel = hasRange
     ? `${formatMoney(valueMin!, dealCurrency)}\u2013${formatMoney(valueMax!, dealCurrency)}`
-    : formatMoney(dealValue, dealCurrency)
+    : upfrontValue > 0
+      ? formatMoney(upfrontValue, dealCurrency)
+      : null
+  const monthlyLabel = monthlyValue > 0
+    ? `${formatMoney(monthlyValue, dealCurrency)}/mo`
+    : null
+  const valueLabel =
+    upfrontLabel && monthlyLabel
+      ? `${upfrontLabel} + ${monthlyLabel}`
+      : upfrontLabel ?? monthlyLabel ?? null
 
   await logActivity(database, {
     dealId: id,
     orgId: body.orgId ?? null,
     type: 'deal_created',
-    title: `Deal created in ${stage?.name ?? 'pipeline'}${dealValue > 0 ? ` \u00b7 ${valueLabel}` : ''}`,
+    title: `Deal created in ${stage?.name ?? 'pipeline'}${valueLabel ? ` \u00b7 ${valueLabel}` : ''}`,
     description: body.source ? `Source: ${body.source}` : null,
     createdById: userId,
     metadata: {
       initial: {
         stageId: body.stageId,
-        value: dealValue,
+        value: legacyValue,
+        upfrontValue,
+        monthlyValue,
+        recurringStartDate: body.recurringStartDate ?? null,
         valueMin,
         valueMax,
         currency: dealCurrency,

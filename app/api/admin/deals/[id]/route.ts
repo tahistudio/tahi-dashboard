@@ -33,6 +33,12 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       value: schema.deals.value,
       currency: schema.deals.currency,
       valueNzd: schema.deals.valueNzd,
+      // Split-value model (migration 0023)
+      upfrontValue: schema.deals.upfrontValue,
+      upfrontValueNzd: schema.deals.upfrontValueNzd,
+      monthlyValue: schema.deals.monthlyValue,
+      monthlyValueNzd: schema.deals.monthlyValueNzd,
+      recurringStartDate: schema.deals.recurringStartDate,
       source: schema.deals.source,
       estimatedHoursPerWeek: schema.deals.estimatedHoursPerWeek,
       engagementType: schema.deals.engagementType,
@@ -220,6 +226,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     title?: string
     stageId?: string
     value?: number
+    /** Split-value model (migration 0023). Either or both can be set. */
+    upfrontValue?: number | null
+    monthlyValue?: number | null
+    recurringStartDate?: string | null
     valueMin?: number | null
     valueMax?: number | null
     currency?: string
@@ -256,6 +266,11 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       value: schema.deals.value,
       currency: schema.deals.currency,
       valueNzd: schema.deals.valueNzd,
+      upfrontValue: schema.deals.upfrontValue,
+      upfrontValueNzd: schema.deals.upfrontValueNzd,
+      monthlyValue: schema.deals.monthlyValue,
+      monthlyValueNzd: schema.deals.monthlyValueNzd,
+      recurringStartDate: schema.deals.recurringStartDate,
       ownerId: schema.deals.ownerId,
       orgId: schema.deals.orgId,
       notes: schema.deals.notes,
@@ -301,9 +316,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.stageId !== undefined) updates.stageId = body.stageId
   if (body.currency !== undefined) updates.currency = body.currency
 
-  // Range handling: clients can send value (single) OR valueMin+valueMax (range).
-  // When range is supplied, value = midpoint. When value is explicitly
-  // supplied as a single number (and range fields are null), clear the range.
+  // Upfront range handling — range now applies only to the upfront portion.
   let nextValueMin: number | null = existingRange.valueMin
   let nextValueMax: number | null = existingRange.valueMax
   let rangeTouched = false
@@ -313,28 +326,62 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     if (body.valueMin != null && body.valueMax != null && body.valueMin !== body.valueMax) {
       nextValueMin = Math.min(body.valueMin, body.valueMax)
       nextValueMax = Math.max(body.valueMin, body.valueMax)
-      updates.value = Math.round((nextValueMin + nextValueMax) / 2)
     } else {
-      nextValueMin = null
-      nextValueMax = null
-      if (body.value !== undefined) updates.value = body.value
-    }
-  } else if (body.value !== undefined) {
-    updates.value = body.value
-    // Single value mode clears any existing range.
-    if (existingRange.valueMin != null || existingRange.valueMax != null) {
-      rangeTouched = true
       nextValueMin = null
       nextValueMax = null
     }
   }
 
-  // Re-compute valueNzd when value or currency changes
+  // Resolve the next upfront/monthly values. Caller can send either or both.
+  // When a range is supplied without an explicit upfrontValue, midpoint wins.
+  const upfrontMidpoint =
+    nextValueMin != null && nextValueMax != null && nextValueMin !== nextValueMax
+      ? Math.round((nextValueMin + nextValueMax) / 2)
+      : null
+
+  let nextUpfront = existing.upfrontValue ?? null
+  if (body.upfrontValue !== undefined) {
+    nextUpfront = body.upfrontValue == null ? 0 : Math.max(0, Math.round(body.upfrontValue))
+  } else if (rangeTouched && upfrontMidpoint != null) {
+    nextUpfront = upfrontMidpoint
+  } else if (body.value !== undefined) {
+    // Legacy single-value clients update upfront via `value`.
+    nextUpfront = Math.max(0, Math.round(body.value))
+  }
+
+  let nextMonthly = existing.monthlyValue ?? null
+  if (body.monthlyValue !== undefined) {
+    nextMonthly = body.monthlyValue == null ? 0 : Math.max(0, Math.round(body.monthlyValue))
+  }
+
+  let nextRecurringStartDate = existing.recurringStartDate ?? null
+  if (body.recurringStartDate !== undefined) {
+    nextRecurringStartDate = body.recurringStartDate || null
+  }
+
+  // Decide whether the monetary position has been touched at all.
+  const monetaryTouched =
+    body.value !== undefined ||
+    body.upfrontValue !== undefined ||
+    body.monthlyValue !== undefined ||
+    body.recurringStartDate !== undefined ||
+    body.currency !== undefined ||
+    rangeTouched
+
+  if (monetaryTouched) {
+    updates.upfrontValue = nextUpfront ?? 0
+    updates.monthlyValue = nextMonthly ?? 0
+    updates.recurringStartDate = nextRecurringStartDate
+    // Legacy `value` field stays as a 12-month rollup so downstream code
+    // that reads `value` directly keeps working.
+    updates.value = (nextUpfront ?? 0) + (nextMonthly ?? 0) * 12
+  }
+
+  // Re-compute *Nzd columns when the monetary position changes.
   let nextValueNzd = existing.valueNzd
   let nextValueMinNzd: number | null = null
   let nextValueMaxNzd: number | null = null
-  if (updates.value !== undefined || body.currency !== undefined || rangeTouched) {
-    const finalValue = (updates.value as number | undefined) ?? existing.value
+  if (monetaryTouched) {
     const finalCurrency = body.currency ?? existing.currency
     const rates = finalCurrency !== 'NZD' ? await database
       .select({ currency: schema.exchangeRates.currency, rateToUsd: schema.exchangeRates.rateToUsd })
@@ -344,8 +391,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       if (finalCurrency === 'NZD' || amount === 0 || rates.length === 0) return amount
       return Math.round(convertToNzd(amount, finalCurrency, rates))
     }
-    nextValueNzd = toNzd(finalValue) ?? 0
+    nextValueNzd = toNzd(updates.value as number) ?? 0
     updates.valueNzd = nextValueNzd
+    updates.upfrontValueNzd = toNzd(nextUpfront ?? 0) ?? 0
+    updates.monthlyValueNzd = toNzd(nextMonthly ?? 0) ?? 0
     nextValueMinNzd = toNzd(nextValueMin)
     nextValueMaxNzd = toNzd(nextValueMax)
   }
@@ -395,25 +444,27 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   }
 
   // ── Activity logging ───────────────────────────────────────────────────
-  // Value change (includes range changes and currency changes when they
-  // affect the monetary position).
-  const valueChangedNow = valueChanged(
-    { value: existing.value, valueMin: existingRange.valueMin, valueMax: existingRange.valueMax, currency: existing.currency },
-    {
-      value: (updates.value as number | undefined) ?? existing.value,
-      valueMin: rangeTouched ? nextValueMin : existingRange.valueMin,
-      valueMax: rangeTouched ? nextValueMax : existingRange.valueMax,
-      currency: body.currency ?? existing.currency,
-    },
-  )
-  if (valueChangedNow) {
-    const before = { value: existing.value, valueMin: existingRange.valueMin, valueMax: existingRange.valueMax, currency: existing.currency }
-    const after = {
-      value: (updates.value as number | undefined) ?? existing.value,
-      valueMin: rangeTouched ? nextValueMin : existingRange.valueMin,
-      valueMax: rangeTouched ? nextValueMax : existingRange.valueMax,
-      currency: body.currency ?? existing.currency,
-    }
+  // Value change (includes range, upfront, monthly, recurring start, and
+  // currency changes when they affect the monetary position).
+  const before = {
+    value: existing.value,
+    valueMin: existingRange.valueMin,
+    valueMax: existingRange.valueMax,
+    currency: existing.currency,
+    upfrontValue: existing.upfrontValue,
+    monthlyValue: existing.monthlyValue,
+    recurringStartDate: existing.recurringStartDate,
+  }
+  const after = {
+    value: (updates.value as number | undefined) ?? existing.value,
+    valueMin: rangeTouched ? nextValueMin : existingRange.valueMin,
+    valueMax: rangeTouched ? nextValueMax : existingRange.valueMax,
+    currency: body.currency ?? existing.currency,
+    upfrontValue: monetaryTouched ? nextUpfront : existing.upfrontValue,
+    monthlyValue: monetaryTouched ? nextMonthly : existing.monthlyValue,
+    recurringStartDate: monetaryTouched ? nextRecurringStartDate : existing.recurringStartDate,
+  }
+  if (valueChanged(before, after)) {
     await logActivity(database, {
       dealId: id,
       orgId: existing.orgId,

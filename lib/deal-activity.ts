@@ -131,14 +131,38 @@ export interface ValueSnapshot {
   valueMin: number | null | undefined
   valueMax: number | null | undefined
   currency: string | null | undefined
+  /** Split-model fields (added in migration 0023). Optional so legacy
+   *  callers without these still type-check. */
+  upfrontValue?: number | null | undefined
+  monthlyValue?: number | null | undefined
+  recurringStartDate?: string | null | undefined
 }
 
 function isRange(s: ValueSnapshot): boolean {
   return s.valueMin != null && s.valueMax != null && s.valueMin !== s.valueMax
 }
 
+function hasSplit(s: ValueSnapshot): boolean {
+  return s.upfrontValue != null || s.monthlyValue != null
+}
+
 function describeValue(s: ValueSnapshot): string {
   const cur = s.currency ?? 'NZD'
+  // Split-model takes priority when set: "$10k + $2k/mo".
+  if (hasSplit(s)) {
+    const upfrontLabel = isRange(s)
+      ? `${formatMoney(s.valueMin ?? 0, cur)}\u2013${formatMoney(s.valueMax ?? 0, cur)}`
+      : (s.upfrontValue ?? 0) > 0
+        ? formatMoney(s.upfrontValue ?? 0, cur)
+        : null
+    const monthlyLabel = (s.monthlyValue ?? 0) > 0
+      ? `${formatMoney(s.monthlyValue ?? 0, cur)}/mo`
+      : null
+    if (upfrontLabel && monthlyLabel) return `${upfrontLabel} + ${monthlyLabel}`
+    if (upfrontLabel) return upfrontLabel
+    if (monthlyLabel) return monthlyLabel
+    return formatMoney(0, cur)
+  }
   if (isRange(s)) {
     return `${formatMoney(s.valueMin ?? 0, cur)}\u2013${formatMoney(s.valueMax ?? 0, cur)}`
   }
@@ -147,14 +171,17 @@ function describeValue(s: ValueSnapshot): string {
 
 /**
  * Has the monetary position of a deal changed? Any of: value, valueMin,
- * valueMax, currency.
+ * valueMax, currency, upfrontValue, monthlyValue, recurringStartDate.
  */
 export function valueChanged(before: ValueSnapshot, after: ValueSnapshot): boolean {
   return (
     before.value !== after.value ||
     before.valueMin !== after.valueMin ||
     before.valueMax !== after.valueMax ||
-    before.currency !== after.currency
+    before.currency !== after.currency ||
+    (before.upfrontValue ?? null) !== (after.upfrontValue ?? null) ||
+    (before.monthlyValue ?? null) !== (after.monthlyValue ?? null) ||
+    (before.recurringStartDate ?? null) !== (after.recurringStartDate ?? null)
   )
 }
 
@@ -173,12 +200,18 @@ export function valueChangeMetadata(
       valueMin: before.valueMin ?? null,
       valueMax: before.valueMax ?? null,
       currency: before.currency ?? null,
+      upfrontValue: before.upfrontValue ?? null,
+      monthlyValue: before.monthlyValue ?? null,
+      recurringStartDate: before.recurringStartDate ?? null,
     },
     after: {
       value: after.value ?? null,
       valueMin: after.valueMin ?? null,
       valueMax: after.valueMax ?? null,
       currency: after.currency ?? null,
+      upfrontValue: after.upfrontValue ?? null,
+      monthlyValue: after.monthlyValue ?? null,
+      recurringStartDate: after.recurringStartDate ?? null,
     },
     note: note ?? null,
   }

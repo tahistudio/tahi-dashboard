@@ -5,8 +5,13 @@
  * through this module so KPIs never disagree across pages.
  *
  * Rules:
- *  - Point estimate: use `deal.valueNzd ?? deal.value ?? 0` (midpoint when
- *    range is set, single value otherwise).
+ *  - Point estimate: prefer the split-value model (upfront + monthly × horizon)
+ *    when either upfrontValue or monthlyValue is set; fall back to the legacy
+ *    single `valueNzd` / `value` otherwise. Migration 0023 backfills both
+ *    so this only applies to deals predating the migration.
+ *  - Recurring start resolution: explicit `recurringStartDate` first, then
+ *    `engagementEndDate`, then `closedAt`, then `expectedCloseDate`, then
+ *    the supplied refDate. Used for month-counting in the horizon window.
  *  - Weighted probability: prefer `stage.historicalProbability` (actual
  *    close rate) when set, fall back to `stage.probability` (static
  *    config), fall back to 0.
@@ -20,11 +25,30 @@
  * use the fields it returns. Do NOT reimplement the math inline.
  */
 
+/** Default horizon (months) for pipeline forecast totals when the caller
+ *  does not pass an explicit value. Configurable via the
+ *  `pipeline.forecastHorizonMonths` setting; the API endpoints read that
+ *  setting and pass it through to this module. */
+export const DEFAULT_FORECAST_HORIZON_MONTHS = 12
+
 export interface DealForMath {
   value?: number | null
   valueNzd?: number | null
   valueMin?: number | null
   valueMax?: number | null
+  /** One-time / project portion (added in migration 0023). */
+  upfrontValue?: number | null
+  upfrontValueNzd?: number | null
+  /** Recurring / retainer portion in monthly units (added in migration 0023). */
+  monthlyValue?: number | null
+  monthlyValueNzd?: number | null
+  /** Optional explicit start date for the recurring portion. */
+  recurringStartDate?: string | null
+  /** Project end (used as recurring-start fallback when no explicit date). */
+  engagementEndDate?: string | null
+  /** Deal close timestamps used as further recurring-start fallbacks. */
+  closedAt?: string | null
+  expectedCloseDate?: string | null
   stageId: string
   /** Static stage probability denormalised onto the deal row. */
   stageProbability?: number | null
@@ -41,14 +65,102 @@ export interface StageForMath {
 }
 
 /**
- * Returns the point estimate used for all totals and weighted math.
- * When a range is set, this is the midpoint. When a single value is set,
- * this is that value. Zero if nothing is set.
+ * Difference between two ISO dates / Date instances in whole months.
+ * Negative if `to` is before `from`.
  */
-export function pointEstimate(deal: DealForMath): number {
-  // valueNzd is pre-computed on write and is the canonical figure for
-  // cross-currency aggregation. Fall back to `value` only when valueNzd
-  // is missing (legacy rows).
+export function monthsBetween(from: Date | string, to: Date | string): number {
+  const a = typeof from === 'string' ? new Date(from) : from
+  const b = typeof to === 'string' ? new Date(to) : to
+  return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth())
+}
+
+/**
+ * Resolve when the recurring portion of a deal starts. Walks the fallback
+ * chain: explicit recurringStartDate → engagementEndDate → closedAt →
+ * expectedCloseDate → refDate (today by default).
+ */
+export function resolveRecurringStart(
+  deal: DealForMath,
+  refDate: Date = new Date(),
+): Date {
+  const candidate =
+    deal.recurringStartDate ??
+    deal.engagementEndDate ??
+    deal.closedAt ??
+    deal.expectedCloseDate
+  if (candidate) {
+    const d = new Date(candidate)
+    if (!isNaN(d.getTime())) return d
+  }
+  return refDate
+}
+
+/**
+ * How many months of recurring revenue fall inside the forecast horizon
+ * starting from refDate. Zero when monthlyValue is unset or the recurring
+ * starts after the horizon ends.
+ */
+export function monthsRecurringInHorizon(
+  deal: DealForMath,
+  horizonMonths: number = DEFAULT_FORECAST_HORIZON_MONTHS,
+  refDate: Date = new Date(),
+): number {
+  if (!deal.monthlyValue && !deal.monthlyValueNzd) return 0
+  const start = resolveRecurringStart(deal, refDate)
+  const monthsToStart = Math.max(0, monthsBetween(refDate, start))
+  return Math.max(0, horizonMonths - monthsToStart)
+}
+
+/**
+ * Monthly recurring revenue contribution from this deal in NZD. Just the
+ * monthly_value_nzd column, with monthly_value as a fallback for legacy
+ * rows where currency conversion hadn't run yet.
+ */
+export function dealMrr(deal: DealForMath): number {
+  return deal.monthlyValueNzd ?? deal.monthlyValue ?? 0
+}
+
+/**
+ * The upfront / one-time portion of a deal in NZD.
+ */
+export function dealUpfront(deal: DealForMath): number {
+  return deal.upfrontValueNzd ?? deal.upfrontValue ?? 0
+}
+
+/**
+ * Has this deal been migrated to the split-value model? True when either
+ * upfront or monthly is non-null. False for legacy rows where only `value`
+ * was set and migration 0023 hasn't run yet.
+ */
+function hasSplitValues(deal: DealForMath): boolean {
+  return (
+    deal.upfrontValue != null ||
+    deal.upfrontValueNzd != null ||
+    deal.monthlyValue != null ||
+    deal.monthlyValueNzd != null
+  )
+}
+
+/**
+ * Returns the point estimate used for all totals and weighted math.
+ *
+ * When the deal has been migrated to the split model: upfront + monthly ×
+ * monthsInHorizon (clipped to the configured horizon, with recurring-start
+ * resolution).
+ *
+ * When the deal predates the migration: legacy `valueNzd` / `value`.
+ */
+export function pointEstimate(
+  deal: DealForMath,
+  opts: { horizonMonths?: number; refDate?: Date } = {},
+): number {
+  if (hasSplitValues(deal)) {
+    const horizon = opts.horizonMonths ?? DEFAULT_FORECAST_HORIZON_MONTHS
+    const refDate = opts.refDate ?? new Date()
+    const monthsRecurring = monthsRecurringInHorizon(deal, horizon, refDate)
+    return dealUpfront(deal) + dealMrr(deal) * monthsRecurring
+  }
+  // Legacy fallback: valueNzd was the canonical cross-currency figure.
   return deal.valueNzd ?? deal.value ?? 0
 }
 
@@ -90,8 +202,19 @@ export function isLostDeal(deal: DealForMath): boolean {
 }
 
 export interface PipelineTotals {
+  /** Sum of each open deal's point estimate (split-model: upfront + monthly × horizon).
+   *  This is the "headline" pipeline number — total value over the horizon. */
   totalValue: number
+  /** Total value × stage probability (the weighted forecast). */
   weightedValue: number
+  /** Sum of monthly_value across all open deals — pipeline MRR if everything closed. */
+  totalMrr: number
+  /** Pipeline MRR × stage probability — weighted forecast for monthly recurring. */
+  weightedMrr: number
+  /** Sum of upfront_value across all open deals. */
+  totalUpfront: number
+  /** Total upfront × stage probability. */
+  weightedUpfront: number
   openDealCount: number
   wonCount: number
   lostCount: number
@@ -102,13 +225,24 @@ export interface PipelineTotals {
 /**
  * THE canonical pipeline totals calculator. Every page that shows
  * pipeline value / weighted forecast must use this.
+ *
+ * Pass `horizonMonths` (from the `pipeline.forecastHorizonMonths` setting)
+ * to scale the recurring-portion contribution. Defaults to 12.
  */
 export function calculatePipelineTotals(
   deals: DealForMath[],
   stages?: StageForMath[],
+  opts: { horizonMonths?: number; refDate?: Date } = {},
 ): PipelineTotals {
+  const horizonMonths = opts.horizonMonths ?? DEFAULT_FORECAST_HORIZON_MONTHS
+  const refDate = opts.refDate ?? new Date()
+
   let totalValue = 0
   let weightedValue = 0
+  let totalMrr = 0
+  let weightedMrr = 0
+  let totalUpfront = 0
+  let weightedUpfront = 0
   let openDealCount = 0
   let wonCount = 0
   let lostCount = 0
@@ -122,10 +256,18 @@ export function calculatePipelineTotals(
       lostCount++
       continue
     }
-    const val = pointEstimate(deal)
+    const val = pointEstimate(deal, { horizonMonths, refDate })
+    const mrr = dealMrr(deal)
+    const upfront = dealUpfront(deal)
     const prob = effectiveProbability(deal, stages)
+    const probFraction = prob / 100
+
     totalValue += val
-    weightedValue += val * (prob / 100)
+    weightedValue += val * probFraction
+    totalMrr += mrr
+    weightedMrr += mrr * probFraction
+    totalUpfront += upfront
+    weightedUpfront += upfront * probFraction
     openDealCount++
   }
 
@@ -136,6 +278,10 @@ export function calculatePipelineTotals(
   return {
     totalValue: Math.round(totalValue),
     weightedValue: Math.round(weightedValue),
+    totalMrr: Math.round(totalMrr),
+    weightedMrr: Math.round(weightedMrr),
+    totalUpfront: Math.round(totalUpfront),
+    weightedUpfront: Math.round(weightedUpfront),
     openDealCount,
     wonCount,
     lostCount,
@@ -189,4 +335,50 @@ export function formatDealValue(
     return `${formatter(deal.valueMin)}\u2013${formatter(deal.valueMax)}`
   }
   return formatter(deal.value ?? 0)
+}
+
+/**
+ * Format a split-model deal as "$10k + $2k/mo", "$10k", or "$2k/mo"
+ * depending on which sides are set. When a range is on the upfront,
+ * shows "$8k\u2013$12k + $2k/mo".
+ *
+ * Caller passes `formatter` which handles currency \u2014 we only know about
+ * the numbers. Returns "\u2014" when both sides are zero/null.
+ */
+export function formatDealValueSplit(
+  deal: Pick<
+    DealForMath,
+    'upfrontValue' | 'upfrontValueNzd' | 'monthlyValue' | 'monthlyValueNzd' | 'valueMin' | 'valueMax' | 'value' | 'valueNzd'
+  >,
+  formatter: (n: number) => string,
+): string {
+  // Pre-migration deals: fall back to the legacy single-value formatter.
+  const splitSet =
+    deal.upfrontValue != null ||
+    deal.upfrontValueNzd != null ||
+    deal.monthlyValue != null ||
+    deal.monthlyValueNzd != null
+  if (!splitSet) {
+    return formatDealValue(
+      { value: deal.value, valueMin: deal.valueMin, valueMax: deal.valueMax },
+      formatter,
+    )
+  }
+
+  const upfront = deal.upfrontValueNzd ?? deal.upfrontValue ?? 0
+  const monthly = deal.monthlyValueNzd ?? deal.monthlyValue ?? 0
+  const hasUpfrontRange =
+    deal.valueMin != null && deal.valueMax != null && deal.valueMin !== deal.valueMax
+
+  const upfrontLabel = upfront > 0 || hasUpfrontRange
+    ? hasUpfrontRange
+      ? `${formatter(deal.valueMin ?? 0)}\u2013${formatter(deal.valueMax ?? 0)}`
+      : formatter(upfront)
+    : null
+  const monthlyLabel = monthly > 0 ? `${formatter(monthly)}/mo` : null
+
+  if (upfrontLabel && monthlyLabel) return `${upfrontLabel} + ${monthlyLabel}`
+  if (upfrontLabel) return upfrontLabel
+  if (monthlyLabel) return monthlyLabel
+  return '\u2014'
 }
