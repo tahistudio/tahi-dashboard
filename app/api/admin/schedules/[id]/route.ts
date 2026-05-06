@@ -45,13 +45,45 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
 
   if (!scheduleRow) return NextResponse.json({ error: 'Schedule not found' }, { status: 404 })
 
-  const rows = await database
-    .select()
-    .from(schema.scheduleRows)
-    .where(eq(schema.scheduleRows.scheduleId, id))
-    .orderBy(asc(schema.scheduleRows.position))
+  // Sectioned schedules (migration 0026): fetch sections + their rows in
+  // one batched read, then nest the rows under each section. Rows without
+  // a section_id (legacy data that somehow escaped backfill) ride on a
+  // synthetic 'unsectioned' bucket so nothing disappears.
+  const [sectionRows, allRows] = await Promise.all([
+    database
+      .select()
+      .from(schema.scheduleSections)
+      .where(eq(schema.scheduleSections.scheduleId, id))
+      .orderBy(asc(schema.scheduleSections.position)),
+    database
+      .select()
+      .from(schema.scheduleRows)
+      .where(eq(schema.scheduleRows.scheduleId, id))
+      .orderBy(asc(schema.scheduleRows.position)),
+  ])
 
-  return NextResponse.json({ schedule: scheduleRow, rows })
+  const rowsBySection = new Map<string, typeof allRows>()
+  for (const r of allRows) {
+    const key = r.sectionId ?? '__unsectioned__'
+    const arr = rowsBySection.get(key) ?? []
+    arr.push(r)
+    rowsBySection.set(key, arr)
+  }
+
+  const sections = sectionRows.map(s => ({
+    ...s,
+    // Only gantt-type sections need rows nested in. Other types carry
+    // their content in `data` (parsed by the client).
+    rows: s.type === 'gantt' ? (rowsBySection.get(s.id) ?? []) : [],
+  }))
+
+  return NextResponse.json({
+    schedule: scheduleRow,
+    sections,
+    // Back-compat: legacy clients expect a flat `rows` array. Keep it
+    // populated until we've migrated every consumer to read from sections.
+    rows: allRows,
+  })
 }
 
 // ── PATCH /api/admin/schedules/[id] ────────────────────────────────────

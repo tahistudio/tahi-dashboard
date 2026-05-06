@@ -49,30 +49,61 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
-  const rows = await database
-    .select({
-      id: schema.scheduleRows.id,
-      rowType: schema.scheduleRows.rowType,
-      label: schema.scheduleRows.label,
-      owner: schema.scheduleRows.owner,
-      startWeek: schema.scheduleRows.startWeek,
-      endWeek: schema.scheduleRows.endWeek,
-      riskFlag: schema.scheduleRows.riskFlag,
-      position: schema.scheduleRows.position,
-    })
-    .from(schema.scheduleRows)
-    .where(eq(schema.scheduleRows.scheduleId, scheduleRow.id))
-    .orderBy(asc(schema.scheduleRows.position))
+  // Sectioned schedules (migration 0026). Public viewer renders one slide
+  // per section; each gantt section gets its rows nested in.
+  const [sectionRows, allRows] = await Promise.all([
+    database
+      .select({
+        id: schema.scheduleSections.id,
+        type: schema.scheduleSections.type,
+        title: schema.scheduleSections.title,
+        subtitle: schema.scheduleSections.subtitle,
+        startWeek: schema.scheduleSections.startWeek,
+        endWeek: schema.scheduleSections.endWeek,
+        data: schema.scheduleSections.data,
+        position: schema.scheduleSections.position,
+      })
+      .from(schema.scheduleSections)
+      .where(eq(schema.scheduleSections.scheduleId, scheduleRow.id))
+      .orderBy(asc(schema.scheduleSections.position)),
+    database
+      .select({
+        id: schema.scheduleRows.id,
+        sectionId: schema.scheduleRows.sectionId,
+        rowType: schema.scheduleRows.rowType,
+        label: schema.scheduleRows.label,
+        owner: schema.scheduleRows.owner,
+        startWeek: schema.scheduleRows.startWeek,
+        endWeek: schema.scheduleRows.endWeek,
+        riskFlag: schema.scheduleRows.riskFlag,
+        position: schema.scheduleRows.position,
+      })
+      .from(schema.scheduleRows)
+      .where(eq(schema.scheduleRows.scheduleId, scheduleRow.id))
+      .orderBy(asc(schema.scheduleRows.position)),
+  ])
 
-  // Strip the internal ID from the shared schedule object — but expose it
-  // via a dedicated `analyticsResourceId` field so the view-tracking hook
-  // can attribute events server-side. The token alone is enough to revoke
-  // analytics access (validateToken is re-checked on each POST), so this
-  // doesn't expand attack surface.
+  const rowsBySection = new Map<string, typeof allRows>()
+  for (const r of allRows) {
+    const key = r.sectionId ?? '__unsectioned__'
+    const arr = rowsBySection.get(key) ?? []
+    arr.push(r)
+    rowsBySection.set(key, arr)
+  }
+
+  const sections = sectionRows.map(s => ({
+    ...s,
+    rows: s.type === 'gantt' ? (rowsBySection.get(s.id) ?? []) : [],
+  }))
+
+  // Strip the internal ID from the shared schedule object; expose via
+  // analyticsResourceId for the view-tracking hook only.
   const { id: internalId, ...safeSchedule } = scheduleRow
   return NextResponse.json({
     schedule: safeSchedule,
-    rows,
+    sections,
+    // Back-compat for the old single-section public viewer.
+    rows: allRows,
     analyticsResourceId: internalId,
   })
 }

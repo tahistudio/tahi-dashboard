@@ -109,13 +109,30 @@ export async function POST(req: NextRequest) {
     updatedAt: now,
   })
 
+  // Every schedule starts with a default 'gantt' section so the editor
+  // and viewer have something to render against. Seed rows (if any)
+  // attach to this section. Future sections (overview, risk register,
+  // RACI, etc.) are added via /sections endpoints.
+  const defaultSectionId = crypto.randomUUID()
+  await database.insert(schema.scheduleSections).values({
+    id: defaultSectionId,
+    scheduleId: id,
+    type: 'gantt',
+    title: 'Project schedule',
+    subtitle: 'Whole project, one view.',
+    position: 0,
+    createdAt: now,
+    updatedAt: now,
+  })
+
   // Seed rows if provided (e.g. from a template). Chunked to stay under
   // D1's per-statement bind-variable cap (100 vars per query). Each row
-  // takes 11 placeholders, so 9 rows per chunk = 99 vars (safe).
+  // now takes 12 placeholders (added section_id), so 8 rows per chunk = 96 vars (safe).
   if (body.rows?.length) {
     const seeded = body.rows.map((r, idx) => ({
       id: crypto.randomUUID(),
       scheduleId: id,
+      sectionId: defaultSectionId,
       rowType: r.rowType,
       label: r.label.trim(),
       owner: r.owner ?? null,
@@ -126,12 +143,12 @@ export async function POST(req: NextRequest) {
       createdAt: now,
       updatedAt: now,
     }))
-    const CHUNK = 9
+    const CHUNK = 8
     for (let i = 0; i < seeded.length; i += CHUNK) {
       const slice = seeded.slice(i, i + CHUNK)
       await database.insert(schema.scheduleRows).values(slice)
     }
   }
 
-  return NextResponse.json({ id }, { status: 201 })
+  return NextResponse.json({ id, defaultSectionId }, { status: 201 })
 }

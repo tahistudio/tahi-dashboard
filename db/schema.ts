@@ -1466,6 +1466,11 @@ export const scheduleRows = sqliteTable('schedule_rows', {
   scheduleId: text('schedule_id')
     .notNull()
     .references(() => projectSchedules.id, { onDelete: 'cascade' }),
+  // Added in migration 0026: rows belong to a specific gantt SECTION rather
+  // than directly to the schedule. The schedule may now have multiple gantt
+  // sections (high-level + month-detail breakdowns). Backfill assigned every
+  // pre-existing row to a default 'gantt' section per schedule.
+  sectionId: text('section_id'),
   // section_header | task | gate | critical_gate
   rowType: text('row_type').notNull(),
   // Display
@@ -1486,6 +1491,54 @@ export const scheduleRows = sqliteTable('schedule_rows', {
 }, (table) => [
   index('idx_schedule_rows_schedule').on(table.scheduleId),
   index('idx_schedule_rows_position').on(table.scheduleId, table.position),
+  index('idx_schedule_rows_section').on(table.sectionId),
+])
+
+// ─── Schedule sections (migration 0026) ─────────────────────────────────
+//
+// A `projectSchedule` is now composed of N ordered `scheduleSections`. Each
+// section has a type that drives rendering:
+//
+//   - `overview` / `text`: rich content (Tiptap HTML in `data.html`).
+//                          Used for the executive overview slide and any
+//                          free-form text section.
+//   - `gantt`:             a gantt grid. Rows live in `scheduleRows` with
+//                          `section_id` pointing here. Optional `start_week`
+//                          / `end_week` filter is used for "month detail"
+//                          zoomed views (e.g. W1–W4).
+//   - `risk_register`:     a structured risk table.
+//                          `data.rows = [{ risk, owner, impact, mitigation,
+//                          contractualImplication }]`
+//   - `raci_matrix`:       a workstreams × roles grid.
+//                          `data = { columns: [{ id, label }], rows: [{ id,
+//                          label, group?, cells: { [colId]: 'R'|'A'|'C'|'I' }
+//                          }] }`
+//
+// Storing risk/RACI shape as JSON in `data` avoids a proliferation of small
+// tables. If we ever need to query across them (e.g. "find all schedules
+// with this owner in their RACI") we can normalise later.
+
+export const scheduleSections = sqliteTable('schedule_sections', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  scheduleId: text('schedule_id')
+    .notNull()
+    .references(() => projectSchedules.id, { onDelete: 'cascade' }),
+  // overview | gantt | risk_register | raci_matrix | text
+  type: text('type').notNull(),
+  // Slide title + eyebrow shown in the public viewer.
+  title: text('title'),
+  subtitle: text('subtitle'),
+  // Optional gantt zoom window. Null means "show all weeks of the schedule".
+  startWeek: integer('start_week'),
+  endWeek: integer('end_week'),
+  // Type-specific JSON payload. See module-level docs for shape per type.
+  data: text('data'),
+  // Display order.
+  position: integer('position').notNull().default(0),
+  ...timestamps,
+}, (table) => [
+  index('idx_schedule_sections_schedule').on(table.scheduleId),
+  index('idx_schedule_sections_position').on(table.scheduleId, table.position),
 ])
 
 // ============================================================

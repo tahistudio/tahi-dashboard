@@ -382,6 +382,56 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_share_view_events_started_at ON share_view_events(started_at)`,
     ],
   },
+  {
+    name: '0026',
+    description: 'Schedules become sectioned: project_schedules now have N ordered scheduleSections (overview | gantt | risk_register | raci_matrix | text). Existing schedule_rows are backfilled to a default gantt section per schedule. Risk/RACI/text content is stored as JSON in section.data.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS schedule_sections (
+        id text PRIMARY KEY NOT NULL,
+        schedule_id text NOT NULL REFERENCES project_schedules(id) ON DELETE CASCADE,
+        type text NOT NULL,
+        title text,
+        subtitle text,
+        start_week integer,
+        end_week integer,
+        data text,
+        position integer NOT NULL DEFAULT 0,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_schedule_sections_schedule ON schedule_sections(schedule_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_schedule_sections_position ON schedule_sections(schedule_id, position)`,
+
+      // Add section_id to schedule_rows. Tolerate the duplicate-column
+      // error so re-runs are idempotent.
+      `ALTER TABLE schedule_rows ADD COLUMN section_id text`,
+      `CREATE INDEX IF NOT EXISTS idx_schedule_rows_section ON schedule_rows(section_id)`,
+
+      // ── Backfill ──
+      // Every existing schedule gets exactly one default 'gantt' section
+      // titled "Project schedule". UUID generated via SQLite's randomblob
+      // trick (matches migration 0020's request_participants backfill).
+      // Idempotent: NOT EXISTS guards re-runs.
+      `INSERT INTO schedule_sections (id, schedule_id, type, title, position, created_at, updated_at)
+         SELECT
+           lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))),
+           s.id, 'gantt', 'Project schedule', 0,
+           strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+           strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+         FROM project_schedules s
+         WHERE NOT EXISTS (
+           SELECT 1 FROM schedule_sections WHERE schedule_id = s.id
+         )`,
+      // Assign every row without a section to its schedule's default section.
+      `UPDATE schedule_rows
+         SET section_id = (
+           SELECT id FROM schedule_sections
+            WHERE schedule_id = schedule_rows.schedule_id
+            ORDER BY position ASC LIMIT 1
+         )
+         WHERE section_id IS NULL`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
