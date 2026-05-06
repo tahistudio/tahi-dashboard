@@ -888,6 +888,142 @@ server.tool(
   }
 )
 
+server.tool(
+  'get_deal',
+  'Get full detail for a single deal: metadata, contacts, activity timeline, stages, lifetime value',
+  { dealId: z.string().describe('Deal ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/deals/${args.dealId}`)
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'delete_deal',
+  'Delete a deal from the sales pipeline (soft-archive: keeps the row but hides it from the active pipeline view)',
+  { dealId: z.string().describe('Deal ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/deals/${args.dealId}`, { method: 'DELETE' })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_deal_activities',
+  'List the activity timeline for a deal (notes, calls, stage changes, nudges sent, etc). Filter by activity type if needed.',
+  {
+    dealId: z.string().describe('Deal ID'),
+    type: z.string().optional().describe('Optional activity type filter (eg. nudge_sent, stage_change, note, call)'),
+  },
+  async (args) => {
+    const params = new URLSearchParams({ dealId: args.dealId })
+    if (args.type) params.set('type', args.type)
+    const data = await apiFetch(`/api/admin/activities?${params.toString()}`)
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'delete_activity',
+  'Remove an activity from the timeline. Hard delete; cannot be undone.',
+  { activityId: z.string().describe('Activity ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/activities/${args.activityId}`, { method: 'DELETE' })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_deal_contacts',
+  'List all contacts linked to a deal (with role, name, email)',
+  { dealId: z.string().describe('Deal ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/deals/${args.dealId}/contacts`)
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'add_deal_contact',
+  'Link a contact to a deal (creates a row in deal_contacts)',
+  {
+    dealId: z.string().describe('Deal ID'),
+    contactId: z.string().describe('Contact ID'),
+    role: z.string().optional().describe('Role on the deal (eg. decision-maker, champion, technical)'),
+  },
+  async (args) => {
+    const { dealId, ...body } = args
+    const data = await apiFetch(`/api/admin/deals/${dealId}/contacts`, { method: 'POST', body })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'remove_deal_contact',
+  'Unlink a contact from a deal',
+  {
+    dealId: z.string().describe('Deal ID'),
+    contactId: z.string().describe('Contact ID'),
+  },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/deals/${args.dealId}/contacts`, { method: 'DELETE', body: { contactId: args.contactId } })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_deal_nudges',
+  'List all nudges (sent, scheduled, drafted, failed) for a specific deal',
+  { dealId: z.string().describe('Deal ID') },
+  async (args) => {
+    const data = await apiFetch(`/api/admin/deals/${args.dealId}/nudges`)
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'send_nudge',
+  'Send a nudge email to deal contacts. Signature from settings (pipeline.nudgeSignatureHtml) is appended automatically.',
+  {
+    dealId: z.string().describe('Deal ID'),
+    contactEmails: z.array(z.string()).describe('Recipient email addresses'),
+    subject: z.string().describe('Email subject'),
+    bodyHtml: z.string().describe('Email body HTML'),
+    sendNow: z.boolean().optional().describe('Send immediately (true) or save as draft (false)'),
+    scheduledAt: z.string().optional().describe('ISO timestamp to schedule send (alternative to sendNow)'),
+  },
+  async (args) => {
+    const { dealId, ...body } = args
+    const data = await apiFetch(`/api/admin/deals/${dealId}/nudges`, { method: 'POST', body })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'list_nudge_templates',
+  'List all nudge email templates',
+  {},
+  async () => {
+    const data = await apiFetch('/api/admin/nudge-templates')
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
+server.tool(
+  'create_nudge_template',
+  'Create a nudge email template',
+  {
+    name: z.string().describe('Template name'),
+    subject: z.string().describe('Email subject (supports {{dealTitle}} variable)'),
+    bodyHtml: z.string().describe('Email body HTML'),
+    category: z.string().optional().describe('Category: follow_up, check_in, proposal, intro, custom'),
+  },
+  async (args) => {
+    const data = await apiFetch('/api/admin/nudge-templates', { method: 'POST', body: args })
+    return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+  }
+)
+
 // ---------------------------------------------------------------------------
 // Invoice Enhancement
 // ---------------------------------------------------------------------------

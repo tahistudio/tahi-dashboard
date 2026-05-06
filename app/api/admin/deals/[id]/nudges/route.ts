@@ -111,6 +111,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           return NextResponse.json({ id: nudgeId, status: 'failed', error: errText }, { status: 500 })
         }
       }
+
+      // Persist the final composed HTML (with signature) so the timeline /
+      // nudge history shows what was actually delivered, not the pre-append draft.
+      if (outgoingHtml !== body.bodyHtml) {
+        await database.update(schema.dealNudges).set({
+          bodyHtml: outgoingHtml,
+          updatedAt: new Date().toISOString(),
+        }).where(eq(schema.dealNudges.id, nudgeId))
+      }
     } catch (err) {
       await database.update(schema.dealNudges).set({
         status: 'failed',

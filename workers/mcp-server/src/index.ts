@@ -378,9 +378,31 @@ const TOOLS: ToolDef[] = [
     currency: prop('string', 'Currency code'),
     autoNudgesDisabled: prop('boolean', 'Disable auto-nudges for this deal'),
   }, ['dealId']),
-  tool('delete_deal', 'Delete a deal from the sales pipeline', {
+  tool('delete_deal', 'Delete a deal from the sales pipeline (soft-archive: keeps the row but hides it from the active pipeline view)', {
     dealId: prop('string', 'Deal ID'),
   }, ['dealId']),
+  tool('get_deal', 'Get full detail for a single deal: metadata, contacts, activity timeline, stages, lifetime value', {
+    dealId: prop('string', 'Deal ID'),
+  }, ['dealId']),
+  tool('list_deal_activities', 'List the activity timeline for a deal (notes, calls, stage changes, nudges sent, etc). Filter by activity type if needed.', {
+    dealId: prop('string', 'Deal ID'),
+    type: prop('string', 'Optional activity type filter (eg. nudge_sent, stage_change, note, call)'),
+  }, ['dealId']),
+  tool('delete_activity', 'Remove an activity from the timeline. Hard delete; cannot be undone.', {
+    activityId: prop('string', 'Activity ID'),
+  }, ['activityId']),
+  tool('list_deal_contacts', 'List all contacts linked to a deal (with role, name, email)', {
+    dealId: prop('string', 'Deal ID'),
+  }, ['dealId']),
+  tool('add_deal_contact', 'Link a contact to a deal (creates a row in deal_contacts)', {
+    dealId: prop('string', 'Deal ID'),
+    contactId: prop('string', 'Contact ID'),
+    role: prop('string', 'Role on the deal (eg. decision-maker, champion, technical)'),
+  }, ['dealId', 'contactId']),
+  tool('remove_deal_contact', 'Unlink a contact from a deal', {
+    dealId: prop('string', 'Deal ID'),
+    contactId: prop('string', 'Contact ID'),
+  }, ['dealId', 'contactId']),
 
   // ── Nudge Emails ──────────────────────────────────────────────────────
   tool('list_nudge_templates', 'List all nudge email templates'),
@@ -865,6 +887,24 @@ async function executeTool(
     }
     case 'delete_deal':
       return json(await apiWrite(`/api/admin/deals/${s('dealId')}`, token, 'DELETE'))
+    case 'get_deal':
+      return json(await apiGet(`/api/admin/deals/${s('dealId')}`, token))
+    case 'list_deal_activities': {
+      const t = typeof args.type === 'string' ? `&type=${encodeURIComponent(args.type)}` : ''
+      return json(await apiGet(`/api/admin/activities?dealId=${s('dealId')}${t}`, token))
+    }
+    case 'delete_activity':
+      return json(await apiWrite(`/api/admin/activities/${s('activityId')}`, token, 'DELETE'))
+    case 'list_deal_contacts':
+      return json(await apiGet(`/api/admin/deals/${s('dealId')}/contacts`, token))
+    case 'add_deal_contact': {
+      const { dealId: dcDealId, ...dcBody } = args
+      return json(await apiWrite(`/api/admin/deals/${dcDealId}/contacts`, token, 'POST', dcBody))
+    }
+    case 'remove_deal_contact': {
+      const { dealId: rcDealId, contactId } = args
+      return json(await apiWrite(`/api/admin/deals/${rcDealId}/contacts`, token, 'DELETE', { contactId: String(contactId) }))
+    }
 
     // ── Nudge Emails ──────────────────────────────────────────────────
     case 'list_nudge_templates':

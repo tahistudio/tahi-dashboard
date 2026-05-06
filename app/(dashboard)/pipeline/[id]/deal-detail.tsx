@@ -493,24 +493,35 @@ export function DealDetail({ dealId }: { dealId: string }) {
                       </div>
 
                       {/* Content */}
-                      <div style={{ paddingBottom: isLast ? 0 : '1.25rem', flex: 1 }}>
-                        <div className="flex items-center gap-2" style={{ marginBottom: '0.25rem' }}>
-                          <span className="font-medium" style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>
+                      <div style={{ paddingBottom: isLast ? 0 : '1.25rem', flex: 1, minWidth: 0 }}>
+                        {/* Title — own row, full width, can wrap */}
+                        <div style={{ marginBottom: '0.25rem' }}>
+                          <span
+                            className="font-medium"
+                            style={{ fontSize: '0.8125rem', color: 'var(--color-text)', wordBreak: 'break-word' }}
+                          >
                             {act.title}
                           </span>
+                        </div>
+
+                        {/* Tag pill + actions row. Pill stays left; trash or
+                            confirm UI sits flush right. flex-wrap keeps the
+                            confirm UI from clipping on very narrow widths. */}
+                        <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: '0.375rem', rowGap: '0.375rem' }}>
                           <span
                             className="rounded-full font-medium uppercase"
-                            style={{ padding: '0.0625rem 0.375rem', fontSize: '0.625rem', background: `${iconColor}20`, color: iconColor }}
+                            style={{ padding: '0.0625rem 0.375rem', fontSize: '0.625rem', background: `${iconColor}20`, color: iconColor, flexShrink: 0 }}
                           >
                             {act.type.replace(/_/g, ' ')}
                           </span>
-                          {/* Trash + inline confirm. Always visible on mobile (touch has no hover);
-                              dim by default on desktop, full opacity on row hover/focus. */}
+                          {/* Trash or inline confirm. .row-actions handles the
+                              opacity behavior (full on mobile, dim-then-hover
+                              on desktop) — see globals.css. */}
                           <div
                             className={
                               isConfirming
-                                ? 'ml-auto flex items-center gap-1.5'
-                                : 'ml-auto flex items-center gap-1.5 opacity-100 sm:opacity-30 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity'
+                                ? 'ml-auto flex flex-wrap items-center gap-1.5'
+                                : 'ml-auto flex items-center gap-1.5 row-actions'
                             }
                           >
                             {isConfirming ? (
@@ -525,7 +536,8 @@ export function DealDetail({ dealId }: { dealId: string }) {
                                   style={{
                                     fontSize: '0.6875rem',
                                     fontWeight: 600,
-                                    padding: '0.125rem 0.5rem',
+                                    padding: '0.25rem 0.625rem',
+                                    minHeight: '1.75rem',
                                     background: 'var(--color-danger)',
                                     color: 'white',
                                     border: 'none',
@@ -542,7 +554,8 @@ export function DealDetail({ dealId }: { dealId: string }) {
                                   style={{
                                     fontSize: '0.6875rem',
                                     fontWeight: 500,
-                                    padding: '0.125rem 0.5rem',
+                                    padding: '0.25rem 0.625rem',
+                                    minHeight: '1.75rem',
                                     background: 'var(--color-bg-secondary)',
                                     color: 'var(--color-text-muted)',
                                     border: '1px solid var(--color-border)',
@@ -563,8 +576,8 @@ export function DealDetail({ dealId }: { dealId: string }) {
                                   display: 'inline-flex',
                                   alignItems: 'center',
                                   justifyContent: 'center',
-                                  width: '1.5rem',
-                                  height: '1.5rem',
+                                  width: '1.75rem',
+                                  height: '1.75rem',
                                   padding: 0,
                                   background: 'transparent',
                                   color: 'var(--color-text-subtle)',
