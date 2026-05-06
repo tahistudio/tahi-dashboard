@@ -1188,6 +1188,19 @@ export const deals = sqliteTable('deals', {
   value: integer('value').notNull().default(0),
   currency: text('currency').notNull().default('NZD'),
   valueNzd: integer('value_nzd').notNull().default(0),
+  // Split value model — added in migration 0023.
+  // upfrontValue: one-time project portion (e.g. $30k upfront for a 3-month build).
+  // monthlyValue: recurring retainer portion (e.g. $2k/mo).
+  // Either or both can be 0. `value` is preserved as the legacy single number
+  // for backward compatibility with reports/charts; new code should compute
+  // the headline number as upfront + monthly × forecastHorizonMonths.
+  upfrontValue: integer('upfront_value'),
+  upfrontValueNzd: integer('upfront_value_nzd'),
+  monthlyValue: integer('monthly_value'),
+  monthlyValueNzd: integer('monthly_value_nzd'),
+  // When the recurring portion starts. If null, falls back to
+  // engagement_end_date, then to closed_at / expected_close_date.
+  recurringStartDate: text('recurring_start_date'),
   source: text('source'),
   estimatedHoursPerWeek: integer('estimated_hours_per_week').default(0),
   // Engagement model (project vs retainer)

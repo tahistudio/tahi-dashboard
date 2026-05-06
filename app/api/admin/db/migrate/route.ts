@@ -273,6 +273,45 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_active_timers_request ON active_timers(request_id)`,
     ],
   },
+  {
+    name: '0023',
+    description: 'Deal value model: split single `value` into upfront (project portion) + monthly (retainer portion) + recurring start date. Backfill from existing value/engagement_type so reports keep working.',
+    statements: [
+      // New columns. Idempotent via the ADD COLUMN duplicate-name catch.
+      `ALTER TABLE deals ADD COLUMN upfront_value integer`,
+      `ALTER TABLE deals ADD COLUMN upfront_value_nzd integer`,
+      `ALTER TABLE deals ADD COLUMN monthly_value integer`,
+      `ALTER TABLE deals ADD COLUMN monthly_value_nzd integer`,
+      // Optional explicit start date for the recurring portion. When null,
+      // resolution rules at compute time fall back to engagement_end_date,
+      // then to closed_at / expected_close_date.
+      `ALTER TABLE deals ADD COLUMN recurring_start_date text`,
+
+      // Backfill — best-effort split of the legacy single `value` field:
+      //   * engagement_type = 'retainer' → value was monthly; copy to monthly_value
+      //   * everything else (project / null) → value was upfront; copy to upfront_value
+      // The user can correct individual deals after rollout.
+      // Only backfill rows that haven't been touched yet (NULL guard) so re-runs are safe.
+      `UPDATE deals
+         SET monthly_value = COALESCE(monthly_value, value),
+             monthly_value_nzd = COALESCE(monthly_value_nzd, value_nzd)
+         WHERE engagement_type = 'retainer'
+           AND monthly_value IS NULL`,
+      `UPDATE deals
+         SET upfront_value = COALESCE(upfront_value, value),
+             upfront_value_nzd = COALESCE(upfront_value_nzd, value_nzd)
+         WHERE (engagement_type IS NULL OR engagement_type = 'project')
+           AND upfront_value IS NULL`,
+      // Defaults for the other half of the split — so every row has both
+      // numbers populated rather than NULL on one side.
+      `UPDATE deals SET upfront_value = 0, upfront_value_nzd = 0
+         WHERE engagement_type = 'retainer' AND upfront_value IS NULL`,
+      `UPDATE deals SET monthly_value = 0, monthly_value_nzd = 0
+         WHERE (engagement_type IS NULL OR engagement_type = 'project') AND monthly_value IS NULL`,
+
+      `CREATE INDEX IF NOT EXISTS idx_deals_monthly_value ON deals(monthly_value)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
