@@ -1212,6 +1212,15 @@ export const deals = sqliteTable('deals', {
   expectedCloseDate: text('expected_close_date'),
   closedAt: text('closed_at'),
   closeReason: text('close_reason'),
+  // Structured close-lost reason (separate from free-text closeReason).
+  // One of: price | competitor | timing | scope | no_response | not_a_fit | other
+  // Captured on closed-lost so we can measure why deals die without parsing
+  // free-text notes (per Sales Strategy doc: "deal-death points").
+  lostReason: text('lost_reason'),
+  // The single concrete next step on this deal. Replaces "Liam keeps it in
+  // his head". Surfaces as an overdue badge in the pipeline.
+  nextActionLabel: text('next_action_label'),
+  nextActionDueAt: text('next_action_due_at'),
   notes: text('notes'),
   // Nudge control: disable auto-nudges per deal
   autoNudgesDisabled: integer('auto_nudges_disabled').default(0),

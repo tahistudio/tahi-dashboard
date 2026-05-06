@@ -954,6 +954,19 @@ function KanbanView({ deals, stages, onMutateDealLocal, onSilentRevalidate, disp
 
 // ---- Deal Close Dialog ---------------------------------------------------
 
+// Sales Strategy doc names two deal-death points: lead goes cold (no_response)
+// and after the proposal lands. The enum captures the proposal-side reasons
+// + the cold-trail catch-all + a "not a fit" for ICP misses.
+const LOST_REASON_OPTIONS = [
+  { value: 'price', label: 'Price', description: 'Budget mismatch — they liked the work, costs were the blocker' },
+  { value: 'competitor', label: 'Competitor', description: 'Went with another studio or freelancer' },
+  { value: 'timing', label: 'Timing', description: 'Right fit, wrong moment — may come back' },
+  { value: 'scope', label: 'Scope', description: 'What they needed sat outside what we do' },
+  { value: 'no_response', label: 'No response', description: 'Lead went cold after first contact or proposal' },
+  { value: 'not_a_fit', label: 'Not a fit', description: 'ICP miss — we declined or they did, no hard feelings' },
+  { value: 'other', label: 'Other', description: 'Something else (add a note below)' },
+] as const
+
 const WON_SOURCE_OPTIONS = [
   { value: 'referral', label: 'Referral' },
   { value: 'webflow_partner', label: 'Webflow Partner' },
@@ -973,16 +986,19 @@ function DealCloseDialog({ type, dealTitle, onConfirm, onCancel }: {
 }) {
   const [wonSource, setWonSource] = useState('')
   const [lostReason, setLostReason] = useState('')
+  const [lostReasonNote, setLostReasonNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   const isWon = type === 'won'
-  const canConfirm = isWon ? wonSource !== '' : lostReason.trim() !== ''
+  const canConfirm = isWon ? wonSource !== '' : lostReason !== ''
 
   const handleConfirm = async () => {
     if (!canConfirm) return
     setSubmitting(true)
     await onConfirm(
-      isWon ? { wonSource } : { lostReason: lostReason.trim() }
+      isWon
+        ? { wonSource }
+        : { lostReason: lostReasonNote.trim() ? `${lostReason}: ${lostReasonNote.trim()}` : lostReason }
     )
     setSubmitting(false)
   }
@@ -1075,29 +1091,55 @@ function DealCloseDialog({ type, dealTitle, onConfirm, onCancel }: {
           <div>
             <label
               className="block font-medium"
-              style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.5rem' }}
+              style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.75rem' }}
             >
               Why was this deal lost?
             </label>
-            <textarea
-              value={lostReason}
-              onChange={e => setLostReason(e.target.value)}
-              placeholder="e.g. Budget constraints, chose competitor, timing not right..."
-              rows={3}
-              className="w-full rounded-lg"
-              style={{
-                padding: '0.625rem 0.75rem',
-                fontSize: '0.875rem',
-                border: '1px solid var(--color-border)',
-                background: 'var(--color-bg)',
-                color: 'var(--color-text)',
-                resize: 'vertical',
-                minHeight: '5rem',
-              }}
-              onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
-              onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
-              autoFocus
-            />
+            <div className="flex flex-col gap-1.5">
+              {LOST_REASON_OPTIONS.map(opt => (
+                <label
+                  key={opt.value}
+                  className="flex items-start gap-3 rounded-lg cursor-pointer transition-colors"
+                  style={{
+                    padding: '0.625rem 0.75rem',
+                    border: `1px solid ${lostReason === opt.value ? 'var(--color-brand)' : 'var(--color-border)'}`,
+                    background: lostReason === opt.value ? 'var(--color-brand-50)' : 'var(--color-bg)',
+                    fontSize: '0.875rem',
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="lostReason"
+                    value={opt.value}
+                    checked={lostReason === opt.value}
+                    onChange={() => setLostReason(opt.value)}
+                    style={{ accentColor: 'var(--color-brand)', marginTop: '0.125rem' }}
+                  />
+                  <div className="min-w-0">
+                    <div style={{ fontWeight: 600 }}>{opt.label}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{opt.description}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+            {lostReason && (
+              <textarea
+                value={lostReasonNote}
+                onChange={e => setLostReasonNote(e.target.value)}
+                placeholder="Optional note for context (kept on the deal record)"
+                rows={2}
+                className="w-full rounded-lg mt-3"
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  fontSize: '0.8125rem',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  color: 'var(--color-text)',
+                  resize: 'vertical',
+                }}
+              />
+            )}
           </div>
         )}
 

@@ -50,6 +50,9 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       expectedCloseDate: schema.deals.expectedCloseDate,
       closedAt: schema.deals.closedAt,
       closeReason: schema.deals.closeReason,
+      lostReason: schema.deals.lostReason,
+      nextActionLabel: schema.deals.nextActionLabel,
+      nextActionDueAt: schema.deals.nextActionDueAt,
       notes: schema.deals.notes,
       createdAt: schema.deals.createdAt,
       updatedAt: schema.deals.updatedAt,
@@ -248,6 +251,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     expectedCloseDate?: string | null
     wonSource?: string | null
     lostReason?: string | null
+    nextActionLabel?: string | null
+    nextActionDueAt?: string | null
     autoNudgesDisabled?: boolean
     status?: 'won' | 'lost'
     /** Optional note explaining a value change (shown in activity timeline). */
@@ -413,7 +418,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.engagementEndDate !== undefined) updates.engagementEndDate = body.engagementEndDate
   if (body.expectedCloseDate !== undefined) updates.expectedCloseDate = body.expectedCloseDate
   if (body.wonSource !== undefined) updates.wonSource = body.wonSource
-  if (body.lostReason !== undefined) updates.closeReason = body.lostReason
+  if (body.lostReason !== undefined) updates.lostReason = body.lostReason
+  if (body.nextActionLabel !== undefined) updates.nextActionLabel = body.nextActionLabel
+  if (body.nextActionDueAt !== undefined) updates.nextActionDueAt = body.nextActionDueAt
   if (body.autoNudgesDisabled !== undefined) updates.autoNudgesDisabled = body.autoNudgesDisabled ? 1 : 0
 
   // When status is explicitly set to won or lost, auto-set closedAt

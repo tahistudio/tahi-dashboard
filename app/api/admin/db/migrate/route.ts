@@ -618,6 +618,15 @@ const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    name: '0031',
+    description: 'Phase 8a deal model: lost_reason (structured enum), next_action_label + next_action_due_at (single concrete next step). Idempotent — duplicate-column errors caught upstream.',
+    statements: [
+      `ALTER TABLE deals ADD COLUMN lost_reason text`,
+      `ALTER TABLE deals ADD COLUMN next_action_label text`,
+      `ALTER TABLE deals ADD COLUMN next_action_due_at text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
