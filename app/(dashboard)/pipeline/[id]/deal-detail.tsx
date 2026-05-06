@@ -7,7 +7,9 @@ import {
   Phone, Mail, FileText, MessageSquare,
   Plus, Loader2, Check, ChevronDown, Inbox, X, Search, UserPlus, Send, BellOff,
   UserCheck, ExternalLink, Activity, DollarSign, TrendingUp, User, Target, Archive, RefreshCw, Sparkles,
+  Trash2,
 } from 'lucide-react'
+import { useToast } from '@/components/tahi/toast'
 import { parseActivityMetadata } from '@/lib/activity-meta'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { DISPLAY_CURRENCIES } from '@/lib/currency'
@@ -238,6 +240,27 @@ export function DealDetail({ dealId }: { dealId: string }) {
   const [loading, setLoading] = useState(true)
   const [showActivityForm, setShowActivityForm] = useState(false)
   const [showNudgeDialog, setShowNudgeDialog] = useState(false)
+  // Activity row that is currently asking "are you sure?". Only one at a time.
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const { showToast } = useToast()
+
+  async function deleteActivity(id: string) {
+    const previous = activities
+    setActivities(prev => prev.filter(a => a.id !== id))
+    setConfirmingDeleteId(null)
+    setDeletingId(id)
+    try {
+      const res = await fetch(apiPath(`/api/admin/activities/${id}`), { method: 'DELETE' })
+      if (!res.ok) throw new Error(`Status ${res.status}`)
+      showToast('Activity removed', 'success')
+    } catch {
+      setActivities(previous)
+      showToast('Failed to delete activity', 'error')
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   const fetchDeal = useCallback(async () => {
     setLoading(true)
@@ -432,8 +455,11 @@ export function DealDetail({ dealId }: { dealId: string }) {
                   // click. Note takes precedence over description for this type.
                   const noteFromMeta = typeof meta?.note === 'string' ? (meta.note as string) : null
 
+                  const isConfirming = confirmingDeleteId === act.id
+                  const isDeleting = deletingId === act.id
+
                   return (
-                    <div key={act.id} className="flex gap-3" style={{ position: 'relative' }}>
+                    <div key={act.id} className="flex gap-3 group" style={{ position: 'relative', opacity: isDeleting ? 0.5 : 1 }}>
                       {/* Timeline connector */}
                       <div className="flex flex-col items-center flex-shrink-0">
                         <div
@@ -459,6 +485,87 @@ export function DealDetail({ dealId }: { dealId: string }) {
                           >
                             {act.type.replace(/_/g, ' ')}
                           </span>
+                          {/* Trash + inline confirm. Hidden until row hover/focus. */}
+                          <div
+                            className={
+                              isConfirming
+                                ? 'ml-auto flex items-center gap-1.5'
+                                : 'ml-auto flex items-center gap-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity'
+                            }
+                          >
+                            {isConfirming ? (
+                              <>
+                                <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
+                                  Delete this entry?
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => { void deleteActivity(act.id) }}
+                                  disabled={isDeleting}
+                                  style={{
+                                    fontSize: '0.6875rem',
+                                    fontWeight: 600,
+                                    padding: '0.125rem 0.5rem',
+                                    background: 'var(--color-danger)',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: 'var(--radius-md)',
+                                    cursor: isDeleting ? 'not-allowed' : 'pointer',
+                                  }}
+                                >
+                                  {isDeleting ? 'Deleting...' : 'Delete'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmingDeleteId(null)}
+                                  disabled={isDeleting}
+                                  style={{
+                                    fontSize: '0.6875rem',
+                                    fontWeight: 500,
+                                    padding: '0.125rem 0.5rem',
+                                    background: 'var(--color-bg-secondary)',
+                                    color: 'var(--color-text-muted)',
+                                    border: '1px solid var(--color-border)',
+                                    borderRadius: 'var(--radius-md)',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingDeleteId(act.id)}
+                                aria-label="Delete activity"
+                                title="Delete activity"
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  width: '1.5rem',
+                                  height: '1.5rem',
+                                  padding: 0,
+                                  background: 'transparent',
+                                  color: 'var(--color-text-subtle)',
+                                  border: 'none',
+                                  borderRadius: 'var(--radius-sm)',
+                                  cursor: 'pointer',
+                                  transition: 'color 150ms ease, background-color 150ms ease',
+                                }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.color = 'var(--color-danger)'
+                                  e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.color = 'var(--color-text-subtle)'
+                                  e.currentTarget.style.backgroundColor = 'transparent'
+                                }}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                         {act.description && (
                           <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>

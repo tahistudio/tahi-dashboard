@@ -391,6 +391,15 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
           {/* Task Templates (admin only) - T423 */}
           {isAdmin && <TaskTemplatesSection />}
 
+          {/* Pipeline Defaults (admin only) — default deal owner + nudge signature */}
+          {isAdmin && (
+            <PipelineDefaultsSection
+              settings={settings}
+              onSave={saveSetting}
+              savingKey={savingKey}
+            />
+          )}
+
           {/* Pipeline Stages (admin only) - T289 */}
           {isAdmin && <PipelineStagesSection />}
 
@@ -1405,6 +1414,147 @@ function TaskTemplatesSection() {
 }
 
 // -- Pipeline Stages Section (T289) --
+
+// -- Pipeline Defaults Section --
+// Owns: default deal owner, nudge signature.
+// Both are stored in the key/value `settings` table so they don't need a
+// schema migration. The deal POST and nudge send paths read these directly.
+
+interface TeamMemberOption {
+  id: string
+  name: string
+  email: string | null
+  avatarUrl: string | null
+}
+
+function PipelineDefaultsSection({
+  settings,
+  onSave,
+  savingKey,
+}: {
+  settings: Record<string, string | null>
+  onSave: (key: string, value: string) => Promise<void>
+  savingKey: string | null
+}) {
+  const [members, setMembers] = useState<TeamMemberOption[]>([])
+  const [loadingMembers, setLoadingMembers] = useState(true)
+  const [signatureDraft, setSignatureDraft] = useState<string>('')
+
+  const ownerKey = 'pipeline.defaultDealOwnerId'
+  const sigKey = 'pipeline.nudgeSignatureHtml'
+  const currentOwnerId = settings[ownerKey] ?? ''
+  const currentSignature = settings[sigKey] ?? ''
+
+  // Hydrate signature draft from settings whenever it changes externally.
+  useEffect(() => {
+    setSignatureDraft(currentSignature)
+  }, [currentSignature])
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      try {
+        const res = await fetch(apiPath('/api/admin/team-members'))
+        if (!res.ok) throw new Error('Failed to load team members')
+        const data = await res.json() as { items?: TeamMemberOption[] }
+        if (!cancelled) setMembers(data.items ?? [])
+      } catch {
+        if (!cancelled) setMembers([])
+      } finally {
+        if (!cancelled) setLoadingMembers(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [])
+
+  const signatureDirty = signatureDraft !== currentSignature
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <Target className="w-5 h-5" />
+        Pipeline Defaults
+      </h2>
+
+      <div className="space-y-4">
+        {/* Default deal owner */}
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+          <label htmlFor="default-deal-owner" className="block text-sm font-medium text-[var(--color-text)]">
+            Default deal owner
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5 mb-3">
+            Auto-assigned as the owner whenever a new deal is created without one.
+          </p>
+          {loadingMembers ? (
+            <LoadingSkeleton rows={1} />
+          ) : (
+            <select
+              id="default-deal-owner"
+              value={currentOwnerId}
+              onChange={(e) => { void onSave(ownerKey, e.target.value) }}
+              disabled={savingKey === ownerKey}
+              className="w-full sm:w-80 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            >
+              <option value="">No default (leave unassigned)</option>
+              {members.map(m => (
+                <option key={m.id} value={m.id}>
+                  {m.name}{m.email ? ` (${m.email})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        {/* Nudge signature */}
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+          <label htmlFor="nudge-signature" className="block text-sm font-medium text-[var(--color-text)]">
+            Nudge email signature
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5 mb-3">
+            Appended to every nudge email at send time. Accepts HTML (links, line breaks, etc).
+          </p>
+          <textarea
+            id="nudge-signature"
+            value={signatureDraft}
+            onChange={(e) => setSignatureDraft(e.target.value)}
+            rows={6}
+            placeholder={'<p>Liam Miller<br>Tahi Studio<br><a href="https://tahi.studio">tahi.studio</a></p>'}
+            className="w-full text-sm font-mono rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            style={{ minHeight: '8rem' }}
+          />
+          {signatureDraft && (
+            <div className="mt-3">
+              <p className="text-xs font-medium text-[var(--color-text-muted)] mb-1.5">Preview</p>
+              <div
+                className="text-sm rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)]"
+                dangerouslySetInnerHTML={{ __html: signatureDraft }}
+              />
+            </div>
+          )}
+          <div className="flex items-center justify-end gap-2 mt-3">
+            {signatureDirty && (
+              <TahiButton
+                variant="secondary"
+                size="sm"
+                onClick={() => setSignatureDraft(currentSignature)}
+              >
+                Discard
+              </TahiButton>
+            )}
+            <TahiButton
+              size="sm"
+              onClick={() => { void onSave(sigKey, signatureDraft) }}
+              disabled={!signatureDirty || savingKey === sigKey}
+            >
+              {savingKey === sigKey ? 'Saving...' : 'Save signature'}
+            </TahiButton>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
 
 interface PipelineStageData {
   id: string

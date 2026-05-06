@@ -178,6 +178,27 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
+  // If no ownerId was supplied, fall back to the configured default deal owner.
+  // Validate the setting still points at an existing team member; if not, leave
+  // owner null rather than misroute the deal.
+  let resolvedOwnerId: string | null = body.ownerId ?? null
+  if (!resolvedOwnerId) {
+    const [setting] = await database
+      .select({ value: schema.settings.value })
+      .from(schema.settings)
+      .where(eq(schema.settings.key, 'pipeline.defaultDealOwnerId'))
+      .limit(1)
+    const candidate = setting?.value ?? null
+    if (candidate) {
+      const [member] = await database
+        .select({ id: schema.teamMembers.id })
+        .from(schema.teamMembers)
+        .where(eq(schema.teamMembers.id, candidate))
+        .limit(1)
+      if (member) resolvedOwnerId = member.id
+    }
+  }
+
   // Range handling: if both min and max supplied, compute midpoint as
   // the primary value. Otherwise use the supplied single value.
   const hasRange = body.valueMin != null && body.valueMax != null && body.valueMin !== body.valueMax
@@ -206,7 +227,7 @@ export async function POST(req: NextRequest) {
     title: body.title.trim(),
     orgId: body.orgId ?? null,
     stageId: body.stageId,
-    ownerId: body.ownerId ?? null,
+    ownerId: resolvedOwnerId,
     value: dealValue,
     currency: dealCurrency,
     valueNzd,
@@ -261,7 +282,7 @@ export async function POST(req: NextRequest) {
         valueMax,
         currency: dealCurrency,
         source: body.source ?? null,
-        ownerId: body.ownerId ?? null,
+        ownerId: resolvedOwnerId,
         orgId: body.orgId ?? null,
         expectedCloseDate: body.expectedCloseDate ?? null,
       },

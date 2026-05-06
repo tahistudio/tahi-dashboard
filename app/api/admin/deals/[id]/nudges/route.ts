@@ -70,6 +70,23 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     try {
       const fromEmail = process.env.RESEND_FROM_EMAIL ?? 'business@tahi.studio'
 
+      // Pull signature from settings and append to body. Stored as raw HTML
+      // under key `pipeline.nudgeSignatureHtml`. If unset/blank, send as-is.
+      let outgoingHtml = body.bodyHtml
+      try {
+        const [sigRow] = await database
+          .select({ value: schema.settings.value })
+          .from(schema.settings)
+          .where(eq(schema.settings.key, 'pipeline.nudgeSignatureHtml'))
+          .limit(1)
+        const signature = sigRow?.value?.trim()
+        if (signature) {
+          outgoingHtml = `${body.bodyHtml}<br><br>${signature}`
+        }
+      } catch {
+        // Signature lookup failed — send without rather than block the nudge.
+      }
+
       if (process.env.RESEND_API_KEY) {
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
@@ -81,7 +98,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             from: `Liam from Tahi Studio <${fromEmail}>`,
             to: body.contactEmails,
             subject: body.subject,
-            html: body.bodyHtml,
+            html: outgoingHtml,
           }),
         })
 
