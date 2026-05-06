@@ -35,6 +35,12 @@ interface DealData {
   valueMax: number | null
   valueMinNzd: number | null
   valueMaxNzd: number | null
+  /** Split-value model (migration 0023). Null on pre-migration deals. */
+  upfrontValue: number | null
+  upfrontValueNzd: number | null
+  monthlyValue: number | null
+  monthlyValueNzd: number | null
+  recurringStartDate: string | null
   source: string | null
   estimatedHoursPerWeek: number | null
   engagementType: string | null
@@ -677,6 +683,17 @@ export function DealDetail({ dealId }: { dealId: string }) {
 
           {/* Value */}
           <SidebarCard title="Value">
+            <ValueBreakdown
+              dealId={dealId}
+              upfrontValue={deal.upfrontValue}
+              monthlyValue={deal.monthlyValue}
+              recurringStartDate={deal.recurringStartDate}
+              engagementEndDate={deal.engagementEndDate}
+              expectedCloseDate={deal.expectedCloseDate}
+              closedAt={deal.closedAt}
+              currency={deal.currency}
+              onUpdated={fetchDeal}
+            />
             <EditableValue
               dealId={dealId}
               value={deal.value}
@@ -1418,6 +1435,229 @@ function ValueTrendline({
           return <circle key={i} cx={x} cy={y} r={2} fill={trendColor} />
         })}
       </svg>
+    </div>
+  )
+}
+
+/**
+ * Read-only breakdown of the split-value model (migration 0023). Shown
+ * above the legacy EditableValue when either upfront or monthly is set.
+ *
+ * For commit 3 this is a display-only summary plus inline edit for the
+ * monthly portion + recurring start. The upfront portion (with optional
+ * range) keeps using the existing EditableValue below us so users can
+ * still edit it the way they always have.
+ */
+function ValueBreakdown({
+  dealId,
+  upfrontValue,
+  monthlyValue,
+  recurringStartDate,
+  engagementEndDate,
+  expectedCloseDate,
+  closedAt,
+  currency,
+  onUpdated,
+}: {
+  dealId: string
+  upfrontValue: number | null
+  monthlyValue: number | null
+  recurringStartDate: string | null
+  engagementEndDate: string | null
+  expectedCloseDate: string | null
+  closedAt: string | null
+  currency: string
+  onUpdated: () => void
+}) {
+  const [editingMonthly, setEditingMonthly] = useState(false)
+  const [draftMonthly, setDraftMonthly] = useState(monthlyValue != null ? String(monthlyValue) : '')
+  const [draftRecurringStart, setDraftRecurringStart] = useState(recurringStartDate ?? '')
+  const [saving, setSaving] = useState(false)
+
+  // Hide the breakdown entirely for legacy deals that have neither field set.
+  const hasSplit = upfrontValue != null || monthlyValue != null
+  if (!hasSplit) return null
+
+  const monthly = monthlyValue ?? 0
+  const upfront = upfrontValue ?? 0
+  const total12 = upfront + monthly * 12
+
+  // Resolve the recurring start the same way the math lib does, for display.
+  const resolvedStart =
+    recurringStartDate ?? engagementEndDate ?? closedAt ?? expectedCloseDate ?? null
+
+  async function saveMonthly() {
+    setSaving(true)
+    try {
+      await fetch(apiPath(`/api/admin/deals/${dealId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          monthlyValue: parseFloat(draftMonthly) || 0,
+          recurringStartDate: draftRecurringStart || null,
+        }),
+      })
+      setEditingMonthly(false)
+      onUpdated()
+    } catch {
+      // silent
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      className="flex flex-col"
+      style={{
+        gap: '0.375rem',
+        padding: '0.625rem 0.75rem',
+        marginBottom: '0.625rem',
+        background: 'var(--color-bg-secondary)',
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--color-border-subtle)',
+      }}
+    >
+      {/* Upfront row */}
+      <div className="flex items-center justify-between" style={{ fontSize: '0.8125rem' }}>
+        <span style={{ color: 'var(--color-text-subtle)' }}>Upfront</span>
+        <span style={{ color: 'var(--color-text)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+          {upfront > 0 ? formatCurrency(upfront, currency) : '—'}
+        </span>
+      </div>
+
+      {/* Monthly row — click to edit */}
+      <div className="flex items-center justify-between" style={{ fontSize: '0.8125rem' }}>
+        <span style={{ color: 'var(--color-text-subtle)' }}>Monthly</span>
+        {editingMonthly ? (
+          <input
+            type="number"
+            value={draftMonthly}
+            onChange={(e) => setDraftMonthly(e.target.value)}
+            placeholder="0"
+            autoFocus
+            style={{
+              width: '6rem',
+              padding: '0.125rem 0.375rem',
+              fontSize: '0.8125rem',
+              textAlign: 'right',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--color-bg)',
+              color: 'var(--color-text)',
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setDraftMonthly(monthlyValue != null ? String(monthlyValue) : '')
+              setDraftRecurringStart(recurringStartDate ?? '')
+              setEditingMonthly(true)
+            }}
+            title="Click to edit monthly retainer"
+            style={{
+              padding: 0,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '0.8125rem',
+              fontWeight: 600,
+              color: 'var(--color-text)',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {monthly > 0 ? `${formatCurrency(monthly, currency)}/mo` : 'Add'}
+          </button>
+        )}
+      </div>
+
+      {/* Recurring start row — only when monthly > 0 or editing */}
+      {(monthly > 0 || editingMonthly) && (
+        <div className="flex items-center justify-between" style={{ fontSize: '0.75rem' }}>
+          <span style={{ color: 'var(--color-text-subtle)' }}>Starts</span>
+          {editingMonthly ? (
+            <input
+              type="date"
+              value={draftRecurringStart}
+              onChange={(e) => setDraftRecurringStart(e.target.value)}
+              style={{
+                padding: '0.125rem 0.375rem',
+                fontSize: '0.75rem',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+              }}
+            />
+          ) : (
+            <span style={{ color: 'var(--color-text-muted)' }}>
+              {resolvedStart
+                ? new Date(resolvedStart).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+                : 'on close'}
+              {!recurringStartDate && resolvedStart ? (
+                <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.6875rem' }}>
+                  {' '}(inferred)
+                </span>
+              ) : null}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Total 12-mo */}
+      <div
+        className="flex items-center justify-between"
+        style={{
+          fontSize: '0.75rem',
+          paddingTop: '0.375rem',
+          borderTop: '1px dashed var(--color-border-subtle)',
+        }}
+      >
+        <span style={{ color: 'var(--color-text-subtle)' }}>12-mo total</span>
+        <span style={{ color: 'var(--color-text-muted)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
+          {formatCurrency(total12, currency)}
+        </span>
+      </div>
+
+      {/* Save / Cancel for monthly edit */}
+      {editingMonthly && (
+        <div className="flex justify-end" style={{ gap: '0.375rem', marginTop: '0.25rem' }}>
+          <button
+            type="button"
+            onClick={() => setEditingMonthly(false)}
+            disabled={saving}
+            style={{
+              fontSize: '0.6875rem',
+              padding: '0.25rem 0.625rem',
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-bg)',
+              color: 'var(--color-text-muted)',
+              borderRadius: 'var(--radius-sm)',
+              cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => { void saveMonthly() }}
+            disabled={saving}
+            style={{
+              fontSize: '0.6875rem',
+              fontWeight: 600,
+              padding: '0.25rem 0.625rem',
+              border: 'none',
+              background: 'var(--color-brand)',
+              color: 'white',
+              borderRadius: 'var(--radius-sm)',
+              cursor: saving ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

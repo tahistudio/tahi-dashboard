@@ -1551,6 +1551,38 @@ function PipelineDefaultsSection({
             </TahiButton>
           </div>
         </div>
+
+        {/* Forecast horizon — drives "12-mo Total Pipeline" rollup, weighted
+            forecast, and the recurring-portion contribution to deal value. */}
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+          <label htmlFor="forecast-horizon" className="block text-sm font-medium text-[var(--color-text)]">
+            Pipeline forecast horizon
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5 mb-3">
+            Months of recurring revenue to roll into the headline pipeline number. 12 is the SaaS standard.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              id="forecast-horizon"
+              type="number"
+              min={1}
+              max={36}
+              defaultValue={settings['pipeline.forecastHorizonMonths'] ?? '12'}
+              onBlur={(e) => {
+                const v = e.currentTarget.value.trim()
+                const n = parseInt(v, 10)
+                const next = Number.isFinite(n) && n > 0 ? String(Math.min(36, Math.max(1, n))) : '12'
+                if (next !== (settings['pipeline.forecastHorizonMonths'] ?? '12')) {
+                  void onSave('pipeline.forecastHorizonMonths', next)
+                }
+              }}
+              disabled={savingKey === 'pipeline.forecastHorizonMonths'}
+              className="text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              style={{ width: '6rem', minHeight: '2.5rem' }}
+            />
+            <span className="text-sm text-[var(--color-text-muted)]">months</span>
+          </div>
+        </div>
       </div>
     </section>
   )

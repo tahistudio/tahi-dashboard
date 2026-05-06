@@ -11,7 +11,7 @@ import {
   Trophy, XCircle, Filter, X, Bell, BellOff,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
-import { calculatePipelineTotals, formatDealValue, rangeConfidenceLevel } from '@/lib/pipeline-math'
+import { calculatePipelineTotals, formatDealValue, formatDealValueSplit, rangeConfidenceLevel } from '@/lib/pipeline-math'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
 import { Pagination, usePagination } from '@/components/tahi/pagination'
@@ -53,6 +53,13 @@ interface Deal {
   valueMax: number | null
   valueMinNzd: number | null
   valueMaxNzd: number | null
+  /** Split-value model (migration 0023). Null for pre-migration deals. */
+  upfrontValue: number | null
+  upfrontValueNzd: number | null
+  monthlyValue: number | null
+  monthlyValueNzd: number | null
+  recurringStartDate: string | null
+  engagementEndDate: string | null
   source: string | null
   estimatedHoursPerWeek: number | null
   expectedCloseDate: string | null
@@ -297,10 +304,11 @@ export function PipelineContent() {
   const openDeals = filtered.filter(d => !d.stageIsClosedWon && !d.stageIsClosedLost)
   const closedDeals = filtered.filter(d => d.stageIsClosedWon || d.stageIsClosedLost)
   const pipelineTotals = calculatePipelineTotals(filtered, stages)
-  const totalValue = pipelineTotals.totalValue
-  const weightedForecast = pipelineTotals.weightedValue
-  const winRate = pipelineTotals.winRate
-  const avgDealSize = pipelineTotals.avgDealSize
+  const totalValue = pipelineTotals.totalValue          // upfront + monthly × horizon, summed
+  const weightedForecast = pipelineTotals.weightedValue // × stage probability
+  const totalMrr = pipelineTotals.totalMrr              // sum of monthly_value across open deals
+  const totalUpfront = pipelineTotals.totalUpfront      // sum of upfront_value across open deals
+  void closedDeals // retained for future reuse (was used by avg deal size + win rate)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
@@ -338,11 +346,31 @@ export function PipelineContent() {
       </PageHeader>
 
       <KPIStrip desktopCols={5}>
-        <KPICell icon={DollarSign} label="Pipeline Value"    value={formatCurrency(toDisplay(totalValue), displayCurrency)} />
-        <KPICell icon={Target}     label="Weighted Forecast" value={formatCurrency(toDisplay(weightedForecast), displayCurrency)} />
-        <KPICell icon={TrendingUp} label="Open Deals"        value={String(openDeals.length)} />
-        <KPICell icon={Award}      label="Win Rate"          value={closedDeals.length > 0 ? `${winRate}%` : '--'} />
-        <KPICell icon={BarChart3}  label="Avg Deal Size"     value={openDeals.length > 0 ? formatCurrency(toDisplay(avgDealSize), displayCurrency) : '--'} />
+        <KPICell
+          icon={TrendingUp}
+          label="Pipeline MRR"
+          value={totalMrr > 0 ? `${formatCurrency(toDisplay(totalMrr), displayCurrency)}/mo` : '--'}
+          sub="Monthly retainer across open deals"
+        />
+        <KPICell
+          icon={DollarSign}
+          label="Upfront"
+          value={totalUpfront > 0 ? formatCurrency(toDisplay(totalUpfront), displayCurrency) : '--'}
+          sub="One-off project value, open deals"
+        />
+        <KPICell
+          icon={BarChart3}
+          label="Total Pipeline"
+          value={formatCurrency(toDisplay(totalValue), displayCurrency)}
+          sub="Upfront + monthly × horizon"
+        />
+        <KPICell
+          icon={Target}
+          label="Weighted Forecast"
+          value={formatCurrency(toDisplay(weightedForecast), displayCurrency)}
+          sub="× stage probability"
+        />
+        <KPICell icon={Award} label="Open Deals" value={String(openDeals.length)} />
       </KPIStrip>
 
       {/* Toolbar */}
@@ -1132,14 +1160,30 @@ function DealCard({ deal, displayCurrency, toDisplay }: { deal: Deal; displayCur
   const srcLabel = deal.source ? (SOURCE_LABELS[deal.source] ?? deal.source) : null
   const srcStyle = deal.source ? sourceBadge(deal.source) : null
   const hasRange = deal.valueMinNzd != null && deal.valueMaxNzd != null && deal.valueMinNzd !== deal.valueMaxNzd
+  // Show "$10k + $2k/mo" when the split-value model has either side set;
+  // fall back to the legacy single number for pre-migration deals.
+  const hasSplit = (deal.upfrontValueNzd ?? deal.upfrontValue) != null ||
+    (deal.monthlyValueNzd ?? deal.monthlyValue) != null
   const pointValue = deal.valueNzd ?? deal.value ?? 0
-  // Format the value display — range uses min/max in NZD, single uses midpoint.
-  const valueLabel = hasRange
-    ? formatDealValue(
-        { value: pointValue, valueMin: deal.valueMinNzd, valueMax: deal.valueMaxNzd },
+  const valueLabel = hasSplit
+    ? formatDealValueSplit(
+        {
+          upfrontValueNzd: deal.upfrontValueNzd,
+          upfrontValue: deal.upfrontValue,
+          monthlyValueNzd: deal.monthlyValueNzd,
+          monthlyValue: deal.monthlyValue,
+          valueMin: deal.valueMinNzd,
+          valueMax: deal.valueMaxNzd,
+          value: pointValue,
+        },
         n => formatCurrency(toDisplay(n), displayCurrency),
       )
-    : (pointValue > 0 ? formatCurrency(toDisplay(pointValue), displayCurrency) : 'TBD')
+    : hasRange
+      ? formatDealValue(
+          { value: pointValue, valueMin: deal.valueMinNzd, valueMax: deal.valueMaxNzd },
+          n => formatCurrency(toDisplay(n), displayCurrency),
+        )
+      : (pointValue > 0 ? formatCurrency(toDisplay(pointValue), displayCurrency) : 'TBD')
   // Range confidence dot: tight = green, rough = amber, speculative = red.
   const confLevel = hasRange
     ? rangeConfidenceLevel({ stageId: deal.stageId, valueMin: deal.valueMinNzd, valueMax: deal.valueMaxNzd })
@@ -1511,10 +1555,14 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
     const def = stages.find(s => s.isDefault)
     return def?.id ?? stages[0]?.id ?? ''
   })
-  const [value, setValue] = useState('')
+  // Split-value model: upfront (project portion, optionally a range) and
+  // monthly (retainer portion). Either or both can be set.
+  const [upfrontValue, setUpfrontValue] = useState('')
   const [valueMin, setValueMin] = useState('')
   const [valueMax, setValueMax] = useState('')
   const [isRange, setIsRange] = useState(false)
+  const [monthlyValue, setMonthlyValue] = useState('')
+  const [recurringStartDate, setRecurringStartDate] = useState('')
   // Default new-deal currency to the user's nav preference. Override per-deal.
   const [currency, setCurrency] = useState<string>(navCurrency)
   const [source, setSource] = useState('')
@@ -1551,13 +1599,22 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
         expectedCloseDate: expectedCloseDate || undefined,
         orgId: orgId || undefined,
       }
+      // Upfront with optional range
       if (isRange) {
         const min = parseFloat(valueMin) || 0
         const max = parseFloat(valueMax) || 0
         payload.valueMin = Math.min(min, max)
         payload.valueMax = Math.max(min, max)
+        // Server uses midpoint as upfrontValue when range is set.
       } else {
-        payload.value = parseFloat(value) || 0
+        const upfront = parseFloat(upfrontValue) || 0
+        if (upfront > 0) payload.upfrontValue = upfront
+      }
+      // Monthly retainer
+      const monthly = parseFloat(monthlyValue) || 0
+      if (monthly > 0) {
+        payload.monthlyValue = monthly
+        if (recurringStartDate) payload.recurringStartDate = recurringStartDate
       }
       const res = await fetch(apiPath('/api/admin/deals'), {
         method: 'POST',
@@ -1641,11 +1698,11 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
             </select>
           </div>
 
-          {/* Value + Currency */}
+          {/* Upfront value (project portion) \u2014 single number or range */}
           <div>
             <div className="flex items-center justify-between" style={{ marginBottom: '0.375rem' }}>
               <label className="block font-medium" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-                {isRange ? 'Value range' : 'Value'}
+                {isRange ? 'Upfront range (project)' : 'Upfront (project)'}
               </label>
               <button
                 type="button"
@@ -1717,8 +1774,8 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
               <div className="grid grid-cols-2 gap-3">
                 <input
                   type="number"
-                  value={value}
-                  onChange={e => setValue(e.target.value)}
+                  value={upfrontValue}
+                  onChange={e => setUpfrontValue(e.target.value)}
                   placeholder="0"
                   className="w-full rounded-lg"
                   style={{
@@ -1761,8 +1818,8 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
                 </p>
               )
             })()}
-            {!isRange && value && currency !== 'NZD' && !loadingRates && (() => {
-              const numVal = parseFloat(value)
+            {!isRange && upfrontValue && currency !== 'NZD' && !loadingRates && (() => {
+              const numVal = parseFloat(upfrontValue)
               if (isNaN(numVal) || numVal <= 0) return null
               const rate = exchangeRates[currency]
               if (!rate || rate <= 0) return null
@@ -1773,6 +1830,56 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
                 </p>
               )
             })()}
+          </div>
+
+          {/* Monthly retainer + (conditional) recurring start date */}
+          <div>
+            <label className="block font-medium" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
+              Monthly retainer
+              <span style={{ color: 'var(--color-text-subtle)', fontWeight: 400 }}> (optional)</span>
+            </label>
+            <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
+              <input
+                type="number"
+                value={monthlyValue}
+                onChange={e => setMonthlyValue(e.target.value)}
+                placeholder="0"
+                className="w-full rounded-lg"
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  fontSize: '0.875rem',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  color: 'var(--color-text)',
+                  minHeight: '2.75rem',
+                }}
+              />
+              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)' }}>
+                {currency}/mo
+              </span>
+            </div>
+            {parseFloat(monthlyValue) > 0 && (
+              <div style={{ marginTop: '0.625rem' }}>
+                <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }}>
+                  Recurring starts on
+                  <span style={{ fontWeight: 400 }}> (optional \u2014 defaults to project end / deal close)</span>
+                </label>
+                <input
+                  type="date"
+                  value={recurringStartDate}
+                  onChange={e => setRecurringStartDate(e.target.value)}
+                  className="w-full rounded-lg cursor-pointer"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.875rem',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    minHeight: '2.75rem',
+                  }}
+                />
+              </div>
+            )}
           </div>
 
           {/* Source */}
