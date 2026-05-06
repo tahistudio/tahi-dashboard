@@ -63,12 +63,19 @@ export async function POST(req: NextRequest) {
 
     // Build an absolute upload URL so it works regardless of environment
     // (production, preview, localhost). Use the request's own origin.
+    //
+    // CRITICAL: Next.js basePath (/dashboard) is NOT auto-prepended to
+    // absolute URLs we construct ourselves. Without this prefix the PUT
+    // 404s in production because the actual route lives at
+    // `/dashboard/api/uploads/proxy`. We read NEXT_PUBLIC_BASEPATH from
+    // env (set in next.config.ts) and prepend explicitly.
     const forwardedHost = req.headers.get('x-forwarded-host')
     const forwardedProto = req.headers.get('x-forwarded-proto') ?? 'https'
     const origin = req.headers.get('origin')
       ?? (forwardedHost ? `${forwardedProto}://${forwardedHost}` : null)
       ?? new URL(req.url).origin
-    const proxyPath = `/api/uploads/proxy?key=${encodeURIComponent(storageKey)}&token=${fileId}`
+    const basePath = process.env.NEXT_PUBLIC_BASEPATH ?? ''
+    const proxyPath = `${basePath}/api/uploads/proxy?key=${encodeURIComponent(storageKey)}&token=${fileId}`
 
     return NextResponse.json({
       uploadUrl: `${origin}${proxyPath}`,
