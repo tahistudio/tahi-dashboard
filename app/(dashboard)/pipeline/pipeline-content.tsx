@@ -226,8 +226,12 @@ export function PipelineContent() {
     void loadTeam()
   }, [])
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
+  // fetchData(silent=true) re-fetches without flashing the loading skeleton.
+  // Used after optimistic mutations (drag-drop, close, create) so the user
+  // never sees a skeleton flash while the server confirms what they already
+  // see on screen.
+  const fetchData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const [stagesRes, dealsRes] = await Promise.all([
         fetch(apiPath('/api/admin/pipeline/stages')),
@@ -237,7 +241,7 @@ export function PipelineContent() {
         const sData = await stagesRes.json() as { stages: PipelineStage[] }
         const fetched = sData.stages ?? []
         setStages(fetched.length > 0 ? fetched : DEFAULT_STAGES)
-      } else {
+      } else if (!silent) {
         setStages(DEFAULT_STAGES)
       }
       if (dealsRes.ok) {
@@ -245,10 +249,17 @@ export function PipelineContent() {
         setDeals(dData.items ?? [])
       }
     } catch {
-      setStages(DEFAULT_STAGES)
+      if (!silent) setStages(DEFAULT_STAGES)
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
+  }, [])
+
+  // Apply a partial update to a deal in local state — used by KanbanView
+  // for optimistic drag-drop updates so the card moves instantly without
+  // waiting for the server.
+  const mutateDealLocal = useCallback((dealId: string, update: Partial<Deal>) => {
+    setDeals(prev => prev.map(d => d.id === dealId ? { ...d, ...update } : d))
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -588,7 +599,8 @@ export function PipelineContent() {
         <KanbanView
           deals={filtered}
           stages={stages}
-          onStageChange={fetchData}
+          onMutateDealLocal={mutateDealLocal}
+          onSilentRevalidate={() => fetchData(true)}
           displayCurrency={displayCurrency}
           toDisplay={toDisplay}
         />
@@ -611,7 +623,8 @@ export function PipelineContent() {
           onCreated={() => {
             setShowNewDeal(false)
             setInitialOrgId(null)
-            fetchData()
+            // Silent revalidate — the new deal will appear without a skeleton flash.
+            fetchData(true)
           }}
         />
       )}
@@ -662,10 +675,13 @@ function LoadingSkeleton() {
 
 // ---- Kanban View ---------------------------------------------------------
 
-function KanbanView({ deals, stages, onStageChange, displayCurrency, toDisplay }: {
+function KanbanView({ deals, stages, onMutateDealLocal, onSilentRevalidate, displayCurrency, toDisplay }: {
   deals: Deal[]
   stages: PipelineStage[]
-  onStageChange: () => void
+  /** Apply a partial update to a deal in the parent's state for optimistic UI. */
+  onMutateDealLocal: (dealId: string, update: Partial<Deal>) => void
+  /** Trigger a background re-fetch without flashing the loading skeleton. */
+  onSilentRevalidate: () => void
   displayCurrency: string
   toDisplay: (nzd: number) => number
 }) {
@@ -687,7 +703,7 @@ function KanbanView({ deals, stages, onStageChange, displayCurrency, toDisplay }
     const fromStageId = e.dataTransfer.getData('fromStageId')
     if (!dealId || fromStageId === newStageId) return
 
-    // Check if the target stage is a closed Won or Lost stage
+    // Check if the target stage is a closed Won or Lost stage — defer to dialog
     const targetStage = stages.find(s => s.id === newStageId)
     if (targetStage && (targetStage.isClosedWon || targetStage.isClosedLost)) {
       const deal = deals.find(d => d.id === dealId)
@@ -700,22 +716,49 @@ function KanbanView({ deals, stages, onStageChange, displayCurrency, toDisplay }
       return
     }
 
+    // Optimistic update: move the card immediately. If the PATCH fails we revert.
+    const snapshot = deals.find(d => d.id === dealId)
+    if (!snapshot) return
+    onMutateDealLocal(dealId, {
+      stageId: newStageId,
+      stageName: targetStage?.name ?? snapshot.stageName,
+      stageColour: targetStage?.colour ?? snapshot.stageColour,
+      stageProbability: targetStage?.probability ?? snapshot.stageProbability,
+      stageIsClosedWon: targetStage?.isClosedWon ?? 0,
+      stageIsClosedLost: targetStage?.isClosedLost ?? 0,
+    })
     try {
-      await fetch(apiPath(`/api/admin/deals/${dealId}`), {
+      const res = await fetch(apiPath(`/api/admin/deals/${dealId}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stageId: newStageId }),
       })
-      onStageChange()
+      if (!res.ok) throw new Error(`Status ${res.status}`)
+      // Background revalidate to pick up server-derived fields (closedAt, etc.)
+      onSilentRevalidate()
     } catch {
-      // silent
+      // Revert
+      onMutateDealLocal(dealId, snapshot)
     }
   }
 
   const handleCloseConfirm = async (payload: { wonSource?: string; lostReason?: string }) => {
     if (!pendingClose) return
+    // Optimistic update: move the card to the target Won/Lost stage immediately.
+    const snapshot = deals.find(d => d.id === pendingClose.dealId)
+    const targetStage = stages.find(s => s.id === pendingClose.stageId)
+    if (snapshot) {
+      onMutateDealLocal(pendingClose.dealId, {
+        stageId: pendingClose.stageId,
+        stageName: targetStage?.name ?? snapshot.stageName,
+        stageColour: targetStage?.colour ?? snapshot.stageColour,
+        stageProbability: targetStage?.probability ?? snapshot.stageProbability,
+        stageIsClosedWon: targetStage?.isClosedWon ?? 0,
+        stageIsClosedLost: targetStage?.isClosedLost ?? 0,
+      })
+    }
     try {
-      await fetch(apiPath(`/api/admin/deals/${pendingClose.dealId}`), {
+      const res = await fetch(apiPath(`/api/admin/deals/${pendingClose.dealId}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -725,8 +768,10 @@ function KanbanView({ deals, stages, onStageChange, displayCurrency, toDisplay }
           ...(payload.lostReason ? { lostReason: payload.lostReason } : {}),
         }),
       })
-      onStageChange()
+      if (!res.ok) throw new Error(`Status ${res.status}`)
+      onSilentRevalidate()
     } catch {
+      if (snapshot) onMutateDealLocal(pendingClose.dealId, snapshot)
       // silent
     } finally {
       setPendingClose(null)
