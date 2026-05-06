@@ -107,20 +107,19 @@ export function useShareViewTracking({
       const additional = Array.from(pendingPagesRef.current)
       const body = JSON.stringify({ sessionId: sid, pagesViewed: additional })
       try {
-        // sendBeacon is fastest + survives page unload; fall back to fetch.
+        // fetch + keepalive is the modern equivalent of sendBeacon: the
+        // request continues even if the page is unloading. Unlike
+        // sendBeacon it sets Content-Type: application/json cleanly, which
+        // matters because the server parses with req.json(). sendBeacon's
+        // Blob-based content-type behaviour caused beacons to silently
+        // 400 in our earlier QA — keepalive is more reliable end-to-end.
         const url = apiPath(`/api/public/views/${viewId}`)
-        if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-          const blob = new Blob([body], { type: 'application/json' })
-          navigator.sendBeacon(url, blob)
-        } else {
-          // keepalive ensures the request completes even on unload.
-          fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body,
-            keepalive: true,
-          }).catch(() => {})
-        }
+        fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          keepalive: true,
+        }).catch(() => {})
         // Whatever pages we just sent are persisted server-side; clear local.
         pendingPagesRef.current = new Set()
       } catch {
