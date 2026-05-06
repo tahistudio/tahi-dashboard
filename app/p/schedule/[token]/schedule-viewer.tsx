@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import { GanttGrid, type GanttRow } from '@/components/tahi/gantt-grid'
 import { GanttLegend } from '@/components/tahi/gantt-legend'
-import { LeafLogo } from '@/components/tahi/leaf-logo'
 import { apiPath } from '@/lib/api'
 import { useShareViewTracking } from '@/components/tahi/use-share-view-tracking'
 
@@ -179,13 +178,25 @@ export function ScheduleViewer({ token }: { token: string }) {
 // ─── Sub-components ──────────────────────────────────────────────────────
 
 function BrandMark({ size = 'md' }: { size?: 'sm' | 'md' }) {
-  // Wraps the dashboard's LeafLogo + the Tahi Studio wordmark in a layout
-  // suited for the cover (small leaf, name beside it). We don't include
-  // the "Dashboard" subtitle from the dashboard's wordmark — this is the
-  // public-facing brand mark.
+  // Uses the actual Tahi brand favicon (the dark-green circle with the
+  // leaf + numeral) which is designed for light surfaces. The pale
+  // tahi-logo.png wordmark is the inverted variant for dark backgrounds
+  // like the dashboard sidebar — would disappear on this white cover.
+  const dim = size === 'sm' ? '1.25rem' : '1.625rem'
+  /* eslint-disable-next-line @next/next/no-img-element */
   return (
     <div className="inline-flex items-center" style={{ gap: '0.5rem' }}>
-      <LeafLogo size={size === 'sm' ? 'sm' : 'sm'} />
+      <img
+        src="/dashboard/favicon.png"
+        alt=""
+        aria-hidden="true"
+        style={{
+          width: dim,
+          height: dim,
+          display: 'block',
+          flexShrink: 0,
+        }}
+      />
       <span
         style={{
           fontSize: size === 'sm' ? '0.8125rem' : '0.9375rem',
