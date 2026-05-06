@@ -1708,6 +1708,29 @@ export const proposalAcceptances = sqliteTable('proposal_acceptances', {
 // public token for all signers, but signerId param tells the server which
 // row to mark as signed.
 
+/**
+ * Proposal templates — reusable proposal blueprints that can be instantiated
+ * with one click into a real proposal. The `snapshot` field stores a frozen
+ * copy of the sections + variants at template-save time. At create time
+ * the snapshot is unpacked into fresh proposal_sections + proposal_variants
+ * rows, with optional {{variable}} substitution applied across all HTML
+ * content (mirroring contract templates).
+ */
+export const proposalTemplates = sqliteTable('proposal_templates', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
+  description: text('description'),
+  // Frozen JSON. Shape:
+  //   { title, subtitle, sections: [{type, title, subtitle, data, position}],
+  //     variants: [{name, tagline, oneOffAmount, monthlyAmount, currency,
+  //                 scopeHtml, pricingNotesHtml, ctaLabel, isFeatured, position}] }
+  snapshot: text('snapshot').notNull(),
+  // Optional declarative variable definitions for the form when creating.
+  variableDefs: text('variable_defs'),
+  createdById: text('created_by_id').notNull(),
+  ...timestamps,
+})
+
 export const contractTemplates = sqliteTable('contract_templates', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text('name').notNull(),

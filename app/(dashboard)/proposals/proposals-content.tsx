@@ -35,21 +35,33 @@ const STATUS_STYLE: Record<string, { bg: string; fg: string; label: string }> = 
   expired: { bg: 'var(--color-bg-secondary)', fg: 'var(--color-text-subtle)', label: 'Expired' },
 }
 
+interface TemplateOption { id: string; name: string; description: string | null }
+
 export function ProposalsContent() {
   const router = useRouter()
   const { showToast } = useToast()
   const [items, setItems] = useState<ProposalListItem[]>([])
+  const [templates, setTemplates] = useState<TemplateOption[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [creating, setCreating] = useState(false)
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(apiPath('/api/admin/proposals'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { items: ProposalListItem[] }
-      setItems(data.items ?? [])
+      const [pRes, tRes] = await Promise.all([
+        fetch(apiPath('/api/admin/proposals')),
+        fetch(apiPath('/api/admin/proposals/templates')),
+      ])
+      if (pRes.ok) {
+        const data = await pRes.json() as { items: ProposalListItem[] }
+        setItems(data.items ?? [])
+      }
+      if (tRes.ok) {
+        const data = await tRes.json() as { items: TemplateOption[] }
+        setTemplates(data.items ?? [])
+      }
     } catch {
       setItems([])
     } finally {
@@ -70,7 +82,7 @@ export function ProposalsContent() {
     )
   })
 
-  async function handleCreate() {
+  async function createBlankProposal() {
     setCreating(true)
     try {
       const res = await fetch(apiPath('/api/admin/proposals'), {
@@ -93,6 +105,35 @@ export function ProposalsContent() {
     } finally {
       setCreating(false)
     }
+  }
+
+  async function createFromTemplate(templateId: string, title: string) {
+    setCreating(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/proposals'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          templateId,
+          seedDefaults: false,
+        }),
+      })
+      const data = await res.json() as { id?: string }
+      if (res.ok && data.id) {
+        router.push(`/proposals/${data.id}`)
+      } else {
+        showToast('Failed to create from template', 'error')
+      }
+    } catch {
+      showToast('Failed to create from template', 'error')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  function handleCreate() {
+    setShowCreateDialog(true)
   }
 
   return (
@@ -210,6 +251,86 @@ export function ProposalsContent() {
           })}
         </div>
       )}
+
+      {showCreateDialog && (
+        <CreateProposalDialog
+          templates={templates}
+          creating={creating}
+          onClose={() => setShowCreateDialog(false)}
+          onPickBlank={() => { setShowCreateDialog(false); void createBlankProposal() }}
+          onPickTemplate={(t) => { setShowCreateDialog(false); void createFromTemplate(t.id, t.name) }}
+        />
+      )}
+    </div>
+  )
+}
+
+function CreateProposalDialog({
+  templates, creating, onClose, onPickBlank, onPickTemplate,
+}: {
+  templates: TemplateOption[]
+  creating: boolean
+  onClose: () => void
+  onPickBlank: () => void
+  onPickTemplate: (t: TemplateOption) => void
+}) {
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
+      <div
+        className="bg-[var(--color-bg)] rounded-xl shadow-xl w-full max-w-md"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="px-6 pt-6 pb-2">
+          <h2 className="text-lg font-bold text-[var(--color-text)]">New proposal</h2>
+          <p className="text-sm text-[var(--color-text-muted)] mt-1">Start from blank or instantiate from a saved template.</p>
+        </div>
+        <div className="px-6 pb-6 space-y-2">
+          <button
+            onClick={onPickBlank}
+            disabled={creating}
+            className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-lg border border-[var(--color-border)] hover:border-[var(--color-brand)] hover:bg-[var(--color-brand-50)] transition-colors"
+          >
+            <span className="inline-flex items-center justify-center" style={{ width: '2rem', height: '2rem', background: 'var(--color-bg-tertiary)', borderRadius: '0 12px 0 12px' }}>
+              <Plus size={14} className="text-[var(--color-text-muted)]" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-[var(--color-text)]">Blank proposal</div>
+              <div className="text-xs text-[var(--color-text-muted)]">Start from scratch with one default section.</div>
+            </div>
+          </button>
+          {templates.length > 0 && (
+            <>
+              <div className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wide pt-3 pb-1">Templates</div>
+              {templates.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => onPickTemplate(t)}
+                  disabled={creating}
+                  className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-lg border border-[var(--color-border)] hover:border-[var(--color-brand)] hover:bg-[var(--color-brand-50)] transition-colors"
+                >
+                  <span className="inline-flex items-center justify-center" style={{ width: '2rem', height: '2rem', background: 'var(--color-brand-50)', borderRadius: '0 12px 0 12px' }}>
+                    <span className="text-sm font-bold text-[var(--color-brand-dark)]">{t.name.slice(0, 1).toUpperCase()}</span>
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-[var(--color-text)] truncate">{t.name}</div>
+                    {t.description && <div className="text-xs text-[var(--color-text-muted)] truncate">{t.description}</div>}
+                  </div>
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+        <div className="px-6 pb-6 flex justify-end">
+          <button
+            onClick={onClose}
+            disabled={creating}
+            className="text-sm font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

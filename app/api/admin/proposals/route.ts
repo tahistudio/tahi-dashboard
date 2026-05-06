@@ -6,6 +6,57 @@ import { eq, desc, and } from 'drizzle-orm'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
+// ── Template snapshot shape — frozen on save, unpacked on create ─────
+interface TemplateSection {
+  type: string
+  title: string | null
+  subtitle: string | null
+  data: unknown
+  position: number
+}
+interface TemplateVariant {
+  name: string
+  tagline: string | null
+  oneOffAmount: number
+  monthlyAmount: number
+  currency: string
+  scopeHtml: string | null
+  pricingNotesHtml: string | null
+  ctaLabel: string | null
+  isFeatured: number
+  position: number
+}
+interface TemplateSnapshot {
+  title?: string | null
+  subtitle?: string | null
+  sections?: TemplateSection[]
+  variants?: TemplateVariant[]
+}
+
+// HTML-escape variable values to prevent injection. Template HTML itself
+// is admin-authored and trusted; variable VALUES come from a form so are
+// escaped before substitution (mirrors contract template variable handling).
+function htmlEscape(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
+}
+function substituteVariables(template: string, values: Record<string, string>): string {
+  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key: string) => {
+    const v = values[key]
+    return v != null ? htmlEscape(v) : match
+  })
+}
+// Recursively walk a JSON-shape and substitute in any string fields.
+function substituteInTree(node: unknown, values: Record<string, string>): unknown {
+  if (typeof node === 'string') return substituteVariables(node, values)
+  if (Array.isArray(node)) return node.map(n => substituteInTree(n, values))
+  if (node && typeof node === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(node)) out[k] = substituteInTree(v, values)
+    return out
+  }
+  return node
+}
+
 // ── GET /api/admin/proposals ──────────────────────────────────────────
 // List with filters: orgId, dealId, status. Joins org + deal names.
 export async function GET(req: NextRequest) {
@@ -72,6 +123,10 @@ export async function POST(req: NextRequest) {
     /** If true, seed a default variant + cover section so the new proposal
      *  isn't visually empty when the user opens the editor. */
     seedDefaults?: boolean
+    /** When set, snapshot from this proposal template is unpacked into
+     *  fresh sections + variants. Variable values fill {{slot}} placeholders. */
+    templateId?: string
+    variableValues?: Record<string, string>
   }
 
   if (!body.title?.trim()) {
@@ -82,12 +137,25 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
+  // Load template snapshot if requested.
+  let templateSnapshot: TemplateSnapshot | null = null
+  if (body.templateId) {
+    const [tpl] = await database
+      .select({ snapshot: schema.proposalTemplates.snapshot })
+      .from(schema.proposalTemplates)
+      .where(eq(schema.proposalTemplates.id, body.templateId))
+      .limit(1)
+    if (!tpl) return NextResponse.json({ error: 'Template not found' }, { status: 404 })
+    try { templateSnapshot = JSON.parse(tpl.snapshot) as TemplateSnapshot }
+    catch { return NextResponse.json({ error: 'Template snapshot is corrupt' }, { status: 500 }) }
+  }
+
   await database.insert(schema.proposals).values({
     id,
     orgId: body.orgId ?? null,
     dealId: body.dealId ?? null,
     title: body.title.trim(),
-    subtitle: body.subtitle?.trim() ?? null,
+    subtitle: body.subtitle?.trim() ?? templateSnapshot?.subtitle ?? null,
     preparedFor: body.preparedFor?.trim() ?? null,
     preparedBy: body.preparedBy?.trim() ?? null,
     effectiveDate: body.effectiveDate ?? null,
@@ -100,6 +168,56 @@ export async function POST(req: NextRequest) {
 
   let defaultVariantId: string | null = null
   let defaultSectionId: string | null = null
+
+  // ── Unpack template snapshot if provided ────────────────────────────
+  if (templateSnapshot) {
+    const subst = (s: string | null | undefined): string | null => {
+      if (s == null) return null
+      return substituteVariables(s, body.variableValues ?? {})
+    }
+    if (templateSnapshot.sections?.length) {
+      const sectionRows = templateSnapshot.sections.map(s => ({
+        id: crypto.randomUUID(),
+        proposalId: id,
+        type: s.type,
+        title: subst(s.title),
+        subtitle: subst(s.subtitle),
+        data: s.data ? JSON.stringify(substituteInTree(s.data, body.variableValues ?? {})) : null,
+        position: s.position ?? 0,
+        createdAt: now,
+        updatedAt: now,
+      }))
+      // D1 bind-cap: section row uses 9 columns, so 11 rows max per insert.
+      // Stay at 9 to be safe.
+      for (let i = 0; i < sectionRows.length; i += 9) {
+        await database.insert(schema.proposalSections).values(sectionRows.slice(i, i + 9))
+      }
+      defaultSectionId = sectionRows[0]?.id ?? null
+    }
+    if (templateSnapshot.variants?.length) {
+      const variantRows = templateSnapshot.variants.map((v, idx) => ({
+        id: crypto.randomUUID(),
+        proposalId: id,
+        name: subst(v.name) ?? `Package ${idx + 1}`,
+        tagline: subst(v.tagline),
+        oneOffAmount: v.oneOffAmount ?? 0,
+        monthlyAmount: v.monthlyAmount ?? 0,
+        currency: v.currency ?? 'NZD',
+        scopeHtml: subst(v.scopeHtml),
+        pricingNotesHtml: subst(v.pricingNotesHtml),
+        ctaLabel: subst(v.ctaLabel),
+        isFeatured: v.isFeatured ?? 0,
+        position: v.position ?? idx,
+        createdAt: now,
+        updatedAt: now,
+      }))
+      for (let i = 0; i < variantRows.length; i += 8) {
+        await database.insert(schema.proposalVariants).values(variantRows.slice(i, i + 8))
+      }
+      defaultVariantId = variantRows.find(v => v.isFeatured)?.id ?? variantRows[0]?.id ?? null
+    }
+    return NextResponse.json({ id, defaultVariantId, defaultSectionId, fromTemplate: true }, { status: 201 })
+  }
 
   if (body.seedDefaults !== false) {
     // Seed a single Standard variant so the editor + viewer have something

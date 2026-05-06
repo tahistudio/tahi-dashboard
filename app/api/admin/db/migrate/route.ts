@@ -602,6 +602,22 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_project_schedules_proposal ON project_schedules(proposal_id)`,
     ],
   },
+  {
+    name: '0030',
+    description: 'Phase 7 proposal templates: reusable proposal blueprints. snapshot column stores the frozen sections + variants payload. Instantiated into fresh rows at create time.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS proposal_templates (
+        id text PRIMARY KEY NOT NULL,
+        name text NOT NULL,
+        description text,
+        snapshot text NOT NULL,
+        variable_defs text,
+        created_by_id text NOT NULL,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

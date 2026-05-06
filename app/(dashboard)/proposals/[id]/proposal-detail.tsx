@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink, Mail } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink, Mail, BookmarkPlus } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
@@ -280,6 +280,25 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
     }
   }
 
+  async function saveAsTemplate() {
+    const name = window.prompt('Save this proposal as a reusable template. Template name:', proposal?.title ?? '')
+    if (!name?.trim()) return
+    try {
+      const res = await fetch(apiPath('/api/admin/proposals/templates'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          fromProposalId: proposalId,
+        }),
+      })
+      if (!res.ok) throw new Error('Failed')
+      showToast('Template saved.', 'success')
+    } catch {
+      showToast('Could not save template.', 'error')
+    }
+  }
+
   async function deleteProposal() {
     try {
       const res = await fetch(apiPath(`/api/admin/proposals/${proposalId}`), { method: 'DELETE' })
@@ -374,6 +393,10 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
             {sharing ? 'Generating…' : 'Get public link'}
           </button>
         )}
+        <button onClick={saveAsTemplate} className="inline-flex items-center" style={toolbarBtn} title="Save the current sections + variants as a reusable template">
+          <BookmarkPlus size={13} />
+          Save as template
+        </button>
         <button onClick={() => { if (window.confirm('Delete this proposal? Cannot be undone.')) deleteProposal() }} className="inline-flex items-center" style={{ ...toolbarBtn, color: 'var(--color-text-subtle)' }}>
           <Trash2 size={13} />
           Delete
