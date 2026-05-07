@@ -59,7 +59,6 @@ const ADMIN_NAV: NavGroup[] = [
     items: [
       { label: 'Pipeline',           href: '/pipeline',            icon: TrendingUp,    adminOnly: true },
       { label: 'Proposals',          href: '/proposals',           icon: FileText,      adminOnly: true },
-      { label: 'Proposal templates', href: '/proposals/templates', icon: Layers,        adminOnly: true },
       { label: 'Schedules',          href: '/schedules',           icon: Calendar,      adminOnly: true },
       { label: 'Contracts',          href: '/contracts',           icon: FileSignature, adminOnly: true },
       { label: 'Project calculator', href: '/calculator',          icon: Calculator,    adminOnly: true },

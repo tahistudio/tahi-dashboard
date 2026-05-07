@@ -13,10 +13,11 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Calculator as CalcIcon, Check, Save } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { ArrowLeft, Calculator as CalcIcon, Check, FileSignature, FileText, Calendar, Save } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
-import type { CalculationInputs, CalculationOutputs, ProjectType, RetainerPlan, ClientRelationship, Currency } from '@/lib/calculator/types'
+import type { CalculationInputs, CalculationOutputs, ProjectType, RetainerPlan, ClientRelationship, Currency, ScopeCategory, ScopeLine, DeliveryMode } from '@/lib/calculator/types'
 
 interface SavedCalculation {
   id: string
@@ -31,14 +32,22 @@ interface SavedCalculation {
   updatedAt: string
 }
 
+const SCOPE_META: Record<ScopeCategory, { label: string; hint: string; defaultHours: number; defaultRate: number }> = {
+  webflow:     { label: 'Webflow build', hint: 'Layout, CMS, interactions', defaultHours: 60, defaultRate: 95 },
+  engineering: { label: 'Engineering',   hint: 'Custom code, integrations, attribution', defaultHours: 30, defaultRate: 110 },
+  design:      { label: 'Design',        hint: 'UI/UX, brand application',  defaultHours: 50, defaultRate: 90 },
+  strategy:    { label: 'Strategy',      hint: 'Discovery, IA, AEO, content', defaultHours: 20, defaultRate: 100 },
+}
+
+const SCOPE_KEYS: ScopeCategory[] = ['webflow', 'engineering', 'design', 'strategy']
+
 const DEFAULT_INPUTS: CalculationInputs = {
   projectType: 'project_plus_retainer',
   scope: {
-    estimatedDevHours: 80,
-    estimatedDesignHours: 60,
-    estimatedStrategyHours: 20,
-    contractorHours: 0,
-    contractorRate: 0,
+    webflow:     { hours: SCOPE_META.webflow.defaultHours,     delivery: 'ourselves', contractorRate: SCOPE_META.webflow.defaultRate },
+    engineering: { hours: SCOPE_META.engineering.defaultHours, delivery: 'ourselves', contractorRate: SCOPE_META.engineering.defaultRate },
+    design:      { hours: SCOPE_META.design.defaultHours,      delivery: 'ourselves', contractorRate: SCOPE_META.design.defaultRate },
+    strategy:    { hours: SCOPE_META.strategy.defaultHours,    delivery: 'ourselves', contractorRate: SCOPE_META.strategy.defaultRate },
     toolLicenceCost: 0,
   },
   timeline: {
@@ -58,6 +67,24 @@ const DEFAULT_INPUTS: CalculationInputs = {
     isReturning: false,
   },
   notes: '',
+}
+
+/** Add weeks to a YYYY-MM-DD date and return the same format. */
+function addWeeks(isoDate: string, weeks: number): string {
+  const d = new Date(isoDate)
+  if (Number.isNaN(d.getTime())) return isoDate
+  d.setDate(d.getDate() + Math.round(weeks * 7))
+  return d.toISOString().slice(0, 10)
+}
+
+/** Whole weeks (rounded up) between two YYYY-MM-DD dates. Min 1. */
+function diffWeeks(startIso: string, endIso: string): number {
+  const a = new Date(startIso)
+  const b = new Date(endIso)
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return 1
+  const ms = b.getTime() - a.getTime()
+  const weeks = ms / (7 * 86400_000)
+  return Math.max(1, Math.ceil(weeks))
 }
 
 export function CalculatorContent({ dealId, orgId }: { dealId: string | null; orgId: string | null }) {
@@ -246,51 +273,112 @@ export function CalculatorContent({ dealId, orgId }: { dealId: string | null; or
             </div>
           </Card>
 
-          {/* Scope */}
-          <Card title="Scope (hours)">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.625rem' }}>
-              <Field label="Engineering">
-                <NumberInput value={inputs.scope.estimatedDevHours} onChange={v => patchScope({ estimatedDevHours: v })} />
-              </Field>
-              <Field label="Design">
-                <NumberInput value={inputs.scope.estimatedDesignHours} onChange={v => patchScope({ estimatedDesignHours: v })} />
-              </Field>
-              <Field label="Strategy">
-                <NumberInput value={inputs.scope.estimatedStrategyHours} onChange={v => patchScope({ estimatedStrategyHours: v })} />
-              </Field>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.625rem', marginTop: '0.625rem' }}>
-              <Field label="Contractor hours">
-                <NumberInput value={inputs.scope.contractorHours} onChange={v => patchScope({ contractorHours: v })} />
-              </Field>
-              <Field label={`Contractor ${inputs.client.currency}/hr`}>
-                <NumberInput value={inputs.scope.contractorRate} onChange={v => patchScope({ contractorRate: v })} />
-              </Field>
-              <Field label={`Tool licences (${inputs.client.currency})`}>
-                <NumberInput value={inputs.scope.toolLicenceCost} onChange={v => patchScope({ toolLicenceCost: v })} />
-              </Field>
+          {/* Scope: per-category line with hours + delivery toggle */}
+          <Card title="Scope">
+            <div style={{ display: 'grid', gap: '0.5rem' }}>
+              {SCOPE_KEYS.map(key => {
+                const meta = SCOPE_META[key]
+                const line = inputs.scope[key]
+                const updateLine = (patch: Partial<ScopeLine>) => patchScope({ [key]: { ...line, ...patch } } as Partial<CalculationInputs['scope']>)
+                return (
+                  <div key={key} style={{
+                    display: 'grid',
+                    gridTemplateColumns: '8rem 1fr',
+                    gap: '0.625rem',
+                    alignItems: 'center',
+                    padding: '0.625rem 0.75rem',
+                    background: 'var(--color-bg-secondary)',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--color-border-subtle)',
+                  }}>
+                    <div>
+                      <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--color-text)' }}>{meta.label}</div>
+                      <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>{meta.hint}</div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '5rem auto 1fr', gap: '0.5rem', alignItems: 'center' }}>
+                      <Field label="Hours">
+                        <NumberInput value={line.hours} onChange={v => updateLine({ hours: v })} />
+                      </Field>
+                      <div style={{ display: 'inline-flex', borderRadius: 'var(--radius-sm)', overflow: 'hidden', border: '1px solid var(--color-border)', alignSelf: 'end', height: '1.875rem' }}>
+                        {(['ourselves', 'contractor'] as DeliveryMode[]).map(mode => {
+                          const active = line.delivery === mode
+                          return (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => updateLine({ delivery: mode })}
+                              style={{
+                                padding: '0 0.625rem',
+                                fontSize: '0.6875rem',
+                                fontWeight: 600,
+                                background: active ? 'var(--color-brand)' : 'transparent',
+                                color: active ? '#fff' : 'var(--color-text-muted)',
+                                border: 'none',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {mode === 'ourselves' ? 'Us' : 'Contractor'}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      {line.delivery === 'contractor' ? (
+                        <Field label={`${inputs.client.currency}/hr`}>
+                          <NumberInput value={line.contractorRate} onChange={v => updateLine({ contractorRate: v })} />
+                        </Field>
+                      ) : (
+                        <div />
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.625rem', marginTop: '0.25rem' }}>
+                <Field label={`Tool licences (${inputs.client.currency})`}>
+                  <NumberInput value={inputs.scope.toolLicenceCost} onChange={v => patchScope({ toolLicenceCost: v })} />
+                </Field>
+                <div style={{ alignSelf: 'end', fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+                  Total scope: {SCOPE_KEYS.reduce((s, k) => s + inputs.scope[k].hours, 0)} hours
+                </div>
+              </div>
             </div>
           </Card>
 
-          {/* Timeline */}
+          {/* Timeline — duration ↔ launch date sync */}
           <Card title="Timeline">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.625rem' }}>
               <Field label="Start date">
                 <input
                   type="date"
                   value={inputs.timeline.startDate}
-                  onChange={e => patchTimeline({ startDate: e.target.value })}
+                  onChange={e => {
+                    const startDate = e.target.value
+                    // Keep duration; recompute launch from start + duration.
+                    const targetLaunchDate = addWeeks(startDate, inputs.timeline.durationWeeks)
+                    patchTimeline({ startDate, targetLaunchDate })
+                  }}
                   style={textInput}
                 />
               </Field>
               <Field label="Duration (weeks)">
-                <NumberInput value={inputs.timeline.durationWeeks} onChange={v => patchTimeline({ durationWeeks: v })} />
+                <NumberInput
+                  value={inputs.timeline.durationWeeks}
+                  onChange={v => {
+                    const durationWeeks = Math.max(1, v)
+                    const targetLaunchDate = addWeeks(inputs.timeline.startDate, durationWeeks)
+                    patchTimeline({ durationWeeks, targetLaunchDate })
+                  }}
+                />
               </Field>
               <Field label="Target launch">
                 <input
                   type="date"
                   value={inputs.timeline.targetLaunchDate}
-                  onChange={e => patchTimeline({ targetLaunchDate: e.target.value })}
+                  onChange={e => {
+                    const targetLaunchDate = e.target.value
+                    const durationWeeks = diffWeeks(inputs.timeline.startDate, targetLaunchDate)
+                    patchTimeline({ targetLaunchDate, durationWeeks })
+                  }}
                   style={textInput}
                 />
               </Field>
@@ -378,7 +466,7 @@ export function CalculatorContent({ dealId, orgId }: { dealId: string | null; or
           display: 'flex', flexDirection: 'column', gap: 'var(--space-4)',
         }}>
           {outputs ? (
-            <Recommendation outputs={outputs} fmt={fmt} />
+            <Recommendation outputs={outputs} fmt={fmt} savedId={savedId} />
           ) : (
             <Card title="Recommendation">
               <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
@@ -424,7 +512,7 @@ export function CalculatorContent({ dealId, orgId }: { dealId: string | null; or
 
 // ─── Output rail ──────────────────────────────────────────────────────────
 
-function Recommendation({ outputs, fmt }: { outputs: CalculationOutputs; fmt: Intl.NumberFormat }) {
+function Recommendation({ outputs, fmt, savedId }: { outputs: CalculationOutputs; fmt: Intl.NumberFormat; savedId: string | null }) {
   const cap = outputs.capacity.warning
   const capColor = cap === 'over_capacity'
     ? '#dc2626'
@@ -450,6 +538,8 @@ function Recommendation({ outputs, fmt }: { outputs: CalculationOutputs; fmt: In
           </div>
         </div>
       </Card>
+
+      {savedId && <DraftActions calculationId={savedId} />}
 
       <Card title="Cost breakdown">
         <Row label="Internal hours" value={fmt.format(outputs.cost.internal)} />
@@ -499,6 +589,58 @@ function Recommendation({ outputs, fmt }: { outputs: CalculationOutputs; fmt: In
 }
 
 // ─── Small bits ───────────────────────────────────────────────────────────
+
+function DraftActions({ calculationId }: { calculationId: string }) {
+  const [busy, setBusy] = useState<null | 'proposal' | 'schedule' | 'contract'>(null)
+  const router = useRouter()
+  async function draft(target: 'proposal' | 'schedule' | 'contract') {
+    setBusy(target)
+    try {
+      const res = await fetch(apiPath('/api/admin/calculator/draft'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ calculationId, target }),
+      })
+      if (!res.ok) return
+      const data = await res.json() as { id: string; url: string }
+      router.push(data.url)
+    } finally {
+      setBusy(null)
+    }
+  }
+  return (
+    <Card title="Draft from this calc">
+      <div style={{ display: 'grid', gap: '0.4375rem' }}>
+        {([
+          { target: 'proposal' as const, label: 'Draft proposal', Icon: FileText },
+          { target: 'schedule' as const, label: 'Draft schedule', Icon: Calendar },
+          { target: 'contract' as const, label: 'Draft contract', Icon: FileSignature },
+        ]).map(({ target, label, Icon }) => (
+          <button
+            key={target}
+            onClick={() => draft(target)}
+            disabled={busy !== null}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.4375rem',
+              padding: '0.5rem 0.625rem',
+              fontSize: '0.8125rem', fontWeight: 600,
+              background: 'var(--color-bg-secondary)',
+              color: 'var(--color-text)',
+              border: '1px solid var(--color-border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              cursor: busy !== null ? 'wait' : 'pointer',
+              textAlign: 'left',
+              opacity: busy === target ? 0.6 : 1,
+            }}
+          >
+            <Icon size={13} />
+            {busy === target ? `Drafting ${target}…` : label}
+          </button>
+        ))}
+      </div>
+    </Card>
+  )
+}
 
 function Card({ title, children, emphasis }: { title: string; children: React.ReactNode; emphasis?: boolean }) {
   return (

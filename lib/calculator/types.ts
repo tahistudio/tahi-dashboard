@@ -12,23 +12,37 @@ export type ClientRelationship = 'cold' | 'warm' | 'returning'
 export type Currency = 'NZD' | 'USD' | 'GBP' | 'AUD' | 'EUR'
 
 /**
+ * Four scope categories. Each has hours + an "ourselves vs contractor"
+ * delivery toggle. Tahi delivers itself by default; flipping to
+ * 'contractor' swaps the cost basis to the per-hour contractor rate
+ * captured at the line-item level.
+ */
+export type ScopeCategory = 'webflow' | 'engineering' | 'design' | 'strategy'
+export type DeliveryMode = 'ourselves' | 'contractor'
+
+export interface ScopeLine {
+  hours: number
+  delivery: DeliveryMode
+  contractorRate: number   // per-hour rate in `client.currency`, only used when delivery === 'contractor'
+}
+
+/**
  * Inputs the operator types into the calculator. Stored verbatim so we
  * can re-render the form filled-in when re-opening a saved calc.
  */
 export interface CalculationInputs {
   projectType: ProjectType
   scope: {
-    estimatedDevHours: number
-    estimatedDesignHours: number
-    estimatedStrategyHours: number
-    contractorHours: number      // 0 if no contractor used
-    contractorRate: number       // $/hr in `client.currency`
-    toolLicenceCost: number      // one-off or per-project tools
+    webflow: ScopeLine        // Webflow build time
+    engineering: ScopeLine    // custom code, integrations, attribution
+    design: ScopeLine         // UI/UX, brand application
+    strategy: ScopeLine       // discovery, IA, AEO, content strategy
+    toolLicenceCost: number   // one-off or per-project tool licences (in client.currency)
   }
   timeline: {
     startDate: string            // ISO date — drives capacity check window
-    durationWeeks: number
-    targetLaunchDate: string     // ISO date — informational, may differ from start+duration
+    durationWeeks: number        // editable; auto-derived from launch date if user edits launch
+    targetLaunchDate: string     // ISO date; auto-derived from startDate + durationWeeks
   }
   retainer: {
     monthlyHours: number         // 0 if not retainer

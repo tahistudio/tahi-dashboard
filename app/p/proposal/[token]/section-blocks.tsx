@@ -168,7 +168,7 @@ function useInView<T extends HTMLElement>(opts?: { rootMargin?: string; threshol
   React.useEffect(() => {
     const node = ref.current
     if (!node) return
-    if (typeof window === 'undefined' || !('IntersectionObserver' in window)) {
+    if (typeof window === 'undefined') {
       setInView(true)
       return
     }
@@ -177,6 +177,22 @@ function useInView<T extends HTMLElement>(opts?: { rootMargin?: string; threshol
       setInView(true)
       return
     }
+
+    // Desktop: the slide deck is a flex track with translateX advance
+    // inside an overflow:hidden parent. Slides that aren't the active
+    // one have their bounding rect translated off-screen, so the
+    // IntersectionObserver against the viewport never reports them as
+    // intersecting and the fade-in never plays. Run the fade-in on
+    // mount instead; the desktop slide-change cross-fade carries the
+    // motion vocabulary from there.
+    //
+    // Mobile: long-scroll vertical, IO works naturally — keep it.
+    const isDesktopDeck = window.matchMedia?.('(min-width: 768px)').matches
+    if (isDesktopDeck || !('IntersectionObserver' in window)) {
+      const t = window.setTimeout(() => setInView(true), 60)
+      return () => window.clearTimeout(t)
+    }
+
     const io = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (entry.isIntersecting) {

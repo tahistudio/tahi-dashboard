@@ -71,16 +71,26 @@ export function compute(
   const { complexityMultiplier, currency, isReturning } = client
 
   // ── Cost ─────────────────────────────────────────────────────────
-  const internalHoursTotal =
-    (scope.estimatedDevHours + scope.estimatedDesignHours + scope.estimatedStrategyHours)
-    * complexityMultiplier
+  // Each scope line is delivered either by the team (priced at the
+  // effective internal hourly rate in NZD) or by a contractor (priced
+  // at the line's contractorRate in client currency, converted to
+  // NZD). Both paths apply the complexity multiplier on hours.
+  const lines = [scope.webflow, scope.engineering, scope.design, scope.strategy]
 
-  const internalCostNZD = internalHoursTotal * CALC_CONSTANTS.effectiveHourlyRateNZD
-  const contractorCostClient = scope.contractorHours * scope.contractorRate
-  const contractorCostNZD = toNZD(contractorCostClient, currency)
-  const toolLicenceCostNZD = toNZD(scope.toolLicenceCost, currency)
+  let internalCostNZD = 0
+  let directCostNZD = 0
 
-  const directCostNZD = contractorCostNZD + toolLicenceCostNZD
+  for (const line of lines) {
+    const hoursAdjusted = line.hours * complexityMultiplier
+    if (line.delivery === 'ourselves') {
+      internalCostNZD += hoursAdjusted * CALC_CONSTANTS.effectiveHourlyRateNZD
+    } else {
+      const lineCostClient = hoursAdjusted * line.contractorRate
+      directCostNZD += toNZD(lineCostClient, currency)
+    }
+  }
+
+  directCostNZD += toNZD(scope.toolLicenceCost, currency)
   const totalCostNZD = directCostNZD + internalCostNZD
 
   // ── Recommendation: floor / target / stretch in client currency ─
@@ -98,11 +108,11 @@ export function compute(
     : 0
 
   // ── Capacity check ──────────────────────────────────────────────
-  // Required hours = scope hours that aren't outsourced. Contractor
-  // hours don't compete for internal capacity.
-  const requiredInternalHours = scope.estimatedDevHours
-    + scope.estimatedDesignHours
-    + scope.estimatedStrategyHours
+  // Required hours = the scope lines we deliver ourselves. Contractor
+  // lines don't compete for internal capacity.
+  const requiredInternalHours = lines
+    .filter(l => l.delivery === 'ourselves')
+    .reduce((s, l) => s + l.hours, 0)
 
   const weeksInWindow = Math.max(1, timeline.durationWeeks)
   const availableHoursInWindow = CALC_CONSTANTS.capacityHoursPerWeek
@@ -113,16 +123,21 @@ export function compute(
   let capacityWarning: CalculationOutputs['capacity']['warning']
   let capacityNote: string
   const headroom = remainingAfterBooked - requiredInternalHours
+  // Slack threshold scales with scope: a 200-hour project with 10
+  // hours of headroom is just as tight as a 50-hour project with 2
+  // hours. Use 15% of required hours OR 8h × weeks, whichever is
+  // higher, as the floor for "comfortable".
+  const slackFloor = Math.max(weeksInWindow * 8, requiredInternalHours * 0.15)
 
   if (headroom < 0) {
     capacityWarning = 'over_capacity'
-    capacityNote = `Adding this work tips us ${Math.round(-headroom)} hours over capacity in the start window. Push start by 1-2 weeks or bring in a contractor.`
-  } else if (headroom < weeksInWindow * 8) {
+    capacityNote = `Adding this work tips us ${Math.round(-headroom)} hours over capacity in the start window. Push start by 1-2 weeks, lengthen duration, or bring in a contractor.`
+  } else if (headroom < slackFloor) {
     capacityWarning = 'tight'
-    capacityNote = `${Math.round(headroom)} hours of slack across the window. Doable, but no room for surprises.`
+    capacityNote = `${Math.round(headroom)} hours of slack across the window for ${Math.round(requiredInternalHours)} hours of work. Doable, but no room for surprises.`
   } else {
     capacityWarning = 'comfortable'
-    capacityNote = `${Math.round(headroom)} hours of slack across the window. Plenty of room to absorb scope creep.`
+    capacityNote = `${Math.round(headroom)} hours of slack across the window for ${Math.round(requiredInternalHours)} hours of work. Plenty of room to absorb scope creep.`
   }
 
   // ── Benchmarks ──────────────────────────────────────────────────

@@ -222,7 +222,14 @@ export const builderRailWide: React.CSSProperties = {
 
 // ─── Toolbar buttons ─────────────────────────────────────────────────────
 
+// Bake display: inline-flex + alignItems: center into the toolbar styles
+// so callers can't accidentally render an icon-then-label that wraps the
+// icon onto its own line. Older callsites with className="inline-flex
+// items-center" continue to work — they just override with the same
+// values.
 export const toolbarBtn: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
   padding: '0.4375rem 0.75rem',
   fontSize: '0.75rem',
   fontWeight: 500,
@@ -233,9 +240,12 @@ export const toolbarBtn: React.CSSProperties = {
   gap: '0.375rem',
   cursor: 'pointer',
   textDecoration: 'none',
+  whiteSpace: 'nowrap',
 }
 
 export const toolbarPrimary: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
   padding: '0.4375rem 0.75rem',
   fontSize: '0.75rem',
   fontWeight: 600,
@@ -245,9 +255,12 @@ export const toolbarPrimary: React.CSSProperties = {
   borderRadius: 'var(--radius-md)',
   gap: '0.375rem',
   cursor: 'pointer',
+  whiteSpace: 'nowrap',
 }
 
 export const railBtn: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
   padding: '0.4375rem 0.625rem',
   fontSize: '0.75rem',
   fontWeight: 600,

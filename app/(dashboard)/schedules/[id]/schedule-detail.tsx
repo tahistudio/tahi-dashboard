@@ -544,6 +544,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
           {publicUrl ? (
             <button
               onClick={() => { void ensureContacts(); setShowEmail(true) }}
+              className="inline-flex items-center"
               style={toolbarPrimary}
               title="Email the public link to a client"
             >
@@ -554,6 +555,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
             <button
               onClick={() => trackSave(handleShare())}
               disabled={sharing}
+              className="inline-flex items-center"
               style={toolbarPrimary}
               title="Generate a public link"
             >

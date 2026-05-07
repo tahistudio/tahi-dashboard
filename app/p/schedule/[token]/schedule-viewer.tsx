@@ -301,25 +301,33 @@ const pageWrap: React.CSSProperties = {
 // Cover: NO forced aspect ratio at narrow widths. Sized to content on
 // phones so meta text never truncates; capped to a cinematic 16:9-ish
 // look at sm+ via min-height.
+//
+// Surface treatment matches the proposal cover's `toned_light` palette:
+// flat brand-50 base instead of the previous off-brand pale-green
+// radials. Decorative ring goes on the backdrop element, not the base
+// surface.
 const coverShell: React.CSSProperties = {
   position: 'relative',
   width: '100%',
   maxWidth: '76rem',
   margin: '0 auto',
-  background: '#ffffff',
-  border: '1px solid #d4e0d0',
-  borderRadius: '1rem',
+  background: 'var(--color-brand-50, #f0f7ee)',
+  border: '1px solid var(--color-border-subtle, #e8f0e6)',
+  borderRadius: '0 24px 0 24px',
   overflow: 'hidden',
   boxShadow: '0 8px 32px rgba(31, 44, 26, 0.08)',
 }
 
 const coverBackdrop: React.CSSProperties = {
   position: 'absolute',
-  inset: 0,
+  top: '-14rem',
+  right: '-14rem',
+  width: '40rem',
+  height: '40rem',
+  borderRadius: '50%',
+  border: '5rem solid var(--color-brand, #5A824E)',
+  opacity: 0.12,
   pointerEvents: 'none',
-  background:
-    'radial-gradient(circle at 92% 8%, rgba(122, 170, 107, 0.22) 0, transparent 38%),' +
-    'radial-gradient(circle at 4% 96%, rgba(220, 239, 216, 0.7) 0, transparent 32%)',
 }
 
 const coverInner: React.CSSProperties = {
