@@ -2,8 +2,10 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 
 // Public routes : no auth needed.
-// Next.js strips the basePath (/dashboard) before middleware sees the path,
-// so these are app-relative paths (e.g. '/sign-in' not '/dashboard/sign-in').
+// Both /<route> and /dashboard/<route> are listed because Clerk's
+// createRouteMatcher behaviour with Next.js basePath has been inconsistent
+// across versions — the belt-and-braces guarantees a logged-out signer
+// hitting /dashboard/p/contract/<token> never gets bounced to /sign-in.
 const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
@@ -20,6 +22,16 @@ const isPublicRoute = createRouteMatcher([
   // Pages live under /p/<resource>/<token>; their data APIs under /api/public.
   '/p/(.*)',
   '/api/public/(.*)',
+  // Same patterns including basePath, in case Clerk doesn't strip it.
+  '/dashboard/sign-in(.*)',
+  '/dashboard/sign-up(.*)',
+  '/dashboard/demo(.*)',
+  '/dashboard/api/webhooks/(.*)',
+  '/dashboard/api/case-study/(.*)',
+  '/dashboard/api/admin/docs/seed(.*)',
+  '/dashboard/api/admin/ai/briefing/cron(.*)',
+  '/dashboard/p/(.*)',
+  '/dashboard/api/public/(.*)',
 ])
 
 // Admin-only routes : if a client hits these, redirect them to /requests
