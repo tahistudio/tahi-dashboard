@@ -152,35 +152,46 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
       return
     }
 
-    // ── Render the PDF once. base64 it. Reuse across recipients. ────
     const publicViewerUrl = doc.token
       ? publicUrl(`/p/contract/${doc.token}`)
       : publicUrl(`/contracts/${contractId}`)
 
-    const pdfBase64 = await renderPdfBase64(
-      ContractSignedPdf({
-        contractName: doc.name,
-        contractType: doc.type,
-        signedAt: doc.signedAt ?? new Date().toISOString(),
-        finalHash: doc.finalHash,
-        publicViewerUrl,
-        bodyHtml: doc.bodyHtml,
-        signers: signers.map(s => {
-          const sig = sigBySigner.get(s.id)
-          return {
-            id: s.id,
-            name: s.name,
-            email: s.email,
-            role: s.role,
-            signedAt: sig?.signedAt ?? s.signedAt ?? null,
-            signatureDataUrl: sig?.signatureDataUrl ?? null,
-          }
-        }),
-      }) as ReactElement<DocumentProps>,
-    )
-
+    // ── Try to render the PDF. @react-pdf/renderer depends on pdfkit
+    //    which uses Node APIs that nodejs_compat doesn't always cover on
+    //    Workers. If render fails we still send the covering email so
+    //    everyone gets notified — just without the attachment. The
+    //    public viewer link gets stronger billing in that case.
     const pdfFilename = `${slugify(doc.name)}-signed.pdf`
     const signerNames = signers.map(s => s.name).filter(Boolean)
+
+    let pdfBase64: string | null = null
+    let pdfError: string | null = null
+    try {
+      pdfBase64 = await renderPdfBase64(
+        ContractSignedPdf({
+          contractName: doc.name,
+          contractType: doc.type,
+          signedAt: doc.signedAt ?? new Date().toISOString(),
+          finalHash: doc.finalHash,
+          publicViewerUrl,
+          bodyHtml: doc.bodyHtml,
+          signers: signers.map(s => {
+            const sig = sigBySigner.get(s.id)
+            return {
+              id: s.id,
+              name: s.name,
+              email: s.email,
+              role: s.role,
+              signedAt: sig?.signedAt ?? s.signedAt ?? null,
+              signatureDataUrl: sig?.signatureDataUrl ?? null,
+            }
+          }),
+        }) as ReactElement<DocumentProps>,
+      )
+    } catch (err) {
+      pdfError = err instanceof Error ? err.message : 'Unknown PDF render error'
+      console.error('[contract-fully-signed-emails] PDF render failed, falling back to no-attachment email:', pdfError)
+    }
 
     // ── Send to each recipient. Failures are tracked but never thrown ─
     const { Resend } = await import('resend')
@@ -199,19 +210,23 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
           signedAt: doc.signedAt ?? new Date().toISOString(),
           publicViewerUrl,
           signerNames,
+          pdfAttached: pdfBase64 !== null,
         }))
 
-        await resend.emails.send({
+        const sendOpts: Parameters<typeof resend.emails.send>[0] = {
           from: FROM_ADDRESS,
           to: r.email,
           subject: `Fully signed: ${doc.name}`,
           html,
-          attachments: [{
+        }
+        if (pdfBase64) {
+          sendOpts.attachments = [{
             filename: pdfFilename,
             content: pdfBase64,
             contentType: 'application/pdf',
-          }],
-        })
+          }]
+        }
+        await resend.emails.send(sendOpts)
         sent.push(r.email)
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown error'
@@ -221,10 +236,12 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
     }
 
     // ── Audit log ────────────────────────────────────────────────────
-    await writeAudit(database, contractId, sent, 'sent', {
+    await writeAudit(database, contractId, sent, sent.length > 0 ? 'sent' : 'failed', {
       sent,
       failed,
-      pdfBytesBase64: pdfBase64.length,
+      pdfAttached: pdfBase64 !== null,
+      pdfError,
+      pdfBytesBase64: pdfBase64?.length ?? 0,
       from: FROM_NAME,
     })
   } catch (err) {

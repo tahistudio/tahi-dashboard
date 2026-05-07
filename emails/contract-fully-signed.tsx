@@ -34,6 +34,10 @@ interface Props {
   // Display-only: list of signer names so the recipient can see the
   // full party set on the agreement.
   signerNames: string[]
+  // Whether the PDF render succeeded and is attached to this email.
+  // When false, the body copy + CTA push the public viewer link instead
+  // of mentioning the attachment. Defaults to true for backwards compat.
+  pdfAttached?: boolean
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -64,6 +68,7 @@ export function ContractFullySignedEmail({
   signedAt,
   publicViewerUrl,
   signerNames,
+  pdfAttached = true,
 }: Props) {
   const typeLabel = TYPE_LABEL[contractType] ?? 'contract'
   const firstName = recipientName.split(' ')[0] ?? recipientName
@@ -74,7 +79,9 @@ export function ContractFullySignedEmail({
   return (
     <Html>
       <Head />
-      <Preview>{`${contractName} is fully signed. PDF attached.`}</Preview>
+      <Preview>{pdfAttached
+        ? `${contractName} is fully signed. PDF attached.`
+        : `${contractName} is fully signed. View the signed copy.`}</Preview>
       <Body style={emailBodyStyle}>
         <EmailShell>
           <EmailHeader eyebrow="Contract fully signed" />
@@ -90,9 +97,9 @@ export function ContractFullySignedEmail({
 
             <EmailParagraph>Hi {firstName},</EmailParagraph>
             <EmailParagraph>
-              {recipientWasSigner
+              {pdfAttached
                 ? `Every signer has now added their signature, so ${contractName} is fully executed. A PDF copy of the signed agreement is attached for your records.`
-                : `Every signer has now added their signature, so ${contractName} is fully executed. A PDF copy of the signed agreement is attached for your records.`}
+                : `Every signer has now added their signature, so ${contractName} is fully executed. View the signed agreement online via the link below — it carries every signature, the signed-on timestamps, and the audit-trail anchor.`}
             </EmailParagraph>
 
             <DetailCard>
@@ -105,9 +112,9 @@ export function ContractFullySignedEmail({
             <PrimaryButton href={publicViewerUrl}>View signed contract</PrimaryButton>
 
             <EmailFootnote>
-              The attached PDF includes every signature, the signed-on timestamp,
-              and the SHA-256 chain anchor that makes any future tampering with
-              the original record detectable. Keep it somewhere safe.
+              {pdfAttached
+                ? 'The attached PDF includes every signature, the signed-on timestamp, and the SHA-256 chain anchor that makes any future tampering with the original record detectable. Keep it somewhere safe.'
+                : 'The signed contract page above shows every signature, the signed-on timestamp, and the SHA-256 chain anchor that makes any future tampering with the original record detectable. Use your browser’s print-to-PDF if you need a local copy.'}
             </EmailFootnote>
 
             <EmailBanner kind="success">Confidential to the signing parties</EmailBanner>
