@@ -174,25 +174,13 @@ export function EmailHeader({ eyebrow }: { eyebrow?: string }) {
       <span aria-hidden="true" style={headerRingStyle} />
       <div style={headerInnerStyle}>
         <div style={headerWordmarkStyle}>
-          {/* The logo asset is the full Tahi Studio lockup (mark + wordmark)
-              so we don't duplicate the wordmark in text alongside it.
-              Earlier the alt="" still rendered "Tahi" + the wordmark text
-              "Tahi Studio" → "Tahi Tahi Studio" in clients that fail to
-              load the image. Now alt is the full wordmark and we render
-              text only as a fallback when the image fails. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={publicUrl('/tahi-logo.png')}
-            alt="Tahi Studio"
-            width={120}
-            height={28}
-            style={{
-              height: '28px',
-              width: 'auto',
-              display: 'block',
-              objectFit: 'contain',
-            }}
-          />
+          {/* Text-only wordmark. The previous design used the logo image
+              for "Tahi" plus a text span for "Tahi Studio" → ended up
+              rendering "Tahi Tahi Studio". The asset at /tahi-logo.png
+              is the "Tahi" mark only (not the full lockup), so dropping
+              it and rendering the wordmark as text gives the cleanest
+              result across every email client. */}
+          <span style={headerWordmarkTextStyle}>Tahi Studio</span>
         </div>
         {eyebrow && <Text style={headerEyebrowStyle}>{eyebrow}</Text>}
       </div>
