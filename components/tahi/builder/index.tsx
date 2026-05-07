@@ -51,6 +51,23 @@ export function BuilderShell({
 function BuilderStyles() {
   return (
     <style>{`
+      /* Single-rail layout — navigator + metadata combined in one right column.
+         Used by proposals, contracts, schedules. */
+      @media (max-width: 1024px) {
+        .tahi-builder .tahi-builder-grid-single {
+          grid-template-columns: 1fr !important;
+        }
+        .tahi-builder .tahi-builder-rail-wide {
+          position: static !important;
+          height: auto !important;
+          border-left: none !important;
+          border-top: 1px solid var(--color-border-subtle) !important;
+          padding: 1.125rem clamp(1rem, 3vw, 2.5rem) !important;
+        }
+      }
+
+      /* Legacy three-column layout — kept for callers that still split nav and
+         rail. Folds rail under main below 1280px, stacks below 900px. */
       @media (max-width: 1280px) {
         .tahi-builder .tahi-builder-grid {
           grid-template-columns: 17rem minmax(0, 1fr) !important;
@@ -175,6 +192,31 @@ export const builderRail: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: '1rem',
+  background: 'var(--color-bg)',
+}
+
+/**
+ * Single-rail layout — navigator + metadata in one combined right column.
+ * Use with `builderGridSingleRail` for a 2-column shell (editor + rail).
+ */
+export const builderGridSingleRail: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'minmax(0, 1fr) 22rem',
+  flex: 1,
+  minHeight: 0,
+}
+
+export const builderRailWide: React.CSSProperties = {
+  position: 'sticky',
+  top: '3.625rem',
+  alignSelf: 'start',
+  height: 'calc(100vh - 3.625rem)',
+  overflowY: 'auto',
+  borderLeft: '1px solid var(--color-border-subtle)',
+  padding: '1.125rem 1rem',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '1.25rem',
   background: 'var(--color-bg)',
 }
 

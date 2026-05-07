@@ -18,7 +18,7 @@ import { SectionRenderer, type ScheduleSection, type SectionType } from '@/compo
 import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
 import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
 import {
-  BuilderShell, builderHeader, builderTitleInput, builderGrid, builderNav, builderMain, builderRail,
+  BuilderShell, builderHeader, builderTitleInput, builderGridSingleRail, builderRailWide, builderMain,
   toolbarBtn, toolbarPrimary, railBtn, navAddBtn, metaInputStyle,
   BuilderMoreMenu, BuilderNavGroup, BuilderNavItem,
   RailSection, FieldGroup, SaveIndicator, BuilderEditorShell, statusPillStyle,
@@ -558,54 +558,8 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         </div>
       </header>
 
-      {/* Three-column main */}
-      <div style={builderGrid} className="tahi-builder-grid">
-        {/* Left navigator */}
-        <aside style={builderNav} className="tahi-builder-nav">
-          <BuilderNavGroup label="Schedule" count={1 + sortedSections.length}>
-            <BuilderNavItem
-              active={activeView === 'cover'}
-              onClick={() => setActiveView('cover')}
-              number={1}
-              icon={<FileText size={12} />}
-              label="Cover"
-              hint={schedule.subtitle || 'Title, dates, prepared by'}
-            />
-            {sortedSections.map((s, i) => (
-              <BuilderNavItem
-                key={s.id}
-                active={activeView === `section:${s.id}`}
-                onClick={() => setActiveView(`section:${s.id}`)}
-                number={i + 2}
-                icon={sectionIcon(s.type)}
-                label={s.title || SECTION_LABEL[s.type]}
-                hint={SECTION_LABEL[s.type]}
-              />
-            ))}
-            <AddSectionMenu
-              open={showAddSectionMenu}
-              onToggle={() => setShowAddSectionMenu(v => !v)}
-              onClose={() => setShowAddSectionMenu(false)}
-              onPick={(type) => {
-                setShowAddSectionMenu(false)
-                trackSave(addSection(type))
-              }}
-            />
-          </BuilderNavGroup>
-
-          {schedule.publicShareToken && (
-            <BuilderNavGroup label="More">
-              <BuilderNavItem
-                active={activeView === 'analytics'}
-                onClick={() => setActiveView('analytics')}
-                icon={<BarChart3 size={12} />}
-                label="Analytics"
-                hint="View, time on page"
-              />
-            </BuilderNavGroup>
-          )}
-        </aside>
-
+      {/* Two-column main: editor on the left, combined navigator + metadata rail on the right */}
+      <div style={builderGridSingleRail} className="tahi-builder-grid-single">
         {/* Centre editor — keyed by activeView so the fade-in plays on switch */}
         <main style={builderMain} key={activeView}>
           {activeView === 'cover' && (
@@ -649,8 +603,53 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
           )}
         </main>
 
-        {/* Right rail — public link, linked-to, meta */}
-        <aside style={builderRail} className="tahi-builder-rail">
+        {/* Right rail — navigator + public link + metadata combined */}
+        <aside style={builderRailWide} className="tahi-builder-rail-wide">
+          <BuilderNavGroup label="Schedule" count={1 + sortedSections.length}>
+            <BuilderNavItem
+              active={activeView === 'cover'}
+              onClick={() => setActiveView('cover')}
+              number={1}
+              icon={<FileText size={12} />}
+              label="Cover"
+              hint={schedule.subtitle || 'Title, dates, prepared by'}
+            />
+            {sortedSections.map((s, i) => (
+              <BuilderNavItem
+                key={s.id}
+                active={activeView === `section:${s.id}`}
+                onClick={() => setActiveView(`section:${s.id}`)}
+                number={i + 2}
+                icon={sectionIcon(s.type)}
+                label={s.title || SECTION_LABEL[s.type]}
+                hint={SECTION_LABEL[s.type]}
+              />
+            ))}
+            <AddSectionMenu
+              open={showAddSectionMenu}
+              onToggle={() => setShowAddSectionMenu(v => !v)}
+              onClose={() => setShowAddSectionMenu(false)}
+              onPick={(type) => {
+                setShowAddSectionMenu(false)
+                trackSave(addSection(type))
+              }}
+            />
+          </BuilderNavGroup>
+
+          {schedule.publicShareToken && (
+            <BuilderNavGroup label="More">
+              <BuilderNavItem
+                active={activeView === 'analytics'}
+                onClick={() => setActiveView('analytics')}
+                icon={<BarChart3 size={12} />}
+                label="Analytics"
+                hint="View, time on page"
+              />
+            </BuilderNavGroup>
+          )}
+
+          <div style={{ height: '1px', background: 'var(--color-border-subtle)', margin: '0.5rem 0' }} aria-hidden="true" />
+
           <RailSection title="Public link">
             {publicUrl ? (
               <div style={{ display: 'grid', gap: '0.5rem' }}>

@@ -44,10 +44,9 @@ import {
   FieldGroup,
   builderHeader,
   builderTitleInput,
-  builderGrid,
-  builderNav,
+  builderGridSingleRail,
+  builderRailWide,
   builderMain,
-  builderRail,
   toolbarBtn,
   toolbarPrimary,
   railBtn,
@@ -482,36 +481,8 @@ export function ContractDetail({ id }: { id: string }) {
         </div>
       </header>
 
-      {/* Main grid: navigator + editor + rail */}
-      <div style={builderGrid} className="tahi-builder-grid">
-        {/* Navigator */}
-        <aside style={builderNav} className="tahi-builder-nav">
-          <BuilderNavGroup label="Document">
-            <BuilderNavItem
-              active={activeView === 'body'}
-              onClick={() => setActiveView('body')}
-              icon={<FileText size={12} />}
-              label="Body"
-              hint={isLocked ? 'Locked (signed)' : 'Contract terms'}
-            />
-            <BuilderNavItem
-              active={activeView === 'signers'}
-              onClick={() => setActiveView('signers')}
-              icon={<Users size={12} />}
-              label="Signers"
-              hint={signers.length === 0 ? 'No signers yet' : `${signedCount} of ${signers.length} signed`}
-              badge={pendingCount > 0 ? `${pendingCount} pending` : undefined}
-            />
-            <BuilderNavItem
-              active={activeView === 'activity'}
-              onClick={() => setActiveView('activity')}
-              icon={<Activity size={12} />}
-              label="Activity"
-              hint={signatures.length > 0 ? `${signatures.length} signature${signatures.length === 1 ? '' : 's'}` : 'Audit chain'}
-            />
-          </BuilderNavGroup>
-        </aside>
-
+      {/* Main grid: editor on the left, combined navigator + metadata rail on the right */}
+      <div style={builderGridSingleRail} className="tahi-builder-grid-single">
         {/* Editor */}
         <main style={builderMain} key={activeView}>
           {activeView === 'body' && (
@@ -591,8 +562,35 @@ export function ContractDetail({ id }: { id: string }) {
           )}
         </main>
 
-        {/* Right rail */}
-        <aside style={builderRail} className="tahi-builder-rail">
+        {/* Right rail — navigator + metadata combined */}
+        <aside style={builderRailWide} className="tahi-builder-rail-wide">
+          <BuilderNavGroup label="Document">
+            <BuilderNavItem
+              active={activeView === 'body'}
+              onClick={() => setActiveView('body')}
+              icon={<FileText size={12} />}
+              label="Body"
+              hint={isLocked ? 'Locked (signed)' : 'Contract terms'}
+            />
+            <BuilderNavItem
+              active={activeView === 'signers'}
+              onClick={() => setActiveView('signers')}
+              icon={<Users size={12} />}
+              label="Signers"
+              hint={signers.length === 0 ? 'No signers yet' : `${signedCount} of ${signers.length} signed`}
+              badge={pendingCount > 0 ? `${pendingCount} pending` : undefined}
+            />
+            <BuilderNavItem
+              active={activeView === 'activity'}
+              onClick={() => setActiveView('activity')}
+              icon={<Activity size={12} />}
+              label="Activity"
+              hint={signatures.length > 0 ? `${signatures.length} signature${signatures.length === 1 ? '' : 's'}` : 'Audit chain'}
+            />
+          </BuilderNavGroup>
+
+          <div style={{ height: '1px', background: 'var(--color-border-subtle)', margin: '0.5rem 0' }} aria-hidden="true" />
+
           <RailSection title="Send for signature">
             {pendingCount > 0 && !isLocked ? (
               <div style={{ display: 'grid', gap: '0.5rem' }}>

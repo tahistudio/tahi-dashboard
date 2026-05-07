@@ -453,29 +453,16 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
   return (
     <div style={builderShell} className="proposal-builder">
       <style>{`
-        @media (max-width: 1280px) {
+        @media (max-width: 1024px) {
           .proposal-builder-grid {
-            grid-template-columns: 17rem minmax(0, 1fr) !important;
+            grid-template-columns: 1fr !important;
           }
           .proposal-builder-rail {
             position: static !important;
             height: auto !important;
-            grid-column: 1 / -1 !important;
             border-left: none !important;
             border-top: 1px solid var(--color-border-subtle) !important;
             padding: 1.125rem clamp(1rem, 3vw, 2.5rem) !important;
-          }
-        }
-        @media (max-width: 900px) {
-          .proposal-builder-grid {
-            grid-template-columns: 1fr !important;
-          }
-          .proposal-builder-nav {
-            position: static !important;
-            height: auto !important;
-            max-height: none !important;
-            border-right: none !important;
-            border-bottom: 1px solid var(--color-border-subtle) !important;
           }
         }
         @keyframes editorFadeIn {
@@ -556,81 +543,8 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
         </div>
       </header>
 
-      {/* Two-column main */}
+      {/* Two-column main: editor on the left, combined navigator + metadata rail on the right */}
       <div style={builderGrid} className="proposal-builder-grid">
-        {/* Slide navigator */}
-        <aside style={builderNav} className="proposal-builder-nav">
-          <BuilderNavGroup label="Slides" count={1 + sortedSections.length}>
-            <BuilderNavItem
-              active={activeView === 'cover'}
-              onClick={() => setActiveView('cover')}
-              number={1}
-              icon={<FileText size={12} />}
-              label="Cover"
-              hint={proposal.subtitle || 'Hero slide'}
-            />
-            {sortedSections.map((s, i) => (
-              <BuilderNavItem
-                key={s.id}
-                active={activeView === `section:${s.id}`}
-                onClick={() => setActiveView(`section:${s.id}`)}
-                number={i + 2}
-                label={s.title || sectionLabel(s.type)}
-                hint={sectionLabel(s.type)}
-              />
-            ))}
-            <BuilderAddSlide
-              open={showAddSlideMenu}
-              onToggle={() => setShowAddSlideMenu(v => !v)}
-              onClose={() => setShowAddSlideMenu(false)}
-              onPick={(type) => {
-                setShowAddSlideMenu(false)
-                trackSave(addSection(type))
-              }}
-            />
-          </BuilderNavGroup>
-
-          <BuilderNavGroup label="Packages" count={variants.length}>
-            {variants.map(v => (
-              <BuilderNavItem
-                key={v.id}
-                active={activeView === `variant:${v.id}`}
-                onClick={() => setActiveView(`variant:${v.id}`)}
-                label={v.name || 'Untitled package'}
-                hint={`${v.currency} ${v.oneOffAmount > 0 ? v.oneOffAmount.toLocaleString() : `${v.monthlyAmount}/mo`}`}
-                badge={v.isFeatured ? 'Featured' : undefined}
-              />
-            ))}
-            <button onClick={() => trackSave(addVariant())} style={navAddBtn} className="nav-item-hover">
-              <Plus size={12} />
-              Add package
-            </button>
-          </BuilderNavGroup>
-
-          {(acceptances.length > 0 || proposal.publicShareToken) && (
-            <BuilderNavGroup label="More">
-              {acceptances.length > 0 && (
-                <BuilderNavItem
-                  active={activeView === 'decisions'}
-                  onClick={() => setActiveView('decisions')}
-                  icon={<MessageSquare size={12} />}
-                  label="Decisions"
-                  hint={`${acceptances.length} response${acceptances.length === 1 ? '' : 's'}`}
-                />
-              )}
-              {proposal.publicShareToken && (
-                <BuilderNavItem
-                  active={activeView === 'analytics'}
-                  onClick={() => setActiveView('analytics')}
-                  icon={<BarChart3 size={12} />}
-                  label="Analytics"
-                  hint="View, time on page"
-                />
-              )}
-            </BuilderNavGroup>
-          )}
-        </aside>
-
         {/* Active editor */}
         <main style={builderMain} key={activeView}>
           {activeView === 'cover' && (
@@ -700,8 +614,80 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
           )}
         </main>
 
-        {/* Right rail — proposal-level settings, always visible on desktop */}
+        {/* Right rail — slide navigator + proposal-level settings combined */}
         <aside style={builderRail} className="proposal-builder-rail">
+          <BuilderNavGroup label="Slides" count={1 + sortedSections.length}>
+            <BuilderNavItem
+              active={activeView === 'cover'}
+              onClick={() => setActiveView('cover')}
+              number={1}
+              icon={<FileText size={12} />}
+              label="Cover"
+              hint={proposal.subtitle || 'Hero slide'}
+            />
+            {sortedSections.map((s, i) => (
+              <BuilderNavItem
+                key={s.id}
+                active={activeView === `section:${s.id}`}
+                onClick={() => setActiveView(`section:${s.id}`)}
+                number={i + 2}
+                label={s.title || sectionLabel(s.type)}
+                hint={sectionLabel(s.type)}
+              />
+            ))}
+            <BuilderAddSlide
+              open={showAddSlideMenu}
+              onToggle={() => setShowAddSlideMenu(v => !v)}
+              onClose={() => setShowAddSlideMenu(false)}
+              onPick={(type) => {
+                setShowAddSlideMenu(false)
+                trackSave(addSection(type))
+              }}
+            />
+          </BuilderNavGroup>
+
+          <BuilderNavGroup label="Packages" count={variants.length}>
+            {variants.map(v => (
+              <BuilderNavItem
+                key={v.id}
+                active={activeView === `variant:${v.id}`}
+                onClick={() => setActiveView(`variant:${v.id}`)}
+                label={v.name || 'Untitled package'}
+                hint={`${v.currency} ${v.oneOffAmount > 0 ? v.oneOffAmount.toLocaleString() : `${v.monthlyAmount}/mo`}`}
+                badge={v.isFeatured ? 'Featured' : undefined}
+              />
+            ))}
+            <button onClick={() => trackSave(addVariant())} style={navAddBtn} className="nav-item-hover">
+              <Plus size={12} />
+              Add package
+            </button>
+          </BuilderNavGroup>
+
+          {(acceptances.length > 0 || proposal.publicShareToken) && (
+            <BuilderNavGroup label="More">
+              {acceptances.length > 0 && (
+                <BuilderNavItem
+                  active={activeView === 'decisions'}
+                  onClick={() => setActiveView('decisions')}
+                  icon={<MessageSquare size={12} />}
+                  label="Decisions"
+                  hint={`${acceptances.length} response${acceptances.length === 1 ? '' : 's'}`}
+                />
+              )}
+              {proposal.publicShareToken && (
+                <BuilderNavItem
+                  active={activeView === 'analytics'}
+                  onClick={() => setActiveView('analytics')}
+                  icon={<BarChart3 size={12} />}
+                  label="Analytics"
+                  hint="View, time on page"
+                />
+              )}
+            </BuilderNavGroup>
+          )}
+
+          <div style={{ height: '1px', background: 'var(--color-border-subtle)', margin: '0.5rem 0' }} aria-hidden="true" />
+
           <BuilderRail
             proposal={proposal}
             setProposal={setProposal}
@@ -802,23 +788,9 @@ const builderTitleInput: React.CSSProperties = {
 
 const builderGrid: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '17rem minmax(0, 1fr) 19rem',
+  gridTemplateColumns: 'minmax(0, 1fr) 22rem',
   flex: 1,
   minHeight: 0,
-}
-
-const builderNav: React.CSSProperties = {
-  position: 'sticky',
-  top: '3.625rem',
-  alignSelf: 'start',
-  height: 'calc(100vh - 3.625rem)',
-  overflowY: 'auto',
-  borderRight: '1px solid var(--color-border-subtle)',
-  padding: '1rem 0.625rem',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '1.25rem',
-  background: 'var(--color-bg)',
 }
 
 const builderMain: React.CSSProperties = {
@@ -837,7 +809,7 @@ const builderRail: React.CSSProperties = {
   padding: '1.125rem 1rem',
   display: 'flex',
   flexDirection: 'column',
-  gap: '1rem',
+  gap: '1.25rem',
   background: 'var(--color-bg)',
 }
 
