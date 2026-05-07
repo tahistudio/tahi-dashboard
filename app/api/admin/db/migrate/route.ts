@@ -658,6 +658,27 @@ const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    name: '0035',
+    description: 'Project calculator: stores sized estimates per deal. Inputs + outputs JSON columns capture the snapshot so a calc can be replayed without re-running the math.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS project_calculations (
+        id text PRIMARY KEY NOT NULL,
+        deal_id text,
+        org_id text,
+        name text NOT NULL,
+        is_active integer NOT NULL DEFAULT 1,
+        inputs text NOT NULL,
+        outputs text NOT NULL,
+        linked_artefact_ref text,
+        created_by_id text NOT NULL,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_project_calculations_deal ON project_calculations(deal_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_project_calculations_org ON project_calculations(org_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

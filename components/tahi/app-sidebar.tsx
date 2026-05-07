@@ -7,7 +7,7 @@ import {
   BarChart2, BookOpen, UserCog, Settings, MessageSquare,
   FolderOpen, ShoppingBag, PanelLeftClose, PanelLeftOpen,
   LayoutDashboard, Moon, Sun, Star, TrendingUp, FileSignature, Gauge,
-  Calendar, Megaphone, Briefcase, Layers,
+  Calendar, Megaphone, Briefcase, Layers, Calculator,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
@@ -62,6 +62,7 @@ const ADMIN_NAV: NavGroup[] = [
       { label: 'Proposal templates', href: '/proposals/templates', icon: Layers,        adminOnly: true },
       { label: 'Schedules',          href: '/schedules',           icon: Calendar,      adminOnly: true },
       { label: 'Contracts',          href: '/contracts',           icon: FileSignature, adminOnly: true },
+      { label: 'Project calculator', href: '/calculator',          icon: Calculator,    adminOnly: true },
       { label: 'Sales analytics',    href: '/sales-analytics',     icon: BarChart2,     adminOnly: true },
     ],
   },

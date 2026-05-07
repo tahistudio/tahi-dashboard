@@ -1934,3 +1934,46 @@ export const shareViewEvents = sqliteTable('share_view_events', {
   index('idx_share_view_events_session').on(table.sessionId),
   index('idx_share_view_events_started_at').on(table.startedAt),
 ])
+
+/**
+ * Project calculator — internal pricing helper.
+ *
+ * Captures a sized estimate for a deal: scope hours, timeline, retainer
+ * shape, currency, complexity multiplier. Computes a recommendation
+ * (floor / target / stretch) using the team's effective hourly rate +
+ * contractor cost + tool licence overhead. Reads pipeline + booked
+ * hours to flag capacity risk for the calculation window.
+ *
+ * `inputs` and `outputs` are JSON blobs — the route handler is the
+ * source of truth for the shape (lib/calculator/types.ts). Storing both
+ * lets us replay a calculation without re-running the math, and surface
+ * "what we quoted vs what we delivered" later when the deal closes.
+ *
+ * Anchored to a deal whenever possible so the dashboard can offer
+ * "draft proposal from this calculation" + "pull this calc into the
+ * gantt + contract" later. dealId may be null for sandbox/exploration.
+ */
+export const projectCalculations = sqliteTable('project_calculations', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  dealId: text('deal_id'),
+  orgId: text('org_id'),
+  name: text('name').notNull(),
+  // Active calc per deal — surfaced first when re-opening the deal.
+  isActive: integer('is_active').notNull().default(1),
+  // JSON snapshot of {scope, timeline, retainer, client} — see
+  // lib/calculator/types.ts CalculationInputs.
+  inputs: text('inputs').notNull(),
+  // JSON snapshot of {cost, recommendation, capacity, benchmarks,
+  // pacing} — see lib/calculator/types.ts CalculationOutputs.
+  // Stored so we can render a historical calc without re-running.
+  outputs: text('outputs').notNull(),
+  // Cross-link back to the artefact this calc produced (if any).
+  // Format: 'proposal:<id>' | 'schedule:<id>' | 'contract:<id>'.
+  // Null until the operator hits "use this for X".
+  linkedArtefactRef: text('linked_artefact_ref'),
+  createdById: text('created_by_id').notNull(),
+  ...timestamps,
+}, (table) => [
+  index('idx_project_calculations_deal').on(table.dealId),
+  index('idx_project_calculations_org').on(table.orgId),
+])

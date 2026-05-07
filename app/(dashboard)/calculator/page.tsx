@@ -1,0 +1,17 @@
+import { getServerAuth } from '@/lib/server-auth'
+import { redirect } from 'next/navigation'
+import { CalculatorContent } from './calculator-content'
+
+export const metadata = { title: 'Project calculator — Tahi Dashboard' }
+
+export default async function CalculatorPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ dealId?: string; orgId?: string }>
+}) {
+  const { userId, orgId } = await getServerAuth()
+  if (!userId) redirect('/sign-in')
+  if (orgId !== process.env.NEXT_PUBLIC_TAHI_ORG_ID) redirect('/requests')
+  const sp = await searchParams
+  return <CalculatorContent dealId={sp.dealId ?? null} orgId={sp.orgId ?? null} />
+}
