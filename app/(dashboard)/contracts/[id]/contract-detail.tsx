@@ -268,7 +268,7 @@ export function ContractDetail({ id }: { id: string }) {
         <div className="flex flex-wrap gap-2">
           {/* Admin preview — always available, regardless of share state.
               Loads the live contract content via the admin preview route. */}
-          <Link href={`/contracts/${id}/preview`} target="_blank" rel="noreferrer">
+          <Link href={`/preview/contract/${id}`} target="_blank" rel="noreferrer">
             <TahiButton variant="secondary" size="sm" iconLeft={<Eye className="w-3.5 h-3.5" />}>
               Preview
             </TahiButton>

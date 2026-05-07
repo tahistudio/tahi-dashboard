@@ -537,7 +537,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
           </span>
         )}
         <div style={{ flex: 1 }} />
-        <Link href={`/proposals/${proposalId}/preview`} target="_blank" rel="noreferrer" className="inline-flex items-center" style={toolbarBtn}>
+        <Link href={`/preview/proposal/${proposalId}`} target="_blank" rel="noreferrer" className="inline-flex items-center" style={toolbarBtn}>
           <Eye size={13} />
           Preview
         </Link>

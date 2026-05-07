@@ -8,9 +8,9 @@ export const metadata = {
 }
 
 /**
- * Admin-only preview of the public proposal viewer using the LIVE state
- * (not the publishedSnapshot). Lets you see what the next Publish will
- * push to the client before you push it.
+ * Admin-only proposal preview, mounted OUTSIDE the (dashboard) route group
+ * so the sidebar doesn't crop the slide deck. Same auth check as the
+ * dashboard, just no chrome.
  */
 export default async function ProposalPreviewPage({
   params,

@@ -433,7 +433,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         </ToolbarButton>
         <div style={{ flex: 1 }} />
         <Link
-          href={`/schedules/${scheduleId}/preview`}
+          href={`/preview/schedule/${scheduleId}`}
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center"

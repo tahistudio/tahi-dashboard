@@ -832,32 +832,28 @@ function SlideNav({ active, total, onChange }: {
  * Replaces the off-brand radial gradient that used to sit on covers.
  */
 function BrandCircleBackdrop({ dark = false }: { dark?: boolean }) {
+  // CSS-rendered full ring — the original SVG asset draws a partial-cropped
+  // ring by design (per Brand Guidelines), but at the deck size it looked
+  // like the circle was malformed rather than intentionally cropped. Pure
+  // CSS gives us a clean closed ring with full control over size + offset.
+  const ringColour = dark ? '#93c98a' : '#5A824E'
+  const opacity = dark ? 0.18 : 0.14
   return (
-    <svg
+    <div
       aria-hidden="true"
-      viewBox="0 0 590 729"
-      preserveAspectRatio="xMaxYMin meet"
       style={{
         position: 'absolute',
-        top: '-12rem',
-        right: '-14rem',
-        width: '50vw',
-        maxWidth: '52rem',
-        height: 'auto',
-        // Slightly higher opacity on dark mode so the ring still reads
-        // against the forest backdrop.
-        opacity: dark ? 0.32 : 0.22,
+        top: '-18rem',
+        right: '-18rem',
+        width: '52rem',
+        height: '52rem',
+        borderRadius: '50%',
+        border: `6rem solid ${ringColour}`,
+        opacity,
         pointerEvents: 'none',
         zIndex: 0,
       }}
-    >
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M225.5 79.2391C67.9548 79.2391 -59.7609 206.955 -59.7609 364.5C-59.7609 522.045 67.9548 649.761 225.5 649.761C383.045 649.761 510.761 522.045 510.761 364.5C510.761 206.955 383.045 79.2391 225.5 79.2391ZM-139 364.5C-139 163.192 24.1922 0 225.5 0C426.808 0 590 163.192 590 364.5C590 565.808 426.808 729 225.5 729C24.1922 729 -139 565.808 -139 364.5Z"
-        fill={dark ? '#93c98a' : '#5A824E'}
-      />
-    </svg>
+    />
   )
 }
 
