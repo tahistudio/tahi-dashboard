@@ -598,26 +598,103 @@ function Differentiators({ section }: { section: PublicSection }) {
   )
 }
 
+/**
+ * <DiffIcon> : custom inline SVG marks for the differentiators grid.
+ *
+ * Drawn at 24px on a 24px viewBox with 1.75 stroke width so the marks
+ * read confident at the 20px display size without going clip-art thick.
+ * All strokes are #5A824E so the icons sit calmly on the dcefd8 leaf
+ * tile that wraps them. Every icon is built from primitives (paths,
+ * circles) rather than relying on a vendor library so the public bundle
+ * stays lean and we can tune the visual tone per brand.
+ */
 function DiffIcon({ name }: { name?: string }) {
-  // Inline SVGs to avoid pulling lucide into the public bundle for a half-dozen marks.
-  const common = { width: 20, height: 20, fill: 'none', stroke: '#5A824E', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+  const stroke = '#5A824E'
+  const common = {
+    width: 20,
+    height: 20,
+    viewBox: '0 0 24 24',
+    fill: 'none' as const,
+    stroke,
+    strokeWidth: 1.75,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+  }
   const wrap = (children: React.ReactNode) => (
     <span style={{
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      width: '2.25rem', height: '2.25rem', background: '#dcefd8',
+      width: '2.5rem', height: '2.5rem', background: '#dcefd8',
       borderRadius: '0 12px 0 12px',
+      // Subtle inside-edge highlight so the tile reads as a real surface,
+      // not a flat fill. Echoes the founder photo frame on the cover.
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.6), 0 1px 2px rgba(31,44,26,0.04)',
     }}>
-      <svg viewBox="0 0 24 24" {...common}>{children}</svg>
+      <svg {...common}>{children}</svg>
     </span>
   )
   switch (name) {
-    case 'founder':  return wrap(<><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></>)
-    case 'partner':  return wrap(<><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></>)
-    case 'sparkle':  return wrap(<><path d="M12 2v6m0 8v6m-10-10h6m8 0h6"/><path d="M5 5l3.5 3.5M19 5l-3.5 3.5M5 19l3.5-3.5M19 19l-3.5-3.5"/></>)
-    case 'code':     return wrap(<><polyline points="16,18 22,12 16,6"/><polyline points="8,6 2,12 8,18"/></>)
-    case 'leaf':     return wrap(<><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19.2 2c1 1 1 5 .8 8a9.8 9.8 0 0 1-9 10z"/><path d="M2 22c5-5 6-12 14-14"/></>)
-    case 'shield':   return wrap(<><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></>)
-    default:         return wrap(<circle cx="12" cy="12" r="4"/>)
+    // Founder-led: two interlocking heads, a partnership not a single
+    // person. Reads as "the founders are on every call".
+    case 'founder':
+      return wrap(
+        <>
+          <circle cx="9" cy="9" r="3" />
+          <circle cx="15.5" cy="10" r="2.25" />
+          <path d="M3.5 20c.5-3 2.8-5 5.5-5s5 2 5.5 5" />
+          <path d="M14 20c.4-2.2 2-3.6 4-3.6s3.6 1.4 4 3.6" />
+        </>
+      )
+    // Partner badge: a shield with a tick inside. Authority + trust.
+    case 'partner':
+      return wrap(
+        <>
+          <path d="M12 3l8 3v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3z" />
+          <path d="M8.5 12l2.5 2.5L16 9.5" strokeWidth="2" />
+        </>
+      )
+    // Sparkle/AEO: four-point star. Sharper than the original radial
+    // burst, reads as "a moment of brilliance" rather than a sun.
+    case 'sparkle':
+      return wrap(
+        <>
+          <path d="M12 3l1.6 6.4L20 11l-6.4 1.6L12 19l-1.6-6.4L4 11l6.4-1.6L12 3z" />
+          <path d="M19 18l.7 1.8L21.5 20.5l-1.8.7L19 23l-.7-1.8L16.5 20.5l1.8-.7L19 18z" strokeWidth="1.25" />
+        </>
+      )
+    // Code/engineering: angle brackets with a slash, clean and unambiguous.
+    case 'code':
+      return wrap(
+        <>
+          <polyline points="8 7 3 12 8 17" />
+          <polyline points="16 7 21 12 16 17" />
+          <line x1="14" y1="5" x2="10" y2="19" />
+        </>
+      )
+    // Leaf: the Tahi mark, simplified. Single-stroke organic curve.
+    case 'leaf':
+      return wrap(
+        <>
+          <path d="M20 4c0 9-6 15-15 15 0-9 6-15 15-15z" />
+          <path d="M5 19c4-4 8-7 13-13" />
+        </>
+      )
+    // Shield: classic protection mark, subtly fuller than the lucide
+    // version so it carries weight at small sizes.
+    case 'shield':
+      return wrap(
+        <>
+          <path d="M12 3l8 3v5.5c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V6l8-3z" />
+          <path d="M12 8v8" strokeWidth="1.25" />
+        </>
+      )
+    default:
+      // Generic mark: concentric rings, calm and brand-aligned.
+      return wrap(
+        <>
+          <circle cx="12" cy="12" r="8" />
+          <circle cx="12" cy="12" r="3" />
+        </>
+      )
   }
 }
 
@@ -1134,7 +1211,7 @@ function RetainerOffer({ section }: { section: PublicSection }) {
         <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#93c98a', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>
           {data?.eyebrow ?? section.subtitle ?? 'Already earned'}
         </div>
-        <h2 style={{ fontSize: 'clamp(1.75rem, 4vw, 2.75rem)', fontWeight: 800, lineHeight: 1.05, color: '#ffffff', margin: 0, letterSpacing: '-0.02em' }}>
+        <h2 style={{ fontSize: 'clamp(1.75rem, 4vw, 2.75rem)', fontWeight: 800, lineHeight: 1.05, color: '#ffffff', margin: 0, letterSpacing: '-0.025em' }}>
           {data?.headline ?? section.title ?? 'Your 10% lifetime discount, already earned'}
         </h2>
         {data?.body && <p style={{ fontSize: '1rem', lineHeight: 1.6, color: '#dcefd8', maxWidth: '38rem', margin: '1rem 0 0 0' }}>{data.body}</p>}
@@ -1432,14 +1509,15 @@ const slideEyebrow: React.CSSProperties = {
 }
 const slideTitle: React.CSSProperties = {
   // Larger, more confident type. Manrope at heavier weight, tighter
-  // letter spacing : the section title earns the slide.
+  // letter spacing : the section title earns the slide. -0.025em matches
+  // the cover h1 so every section sits on the same typographic axis.
   fontSize: 'clamp(1.75rem, 4.5vw, 3rem)',
   fontWeight: 800,
   lineHeight: 1.05,
   color: '#121A0F',
   margin: 0,
   marginBottom: '1rem',
-  letterSpacing: '-0.02em',
+  letterSpacing: '-0.025em',
 }
 const proseStyle: React.CSSProperties = {
   fontSize: '1rem',
