@@ -669,7 +669,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
                   <button
                     onClick={() => { void ensureContacts(); setShowEmail(true) }}
                     className="inline-flex items-center"
-                    style={{ ...railBtn, background: 'var(--color-brand)', color: '#FFFFFF', borderColor: 'var(--color-brand)', flex: 1 }}
+                    style={{ ...railBtn, background: 'var(--color-brand)', color: '#FFFFFF', borderColor: 'var(--color-brand)', flex: 1, justifyContent: 'center' }}
                   >
                     <Mail size={12} />
                     Email
@@ -682,7 +682,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
                       )
                     }}
                     className="inline-flex items-center"
-                    style={railBtn}
+                    style={{ ...railBtn, justifyContent: 'center' }}
                     title="Copy URL"
                   >
                     <Copy size={12} />
@@ -693,7 +693,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center"
-                    style={railBtn}
+                    style={{ ...railBtn, justifyContent: 'center' }}
                     title="Open in new tab"
                   >
                     <ExternalLink size={12} />

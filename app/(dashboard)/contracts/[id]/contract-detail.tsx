@@ -643,7 +643,7 @@ export function ContractDetail({ id }: { id: string }) {
                   {publicUrl}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem' }}>
-                  <button onClick={() => copyLink(publicUrl)} className="inline-flex items-center" style={{ ...railBtn, flex: 1 }} title="Copy URL">
+                  <button onClick={() => copyLink(publicUrl)} className="inline-flex items-center" style={{ ...railBtn, flex: 1, justifyContent: 'center' }} title="Copy URL">
                     <Copy size={12} />
                     Copy
                   </button>

@@ -1279,15 +1279,15 @@ function BuilderRail({
               {publicUrl}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem' }}>
-              <button onClick={onEmail} className="inline-flex items-center" style={{ ...railBtn, background: 'var(--color-brand)', color: '#FFFFFF', borderColor: 'var(--color-brand)', flex: 1 }}>
+              <button onClick={onEmail} className="inline-flex items-center" style={{ ...railBtn, background: 'var(--color-brand)', color: '#FFFFFF', borderColor: 'var(--color-brand)', flex: 1, justifyContent: 'center' }}>
                 <Mail size={12} />
                 Email
               </button>
-              <button onClick={() => onCopy(publicUrl)} className="inline-flex items-center" style={railBtn} title="Copy URL">
+              <button onClick={() => onCopy(publicUrl)} className="inline-flex items-center" style={{ ...railBtn, justifyContent: 'center' }} title="Copy URL">
                 <Copy size={12} />
                 Copy
               </button>
-              <a href={publicUrl} target="_blank" rel="noreferrer" className="inline-flex items-center" style={railBtn} title="Open in new tab">
+              <a href={publicUrl} target="_blank" rel="noreferrer" className="inline-flex items-center" style={{ ...railBtn, justifyContent: 'center' }} title="Open in new tab">
                 <ExternalLink size={12} />
                 Open
               </a>
