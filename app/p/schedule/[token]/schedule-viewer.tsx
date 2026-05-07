@@ -35,7 +35,18 @@ interface PublicSchedule {
  *   - Optional executive overview slide between cover and gantt.
  *   - Shared legend component — same visual language as the editor.
  */
-export function ScheduleViewer({ token }: { token: string }) {
+/**
+ * Two ways to mount the viewer:
+ *   <ScheduleViewer token="..." />            // public, fetches via token
+ *   <ScheduleViewer previewScheduleId="..." />// admin preview, fetches live data
+ */
+type ScheduleViewerProps =
+  | { token: string; previewScheduleId?: undefined }
+  | { token?: undefined; previewScheduleId: string }
+
+export function ScheduleViewer(props: ScheduleViewerProps) {
+  const { token, previewScheduleId } = props
+  const isPreview = !!previewScheduleId
   const [schedule, setSchedule] = useState<PublicSchedule | null>(null)
   const [sections, setSections] = useState<ScheduleSection[]>([])
   const [analyticsResourceId, setAnalyticsResourceId] = useState<string | null>(null)
@@ -45,7 +56,10 @@ export function ScheduleViewer({ token }: { token: string }) {
     let cancelled = false
     async function load() {
       try {
-        const res = await fetch(apiPath(`/api/public/schedules/${encodeURIComponent(token)}`))
+        const url = isPreview
+          ? apiPath(`/api/admin/schedules/${encodeURIComponent(previewScheduleId!)}/preview-data`)
+          : apiPath(`/api/public/schedules/${encodeURIComponent(token!)}`)
+        const res = await fetch(url)
         if (!res.ok) {
           if (!cancelled) setState('not_found')
           return
@@ -84,12 +98,13 @@ export function ScheduleViewer({ token }: { token: string }) {
     }
     void load()
     return () => { cancelled = true }
-  }, [token])
+  }, [token, previewScheduleId, isPreview])
 
   useShareViewTracking({
     resourceType: 'schedule',
     resourceId: analyticsResourceId,
-    shareToken: token,
+    // No token in preview — share-view tracking endpoint requires one.
+    shareToken: isPreview ? null : token,
   })
 
   if (state === 'loading') {
@@ -130,6 +145,33 @@ export function ScheduleViewer({ token }: { token: string }) {
 
   return (
     <div style={pageWrap}>
+      {/* Preview-mode pill — visible to admins viewing the live state. */}
+      {isPreview && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '1rem',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 50,
+            padding: '0.5rem 1rem',
+            background: '#1f2c1a',
+            color: '#FFFFFF',
+            borderRadius: '999px',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            letterSpacing: '0.04em',
+            boxShadow: '0 8px 24px rgba(31, 44, 26, 0.25)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+        >
+          <span style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: '#93c98a' }} />
+          Admin preview · live, unpublished state
+        </div>
+      )}
+
       {/* Cover slide */}
       <section style={coverShell}>
         <div style={coverBackdrop} aria-hidden="true" />

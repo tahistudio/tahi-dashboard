@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Trash2, AlertTriangle, Share2, Copy, Diamond, Calendar, Mail } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, AlertTriangle, Share2, Copy, Diamond, Calendar, Mail, Eye } from 'lucide-react'
 import { EmailShareModal, type EmailRecipientSuggestion } from '@/components/tahi/email-share-modal'
 import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
 import { apiPath } from '@/lib/api'
@@ -430,6 +430,27 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
           Critical gate
         </ToolbarButton>
         <div style={{ flex: 1 }} />
+        <Link
+          href={`/schedules/${scheduleId}/preview`}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center"
+          style={{
+            padding: '0.4375rem 0.75rem',
+            fontSize: '0.75rem',
+            fontWeight: 500,
+            background: 'var(--color-bg)',
+            color: 'var(--color-text-muted)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            gap: '0.375rem',
+            cursor: 'pointer',
+            textDecoration: 'none',
+          }}
+        >
+          <Eye size={13} />
+          Preview
+        </Link>
         {publicUrl ? (
           <>
             <button

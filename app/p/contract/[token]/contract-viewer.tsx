@@ -50,11 +50,16 @@ export function ContractViewer({
   token,
   mode,
   signerId,
+  previewContractId,
 }: {
-  token: string
+  token?: string
   mode: Mode
   signerId?: string
+  /** Admin-only preview mode: load live state from the admin endpoint
+   *  instead of the public token endpoint. Sign UI is disabled. */
+  previewContractId?: string
 }) {
+  const isPreview = !!previewContractId
   const [contract, setContract] = useState<PublicContract | null>(null)
   const [signers, setSigners] = useState<PublicSigner[]>([])
   const [signatures, setSignatures] = useState<PublicSignature[]>([])
@@ -65,7 +70,10 @@ export function ContractViewer({
 
   const reload = useCallback(async () => {
     try {
-      const res = await fetch(apiPath(`/api/public/contracts/${encodeURIComponent(token)}`))
+      const url = isPreview
+        ? apiPath(`/api/admin/contracts/${encodeURIComponent(previewContractId!)}/preview-data`)
+        : apiPath(`/api/public/contracts/${encodeURIComponent(token!)}`)
+      const res = await fetch(url)
       if (!res.ok) {
         setState('not_found')
         return
@@ -82,14 +90,15 @@ export function ContractViewer({
     } catch {
       setState('not_found')
     }
-  }, [token])
+  }, [token, previewContractId, isPreview])
 
   useEffect(() => { void reload() }, [reload])
 
   useShareViewTracking({
     resourceType: 'contract',
     resourceId: contract?.id ?? null,
-    shareToken: token,
+    // No token in preview — share-view tracking endpoint requires one.
+    shareToken: isPreview ? null : token,
   })
 
   // Resolve the active signer for sign mode.
@@ -99,6 +108,7 @@ export function ContractViewer({
 
   async function submitSignature(dataUrl: string) {
     if (!signerId || !contract) return
+    if (!token) return // preview mode — sign disabled
     setSubmitting(true)
     setError(null)
     try {
@@ -163,6 +173,33 @@ export function ContractViewer({
 
   return (
     <div style={pageWrap}>
+      {/* Preview-mode pill */}
+      {isPreview && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '1rem',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 50,
+            padding: '0.5rem 1rem',
+            background: '#1f2c1a',
+            color: '#FFFFFF',
+            borderRadius: '999px',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            letterSpacing: '0.04em',
+            boxShadow: '0 8px 24px rgba(31, 44, 26, 0.25)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+        >
+          <span style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: '#93c98a' }} />
+          Admin preview · live, unpublished state
+        </div>
+      )}
+
       {/* Cover */}
       <section style={coverShell}>
         <div style={coverBackdrop} aria-hidden="true" />
