@@ -4,7 +4,7 @@
  * <TypedSectionFields> dispatches based on section type and renders a small
  * focussed form for each. The legacy types (overview/about/terms/scope_shared/
  * text/testimonial) still use the simple HTML/quote forms inside
- * proposal-detail.tsx — this module covers only the new sales-led types.
+ * proposal-detail.tsx; this module covers only the new sales-led types.
  *
  * Pattern: each type gets a stateful editor that reads from `data` and emits
  * a complete replacement object via `onChange`. Save-on-blur is handled by
@@ -51,7 +51,11 @@ const smallBtn: React.CSSProperties = {
   cursor: 'pointer',
   display: 'inline-flex',
   alignItems: 'center',
+  // Centre icon + label horizontally so the Trash glyph sits dead-centre
+  // when the button is icon-only (no label content to balance it).
+  justifyContent: 'center',
   gap: '0.25rem',
+  lineHeight: 1,
 }
 
 interface FieldsProps {
@@ -66,14 +70,49 @@ export function TypedSectionFields({
     case 'value_anchor':       return <ValueAnchorFields data={data} onChange={onChange} />
     case 'process':            return <ListFields data={data} onChange={onChange} key_field="steps" itemKeys={['title', 'body', 'eyebrow']} placeholders={{ title: 'Discovery', body: 'A short call to understand goals…', eyebrow: 'optional' }} />
     case 'differentiators':    return <ListFields data={data} onChange={onChange} key_field="items" itemKeys={['icon', 'title', 'body']} placeholders={{ icon: 'founder|partner|sparkle|code|leaf|shield', title: 'Founder-led', body: 'Liam and Staci on the call…' }} />
-    case 'case_study':         return <ListFields data={data} onChange={onChange} key_field="items" itemKeys={['client', 'problem', 'outcome', 'metric', 'quote', 'quoteAuthor']} placeholders={{ client: 'Physitrack', problem: 'Outdated marketing site…', outcome: 'Full Webflow rebuild + AEO', metric: '12-month retainer', quote: 'optional', quoteAuthor: 'optional' }} />
+    case 'case_study':         return <ListFields data={data} onChange={onChange} key_field="items" itemKeys={['client', 'problem', 'outcome', 'metric', 'link', 'quote', 'quoteAuthor']} placeholders={{ client: 'Physitrack', problem: 'Outdated marketing site…', outcome: 'Full Webflow rebuild + AEO', metric: '12-month retainer', link: 'https://tahi.studio/case-studies/physitrack (optional)', quote: 'optional', quoteAuthor: 'optional' }} />
     case 'testimonial_stack':  return <ListFields data={data} onChange={onChange} key_field="items" itemKeys={['quote', 'author', 'role', 'company']} placeholders={{ quote: '"They are the only…"', author: 'Marketing Lead', role: 'Director', company: 'Acme Inc.' }} />
     case 'faq':                return <ListFields data={data} onChange={onChange} key_field="items" itemKeys={['q', 'a']} placeholders={{ q: 'What if I want to stop?', a: 'You can. We bill month-to-month…' }} multiline={['a']} />
     case 'guarantee':          return <GuaranteeFields data={data} onChange={onChange} />
     case 'retainer_offer':     return <RetainerOfferFields data={data} onChange={onChange} />
     case 'founders':           return <FoundersFields data={data} onChange={onChange} />
+    case 'partner_badges':     return <PartnerBadgesFields data={data} onChange={onChange} />
     default:                   return null
   }
+}
+
+// ─── partner_badges ───────────────────────────────────────────────────────
+
+function PartnerBadgesFields({ data, onChange }: FieldsProps) {
+  type Item = { label: string; sub?: string; logo?: string }
+  const eyebrow = String(data.eyebrow ?? '')
+  const intro = String(data.intro ?? '')
+  const items: Item[] = Array.isArray(data.items) ? (data.items as Item[]) : []
+  const set = (patch: Record<string, unknown>) => onChange({ ...data, ...patch })
+  const updateAt = (i: number, patch: Partial<Item>) => set({ items: items.map((it, j) => j === i ? { ...it, ...patch } : it) })
+  return (
+    <div style={{ display: 'grid', gap: '0.5rem' }}>
+      <Field label="Eyebrow"><input value={eyebrow} onChange={e => set({ eyebrow: e.target.value })} placeholder="Credentialled team" style={inputStyle} /></Field>
+      <Field label="Intro"><input value={intro} onChange={e => set({ intro: e.target.value })} placeholder="Vetted by the platforms we build on." style={inputStyle} /></Field>
+      <div>
+        <span style={labelStyle}>Badges</span>
+        <div style={{ display: 'grid', gap: '0.375rem' }}>
+          {items.map((it, i) => (
+            <div key={i} style={cardStyle}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Badge {i + 1}</span>
+                <button onClick={() => set({ items: items.filter((_, j) => j !== i) })} style={{ ...smallBtn, padding: '0.25rem 0.375rem' }} aria-label="Remove"><Trash2 size={12} /></button>
+              </div>
+              <Field label="label"><input value={it.label} onChange={e => updateAt(i, { label: e.target.value })} placeholder="Webflow Premium Partner" style={inputStyle} /></Field>
+              <Field label="sub"><input value={it.sub ?? ''} onChange={e => updateAt(i, { sub: e.target.value })} placeholder="Direct platform support" style={inputStyle} /></Field>
+              <Field label="logo URL (optional)"><input value={it.logo ?? ''} onChange={e => updateAt(i, { logo: e.target.value })} placeholder="https://… (renders next to the label)" style={inputStyle} /></Field>
+            </div>
+          ))}
+          <button onClick={() => set({ items: [...items, { label: '', sub: '', logo: '' }] })} style={smallBtn}><Plus size={12} />Add badge</button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ─── founders ─────────────────────────────────────────────────────────────

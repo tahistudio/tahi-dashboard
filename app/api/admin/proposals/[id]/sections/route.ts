@@ -15,6 +15,8 @@ const SECTION_TYPES = [
   'testimonial_stack', 'faq', 'guarantee', 'retainer_offer',
   // Phase 9 — founder-led credibility slide
   'founders',
+  // Phase 10 — partner / credential pill row (Webflow Premium, Client First, Optibase)
+  'partner_badges',
 ] as const
 
 // POST /api/admin/proposals/[id]/sections

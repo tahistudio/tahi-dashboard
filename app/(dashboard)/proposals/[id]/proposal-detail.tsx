@@ -91,6 +91,7 @@ const SECTION_TYPE_GROUPS = [
       { value: 'case_study', label: 'Case studies' },
       { value: 'testimonial_stack', label: 'Testimonials (carousel)' },
       { value: 'founders', label: 'Founders' },
+      { value: 'partner_badges', label: 'Partner badges' },
       { value: 'faq', label: 'FAQ' },
       { value: 'terms', label: 'Terms' },
     ],
@@ -117,6 +118,7 @@ const SECTION_TYPES: ReadonlyArray<{ value: string; label: string }> =
 const STRUCTURED_TYPES = new Set<string>([
   'value_anchor', 'process', 'differentiators', 'case_study',
   'testimonial_stack', 'faq', 'guarantee', 'retainer_offer', 'founders',
+  'partner_badges',
 ])
 
 export function ProposalDetail({ proposalId }: { proposalId: string }) {
