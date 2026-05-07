@@ -13,6 +13,8 @@ const SECTION_TYPES = [
   // Phase 4 sales-led types (data shape lives in app/p/proposal/[token]/section-blocks.tsx)
   'value_anchor', 'process', 'differentiators', 'case_study',
   'testimonial_stack', 'faq', 'guarantee', 'retainer_offer',
+  // Phase 9 — founder-led credibility slide
+  'founders',
 ] as const
 
 // POST /api/admin/proposals/[id]/sections

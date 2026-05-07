@@ -21,10 +21,11 @@ export type SectionType =
   | 'process'                     // 5-step timeline
   | 'differentiators'             // icon grid
   | 'case_study'                  // logo + problem + outcome stack
-  | 'testimonial_stack'           // multi-quote
+  | 'testimonial_stack'           // multi-quote carousel
   | 'faq'                         // Q/A list
   | 'guarantee'                   // risk-reversal callout
   | 'retainer_offer'              // 10% lifetime hook
+  | 'founders'                    // founder-led credibility slide
 
 export interface PublicSection {
   id: string
@@ -104,6 +105,30 @@ export function defaultDataForType(type: SectionType): Record<string, unknown> {
         headline: 'No surprises, no lock-in',
         body: 'Month-to-month retainer with no minimum term. If the work isn’t doing what you need, we say so first. If it’s the right fit, you stay because you want to.',
         badges: ['No lock-in', 'Same-day responses', 'Honest scoping'],
+      }
+    case 'founders':
+      return {
+        eyebrow: 'The team on your build',
+        intro: 'Founder-led means founder-built. Liam runs engineering, Staci runs design, and we are on every call and every build.',
+        people: [
+          {
+            name: 'Liam Miller',
+            role: 'Co-founder · Engineering',
+            bio: 'Webflow developer turned agency owner. Animations, attribution, and the technical depth most agencies hand off.',
+            // Cropped to faces — see public/proposals/founders-placeholder.jpg.
+            imageUrl: '/dashboard/proposals/founders-placeholder.jpg',
+            imagePosition: '28% 25%',
+            initials: 'LM',
+          },
+          {
+            name: 'Staci Bonnie',
+            role: 'Co-founder · Design',
+            bio: 'Web design and UI/UX with a former-chef\'s eye for how something feels before it is read.',
+            imageUrl: '/dashboard/proposals/founders-placeholder.jpg',
+            imagePosition: '70% 25%',
+            initials: 'SB',
+          },
+        ],
       }
     case 'retainer_offer':
       return {
@@ -200,6 +225,7 @@ export function ProposalSectionBlock({ section }: { section: PublicSection }) {
     case 'faq':                return <FAQ section={section} />
     case 'guarantee':          return <Guarantee section={section} />
     case 'retainer_offer':     return <RetainerOffer section={section} />
+    case 'founders':           return <Founders section={section} />
     default:                   return <HtmlSection section={section} />
   }
 }
@@ -429,25 +455,224 @@ function TestimonialStack({ section }: { section: PublicSection }) {
   type Item = { quote: string; author: string; role?: string; company?: string }
   const data = safeParse<{ items?: Item[] }>(section.data)
   const items = data?.items ?? []
+  if (items.length === 0) return null
+  if (items.length === 1) {
+    return (
+      <section style={slideShell} className="proposal-slide">
+        {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
+        {section.title && <h2 style={slideTitle}>{section.title}</h2>}
+        <div style={{ marginTop: '1.5rem', maxWidth: '40rem', margin: '1.5rem auto 0' }}>
+          <TestimonialCard item={items[0]} variant="static" />
+        </div>
+      </section>
+    )
+  }
   return (
     <section style={slideShell} className="proposal-slide">
       {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
       {section.title && <h2 style={slideTitle}>{section.title}</h2>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))', gap: '0.875rem', marginTop: '1.25rem' }}>
-        {items.map((it, i) => (
-          <div key={i} style={{ background: '#ffffff', border: '1px solid #e8f0e6', borderRadius: '0 16px 0 16px', padding: '1.125rem 1.25rem' }}>
-            <blockquote style={{ fontSize: '0.9375rem', lineHeight: 1.55, color: '#1f2c1a', margin: 0, fontStyle: 'italic' }}>
-              &ldquo;{it.quote}&rdquo;
-            </blockquote>
-            <div style={{ marginTop: '0.875rem', fontSize: '0.8125rem', color: '#5a6657' }}>
-              <strong style={{ color: '#1f2c1a' }}>{it.author}</strong>
-              {it.role ? <span> · {it.role}</span> : null}
-              {it.company ? <div style={{ color: '#8a9987', fontSize: '0.75rem', marginTop: '0.125rem' }}>{it.company}</div> : null}
-            </div>
-          </div>
-        ))}
-      </div>
+      <TestimonialCarousel items={items} />
     </section>
+  )
+}
+
+/**
+ * <TestimonialCarousel> — single quote in focus, prev/next visible at the
+ * edges, soft fade. Auto-advances every 6s; pauses on hover, focus, or
+ * touch. Drag works on mobile (basic threshold-based swipe). Manual nav
+ * via arrow buttons or dot indicators. Respects prefers-reduced-motion
+ * by disabling auto-advance.
+ */
+function TestimonialCarousel({
+  items,
+}: {
+  items: { quote: string; author: string; role?: string; company?: string }[]
+}) {
+  const AUTO_ADVANCE_MS = 6000
+  const [active, setActive] = React.useState(0)
+  const [paused, setPaused] = React.useState(false)
+  const [progress, setProgress] = React.useState(0)
+  const trackRef = React.useRef<HTMLDivElement>(null)
+  const dragRef = React.useRef<{ startX: number; deltaX: number } | null>(null)
+  const reducedMotion = React.useRef(false)
+
+  React.useEffect(() => {
+    reducedMotion.current = typeof window !== 'undefined'
+      && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  }, [])
+
+  // Auto-advance with progress bar.
+  React.useEffect(() => {
+    if (paused || items.length < 2 || reducedMotion.current) return
+    let raf = 0
+    const t0 = performance.now()
+    const tick = (t: number) => {
+      const p = Math.min(1, (t - t0) / AUTO_ADVANCE_MS)
+      setProgress(p)
+      if (p >= 1) {
+        setActive(a => (a + 1) % items.length)
+        setProgress(0)
+      } else {
+        raf = requestAnimationFrame(tick)
+      }
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [active, paused, items.length])
+
+  // Pause progress when manually navigating; resume after 1s of stillness.
+  function jump(i: number) {
+    setActive((i + items.length) % items.length)
+    setProgress(0)
+    setPaused(true)
+    window.setTimeout(() => setPaused(false), 1200)
+  }
+
+  // Touch drag — threshold of 40px to count as a swipe.
+  function onTouchStart(e: React.TouchEvent) {
+    dragRef.current = { startX: e.touches[0].clientX, deltaX: 0 }
+    setPaused(true)
+  }
+  function onTouchMove(e: React.TouchEvent) {
+    if (!dragRef.current) return
+    dragRef.current.deltaX = e.touches[0].clientX - dragRef.current.startX
+  }
+  function onTouchEnd() {
+    if (!dragRef.current) return
+    const d = dragRef.current.deltaX
+    dragRef.current = null
+    if (Math.abs(d) > 40) jump(active + (d < 0 ? 1 : -1))
+    else setPaused(false)
+  }
+
+  return (
+    <div
+      style={{ marginTop: '1.5rem', position: 'relative' }}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={() => setPaused(false)}
+    >
+      {/* Edge fades — purely cosmetic, hint that more cards exist beyond the frame. */}
+      <div aria-hidden="true" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '8%', background: 'linear-gradient(to right, var(--color-bg, #FFFFFF), transparent)', pointerEvents: 'none', zIndex: 2 }} />
+      <div aria-hidden="true" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8%', background: 'linear-gradient(to left, var(--color-bg, #FFFFFF), transparent)', pointerEvents: 'none', zIndex: 2 }} />
+
+      <div
+        ref={trackRef}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        style={{
+          overflow: 'hidden',
+          padding: '0.5rem 0',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            // Each card occupies 70% of the container with no flex gap.
+            // Active card centred via 15% offset + 70%-step translate.
+            // Inner card padding handles the visual gutter.
+            transform: `translateX(calc(15% - ${active * 70}%))`,
+            transition: 'transform 520ms cubic-bezier(0.22, 1, 0.36, 1)',
+            willChange: 'transform',
+          }}
+        >
+          {items.map((it, i) => (
+            <div
+              key={i}
+              style={{
+                flex: '0 0 70%',
+                minWidth: 0,
+                padding: '0 0.75rem',
+                opacity: i === active ? 1 : 0.45,
+                transform: i === active ? 'scale(1)' : 'scale(0.95)',
+                transition: 'opacity 520ms ease, transform 520ms cubic-bezier(0.22, 1, 0.36, 1)',
+              }}
+            >
+              <TestimonialCard item={it} variant={i === active ? 'active' : 'inactive'} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Progress + dots */}
+      <div style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.625rem' }}>
+        {!reducedMotion.current && (
+          <div aria-hidden="true" style={{ width: '4rem', height: '0.125rem', background: '#e8f0e6', borderRadius: '999px', overflow: 'hidden' }}>
+            <div style={{
+              width: `${Math.round(progress * 100)}%`,
+              height: '100%',
+              background: '#5A824E',
+              transition: paused ? 'width 240ms ease' : 'none',
+            }} />
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: '0.4375rem' }}>
+          {items.map((_, i) => (
+            <button
+              key={i}
+              type="button"
+              aria-label={`Go to testimonial ${i + 1}`}
+              onClick={() => jump(i)}
+              style={{
+                width: i === active ? '1.25rem' : '0.5rem',
+                height: '0.5rem',
+                borderRadius: '999px',
+                background: i === active ? '#5A824E' : '#d4e0d0',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                transition: 'width 240ms ease, background 240ms ease',
+              }}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TestimonialCard({
+  item, variant,
+}: {
+  item: { quote: string; author: string; role?: string; company?: string }
+  variant: 'active' | 'inactive' | 'static'
+}) {
+  const elevated = variant === 'active' || variant === 'static'
+  return (
+    <figure
+      style={{
+        background: '#ffffff',
+        border: '1px solid #e8f0e6',
+        borderRadius: '0 24px 0 24px',
+        padding: '2rem 2.25rem',
+        boxShadow: elevated ? '0 16px 40px -16px rgba(31,44,26,0.12)' : 'none',
+        transition: 'box-shadow 240ms ease',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1.25rem',
+        margin: 0,
+      }}
+    >
+      <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" style={{ color: '#5A824E', opacity: 0.6 }}>
+        <path d="M9 7c-3 0-5 2-5 5v6h6v-6H6c0-2 1-3 3-3V7zm10 0c-3 0-5 2-5 5v6h6v-6h-4c0-2 1-3 3-3V7z" fill="currentColor" />
+      </svg>
+      <blockquote style={{ fontSize: 'clamp(1.125rem, 1.4vw, 1.375rem)', lineHeight: 1.5, color: '#121A0F', margin: 0, fontWeight: 500, letterSpacing: '-0.005em' }}>
+        {item.quote}
+      </blockquote>
+      <figcaption style={{ marginTop: 'auto', fontSize: '0.875rem', color: '#5a6657' }}>
+        <div style={{ fontWeight: 700, color: '#1f2c1a' }}>{item.author}</div>
+        {(item.role || item.company) && (
+          <div style={{ fontSize: '0.8125rem', color: '#8a9987', marginTop: '0.125rem' }}>
+            {item.role}
+            {item.role && item.company ? ' · ' : ''}
+            {item.company}
+          </div>
+        )}
+      </figcaption>
+    </figure>
   )
 }
 
@@ -607,6 +832,145 @@ function RetainerOffer({ section }: { section: PublicSection }) {
       )}
       {data?.footnote && <p style={{ fontSize: '0.8125rem', color: '#a8c89e', marginTop: '1.25rem', marginBottom: 0 }}>{data.footnote}</p>}
     </section>
+  )
+}
+
+/**
+ * <Founders> — founder-led credibility slide.
+ *
+ * Two cards side-by-side on desktop, stacked on mobile. Each card has a
+ * leaf-radius photo (or initials fallback if no image) plus name, role,
+ * and a short bio. The placeholder photo of Liam and Staci lives at
+ * /dashboard/proposals/founders-placeholder.jpg — each card overrides
+ * the imagePosition (CSS object-position) to crop to its respective face.
+ */
+function Founders({ section }: { section: PublicSection }) {
+  type Person = {
+    name: string
+    role: string
+    bio?: string
+    imageUrl?: string
+    imagePosition?: string
+    initials?: string
+  }
+  const data = safeParse<{ eyebrow?: string; intro?: string; people?: Person[] }>(section.data)
+  const people = data?.people ?? []
+  const theme = readTheme(section)
+  const c = themeColours(theme)
+  return (
+    <section style={{ ...slideShell, background: c.bg, color: c.text }} className="proposal-slide">
+      <div style={slideInner}>
+        {(data?.eyebrow || section.subtitle) && (
+          <div style={{ ...slideEyebrow, color: c.eyebrow }}>{data?.eyebrow ?? section.subtitle}</div>
+        )}
+        {section.title && (
+          <h2 style={{ ...slideTitle, color: c.text }}>{section.title}</h2>
+        )}
+        {data?.intro && (
+          <p style={{ fontSize: '1.0625rem', lineHeight: 1.55, color: c.textMuted, maxWidth: '40rem', margin: '0 0 2.25rem 0' }}>
+            {data.intro}
+          </p>
+        )}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: people.length === 1 ? 'minmax(0, 24rem)' : 'repeat(auto-fit, minmax(16rem, 1fr))',
+            gap: '1.25rem',
+            justifyContent: people.length === 1 ? 'center' : 'stretch',
+          }}
+        >
+          {people.map((p, i) => (
+            <FounderCard key={i} person={p} theme={c} />
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function FounderCard({
+  person, theme,
+}: {
+  person: { name: string; role: string; bio?: string; imageUrl?: string; imagePosition?: string; initials?: string }
+  theme: ThemeColours
+}) {
+  return (
+    <div
+      style={{
+        background: theme.cardBg,
+        border: `1px solid ${theme.cardBorder}`,
+        borderRadius: '0 24px 0 24px',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        transition: 'border-color 240ms ease, box-shadow 240ms ease, transform 240ms ease',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.transform = 'translateY(-0.125rem)'
+        e.currentTarget.style.boxShadow = '0 16px 40px -16px rgba(31,44,26,0.18)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.transform = 'translateY(0)'
+        e.currentTarget.style.boxShadow = 'none'
+      }}
+    >
+      {/* Photo or initials block. Aspect 4:5 to give a portrait crop. */}
+      <div
+        style={{
+          position: 'relative',
+          width: '100%',
+          aspectRatio: '4 / 5',
+          background: person.imageUrl ? '#1f2c1a' : 'linear-gradient(135deg, #5A824E 0%, #425F39 100%)',
+          overflow: 'hidden',
+        }}
+      >
+        {person.imageUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={person.imageUrl}
+            alt={person.name}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              objectPosition: person.imagePosition ?? '50% 25%',
+            }}
+          />
+        ) : (
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 'clamp(3rem, 8vw, 5rem)',
+              fontWeight: 800,
+              color: '#FFFFFF',
+              letterSpacing: '-0.02em',
+            }}
+          >
+            {person.initials ?? person.name.split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase()}
+          </div>
+        )}
+      </div>
+      <div style={{ padding: '1.25rem 1.375rem' }}>
+        <div style={{ fontSize: '1.0625rem', fontWeight: 800, color: theme.text, letterSpacing: '-0.01em' }}>
+          {person.name}
+        </div>
+        <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: theme.eyebrow, marginTop: '0.125rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          {person.role}
+        </div>
+        {person.bio && (
+          <p style={{ fontSize: '0.9375rem', lineHeight: 1.5, color: theme.textMuted, marginTop: '0.75rem', marginBottom: 0 }}>
+            {person.bio}
+          </p>
+        )}
+      </div>
+    </div>
   )
 }
 

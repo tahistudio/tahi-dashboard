@@ -20,7 +20,7 @@
  */
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useShareViewTracking } from '@/components/tahi/use-share-view-tracking'
@@ -478,160 +478,19 @@ export function ProposalViewer(props: ProposalViewerProps) {
 
       {/* Variants picker + active variant detail */}
       {variants.length > 0 && (
-        <section style={slideShell} className="proposal-slide">
-          <div style={slideEyebrow}>Choose your package</div>
-          <h2 style={slideTitle}>{variants.length === 1 ? activeVariant?.name : 'Pick the package that fits.'}</h2>
-          {variants.length > 1 && (
-            <p style={slideSub}>
-              {variants.length} options · same team, same approach, different scope and investment
-            </p>
-          )}
-
-          {/* Compare table (only when >1 variant) */}
-          {variants.length > 1 && <VariantCompareTable variants={variants} activeVariantId={activeVariantId} onSelect={setActiveVariantId} />}
-
-          {/* Tabs (only when >1 variant) */}
-          {variants.length > 1 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1.25rem' }}>
-              {variants.map(v => {
-                const isActive = v.id === activeVariantId
-                return (
-                  <button
-                    key={v.id}
-                    onClick={() => setActiveVariantId(v.id)}
-                    style={{
-                      padding: '0.625rem 1rem',
-                      fontSize: '0.875rem',
-                      fontWeight: 600,
-                      background: isActive ? '#1f2c1a' : '#ffffff',
-                      color: isActive ? '#ffffff' : '#1f2c1a',
-                      border: `1px solid ${isActive ? '#1f2c1a' : '#d4e0d0'}`,
-                      borderRadius: 'var(--radius-md, 0.5rem)',
-                      cursor: 'pointer',
-                      position: 'relative',
-                    }}
-                  >
-                    {v.name}
-                    {v.isFeatured ? (
-                      <span style={{
-                        marginLeft: '0.5rem',
-                        padding: '0.125rem 0.4375rem',
-                        fontSize: '0.625rem',
-                        fontWeight: 700,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.06em',
-                        background: '#5A824E',
-                        color: '#ffffff',
-                        borderRadius: '999px',
-                      }}>
-                        Most chosen
-                      </span>
-                    ) : null}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
-          {/* Active variant content */}
-          {activeVariant && (
-            <div style={{ marginTop: '1.5rem', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: '1.5rem' }}>
-              {activeVariant.tagline && (
-                <p style={{ fontSize: '1rem', color: '#5a6657', margin: 0, fontStyle: 'italic' }}>
-                  {activeVariant.tagline}
-                </p>
-              )}
-
-              {/* Scope — feature checklist (parsed from <li>) + remaining HTML */}
-              {activeVariant.scopeHtml && (
-                <div>
-                  <h3 style={subSlideHeader}>What&apos;s included</h3>
-                  <VariantScopeBody html={activeVariant.scopeHtml} />
-                </div>
-              )}
-
-              {/* Pricing */}
-              <div style={pricingCard}>
-                <h3 style={{ ...subSlideHeader, marginTop: 0 }}>Investment</h3>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2rem', alignItems: 'baseline' }}>
-                  {activeVariant.oneOffAmount > 0 && (
-                    <PriceCell
-                      label="One-off"
-                      amount={formatMoney(activeVariant.oneOffAmount, activeVariant.currency)}
-                      sub="paid as scheduled in the SoW"
-                    />
-                  )}
-                  {activeVariant.monthlyAmount > 0 && (
-                    <PriceCell
-                      label="Monthly"
-                      amount={`${formatMoney(activeVariant.monthlyAmount, activeVariant.currency)}/mo`}
-                      sub="ongoing retainer"
-                    />
-                  )}
-                  {activeVariant.oneOffAmount === 0 && activeVariant.monthlyAmount === 0 && (
-                    <span style={{ fontSize: '0.875rem', color: '#5a6657' }}>Pricing to be confirmed.</span>
-                  )}
-                </div>
-                {activeVariant.pricingNotesHtml && (
-                  <div style={{ marginTop: '0.75rem', fontSize: '0.875rem', color: '#5a6657' }} dangerouslySetInnerHTML={{ __html: activeVariant.pricingNotesHtml }} />
-                )}
-              </div>
-
-              {/* Timeline link (if attached) */}
-              {activeVariant.timelineScheduleId && (
-                <div style={{ fontSize: '0.875rem', color: '#5a6657' }}>
-                  <strong style={{ color: '#1f2c1a' }}>Project schedule</strong> attached separately. Ask
-                  the sender for the timeline link if you haven&apos;t already received it.
-                </div>
-              )}
-
-              {/* CTA — accept / decline / question. Hidden in preview mode
-                  since those flows require a real public token + write to
-                  the acceptance audit table. */}
-              {!submitted && !isPreview && (
-                <>
-                  {questionAcked && (
-                    <div style={{
-                      padding: '0.75rem 1rem',
-                      background: '#eff6ff',
-                      color: '#1e40af',
-                      border: '1px solid #bfdbfe',
-                      borderRadius: '0.625rem',
-                      fontSize: '0.875rem',
-                      fontWeight: 500,
-                      lineHeight: 1.5,
-                    }}>
-                      <strong>Question received.</strong> Liam will reply within one business day. You can still accept or decline below.
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.625rem', marginTop: '0.5rem' }}>
-                    <button
-                      onClick={() => setDecisionMode({ kind: 'accepted', variantId: activeVariant.id })}
-                      style={primaryBtn}
-                    >
-                      {activeVariant.ctaLabel?.trim() || `Accept ${activeVariant.name}`}
-                    </button>
-                    <button
-                      onClick={() => setDecisionMode({ kind: 'question', variantId: activeVariant.id })}
-                      style={tertiaryBtn}
-                    >
-                      Ask a question or request a tweak
-                    </button>
-                    <button
-                      onClick={() => setDecisionMode({ kind: 'declined', variantId: null })}
-                      style={secondaryBtn}
-                    >
-                      Decline
-                    </button>
-                  </div>
-                  <p style={{ fontSize: '0.75rem', color: '#8a9987', marginTop: '0.5rem', marginBottom: 0 }}>
-                    Not sure? Ask anything — we&apos;d rather refine than push.
-                  </p>
-                </>
-              )}
-            </div>
-          )}
-        </section>
+        <VariantsSlide
+          variants={variants}
+          activeVariantId={activeVariantId}
+          activeVariant={activeVariant ?? null}
+          onSelect={setActiveVariantId}
+          onDecision={kind => setDecisionMode({
+            kind,
+            variantId: kind === 'declined' ? null : (activeVariant?.id ?? null),
+          })}
+          submitted={submitted}
+          isPreview={isPreview}
+          questionAcked={questionAcked}
+        />
       )}
 
         {/* Post-accept timeline — included as the final slide once accepted */}
@@ -1155,6 +1014,383 @@ function PostAcceptTimeline({ variantName }: { variantName?: string | null }) {
         ))}
       </ol>
     </section>
+  )
+}
+
+// ─── Variants slide — premium tabbed reveal with motion ──────────────────
+
+/**
+ * <VariantsSlide> — the package-picker slide.
+ *
+ * Replaces the old grid-of-cards with a pill-shaped tab strip on top, an
+ * animated indicator that slides between tabs, and a content area that
+ * cross-fades on switch. The price cells count up from the previous value
+ * to the new one so the buyer sees the change rather than just reading it.
+ *
+ * The compare-table view is opt-in via the "Compare side-by-side" toggle
+ * underneath the tabs. Default is the cinematic single-variant reveal.
+ */
+function VariantsSlide({
+  variants, activeVariantId, activeVariant, onSelect, onDecision,
+  submitted, isPreview, questionAcked,
+}: {
+  variants: PublicVariant[]
+  activeVariantId: string | null
+  activeVariant: PublicVariant | null
+  onSelect: (id: string) => void
+  onDecision: (kind: 'accepted' | 'declined' | 'question') => void
+  submitted: 'accepted' | 'declined' | null
+  isPreview: boolean
+  questionAcked: boolean
+}) {
+  const [showCompare, setShowCompare] = useState(false)
+  const featured = variants.find(v => v.isFeatured)
+
+  return (
+    <section style={slideShell} className="proposal-slide">
+      <style>{`
+        @keyframes variantFadeIn {
+          from { opacity: 0; transform: translateY(0.5rem); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes compareFadeIn {
+          from { opacity: 0; transform: translateY(-0.25rem); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+
+      <div style={slideEyebrow}>Choose your package</div>
+      <h2 style={slideTitle}>
+        {variants.length === 1 ? activeVariant?.name : 'Pick the one that fits.'}
+      </h2>
+      {variants.length > 1 && (
+        <p style={slideSub}>
+          {variants.length} options. Same team, same approach, different scope and investment.
+        </p>
+      )}
+
+      {/* Tab strip — only when N>1 */}
+      {variants.length > 1 && (
+        <>
+          {featured && (
+            <div style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.375rem',
+                fontSize: '0.625rem',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+                color: '#5A824E',
+              }}>
+                <span style={{ width: '0.375rem', height: '0.375rem', borderRadius: '50%', background: '#5A824E' }} />
+                Most clients pick {featured.name}
+              </span>
+            </div>
+          )}
+
+          <VariantTabStrip
+            variants={variants}
+            activeVariantId={activeVariantId}
+            onSelect={onSelect}
+          />
+
+          <div style={{ marginTop: '0.625rem' }}>
+            <button
+              type="button"
+              onClick={() => setShowCompare(s => !s)}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                color: '#5A824E',
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                textDecorationThickness: '1px',
+                textUnderlineOffset: '0.25rem',
+              }}
+            >
+              {showCompare ? 'Hide side-by-side' : 'Compare side-by-side'}
+            </button>
+          </div>
+
+          {showCompare && (
+            <div style={{ animation: 'compareFadeIn 280ms ease-out' }}>
+              <VariantCompareTable variants={variants} activeVariantId={activeVariantId} onSelect={onSelect} />
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Active variant content — keyed so it cross-fades on switch */}
+      {activeVariant && (
+        <div
+          key={activeVariant.id}
+          style={{
+            marginTop: '1.5rem',
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr)',
+            gap: '1.5rem',
+            animation: 'variantFadeIn 320ms cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+        >
+          {activeVariant.tagline && (
+            <p style={{ fontSize: '1rem', color: '#5a6657', margin: 0, fontStyle: 'italic' }}>
+              {activeVariant.tagline}
+            </p>
+          )}
+
+          {activeVariant.scopeHtml && (
+            <div>
+              <h3 style={subSlideHeader}>What&apos;s included</h3>
+              <VariantScopeBody html={activeVariant.scopeHtml} />
+            </div>
+          )}
+
+          <div style={pricingCard}>
+            <h3 style={{ ...subSlideHeader, marginTop: 0 }}>Investment</h3>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2rem', alignItems: 'baseline' }}>
+              {activeVariant.oneOffAmount > 0 && (
+                <AnimatedPriceCell
+                  label="One-off"
+                  value={activeVariant.oneOffAmount}
+                  currency={activeVariant.currency}
+                  sub="paid as scheduled in the SoW"
+                />
+              )}
+              {activeVariant.monthlyAmount > 0 && (
+                <AnimatedPriceCell
+                  label="Monthly"
+                  value={activeVariant.monthlyAmount}
+                  currency={activeVariant.currency}
+                  suffix="/mo"
+                  sub="ongoing retainer"
+                />
+              )}
+              {activeVariant.oneOffAmount === 0 && activeVariant.monthlyAmount === 0 && (
+                <span style={{ fontSize: '0.875rem', color: '#5a6657' }}>Pricing to be confirmed.</span>
+              )}
+            </div>
+            {activeVariant.pricingNotesHtml && (
+              <div style={{ marginTop: '0.75rem', fontSize: '0.875rem', color: '#5a6657' }} dangerouslySetInnerHTML={{ __html: activeVariant.pricingNotesHtml }} />
+            )}
+          </div>
+
+          {activeVariant.timelineScheduleId && (
+            <div style={{ fontSize: '0.875rem', color: '#5a6657' }}>
+              <strong style={{ color: '#1f2c1a' }}>Project schedule</strong> attached separately. Ask
+              the sender for the timeline link if you haven&apos;t already received it.
+            </div>
+          )}
+
+          {!submitted && !isPreview && (
+            <>
+              {questionAcked && (
+                <div style={{
+                  padding: '0.75rem 1rem',
+                  background: '#eff6ff',
+                  color: '#1e40af',
+                  border: '1px solid #bfdbfe',
+                  borderRadius: '0.625rem',
+                  fontSize: '0.875rem',
+                  fontWeight: 500,
+                  lineHeight: 1.5,
+                }}>
+                  <strong>Question received.</strong> Liam will reply within one business day. You can still accept or decline below.
+                </div>
+              )}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.625rem', marginTop: '0.5rem' }}>
+                <button onClick={() => onDecision('accepted')} style={primaryBtn}>
+                  {activeVariant.ctaLabel?.trim() || `Accept ${activeVariant.name}`}
+                </button>
+                <button onClick={() => onDecision('question')} style={tertiaryBtn}>
+                  Ask a question or request a tweak
+                </button>
+                <button onClick={() => onDecision('declined')} style={secondaryBtn}>
+                  Decline
+                </button>
+              </div>
+              <p style={{ fontSize: '0.75rem', color: '#8a9987', marginTop: '0.5rem', marginBottom: 0 }}>
+                Not sure? Ask anything. We&apos;d rather refine than push.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/**
+ * <VariantTabStrip> — pill-shaped tab strip with a sliding indicator.
+ *
+ * The indicator's left and width come from measuring each tab's bounding
+ * box on mount and on resize. CSS transitions on transform and width
+ * give the indicator the smooth slide-and-stretch motion.
+ */
+function VariantTabStrip({
+  variants, activeVariantId, onSelect,
+}: {
+  variants: PublicVariant[]
+  activeVariantId: string | null
+  onSelect: (id: string) => void
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
+  const [indicator, setIndicator] = useState<{ left: number; width: number } | null>(null)
+
+  // Measure the active tab's bounding box relative to the container. Re-run
+  // whenever the active variant changes or the container resizes. Falls
+  // back to no indicator on the first render before refs are populated.
+  useEffect(() => {
+    function measure() {
+      const container = containerRef.current
+      const activeId = activeVariantId
+      if (!container || !activeId) return
+      const tab = tabRefs.current.get(activeId)
+      if (!tab) return
+      const containerRect = container.getBoundingClientRect()
+      const tabRect = tab.getBoundingClientRect()
+      setIndicator({
+        left: tabRect.left - containerRect.left,
+        width: tabRect.width,
+      })
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    if (containerRef.current) ro.observe(containerRef.current)
+    window.addEventListener('resize', measure)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [activeVariantId, variants.length])
+
+  return (
+    <div
+      ref={containerRef}
+      role="tablist"
+      style={{
+        position: 'relative',
+        display: 'inline-flex',
+        background: '#f7f9f6',
+        border: '1px solid #e8f0e6',
+        borderRadius: '999px',
+        padding: '0.25rem',
+        boxShadow: 'inset 0 1px 2px rgba(31,44,26,0.04)',
+        overflow: 'hidden',
+        maxWidth: '100%',
+        flexWrap: 'nowrap',
+      }}
+    >
+      {indicator && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            top: '0.25rem',
+            bottom: '0.25rem',
+            left: 0,
+            width: indicator.width,
+            transform: `translateX(${indicator.left}px)`,
+            background: '#1f2c1a',
+            borderRadius: '999px',
+            transition: 'transform 320ms cubic-bezier(0.32, 0.72, 0.16, 1.02), width 320ms cubic-bezier(0.32, 0.72, 0.16, 1.02)',
+            boxShadow: '0 4px 14px -2px rgba(31,44,26,0.35)',
+            zIndex: 0,
+          }}
+        />
+      )}
+      {variants.map(v => {
+        const isActive = v.id === activeVariantId
+        return (
+          <button
+            key={v.id}
+            ref={el => { if (el) tabRefs.current.set(v.id, el); else tabRefs.current.delete(v.id) }}
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => onSelect(v.id)}
+            style={{
+              position: 'relative',
+              zIndex: 1,
+              padding: '0.625rem 1.125rem',
+              fontSize: '0.875rem',
+              fontWeight: 600,
+              background: 'transparent',
+              color: isActive ? '#ffffff' : '#1f2c1a',
+              border: 'none',
+              borderRadius: '999px',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              transition: 'color 240ms ease',
+            }}
+          >
+            {v.name}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * <AnimatedPriceCell> — money cell that counts from the previous value to
+ * the new one when the active variant changes. Cubic ease-out, ~620ms.
+ * Falls back to the static value if `prefers-reduced-motion` is set.
+ */
+function AnimatedPriceCell({
+  label, value, currency, suffix, sub,
+}: {
+  label: string
+  value: number
+  currency: string
+  suffix?: string
+  sub: string
+}) {
+  const [display, setDisplay] = useState(value)
+  const prevRef = useRef(value)
+
+  useEffect(() => {
+    const start = prevRef.current
+    const end = value
+    if (start === end) {
+      setDisplay(end)
+      return
+    }
+    const reduced = typeof window !== 'undefined'
+      && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (reduced) {
+      setDisplay(end)
+      prevRef.current = end
+      return
+    }
+    const duration = 620
+    const t0 = performance.now()
+    let raf = 0
+    const tick = (t: number) => {
+      const p = Math.min(1, (t - t0) / duration)
+      const eased = 1 - Math.pow(1 - p, 3)
+      setDisplay(start + (end - start) * eased)
+      if (p < 1) raf = requestAnimationFrame(tick)
+      else prevRef.current = end
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [value])
+
+  return (
+    <div>
+      <div style={{ fontSize: '0.625rem', fontWeight: 600, color: '#8a9987', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.25rem' }}>
+        {label}
+      </div>
+      <div style={{ fontSize: '2rem', fontWeight: 800, color: '#1f2c1a', letterSpacing: '-0.02em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+        {formatMoney(Math.round(display), currency)}{suffix}
+      </div>
+      <div style={{ fontSize: '0.75rem', color: '#8a9987', marginTop: '0.25rem' }}>{sub}</div>
+    </div>
   )
 }
 

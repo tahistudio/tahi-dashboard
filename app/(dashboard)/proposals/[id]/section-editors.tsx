@@ -71,8 +71,67 @@ export function TypedSectionFields({
     case 'faq':                return <ListFields data={data} onChange={onChange} key_field="items" itemKeys={['q', 'a']} placeholders={{ q: 'What if I want to stop?', a: 'You can. We bill month-to-month…' }} multiline={['a']} />
     case 'guarantee':          return <GuaranteeFields data={data} onChange={onChange} />
     case 'retainer_offer':     return <RetainerOfferFields data={data} onChange={onChange} />
+    case 'founders':           return <FoundersFields data={data} onChange={onChange} />
     default:                   return null
   }
+}
+
+// ─── founders ─────────────────────────────────────────────────────────────
+
+function FoundersFields({ data, onChange }: FieldsProps) {
+  type Person = { name: string; role: string; bio?: string; imageUrl?: string; imagePosition?: string; initials?: string }
+  const eyebrow = String(data.eyebrow ?? '')
+  const intro = String(data.intro ?? '')
+  const people: Person[] = Array.isArray(data.people) ? (data.people as Person[]) : []
+  const set = (patch: Record<string, unknown>) => onChange({ ...data, ...patch })
+  const updateAt = (i: number, patch: Partial<Person>) => {
+    const next = people.map((p, j) => j === i ? { ...p, ...patch } : p)
+    set({ people: next })
+  }
+  const removeAt = (i: number) => set({ people: people.filter((_, j) => j !== i) })
+  const add = () => set({
+    people: [...people, { name: '', role: '', bio: '', imageUrl: '', imagePosition: '50% 25%', initials: '' }],
+  })
+
+  return (
+    <div style={{ display: 'grid', gap: '0.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.5rem' }}>
+        <Field label="Eyebrow">
+          <input value={eyebrow} onChange={e => set({ eyebrow: e.target.value })} placeholder="The team on your build" style={inputStyle} />
+        </Field>
+        <Field label="Intro paragraph">
+          <input value={intro} onChange={e => set({ intro: e.target.value })} placeholder="Founder-led means founder-built…" style={inputStyle} />
+        </Field>
+      </div>
+      <div>
+        <span style={labelStyle}>People</span>
+        <div style={{ display: 'grid', gap: '0.625rem' }}>
+          {people.map((p, i) => (
+            <div key={i} style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-md)', padding: '0.625rem', background: 'var(--color-bg)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2rem', gap: '0.375rem', alignItems: 'center' }}>
+                <input value={p.name} onChange={e => updateAt(i, { name: e.target.value })} placeholder="Liam Miller" style={inputStyle} />
+                <input value={p.role} onChange={e => updateAt(i, { role: e.target.value })} placeholder="Co-founder · Engineering" style={inputStyle} />
+                <button onClick={() => removeAt(i)} style={{ ...smallBtn, padding: '0.25rem 0.375rem' }} aria-label="Remove"><Trash2 size={12} /></button>
+              </div>
+              <textarea
+                value={p.bio ?? ''}
+                onChange={e => updateAt(i, { bio: e.target.value })}
+                placeholder="Short bio. One or two sentences."
+                rows={2}
+                style={{ ...inputStyle, marginTop: '0.375rem', resize: 'vertical', fontFamily: 'inherit' }}
+              />
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '0.375rem', marginTop: '0.375rem' }}>
+                <input value={p.imageUrl ?? ''} onChange={e => updateAt(i, { imageUrl: e.target.value })} placeholder="/dashboard/proposals/founders-placeholder.jpg" style={inputStyle} />
+                <input value={p.imagePosition ?? ''} onChange={e => updateAt(i, { imagePosition: e.target.value })} placeholder="50% 25%" style={inputStyle} title="CSS object-position — controls the crop. e.g. '28% 25%' for left face, '70% 25%' for right face" />
+                <input value={p.initials ?? ''} onChange={e => updateAt(i, { initials: e.target.value })} placeholder="LM" maxLength={3} style={inputStyle} title="Fallback initials when no image is set" />
+              </div>
+            </div>
+          ))}
+          <button onClick={add} style={smallBtn}><Plus size={12} />Add person</button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ─── value_anchor ─────────────────────────────────────────────────────────

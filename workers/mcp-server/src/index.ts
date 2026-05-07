@@ -633,9 +633,9 @@ const TOOLS: ToolDef[] = [
   tool('delete_proposal', 'Delete a proposal (cascades to sections + variants + acceptances).', {
     proposalId: prop('string', 'Proposal ID'),
   }, ['proposalId']),
-  tool('add_proposal_section', 'Add a shared section to a proposal. Type drives rendering: cover (Tiptap data.html) | overview (data.html) | terms (data.html) | about (data.html) | testimonial (data.quote+author+role) | scope_shared (data.html) | text (data.html). Per-variant scope/pricing/timeline lives on proposal_variants, not here.', {
+  tool('add_proposal_section', 'Add a shared section to a proposal. Type drives rendering. Legacy: cover | overview | terms | about | testimonial | scope_shared | text (all use data.html). Sales-led structured types (data shape lives in app/p/proposal/[token]/section-blocks.tsx defaultDataForType): value_anchor | process | differentiators | case_study | testimonial_stack | faq | guarantee | retainer_offer | founders. Per-variant scope/pricing/timeline lives on proposal_variants, not here.', {
     proposalId: prop('string', 'Proposal ID'),
-    type: prop('string', 'cover | overview | terms | about | testimonial | scope_shared | text'),
+    type: prop('string', 'cover | overview | terms | about | testimonial | scope_shared | text | value_anchor | process | differentiators | case_study | testimonial_stack | faq | guarantee | retainer_offer | founders'),
     title: prop('string', 'Slide title'),
     subtitle: prop('string', 'Eyebrow / subtitle'),
     data: { type: 'object', description: 'Type-specific JSON payload' },

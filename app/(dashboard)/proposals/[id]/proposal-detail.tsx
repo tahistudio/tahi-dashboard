@@ -89,7 +89,8 @@ const SECTION_TYPE_GROUPS = [
       { value: 'process', label: 'Our process' },
       { value: 'retainer_offer', label: 'Retainer offer (10% lifetime)' },
       { value: 'case_study', label: 'Case studies' },
-      { value: 'testimonial_stack', label: 'Testimonial stack' },
+      { value: 'testimonial_stack', label: 'Testimonials (carousel)' },
+      { value: 'founders', label: 'Founders' },
       { value: 'faq', label: 'FAQ' },
       { value: 'terms', label: 'Terms' },
     ],
@@ -115,7 +116,7 @@ const SECTION_TYPES: ReadonlyArray<{ value: string; label: string }> =
 // All others fall back to the legacy HTML/quote inputs.
 const STRUCTURED_TYPES = new Set<string>([
   'value_anchor', 'process', 'differentiators', 'case_study',
-  'testimonial_stack', 'faq', 'guarantee', 'retainer_offer',
+  'testimonial_stack', 'faq', 'guarantee', 'retainer_offer', 'founders',
 ])
 
 export function ProposalDetail({ proposalId }: { proposalId: string }) {
