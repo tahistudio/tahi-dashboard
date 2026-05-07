@@ -6,8 +6,9 @@ import {
   Clock, AlertTriangle, RefreshCw,
   User, CheckCircle2, Loader2, Activity,
   FileText, Image as ImageIcon, Download, Paperclip,
-  Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud, ChevronDown,
+  Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud, ChevronDown, Eye,
 } from 'lucide-react'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import Link from 'next/link'
 import { RequestThread } from '@/components/tahi/request-thread'
 import dynamic from 'next/dynamic'
@@ -2084,42 +2085,106 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
                   {' / '}{formatDate(f.createdAt)}
                 </p>
               </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                {f.mimeType?.startsWith('image/') && (
-                  <a
-                    href={apiPath(`/api/uploads/serve?key=${encodeURIComponent(f.storageKey)}`)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center transition-colors"
-                    style={{
-                      width: 28, height: 28, borderRadius: 'var(--radius-button)',
-                      color: 'var(--color-text-subtle)',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)'; e.currentTarget.style.color = 'var(--color-text)' }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
-                    aria-label={`View ${f.filename}`}
-                  >
-                    <ImageIcon size={14} />
-                  </a>
-                )}
-                <a
-                  href={apiPath(`/api/uploads/serve?key=${encodeURIComponent(f.storageKey)}&download=1`)}
-                  className="flex items-center justify-center transition-colors"
-                  style={{
-                    width: 28, height: 28, borderRadius: 'var(--radius-button)',
-                    color: 'var(--color-text-subtle)',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)'; e.currentTarget.style.color = 'var(--color-text)' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
-                  aria-label={`Download ${f.filename}`}
-                >
-                  <Download size={14} />
-                </a>
-              </div>
+              <FileActions
+                file={f}
+                onDeleted={onRefresh}
+              />
             </div>
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * <FileActions> — view / download / delete action group on each file row.
+ *
+ * View opens inline in a new tab when the MIME is renderable (image, PDF,
+ * video, audio). Download forces attachment Content-Disposition. Delete
+ * confirms via a Tahi dialog and hits DELETE /api/uploads/[fileId] which
+ * removes from R2 + the files row.
+ */
+function FileActions({ file, onDeleted }: {
+  file: { id: string; filename: string; storageKey: string; mimeType: string | null }
+  onDeleted: () => void
+}) {
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const inlineSafe = (file.mimeType ?? '').match(/^(image|video|audio)\//) || file.mimeType === 'application/pdf'
+
+  async function doDelete() {
+    setBusy(true)
+    try {
+      const res = await fetch(apiPath(`/api/uploads/${file.id}`), { method: 'DELETE' })
+      if (res.ok) onDeleted()
+    } catch { /* silent */ }
+    finally {
+      setBusy(false)
+      setConfirmOpen(false)
+    }
+  }
+
+  const iconBtn: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 28,
+    height: 28,
+    borderRadius: 'var(--radius-button)',
+    color: 'var(--color-text-subtle)',
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+  }
+
+  return (
+    <div className="flex items-center gap-1 flex-shrink-0">
+      {inlineSafe && (
+        <a
+          href={apiPath(`/api/uploads/serve?key=${encodeURIComponent(file.storageKey)}`)}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={iconBtn}
+          aria-label={`Open ${file.filename}`}
+          title="Open in browser"
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)'; e.currentTarget.style.color = 'var(--color-text)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+        >
+          <Eye size={14} />
+        </a>
+      )}
+      <a
+        href={apiPath(`/api/uploads/serve?key=${encodeURIComponent(file.storageKey)}&download=1`)}
+        style={iconBtn}
+        aria-label={`Download ${file.filename}`}
+        title="Download"
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)'; e.currentTarget.style.color = 'var(--color-text)' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+      >
+        <Download size={14} />
+      </a>
+      <button
+        type="button"
+        onClick={() => setConfirmOpen(true)}
+        disabled={busy}
+        style={iconBtn}
+        aria-label={`Delete ${file.filename}`}
+        title="Delete"
+        onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = '#dc2626' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+      >
+        <Trash2 size={14} />
+      </button>
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Delete file?"
+        description={`Permanently removes "${file.filename}" from this request. The file is gone from R2 storage and any messages referencing it will lose the link. Cannot be undone.`}
+        confirmLabel="Delete file"
+        variant="danger"
+        onConfirm={doDelete}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </div>
   )
 }
