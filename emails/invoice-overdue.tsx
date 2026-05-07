@@ -63,7 +63,7 @@ export function InvoiceOverdueEmail({
             <EmailParagraph>
               Hi {firstName}, your invoice from Tahi Studio was due on {dueDate} and is now
               {' '}{daysOverdue} {dayWord} past due. If you have already paid, please ignore
-              this — banks can take a couple of days to reconcile.
+              this. Banks can take a couple of days to reconcile.
             </EmailParagraph>
 
             <DetailCard>
