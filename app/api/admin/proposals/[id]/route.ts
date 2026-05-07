@@ -62,7 +62,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
 
 // ── PATCH /api/admin/proposals/[id] ────────────────────────────────────
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
@@ -79,7 +79,15 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   }
 
   const database = await db() as unknown as D1
-  const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() }
+  const now = new Date().toISOString()
+  const updates: Record<string, unknown> = { updatedAt: now }
+
+  // Read current dealId so we can log link/unlink activity if it changes.
+  const [current] = await database
+    .select({ dealId: schema.proposals.dealId, title: schema.proposals.title })
+    .from(schema.proposals)
+    .where(eq(schema.proposals.id, id))
+    .limit(1)
 
   if (body.title !== undefined) updates.title = body.title.trim()
   if (body.subtitle !== undefined) updates.subtitle = body.subtitle?.trim() ?? null
@@ -92,6 +100,41 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.status !== undefined) updates.status = body.status
 
   await database.update(schema.proposals).set(updates).where(eq(schema.proposals.id, id))
+
+  // ── Activity log on deal link/unlink ──────────────────────────────────
+  // When a proposal moves between deals, write a row on each affected
+  // deal's activity timeline so the pipeline tells the full story.
+  if (body.dealId !== undefined && current && body.dealId !== current.dealId) {
+    const proposalTitle = (body.title?.trim() ?? current.title ?? 'Proposal')
+    const actor = userId ?? 'system'
+    if (current.dealId) {
+      await database.insert(schema.activities).values({
+        id: crypto.randomUUID(),
+        type: 'proposal_unlinked',
+        title: `Proposal unlinked: ${proposalTitle}`,
+        description: null,
+        dealId: current.dealId,
+        createdById: actor,
+        completedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+    if (body.dealId) {
+      await database.insert(schema.activities).values({
+        id: crypto.randomUUID(),
+        type: 'proposal_linked',
+        title: `Proposal linked: ${proposalTitle}`,
+        description: null,
+        dealId: body.dealId,
+        createdById: actor,
+        completedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+  }
+
   return NextResponse.json({ success: true })
 }
 

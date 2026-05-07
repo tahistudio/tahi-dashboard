@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Plus, Trash2, AlertTriangle, Share2, Copy, Diamond, Calendar, Mail } from 'lucide-react'
 import { EmailShareModal, type EmailRecipientSuggestion } from '@/components/tahi/email-share-modal'
+import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { GanttGrid, type GanttRow, type RowOwner, type RowType } from '@/components/tahi/gantt-grid'
@@ -16,6 +17,7 @@ interface Schedule {
   id: string
   orgId: string | null
   dealId: string | null
+  proposalId: string | null
   title: string
   subtitle: string | null
   preparedFor: string | null
@@ -400,6 +402,18 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
           </FieldGroup>
         </div>
       </div>
+
+      {/* Linked to — client + deal + proposal cross-link with activity logging */}
+      <LinkedToPanel
+        resourceType="schedule"
+        resourceId={scheduleId}
+        orgId={schedule.orgId}
+        dealId={schedule.dealId}
+        proposalId={schedule.proposalId}
+        orgName={schedule.orgName}
+        dealTitle={schedule.dealTitle}
+        onChanged={() => void fetchAll({ silent: true })}
+      />
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center" style={{ gap: '0.5rem' }}>

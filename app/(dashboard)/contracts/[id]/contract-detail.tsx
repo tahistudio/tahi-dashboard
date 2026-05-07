@@ -13,6 +13,7 @@ import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { EmailShareModal, type EmailRecipientSuggestion } from '@/components/tahi/email-share-modal'
 import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
+import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
 
 interface ContractDoc {
   id: string
@@ -307,6 +308,15 @@ export function ContractDetail({ id }: { id: string }) {
           </TahiButton>
         </div>
       </div>
+
+      <LinkedToPanel
+        resourceType="contract"
+        resourceId={id}
+        orgId={contract.orgId}
+        dealId={contract.dealId}
+        proposalId={contract.proposalId}
+        onChanged={() => void fetchAll({ silent: true })}
+      />
 
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Left: contract body */}

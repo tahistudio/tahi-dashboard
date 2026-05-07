@@ -13,6 +13,7 @@ import { defaultDataForType, type SectionType } from '@/app/p/proposal/[token]/s
 import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
 import { PromptDialog } from '@/components/tahi/prompt-dialog'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
+import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
 
 interface Proposal {
   id: string
@@ -405,6 +406,17 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
           </FieldGroup>
         </div>
       </div>
+
+      {/* Linked to — client + deal cross-link with activity logging */}
+      <LinkedToPanel
+        resourceType="proposal"
+        resourceId={proposalId}
+        orgId={proposal.orgId}
+        dealId={proposal.dealId}
+        orgName={proposal.orgName}
+        dealTitle={proposal.dealTitle}
+        onChanged={() => void fetchAll({ silent: true })}
+      />
 
       {/* Publish indicator — shows when admin has unpublished edits */}
       {(() => {

@@ -89,7 +89,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
 // ── PATCH /api/admin/schedules/[id] ────────────────────────────────────
 // Partial update of top-level fields. Row mutations live on /rows endpoints.
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
@@ -98,6 +98,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     subtitle?: string | null
     orgId?: string | null
     dealId?: string | null
+    proposalId?: string | null
     preparedFor?: string | null
     preparedBy?: string | null
     effectiveDate?: string | null
@@ -108,12 +109,21 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   }
 
   const database = await db() as unknown as D1
-  const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() }
+  const now = new Date().toISOString()
+  const updates: Record<string, unknown> = { updatedAt: now }
+
+  // Read current dealId so we can log link/unlink activity if it changes.
+  const [current] = await database
+    .select({ dealId: schema.projectSchedules.dealId, title: schema.projectSchedules.title })
+    .from(schema.projectSchedules)
+    .where(eq(schema.projectSchedules.id, id))
+    .limit(1)
 
   if (body.title !== undefined) updates.title = body.title.trim()
   if (body.subtitle !== undefined) updates.subtitle = body.subtitle?.trim() ?? null
   if (body.orgId !== undefined) updates.orgId = body.orgId
   if (body.dealId !== undefined) updates.dealId = body.dealId
+  if (body.proposalId !== undefined) updates.proposalId = body.proposalId
   if (body.preparedFor !== undefined) updates.preparedFor = body.preparedFor?.trim() ?? null
   if (body.preparedBy !== undefined) updates.preparedBy = body.preparedBy?.trim() ?? null
   if (body.effectiveDate !== undefined) updates.effectiveDate = body.effectiveDate
@@ -125,6 +135,39 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.status !== undefined) updates.status = body.status
 
   await database.update(schema.projectSchedules).set(updates).where(eq(schema.projectSchedules.id, id))
+
+  // Activity log on deal link/unlink — keeps the pipeline timeline complete.
+  if (body.dealId !== undefined && current && body.dealId !== current.dealId) {
+    const scheduleTitle = (body.title?.trim() ?? current.title ?? 'Schedule')
+    const actor = userId ?? 'system'
+    if (current.dealId) {
+      await database.insert(schema.activities).values({
+        id: crypto.randomUUID(),
+        type: 'schedule_unlinked',
+        title: `Schedule unlinked: ${scheduleTitle}`,
+        description: null,
+        dealId: current.dealId,
+        createdById: actor,
+        completedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+    if (body.dealId) {
+      await database.insert(schema.activities).values({
+        id: crypto.randomUUID(),
+        type: 'schedule_linked',
+        title: `Schedule linked: ${scheduleTitle}`,
+        description: null,
+        dealId: body.dealId,
+        createdById: actor,
+        completedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+  }
+
   return NextResponse.json({ success: true })
 }
 

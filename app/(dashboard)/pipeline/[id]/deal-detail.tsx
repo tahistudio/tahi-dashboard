@@ -659,14 +659,17 @@ export function DealDetail({ dealId }: { dealId: string }) {
           )}
         </div>
 
-        {/* Right column (1/3) — sales kit on top, then sidebar card */}
-        <div className="flex flex-col" style={{ gap: 'var(--space-4)', alignSelf: 'flex-start' }}>
+        {/* Right column (1/3) — sales kit on top, then sidebar card.
+            Both children stretch to the full column width via the override
+            below; SharedSidebarCard's default style sets alignSelf:flex-start
+            which would shrink it narrower than DealSalesKit. */}
+        <div className="flex flex-col" style={{ gap: 'var(--space-4)', alignSelf: 'flex-start', width: '100%' }}>
           <DealSalesKit
             dealId={dealId}
             orgId={deal.orgId ?? null}
             dealTitle={deal.title}
           />
-          <SharedSidebarCard className="flex flex-col">
+          <SharedSidebarCard className="flex flex-col" style={{ alignSelf: 'stretch' }}>
           {/* Stage selector */}
           <SidebarCard title="Stage">
             <StageSelector
@@ -1518,7 +1521,16 @@ function NextActionEditor({
   }
 
   return (
-    <div className="flex flex-col" style={{ gap: 'var(--space-2)', padding: 'var(--space-3-5) var(--space-4)' }}>
+    <div
+      className="flex flex-col"
+      style={{
+        // SidebarSection already provides outer padding — we just lay out the
+        // two fields here. min-width: 0 on the wrapper + flex children prevents
+        // the date input from forcing the card wider than its siblings.
+        gap: 'var(--space-2)',
+        minWidth: 0,
+      }}
+    >
       <input
         type="text"
         value={draftLabel}
@@ -1527,6 +1539,7 @@ function NextActionEditor({
         placeholder="e.g. Send updated SoW"
         style={{
           width: '100%',
+          minWidth: 0,
           padding: '0.5rem 0.625rem',
           fontSize: '0.875rem',
           fontWeight: 500,
@@ -1537,7 +1550,7 @@ function NextActionEditor({
           outline: 'none',
         }}
       />
-      <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
+      <div className="flex items-center" style={{ gap: 'var(--space-2)', minWidth: 0 }}>
         <input
           type="date"
           value={draftDue}
@@ -1548,7 +1561,8 @@ function NextActionEditor({
             if (next !== current) save({ nextActionDueAt: next })
           }}
           style={{
-            flex: 1,
+            flex: '1 1 0',
+            minWidth: 0,
             padding: '0.4375rem 0.625rem',
             fontSize: '0.8125rem',
             background: 'var(--color-bg)',
@@ -1559,13 +1573,13 @@ function NextActionEditor({
           }}
         />
         {due && (
-          <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: dueColour, whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: dueColour, whiteSpace: 'nowrap', flexShrink: 0 }}>
             {overdue ? 'Overdue' : dueToday ? 'Today' : ''}
           </span>
         )}
       </div>
       {!draftLabel && !draftDue && (
-        <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+        <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', lineHeight: 1.4 }}>
           One field, one date. Replaces keeping the next step in your head.
         </p>
       )}

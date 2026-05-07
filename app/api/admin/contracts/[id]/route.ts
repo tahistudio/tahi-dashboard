@@ -36,9 +36,9 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
   return NextResponse.json({ contract: doc, signers, signatures })
 }
 
-// PATCH /api/admin/contracts/documents/[id] — partial update
+// PATCH /api/admin/contracts/[id] — partial update
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
@@ -50,9 +50,19 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     expiresAt?: string | null
     orgId?: string | null
     dealId?: string | null
+    proposalId?: string | null
   }
   const database = await db() as unknown as D1
-  const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() }
+  const now = new Date().toISOString()
+  const updates: Record<string, unknown> = { updatedAt: now }
+
+  // Read current state so we can log link/unlink activity if dealId changes.
+  const [current] = await database
+    .select({ dealId: schema.contractDocuments.dealId, name: schema.contractDocuments.name })
+    .from(schema.contractDocuments)
+    .where(eq(schema.contractDocuments.id, id))
+    .limit(1)
+
   if (body.name !== undefined) updates.name = body.name.trim()
   if (body.status !== undefined) updates.status = body.status
   if (body.bodyHtml !== undefined) updates.bodyHtml = body.bodyHtml
@@ -60,7 +70,41 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.expiresAt !== undefined) updates.expiresAt = body.expiresAt
   if (body.orgId !== undefined) updates.orgId = body.orgId
   if (body.dealId !== undefined) updates.dealId = body.dealId
+  if (body.proposalId !== undefined) updates.proposalId = body.proposalId
   await database.update(schema.contractDocuments).set(updates).where(eq(schema.contractDocuments.id, id))
+
+  // Activity log on deal link/unlink — keeps the pipeline timeline complete.
+  if (body.dealId !== undefined && current && body.dealId !== current.dealId) {
+    const contractName = (body.name?.trim() ?? current.name ?? 'Contract')
+    const actor = userId ?? 'system'
+    if (current.dealId) {
+      await database.insert(schema.activities).values({
+        id: crypto.randomUUID(),
+        type: 'contract_unlinked',
+        title: `Contract unlinked: ${contractName}`,
+        description: null,
+        dealId: current.dealId,
+        createdById: actor,
+        completedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+    if (body.dealId) {
+      await database.insert(schema.activities).values({
+        id: crypto.randomUUID(),
+        type: 'contract_linked',
+        title: `Contract linked: ${contractName}`,
+        description: null,
+        dealId: body.dealId,
+        createdById: actor,
+        completedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+  }
+
   return NextResponse.json({ success: true })
 }
 
