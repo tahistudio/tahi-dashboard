@@ -109,25 +109,12 @@ export function defaultDataForType(type: SectionType): Record<string, unknown> {
     case 'founders':
       return {
         eyebrow: 'The team on your build',
-        intro: 'Founder-led means founder-built. Liam runs engineering, Staci runs design, and we are on every call and every build.',
+        intro: 'Founder-led, end-to-end. Liam runs engineering, Staci runs design, and we are both on every call and every build. No account managers, no handoffs, no quiet weeks.',
+        image: '/dashboard/proposals/founders-placeholder.jpg',
+        imagePosition: '50% 25%',
         people: [
-          {
-            name: 'Liam Miller',
-            role: 'Co-founder · Engineering',
-            bio: 'Webflow developer turned agency owner. Animations, attribution, and the technical depth most agencies hand off.',
-            // Cropped to faces — see public/proposals/founders-placeholder.jpg.
-            imageUrl: '/dashboard/proposals/founders-placeholder.jpg',
-            imagePosition: '28% 25%',
-            initials: 'LM',
-          },
-          {
-            name: 'Staci Bonnie',
-            role: 'Co-founder · Design',
-            bio: 'Web design and UI/UX with a former-chef\'s eye for how something feels before it is read.',
-            imageUrl: '/dashboard/proposals/founders-placeholder.jpg',
-            imagePosition: '70% 25%',
-            initials: 'SB',
-          },
+          { name: 'Liam Miller', role: 'Engineering' },
+          { name: 'Staci Bonnie', role: 'Design' },
         ],
       }
     case 'retainer_offer':
@@ -153,21 +140,23 @@ function safeParse<T>(json: string | null): T | null {
   try { return JSON.parse(json) as T } catch { return null }
 }
 
-// ─── Per-slide light / dark theming ────────────────────────────────────────
+// ─── Per-slide theming ────────────────────────────────────────────────────
 //
-// Each section's data may include `theme: 'light' | 'dark'` (set in the
-// admin editor). Some types default to dark (retainer_offer is the
-// premium-CTA dark slab); everything else defaults to light. The brand
-// palette below is the source of truth for both modes — all renderers
+// Each section's data may include `theme: 'brand_glass' | 'toned_light' |
+// 'light' | 'dark'` (set in the admin editor). Some types default to dark
+// (retainer_offer is the premium-CTA dark slab); everything else defaults
+// to light. The palettes below are the source of truth — all renderers
 // read from these tokens rather than hardcoding hex.
 
-type SlideTheme = 'light' | 'dark'
+export type SlideTheme = 'brand_glass' | 'toned_light' | 'light' | 'dark'
 
 function readTheme(section: PublicSection, fallback: SlideTheme = 'light'): SlideTheme {
   try {
     if (!section.data) return fallback
     const parsed = JSON.parse(section.data) as { theme?: string }
-    if (parsed.theme === 'dark' || parsed.theme === 'light') return parsed.theme
+    if (parsed.theme === 'brand_glass' || parsed.theme === 'toned_light' || parsed.theme === 'light' || parsed.theme === 'dark') {
+      return parsed.theme
+    }
   } catch { /* ignore */ }
   return fallback
 }
@@ -186,31 +175,70 @@ interface ThemeColours {
 }
 
 function themeColours(theme: SlideTheme): ThemeColours {
-  if (theme === 'dark') {
-    return {
-      bg: '#1f2c1a',
-      text: '#ffffff',
-      textMuted: '#dcefd8',
-      textSubtle: '#a8c89e',
-      eyebrow: '#93c98a',
-      cardBg: 'rgba(255,255,255,0.06)',
-      cardBorder: 'rgba(220,239,216,0.18)',
-      cardBorderStrong: 'rgba(220,239,216,0.35)',
-      divider: 'rgba(220,239,216,0.16)',
-      brandAccent: '#93c98a',
-    }
-  }
-  return {
-    bg: '#FFFFFF',
-    text: '#121A0F',
-    textMuted: '#5a6657',
-    textSubtle: '#8a9987',
-    eyebrow: '#5A824E',
-    cardBg: '#fdfefd',
-    cardBorder: '#e8f0e6',
-    cardBorderStrong: '#d4e0d0',
-    divider: '#e8f0e6',
-    brandAccent: '#5A824E',
+  switch (theme) {
+    case 'dark':
+      return {
+        // Layered radial glow on the deep brand-dark base. The two glows
+        // give the slide visual depth without competing with the content.
+        bg: 'radial-gradient(120% 80% at 85% -20%, rgba(147,201,138,0.22) 0%, transparent 55%), radial-gradient(80% 60% at -10% 110%, rgba(122,170,114,0.16) 0%, transparent 50%), #1f2c1a',
+        text: '#ffffff',
+        textMuted: '#dcefd8',
+        textSubtle: '#a8c89e',
+        eyebrow: '#93c98a',
+        cardBg: 'rgba(255,255,255,0.06)',
+        cardBorder: 'rgba(220,239,216,0.18)',
+        cardBorderStrong: 'rgba(220,239,216,0.35)',
+        divider: 'rgba(220,239,216,0.16)',
+        brandAccent: '#93c98a',
+      }
+    case 'brand_glass':
+      return {
+        // Brand-green base layered with two radial glows (warm white at
+        // top-right, brand-light at bottom-left) and a soft vignette.
+        // Reads as depth without a busy gradient.
+        bg: [
+          'radial-gradient(60% 60% at 85% 0%, rgba(255,255,255,0.22) 0%, transparent 55%)',
+          'radial-gradient(80% 60% at 0% 110%, rgba(122,170,114,0.45) 0%, transparent 60%)',
+          'radial-gradient(120% 100% at 50% 50%, transparent 60%, rgba(0,0,0,0.18) 100%)',
+          'linear-gradient(135deg, #5A824E 0%, #3e5a35 100%)',
+        ].join(', '),
+        text: '#FFFFFF',
+        textMuted: '#dcefd8',
+        textSubtle: '#a8c89e',
+        eyebrow: '#dcefd8',
+        cardBg: 'rgba(255,255,255,0.10)',
+        cardBorder: 'rgba(255,255,255,0.22)',
+        cardBorderStrong: 'rgba(255,255,255,0.32)',
+        divider: 'rgba(255,255,255,0.16)',
+        brandAccent: '#dcefd8',
+      }
+    case 'toned_light':
+      return {
+        bg: 'radial-gradient(80% 60% at 100% 0%, rgba(220,239,216,0.5) 0%, transparent 55%), linear-gradient(160deg, #f5f3ed 0%, #eef3ec 100%)',
+        text: '#121A0F',
+        textMuted: '#3d5034',
+        textSubtle: '#6a7560',
+        eyebrow: '#5A824E',
+        cardBg: 'rgba(255,255,255,0.65)',
+        cardBorder: '#e8e3d6',
+        cardBorderStrong: '#d4cfbe',
+        divider: '#e8e3d6',
+        brandAccent: '#5A824E',
+      }
+    case 'light':
+    default:
+      return {
+        bg: '#FFFFFF',
+        text: '#121A0F',
+        textMuted: '#5a6657',
+        textSubtle: '#8a9987',
+        eyebrow: '#5A824E',
+        cardBg: '#fdfefd',
+        cardBorder: '#e8f0e6',
+        cardBorderStrong: '#d4e0d0',
+        divider: '#e8f0e6',
+        brandAccent: '#5A824E',
+      }
   }
 }
 
@@ -479,9 +507,10 @@ function TestimonialStack({ section }: { section: PublicSection }) {
 /**
  * <TestimonialCarousel> — single quote in focus, prev/next visible at the
  * edges, soft fade. Auto-advances every 6s; pauses on hover, focus, or
- * touch. Drag works on mobile (basic threshold-based swipe). Manual nav
- * via arrow buttons or dot indicators. Respects prefers-reduced-motion
- * by disabling auto-advance.
+ * pointer-down. Drag works with both mouse and touch via pointer events,
+ * with a 40px threshold for a committed swipe (snaps back below that).
+ * Container has a max-width so cards don't balloon on huge displays.
+ * Respects prefers-reduced-motion by disabling auto-advance.
  */
 function TestimonialCarousel({
   items,
@@ -492,8 +521,10 @@ function TestimonialCarousel({
   const [active, setActive] = React.useState(0)
   const [paused, setPaused] = React.useState(false)
   const [progress, setProgress] = React.useState(0)
+  const [dragOffset, setDragOffset] = React.useState(0)
+  const [isDragging, setIsDragging] = React.useState(false)
   const trackRef = React.useRef<HTMLDivElement>(null)
-  const dragRef = React.useRef<{ startX: number; deltaX: number } | null>(null)
+  const pointerRef = React.useRef<{ startX: number; pointerId: number; pointerType: string } | null>(null)
   const reducedMotion = React.useRef(false)
 
   React.useEffect(() => {
@@ -503,7 +534,7 @@ function TestimonialCarousel({
 
   // Auto-advance with progress bar.
   React.useEffect(() => {
-    if (paused || items.length < 2 || reducedMotion.current) return
+    if (paused || isDragging || items.length < 2 || reducedMotion.current) return
     let raf = 0
     const t0 = performance.now()
     const tick = (t: number) => {
@@ -518,9 +549,8 @@ function TestimonialCarousel({
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [active, paused, items.length])
+  }, [active, paused, isDragging, items.length])
 
-  // Pause progress when manually navigating; resume after 1s of stillness.
   function jump(i: number) {
     setActive((i + items.length) % items.length)
     setProgress(0)
@@ -528,53 +558,72 @@ function TestimonialCarousel({
     window.setTimeout(() => setPaused(false), 1200)
   }
 
-  // Touch drag — threshold of 40px to count as a swipe.
-  function onTouchStart(e: React.TouchEvent) {
-    dragRef.current = { startX: e.touches[0].clientX, deltaX: 0 }
+  // Pointer events — covers mouse, touch, and pen with one code path.
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    pointerRef.current = { startX: e.clientX, pointerId: e.pointerId, pointerType: e.pointerType }
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setIsDragging(true)
     setPaused(true)
   }
-  function onTouchMove(e: React.TouchEvent) {
-    if (!dragRef.current) return
-    dragRef.current.deltaX = e.touches[0].clientX - dragRef.current.startX
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!pointerRef.current || pointerRef.current.pointerId !== e.pointerId) return
+    setDragOffset(e.clientX - pointerRef.current.startX)
   }
-  function onTouchEnd() {
-    if (!dragRef.current) return
-    const d = dragRef.current.deltaX
-    dragRef.current = null
+  function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    if (!pointerRef.current || pointerRef.current.pointerId !== e.pointerId) return
+    const d = e.clientX - pointerRef.current.startX
+    e.currentTarget.releasePointerCapture(e.pointerId)
+    pointerRef.current = null
+    setDragOffset(0)
+    setIsDragging(false)
     if (Math.abs(d) > 40) jump(active + (d < 0 ? 1 : -1))
     else setPaused(false)
   }
 
+  // Card width is 70% of the container; offset the track so the active
+  // card lands centred. Drag adds a temporary live offset in pixels.
+  const trackTransform = `translate3d(calc(15% - ${active * 70}% + ${dragOffset}px), 0, 0)`
+
   return (
     <div
-      style={{ marginTop: '1.5rem', position: 'relative' }}
+      style={{
+        marginTop: '1.5rem',
+        position: 'relative',
+        // Cap the carousel width so a 4K display doesn't blow the cards
+        // up to billboard size. Inside this rail the cards still scale.
+        maxWidth: '64rem',
+        marginLeft: 'auto',
+        marginRight: 'auto',
+      }}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
       onBlur={() => setPaused(false)}
     >
-      {/* Edge fades — purely cosmetic, hint that more cards exist beyond the frame. */}
-      <div aria-hidden="true" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '8%', background: 'linear-gradient(to right, var(--color-bg, #FFFFFF), transparent)', pointerEvents: 'none', zIndex: 2 }} />
-      <div aria-hidden="true" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8%', background: 'linear-gradient(to left, var(--color-bg, #FFFFFF), transparent)', pointerEvents: 'none', zIndex: 2 }} />
+      <div aria-hidden="true" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '6%', background: 'linear-gradient(to right, var(--color-bg, #FFFFFF), transparent)', pointerEvents: 'none', zIndex: 2 }} />
+      <div aria-hidden="true" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '6%', background: 'linear-gradient(to left, var(--color-bg, #FFFFFF), transparent)', pointerEvents: 'none', zIndex: 2 }} />
 
       <div
         ref={trackRef}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
         style={{
           overflow: 'hidden',
           padding: '0.5rem 0',
+          cursor: isDragging ? 'grabbing' : 'grab',
+          touchAction: 'pan-y',
+          userSelect: 'none',
         }}
       >
         <div
           style={{
             display: 'flex',
-            // Each card occupies 70% of the container with no flex gap.
-            // Active card centred via 15% offset + 70%-step translate.
-            // Inner card padding handles the visual gutter.
-            transform: `translateX(calc(15% - ${active * 70}%))`,
-            transition: 'transform 520ms cubic-bezier(0.22, 1, 0.36, 1)',
+            transform: trackTransform,
+            transition: isDragging
+              ? 'none'
+              : 'transform 360ms cubic-bezier(0.22, 1, 0.36, 1)',
             willChange: 'transform',
           }}
         >
@@ -585,9 +634,10 @@ function TestimonialCarousel({
                 flex: '0 0 70%',
                 minWidth: 0,
                 padding: '0 0.75rem',
-                opacity: i === active ? 1 : 0.45,
-                transform: i === active ? 'scale(1)' : 'scale(0.95)',
-                transition: 'opacity 520ms ease, transform 520ms cubic-bezier(0.22, 1, 0.36, 1)',
+                opacity: i === active ? 1 : 0.4,
+                transform: i === active ? 'scale(1)' : 'scale(0.94)',
+                transition: 'opacity 320ms ease, transform 360ms cubic-bezier(0.22, 1, 0.36, 1)',
+                pointerEvents: i === active ? 'auto' : 'none',
               }}
             >
               <TestimonialCard item={it} variant={i === active ? 'active' : 'inactive'} />
@@ -598,7 +648,7 @@ function TestimonialCarousel({
 
       {/* Progress + dots */}
       <div style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.625rem' }}>
-        {!reducedMotion.current && (
+        {!reducedMotion.current && items.length > 1 && (
           <div aria-hidden="true" style={{ width: '4rem', height: '0.125rem', background: '#e8f0e6', borderRadius: '999px', overflow: 'hidden' }}>
             <div style={{
               width: `${Math.round(progress * 100)}%`,
@@ -838,139 +888,165 @@ function RetainerOffer({ section }: { section: PublicSection }) {
 /**
  * <Founders> — founder-led credibility slide.
  *
- * Two cards side-by-side on desktop, stacked on mobile. Each card has a
- * leaf-radius photo (or initials fallback if no image) plus name, role,
- * and a short bio. The placeholder photo of Liam and Staci lives at
- * /dashboard/proposals/founders-placeholder.jpg — each card overrides
- * the imagePosition (CSS object-position) to crop to its respective face.
+ * Single composition, two columns on desktop, stacked on mobile:
+ *   [ text panel ]   [ shared photo ]
+ *
+ * The image is one shot of both founders, framed in a leaf-radius card
+ * with a soft brand-tinted shadow. People show as small role pills under
+ * the intro paragraph, not as separate photo cards. This reads as a
+ * single editorial composition, not a roster.
  */
 function Founders({ section }: { section: PublicSection }) {
-  type Person = {
-    name: string
-    role: string
-    bio?: string
-    imageUrl?: string
+  type Person = { name: string; role: string }
+  const data = safeParse<{
+    eyebrow?: string
+    intro?: string
+    image?: string
     imagePosition?: string
-    initials?: string
-  }
-  const data = safeParse<{ eyebrow?: string; intro?: string; people?: Person[] }>(section.data)
+    people?: Person[]
+  }>(section.data)
   const people = data?.people ?? []
   const theme = readTheme(section)
   const c = themeColours(theme)
+  const initials = people.map(p => p.name.split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase()).join(' & ')
+
   return (
     <section style={{ ...slideShell, background: c.bg, color: c.text }} className="proposal-slide">
-      <div style={slideInner}>
-        {(data?.eyebrow || section.subtitle) && (
-          <div style={{ ...slideEyebrow, color: c.eyebrow }}>{data?.eyebrow ?? section.subtitle}</div>
-        )}
-        {section.title && (
-          <h2 style={{ ...slideTitle, color: c.text }}>{section.title}</h2>
-        )}
-        {data?.intro && (
-          <p style={{ fontSize: '1.0625rem', lineHeight: 1.55, color: c.textMuted, maxWidth: '40rem', margin: '0 0 2.25rem 0' }}>
-            {data.intro}
-          </p>
-        )}
+      <div style={{ ...slideInner, maxWidth: '72rem' }}>
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: people.length === 1 ? 'minmax(0, 24rem)' : 'repeat(auto-fit, minmax(16rem, 1fr))',
-            gap: '1.25rem',
-            justifyContent: people.length === 1 ? 'center' : 'stretch',
+            gridTemplateColumns: 'minmax(0, 1fr)',
+            gap: 'clamp(1.5rem, 4vw, 3rem)',
+            alignItems: 'center',
           }}
+          className="founders-grid"
         >
-          {people.map((p, i) => (
-            <FounderCard key={i} person={p} theme={c} />
-          ))}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function FounderCard({
-  person, theme,
-}: {
-  person: { name: string; role: string; bio?: string; imageUrl?: string; imagePosition?: string; initials?: string }
-  theme: ThemeColours
-}) {
-  return (
-    <div
-      style={{
-        background: theme.cardBg,
-        border: `1px solid ${theme.cardBorder}`,
-        borderRadius: '0 24px 0 24px',
-        overflow: 'hidden',
-        display: 'flex',
-        flexDirection: 'column',
-        transition: 'border-color 240ms ease, box-shadow 240ms ease, transform 240ms ease',
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.transform = 'translateY(-0.125rem)'
-        e.currentTarget.style.boxShadow = '0 16px 40px -16px rgba(31,44,26,0.18)'
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.transform = 'translateY(0)'
-        e.currentTarget.style.boxShadow = 'none'
-      }}
-    >
-      {/* Photo or initials block. Aspect 4:5 to give a portrait crop. */}
-      <div
-        style={{
-          position: 'relative',
-          width: '100%',
-          aspectRatio: '4 / 5',
-          background: person.imageUrl ? '#1f2c1a' : 'linear-gradient(135deg, #5A824E 0%, #425F39 100%)',
-          overflow: 'hidden',
-        }}
-      >
-        {person.imageUrl ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={person.imageUrl}
-            alt={person.name}
-            style={{
-              position: 'absolute',
-              inset: 0,
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-              objectPosition: person.imagePosition ?? '50% 25%',
-            }}
-          />
-        ) : (
-          <div
-            aria-hidden="true"
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 'clamp(3rem, 8vw, 5rem)',
-              fontWeight: 800,
-              color: '#FFFFFF',
-              letterSpacing: '-0.02em',
-            }}
-          >
-            {person.initials ?? person.name.split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase()}
+          {/* Image side */}
+          <div style={{ order: 1 }}>
+            <div
+              style={{
+                position: 'relative',
+                width: '100%',
+                aspectRatio: '4 / 5',
+                maxHeight: '34rem',
+                background: data?.image
+                  ? '#1f2c1a'
+                  : 'linear-gradient(135deg, #5A824E 0%, #425F39 100%)',
+                borderRadius: '0 32px 0 32px',
+                overflow: 'hidden',
+                boxShadow: theme === 'dark' || theme === 'brand_glass'
+                  ? '0 24px 60px -24px rgba(0,0,0,0.45)'
+                  : '0 24px 60px -24px rgba(31,44,26,0.30)',
+                transition: 'transform 480ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 480ms ease',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.transform = 'translateY(-0.25rem)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.transform = 'translateY(0)'
+              }}
+            >
+              {data?.image ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={data.image}
+                  alt={people.map(p => p.name).join(' and ') || 'Tahi founders'}
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    objectPosition: data.imagePosition ?? '50% 25%',
+                    transition: 'transform 1200ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  }}
+                />
+              ) : (
+                <div
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 'clamp(3.5rem, 8vw, 6rem)',
+                    fontWeight: 800,
+                    color: '#FFFFFF',
+                    letterSpacing: '-0.02em',
+                  }}
+                >
+                  {initials || 'L+S'}
+                </div>
+              )}
+              {/* Soft inside-edge highlight — gives the image a glass-frame feel */}
+              <div
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  borderRadius: '0 32px 0 32px',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -32px 64px rgba(0,0,0,0.18)',
+                  pointerEvents: 'none',
+                }}
+              />
+            </div>
           </div>
-        )}
-      </div>
-      <div style={{ padding: '1.25rem 1.375rem' }}>
-        <div style={{ fontSize: '1.0625rem', fontWeight: 800, color: theme.text, letterSpacing: '-0.01em' }}>
-          {person.name}
+
+          {/* Text side */}
+          <div style={{ order: 2 }}>
+            {(data?.eyebrow || section.subtitle) && (
+              <div style={{ ...slideEyebrow, color: c.eyebrow, marginBottom: '0.75rem' }}>
+                {data?.eyebrow ?? section.subtitle}
+              </div>
+            )}
+            {section.title && (
+              <h2 style={{ ...slideTitle, color: c.text, fontSize: 'clamp(2rem, 4.5vw, 3.5rem)' }}>
+                {section.title}
+              </h2>
+            )}
+            {data?.intro && (
+              <p style={{ fontSize: 'clamp(1rem, 1.4vw, 1.1875rem)', lineHeight: 1.55, color: c.textMuted, maxWidth: '32rem', margin: '0 0 1.5rem 0' }}>
+                {data.intro}
+              </p>
+            )}
+            {people.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1.25rem' }}>
+                {people.map((p, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'baseline',
+                      gap: '0.5rem',
+                      padding: '0.5rem 0.875rem',
+                      background: c.cardBg,
+                      border: `1px solid ${c.cardBorderStrong}`,
+                      borderRadius: '999px',
+                      fontSize: '0.875rem',
+                    }}
+                  >
+                    <span style={{ fontWeight: 700, color: c.text }}>{p.name}</span>
+                    <span aria-hidden="true" style={{ width: '0.1875rem', height: '0.1875rem', borderRadius: '50%', background: c.eyebrow, opacity: 0.6 }} />
+                    <span style={{ fontSize: '0.75rem', color: c.eyebrow, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      {p.role}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-        <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: theme.eyebrow, marginTop: '0.125rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-          {person.role}
-        </div>
-        {person.bio && (
-          <p style={{ fontSize: '0.9375rem', lineHeight: 1.5, color: theme.textMuted, marginTop: '0.75rem', marginBottom: 0 }}>
-            {person.bio}
-          </p>
-        )}
       </div>
-    </div>
+      <style>{`
+        @media (min-width: 768px) {
+          .founders-grid { grid-template-columns: 1fr 1fr !important; }
+          .founders-grid > div:first-child { order: 2 !important; }
+          .founders-grid > div:last-child { order: 1 !important; }
+        }
+      `}</style>
+    </section>
   )
 }
 

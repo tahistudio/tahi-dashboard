@@ -79,9 +79,11 @@ export function TypedSectionFields({
 // ─── founders ─────────────────────────────────────────────────────────────
 
 function FoundersFields({ data, onChange }: FieldsProps) {
-  type Person = { name: string; role: string; bio?: string; imageUrl?: string; imagePosition?: string; initials?: string }
+  type Person = { name: string; role: string }
   const eyebrow = String(data.eyebrow ?? '')
   const intro = String(data.intro ?? '')
+  const image = String(data.image ?? '')
+  const imagePosition = String(data.imagePosition ?? '50% 25%')
   const people: Person[] = Array.isArray(data.people) ? (data.people as Person[]) : []
   const set = (patch: Record<string, unknown>) => onChange({ ...data, ...patch })
   const updateAt = (i: number, patch: Partial<Person>) => {
@@ -89,42 +91,49 @@ function FoundersFields({ data, onChange }: FieldsProps) {
     set({ people: next })
   }
   const removeAt = (i: number) => set({ people: people.filter((_, j) => j !== i) })
-  const add = () => set({
-    people: [...people, { name: '', role: '', bio: '', imageUrl: '', imagePosition: '50% 25%', initials: '' }],
-  })
+  const add = () => set({ people: [...people, { name: '', role: '' }] })
 
   return (
     <div style={{ display: 'grid', gap: '0.5rem' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.5rem' }}>
-        <Field label="Eyebrow">
-          <input value={eyebrow} onChange={e => set({ eyebrow: e.target.value })} placeholder="The team on your build" style={inputStyle} />
+      <Field label="Eyebrow">
+        <input value={eyebrow} onChange={e => set({ eyebrow: e.target.value })} placeholder="The team on your build" style={inputStyle} />
+      </Field>
+      <Field label="Intro paragraph">
+        <textarea
+          value={intro}
+          onChange={e => set({ intro: e.target.value })}
+          placeholder="Founder-led, end-to-end. Liam runs engineering, Staci runs design…"
+          rows={3}
+          style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
+        />
+      </Field>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.5rem' }}>
+        <Field label="Image URL (one shared photo of all founders)">
+          <input
+            value={image}
+            onChange={e => set({ image: e.target.value })}
+            placeholder="/dashboard/proposals/founders-placeholder.jpg"
+            style={inputStyle}
+          />
         </Field>
-        <Field label="Intro paragraph">
-          <input value={intro} onChange={e => set({ intro: e.target.value })} placeholder="Founder-led means founder-built…" style={inputStyle} />
+        <Field label="Image crop">
+          <input
+            value={imagePosition}
+            onChange={e => set({ imagePosition: e.target.value })}
+            placeholder="50% 25%"
+            style={inputStyle}
+            title="CSS object-position. Higher Y crops upward; e.g. '50% 15%' shows more of the top of the image."
+          />
         </Field>
       </div>
       <div>
-        <span style={labelStyle}>People</span>
-        <div style={{ display: 'grid', gap: '0.625rem' }}>
+        <span style={labelStyle}>People (shown as role pills under the intro)</span>
+        <div style={{ display: 'grid', gap: '0.375rem' }}>
           {people.map((p, i) => (
-            <div key={i} style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-md)', padding: '0.625rem', background: 'var(--color-bg)' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2rem', gap: '0.375rem', alignItems: 'center' }}>
-                <input value={p.name} onChange={e => updateAt(i, { name: e.target.value })} placeholder="Liam Miller" style={inputStyle} />
-                <input value={p.role} onChange={e => updateAt(i, { role: e.target.value })} placeholder="Co-founder · Engineering" style={inputStyle} />
-                <button onClick={() => removeAt(i)} style={{ ...smallBtn, padding: '0.25rem 0.375rem' }} aria-label="Remove"><Trash2 size={12} /></button>
-              </div>
-              <textarea
-                value={p.bio ?? ''}
-                onChange={e => updateAt(i, { bio: e.target.value })}
-                placeholder="Short bio. One or two sentences."
-                rows={2}
-                style={{ ...inputStyle, marginTop: '0.375rem', resize: 'vertical', fontFamily: 'inherit' }}
-              />
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '0.375rem', marginTop: '0.375rem' }}>
-                <input value={p.imageUrl ?? ''} onChange={e => updateAt(i, { imageUrl: e.target.value })} placeholder="/dashboard/proposals/founders-placeholder.jpg" style={inputStyle} />
-                <input value={p.imagePosition ?? ''} onChange={e => updateAt(i, { imagePosition: e.target.value })} placeholder="50% 25%" style={inputStyle} title="CSS object-position — controls the crop. e.g. '28% 25%' for left face, '70% 25%' for right face" />
-                <input value={p.initials ?? ''} onChange={e => updateAt(i, { initials: e.target.value })} placeholder="LM" maxLength={3} style={inputStyle} title="Fallback initials when no image is set" />
-              </div>
+            <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 2rem', gap: '0.375rem', alignItems: 'center' }}>
+              <input value={p.name} onChange={e => updateAt(i, { name: e.target.value })} placeholder="Liam Miller" style={inputStyle} />
+              <input value={p.role} onChange={e => updateAt(i, { role: e.target.value })} placeholder="Engineering" style={inputStyle} />
+              <button onClick={() => removeAt(i)} style={{ ...smallBtn, padding: '0.25rem 0.375rem' }} aria-label="Remove"><Trash2 size={12} /></button>
             </div>
           ))}
           <button onClick={add} style={smallBtn}><Plus size={12} />Add person</button>

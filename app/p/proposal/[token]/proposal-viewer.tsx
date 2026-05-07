@@ -95,21 +95,34 @@ export function coverPalette(theme: CoverTheme | null | undefined): CoverPalette
   switch (theme) {
     case 'brand_glass':
       return {
-        background: 'linear-gradient(135deg, #5A824E 0%, #425F39 100%)',
+        // Layered glow + base gradient. The white glow at top-right and the
+        // brand-light glow at bottom-left create a sense of light hitting
+        // the slide from a window. The vignette pulls the eye to centre.
+        background: [
+          'radial-gradient(60% 60% at 85% 0%, rgba(255,255,255,0.22) 0%, transparent 55%)',
+          'radial-gradient(80% 60% at 0% 110%, rgba(122,170,114,0.45) 0%, transparent 60%)',
+          'radial-gradient(120% 100% at 50% 50%, transparent 60%, rgba(0,0,0,0.20) 100%)',
+          'linear-gradient(135deg, #5A824E 0%, #3e5a35 100%)',
+        ].join(', '),
         text: '#FFFFFF',
         textSubtle: '#dcefd8',
         textMuted: '#a8c89e',
         ringColor: '#FFFFFF',
-        ringOpacity: 0.18,
+        ringOpacity: 0.16,
         cardBg: 'rgba(255,255,255,0.10)',
         cardBorder: 'rgba(255,255,255,0.22)',
-        cardBackdrop: 'blur(12px)',
+        cardBackdrop: 'blur(16px) saturate(140%)',
         eyebrow: '#dcefd8',
         isDarkMode: true,
       }
     case 'dark':
       return {
-        background: '#1f2c1a',
+        // Same depth layering as brand_glass on the deep dark base.
+        background: [
+          'radial-gradient(120% 80% at 85% -20%, rgba(147,201,138,0.22) 0%, transparent 55%)',
+          'radial-gradient(80% 60% at -10% 110%, rgba(122,170,114,0.16) 0%, transparent 50%)',
+          '#1f2c1a',
+        ].join(', '),
         text: '#FFFFFF',
         textSubtle: '#dcefd8',
         textMuted: '#a8c89e',
@@ -123,7 +136,7 @@ export function coverPalette(theme: CoverTheme | null | undefined): CoverPalette
       }
     case 'toned_light':
       return {
-        background: 'linear-gradient(135deg, #f5f3ed 0%, #eef3ec 100%)',
+        background: 'radial-gradient(80% 60% at 100% 0%, rgba(220,239,216,0.55) 0%, transparent 55%), linear-gradient(160deg, #f5f3ed 0%, #eef3ec 100%)',
         text: '#121A0F',
         textSubtle: '#3d5034',
         textMuted: '#5a6657',
@@ -286,12 +299,31 @@ export function ProposalViewer(props: ProposalViewerProps) {
 
   useEffect(() => { void reload() }, [reload])
 
-  useShareViewTracking({
+  const { trackPages } = useShareViewTracking({
     resourceType: 'proposal',
     resourceId: analyticsResourceId,
     // No token in preview mode — share tracking endpoint requires a token.
     shareToken: isPreview ? null : token,
   })
+
+  // Map activeSlide index to a stable slide ID so analytics records which
+  // slides the prospect actually reached. Cover and the auto-rendered
+  // variants/first-48 slides use literal string keys; section slides use
+  // their section.id. Pushed to trackPages on every slide change.
+  useEffect(() => {
+    let id: string | null = null
+    if (activeSlide === 0) {
+      id = 'cover'
+    } else if (activeSlide <= sections.length) {
+      const section = sections[activeSlide - 1]
+      id = section?.id ?? null
+    } else if (variants.length > 0 && activeSlide === sections.length + 1) {
+      id = 'variants'
+    } else if (submitted === 'accepted') {
+      id = 'first-48-hours'
+    }
+    if (id) trackPages([id])
+  }, [activeSlide, sections, variants.length, submitted, trackPages])
 
   async function submitDecision() {
     if (!decisionMode) return
