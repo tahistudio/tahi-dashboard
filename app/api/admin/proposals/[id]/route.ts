@@ -78,7 +78,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     effectiveDate?: string | null
     expiresAt?: string | null
     status?: 'draft' | 'shared' | 'accepted' | 'declined' | 'withdrawn' | 'expired'
-    coverTheme?: 'light' | 'dark'
+    coverTheme?: 'brand_glass' | 'toned_light' | 'light' | 'dark'
   }
 
   const database = await db() as unknown as D1

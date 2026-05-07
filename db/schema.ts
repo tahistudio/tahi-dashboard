@@ -1597,9 +1597,10 @@ export const proposals = sqliteTable('proposals', {
   publishedSnapshot: text('published_snapshot'),
   publishedAt: text('published_at'),
   // Cover slide theme — separate from per-section themes (which live on
-  // section.data.theme). 'light' (default) or 'dark'. Lets the admin set
-  // the cover's mood independently of how the body slides flow.
-  coverTheme: text('cover_theme').default('light'),
+  // section.data.theme). One of: 'brand_glass' (suggested default),
+  // 'toned_light', 'light', or 'dark'. Palette lookup lives in
+  // app/p/proposal/[token]/proposal-viewer.tsx :: coverPalette().
+  coverTheme: text('cover_theme').default('brand_glass'),
   createdById: text('created_by_id').notNull(),
   ...timestamps,
 }, (table) => [

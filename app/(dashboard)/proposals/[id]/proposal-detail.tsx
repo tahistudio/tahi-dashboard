@@ -31,7 +31,7 @@ interface Proposal {
   decidedAt: string | null
   decidedVariantId: string | null
   publishedAt: string | null
-  coverTheme: 'light' | 'dark' | null
+  coverTheme: 'brand_glass' | 'toned_light' | 'light' | 'dark' | null
   orgName: string | null
   dealTitle: string | null
   createdAt: string
@@ -440,35 +440,13 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
             <input type="date" value={proposal.expiresAt ?? ''} onChange={e => patchProposal({ expiresAt: e.currentTarget.value || null })} style={metaInputStyle} />
           </FieldGroup>
           <FieldGroup label="Cover theme">
-            <div className="flex" style={{ gap: '0.375rem' }}>
-              {(['light', 'dark'] as const).map(t => {
-                const active = (proposal.coverTheme ?? 'light') === t
-                return (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => {
-                      setProposal(p => p ? { ...p, coverTheme: t } : p)
-                      void patchProposal({ coverTheme: t })
-                    }}
-                    style={{
-                      flex: 1,
-                      padding: '0.4375rem 0.625rem',
-                      fontSize: '0.75rem',
-                      fontWeight: 600,
-                      background: active ? (t === 'dark' ? '#1f2c1a' : '#FFFFFF') : 'var(--color-bg)',
-                      color: active ? (t === 'dark' ? '#FFFFFF' : '#121A0F') : 'var(--color-text-muted)',
-                      border: `1px solid ${active ? 'var(--color-brand)' : 'var(--color-border)'}`,
-                      borderRadius: 'var(--radius-sm)',
-                      cursor: 'pointer',
-                      textTransform: 'capitalize',
-                    }}
-                  >
-                    {t}
-                  </button>
-                )
-              })}
-            </div>
+            <CoverThemePicker
+              value={proposal.coverTheme ?? 'brand_glass'}
+              onChange={t => {
+                setProposal(p => p ? { ...p, coverTheme: t } : p)
+                void patchProposal({ coverTheme: t })
+              }}
+            />
           </FieldGroup>
         </div>
       </div>
@@ -940,6 +918,192 @@ function FieldGroup({ label, children }: { label: string; children: React.ReactN
         {label}
       </div>
       {children}
+    </div>
+  )
+}
+
+/**
+ * <CoverThemePicker> — dropdown for proposal.coverTheme.
+ *
+ * Suggested theme is listed first so it carries the visual weight of being
+ * the recommended option. The four themes map to palettes in
+ * app/p/proposal/[token]/proposal-viewer.tsx :: coverPalette().
+ */
+type CoverThemeValue = 'brand_glass' | 'toned_light' | 'light' | 'dark'
+
+const COVER_THEMES: ReadonlyArray<{
+  value: CoverThemeValue
+  label: string
+  hint: string
+  swatch: { background: string; border: string }
+  suggested?: boolean
+}> = [
+  {
+    value: 'brand_glass',
+    label: 'Brand glass',
+    hint: 'Suggested · brand green with glass cards',
+    swatch: { background: 'linear-gradient(135deg, #5A824E 0%, #425F39 100%)', border: '#425F39' },
+    suggested: true,
+  },
+  {
+    value: 'toned_light',
+    label: 'Toned light',
+    hint: 'Warm off-white, brand-tinted accents',
+    swatch: { background: 'linear-gradient(135deg, #f5f3ed 0%, #eef3ec 100%)', border: '#e8e3d6' },
+  },
+  {
+    value: 'light',
+    label: 'Light',
+    hint: 'Clean white background',
+    swatch: { background: '#FFFFFF', border: '#d4e0d0' },
+  },
+  {
+    value: 'dark',
+    label: 'Dark',
+    hint: 'Deep brand-dark green',
+    swatch: { background: '#1f2c1a', border: '#2d3d2a' },
+  },
+]
+
+function CoverThemePicker({
+  value,
+  onChange,
+}: {
+  value: CoverThemeValue
+  onChange: (v: CoverThemeValue) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const current = COVER_THEMES.find(t => t.value === value) ?? COVER_THEMES[0]
+
+  // Close on outside click.
+  useEffect(() => {
+    if (!open) return
+    function onDocClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null
+      if (!target?.closest?.('[data-cover-theme-picker]')) setOpen(false)
+    }
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div data-cover-theme-picker style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          padding: '0.4375rem 0.625rem',
+          fontSize: '0.8125rem',
+          fontWeight: 500,
+          background: 'var(--color-bg)',
+          color: 'var(--color-text)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-sm)',
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            width: '1rem',
+            height: '1rem',
+            borderRadius: '0 6px 0 6px',
+            background: current.swatch.background,
+            border: `1px solid ${current.swatch.border}`,
+            flexShrink: 0,
+          }}
+        />
+        <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {current.label}
+        </span>
+        {current.suggested && (
+          <span style={{ fontSize: '0.625rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-brand)' }}>
+            Suggested
+          </span>
+        )}
+        <ChevronDown size={14} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 0.25rem)',
+            left: 0,
+            right: 0,
+            zIndex: 50,
+            padding: '0.25rem',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            boxShadow: '0 16px 40px -12px rgba(31, 44, 26, 0.18)',
+          }}
+        >
+          {COVER_THEMES.map(t => {
+            const active = t.value === value
+            return (
+              <button
+                key={t.value}
+                type="button"
+                role="option"
+                aria-selected={active}
+                onClick={() => { onChange(t.value); setOpen(false) }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = active ? 'var(--color-brand-50)' : 'transparent' }}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.625rem',
+                  padding: '0.5rem 0.5rem',
+                  background: active ? 'var(--color-brand-50)' : 'transparent',
+                  border: 'none',
+                  borderRadius: 'var(--radius-sm)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontSize: '0.8125rem',
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: '1.25rem',
+                    height: '1.25rem',
+                    borderRadius: '0 8px 0 8px',
+                    background: t.swatch.background,
+                    border: `1px solid ${t.swatch.border}`,
+                    flexShrink: 0,
+                  }}
+                />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>{t.label}</span>
+                    {t.suggested && (
+                      <span style={{ fontSize: '0.5625rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-brand)' }}>
+                        Suggested
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', marginTop: '0.0625rem' }}>{t.hint}</div>
+                </span>
+                {active && <span aria-hidden="true" style={{ width: '0.375rem', height: '0.375rem', borderRadius: '50%', background: 'var(--color-brand)', flexShrink: 0 }} />}
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

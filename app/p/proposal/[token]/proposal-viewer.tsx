@@ -36,7 +36,7 @@ interface PublicProposal {
   status: string
   decidedAt: string | null
   decidedVariantId: string | null
-  coverTheme?: 'light' | 'dark' | null
+  coverTheme?: CoverTheme | null
   orgName: string | null
 }
 
@@ -62,6 +62,95 @@ interface PublicVariant {
   ctaLabel: string | null
   isFeatured: number
   position: number
+}
+
+/**
+ * Cover themes — four distinct moods for slide 1. Persisted as `cover_theme`.
+ *
+ *  - brand_glass : brand-green base with translucent glass cards (suggested)
+ *  - toned_light : warm off-white, brand-tinted accents
+ *  - light       : pure white, brand text (the legacy default)
+ *  - dark        : deep brand-dark green, white text
+ *
+ * Per-section themes still live on section.data.theme. This is metadata for
+ * the cover only.
+ */
+export type CoverTheme = 'brand_glass' | 'toned_light' | 'light' | 'dark'
+
+export interface CoverPalette {
+  background: string
+  text: string
+  textSubtle: string
+  textMuted: string
+  ringColor: string
+  ringOpacity: number
+  cardBg: string
+  cardBorder: string
+  cardBackdrop: string
+  eyebrow: string
+  isDarkMode: boolean
+}
+
+export function coverPalette(theme: CoverTheme | null | undefined): CoverPalette {
+  switch (theme) {
+    case 'brand_glass':
+      return {
+        background: 'linear-gradient(135deg, #5A824E 0%, #425F39 100%)',
+        text: '#FFFFFF',
+        textSubtle: '#dcefd8',
+        textMuted: '#a8c89e',
+        ringColor: '#FFFFFF',
+        ringOpacity: 0.18,
+        cardBg: 'rgba(255,255,255,0.10)',
+        cardBorder: 'rgba(255,255,255,0.22)',
+        cardBackdrop: 'blur(12px)',
+        eyebrow: '#dcefd8',
+        isDarkMode: true,
+      }
+    case 'dark':
+      return {
+        background: '#1f2c1a',
+        text: '#FFFFFF',
+        textSubtle: '#dcefd8',
+        textMuted: '#a8c89e',
+        ringColor: '#93c98a',
+        ringOpacity: 0.18,
+        cardBg: 'rgba(255,255,255,0.06)',
+        cardBorder: 'rgba(220,239,216,0.2)',
+        cardBackdrop: 'none',
+        eyebrow: '#a8c89e',
+        isDarkMode: true,
+      }
+    case 'toned_light':
+      return {
+        background: 'linear-gradient(135deg, #f5f3ed 0%, #eef3ec 100%)',
+        text: '#121A0F',
+        textSubtle: '#3d5034',
+        textMuted: '#5a6657',
+        ringColor: '#5A824E',
+        ringOpacity: 0.18,
+        cardBg: 'rgba(255,255,255,0.7)',
+        cardBorder: '#e8e3d6',
+        cardBackdrop: 'blur(6px)',
+        eyebrow: '#5A824E',
+        isDarkMode: false,
+      }
+    case 'light':
+    default:
+      return {
+        background: '#FFFFFF',
+        text: '#121A0F',
+        textSubtle: '#3d5034',
+        textMuted: '#5a6657',
+        ringColor: '#5A824E',
+        ringOpacity: 0.14,
+        cardBg: 'rgba(255,255,255,0.65)',
+        cardBorder: '#e8f0e6',
+        cardBackdrop: 'none',
+        eyebrow: '#8a9987',
+        isDarkMode: false,
+      }
+  }
 }
 
 function safeParse<T>(json: string | null): T | null {
@@ -360,25 +449,25 @@ export function ProposalViewer(props: ProposalViewerProps) {
         className="proposal-track"
         style={{ transform: `translateX(-${activeSlide * 100}vw)` }}
       >
-        {/* Cover slide — light or dark per proposal.coverTheme */}
+        {/* Cover slide — palette comes from proposal.coverTheme. */}
         {(() => {
-          const dark = proposal.coverTheme === 'dark'
+          const palette = coverPalette(proposal.coverTheme)
           return (
             <section
-              style={{ ...coverShell, background: dark ? '#1f2c1a' : '#FFFFFF', color: dark ? '#FFFFFF' : '#121A0F' }}
+              style={{ ...coverShell, background: palette.background, color: palette.text }}
               className="proposal-slide proposal-cover"
             >
-              <BrandCircleBackdrop dark={dark} />
+              <BrandCircleBackdrop palette={palette} />
               <div style={coverInner}>
-                <BrandMark dark={dark} />
-                <CoverHeroStats dark={dark} />
+                <BrandMark dark={palette.isDarkMode} />
+                <CoverHeroStats palette={palette} />
                 <div style={{ marginTop: 'auto' }}>
                   {proposal.subtitle && (
-                    <div style={{ ...coverEyebrow, color: dark ? '#a8c89e' : '#8a9987' }}>{proposal.subtitle}</div>
+                    <div style={{ ...coverEyebrow, color: palette.eyebrow }}>{proposal.subtitle}</div>
                   )}
-                  <h1 style={{ ...coverTitle, color: dark ? '#FFFFFF' : '#121A0F' }}>{proposal.title}</h1>
+                  <h1 style={{ ...coverTitle, color: palette.text }}>{proposal.title}</h1>
                 </div>
-                <CoverMetaGrid proposal={proposal} dark={dark} />
+                <CoverMetaGrid proposal={proposal} palette={palette} />
               </div>
             </section>
           )
@@ -674,7 +763,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
 
 // ─── Subcomponents ───────────────────────────────────────────────────────
 
-function CoverMetaGrid({ proposal, dark = false }: { proposal: PublicProposal; dark?: boolean }) {
+function CoverMetaGrid({ proposal, palette }: { proposal: PublicProposal; palette: CoverPalette }) {
   const cells: { label: string; value: string }[] = []
   if (proposal.preparedFor) cells.push({ label: 'Prepared for', value: proposal.preparedFor })
   if (proposal.preparedBy) cells.push({ label: 'Prepared by', value: proposal.preparedBy })
@@ -682,13 +771,13 @@ function CoverMetaGrid({ proposal, dark = false }: { proposal: PublicProposal; d
   if (proposal.expiresAt) cells.push({ label: 'Expires', value: formatDate(proposal.expiresAt) ?? proposal.expiresAt })
   if (cells.length === 0) return null
   return (
-    <div style={coverMetaGrid}>
+    <div style={{ ...coverMetaGrid, position: 'relative', zIndex: 1 }}>
       {cells.map(c => (
         <div key={c.label} style={{ minWidth: 0 }}>
-          <div style={{ fontSize: '0.625rem', fontWeight: 600, color: dark ? '#a8c89e' : '#8a9987', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.25rem' }}>
+          <div style={{ fontSize: '0.625rem', fontWeight: 600, color: palette.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.25rem' }}>
             {c.label}
           </div>
-          <div style={{ fontSize: '0.9375rem', fontWeight: 600, color: dark ? '#FFFFFF' : '#1f2c1a', overflowWrap: 'break-word', wordBreak: 'break-word' }}>
+          <div style={{ fontSize: '0.9375rem', fontWeight: 600, color: palette.text, overflowWrap: 'break-word', wordBreak: 'break-word' }}>
             {c.value}
           </div>
         </div>
@@ -831,13 +920,9 @@ function SlideNav({ active, total, onChange }: {
  * 20–60% opacity, partial-cropped at the canvas edge, in Brand Green.
  * Replaces the off-brand radial gradient that used to sit on covers.
  */
-function BrandCircleBackdrop({ dark = false }: { dark?: boolean }) {
-  // CSS-rendered full ring — the original SVG asset draws a partial-cropped
-  // ring by design (per Brand Guidelines), but at the deck size it looked
-  // like the circle was malformed rather than intentionally cropped. Pure
-  // CSS gives us a clean closed ring with full control over size + offset.
-  const ringColour = dark ? '#93c98a' : '#5A824E'
-  const opacity = dark ? 0.18 : 0.14
+function BrandCircleBackdrop({ palette }: { palette: CoverPalette }) {
+  // CSS-rendered full ring. Colour and opacity come from the active cover
+  // palette so the circle reads correctly on any background.
   return (
     <div
       aria-hidden="true"
@@ -848,8 +933,8 @@ function BrandCircleBackdrop({ dark = false }: { dark?: boolean }) {
         width: '52rem',
         height: '52rem',
         borderRadius: '50%',
-        border: `6rem solid ${ringColour}`,
-        opacity,
+        border: `6rem solid ${palette.ringColor}`,
+        opacity: palette.ringOpacity,
         pointerEvents: 'none',
         zIndex: 0,
       }}
@@ -857,28 +942,30 @@ function BrandCircleBackdrop({ dark = false }: { dark?: boolean }) {
   )
 }
 
-function CoverHeroStats({ dark = false }: { dark?: boolean }) {
+function CoverHeroStats({ palette }: { palette: CoverPalette }) {
   const stats: { value: string; label: string }[] = [
-    { value: '12 days', label: 'median project → sign' },
+    { value: '12 days', label: 'median project, signed to live' },
     { value: 'Premium', label: 'Webflow Partner' },
-    { value: 'Carbon-', label: 'negative since 2024' },
-    { value: 'Founder-', label: 'led by Liam + Staci' },
+    { value: 'Carbon', label: 'negative since 2024' },
+    { value: 'Founder-led', label: 'by Liam and Staci' },
   ]
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))', gap: '0.625rem', marginTop: '0.875rem' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))', gap: '0.625rem', marginTop: '0.875rem', position: 'relative', zIndex: 1 }}>
       {stats.map(s => (
         <div
           key={s.label}
           style={{
-            background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.65)',
-            border: `1px solid ${dark ? 'rgba(220,239,216,0.2)' : '#e8f0e6'}`,
+            background: palette.cardBg,
+            border: `1px solid ${palette.cardBorder}`,
+            backdropFilter: palette.cardBackdrop,
+            WebkitBackdropFilter: palette.cardBackdrop,
             borderRadius: '0 12px 0 12px',
             padding: '0.625rem 0.875rem',
             minWidth: 0,
           }}
         >
-          <div style={{ fontSize: '0.875rem', fontWeight: 800, color: dark ? '#FFFFFF' : '#1f2c1a', letterSpacing: '-0.01em' }}>{s.value}</div>
-          <div style={{ fontSize: '0.6875rem', color: dark ? '#a8c89e' : '#5a6657' }}>{s.label}</div>
+          <div style={{ fontSize: '0.875rem', fontWeight: 800, color: palette.text, letterSpacing: '-0.01em' }}>{s.value}</div>
+          <div style={{ fontSize: '0.6875rem', color: palette.textMuted }}>{s.label}</div>
         </div>
       ))}
     </div>
@@ -1159,6 +1246,7 @@ const coverShell: React.CSSProperties = {
 
 const coverInner: React.CSSProperties = {
   position: 'relative',
+  zIndex: 1,
   display: 'flex',
   flexDirection: 'column',
   minHeight: '100svh',

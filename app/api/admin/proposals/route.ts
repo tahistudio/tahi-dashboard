@@ -161,6 +161,7 @@ export async function POST(req: NextRequest) {
     effectiveDate: body.effectiveDate ?? null,
     expiresAt: body.expiresAt ?? null,
     status: 'draft',
+    coverTheme: 'brand_glass',
     createdById: userId,
     createdAt: now,
     updatedAt: now,
