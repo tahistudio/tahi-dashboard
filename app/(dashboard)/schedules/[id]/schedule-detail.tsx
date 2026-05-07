@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft, Plus, Trash2, AlertTriangle, Share2, Copy, Diamond, Calendar, Mail, Eye } from 'lucide-react'
 import { EmailShareModal, type EmailRecipientSuggestion } from '@/components/tahi/email-share-modal'
 import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { GanttGrid, type GanttRow, type RowOwner, type RowType } from '@/components/tahi/gantt-grid'
@@ -62,6 +63,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   const [savingDraft, setSavingDraft] = useState(false)
   const [sharing, setSharing] = useState(false)
   const [showEmail, setShowEmail] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [contacts, setContacts] = useState<Array<{ id: string; name: string; email: string; isPrimary: number }>>([])
 
   async function ensureContacts() {
@@ -536,9 +538,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
           </button>
         )}
         <button
-          onClick={() => {
-            if (window.confirm('Delete this schedule? This cannot be undone.')) deleteSchedule()
-          }}
+          onClick={() => setShowDeleteConfirm(true)}
           className="inline-flex items-center"
           style={{
             padding: '0.4375rem 0.75rem',
@@ -628,6 +628,16 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         onSent={({ sent }) => {
           if (sent > 0) showToast(`Sent ${sent} email${sent === 1 ? '' : 's'}.`, 'success')
         }}
+      />
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete this schedule?"
+        description="Permanently removes the schedule, every section, and every Gantt row. Cannot be undone."
+        confirmLabel="Delete schedule"
+        variant="danger"
+        onConfirm={async () => { setShowDeleteConfirm(false); await deleteSchedule() }}
+        onCancel={() => setShowDeleteConfirm(false)}
       />
     </div>
   )

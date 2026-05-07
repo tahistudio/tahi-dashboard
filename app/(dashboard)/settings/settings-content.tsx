@@ -11,6 +11,7 @@ import {
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { useToast } from '@/components/tahi/toast'
+import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
 import { apiPath } from '@/lib/api'
 
 // -- Types --
@@ -1508,30 +1509,19 @@ function PipelineDefaultsSection({
 
         {/* Nudge signature */}
         <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
-          <label htmlFor="nudge-signature" className="block text-sm font-medium text-[var(--color-text)]">
+          <label className="block text-sm font-medium text-[var(--color-text)]">
             Nudge email signature
           </label>
           <p className="text-xs text-[var(--color-text-muted)] mt-0.5 mb-3">
-            Appended to every nudge email at send time. Accepts HTML (links, line breaks, etc).
+            Appended to every nudge email at send time. Format with the rich
+            text controls — links, lists, headings and emphasis all carry
+            through to the email.
           </p>
-          <textarea
-            id="nudge-signature"
-            value={signatureDraft}
-            onChange={(e) => setSignatureDraft(e.target.value)}
-            rows={6}
-            placeholder={'<p>Liam Miller<br>Tahi Studio<br><a href="https://tahi.studio">tahi.studio</a></p>'}
-            className="w-full text-sm font-mono rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
-            style={{ minHeight: '8rem' }}
+          <TiptapDocEditor
+            content={signatureDraft}
+            onChange={(html) => setSignatureDraft(html)}
+            placeholder="Liam Miller — Tahi Studio — tahi.studio"
           />
-          {signatureDraft && (
-            <div className="mt-3">
-              <p className="text-xs font-medium text-[var(--color-text-muted)] mb-1.5">Preview</p>
-              <div
-                className="text-sm rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)]"
-                dangerouslySetInnerHTML={{ __html: signatureDraft }}
-              />
-            </div>
-          )}
           <div className="flex items-center justify-end gap-2 mt-3">
             {signatureDirty && (
               <TahiButton
