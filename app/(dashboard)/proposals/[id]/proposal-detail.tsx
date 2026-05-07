@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink, Mail, BookmarkPlus, Eye, ChevronUp, ChevronDown } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink, Mail, BookmarkPlus, Eye, ChevronUp, ChevronDown, Settings as SettingsIcon, MessageSquare, BarChart3, MoreHorizontal, Check, FileText } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
@@ -131,6 +131,27 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
   const [showEmail, setShowEmail] = useState(false)
   const [contacts, setContacts] = useState<Array<{ id: string; name: string; email: string; isPrimary: number }>>([])
 
+  // Active view drives the right pane:
+  //   'cover'              → cover meta editor
+  //   `section:${id}`      → that section's editor
+  //   `variant:${id}`      → that variant's editor
+  //   'settings' | 'decisions' | 'analytics' → admin panels
+  const [activeView, setActiveView] = useState<string>('cover')
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false)
+  const [showAddSlideMenu, setShowAddSlideMenu] = useState(false)
+
+  // Save indicator — counts saves over the lifetime of the page; the timestamp
+  // of the most recent save lets the header show "saved 3s ago".
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
+  const [savingCount, setSavingCount] = useState(0)
+  const trackSave = useCallback((promise: Promise<unknown>) => {
+    setSavingCount(c => c + 1)
+    void promise.finally(() => {
+      setSavingCount(c => Math.max(0, c - 1))
+      setLastSavedAt(Date.now())
+    })
+  }, [])
+
   // Lazy-load contacts the first time the email modal opens.
   async function ensureContacts() {
     if (!proposal?.orgId || contacts.length > 0) return
@@ -160,6 +181,18 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
   }, [proposalId])
 
   useEffect(() => { void fetchAll() }, [fetchAll])
+
+  // If the active view points to a section or variant that's been deleted
+  // or hasn't loaded, fall back to the cover.
+  useEffect(() => {
+    if (activeView.startsWith('section:')) {
+      const id = activeView.slice('section:'.length)
+      if (sections.length > 0 && !sections.some(s => s.id === id)) setActiveView('cover')
+    } else if (activeView.startsWith('variant:')) {
+      const id = activeView.slice('variant:'.length)
+      if (variants.length > 0 && !variants.some(v => v.id === id)) setActiveView('cover')
+    }
+  }, [activeView, sections, variants])
 
   // ── Top-level patch (save on blur) ───────────────────────────────────
   async function patchProposal(changes: Partial<Proposal>) {
@@ -403,266 +436,274 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
     ? `${typeof window !== 'undefined' ? window.location.origin : ''}/dashboard/p/proposal/${proposal.publicShareToken}`
     : null
 
+  // Sorted sections drive the navigator order and slide numbering.
+  const sortedSections = [...sections].sort((a, b) => a.position - b.position)
+
+  // Has unpublished edits since the last publish?
+  const hasUnpublished =
+    !proposal.publishedAt ||
+    (proposal.updatedAt && new Date(proposal.updatedAt).getTime() > new Date(proposal.publishedAt).getTime() + 1000)
+
+  // Section type → friendly label for the navigator (falls back to type code).
+  const sectionLabel = (type: string) =>
+    SECTION_TYPES.find(t => t.value === type)?.label ?? type
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-      <Link href="/proposals" className="inline-flex items-center" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', textDecoration: 'none', gap: '0.375rem' }}>
-        <ArrowLeft size={14} />
-        All proposals
-      </Link>
+    <div style={builderShell} className="proposal-builder">
+      <style>{`
+        @media (max-width: 900px) {
+          .proposal-builder-grid {
+            grid-template-columns: 1fr !important;
+          }
+          .proposal-builder-nav {
+            position: static !important;
+            max-height: none !important;
+          }
+        }
+        @keyframes editorFadeIn {
+          from { opacity: 0; transform: translateY(0.375rem); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .nav-item-hover:hover { background: var(--color-bg-secondary) !important; }
+        .nav-item-active {
+          background: linear-gradient(135deg, var(--color-brand-50) 0%, transparent 100%) !important;
+          color: var(--color-text) !important;
+        }
+        .nav-item-active::before {
+          content: '';
+          position: absolute;
+          left: 0; top: 0.625rem; bottom: 0.625rem;
+          width: 0.1875rem;
+          background: var(--color-brand);
+          border-radius: 0 0.1875rem 0.1875rem 0;
+        }
+      `}</style>
 
-      {/* Cover header — editable */}
-      <div style={{ padding: '1.5rem 1.75rem', background: 'var(--color-bg)', border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-lg)' }}>
-        <input
-          type="text"
-          value={proposal.subtitle ?? ''}
-          onChange={e => setProposal(p => p ? { ...p, subtitle: e.target.value } : p)}
-          onBlur={e => patchProposal({ subtitle: e.currentTarget.value || null })}
-          placeholder="PROPOSAL"
-          style={{ display: 'block', width: '100%', fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', background: 'transparent', border: 'none', padding: 0, marginBottom: '0.5rem', outline: 'none' }}
-        />
-        <input
-          type="text"
-          value={proposal.title}
-          onChange={e => setProposal(p => p ? { ...p, title: e.target.value } : p)}
-          onBlur={e => patchProposal({ title: e.currentTarget.value || 'Untitled' })}
-          style={{ display: 'block', width: '100%', fontSize: '1.5rem', fontWeight: 800, color: 'var(--color-text)', background: 'transparent', border: 'none', padding: 0, outline: 'none', marginBottom: '1rem' }}
-        />
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '1rem' }}>
-          <FieldGroup label="Prepared for">
-            <input type="text" value={proposal.preparedFor ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedFor: e.target.value } : p)} onBlur={e => patchProposal({ preparedFor: e.currentTarget.value || null })} style={metaInputStyle} />
-          </FieldGroup>
-          <FieldGroup label="Prepared by">
-            <input type="text" value={proposal.preparedBy ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedBy: e.target.value } : p)} onBlur={e => patchProposal({ preparedBy: e.currentTarget.value || null })} style={metaInputStyle} />
-          </FieldGroup>
-          <FieldGroup label="Effective">
-            <input type="date" value={proposal.effectiveDate ?? ''} onChange={e => patchProposal({ effectiveDate: e.currentTarget.value || null })} style={metaInputStyle} />
-          </FieldGroup>
-          <FieldGroup label="Expires">
-            <input type="date" value={proposal.expiresAt ?? ''} onChange={e => patchProposal({ expiresAt: e.currentTarget.value || null })} style={metaInputStyle} />
-          </FieldGroup>
-          <FieldGroup label="Cover theme">
-            <CoverThemePicker
-              value={proposal.coverTheme ?? 'brand_glass'}
-              onChange={t => {
-                setProposal(p => p ? { ...p, coverTheme: t } : p)
-                void patchProposal({ coverTheme: t })
-              }}
+      {/* Sticky top bar — back link, title (inline edit), status, actions */}
+      <header style={builderHeader}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', minWidth: 0, flex: 1 }}>
+          <Link href="/proposals" aria-label="All proposals" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '2rem', height: '2rem', borderRadius: '0.5rem', color: 'var(--color-text-muted)', flexShrink: 0 }} className="nav-item-hover">
+            <ArrowLeft size={16} />
+          </Link>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <input
+              type="text"
+              value={proposal.title}
+              onChange={e => setProposal(p => p ? { ...p, title: e.target.value } : p)}
+              onBlur={e => trackSave(patchProposal({ title: e.currentTarget.value || 'Untitled' }))}
+              placeholder="Untitled proposal"
+              style={builderTitleInput}
             />
-          </FieldGroup>
+          </div>
+          <span style={statusPill(proposal.status)}>{proposal.status}</span>
+          <SaveIndicator savingCount={savingCount} lastSavedAt={lastSavedAt} />
         </div>
-      </div>
 
-      {/* Linked to — client + deal cross-link with activity logging */}
-      <LinkedToPanel
-        resourceType="proposal"
-        resourceId={proposalId}
-        orgId={proposal.orgId}
-        dealId={proposal.dealId}
-        orgName={proposal.orgName}
-        dealTitle={proposal.dealTitle}
-        onChanged={() => void fetchAll({ silent: true })}
-      />
-
-      {/* Publish indicator — shows when admin has unpublished edits */}
-      {(() => {
-        const hasUnpublished =
-          !proposal.publishedAt ||
-          (proposal.updatedAt && new Date(proposal.updatedAt).getTime() > new Date(proposal.publishedAt).getTime() + 1000)
-        if (!hasUnpublished) return null
-        return (
-          <div className="flex flex-wrap items-center justify-between" style={{
-            padding: '0.625rem 0.875rem',
-            background: '#fff7ed',
-            color: '#9a3412',
-            border: '1px solid #fed7aa',
-            borderRadius: 'var(--radius-lg)',
-            gap: '0.75rem',
-          }}>
-            <div style={{ fontSize: '0.8125rem', fontWeight: 500 }}>
-              <strong>Unpublished changes.</strong> The public viewer is still showing
-              {proposal.publishedAt ? ' the last published version' : ' nothing — publish to share with the client'}.
-            </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+          {hasUnpublished && (
             <button
-              onClick={handlePublish}
+              onClick={() => trackSave(handlePublish())}
               disabled={publishing}
-              className="inline-flex items-center"
-              style={{
-                padding: '0.4375rem 0.875rem',
-                fontSize: '0.8125rem',
-                fontWeight: 600,
-                background: 'var(--color-brand)',
-                color: 'white',
-                border: 'none',
-                borderRadius: 'var(--radius-leaf-sm)',
-                cursor: publishing ? 'wait' : 'pointer',
-                opacity: publishing ? 0.7 : 1,
-                whiteSpace: 'nowrap',
-              }}
+              style={{ ...toolbarPrimary, background: '#fb923c', borderColor: '#fb923c' }}
+              title="Push the latest edits to the public viewer"
             >
               {publishing ? 'Publishing…' : 'Publish'}
             </button>
-          </div>
-        )
-      })()}
-
-      {/* Toolbar — share + delete */}
-      <div className="flex flex-wrap items-center" style={{ gap: '0.5rem' }}>
-        <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '0.25rem 0.625rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-full)', border: '1px solid var(--color-border-subtle)' }}>
-          Status: {proposal.status}
-        </span>
-        {proposal.publishedAt && (
-          <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>
-            Published {new Date(proposal.publishedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
-          </span>
-        )}
-        <div style={{ flex: 1 }} />
-        <Link href={`/preview/proposal/${proposalId}`} target="_blank" rel="noreferrer" className="inline-flex items-center" style={toolbarBtn}>
-          <Eye size={13} />
-          Preview
-        </Link>
-        {publicUrl ? (
-          <>
-            <button onClick={() => { void ensureContacts(); setShowEmail(true) }} className="inline-flex items-center" style={toolbarPrimary}>
-              <Mail size={13} />
-              Email link
+          )}
+          <Link href={`/preview/proposal/${proposalId}`} target="_blank" rel="noreferrer" className="inline-flex items-center" style={toolbarBtn}>
+            <Eye size={13} />
+            Preview
+          </Link>
+          {publicUrl ? (
+            <>
+              <button onClick={() => { void ensureContacts(); setShowEmail(true) }} className="inline-flex items-center" style={toolbarPrimary}>
+                <Mail size={13} />
+                Email
+              </button>
+              <button onClick={() => { navigator.clipboard.writeText(publicUrl).then(() => showToast('Public link copied', 'success')) }} className="inline-flex items-center" style={toolbarBtn} title={publicUrl}>
+                <Copy size={13} />
+                Copy
+              </button>
+            </>
+          ) : (
+            <button onClick={handleShare} disabled={sharing} className="inline-flex items-center" style={toolbarPrimary}>
+              <Share2 size={13} />
+              {sharing ? 'Sharing…' : 'Share'}
             </button>
-            <button onClick={() => { navigator.clipboard.writeText(publicUrl).then(() => showToast('Public link copied', 'success')) }} className="inline-flex items-center" style={toolbarBtn} title={publicUrl}>
-              <Copy size={13} />
-              Copy link
-            </button>
-            <a href={publicUrl} target="_blank" rel="noreferrer" className="inline-flex items-center" style={toolbarBtn}>
-              <ExternalLink size={13} />
-              Open
-            </a>
-            <button onClick={handleUnshare} disabled={sharing} className="inline-flex items-center" style={{ ...toolbarBtn, color: 'var(--color-danger)' }}>
-              Revoke
-            </button>
-          </>
-        ) : (
-          <button onClick={handleShare} disabled={sharing} className="inline-flex items-center" style={toolbarPrimary}>
-            <Share2 size={13} />
-            {sharing ? 'Generating…' : 'Get public link'}
-          </button>
-        )}
-        <button onClick={() => setShowSaveTemplate(true)} className="inline-flex items-center" style={toolbarBtn} title="Save the current sections + variants as a reusable template">
-          <BookmarkPlus size={13} />
-          Save as template
-        </button>
-        <button onClick={() => setShowDeleteConfirm(true)} className="inline-flex items-center" style={{ ...toolbarBtn, color: 'var(--color-text-subtle)' }}>
-          <Trash2 size={13} />
-          Delete
-        </button>
-      </div>
-
-      {/* Sections */}
-      <div>
-        <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
-          <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>Shared sections</h2>
-          <select
-            onChange={e => { if (e.target.value) { addSection(e.target.value); e.target.value = '' } }}
-            defaultValue=""
-            style={{ ...metaInputStyle, width: 'auto', minWidth: '12rem', cursor: 'pointer' }}
-          >
-            <option value="" disabled>+ Add section…</option>
-            {SECTION_TYPE_GROUPS.map(group => (
-              <optgroup key={group.label} label={group.label}>
-                {group.items.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </optgroup>
-            ))}
-          </select>
+          )}
+          <BuilderMoreMenu
+            open={moreMenuOpen}
+            onToggle={() => setMoreMenuOpen(v => !v)}
+            onClose={() => setMoreMenuOpen(false)}
+            items={[
+              { icon: <ExternalLink size={13} />, label: 'Open public link', disabled: !publicUrl, onClick: () => publicUrl && window.open(publicUrl, '_blank', 'noreferrer') },
+              { icon: <BookmarkPlus size={13} />, label: 'Save as template', onClick: () => setShowSaveTemplate(true) },
+              ...(publicUrl ? [{ icon: <Trash2 size={13} />, label: 'Revoke public link', danger: true, onClick: () => trackSave(handleUnshare()) }] : []),
+              { icon: <Trash2 size={13} />, label: 'Delete proposal', danger: true, onClick: () => setShowDeleteConfirm(true) },
+            ]}
+          />
         </div>
-        {sections.length === 0 ? (
-          <div style={emptyHint}>No sections yet. Use the dropdown to add one.</div>
-        ) : (
-          <div className="flex flex-col" style={{ gap: '0.75rem' }}>
-            {[...sections].sort((a, b) => a.position - b.position).map((s, i, sorted) => (
-              <SectionEditor
+      </header>
+
+      {/* Two-column main */}
+      <div style={builderGrid} className="proposal-builder-grid">
+        {/* Slide navigator */}
+        <aside style={builderNav} className="proposal-builder-nav">
+          <BuilderNavGroup label="Slides" count={1 + sortedSections.length}>
+            <BuilderNavItem
+              active={activeView === 'cover'}
+              onClick={() => setActiveView('cover')}
+              number={1}
+              icon={<FileText size={12} />}
+              label="Cover"
+              hint={proposal.subtitle || 'Hero slide'}
+            />
+            {sortedSections.map((s, i) => (
+              <BuilderNavItem
                 key={s.id}
-                section={s}
-                isFirst={i === 0}
-                isLast={i === sorted.length - 1}
-                onChange={changes => patchSection(s.id, changes)}
-                onDelete={() => deleteSection(s.id)}
-                onMoveUp={() => moveSection(s.id, -1)}
-                onMoveDown={() => moveSection(s.id, 1)}
+                active={activeView === `section:${s.id}`}
+                onClick={() => setActiveView(`section:${s.id}`)}
+                number={i + 2}
+                label={s.title || sectionLabel(s.type)}
+                hint={sectionLabel(s.type)}
               />
             ))}
-          </div>
-        )}
-      </div>
+            <BuilderAddSlide
+              open={showAddSlideMenu}
+              onToggle={() => setShowAddSlideMenu(v => !v)}
+              onClose={() => setShowAddSlideMenu(false)}
+              onPick={(type) => {
+                setShowAddSlideMenu(false)
+                trackSave(addSection(type))
+              }}
+            />
+          </BuilderNavGroup>
 
-      {/* Variants */}
-      <div>
-        <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
-          <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>Packages (variants)</h2>
-          <button onClick={addVariant} className="inline-flex items-center" style={toolbarBtn}>
-            <Plus size={13} />
-            Add package
-          </button>
-        </div>
-        {variants.length === 0 ? (
-          <div style={emptyHint}>No packages yet. Add at least one.</div>
-        ) : (
-          <div className="flex flex-col" style={{ gap: '0.75rem' }}>
+          <BuilderNavGroup label="Packages" count={variants.length}>
             {variants.map(v => (
-              <VariantEditor
+              <BuilderNavItem
                 key={v.id}
-                variant={v}
-                onChange={changes => patchVariant(v.id, changes)}
-                onDelete={() => deleteVariant(v.id)}
+                active={activeView === `variant:${v.id}`}
+                onClick={() => setActiveView(`variant:${v.id}`)}
+                label={v.name || 'Untitled package'}
+                hint={`${v.currency} ${v.oneOffAmount > 0 ? v.oneOffAmount.toLocaleString() : `${v.monthlyAmount}/mo`}`}
+                badge={v.isFeatured ? 'Featured' : undefined}
               />
             ))}
-          </div>
-        )}
+            <button onClick={() => trackSave(addVariant())} style={navAddBtn} className="nav-item-hover">
+              <Plus size={12} />
+              Add package
+            </button>
+          </BuilderNavGroup>
+
+          <BuilderNavGroup label="More">
+            <BuilderNavItem
+              active={activeView === 'settings'}
+              onClick={() => setActiveView('settings')}
+              icon={<SettingsIcon size={12} />}
+              label="Settings"
+              hint="Linked to, dates, theme"
+            />
+            {acceptances.length > 0 && (
+              <BuilderNavItem
+                active={activeView === 'decisions'}
+                onClick={() => setActiveView('decisions')}
+                icon={<MessageSquare size={12} />}
+                label="Decisions"
+                hint={`${acceptances.length} response${acceptances.length === 1 ? '' : 's'}`}
+              />
+            )}
+            {proposal.publicShareToken && (
+              <BuilderNavItem
+                active={activeView === 'analytics'}
+                onClick={() => setActiveView('analytics')}
+                icon={<BarChart3 size={12} />}
+                label="Analytics"
+                hint="View, time on page"
+              />
+            )}
+          </BuilderNavGroup>
+        </aside>
+
+        {/* Active editor */}
+        <main style={builderMain} key={activeView}>
+          {activeView === 'cover' && (
+            <CoverEditor
+              proposal={proposal}
+              onPatch={(p) => trackSave(patchProposal(p))}
+              setProposal={setProposal}
+            />
+          )}
+
+          {activeView.startsWith('section:') && (() => {
+            const id = activeView.slice('section:'.length)
+            const section = sortedSections.find(s => s.id === id)
+            if (!section) return null
+            const idx = sortedSections.findIndex(s => s.id === id)
+            const number = idx + 2
+            return (
+              <SlideEditorShell
+                eyebrow={`Slide ${number}`}
+                kicker={sectionLabel(section.type)}
+                onMoveUp={idx > 0 ? () => trackSave(moveSection(section.id, -1)) : undefined}
+                onMoveDown={idx < sortedSections.length - 1 ? () => trackSave(moveSection(section.id, 1)) : undefined}
+                onDelete={() => trackSave(deleteSection(section.id))}
+              >
+                <SectionEditor
+                  section={section}
+                  isFirst={idx === 0}
+                  isLast={idx === sortedSections.length - 1}
+                  hideHeader
+                  onChange={changes => trackSave(patchSection(section.id, changes))}
+                  onDelete={() => trackSave(deleteSection(section.id))}
+                  onMoveUp={() => trackSave(moveSection(section.id, -1))}
+                  onMoveDown={() => trackSave(moveSection(section.id, 1))}
+                />
+              </SlideEditorShell>
+            )
+          })()}
+
+          {activeView.startsWith('variant:') && (() => {
+            const id = activeView.slice('variant:'.length)
+            const variant = variants.find(v => v.id === id)
+            if (!variant) return null
+            return (
+              <SlideEditorShell
+                eyebrow="Package"
+                kicker={variant.name || 'Untitled'}
+                onDelete={() => trackSave(deleteVariant(variant.id))}
+              >
+                <VariantEditor
+                  variant={variant}
+                  hideHeader
+                  onChange={changes => trackSave(patchVariant(variant.id, changes))}
+                  onDelete={() => trackSave(deleteVariant(variant.id))}
+                />
+              </SlideEditorShell>
+            )
+          })()}
+
+          {activeView === 'settings' && (
+            <SettingsPanel
+              proposal={proposal}
+              setProposal={setProposal}
+              onPatch={(p) => trackSave(patchProposal(p))}
+              proposalId={proposalId}
+              onLinkChanged={() => void fetchAll({ silent: true })}
+            />
+          )}
+
+          {activeView === 'decisions' && (
+            <DecisionsPanel acceptances={acceptances} variants={variants} proposalTitle={proposal.title} />
+          )}
+
+          {activeView === 'analytics' && proposal.publicShareToken && (
+            <SlideEditorShell eyebrow="Analytics" kicker="View activity">
+              <ShareAnalyticsCard resourceType="proposal" resourceId={proposalId} />
+            </SlideEditorShell>
+          )}
+        </main>
       </div>
-
-      {/* Decisions + questions log */}
-      {acceptances.length > 0 && (
-        <div>
-          <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)', margin: '0 0 0.75rem 0' }}>
-            Decisions &amp; questions
-          </h2>
-          <div className="flex flex-col" style={{ gap: '0.5rem' }}>
-            {acceptances.map(a => {
-              const variantName = a.variantId ? variants.find(v => v.id === a.variantId)?.name : null
-              const palette =
-                a.status === 'accepted' ? { color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0', label: 'Accepted' } :
-                a.status === 'declined' ? { color: '#dc2626', bg: '#fef2f2', border: '#fecaca', label: 'Declined' } :
-                a.status === 'question' ? { color: '#1e40af', bg: '#eff6ff', border: '#bfdbfe', label: 'Question / tweak request' } :
-                { color: 'var(--color-text-muted)', bg: 'var(--color-bg-tertiary)', border: 'var(--color-border-subtle)', label: a.status }
-              return (
-                <div key={a.id} style={{ padding: '0.75rem 1rem', border: `1px solid ${palette.border}`, background: palette.bg, borderRadius: 'var(--radius-md)', fontSize: '0.8125rem', color: 'var(--color-text)' }}>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '0.5rem' }}>
-                    <strong style={{ color: palette.color }}>{palette.label}</strong>
-                    {variantName && <span style={{ color: 'var(--color-text-muted)' }}>· {variantName}</span>}
-                    {a.acceptorName && <span style={{ color: 'var(--color-text-muted)' }}>· {a.acceptorName}</span>}
-                    {a.acceptorEmail && <span style={{ color: 'var(--color-text-subtle)' }}>· {a.acceptorEmail}</span>}
-                    <span style={{ color: 'var(--color-text-subtle)', marginLeft: 'auto' }}>{new Date(a.acceptedAt).toLocaleString()}</span>
-                  </div>
-                  {a.comment && (
-                    <p style={{ margin: '0.5rem 0 0 0', color: 'var(--color-text)', whiteSpace: 'pre-wrap' }}>
-                      {a.status === 'question' ? a.comment : `“${a.comment}”`}
-                    </p>
-                  )}
-                  {a.status === 'question' && a.acceptorEmail && (
-                    <a
-                      href={`mailto:${a.acceptorEmail}?subject=${encodeURIComponent('Re: ' + (proposal?.title ?? 'your proposal'))}`}
-                      style={{ display: 'inline-block', marginTop: '0.5rem', fontSize: '0.75rem', fontWeight: 600, color: '#1e40af' }}
-                    >
-                      Reply via email →
-                    </a>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Analytics */}
-      {proposal.publicShareToken && (
-        <ShareAnalyticsCard resourceType="proposal" resourceId={proposalId} />
-      )}
 
       <EmailShareModal
         open={showEmail}
@@ -706,6 +747,601 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
   )
 }
 
+// ─── Builder: navigator + active editor shell ─────────────────────────────
+
+const builderShell: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  minHeight: 'calc(100vh - 4rem)',
+  marginTop: 'calc(-1 * var(--space-5))',
+  marginLeft: 'calc(-1 * var(--space-5))',
+  marginRight: 'calc(-1 * var(--space-5))',
+}
+
+const builderHeader: React.CSSProperties = {
+  position: 'sticky',
+  top: 0,
+  zIndex: 20,
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.875rem',
+  padding: '0.625rem 1rem',
+  background: 'rgba(255,255,255,0.85)',
+  backdropFilter: 'blur(12px)',
+  WebkitBackdropFilter: 'blur(12px)',
+  borderBottom: '1px solid var(--color-border-subtle)',
+}
+
+const builderTitleInput: React.CSSProperties = {
+  display: 'block',
+  width: '100%',
+  fontSize: '1rem',
+  fontWeight: 700,
+  color: 'var(--color-text)',
+  background: 'transparent',
+  border: '1px solid transparent',
+  borderRadius: '0.375rem',
+  padding: '0.25rem 0.5rem',
+  outline: 'none',
+  letterSpacing: '-0.01em',
+  transition: 'border-color 200ms ease, background 200ms ease',
+}
+
+const builderGrid: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '17rem minmax(0, 1fr)',
+  flex: 1,
+  minHeight: 0,
+}
+
+const builderNav: React.CSSProperties = {
+  position: 'sticky',
+  top: '3.625rem',
+  alignSelf: 'start',
+  height: 'calc(100vh - 3.625rem)',
+  overflowY: 'auto',
+  borderRight: '1px solid var(--color-border-subtle)',
+  padding: '1rem 0.625rem',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '1.25rem',
+  background: 'var(--color-bg)',
+}
+
+const builderMain: React.CSSProperties = {
+  padding: 'clamp(1rem, 3vw, 2.5rem)',
+  animation: 'editorFadeIn 240ms cubic-bezier(0.22, 1, 0.36, 1)',
+}
+
+const navAddBtn: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '0.4375rem',
+  padding: '0.4375rem 0.625rem',
+  marginTop: '0.25rem',
+  fontSize: '0.75rem',
+  fontWeight: 600,
+  color: 'var(--color-text-muted)',
+  background: 'transparent',
+  border: '1px dashed var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  cursor: 'pointer',
+  width: '100%',
+  justifyContent: 'flex-start',
+  transition: 'background 160ms ease, color 160ms ease, border-color 160ms ease',
+}
+
+function statusPill(status: string): React.CSSProperties {
+  const palette: Record<string, { bg: string; fg: string; bd: string }> = {
+    draft:     { bg: '#f7f9f6', fg: '#5a6657', bd: '#e8f0e6' },
+    shared:    { bg: '#eff6ff', fg: '#1e40af', bd: '#bfdbfe' },
+    accepted:  { bg: '#f0fdf4', fg: '#15803d', bd: '#bbf7d0' },
+    declined:  { bg: '#fef2f2', fg: '#dc2626', bd: '#fecaca' },
+    withdrawn: { bg: '#f5f5f4', fg: '#525252', bd: '#e7e5e4' },
+    expired:   { bg: '#fff7ed', fg: '#9a3412', bd: '#fed7aa' },
+  }
+  const p = palette[status] ?? palette.draft
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    fontSize: '0.625rem',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    padding: '0.25rem 0.625rem',
+    borderRadius: '999px',
+    background: p.bg,
+    color: p.fg,
+    border: `1px solid ${p.bd}`,
+    flexShrink: 0,
+  }
+}
+
+function SaveIndicator({ savingCount, lastSavedAt }: { savingCount: number; lastSavedAt: number | null }) {
+  const [, setTick] = useState(0)
+  // Re-render every 5s so "Saved 12s ago" updates without React having to
+  // be told. Cheap enough — one timer per page.
+  useEffect(() => {
+    const t = setInterval(() => setTick(x => x + 1), 5000)
+    return () => clearInterval(t)
+  }, [])
+  if (savingCount > 0) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
+        <span aria-hidden="true" style={{ width: '0.375rem', height: '0.375rem', borderRadius: '50%', background: 'var(--color-warning, #fb923c)', animation: 'pulse 1s ease-in-out infinite' }} />
+        Saving…
+      </span>
+    )
+  }
+  if (!lastSavedAt) return <span style={{ width: '0.5rem' }} aria-hidden="true" />
+  const elapsedSec = Math.max(1, Math.round((Date.now() - lastSavedAt) / 1000))
+  const label = elapsedSec < 5 ? 'Saved' : elapsedSec < 60 ? `Saved ${elapsedSec}s ago` : `Saved ${Math.round(elapsedSec / 60)}m ago`
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
+      <Check size={11} style={{ color: 'var(--color-brand)' }} />
+      {label}
+    </span>
+  )
+}
+
+function BuilderMoreMenu({
+  open, onToggle, onClose, items,
+}: {
+  open: boolean
+  onToggle: () => void
+  onClose: () => void
+  items: Array<{ icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean; disabled?: boolean }>
+}) {
+  useEffect(() => {
+    if (!open) return
+    function onDocClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null
+      if (!target?.closest?.('[data-more-menu]')) onClose()
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open, onClose])
+  return (
+    <div data-more-menu style={{ position: 'relative' }}>
+      <button
+        onClick={onToggle}
+        aria-label="More actions"
+        aria-expanded={open}
+        style={{ ...toolbarBtn, padding: '0.4375rem 0.5rem' }}
+      >
+        <MoreHorizontal size={14} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 0.375rem)',
+            right: 0,
+            minWidth: '14rem',
+            padding: '0.25rem',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            boxShadow: '0 16px 40px -12px rgba(31, 44, 26, 0.18)',
+            zIndex: 30,
+          }}
+        >
+          {items.map((it, i) => (
+            <button
+              key={i}
+              onClick={() => { onClose(); if (!it.disabled) it.onClick() }}
+              disabled={it.disabled}
+              role="menuitem"
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.5rem 0.625rem',
+                fontSize: '0.8125rem',
+                color: it.danger ? 'var(--color-danger)' : 'var(--color-text)',
+                background: 'transparent',
+                border: 'none',
+                borderRadius: 'var(--radius-sm)',
+                cursor: it.disabled ? 'not-allowed' : 'pointer',
+                opacity: it.disabled ? 0.4 : 1,
+                textAlign: 'left',
+              }}
+              className="nav-item-hover"
+            >
+              {it.icon}
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BuilderNavGroup({ label, count, children }: { label: string; count?: number; children: React.ReactNode }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 0.625rem', marginBottom: '0.4375rem' }}>
+        <span style={{ fontSize: '0.625rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          {label}
+        </span>
+        {count !== undefined && count > 0 && (
+          <span style={{ fontSize: '0.625rem', fontWeight: 600, color: 'var(--color-text-subtle)' }}>{count}</span>
+        )}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function BuilderNavItem({
+  active, onClick, number, icon, label, hint, badge,
+}: {
+  active: boolean
+  onClick: () => void
+  number?: number
+  icon?: React.ReactNode
+  label: string
+  hint?: string
+  badge?: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-current={active ? 'page' : undefined}
+      className={active ? 'nav-item-active' : 'nav-item-hover'}
+      style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.625rem',
+        width: '100%',
+        padding: '0.5rem 0.625rem',
+        background: 'transparent',
+        border: 'none',
+        borderRadius: 'var(--radius-sm)',
+        textAlign: 'left',
+        cursor: 'pointer',
+        color: 'var(--color-text-muted)',
+        transition: 'background 160ms ease, color 160ms ease',
+      }}
+    >
+      {number !== undefined && (
+        <span style={{
+          flexShrink: 0,
+          width: '1.25rem',
+          height: '1.25rem',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '0.625rem',
+          fontWeight: 700,
+          color: active ? '#FFFFFF' : 'var(--color-text-subtle)',
+          background: active ? 'var(--color-brand)' : 'var(--color-bg-secondary)',
+          border: active ? 'none' : '1px solid var(--color-border-subtle)',
+          borderRadius: '0 6px 0 6px',
+          letterSpacing: '-0.02em',
+        }}>{number}</span>
+      )}
+      {icon && number === undefined && (
+        <span style={{
+          flexShrink: 0,
+          width: '1.25rem',
+          height: '1.25rem',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: active ? 'var(--color-brand)' : 'var(--color-text-subtle)',
+        }}>{icon}</span>
+      )}
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: '0.8125rem', fontWeight: active ? 700 : 500, color: active ? 'var(--color-text)' : 'var(--color-text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {label}
+        </div>
+        {hint && (
+          <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {hint}
+          </div>
+        )}
+      </span>
+      {badge && (
+        <span style={{ fontSize: '0.5625rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-brand)', flexShrink: 0 }}>
+          {badge}
+        </span>
+      )}
+    </button>
+  )
+}
+
+function BuilderAddSlide({
+  open, onToggle, onClose, onPick,
+}: {
+  open: boolean
+  onToggle: () => void
+  onClose: () => void
+  onPick: (type: string) => void
+}) {
+  useEffect(() => {
+    if (!open) return
+    function onDocClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null
+      if (!target?.closest?.('[data-add-slide]')) onClose()
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open, onClose])
+  return (
+    <div data-add-slide style={{ position: 'relative' }}>
+      <button onClick={onToggle} style={navAddBtn} className="nav-item-hover">
+        <Plus size={12} />
+        Add slide
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute',
+          top: 'calc(100% + 0.25rem)',
+          left: 0,
+          right: 0,
+          minWidth: '17rem',
+          maxHeight: '24rem',
+          overflowY: 'auto',
+          padding: '0.375rem',
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-md)',
+          boxShadow: '0 16px 40px -12px rgba(31, 44, 26, 0.18)',
+          zIndex: 30,
+        }}>
+          {SECTION_TYPE_GROUPS.map(group => (
+            <div key={group.label} style={{ marginBottom: '0.25rem' }}>
+              <div style={{ padding: '0.375rem 0.5rem 0.25rem', fontSize: '0.625rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                {group.label}
+              </div>
+              {group.items.map(t => (
+                <button
+                  key={t.value}
+                  onClick={() => onPick(t.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.4375rem 0.625rem',
+                    fontSize: '0.8125rem',
+                    fontWeight: 500,
+                    color: 'var(--color-text)',
+                    background: 'transparent',
+                    border: 'none',
+                    borderRadius: 'var(--radius-sm)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                  className="nav-item-hover"
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SlideEditorShell({
+  eyebrow, kicker, children, onMoveUp, onMoveDown, onDelete,
+}: {
+  eyebrow: string
+  kicker: string
+  children: React.ReactNode
+  onMoveUp?: () => void
+  onMoveDown?: () => void
+  onDelete?: () => void
+}) {
+  return (
+    <div style={{ maxWidth: '52rem', margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+        <div>
+          <div style={{ fontSize: '0.625rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            {eyebrow}
+          </div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text)', marginTop: '0.25rem', letterSpacing: '-0.01em' }}>
+            {kicker}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '0.375rem' }}>
+          {onMoveUp && (
+            <button onClick={onMoveUp} aria-label="Move up" style={{ ...toolbarBtn, padding: '0.4375rem 0.5rem' }} title="Move up">
+              <ChevronUp size={13} />
+            </button>
+          )}
+          {onMoveDown && (
+            <button onClick={onMoveDown} aria-label="Move down" style={{ ...toolbarBtn, padding: '0.4375rem 0.5rem' }} title="Move down">
+              <ChevronDown size={13} />
+            </button>
+          )}
+          {onDelete && (
+            <button onClick={onDelete} aria-label="Delete" style={{ ...toolbarBtn, padding: '0.4375rem 0.5rem', color: 'var(--color-text-subtle)' }} title="Delete">
+              <Trash2 size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function CoverEditor({
+  proposal, setProposal, onPatch,
+}: {
+  proposal: Proposal
+  setProposal: React.Dispatch<React.SetStateAction<Proposal | null>>
+  onPatch: (changes: Partial<Proposal>) => void
+}) {
+  return (
+    <div style={{ maxWidth: '52rem', margin: '0 auto' }}>
+      <div style={{ marginBottom: '1.25rem' }}>
+        <div style={{ fontSize: '0.625rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Slide 1</div>
+        <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text)', marginTop: '0.25rem', letterSpacing: '-0.01em' }}>Cover</div>
+      </div>
+      <div style={{ display: 'grid', gap: '1rem', padding: '1.5rem', background: 'var(--color-bg)', border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-lg)' }}>
+        <FieldGroup label="Eyebrow">
+          <input
+            type="text"
+            value={proposal.subtitle ?? ''}
+            onChange={e => setProposal(p => p ? { ...p, subtitle: e.target.value } : p)}
+            onBlur={e => onPatch({ subtitle: e.currentTarget.value || null })}
+            placeholder="PROPOSAL"
+            style={metaInputStyle}
+          />
+        </FieldGroup>
+        <FieldGroup label="Title">
+          <input
+            type="text"
+            value={proposal.title}
+            onChange={e => setProposal(p => p ? { ...p, title: e.target.value } : p)}
+            onBlur={e => onPatch({ title: e.currentTarget.value || 'Untitled' })}
+            style={{ ...metaInputStyle, fontSize: '1.125rem', fontWeight: 700, padding: '0.5rem 0.625rem' }}
+          />
+        </FieldGroup>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '0.875rem' }}>
+          <FieldGroup label="Prepared for">
+            <input type="text" value={proposal.preparedFor ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedFor: e.target.value } : p)} onBlur={e => onPatch({ preparedFor: e.currentTarget.value || null })} style={metaInputStyle} />
+          </FieldGroup>
+          <FieldGroup label="Prepared by">
+            <input type="text" value={proposal.preparedBy ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedBy: e.target.value } : p)} onBlur={e => onPatch({ preparedBy: e.currentTarget.value || null })} style={metaInputStyle} />
+          </FieldGroup>
+          <FieldGroup label="Effective">
+            <input type="date" value={proposal.effectiveDate ?? ''} onChange={e => onPatch({ effectiveDate: e.currentTarget.value || null })} style={metaInputStyle} />
+          </FieldGroup>
+          <FieldGroup label="Expires">
+            <input type="date" value={proposal.expiresAt ?? ''} onChange={e => onPatch({ expiresAt: e.currentTarget.value || null })} style={metaInputStyle} />
+          </FieldGroup>
+        </div>
+        <FieldGroup label="Cover theme">
+          <CoverThemePicker
+            value={proposal.coverTheme ?? 'brand_glass'}
+            onChange={t => {
+              setProposal(p => p ? { ...p, coverTheme: t } : p)
+              onPatch({ coverTheme: t })
+            }}
+          />
+        </FieldGroup>
+      </div>
+    </div>
+  )
+}
+
+function SettingsPanel({
+  proposal, setProposal, onPatch, proposalId, onLinkChanged,
+}: {
+  proposal: Proposal
+  setProposal: React.Dispatch<React.SetStateAction<Proposal | null>>
+  onPatch: (changes: Partial<Proposal>) => void
+  proposalId: string
+  onLinkChanged: () => void
+}) {
+  return (
+    <div style={{ maxWidth: '52rem', margin: '0 auto' }}>
+      <div style={{ marginBottom: '1.25rem' }}>
+        <div style={{ fontSize: '0.625rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Settings</div>
+        <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text)', marginTop: '0.25rem', letterSpacing: '-0.01em' }}>Proposal metadata</div>
+      </div>
+      <div style={{ display: 'grid', gap: '1rem' }}>
+        <LinkedToPanel
+          resourceType="proposal"
+          resourceId={proposalId}
+          orgId={proposal.orgId}
+          dealId={proposal.dealId}
+          orgName={proposal.orgName}
+          dealTitle={proposal.dealTitle}
+          onChanged={onLinkChanged}
+        />
+        <div style={{ padding: '1.25rem', background: 'var(--color-bg)', border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-lg)', display: 'grid', gap: '0.875rem' }}>
+          <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--color-text)' }}>Cover meta</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '0.875rem' }}>
+            <FieldGroup label="Prepared for">
+              <input type="text" value={proposal.preparedFor ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedFor: e.target.value } : p)} onBlur={e => onPatch({ preparedFor: e.currentTarget.value || null })} style={metaInputStyle} />
+            </FieldGroup>
+            <FieldGroup label="Prepared by">
+              <input type="text" value={proposal.preparedBy ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedBy: e.target.value } : p)} onBlur={e => onPatch({ preparedBy: e.currentTarget.value || null })} style={metaInputStyle} />
+            </FieldGroup>
+            <FieldGroup label="Effective">
+              <input type="date" value={proposal.effectiveDate ?? ''} onChange={e => onPatch({ effectiveDate: e.currentTarget.value || null })} style={metaInputStyle} />
+            </FieldGroup>
+            <FieldGroup label="Expires">
+              <input type="date" value={proposal.expiresAt ?? ''} onChange={e => onPatch({ expiresAt: e.currentTarget.value || null })} style={metaInputStyle} />
+            </FieldGroup>
+          </div>
+          <FieldGroup label="Cover theme">
+            <CoverThemePicker
+              value={proposal.coverTheme ?? 'brand_glass'}
+              onChange={t => {
+                setProposal(p => p ? { ...p, coverTheme: t } : p)
+                onPatch({ coverTheme: t })
+              }}
+            />
+          </FieldGroup>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DecisionsPanel({
+  acceptances, variants, proposalTitle,
+}: {
+  acceptances: Acceptance[]
+  variants: Variant[]
+  proposalTitle: string
+}) {
+  return (
+    <div style={{ maxWidth: '52rem', margin: '0 auto' }}>
+      <div style={{ marginBottom: '1.25rem' }}>
+        <div style={{ fontSize: '0.625rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Decisions</div>
+        <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text)', marginTop: '0.25rem', letterSpacing: '-0.01em' }}>Responses from the prospect</div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        {acceptances.map(a => {
+          const variantName = a.variantId ? variants.find(v => v.id === a.variantId)?.name : null
+          const palette =
+            a.status === 'accepted' ? { color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0', label: 'Accepted' } :
+            a.status === 'declined' ? { color: '#dc2626', bg: '#fef2f2', border: '#fecaca', label: 'Declined' } :
+            a.status === 'question' ? { color: '#1e40af', bg: '#eff6ff', border: '#bfdbfe', label: 'Question or tweak request' } :
+            { color: 'var(--color-text-muted)', bg: 'var(--color-bg-tertiary)', border: 'var(--color-border-subtle)', label: a.status }
+          return (
+            <div key={a.id} style={{ padding: '0.875rem 1.125rem', border: `1px solid ${palette.border}`, background: palette.bg, borderRadius: 'var(--radius-md)', fontSize: '0.8125rem', color: 'var(--color-text)' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '0.5rem' }}>
+                <strong style={{ color: palette.color }}>{palette.label}</strong>
+                {variantName && <span style={{ color: 'var(--color-text-muted)' }}>· {variantName}</span>}
+                {a.acceptorName && <span style={{ color: 'var(--color-text-muted)' }}>· {a.acceptorName}</span>}
+                {a.acceptorEmail && <span style={{ color: 'var(--color-text-subtle)' }}>· {a.acceptorEmail}</span>}
+                <span style={{ color: 'var(--color-text-subtle)', marginLeft: 'auto' }}>{new Date(a.acceptedAt).toLocaleString()}</span>
+              </div>
+              {a.comment && (
+                <p style={{ margin: '0.5rem 0 0 0', color: 'var(--color-text)', whiteSpace: 'pre-wrap' }}>
+                  {a.status === 'question' ? a.comment : `“${a.comment}”`}
+                </p>
+              )}
+              {a.status === 'question' && a.acceptorEmail && (
+                <a
+                  href={`mailto:${a.acceptorEmail}?subject=${encodeURIComponent('Re: ' + (proposalTitle ?? 'your proposal'))}`}
+                  style={{ display: 'inline-block', marginTop: '0.5rem', fontSize: '0.75rem', fontWeight: 600, color: '#1e40af' }}
+                >
+                  Reply via email →
+                </a>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── Section editor (per-type) ───────────────────────────────────────────
 
 interface SectionPatch {
@@ -716,7 +1352,7 @@ interface SectionPatch {
   data?: unknown
 }
 
-function SectionEditor({ section, onChange, onDelete, onMoveUp, onMoveDown, isFirst, isLast }: {
+function SectionEditor({ section, onChange, onDelete, onMoveUp, onMoveDown, isFirst, isLast, hideHeader = false }: {
   section: Section
   onChange: (changes: SectionPatch) => void
   onDelete: () => void
@@ -724,16 +1360,82 @@ function SectionEditor({ section, onChange, onDelete, onMoveUp, onMoveDown, isFi
   onMoveDown?: () => void
   isFirst?: boolean
   isLast?: boolean
+  hideHeader?: boolean
 }) {
   const [data, setData] = useState<Record<string, unknown>>(() => {
     if (!section.data) return {}
     try { return JSON.parse(section.data) as Record<string, unknown> } catch { return {} }
   })
+  // Re-sync local data when the section ID changes (different slide selected).
+  // Without this the editor renders stale state when switching between slides.
+  useEffect(() => {
+    if (!section.data) { setData({}); return }
+    try { setData(JSON.parse(section.data) as Record<string, unknown>) } catch { setData({}) }
+  }, [section.id, section.data])
 
   const setField = (key: string, value: unknown) => {
     setData(prev => ({ ...prev, [key]: value }))
   }
   const flush = () => onChange({ data })
+
+  const editorBody = (
+    <div style={{ display: 'grid', gap: '0.875rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.625rem' }}>
+        <FieldGroup label="Title">
+          <input type="text" value={section.title ?? ''} onChange={e => onChange({ title: e.target.value })} style={metaInputStyle} />
+        </FieldGroup>
+        <FieldGroup label="Eyebrow">
+          <input type="text" value={section.subtitle ?? ''} onChange={e => onChange({ subtitle: e.target.value })} style={metaInputStyle} />
+        </FieldGroup>
+      </div>
+      <FieldGroup label="Slide theme">
+        <CoverThemePicker
+          value={(data.theme as CoverThemeValue) ?? 'light'}
+          onChange={t => { const next = { ...data, theme: t }; setData(next); onChange({ data: next }) }}
+        />
+      </FieldGroup>
+      {STRUCTURED_TYPES.has(section.type) ? (
+        <TypedSectionFields
+          type={section.type}
+          data={data}
+          onChange={(next) => { setData(next); onChange({ data: next }) }}
+        />
+      ) : section.type === 'testimonial' ? (
+        <>
+          <FieldGroup label="Quote">
+            <textarea value={String(data.quote ?? '')} onChange={e => setField('quote', e.target.value)} onBlur={flush} rows={3} style={{ ...metaInputStyle, fontFamily: 'inherit' }} />
+          </FieldGroup>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.625rem' }}>
+            <FieldGroup label="Author">
+              <input type="text" value={String(data.author ?? '')} onChange={e => setField('author', e.target.value)} onBlur={flush} style={metaInputStyle} />
+            </FieldGroup>
+            <FieldGroup label="Author role">
+              <input type="text" value={String(data.role ?? '')} onChange={e => setField('role', e.target.value)} onBlur={flush} style={metaInputStyle} />
+            </FieldGroup>
+          </div>
+        </>
+      ) : (
+        <FieldGroup label="Content">
+          <TiptapDocEditor
+            content={String(data.html ?? '')}
+            onChange={(html) => {
+              setData(prev => ({ ...prev, html }))
+              onChange({ data: { ...data, html } })
+            }}
+            placeholder="Start writing your section…"
+          />
+        </FieldGroup>
+      )}
+    </div>
+  )
+
+  if (hideHeader) {
+    return (
+      <div style={{ padding: '1.5rem', background: 'var(--color-bg)', border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-lg)' }}>
+        {editorBody}
+      </div>
+    )
+  }
 
   return (
     <details open style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)' }}>
@@ -768,73 +1470,21 @@ function SectionEditor({ section, onChange, onDelete, onMoveUp, onMoveDown, isFi
           </button>
         </span>
       </summary>
-      <div style={{ padding: '0.75rem 0.875rem', borderTop: '1px solid var(--color-border-subtle)', display: 'grid', gap: '0.625rem' }}>
-        <FieldGroup label="Title">
-          <input type="text" value={section.title ?? ''} onChange={e => onChange({ title: e.target.value })} style={metaInputStyle} />
-        </FieldGroup>
-        <FieldGroup label="Subtitle (eyebrow)">
-          <input type="text" value={section.subtitle ?? ''} onChange={e => onChange({ subtitle: e.target.value })} style={metaInputStyle} />
-        </FieldGroup>
-        {/* Per-slide theme — same four palettes as the cover. Renderer
-            reads section.data.theme via readTheme() in section-blocks.tsx. */}
-        <FieldGroup label="Slide theme">
-          <CoverThemePicker
-            value={(data.theme as CoverThemeValue) ?? 'light'}
-            onChange={t => { const next = { ...data, theme: t }; setData(next); onChange({ data: next }) }}
-          />
-        </FieldGroup>
-        {STRUCTURED_TYPES.has(section.type) ? (
-          <TypedSectionFields
-            type={section.type}
-            data={data}
-            onChange={(next) => { setData(next); onChange({ data: next }) }}
-          />
-        ) : section.type === 'testimonial' ? (
-          <>
-            <FieldGroup label="Quote">
-              <textarea value={String(data.quote ?? '')} onChange={e => setField('quote', e.target.value)} onBlur={flush} rows={3} style={{ ...metaInputStyle, fontFamily: 'inherit' }} />
-            </FieldGroup>
-            <FieldGroup label="Author">
-              <input type="text" value={String(data.author ?? '')} onChange={e => setField('author', e.target.value)} onBlur={flush} style={metaInputStyle} />
-            </FieldGroup>
-            <FieldGroup label="Author role">
-              <input type="text" value={String(data.role ?? '')} onChange={e => setField('role', e.target.value)} onBlur={flush} style={metaInputStyle} />
-            </FieldGroup>
-          </>
-        ) : (
-          <FieldGroup label="Content">
-            <TiptapDocEditor
-              content={String(data.html ?? '')}
-              onChange={(html) => {
-                setData(prev => ({ ...prev, html }))
-                onChange({ data: { ...data, html } })
-              }}
-              placeholder="Start writing your section…"
-            />
-          </FieldGroup>
-        )}
+      <div style={{ padding: '0.75rem 0.875rem', borderTop: '1px solid var(--color-border-subtle)' }}>
+        {editorBody}
       </div>
     </details>
   )
 }
 
-function VariantEditor({ variant, onChange, onDelete }: {
+function VariantEditor({ variant, onChange, onDelete, hideHeader = false }: {
   variant: Variant
   onChange: (changes: Partial<Variant>) => void
   onDelete: () => void
+  hideHeader?: boolean
 }) {
-  return (
-    <details open style={{ border: variant.isFeatured ? '2px solid var(--color-brand)' : '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)' }}>
-      <summary style={{ padding: '0.625rem 0.875rem', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between', listStyle: 'none' }}>
-        <span>
-          {variant.isFeatured ? <Star size={12} style={{ color: 'var(--color-brand)', marginRight: '0.25rem' }} /> : null}
-          {variant.name} · {variant.currency} {variant.oneOffAmount.toLocaleString()}{variant.monthlyAmount > 0 ? ` + ${variant.monthlyAmount.toLocaleString()}/mo` : ''}
-        </span>
-        <button onClick={(e) => { e.preventDefault(); onDelete() }} style={{ ...toolbarBtn, padding: '0.25rem 0.625rem' }}>
-          <Trash2 size={12} />
-        </button>
-      </summary>
-      <div style={{ padding: '0.75rem 0.875rem', borderTop: '1px solid var(--color-border-subtle)', display: 'grid', gap: '0.625rem' }}>
+  const body = (
+    <div style={{ padding: hideHeader ? '1.5rem' : '0.75rem 0.875rem', borderTop: hideHeader ? 'none' : '1px solid var(--color-border-subtle)', display: 'grid', gap: '0.875rem' }}>
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))', gap: '0.625rem' }}>
           <FieldGroup label="Name">
             <input type="text" value={variant.name} onChange={e => onChange({ name: e.target.value })} style={metaInputStyle} />
@@ -875,7 +1525,29 @@ function VariantEditor({ variant, onChange, onDelete }: {
           <input type="checkbox" checked={!!variant.isFeatured} onChange={e => onChange({ isFeatured: e.target.checked ? 1 : 0 })} />
           Featured / recommended
         </label>
+    </div>
+  )
+
+  if (hideHeader) {
+    return (
+      <div style={{ background: 'var(--color-bg)', border: variant.isFeatured ? '2px solid var(--color-brand)' : '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-lg)' }}>
+        {body}
       </div>
+    )
+  }
+
+  return (
+    <details open style={{ border: variant.isFeatured ? '2px solid var(--color-brand)' : '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)' }}>
+      <summary style={{ padding: '0.625rem 0.875rem', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between', listStyle: 'none' }}>
+        <span>
+          {variant.isFeatured ? <Star size={12} style={{ color: 'var(--color-brand)', marginRight: '0.25rem' }} /> : null}
+          {variant.name} · {variant.currency} {variant.oneOffAmount.toLocaleString()}{variant.monthlyAmount > 0 ? ` + ${variant.monthlyAmount.toLocaleString()}/mo` : ''}
+        </span>
+        <button onClick={(e) => { e.preventDefault(); onDelete() }} style={{ ...toolbarBtn, padding: '0.25rem 0.625rem' }}>
+          <Trash2 size={12} />
+        </button>
+      </summary>
+      {body}
     </details>
   )
 }
