@@ -20,6 +20,7 @@ import {
   EmailParagraph,
   EmailShell,
   MessageBlock,
+  Mono,
   PrimaryButton,
   emailBodyStyle,
 } from './_components'
@@ -92,13 +93,13 @@ export function ContractSignEmail({
 
             <PrimaryButton href={signUrl}>Review and sign</PrimaryButton>
 
-            <EmailFootnote>
-              Each signature is anchored to a tamper-evident SHA-256 chain. Your IP is hashed,
-              never stored in plain text. The link is unique to you and expires when the contract
-              is fully signed or cancelled.
-            </EmailFootnote>
-
             <EmailBanner kind="info">Confidential to the named recipient</EmailBanner>
+
+            <EmailFootnote framed>
+              Each signature is anchored to a tamper-evident <Mono>SHA-256</Mono> chain. Your
+              IP is hashed, never stored in plain text. The link is unique to you and expires
+              when the contract is fully signed or cancelled.
+            </EmailFootnote>
           </EmailCard>
 
           <EmailFooter />
