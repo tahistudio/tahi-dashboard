@@ -3,9 +3,16 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Plus, Calendar, ExternalLink, Search } from 'lucide-react'
+import {
+  Calendar, Plus, Search, RefreshCw, Building2, Target, Trash2, ExternalLink, Eye,
+} from 'lucide-react'
+import { TahiButton } from '@/components/tahi/tahi-button'
+import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
+import { EmptyState } from '@/components/tahi/empty-state'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
 import { PageHeader } from '@/components/tahi/page-header'
+import { Input } from '@/components/tahi/input'
 import { useToast } from '@/components/tahi/toast'
 
 interface ScheduleListItem {
@@ -26,10 +33,32 @@ interface ScheduleListItem {
   dealTitle: string | null
 }
 
-const STATUS_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
-  draft: { bg: 'var(--color-bg-tertiary)', fg: 'var(--color-text-muted)', label: 'Draft' },
-  shared: { bg: 'var(--color-brand-50)', fg: 'var(--color-brand-dark)', label: 'Shared' },
-  archived: { bg: 'var(--color-bg-secondary)', fg: 'var(--color-text-subtle)', label: 'Archived' },
+type ScheduleStatus = ScheduleListItem['status']
+
+const STATUS_STYLES: Record<ScheduleStatus, { bg: string; color: string; label: string }> = {
+  draft: { bg: 'var(--color-bg-tertiary)', color: 'var(--color-text-muted)', label: 'Draft' },
+  shared: { bg: '#eff6ff', color: '#1e40af', label: 'Shared' },
+  archived: { bg: 'var(--color-bg-secondary)', color: 'var(--color-text-subtle)', label: 'Archived' },
+}
+
+const STATUS_TABS: { value: 'all' | ScheduleStatus; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'draft', label: 'Draft' },
+  { value: 'shared', label: 'Shared' },
+  { value: 'archived', label: 'Archived' },
+]
+
+function statusKey(status: string): ScheduleStatus {
+  return (status in STATUS_STYLES ? status : 'draft') as ScheduleStatus
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return '-'
+  try {
+    return new Date(iso).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
+  } catch {
+    return iso
+  }
 }
 
 export function SchedulesContent() {
@@ -38,7 +67,9 @@ export function SchedulesContent() {
   const [items, setItems] = useState<ScheduleListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | ScheduleStatus>('all')
   const [creating, setCreating] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<ScheduleListItem | null>(null)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -57,14 +88,15 @@ export function SchedulesContent() {
   useEffect(() => { void fetchAll() }, [fetchAll])
 
   const filtered = items.filter(s => {
-    if (!search.trim()) return true
-    const q = search.toLowerCase()
-    return (
-      s.title.toLowerCase().includes(q) ||
-      (s.orgName ?? '').toLowerCase().includes(q) ||
-      (s.dealTitle ?? '').toLowerCase().includes(q) ||
-      (s.preparedFor ?? '').toLowerCase().includes(q)
-    )
+    if (statusFilter !== 'all' && statusKey(s.status) !== statusFilter) return false
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      if (!s.title.toLowerCase().includes(q) &&
+          !(s.orgName ?? '').toLowerCase().includes(q) &&
+          !(s.dealTitle ?? '').toLowerCase().includes(q) &&
+          !(s.preparedFor ?? '').toLowerCase().includes(q)) return false
+    }
+    return true
   })
 
   async function handleCreate() {
@@ -92,185 +124,197 @@ export function SchedulesContent() {
     }
   }
 
+  async function handleDelete() {
+    if (!deleteTarget) return
+    const res = await fetch(apiPath(`/api/admin/schedules/${deleteTarget.id}`), { method: 'DELETE' })
+    if (res.ok) {
+      setDeleteTarget(null)
+      void fetchAll()
+    } else {
+      showToast('Failed to delete schedule', 'error')
+    }
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+    <div className="space-y-6">
       <PageHeader
         title="Schedules"
-        subtitle="Project gantts and timelines you can share with clients"
+        subtitle="Project gantts and timelines you can share with clients."
       >
-        <button
-          onClick={handleCreate}
-          disabled={creating}
-          className="inline-flex items-center font-medium hover:-translate-y-px"
-          style={{
-            padding: 'var(--space-2) var(--space-4)',
-            fontSize: 'var(--text-sm)',
-            fontWeight: 600,
-            background: 'var(--color-brand)',
-            color: 'white',
-            border: 'none',
-            borderRadius: 'var(--radius-leaf-sm)',
-            gap: 'var(--space-1-5)',
-            transition: 'background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease',
-            height: '2.25rem',
-            cursor: creating ? 'not-allowed' : 'pointer',
-            opacity: creating ? 0.6 : 1,
-          }}
-          onMouseEnter={e => {
-            if (!creating) {
-              e.currentTarget.style.background = 'var(--color-brand-dark)'
-              e.currentTarget.style.boxShadow = '0 4px 14px rgba(90,130,78,0.4)'
-            }
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.background = 'var(--color-brand)'
-            e.currentTarget.style.boxShadow = 'none'
-          }}
-        >
-          <Plus size={15} aria-hidden="true" />
-          {creating ? 'Creating…' : 'New schedule'}
-        </button>
+        <TahiButton variant="secondary" size="sm" onClick={fetchAll} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+          Refresh
+        </TahiButton>
+        <TahiButton size="sm" onClick={handleCreate} disabled={creating} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+          {creating ? 'Creating...' : 'New schedule'}
+        </TahiButton>
       </PageHeader>
 
-      {/* Search */}
-      <div className="relative" style={{ maxWidth: '24rem' }}>
-        <Search
-          size={14}
-          style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)', pointerEvents: 'none' }}
-          aria-hidden="true"
-        />
-        <input
-          type="search"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search by title, client or deal…"
-          style={{
-            width: '100%',
-            padding: '0.5rem 0.75rem 0.5rem 2.25rem',
-            fontSize: '0.875rem',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-md)',
-            background: 'var(--color-bg)',
-            color: 'var(--color-text)',
-          }}
-        />
-      </div>
-
-      {/* List */}
-      {loading ? (
-        <div className="flex flex-col gap-2">
-          {[1, 2, 3].map(i => (
-            <div
-              key={i}
-              className="animate-pulse rounded-lg"
-              style={{ height: '5rem', background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border-subtle)' }}
-            />
-          ))}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex-1 max-w-sm">
+          <Input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search schedules..."
+            leadingIcon={<Search size={14} aria-hidden="true" />}
+            style={{ width: '100%' }}
+          />
         </div>
-      ) : filtered.length === 0 ? (
-        <div
-          className="flex flex-col items-center justify-center rounded-xl"
-          style={{ padding: '3rem 2rem', border: '1px dashed var(--color-border)', background: 'var(--color-bg)' }}
-        >
-          <div
-            className="flex items-center justify-center"
-            style={{ width: '3rem', height: '3rem', borderRadius: 'var(--radius-leaf)', background: 'var(--color-brand-50)', color: 'var(--color-brand)', marginBottom: '1rem' }}
-          >
-            <Calendar size={20} aria-hidden="true" />
-          </div>
-          <h3 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)', marginBottom: '0.25rem' }}>
-            {search.trim() ? 'No schedules match your search' : 'No schedules yet'}
-          </h3>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
-            {search.trim() ? 'Try a different keyword' : 'Create one to map a project timeline you can share with clients.'}
-          </p>
-          {!search.trim() && (
+        <div className="flex flex-wrap gap-1.5">
+          {STATUS_TABS.map(tab => (
             <button
-              onClick={handleCreate}
-              disabled={creating}
-              className="inline-flex items-center font-medium"
+              key={tab.value}
+              onClick={() => setStatusFilter(tab.value)}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
               style={{
-                padding: 'var(--space-2) var(--space-4)',
-                fontSize: '0.875rem',
-                fontWeight: 600,
-                background: 'var(--color-brand)',
-                color: 'white',
-                border: 'none',
-                borderRadius: 'var(--radius-leaf-sm)',
-                gap: 'var(--space-1-5)',
-                cursor: creating ? 'not-allowed' : 'pointer',
+                background: statusFilter === tab.value ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
+                color: statusFilter === tab.value ? 'white' : 'var(--color-text-muted)',
               }}
             >
-              <Plus size={15} />
-              New schedule
+              {tab.label}
             </button>
-          )}
+          ))}
         </div>
+      </div>
+
+      {loading ? (
+        <LoadingSkeleton rows={6} />
+      ) : filtered.length === 0 ? (
+        items.length === 0 ? (
+          <EmptyState
+            icon={<Calendar className="w-8 h-8 text-white" />}
+            title="No schedules yet"
+            description="Create one to map a project timeline you can share with clients."
+            ctaLabel="New schedule"
+            onCtaClick={handleCreate}
+          />
+        ) : (
+          <EmptyState
+            variant="inline"
+            icon={<Calendar className="w-8 h-8" />}
+            title="No schedules match your filters"
+            description="Try clearing the search or changing the status tab."
+          />
+        )
       ) : (
-        <div className="flex flex-col" style={{ gap: '0.5rem' }}>
-          {filtered.map(s => {
-            const tone = STATUS_STYLE[s.status] ?? STATUS_STYLE.draft
-            return (
-              <Link
-                key={s.id}
-                href={`/schedules/${s.id}`}
-                className="block rounded-xl transition-colors"
-                style={{
-                  padding: '1rem 1.25rem',
-                  border: '1px solid var(--color-border-subtle)',
-                  background: 'var(--color-bg)',
-                  textDecoration: 'none',
-                  color: 'inherit',
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.borderColor = 'var(--color-border)'
-                  e.currentTarget.style.background = 'var(--color-bg-secondary)'
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
-                  e.currentTarget.style.background = 'var(--color-bg)'
-                }}
-              >
-                <div className="flex items-center justify-between" style={{ gap: '1rem' }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="flex items-center" style={{ gap: '0.5rem', marginBottom: '0.25rem' }}>
-                      <h3 className="font-semibold truncate" style={{ fontSize: '0.9375rem', color: 'var(--color-text)' }}>
-                        {s.title}
-                      </h3>
-                      <span
-                        style={{
-                          padding: '0.125rem 0.5rem',
-                          fontSize: '0.6875rem',
-                          fontWeight: 600,
-                          background: tone.bg,
-                          color: tone.fg,
-                          borderRadius: 'var(--radius-full)',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.03em',
-                          flexShrink: 0,
-                        }}
-                      >
-                        {tone.label}
-                      </span>
-                    </div>
-                    <div className="flex items-center" style={{ gap: '0.75rem', fontSize: '0.75rem', color: 'var(--color-text-subtle)', flexWrap: 'wrap' }}>
-                      {s.orgName && <span>{s.orgName}</span>}
-                      {s.dealTitle && <span>· {s.dealTitle}</span>}
-                      <span>· {s.numberOfWeeks} weeks</span>
-                      {s.targetLaunchDate && (
-                        <span>· launches {new Date(s.targetLaunchDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--color-border)]">
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Name</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Status</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)] hidden md:table-cell">Org</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)] hidden md:table-cell">Deal</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)] hidden lg:table-cell">Target launch</th>
+                <th className="text-right px-4 py-3 font-medium text-[var(--color-text-muted)]">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(s => {
+                const sty = STATUS_STYLES[statusKey(s.status)]
+                return (
+                  <tr
+                    key={s.id}
+                    className="border-b border-[var(--color-border-subtle)] last:border-0 hover:bg-[var(--color-bg-secondary)] transition-colors cursor-pointer"
+                    onClick={() => router.push(`/schedules/${s.id}`)}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-[var(--color-text)]">{s.title}</div>
+                      {s.preparedFor && (
+                        <div className="text-xs text-[var(--color-text-subtle)] mt-0.5 md:hidden">
+                          for {s.preparedFor}
+                        </div>
                       )}
-                    </div>
-                  </div>
-                  {s.publicShareToken && (
-                    <ExternalLink size={14} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} aria-hidden="true" />
-                  )}
-                </div>
-              </Link>
-            )
-          })}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className="text-xs font-medium px-2 py-0.5 rounded-full"
+                        style={{ background: sty.bg, color: sty.color }}
+                      >
+                        {sty.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-[var(--color-text-muted)] hidden md:table-cell">
+                      {s.orgId && s.orgName ? (
+                        <Link
+                          href={`/clients/${s.orgId}`}
+                          onClick={e => e.stopPropagation()}
+                          className="inline-flex items-center gap-1.5 hover:text-[var(--color-brand-dark)] transition-colors"
+                        >
+                          <Building2 className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span className="truncate max-w-[14rem]">{s.orgName}</span>
+                        </Link>
+                      ) : <span className="text-[var(--color-text-subtle)]">-</span>}
+                    </td>
+                    <td className="px-4 py-3 text-[var(--color-text-muted)] hidden md:table-cell">
+                      {s.dealId && s.dealTitle ? (
+                        <Link
+                          href={`/pipeline/${s.dealId}`}
+                          onClick={e => e.stopPropagation()}
+                          className="inline-flex items-center gap-1.5 hover:text-[var(--color-brand-dark)] transition-colors"
+                        >
+                          <Target className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span className="truncate max-w-[14rem]">{s.dealTitle}</span>
+                        </Link>
+                      ) : <span className="text-[var(--color-text-subtle)]">-</span>}
+                    </td>
+                    <td className="px-4 py-3 text-[var(--color-text-muted)] hidden lg:table-cell">
+                      <div className="flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
+                        {formatDate(s.targetLaunchDate)}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div
+                        className="flex items-center justify-end gap-1"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        {s.publicShareToken && (
+                          <a
+                            href={`/dashboard/p/schedule/${s.publicShareToken}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-subtle)] hover:text-[var(--color-text)] transition-colors"
+                            aria-label="Open public viewer"
+                            title="Open public viewer"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        <Link
+                          href={`/schedules/${s.id}`}
+                          className="p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-subtle)] hover:text-[var(--color-text)] transition-colors"
+                          aria-label="Preview"
+                          title="Preview"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </Link>
+                        <button
+                          onClick={() => setDeleteTarget(s)}
+                          className="p-1.5 rounded-lg hover:bg-red-50 text-[var(--color-text-subtle)] hover:text-red-500 transition-colors"
+                          aria-label="Delete"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete schedule"
+        description={deleteTarget ? `Delete "${deleteTarget.title}"? This removes all rows and sections. Cannot be undone.` : ''}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }
