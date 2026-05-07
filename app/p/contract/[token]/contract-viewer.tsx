@@ -1,22 +1,80 @@
 /**
- * <ContractViewer> — public viewer for a Tahi contract document.
+ * <ContractViewer> - public viewer for a Tahi contract document.
  *
  * Two modes:
- *   - 'read'   : public token, no signerId. Shows contract + signed-status,
+ *  - 'read'   : public token, no signerId. Shows contract + signed-status,
  *                no sign UI. Used at /p/contract/[token].
- *   - 'sign'   : public token + signerId. Same content but with a signature
+ *  - 'sign'   : public token + signerId. Same content but with a signature
  *                canvas pad bound to the specified signer. After signing,
  *                flips to a thank-you state.
  *
  * Brand language matches the proposal viewer (cover shell, leaf radius, etc).
- * The contract bodyHtml is rendered via dangerouslySetInnerHTML — admin-
+ * The contract bodyHtml is rendered via dangerouslySetInnerHTML - admin-
  * authored content with variable substitution already escaped on the server.
  */
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { apiPath } from '@/lib/api'
 import { useShareViewTracking } from '@/components/tahi/use-share-view-tracking'
+
+/**
+ * Fade-in-on-scroll hook. Mirrors the proposal viewer behaviour so the
+ * two surfaces feel like siblings. Respects prefers-reduced-motion and
+ * falls back to immediately-visible on any environment that doesn't
+ * support IntersectionObserver.
+ */
+function useInView<T extends HTMLElement>(opts?: { rootMargin?: string; threshold?: number }): [React.RefObject<T | null>, boolean] {
+  const ref = useRef<T | null>(null)
+  const [inView, setInView] = useState(false)
+  useEffect(() => {
+    const node = ref.current
+    if (!node) return
+    if (typeof window === 'undefined' || !('IntersectionObserver' in window)) {
+      setInView(true)
+      return
+    }
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (reduced) {
+      setInView(true)
+      return
+    }
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          setInView(true)
+          io.disconnect()
+          break
+        }
+      }
+    }, { rootMargin: opts?.rootMargin ?? '0px 0px -8% 0px', threshold: opts?.threshold ?? 0.05 })
+    io.observe(node)
+    return () => io.disconnect()
+  }, [opts?.rootMargin, opts?.threshold])
+  return [ref, inView]
+}
+
+/**
+ * <FadeSection> - layout-agnostic wrapper that fades + lifts its children
+ * into view as they scroll past 8% of the viewport. Keeps each contract
+ * slide feeling intentional rather than dropping in instantly.
+ */
+function FadeSection({ children, style, delay = 0 }: { children: React.ReactNode; style?: React.CSSProperties; delay?: number }) {
+  const [ref, visible] = useInView<HTMLElement>()
+  return (
+    <section
+      ref={ref}
+      style={{
+        ...style,
+        opacity: visible ? 1 : 0,
+        transform: visible ? 'translateY(0)' : 'translateY(0.625rem)',
+        transition: `opacity 480ms cubic-bezier(0.22, 1, 0.36, 1) ${delay}ms, transform 480ms cubic-bezier(0.22, 1, 0.36, 1) ${delay}ms`,
+      }}
+    >
+      {children}
+    </section>
+  )
+}
 
 interface PublicContract {
   id: string
@@ -97,7 +155,7 @@ export function ContractViewer({
   useShareViewTracking({
     resourceType: 'contract',
     resourceId: contract?.id ?? null,
-    // No token in preview — share-view tracking endpoint requires one.
+    // No token in preview - share-view tracking endpoint requires one.
     shareToken: isPreview ? null : token,
   })
 
@@ -108,7 +166,7 @@ export function ContractViewer({
 
   async function submitSignature(dataUrl: string) {
     if (!signerId || !contract) return
-    if (!token) return // preview mode — sign disabled
+    if (!token) return // preview mode - sign disabled
     setSubmitting(true)
     setError(null)
     try {
@@ -200,7 +258,9 @@ export function ContractViewer({
         </div>
       )}
 
-      {/* Cover */}
+      {/* Cover - rendered without FadeSection so it's instantly visible
+          on first paint. The fade-in pattern below applies to subsequent
+          slides so they scroll into view with a subtle lift. */}
       <section style={coverShell}>
         <div style={coverBackdrop} aria-hidden="true" />
         <div style={coverInner}>
@@ -227,15 +287,16 @@ export function ContractViewer({
       )}
 
       {/* Contract body */}
-      <section style={slideShell}>
+      <FadeSection style={slideShell}>
+        <div style={slideEyebrow}>The agreement</div>
         <div
           style={prose}
           dangerouslySetInnerHTML={{ __html: contract.bodyHtml }}
         />
-      </section>
+      </FadeSection>
 
       {/* Signers list */}
-      <section style={slideShell}>
+      <FadeSection style={slideShell} delay={60}>
         <div style={slideEyebrow}>Signatories</div>
         <h2 style={slideTitle}>Who signs this</h2>
         <div style={signerList}>
@@ -243,7 +304,15 @@ export function ContractViewer({
             const sig = signatures.find(x => x.signerId === s.id)
             const isYou = mode === 'sign' && s.id === signerId
             return (
-              <div key={s.id} style={{ ...signerCard, borderColor: isYou ? '#5A824E' : '#d4e0d0' }}>
+              <div
+                key={s.id}
+                style={{
+                  ...signerCard,
+                  borderColor: isYou ? '#5A824E' : '#d4e0d0',
+                  boxShadow: isYou ? '0 6px 18px rgba(90, 130, 78, 0.12)' : 'none',
+                  background: isYou ? '#f0f7ee' : '#fdfefd',
+                }}
+              >
                 <div style={signerHeader}>
                   <div>
                     <div style={signerName}>
@@ -269,11 +338,11 @@ export function ContractViewer({
             )
           })}
         </div>
-      </section>
+      </FadeSection>
 
       {/* Sign UI (sign mode only, when allowed) */}
       {mode === 'sign' && (
-        <section style={slideShell}>
+        <FadeSection style={slideShell} delay={120}>
           {signGuardMessage ? (
             <div style={statusBanner(allSigned ? 'success' : 'info')}>{signGuardMessage}</div>
           ) : justSigned ? (
@@ -293,14 +362,13 @@ export function ContractViewer({
               error={error}
             />
           ) : null}
-        </section>
+        </FadeSection>
       )}
 
       <footer style={footer}>
         <BrandMark size="sm" />
         <span style={footerNote}>
-          Tamper-evident · Each signature is anchored to a SHA-256 chain. Confidential — for the named
-          recipient only.
+          Tamper-evident · each signature is anchored to a SHA-256 chain. Confidential, for the named recipient only.
         </span>
       </footer>
     </div>
@@ -537,9 +605,11 @@ const coverShell: React.CSSProperties = {
   margin: '0 auto',
   background: '#ffffff',
   border: '1px solid #d4e0d0',
-  borderRadius: '1rem',
+  // Asymmetric leaf radius - top-right + bottom-left rounded harder,
+  // mirrors the brand mark's leaf silhouette.
+  borderRadius: '0.75rem 1.5rem 0.75rem 1.5rem',
   overflow: 'hidden',
-  boxShadow: '0 8px 32px rgba(31, 44, 26, 0.08)',
+  boxShadow: '0 10px 36px rgba(31, 44, 26, 0.08), 0 1px 0 rgba(255, 255, 255, 0.6) inset',
 }
 
 const coverBackdrop: React.CSSProperties = {
@@ -616,9 +686,9 @@ const slideShell: React.CSSProperties = {
   margin: '0 auto',
   background: '#ffffff',
   border: '1px solid #d4e0d0',
-  borderRadius: '1rem',
-  padding: 'clamp(1.25rem, 4vw, 2.5rem)',
-  boxShadow: '0 4px 16px rgba(31, 44, 26, 0.04)',
+  borderRadius: '0.75rem 1.25rem 0.75rem 1.25rem',
+  padding: 'clamp(1.5rem, 4vw, 2.75rem)',
+  boxShadow: '0 4px 18px rgba(31, 44, 26, 0.04)',
 }
 
 const slideEyebrow: React.CSSProperties = {
@@ -753,12 +823,13 @@ const padShell: React.CSSProperties = {
   position: 'relative',
   width: '100%',
   maxWidth: '40rem',
-  height: '12rem',
+  height: 'clamp(10rem, 32vw, 13rem)',
   border: '1px solid #d4e0d0',
-  borderRadius: '0.625rem',
-  background: '#fdfefd',
+  borderRadius: '0 16px 0 16px',
+  background: 'linear-gradient(180deg, #ffffff 0%, #fdfefd 60%, #f7f9f6 100%)',
   overflow: 'hidden',
   touchAction: 'none',
+  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 1px 2px rgba(31, 44, 26, 0.04)',
 }
 
 const padCanvas: React.CSSProperties = {
@@ -786,26 +857,33 @@ const padControls: React.CSSProperties = {
 }
 
 const btnGhost: React.CSSProperties = {
-  background: 'transparent',
+  background: '#ffffff',
   border: '1px solid #d4e0d0',
   borderRadius: '0.5rem',
-  padding: '0.5rem 0.875rem',
+  padding: '0.625rem 1rem',
   fontSize: '0.8125rem',
   fontWeight: 600,
   color: '#5a6657',
   cursor: 'pointer',
+  // Touch target floor (44px) for mobile signing.
+  minHeight: '2.75rem',
 }
 
 const btnPrimary: React.CSSProperties = {
   background: '#5A824E',
   color: '#ffffff',
   border: 'none',
-  borderRadius: '0 14px 0 14px',
-  padding: '0.625rem 1.25rem',
+  borderRadius: '0 16px 0 16px',
+  padding: '0.75rem 1.5rem',
   fontSize: '0.875rem',
   fontWeight: 700,
+  letterSpacing: '-0.005em',
   cursor: 'pointer',
   marginLeft: 'auto',
+  // Touch target floor (44px) for mobile signing.
+  minHeight: '2.75rem',
+  boxShadow: '0 6px 18px rgba(90, 130, 78, 0.25)',
+  transition: 'transform 160ms ease, box-shadow 160ms ease',
 }
 
 const agreeLabel: React.CSSProperties = {

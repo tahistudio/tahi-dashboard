@@ -1,10 +1,10 @@
 /**
- * <ContractDetail> — admin builder for a single contract document.
+ * <ContractDetail> - admin builder for a single contract document.
  *
  * Mirrors the proposal builder shell pattern (sticky header, left
  * navigator, centre editor, right rail) so the two surfaces feel like
- * siblings. Contracts don't have slides or variants — they have one body
- * + signers + an audit chain — so the navigator only has three sections:
+ * siblings. Contracts don't have slides or variants - they have one body
+ * + signers + an audit chain - so the navigator only has three sections:
  * Body, Signers, Activity.
  *
  * The right rail is where signing actions live: a "Send for signature"
@@ -13,7 +13,7 @@
  * a token and flips status to 'sent' on first send.
  *
  * Locked states (signed / cancelled / expired) collapse the body editor
- * to a read-only render — the signature chain is sealed and we mustn't
+ * to a read-only render - the signature chain is sealed and we mustn't
  * let admins re-edit content under signers' feet.
  */
 'use client'
@@ -114,11 +114,11 @@ const TYPE_LABEL: Record<string, string> = {
 }
 
 const TYPE_OPTIONS: Array<{ value: ContractDoc['type']; label: string }> = [
-  { value: 'nda', label: 'NDA — Non-disclosure agreement' },
-  { value: 'sla', label: 'SLA — Service-level agreement' },
-  { value: 'msa', label: 'MSA — Master services agreement' },
-  { value: 'sow', label: 'SOW — Statement of work' },
-  { value: 'mou', label: 'MOU — Memorandum of understanding' },
+  { value: 'nda', label: 'NDA - Non-disclosure agreement' },
+  { value: 'sla', label: 'SLA - Service-level agreement' },
+  { value: 'msa', label: 'MSA - Master services agreement' },
+  { value: 'sow', label: 'SOW - Statement of work' },
+  { value: 'mou', label: 'MOU - Memorandum of understanding' },
   { value: 'other', label: 'Other' },
 ]
 
@@ -162,7 +162,7 @@ export function ContractDetail({ id }: { id: string }) {
   const [name, setName] = useState('')
   const [bodyHtml, setBodyHtml] = useState('')
 
-  // Save indicator state — every awaited mutation tracks against this so
+  // Save indicator state - every awaited mutation tracks against this so
   // the header pill can show "Saving..." → "Saved 12s ago".
   const [savingCount, setSavingCount] = useState(0)
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
@@ -174,7 +174,7 @@ export function ContractDetail({ id }: { id: string }) {
     })
   }, [])
 
-  // Per-signer URLs derived from publicShareToken — built client-side so
+  // Per-signer URLs derived from publicShareToken - built client-side so
   // we can include window.location.origin for copy/open.
   const [signerLinks, setSignerLinks] = useState<Record<string, string>>({})
 
@@ -336,7 +336,7 @@ export function ContractDetail({ id }: { id: string }) {
     }
   }
 
-  // Save-as-template — note this calls an endpoint that may not exist yet.
+  // Save-as-template - note this calls an endpoint that may not exist yet.
   // The placeholder stays in the More menu so PM/BE can wire it later; if
   // the endpoint 404s we surface a clear toast rather than crashing.
   async function saveAsTemplate(templateName: string) {
@@ -770,7 +770,7 @@ export function ContractDetail({ id }: { id: string }) {
       <PromptDialog
         open={showSaveTemplate}
         title="Save as template"
-        description="Reusable contract blueprints — instantiate with one click on the next deal."
+        description="Reusable contract blueprints - instantiate with one click on the next deal."
         defaultValue={contract.name}
         placeholder="Template name"
         confirmLabel="Save template"

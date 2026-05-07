@@ -7,14 +7,14 @@
  * schedules) reuse the same vocabulary without copy-paste drift.
  *
  * Design vocabulary:
- *   - Sticky top header bar with leaf-radius accents
- *   - Left navigator (~17rem) with section groups + active rail-stripe
- *   - Centre editor (fadeIn animation on switch)
- *   - Right rail (~19rem) for resource-level metadata
- *   - Mobile: rail folds under main at 1280px, full stack at 900px
+ *  - Sticky top header bar with leaf-radius accents
+ *  - Left navigator (~17rem) with section groups + active rail-stripe
+ *  - Centre editor (fadeIn animation on switch)
+ *  - Right rail (~19rem) for resource-level metadata
+ *  - Mobile: rail folds under main at 1280px, full stack at 900px
  *
  * Tokens: every visible style uses CSS vars so dark mode keeps working.
- * Primitives stay layout-only — feature-specific copy lives in callers.
+ * Primitives stay layout-only - feature-specific copy lives in callers.
  */
 'use client'
 
@@ -24,7 +24,7 @@ import { Check, MoreHorizontal } from 'lucide-react'
 // ─── Layout shells & global builder styles ───────────────────────────────
 
 /**
- * <BuilderShell> — the root flex column that takes over the dashboard
+ * <BuilderShell> - the root flex column that takes over the dashboard
  * page area. Negative margins cancel the dashboard's standard padding so
  * the sticky header butts against the top nav. Wraps children with the
  * <BuilderStyles/> tag so the responsive @media rules apply once.
@@ -45,7 +45,7 @@ export function BuilderShell({
 }
 
 /**
- * <BuilderStyles> — keyframes + responsive grid + nav hover rules.
+ * <BuilderStyles> - keyframes + responsive grid + nav hover rules.
  * Targets `.tahi-builder` so the rules don't leak into other pages.
  */
 function BuilderStyles() {
@@ -251,7 +251,7 @@ export const metaInputStyle: React.CSSProperties = {
 // ─── Status pill (caller-defined palette) ────────────────────────────────
 
 /**
- * Generic status pill style — caller passes a palette so each builder can
+ * Generic status pill style - caller passes a palette so each builder can
  * map its own status vocabulary (proposal: draft/shared/accepted; contract:
  * draft/sent/signed; etc).
  */
@@ -275,7 +275,7 @@ export function statusPillStyle(p: { bg: string; fg: string; bd: string }): Reac
 // ─── Save indicator ──────────────────────────────────────────────────────
 
 /**
- * <SaveIndicator> — pulsing dot while saves are in flight, then a green
+ * <SaveIndicator> - pulsing dot while saves are in flight, then a green
  * tick + relative time once they've all settled. Re-renders on a 5s tick
  * so "Saved 12s ago" updates without external state.
  */
@@ -321,7 +321,7 @@ export interface BuilderMoreMenuItem {
 }
 
 /**
- * <BuilderMoreMenu> — three-dot overflow trigger + popover menu for
+ * <BuilderMoreMenu> - three-dot overflow trigger + popover menu for
  * actions that don't earn a place in the toolbar (Save as template,
  * Delete, etc).
  */
@@ -552,7 +552,7 @@ export function FieldGroup({ label, children }: { label: string; children: React
 // ─── Slide editor shell ──────────────────────────────────────────────────
 
 /**
- * <BuilderEditorShell> — the framed container around an editor pane.
+ * <BuilderEditorShell> - the framed container around an editor pane.
  * Centres a max-width column, places an eyebrow + kicker title, and
  * exposes optional move-up/move-down/delete buttons aligned to the right.
  */
