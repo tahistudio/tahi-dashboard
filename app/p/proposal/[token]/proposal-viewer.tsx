@@ -1,18 +1,18 @@
 /**
- * <ProposalViewer> — public 16:9 slide-deck viewer for client proposals.
+ * <ProposalViewer> : public 16:9 slide-deck viewer for client proposals.
  *
  * Layout flow:
- *   1. Cover slide       — title, subtitle, prepared-for, prepared-by
- *   2. Shared sections   — overview, terms, about, testimonials, etc.
+ *   1. Cover slide       : title, subtitle, prepared-for, prepared-by
+ *   2. Shared sections   : overview, terms, about, testimonials, etc.
  *      (rendered in `position` order via the section dispatcher)
- *   3. Variants section  — picker (tabs) for 1-N packages. Each variant
+ *   3. Variants section  : picker (tabs) for 1-N packages. Each variant
  *      shows scope HTML + pricing block + accept/decline CTA.
- *   4. Footer            — brand mark + confidential note
+ *   4. Footer            : brand mark + confidential note
  *
  * Decision flow:
  *   - User clicks Accept on a variant → modal asks for name/email/role/comment
  *   - Submit POSTs to /api/public/proposals/[token]/accept
- *   - On success the whole viewer flips to a "Thank you — you accepted X" state
+ *   - On success the whole viewer flips to a "Thank you : you accepted X" state
  *   - Same path for decline (no variant required)
  *
  * Analytics: re-uses useShareViewTracking with resourceType='proposal'.
@@ -65,7 +65,7 @@ interface PublicVariant {
 }
 
 /**
- * Cover themes — four distinct moods for slide 1. Persisted as `cover_theme`.
+ * Cover themes : four distinct moods for slide 1. Persisted as `cover_theme`.
  *
  *  - brand_glass : brand-green base with translucent glass cards (suggested)
  *  - toned_light : warm off-white, brand-tinted accents
@@ -189,7 +189,7 @@ function formatDate(iso: string | null): string | null {
  *   <ProposalViewer token="..." />                  // public mode, fetches via token
  *   <ProposalViewer previewProposalId="..." />      // admin preview, fetches live data
  *
- * Preview mode disables accept/decline/question — those require a real
+ * Preview mode disables accept/decline/question : those require a real
  * public token + token-validation on the server. Preview is read-only.
  */
 type ProposalViewerProps =
@@ -210,7 +210,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
   const [decisionForm, setDecisionForm] = useState({ name: '', email: '', role: '', comment: '' })
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState<null | 'accepted' | 'declined'>(null)
-  // Question state — non-locking. After submit we show a thank-you banner but
+  // Question state : non-locking. After submit we show a thank-you banner but
   // keep the accept / decline buttons live so the prospect can still proceed.
   const [questionAcked, setQuestionAcked] = useState(false)
 
@@ -234,7 +234,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
   }, [activeSlide, totalSlides])
 
   // Keyboard navigation. Skip when the user is interacting with form
-  // fields (decision modal etc.) — checking document.activeElement avoids
+  // fields (decision modal etc.) : checking document.activeElement avoids
   // hijacking arrow keys inside text inputs.
   useEffect(() => {
     function isTypingTarget(): boolean {
@@ -302,7 +302,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
   const { trackPages } = useShareViewTracking({
     resourceType: 'proposal',
     resourceId: analyticsResourceId,
-    // No token in preview mode — share tracking endpoint requires a token.
+    // No token in preview mode : share tracking endpoint requires a token.
     shareToken: isPreview ? null : token,
   })
 
@@ -327,7 +327,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
 
   async function submitDecision() {
     if (!decisionMode) return
-    if (!token) return // Preview mode — accept/decline disabled, buttons are hidden
+    if (!token) return // Preview mode : accept/decline disabled, buttons are hidden
     setSubmitting(true)
     try {
       const res = await fetch(apiPath(`/api/public/proposals/${encodeURIComponent(token)}/accept`), {
@@ -348,7 +348,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
         return
       }
       if (decisionMode.kind === 'question') {
-        // Non-locking — show a thank-you banner but keep buttons live so the
+        // Non-locking : show a thank-you banner but keep buttons live so the
         // prospect can still accept or decline once Liam replies.
         setQuestionAcked(true)
       } else {
@@ -400,7 +400,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
       {/* Horizontal slide deck on desktop, natural long-scroll on mobile.
           Track translates by viewport-widths for slide advance; vertical
           scroll within a slide is preserved when content overflows.
-          Mobile (<768px) bypasses the track entirely — slides stack and
+          Mobile (<768px) bypasses the track entirely : slides stack and
           flow naturally so the experience doesn't fight the touch model. */}
       <style>{`
         @media (min-width: 768px) {
@@ -421,12 +421,16 @@ export function ProposalViewer(props: ProposalViewerProps) {
         }
         @media (max-width: 767px) {
           .proposal-track { display: block; transform: none !important; height: auto; }
-          .proposal-slide { min-height: auto !important; border-top: none !important; padding: 2rem 1rem !important; width: 100% !important; }
-          .proposal-cover { min-height: auto !important; }
+          /* Mobile: extra bottom padding so the fixed footer pill + decided
+             banner don't eat the bottom of the last slide. The slide counter
+             is hidden on mobile (see SlideNav media query) so we only need
+             to clear the footer + any banner. */
+          .proposal-slide { min-height: auto !important; border-top: none !important; padding: 2rem 1rem 5.5rem 1rem !important; width: 100% !important; }
+          .proposal-cover { min-height: auto !important; padding-bottom: 5.5rem !important; }
         }
       `}</style>
 
-      {/* Preview-mode pill — floats at the top so admin knows they're
+      {/* Preview-mode pill : floats at the top so admin knows they're
           looking at unpublished, live state and not what the client sees. */}
       {isPreview && (
         <div
@@ -454,7 +458,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
         </div>
       )}
 
-      {/* Already-decided banner — fixed at top so it's visible regardless
+      {/* Already-decided banner : fixed at top so it's visible regardless
           of which slide the prospect is on. */}
       {submitted && (
         <div style={{ ...decidedBanner(submitted), position: 'fixed', top: '1rem', left: '1rem', right: '1rem', zIndex: 40, maxWidth: 'calc(100% - 2rem)' }}>
@@ -472,7 +476,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
         </div>
       )}
 
-      {/* Side arrows + slide counter — desktop only via media query. */}
+      {/* Side arrows + slide counter : desktop only via media query. */}
       <SlideNav active={activeSlide} total={totalSlides} onChange={setActiveSlide} />
 
       {/* Slide track. Each direct child is one slide; CSS lays them out as
@@ -481,7 +485,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
         className="proposal-track"
         style={{ transform: `translateX(-${activeSlide * 100}vw)` }}
       >
-        {/* Cover slide — palette comes from proposal.coverTheme. */}
+        {/* Cover slide : palette comes from proposal.coverTheme. */}
         {(() => {
           const palette = coverPalette(proposal.coverTheme)
           return (
@@ -525,13 +529,13 @@ export function ProposalViewer(props: ProposalViewerProps) {
         />
       )}
 
-        {/* Post-accept timeline — included as the final slide once accepted */}
+        {/* Post-accept timeline : included as the final slide once accepted */}
         {submitted === 'accepted' && (
           <PostAcceptTimeline variantName={decidedVariant?.name ?? null} />
         )}
       </div>{/* /proposal-track */}
 
-      {/* Footer — fixed to the bottom-left so it stays visible across slides */}
+      {/* Footer : fixed to the bottom-left so it stays visible across slides */}
       <footer
         style={{
           position: 'fixed',
@@ -573,7 +577,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
                 ? 'Confirm your name + email so we have a record. We\'ll be in touch within one business day to start the engagement.'
                 : decisionMode.kind === 'declined'
                   ? 'Help us improve future proposals by sharing what didn\'t fit. Optional but appreciated.'
-                  : 'Tell us what you\'d like to know or what you\'d like to change. Liam replies within one business day. The proposal stays open — no commitment.'}
+                  : 'Tell us what you\'d like to know or what you\'d like to change. Liam replies within one business day. The proposal stays open. No commitment.'}
             </p>
 
             <div style={{ display: 'grid', gap: '0.75rem' }}>
@@ -677,10 +681,10 @@ function CoverMetaGrid({ proposal, palette }: { proposal: PublicProposal; palett
   )
 }
 
-// ─── Cover hero — credibility row above the title ─────────────────────────
+// ─── Cover hero : credibility row above the title ─────────────────────────
 
 /**
- * <SlideNav> — desktop-only side arrows + bottom-centre slide counter.
+ * <SlideNav> : desktop-only side arrows + bottom-centre slide counter.
  *
  * Hidden under the 768px breakpoint via media query (mobile uses natural
  * vertical scroll). Disabled state on the prev/next buttons at the ends
@@ -806,9 +810,9 @@ function SlideNav({ active, total, onChange }: {
 }
 
 /**
- * <BrandCircleBackdrop> — the brand circle ring used as atmospheric depth
+ * <BrandCircleBackdrop> : the brand circle ring used as atmospheric depth
  * on the cover slide. Per Brand Guidelines §"Circle Background Element":
- * 20–60% opacity, partial-cropped at the canvas edge, in Brand Green.
+ * 20-60% opacity, partial-cropped at the canvas edge, in Brand Green.
  * Replaces the off-brand radial gradient that used to sit on covers.
  */
 function BrandCircleBackdrop({ palette }: { palette: CoverPalette }) {
@@ -863,7 +867,7 @@ function CoverHeroStats({ palette }: { palette: CoverPalette }) {
   )
 }
 
-// ─── Variant scope body — pulls <li> items out as a check-list ────────────
+// ─── Variant scope body : pulls <li> items out as a check-list ────────────
 
 function VariantScopeBody({ html }: { html: string }) {
   // Extract <li> contents (stripped of nested HTML) from the FIRST <ul>/<ol>
@@ -902,7 +906,7 @@ function VariantScopeBody({ html }: { html: string }) {
   )
 }
 
-// ─── Variant compare table — shown when N≥2 variants ──────────────────────
+// ─── Variant compare table : shown when N≥2 variants ──────────────────────
 
 function VariantCompareTable({
   variants, activeVariantId, onSelect,
@@ -981,7 +985,7 @@ function VariantCompareTable({
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
                     ) : (
-                      <span style={{ color: '#c8d4c5', fontSize: '0.875rem' }}>—</span>
+                      <span style={{ color: '#c8d4c5', fontSize: '0.875rem' }} aria-label="not included">·</span>
                     )}
                   </td>
                 )
@@ -1019,9 +1023,9 @@ const compareTd: React.CSSProperties = {
 function PostAcceptTimeline({ variantName }: { variantName?: string | null }) {
   const steps: { title: string; body: string }[] = [
     { title: 'Right now', body: 'Liam gets the email and your dashboard project is created. We confirm receipt within one business day.' },
-    { title: 'Tomorrow', body: 'Personal Loom from Liam: a walkthrough of your client portal — how to make requests, what to expect, and the first tasks queued up.' },
+    { title: 'Tomorrow', body: 'Personal Loom from Liam. A walkthrough of your client portal: how to make requests, what to expect, and the first tasks queued up.' },
     { title: 'This week', body: 'Discovery items kick off. Tracks move through the dashboard, you see progress live and can request changes anytime.' },
-    { title: 'Around delivery', body: 'Two to three weeks before handoff we open the retainer conversation — your 10% lifetime discount is already earned.' },
+    { title: 'Around delivery', body: 'Two to three weeks before handoff we open the retainer conversation. Your 10% lifetime discount is already earned.' },
   ]
   return (
     <section style={{ ...slideShell, background: '#1f2c1a', color: '#ffffff', border: 'none' }}>
@@ -1049,10 +1053,10 @@ function PostAcceptTimeline({ variantName }: { variantName?: string | null }) {
   )
 }
 
-// ─── Variants slide — premium tabbed reveal with motion ──────────────────
+// ─── Variants slide : premium tabbed reveal with motion ──────────────────
 
 /**
- * <VariantsSlide> — the package-picker slide.
+ * <VariantsSlide> : the package-picker slide.
  *
  * Replaces the old grid-of-cards with a pill-shaped tab strip on top, an
  * animated indicator that slides between tabs, and a content area that
@@ -1101,7 +1105,7 @@ function VariantsSlide({
         </p>
       )}
 
-      {/* Tab strip — only when N>1 */}
+      {/* Tab strip : only when N>1 */}
       {variants.length > 1 && (
         <>
           {featured && (
@@ -1157,20 +1161,20 @@ function VariantsSlide({
         </>
       )}
 
-      {/* Active variant content — keyed so it cross-fades on switch */}
+      {/* Active variant content : keyed so it cross-fades on switch */}
       {activeVariant && (
         <div
           key={activeVariant.id}
           style={{
-            marginTop: '1.5rem',
+            marginTop: '2rem',
             display: 'grid',
             gridTemplateColumns: 'minmax(0, 1fr)',
-            gap: '1.5rem',
+            gap: '2rem',
             animation: 'variantFadeIn 320ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         >
           {activeVariant.tagline && (
-            <p style={{ fontSize: '1rem', color: '#5a6657', margin: 0, fontStyle: 'italic' }}>
+            <p style={{ fontSize: 'clamp(1rem, 1.4vw, 1.125rem)', color: '#5a6657', margin: 0, lineHeight: 1.55, maxWidth: '36rem' }}>
               {activeVariant.tagline}
             </p>
           )}
@@ -1183,8 +1187,10 @@ function VariantsSlide({
           )}
 
           <div style={pricingCard}>
-            <h3 style={{ ...subSlideHeader, marginTop: 0 }}>Investment</h3>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2rem', alignItems: 'baseline' }}>
+            <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#5A824E', textTransform: 'uppercase', letterSpacing: '0.16em', marginBottom: '1.5rem' }}>
+              Investment
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3rem 4rem', alignItems: 'flex-end' }}>
               {activeVariant.oneOffAmount > 0 && (
                 <AnimatedPriceCell
                   label="One-off"
@@ -1207,7 +1213,7 @@ function VariantsSlide({
               )}
             </div>
             {activeVariant.pricingNotesHtml && (
-              <div style={{ marginTop: '0.75rem', fontSize: '0.875rem', color: '#5a6657' }} dangerouslySetInnerHTML={{ __html: activeVariant.pricingNotesHtml }} />
+              <div style={{ marginTop: '1.25rem', fontSize: '0.875rem', color: '#5a6657', lineHeight: 1.55, paddingTop: '1.25rem', borderTop: '1px solid rgba(122,170,114,0.25)' }} dangerouslySetInnerHTML={{ __html: activeVariant.pricingNotesHtml }} />
             )}
           </div>
 
@@ -1257,7 +1263,7 @@ function VariantsSlide({
 }
 
 /**
- * <VariantTabStrip> — pill-shaped tab strip with a sliding indicator.
+ * <VariantTabStrip> : pill-shaped tab strip with a sliding indicator.
  *
  * The indicator's left and width come from measuring each tab's bounding
  * box on mount and on resize. CSS transitions on transform and width
@@ -1369,7 +1375,7 @@ function VariantTabStrip({
 }
 
 /**
- * <AnimatedPriceCell> — money cell that counts from the previous value to
+ * <AnimatedPriceCell> : money cell that counts from the previous value to
  * the new one when the active variant changes. Cubic ease-out, ~620ms.
  * Falls back to the static value if `prefers-reduced-motion` is set.
  */
@@ -1415,13 +1421,13 @@ function AnimatedPriceCell({
 
   return (
     <div>
-      <div style={{ fontSize: '0.625rem', fontWeight: 600, color: '#8a9987', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.25rem' }}>
+      <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#5a6657', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '0.625rem' }}>
         {label}
       </div>
-      <div style={{ fontSize: '2rem', fontWeight: 800, color: '#1f2c1a', letterSpacing: '-0.02em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-        {formatMoney(Math.round(display), currency)}{suffix}
+      <div style={{ fontSize: 'clamp(2.5rem, 5.2vw, 3.75rem)', fontWeight: 800, color: '#121A0F', letterSpacing: '-0.025em', lineHeight: 0.98, fontVariantNumeric: 'tabular-nums' }}>
+        {formatMoney(Math.round(display), currency)}{suffix && <span style={{ fontSize: '0.5em', fontWeight: 600, color: '#5a6657', marginLeft: '0.125rem' }}>{suffix}</span>}
       </div>
-      <div style={{ fontSize: '0.75rem', color: '#8a9987', marginTop: '0.25rem' }}>{sub}</div>
+      <div style={{ fontSize: '0.8125rem', color: '#5a6657', marginTop: '0.625rem' }}>{sub}</div>
     </div>
   )
 }
@@ -1429,13 +1435,13 @@ function AnimatedPriceCell({
 function PriceCell({ label, amount, sub }: { label: string; amount: string; sub: string }) {
   return (
     <div>
-      <div style={{ fontSize: '0.625rem', fontWeight: 600, color: '#8a9987', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.25rem' }}>
+      <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#5a6657', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '0.625rem' }}>
         {label}
       </div>
-      <div style={{ fontSize: '2rem', fontWeight: 800, color: '#1f2c1a', letterSpacing: '-0.02em', lineHeight: 1 }}>
+      <div style={{ fontSize: 'clamp(2.5rem, 5.2vw, 3.75rem)', fontWeight: 800, color: '#121A0F', letterSpacing: '-0.025em', lineHeight: 0.98 }}>
         {amount}
       </div>
-      <div style={{ fontSize: '0.75rem', color: '#8a9987', marginTop: '0.25rem' }}>{sub}</div>
+      <div style={{ fontSize: '0.8125rem', color: '#5a6657', marginTop: '0.625rem' }}>{sub}</div>
     </div>
   )
 }
@@ -1478,12 +1484,12 @@ function BrandMark({ size = 'md', dark = false }: { size?: 'sm' | 'md'; dark?: b
 
 const pageWrap: React.CSSProperties = {
   // Pure white per Brand Guidelines (`#FFFFFF`). Replaces the off-white
-  // we used previously which read as "card on a tray" — the deck should
+  // we used previously which read as "card on a tray" : the deck should
   // feel like the surface itself, not a card on a surface.
   minHeight: '100vh',
   background: '#FFFFFF',
   fontFamily: 'var(--font-manrope, system-ui)',
-  // Brand text — true near-black with a green undertone (Brand Guidelines).
+  // Brand text : true near-black with a green undertone (Brand Guidelines).
   color: '#121A0F',
   // No outer padding: slides own their own padding so they fill the viewport.
   padding: 0,
@@ -1495,7 +1501,7 @@ const pageWrap: React.CSSProperties = {
 const coverShell: React.CSSProperties = {
   position: 'relative',
   width: '100%',
-  // Full bleed cover slide. No card border on desktop — the cover IS the
+  // Full bleed cover slide. No card border on desktop : the cover IS the
   // surface. Subtle gradient + brand circle motif do the visual work.
   background: '#FFFFFF',
   overflow: 'hidden',
@@ -1518,7 +1524,7 @@ const coverInner: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   minHeight: '100svh',
-  // Inner content rail — keeps long titles readable on huge displays.
+  // Inner content rail : keeps long titles readable on huge displays.
   width: '100%',
   maxWidth: '76rem',
   margin: '0 auto',
@@ -1536,7 +1542,7 @@ const coverEyebrow: React.CSSProperties = {
 }
 
 const coverTitle: React.CSSProperties = {
-  // Premium hero size — the cover earns the screen.
+  // Premium hero size : the cover earns the screen.
   fontSize: 'clamp(2.25rem, 7.5vw, 5.5rem)',
   fontWeight: 800,
   lineHeight: 0.98,
@@ -1571,35 +1577,40 @@ const slideShell: React.CSSProperties = {
 }
 
 const slideEyebrow: React.CSSProperties = {
-  fontSize: '0.6875rem',
-  fontWeight: 600,
-  color: '#8a9987',
+  fontSize: '0.75rem',
+  fontWeight: 700,
+  color: '#5A824E',
   textTransform: 'uppercase',
-  letterSpacing: '0.1em',
-  marginBottom: '0.375rem',
+  letterSpacing: '0.16em',
+  marginBottom: '1rem',
 }
 
 const slideTitle: React.CSSProperties = {
-  fontSize: 'clamp(1.25rem, 3vw, 1.875rem)',
+  // Big, confident hero. Pricing pages : Linear, Stripe : earn their slide
+  // with type that holds the eye.
+  fontSize: 'clamp(2rem, 4.5vw, 3.25rem)',
   fontWeight: 800,
-  color: '#1f2c1a',
+  color: '#121A0F',
   margin: 0,
-  letterSpacing: '-0.015em',
+  letterSpacing: '-0.025em',
+  lineHeight: 1.05,
 }
 
 const slideSub: React.CSSProperties = {
-  fontSize: '0.875rem',
+  fontSize: 'clamp(1rem, 1.4vw, 1.125rem)',
   color: '#5a6657',
-  marginTop: '0.375rem',
+  marginTop: '0.625rem',
+  maxWidth: '36rem',
+  lineHeight: 1.5,
 }
 
 const subSlideHeader: React.CSSProperties = {
   fontSize: '0.6875rem',
-  fontWeight: 600,
-  color: '#8a9987',
+  fontWeight: 700,
+  color: '#5A824E',
   textTransform: 'uppercase',
-  letterSpacing: '0.08em',
-  margin: '0 0 0.5rem 0',
+  letterSpacing: '0.12em',
+  margin: '0 0 1rem 0',
 }
 
 const proseStyle: React.CSSProperties = {
@@ -1608,11 +1619,23 @@ const proseStyle: React.CSSProperties = {
   color: '#1f2c1a',
 }
 
+/**
+ * The pricing card is the cinematic centrepiece of the variants slide.
+ * Layered radial glow on a soft brand-tinted base, leaf radius, generous
+ * breathing room. No flat fill, no top-to-bottom gradient : depth comes
+ * from atmosphere, not gloss.
+ */
 const pricingCard: React.CSSProperties = {
-  padding: '1.25rem',
-  background: '#f0f7ee',
+  position: 'relative',
+  padding: '2rem 2rem 2.25rem 2rem',
+  background: [
+    'radial-gradient(60% 60% at 80% 0%, rgba(220,239,216,0.55) 0%, transparent 60%)',
+    'radial-gradient(80% 60% at 0% 110%, rgba(122,170,114,0.18) 0%, transparent 60%)',
+    '#f0f7ee',
+  ].join(', '),
   border: '1px solid #dcefd8',
-  borderRadius: '0.75rem',
+  borderRadius: '0 20px 0 20px',
+  overflow: 'hidden',
 }
 
 const primaryBtn: React.CSSProperties = {
