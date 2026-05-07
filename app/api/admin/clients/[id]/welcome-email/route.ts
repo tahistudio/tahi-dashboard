@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { publicUrl } from '@/lib/app-url'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -61,7 +62,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     )
   }
 
-  const portalUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://dashboard.tahistudio.com'
+  const portalUrl = publicUrl('/')
 
   try {
     const { Resend } = await import('resend')

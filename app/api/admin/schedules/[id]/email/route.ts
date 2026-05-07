@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { render } from '@react-email/render'
 import { ScheduleShareEmail } from '@/emails/schedule-share'
+import { publicUrl } from '@/lib/app-url'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -51,8 +52,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
   const fromName = 'Liam Miller'
   const customMessage = body.message?.trim() || null
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://dashboard.tahistudio.com'
-  const viewUrl = `${appUrl}/dashboard/p/schedule/${schedule.token}`
+  const viewUrl = publicUrl(`/p/schedule/${schedule.token}`)
 
   const { Resend } = await import('resend')
   const resend = new Resend(process.env.RESEND_API_KEY)
