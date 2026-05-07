@@ -173,17 +173,20 @@ export function buildSignedPdfBase64(inputs: SignedPdfInputs): string {
   let y = 36
 
   // ── Hero ────────────────────────────────────────────────────────
-  // FULLY SIGNED pill
-  doc.setFillColor('#dcfce7')
-  doc.setDrawColor('#bbf7d0')
-  const pillW = 32
-  const pillH = 6
-  doc.roundedRect(PAGE_MARGIN, y - pillH + 1, pillW, pillH, 3, 3, 'FD')
-  doc.setTextColor('#15803d')
+  // FULLY SIGNED pill — measure the label so the chip always wraps it.
   doc.setFontSize(7)
   doc.setFont('helvetica', 'bold')
-  doc.text('FULLY SIGNED', PAGE_MARGIN + pillW / 2, y + 3, { align: 'center', baseline: 'middle' })
-  y += 10
+  const pillLabel = 'FULLY SIGNED'
+  const pillTextW = doc.getTextWidth(pillLabel)
+  const pillPadX = 3.5
+  const pillW = pillTextW + pillPadX * 2
+  const pillH = 5
+  doc.setFillColor('#dcfce7')
+  doc.setDrawColor('#bbf7d0')
+  doc.roundedRect(PAGE_MARGIN, y - pillH / 2, pillW, pillH, pillH / 2, pillH / 2, 'FD')
+  doc.setTextColor('#15803d')
+  doc.text(pillLabel, PAGE_MARGIN + pillW / 2, y + 0.4, { align: 'center', baseline: 'middle' })
+  y += pillH / 2 + 6
 
   // Title
   doc.setTextColor(TEXT_DARK)
@@ -292,15 +295,6 @@ export function buildSignedPdfBase64(inputs: SignedPdfInputs): string {
   const trailLines = doc.splitTextToSize(trailIntro, contentWidth)
   doc.text(trailLines, PAGE_MARGIN, y)
   y += trailLines.length * 4 + 2
-
-  if (inputs.finalHash) {
-    doc.setFont('courier', 'normal')
-    doc.setFontSize(7)
-    doc.setTextColor(TEXT_DARK)
-    const hashLines = doc.splitTextToSize(`Anchor: ${inputs.finalHash}`, contentWidth)
-    doc.text(hashLines, PAGE_MARGIN, y)
-    y += hashLines.length * 3 + 2
-  }
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(7)
