@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink, Mail, BookmarkPlus } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink, Mail, BookmarkPlus, Eye } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
@@ -11,6 +11,8 @@ import { EmailShareModal, type EmailRecipientSuggestion } from '@/components/tah
 import { TypedSectionFields } from './section-editors'
 import { defaultDataForType, type SectionType } from '@/app/p/proposal/[token]/section-blocks'
 import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
+import { PromptDialog } from '@/components/tahi/prompt-dialog'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 
 interface Proposal {
   id: string
@@ -78,7 +80,7 @@ interface Acceptance {
 // place on $25k+ projects.
 const SECTION_TYPE_GROUPS = [
   {
-    label: 'Workhorses',
+    label: 'Common',
     items: [
       { value: 'overview', label: 'Overview' },
       { value: 'value_anchor', label: 'Value anchor (the math)' },
@@ -91,7 +93,7 @@ const SECTION_TYPE_GROUPS = [
     ],
   },
   {
-    label: 'Situational',
+    label: 'Other',
     items: [
       { value: 'differentiators', label: 'Why us (icon grid)' },
       { value: 'guarantee', label: 'Guarantee / promise' },
@@ -319,9 +321,10 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
     }
   }
 
-  async function saveAsTemplate() {
-    const name = window.prompt('Save this proposal as a reusable template. Template name:', proposal?.title ?? '')
-    if (!name?.trim()) return
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
+  async function saveAsTemplate(name: string) {
     try {
       const res = await fetch(apiPath('/api/admin/proposals/templates'), {
         method: 'POST',
@@ -333,6 +336,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
       })
       if (!res.ok) throw new Error('Failed')
       showToast('Template saved.', 'success')
+      setShowSaveTemplate(false)
     } catch {
       showToast('Could not save template.', 'error')
     }
@@ -455,6 +459,10 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
           </span>
         )}
         <div style={{ flex: 1 }} />
+        <Link href={`/proposals/${proposalId}/preview`} target="_blank" rel="noreferrer" className="inline-flex items-center" style={toolbarBtn}>
+          <Eye size={13} />
+          Preview
+        </Link>
         {publicUrl ? (
           <>
             <button onClick={() => { void ensureContacts(); setShowEmail(true) }} className="inline-flex items-center" style={toolbarPrimary}>
@@ -479,11 +487,11 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
             {sharing ? 'Generating…' : 'Get public link'}
           </button>
         )}
-        <button onClick={saveAsTemplate} className="inline-flex items-center" style={toolbarBtn} title="Save the current sections + variants as a reusable template">
+        <button onClick={() => setShowSaveTemplate(true)} className="inline-flex items-center" style={toolbarBtn} title="Save the current sections + variants as a reusable template">
           <BookmarkPlus size={13} />
           Save as template
         </button>
-        <button onClick={() => { if (window.confirm('Delete this proposal? Cannot be undone.')) deleteProposal() }} className="inline-flex items-center" style={{ ...toolbarBtn, color: 'var(--color-text-subtle)' }}>
+        <button onClick={() => setShowDeleteConfirm(true)} className="inline-flex items-center" style={{ ...toolbarBtn, color: 'var(--color-text-subtle)' }}>
           <Trash2 size={13} />
           Delete
         </button>
@@ -611,6 +619,27 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
         onSent={({ sent }) => {
           if (sent > 0) showToast(`Sent ${sent} email${sent === 1 ? '' : 's'}.`)
         }}
+      />
+
+      <PromptDialog
+        open={showSaveTemplate}
+        title="Save as template"
+        description="Reusable proposal blueprints — instantiate with one click on the next deal."
+        defaultValue={proposal?.title ?? ''}
+        placeholder="Template name"
+        confirmLabel="Save template"
+        onConfirm={saveAsTemplate}
+        onCancel={() => setShowSaveTemplate(false)}
+      />
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete this proposal?"
+        description="This permanently removes the proposal, every section, and every variant. Cannot be undone."
+        confirmLabel="Delete proposal"
+        variant="danger"
+        onConfirm={async () => { setShowDeleteConfirm(false); await deleteProposal() }}
+        onCancel={() => setShowDeleteConfirm(false)}
       />
     </div>
   )

@@ -80,7 +80,21 @@ function formatDate(iso: string | null): string | null {
   return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-export function ProposalViewer({ token }: { token: string }) {
+/**
+ * Two ways to call this viewer:
+ *   <ProposalViewer token="..." />                  // public mode, fetches via token
+ *   <ProposalViewer previewProposalId="..." />      // admin preview, fetches live data
+ *
+ * Preview mode disables accept/decline/question — those require a real
+ * public token + token-validation on the server. Preview is read-only.
+ */
+type ProposalViewerProps =
+  | { token: string; previewProposalId?: undefined }
+  | { token?: undefined; previewProposalId: string }
+
+export function ProposalViewer(props: ProposalViewerProps) {
+  const { token, previewProposalId } = props
+  const isPreview = !!previewProposalId
   const [proposal, setProposal] = useState<PublicProposal | null>(null)
   const [sections, setSections] = useState<PublicSection[]>([])
   const [variants, setVariants] = useState<PublicVariant[]>([])
@@ -98,7 +112,10 @@ export function ProposalViewer({ token }: { token: string }) {
 
   const reload = useCallback(async () => {
     try {
-      const res = await fetch(apiPath(`/api/public/proposals/${encodeURIComponent(token)}`))
+      const url = isPreview
+        ? apiPath(`/api/admin/proposals/${encodeURIComponent(previewProposalId!)}/preview-data`)
+        : apiPath(`/api/public/proposals/${encodeURIComponent(token!)}`)
+      const res = await fetch(url)
       if (!res.ok) {
         setState('not_found')
         return
@@ -123,18 +140,20 @@ export function ProposalViewer({ token }: { token: string }) {
     } catch {
       setState('not_found')
     }
-  }, [token])
+  }, [token, previewProposalId, isPreview])
 
   useEffect(() => { void reload() }, [reload])
 
   useShareViewTracking({
     resourceType: 'proposal',
     resourceId: analyticsResourceId,
-    shareToken: token,
+    // No token in preview mode — share tracking endpoint requires a token.
+    shareToken: isPreview ? null : token,
   })
 
   async function submitDecision() {
     if (!decisionMode) return
+    if (!token) return // Preview mode — accept/decline disabled, buttons are hidden
     setSubmitting(true)
     try {
       const res = await fetch(apiPath(`/api/public/proposals/${encodeURIComponent(token)}/accept`), {
@@ -219,6 +238,34 @@ export function ProposalViewer({ token }: { token: string }) {
           .proposal-cover { min-height: auto !important; }
         }
       `}</style>
+
+      {/* Preview-mode pill — floats at the top so admin knows they're
+          looking at unpublished, live state and not what the client sees. */}
+      {isPreview && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '1rem',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 50,
+            padding: '0.5rem 1rem',
+            background: '#1f2c1a',
+            color: '#FFFFFF',
+            borderRadius: '999px',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            letterSpacing: '0.04em',
+            boxShadow: '0 8px 24px rgba(31, 44, 26, 0.25)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+        >
+          <span style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: '#93c98a' }} />
+          Admin preview · live, unpublished state
+        </div>
+      )}
 
       {/* Cover slide */}
       <section style={coverShell} className="proposal-slide proposal-cover">
@@ -363,8 +410,10 @@ export function ProposalViewer({ token }: { token: string }) {
                 </div>
               )}
 
-              {/* CTA */}
-              {!submitted && (
+              {/* CTA — accept / decline / question. Hidden in preview mode
+                  since those flows require a real public token + write to
+                  the acceptance audit table. */}
+              {!submitted && !isPreview && (
                 <>
                   {questionAcked && (
                     <div style={{

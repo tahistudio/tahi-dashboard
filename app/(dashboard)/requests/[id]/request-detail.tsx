@@ -1901,7 +1901,9 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
         fileId: string
       }
 
-      const uploadRes = await fetch(apiPath(presignData.uploadUrl), {
+      // uploadUrl is already absolute (origin + basePath + path) — wrapping
+      // it in apiPath() double-prepends /dashboard and produces 404s.
+      const uploadRes = await fetch(presignData.uploadUrl, {
         method: 'PUT',
         headers: { 'Content-Type': file.type || 'application/octet-stream' },
         body: file,

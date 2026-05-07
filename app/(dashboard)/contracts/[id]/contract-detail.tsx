@@ -187,6 +187,17 @@ export function ContractDetail({ id }: { id: string }) {
     }
   }
 
+  const [showDeleteContract, setShowDeleteContract] = useState(false)
+  async function deleteContract() {
+    try {
+      const res = await fetch(apiPath(`/api/admin/contracts/${id}`), { method: 'DELETE' })
+      if (!res.ok) throw new Error('delete failed')
+      showToast('Contract deleted.')
+      router.push('/contracts')
+    } catch {
+      showToast('Could not delete contract.', 'error')
+    }
+  }
   async function deleteSigner(signerId: string) {
     try {
       const res = await fetch(apiPath(`/api/admin/contracts/${id}/signers/${signerId}`), { method: 'DELETE' })
@@ -291,6 +302,9 @@ export function ContractDetail({ id }: { id: string }) {
               </TahiButton>
             </>
           )}
+          <TahiButton variant="secondary" size="sm" onClick={() => setShowDeleteContract(true)} iconLeft={<Trash2 className="w-3.5 h-3.5" />}>
+            Delete
+          </TahiButton>
         </div>
       </div>
 
@@ -490,7 +504,7 @@ export function ContractDetail({ id }: { id: string }) {
         <AddSignerDialog
           contractId={id}
           onClose={() => setShowAddSigner(false)}
-          onAdded={() => { setShowAddSigner(false); void fetchAll() }}
+          onAdded={() => { setShowAddSigner(false); void fetchAll({ silent: true }) }}
         />
       )}
 
@@ -502,6 +516,16 @@ export function ContractDetail({ id }: { id: string }) {
         variant="danger"
         onConfirm={revokeShare}
         onCancel={() => setShowRevoke(false)}
+      />
+
+      <ConfirmDialog
+        open={showDeleteContract}
+        title="Delete this contract?"
+        description="Permanently removes the contract, all signers, and all signature records. Cannot be undone. If signing is in progress, consider Revoke instead."
+        confirmLabel="Delete contract"
+        variant="danger"
+        onConfirm={async () => { setShowDeleteContract(false); await deleteContract() }}
+        onCancel={() => setShowDeleteContract(false)}
       />
 
       <EmailShareModal

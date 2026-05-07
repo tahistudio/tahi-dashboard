@@ -13,6 +13,7 @@ import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Input, Select } from '@/components/tahi/input'
+import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
 
 interface ContractListItem {
   id: string
@@ -439,8 +440,12 @@ function CreateContractDialog({
           </div>
           {!templateId && (
             <div>
-              <label htmlFor="ctr-body" className="block text-sm font-medium text-[var(--color-text)] mb-1">Contract body (HTML)</label>
-              <textarea id="ctr-body" rows={6} value={bodyHtml} onChange={e => setBodyHtml(e.target.value)} className={inputCn} placeholder="<h2>Statement of Work</h2><p>...</p>" />
+              <label className="block text-sm font-medium text-[var(--color-text)] mb-1">Contract body</label>
+              <TiptapDocEditor
+                content={bodyHtml}
+                onChange={(html) => setBodyHtml(html)}
+                placeholder="Write the contract body. You can edit this in detail after creating."
+              />
             </div>
           )}
           <div className="flex justify-end gap-2 pt-2">

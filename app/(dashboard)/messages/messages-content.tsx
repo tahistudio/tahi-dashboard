@@ -389,8 +389,10 @@ export function MessagesContent({ isAdmin: isAdminProp }: { isAdmin: boolean }) 
         fileId: string
       }
 
-      // 2. Upload to R2
-      await fetch(apiPath(uploadUrl), {
+      // 2. Upload to R2 — uploadUrl is already an absolute URL (origin
+      // + basePath + path) returned by the presign endpoint. Wrapping it
+      // in apiPath() double-prepends /dashboard and produces 404s.
+      await fetch(uploadUrl, {
         method: 'PUT',
         headers: { 'Content-Type': 'audio/webm' },
         body: recordedBlob,
