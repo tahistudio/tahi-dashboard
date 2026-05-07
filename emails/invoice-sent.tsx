@@ -1,15 +1,22 @@
+/**
+ * <InvoiceSentEmail> — sent to the client when a new invoice is issued.
+ * Stripe payment URL takes priority over a generic dashboard link.
+ */
+import { Body, Head, Html, Preview } from '@react-email/components'
 import {
-  Body,
-  Container,
-  Head,
-  Heading,
-  Html,
-  Link,
-  Preview,
-  Section,
-  Text,
-  Hr,
-} from '@react-email/components'
+  DetailCard,
+  DetailRow,
+  EmailCard,
+  EmailEyebrow,
+  EmailFooter,
+  EmailFootnote,
+  EmailHeader,
+  EmailHeading,
+  EmailParagraph,
+  EmailShell,
+  PrimaryButton,
+  emailBodyStyle,
+} from './_components'
 
 interface InvoiceSentEmailProps {
   clientName: string
@@ -33,181 +40,49 @@ export function InvoiceSentEmail({
   paymentUrl,
 }: InvoiceSentEmailProps) {
   const invoiceUrl = `${dashboardUrl}/invoices`
+  const displayId = invoiceId.slice(0, 8).toUpperCase()
+  const firstName = clientName.split(' ')[0] ?? clientName
 
   return (
     <Html>
       <Head />
-      <Preview>Invoice from Tahi Studio: {amountFormatted} {currency}</Preview>
-      <Body style={bodyStyle}>
-        <Container style={containerStyle}>
-          <Section style={headerStyle}>
-            <Heading style={logoStyle}>Tahi Studio</Heading>
-          </Section>
+      <Preview>{`Invoice ${displayId} from Tahi Studio: ${amountFormatted} ${currency}`}</Preview>
+      <Body style={emailBodyStyle}>
+        <EmailShell>
+          <EmailHeader eyebrow="A new invoice is ready" />
 
-          <Section style={contentStyle}>
-            <Heading as="h2" style={headingStyle}>
-              Invoice
-            </Heading>
+          <EmailCard>
+            <EmailEyebrow>Invoice {displayId}</EmailEyebrow>
+            <EmailHeading>
+              Your <span style={{ color: '#5A824E' }}>invoice</span> is ready
+            </EmailHeading>
 
-            <Text style={textStyle}>
-              Hi {clientName}, here is your invoice from Tahi Studio.
-            </Text>
+            <EmailParagraph>
+              Hi {firstName}, here is the latest invoice from Tahi Studio. The full breakdown
+              is on the dashboard, and you can pay directly from the button below.
+            </EmailParagraph>
 
-            <Section style={detailsBoxStyle}>
-              <Text style={detailLabelStyle}>Invoice ID</Text>
-              <Text style={detailValueStyle}>{invoiceId.slice(0, 8).toUpperCase()}</Text>
+            <DetailCard>
+              <DetailRow first label="Amount due" value={`${amountFormatted} ${currency}`} hero />
+              <DetailRow label="Invoice ID" value={displayId} mono />
+              {dueDate && <DetailRow label="Due date" value={dueDate} />}
+              {notes && <DetailRow label="Notes" value={notes} />}
+            </DetailCard>
 
-              <Text style={detailLabelStyle}>Amount</Text>
-              <Text style={amountStyle}>{amountFormatted} {currency}</Text>
+            <PrimaryButton href={paymentUrl ?? invoiceUrl}>
+              {paymentUrl ? 'Pay invoice' : 'View invoice'}
+            </PrimaryButton>
 
-              {dueDate && (
-                <>
-                  <Text style={detailLabelStyle}>Due Date</Text>
-                  <Text style={detailValueStyle}>{dueDate}</Text>
-                </>
-              )}
+            <EmailFootnote>
+              Questions about a line item? Reply to this email and we will walk through it with you.
+            </EmailFootnote>
+          </EmailCard>
 
-              {notes && (
-                <>
-                  <Text style={detailLabelStyle}>Notes</Text>
-                  <Text style={detailValueStyle}>{notes}</Text>
-                </>
-              )}
-            </Section>
-
-            <Section style={buttonSectionStyle}>
-              {paymentUrl ? (
-                <Link href={paymentUrl} style={buttonStyle}>
-                  Pay Now
-                </Link>
-              ) : (
-                <Link href={invoiceUrl} style={buttonStyle}>
-                  View Invoice
-                </Link>
-              )}
-            </Section>
-          </Section>
-
-          <Hr style={hrStyle} />
-
-          <Section style={footerStyle}>
-            <Text style={footerTextStyle}>
-              Tahi Studio Dashboard
-            </Text>
-          </Section>
-        </Container>
+          <EmailFooter />
+        </EmailShell>
       </Body>
     </Html>
   )
 }
 
 export default InvoiceSentEmail
-
-// -- Styles --
-
-const bodyStyle = {
-  backgroundColor: '#f5f7f5',
-  fontFamily: 'Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-  margin: '0',
-  padding: '0',
-} as const
-
-const containerStyle = {
-  maxWidth: '560px',
-  margin: '0 auto',
-  padding: '2rem 0',
-} as const
-
-const headerStyle = {
-  padding: '1.5rem 2rem',
-  textAlign: 'center' as const,
-} as const
-
-const logoStyle = {
-  color: '#5A824E',
-  fontSize: '1.25rem',
-  fontWeight: '700',
-  margin: '0',
-} as const
-
-const contentStyle = {
-  backgroundColor: '#ffffff',
-  borderRadius: '0.75rem',
-  padding: '2rem',
-  margin: '0 1rem',
-} as const
-
-const headingStyle = {
-  color: '#121A0F',
-  fontSize: '1.25rem',
-  fontWeight: '700',
-  margin: '0 0 1rem 0',
-} as const
-
-const textStyle = {
-  color: '#5a6657',
-  fontSize: '0.875rem',
-  lineHeight: '1.5',
-  margin: '0 0 1.5rem 0',
-} as const
-
-const detailsBoxStyle = {
-  backgroundColor: '#f7f9f6',
-  borderRadius: '0.5rem',
-  padding: '1rem 1.25rem',
-  margin: '0 0 1.5rem 0',
-} as const
-
-const detailLabelStyle = {
-  color: '#8a9987',
-  fontSize: '0.75rem',
-  fontWeight: '600',
-  textTransform: 'uppercase' as const,
-  letterSpacing: '0.05em',
-  margin: '0.75rem 0 0.125rem 0',
-} as const
-
-const detailValueStyle = {
-  color: '#121A0F',
-  fontSize: '0.875rem',
-  fontWeight: '500',
-  margin: '0',
-} as const
-
-const amountStyle = {
-  color: '#121A0F',
-  fontSize: '1.25rem',
-  fontWeight: '700',
-  margin: '0',
-} as const
-
-const buttonSectionStyle = {
-  textAlign: 'center' as const,
-} as const
-
-const buttonStyle = {
-  backgroundColor: '#5A824E',
-  color: '#ffffff',
-  display: 'inline-block',
-  fontSize: '0.875rem',
-  fontWeight: '600',
-  padding: '0.625rem 1.5rem',
-  borderRadius: '0 0.625rem 0 0.625rem',
-  textDecoration: 'none',
-} as const
-
-const hrStyle = {
-  borderColor: '#e8f0e6',
-  margin: '1.5rem 1rem',
-} as const
-
-const footerStyle = {
-  padding: '0 2rem 1rem',
-  textAlign: 'center' as const,
-} as const
-
-const footerTextStyle = {
-  color: '#8a9987',
-  fontSize: '0.75rem',
-  margin: '0',
-} as const

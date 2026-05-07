@@ -1,15 +1,22 @@
+/**
+ * <ReviewRequestEmail> — testimonial outreach: ask a happy client whether
+ * they would be open to leaving a review. Three answer paths embedded as
+ * tracked links: yes / defer / no.
+ */
+import { Body, Head, Html, Link, Preview, Section } from '@react-email/components'
 import {
-  Body,
-  Container,
-  Head,
-  Heading,
-  Html,
-  Link,
-  Preview,
-  Section,
-  Text,
-  Hr,
-} from '@react-email/components'
+  EMAIL_TOKENS,
+  EmailCard,
+  EmailEyebrow,
+  EmailFooter,
+  EmailFootnote,
+  EmailHeader,
+  EmailHeading,
+  EmailParagraph,
+  EmailShell,
+  PrimaryButton,
+  emailBodyStyle,
+} from './_components'
 
 interface ReviewRequestEmailProps {
   clientName: string
@@ -18,187 +25,83 @@ interface ReviewRequestEmailProps {
   token: string
 }
 
+const secondaryRowStyle = {
+  textAlign: 'center' as const,
+  margin: '0.5rem 0 0',
+} as const
+
+const secondaryButtonStyle = {
+  display: 'inline-block',
+  fontSize: '0.8125rem',
+  fontWeight: 600,
+  padding: '0.625rem 1.125rem',
+  borderRadius: '0.5rem',
+  textDecoration: 'none',
+  background: EMAIL_TOKENS.surface,
+  color: EMAIL_TOKENS.textMuted,
+  border: `1px solid ${EMAIL_TOKENS.border}`,
+  marginRight: '0.5rem',
+} as const
+
+const tertiaryStyle = {
+  color: EMAIL_TOKENS.textSubtle,
+  fontSize: '0.8125rem',
+  textDecoration: 'underline',
+  fontWeight: 500,
+} as const
+
 export function ReviewRequestEmail({
   clientName,
   orgName,
   respondUrl,
   token,
 }: ReviewRequestEmailProps) {
-  const yesUrl = `${respondUrl}?token=${token}&answer=yes`
+  const yesUrl   = `${respondUrl}?token=${token}&answer=yes`
   const deferUrl = `${respondUrl}?token=${token}&answer=defer`
-  const noUrl = `${respondUrl}?token=${token}&answer=no`
+  const noUrl    = `${respondUrl}?token=${token}&answer=no`
+  const firstName = clientName.split(' ')[0] ?? clientName
 
   return (
     <Html>
       <Head />
-      <Preview>We would love your feedback, {clientName}!</Preview>
-      <Body style={bodyStyle}>
-        <Container style={containerStyle}>
-          <Section style={headerStyle}>
-            <Heading style={logoStyle}>Tahi Studio</Heading>
-          </Section>
+      <Preview>{`We would love your feedback, ${firstName}`}</Preview>
+      <Body style={emailBodyStyle}>
+        <EmailShell>
+          <EmailHeader eyebrow="A quick favour" />
 
-          <Section style={contentStyle}>
-            <Heading as="h2" style={headingStyle}>
-              How has your experience been?
-            </Heading>
+          <EmailCard>
+            <EmailEyebrow>How was it?</EmailEyebrow>
+            <EmailHeading>
+              Would you share a <span style={{ color: '#5A824E' }}>kind word</span>?
+            </EmailHeading>
 
-            <Text style={textStyle}>
-              Hi {clientName},
-            </Text>
+            <EmailParagraph>Hi {firstName},</EmailParagraph>
+            <EmailParagraph>
+              We have loved working with {orgName} and would really appreciate hearing about
+              your experience. A short review helps us improve and helps other businesses
+              decide if Tahi is right for them.
+            </EmailParagraph>
+            <EmailParagraph>
+              It takes a couple of minutes. Are you open to it?
+            </EmailParagraph>
 
-            <Text style={textStyle}>
-              We have loved working with {orgName} and would really appreciate
-              hearing about your experience. Your feedback helps us improve and
-              also helps other businesses discover Tahi Studio.
-            </Text>
+            <PrimaryButton href={yesUrl}>Yes, happy to</PrimaryButton>
 
-            <Text style={textStyle}>
-              It only takes a couple of minutes. Would you be open to sharing
-              a quick review?
-            </Text>
-
-            <Section style={buttonGroupStyle}>
-              <Link href={yesUrl} style={primaryButtonStyle}>
-                Yes, happy to
-              </Link>
+            <Section style={secondaryRowStyle}>
+              <Link href={deferUrl} style={secondaryButtonStyle}>Not right now</Link>
+              <Link href={noUrl} style={tertiaryStyle}>No thanks</Link>
             </Section>
 
-            <Section style={secondaryButtonGroupStyle}>
-              <Link href={deferUrl} style={secondaryButtonStyle}>
-                Not right now
-              </Link>
-              <Text style={spacerStyle}>&nbsp;&nbsp;</Text>
-              <Link href={noUrl} style={tertiaryButtonStyle}>
-                No thanks
-              </Link>
-            </Section>
-          </Section>
+            <EmailFootnote>
+              No pressure either way. We will not ask again unless you tell us to.
+            </EmailFootnote>
+          </EmailCard>
 
-          <Hr style={hrStyle} />
-
-          <Section style={footerStyle}>
-            <Text style={footerTextStyle}>
-              Tahi Studio Dashboard
-            </Text>
-          </Section>
-        </Container>
+          <EmailFooter />
+        </EmailShell>
       </Body>
     </Html>
   )
 }
 
 export default ReviewRequestEmail
-
-// -- Styles --
-
-const bodyStyle = {
-  backgroundColor: '#f5f7f5',
-  fontFamily: 'Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-  margin: '0',
-  padding: '0',
-} as const
-
-const containerStyle = {
-  maxWidth: '560px',
-  margin: '0 auto',
-  padding: '2rem 0',
-} as const
-
-const headerStyle = {
-  padding: '1.5rem 2rem',
-  textAlign: 'center' as const,
-} as const
-
-const logoStyle = {
-  color: '#5A824E',
-  fontSize: '1.25rem',
-  fontWeight: '700',
-  margin: '0',
-} as const
-
-const contentStyle = {
-  backgroundColor: '#ffffff',
-  borderRadius: '0.75rem',
-  padding: '2rem',
-  margin: '0 1rem',
-} as const
-
-const headingStyle = {
-  color: '#121A0F',
-  fontSize: '1.25rem',
-  fontWeight: '700',
-  margin: '0 0 1rem 0',
-} as const
-
-const textStyle = {
-  color: '#5a6657',
-  fontSize: '0.875rem',
-  lineHeight: '1.6',
-  margin: '0 0 1rem 0',
-} as const
-
-const buttonGroupStyle = {
-  textAlign: 'center' as const,
-  margin: '1.5rem 0 1rem 0',
-} as const
-
-const secondaryButtonGroupStyle = {
-  textAlign: 'center' as const,
-  margin: '0 0 0.5rem 0',
-} as const
-
-const primaryButtonStyle = {
-  backgroundColor: '#5A824E',
-  color: '#ffffff',
-  display: 'inline-block',
-  fontSize: '0.875rem',
-  fontWeight: '600',
-  padding: '0.75rem 2rem',
-  borderRadius: '0 0.625rem 0 0.625rem',
-  textDecoration: 'none',
-} as const
-
-const secondaryButtonStyle = {
-  backgroundColor: '#f7f9f6',
-  color: '#5a6657',
-  display: 'inline-block',
-  fontSize: '0.8125rem',
-  fontWeight: '500',
-  padding: '0.5rem 1rem',
-  borderRadius: '0.375rem',
-  textDecoration: 'none',
-  border: '1px solid #d4e0d0',
-} as const
-
-const tertiaryButtonStyle = {
-  color: '#8a9987',
-  display: 'inline-block',
-  fontSize: '0.8125rem',
-  fontWeight: '500',
-  padding: '0.5rem 1rem',
-  textDecoration: 'underline',
-} as const
-
-const spacerStyle = {
-  display: 'inline',
-  margin: '0',
-  padding: '0',
-  fontSize: '0.25rem',
-} as const
-
-const hrStyle = {
-  borderColor: '#e8f0e6',
-  margin: '1.5rem 1rem',
-} as const
-
-const footerStyle = {
-  padding: '0 2rem 1rem',
-  textAlign: 'center' as const,
-} as const
-
-const footerTextStyle = {
-  color: '#8a9987',
-  fontSize: '0.75rem',
-  margin: '0',
-} as const

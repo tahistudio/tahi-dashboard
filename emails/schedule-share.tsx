@@ -1,6 +1,22 @@
+/**
+ * <ScheduleShareEmail> — the "your project schedule is ready" email.
+ */
+import { Body, Head, Html, Preview } from '@react-email/components'
 import {
-  Body, Container, Head, Heading, Html, Link, Preview, Section, Text, Hr,
-} from '@react-email/components'
+  DetailCard,
+  DetailRow,
+  EmailCard,
+  EmailEyebrow,
+  EmailFooter,
+  EmailFootnote,
+  EmailHeader,
+  EmailHeading,
+  EmailParagraph,
+  EmailShell,
+  MessageBlock,
+  PrimaryButton,
+  emailBodyStyle,
+} from './_components'
 
 interface ScheduleShareEmailProps {
   recipientName: string
@@ -13,78 +29,61 @@ interface ScheduleShareEmailProps {
 }
 
 export function ScheduleShareEmail({
-  recipientName, scheduleTitle, scheduleSubtitle, viewUrl, fromName, customMessage, targetLaunchDate,
+  recipientName,
+  scheduleTitle,
+  scheduleSubtitle,
+  viewUrl,
+  fromName,
+  customMessage,
+  targetLaunchDate,
 }: ScheduleShareEmailProps) {
   const launchLabel = targetLaunchDate
     ? new Date(targetLaunchDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
     : null
+  const firstName = recipientName.split(' ')[0] ?? recipientName
 
   return (
     <Html>
       <Head />
       <Preview>{`${fromName} has shared the project schedule for ${scheduleTitle}`}</Preview>
-      <Body style={bodyStyle}>
-        <Container style={containerStyle}>
-          <Section style={headerStyle}>
-            <Heading style={logoStyle}>Tahi Studio</Heading>
-          </Section>
+      <Body style={emailBodyStyle}>
+        <EmailShell>
+          <EmailHeader eyebrow="Your project schedule" />
 
-          <Section style={contentStyle}>
-            <Heading as="h2" style={headingStyle}>Project schedule shared</Heading>
-            <Text style={textStyle}>Hi {recipientName.split(' ')[0]},</Text>
-            <Text style={textStyle}>
-              {fromName} has shared the project schedule below. It covers the high-level Gantt,
-              month-by-month detail, the risk register and the RACI matrix.
-            </Text>
+          <EmailCard>
+            <EmailEyebrow>Project schedule</EmailEyebrow>
+            <EmailHeading>
+              The <span style={{ color: '#5A824E' }}>plan</span> is ready
+            </EmailHeading>
 
-            <Section style={cardStyle}>
-              {scheduleSubtitle && <Text style={cardLabel}>{scheduleSubtitle.toUpperCase()}</Text>}
-              <Text style={cardTitle}>{scheduleTitle}</Text>
-              {launchLabel && <Text style={cardMeta}>Target launch · {launchLabel}</Text>}
-            </Section>
+            <EmailParagraph>Hi {firstName},</EmailParagraph>
+            <EmailParagraph>
+              {fromName} has shared the project schedule below. It walks through the high-level
+              Gantt, the month-by-month detail, the risk register, and the RACI matrix.
+            </EmailParagraph>
+
+            <DetailCard>
+              <DetailRow first label="Project" value={scheduleTitle} hero />
+              {scheduleSubtitle && <DetailRow label="Scope" value={scheduleSubtitle} />}
+              {launchLabel && <DetailRow label="Target launch" value={launchLabel} />}
+            </DetailCard>
 
             {customMessage && (
-              <Section style={messageStyle}>
-                <Text style={messageLabel}>Message from {fromName}</Text>
-                <Text style={messageBody}>{customMessage}</Text>
-              </Section>
+              <MessageBlock fromName={fromName} message={customMessage} />
             )}
 
-            <Section style={buttonGroupStyle}>
-              <Link href={viewUrl} style={primaryButtonStyle}>
-                View schedule
-              </Link>
-            </Section>
-          </Section>
+            <PrimaryButton href={viewUrl}>View schedule</PrimaryButton>
 
-          <Hr style={hrStyle} />
-          <Section style={footerStyle}>
-            <Text style={footerTextStyle}>Tahi Studio · business@tahi.studio</Text>
-          </Section>
-        </Container>
+            <EmailFootnote>
+              Anything need to shift? Reply to this email and we will update the plan together.
+            </EmailFootnote>
+          </EmailCard>
+
+          <EmailFooter />
+        </EmailShell>
       </Body>
     </Html>
   )
 }
 
 export default ScheduleShareEmail
-
-const bodyStyle = { backgroundColor: '#f5f7f5', fontFamily: 'Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', margin: '0', padding: '0' } as const
-const containerStyle = { maxWidth: '560px', margin: '0 auto', padding: '2rem 0' } as const
-const headerStyle = { padding: '1.5rem 2rem', textAlign: 'center' as const } as const
-const logoStyle = { color: '#5A824E', fontSize: '1.25rem', fontWeight: '700', margin: '0' } as const
-const contentStyle = { backgroundColor: '#ffffff', borderRadius: '0.75rem', padding: '2rem', margin: '0 1rem' } as const
-const headingStyle = { color: '#121A0F', fontSize: '1.25rem', fontWeight: '700', margin: '0 0 1rem 0' } as const
-const textStyle = { color: '#5a6657', fontSize: '0.875rem', lineHeight: '1.6', margin: '0 0 1rem 0' } as const
-const cardStyle = { backgroundColor: '#f7f9f6', border: '1px solid #e8f0e6', borderRadius: '0.625rem', padding: '1rem 1.25rem', margin: '1.25rem 0' } as const
-const cardLabel = { color: '#8a9987', fontSize: '0.6875rem', fontWeight: '700', letterSpacing: '0.08em', textTransform: 'uppercase' as const, margin: '0 0 0.25rem 0' } as const
-const cardTitle = { color: '#121A0F', fontSize: '1rem', fontWeight: '700', margin: '0 0 0.25rem 0' } as const
-const cardMeta = { color: '#8a9987', fontSize: '0.75rem', margin: '0' } as const
-const messageStyle = { backgroundColor: '#fdfefd', border: '1px dashed #d4e0d0', borderRadius: '0.5rem', padding: '0.875rem 1rem', margin: '1rem 0' } as const
-const messageLabel = { color: '#8a9987', fontSize: '0.6875rem', fontWeight: '700', letterSpacing: '0.08em', textTransform: 'uppercase' as const, margin: '0 0 0.375rem 0' } as const
-const messageBody = { color: '#1f2c1a', fontSize: '0.875rem', lineHeight: '1.55', margin: '0', whiteSpace: 'pre-wrap' as const } as const
-const buttonGroupStyle = { textAlign: 'center' as const, margin: '1.5rem 0 1rem 0' } as const
-const primaryButtonStyle = { backgroundColor: '#5A824E', color: '#ffffff', display: 'inline-block', fontSize: '0.875rem', fontWeight: '700', padding: '0.75rem 2rem', borderRadius: '0 16px 0 16px', textDecoration: 'none' } as const
-const hrStyle = { borderColor: '#e8f0e6', margin: '1.5rem 1rem' } as const
-const footerStyle = { padding: '0 2rem 1rem', textAlign: 'center' as const } as const
-const footerTextStyle = { color: '#8a9987', fontSize: '0.75rem', margin: '0' } as const
