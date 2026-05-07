@@ -1,5 +1,5 @@
 /**
- * Public-side proposal section renderers — one per section type.
+ * Public-side proposal section renderers : one per section type.
  *
  * The shared <ProposalSectionBlock /> is a dispatcher that picks a renderer
  * based on `section.type`. Each renderer reads its typed shape from
@@ -26,6 +26,7 @@ export type SectionType =
   | 'guarantee'                   // risk-reversal callout
   | 'retainer_offer'              // 10% lifetime hook
   | 'founders'                    // founder-led credibility slide
+  | 'partner_badges'              // partner / credential pill row
 
 export interface PublicSection {
   id: string
@@ -67,22 +68,26 @@ export function defaultDataForType(type: SectionType): Record<string, unknown> {
         ],
       }
     case 'differentiators':
+      // Default seed is capped at 4 so the grid lays out evenly on every
+      // viewport (2x2 on desktop, 1x4 on mobile). The structured editor lets
+      // the admin add more, but four reads as confident rather than crowded.
       return {
         items: [
-          { icon: 'founder', title: 'Founder-led', body: 'Liam (engineering) and Staci (design) are on the call and on the build. No account managers.' },
-          { icon: 'partner', title: 'Webflow Premium Partner', body: 'Direct contacts inside Webflow. Better tooling, faster escalations, working toward Enterprise.' },
-          { icon: 'sparkle', title: 'AEO as a real service', body: 'Structuring content so ChatGPT, Claude and Gemini surface it in answers. Most agencies are still at SEO.' },
-          { icon: 'code', title: 'Engineering depth', body: 'Attribution, CRM integration, analytics ownership — we ship what most agencies hand off.' },
-          { icon: 'leaf', title: 'Carbon negative', body: '1% of revenue plants enough trees through Trees That Count to absorb more CO₂ than your site’s page views.' },
+          { icon: 'founder', title: 'Founder-led', body: 'Liam and Staci on every call and every build. No account managers.' },
+          { icon: 'partner', title: 'Webflow Premium', body: 'Direct contacts inside Webflow. Faster escalations, better tooling.' },
+          { icon: 'sparkle', title: 'AEO as a service', body: 'Content structured so ChatGPT, Claude and Gemini surface it.' },
           { icon: 'shield', title: 'No lock-in', body: 'You stay because the work is good, not because a contract traps you.' },
         ],
       }
     case 'case_study':
+      // Three items lays out as a clean 3-column grid on desktop and stacks
+      // on mobile. Each entry can carry an optional `link` to the published
+      // case study; when set the whole card becomes clickable.
       return {
         items: [
-          { client: 'Physitrack', problem: 'Outdated marketing site holding back enterprise sales conversations.', outcome: 'Full Webflow rebuild + AEO restructure.', metric: 'Drove 12-month retainer relationship.' },
-          { client: 'Elevate (Telcom Networks)', problem: 'Hourly Webflow needs with no consistent dev capacity.', outcome: 'On-demand small-track delivery, dashboard-managed.', metric: 'Trusted with every Webflow change for 18 months.' },
-          { client: 'Glasswall Solutions', problem: 'Marketing team needed a dependable Webflow partner alongside in-house.', outcome: 'GBP 1,250/mo retainer covering ongoing improvements.', metric: 'Zero churn since onboarding.' },
+          { client: 'Physitrack', problem: 'Outdated site held back enterprise sales.', outcome: 'Full Webflow rebuild plus AEO restructure.', metric: '12-month retainer signed', link: '' },
+          { client: 'Elevate', problem: 'Hourly Webflow needs, no consistent capacity.', outcome: 'On-demand small-track delivery, dashboard-managed.', metric: '18 months, zero churn', link: '' },
+          { client: 'Glasswall Solutions', problem: 'Needed a dependable Webflow partner alongside in-house.', outcome: 'GBP 1,250/mo retainer covering steady improvements.', metric: 'Zero churn since onboarding', link: '' },
         ],
       }
     case 'testimonial_stack':
@@ -94,10 +99,10 @@ export function defaultDataForType(type: SectionType): Record<string, unknown> {
     case 'faq':
       return {
         items: [
-          { q: 'What if I want to stop the retainer?', a: 'You can. We bill month-to-month with no lock-in. Clients stay because the work is good, not because a contract traps them.' },
-          { q: 'Who actually does the work?', a: 'Liam (engineering) and Staci (design). For specialist work like CRO we bring in trusted contractors, but the founders are always on the build.' },
-          { q: 'How fast do you respond?', a: 'Same-day on dashboard messages during business hours. Proactive update if a task is taking longer than expected — never silence.' },
-          { q: 'What about scope creep?', a: 'We flag it early and discuss it before it becomes a problem. Honest pushback is part of the relationship.' },
+          { q: 'What if I want to stop the retainer?', a: 'You can. Month-to-month with no lock-in. Clients stay because the work is good.' },
+          { q: 'Who actually does the work?', a: 'Liam runs engineering, Staci runs design. Founders on every call and every build.' },
+          { q: 'How fast do you respond?', a: 'Same day on dashboard messages during business hours. Proactive updates, never silence.' },
+          { q: 'What about scope creep?', a: 'We flag it early and discuss it before it becomes a problem. Honest pushback included.' },
         ],
       }
     case 'guarantee':
@@ -109,7 +114,7 @@ export function defaultDataForType(type: SectionType): Record<string, unknown> {
     case 'founders':
       return {
         eyebrow: 'The team on your build',
-        intro: 'Founder-led, end-to-end. Liam runs engineering, Staci runs design, and we are both on every call and every build. No account managers, no handoffs, no quiet weeks.',
+        intro: 'Founder-led, end-to-end. Liam runs engineering, Staci runs design. No account managers, no handoffs.',
         image: '/dashboard/proposals/founders-placeholder.jpg',
         imagePosition: '50% 25%',
         people: [
@@ -117,16 +122,28 @@ export function defaultDataForType(type: SectionType): Record<string, unknown> {
           { name: 'Staci Bonnie', role: 'Design' },
         ],
       }
+    case 'partner_badges':
+      // Credential row: Webflow Premium, Client First, Optibase. Renders as
+      // leaf-radius framed pills, brand-bordered, with a soft hover lift.
+      return {
+        eyebrow: 'Credentialled team',
+        intro: 'Vetted by the platforms we build on.',
+        items: [
+          { label: 'Webflow Premium Partner', sub: 'Direct platform support' },
+          { label: 'Client First Partner', sub: 'Finsweet certified system' },
+          { label: 'Optibase Partner', sub: 'Performance and CRO partner' },
+        ],
+      }
     case 'retainer_offer':
       return {
         eyebrow: 'After the project',
         headline: 'Your 10% lifetime discount, already earned',
-        body: 'Because you’re trusting us with this project, you’ve already earned 10% off Maintain or Scale — for as long as you’re a client. The discount never expires and never gets reviewed. It’s a thank-you for the trust, not a hook.',
+        body: 'Because you’re trusting us with this project, you’ve already earned 10% off Maintain or Scale, for as long as you’re a client. The discount never expires and never gets reviewed. A thank you for the trust, not a hook.',
         plans: [
           { name: 'Maintain', regular: 1500, discounted: 1350, currency: 'USD', unit: 'mo', tagline: 'Steady improvement, one small track at a time.' },
           { name: 'Scale', regular: 4000, discounted: 3600, currency: 'USD', unit: 'mo', tagline: 'Two tracks, design + dev + strategy.' },
         ],
-        footnote: 'Talk to us 2–3 weeks before delivery and we’ll set it up so it’s ready the day the project closes.',
+        footnote: 'Talk to us two or three weeks before delivery and we’ll set it up so it’s ready the day the project closes.',
       }
     default:
       return { html: '' }
@@ -140,12 +157,78 @@ function safeParse<T>(json: string | null): T | null {
   try { return JSON.parse(json) as T } catch { return null }
 }
 
+// ─── useInView ────────────────────────────────────────────────────────────
+//
+// Tiny IntersectionObserver-backed hook. Each section renderer wraps its
+// outer container in <ScrollFadeIn> so every slide gets the same subtle
+// fade-up on first scroll into view. Honors prefers-reduced-motion.
+function useInView<T extends HTMLElement>(opts?: { rootMargin?: string; threshold?: number }): [React.RefObject<T | null>, boolean] {
+  const ref = React.useRef<T | null>(null)
+  const [inView, setInView] = React.useState(false)
+  React.useEffect(() => {
+    const node = ref.current
+    if (!node) return
+    if (typeof window === 'undefined' || !('IntersectionObserver' in window)) {
+      setInView(true)
+      return
+    }
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (reduced) {
+      setInView(true)
+      return
+    }
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          setInView(true)
+          io.disconnect()
+          break
+        }
+      }
+    }, { rootMargin: opts?.rootMargin ?? '0px 0px -10% 0px', threshold: opts?.threshold ?? 0.08 })
+    io.observe(node)
+    return () => io.disconnect()
+  }, [opts?.rootMargin, opts?.threshold])
+  return [ref, inView]
+}
+
+/**
+ * <SectionMotion>: subtle fade-up on first scroll into view. Participates
+ * in layout (block-level wrapper). Every section renderer wraps its inner
+ * content in this so the deck has one consistent micro-motion vocabulary
+ * instead of one-off hover transforms. Reduced-motion users land in the
+ * static, in-view state.
+ */
+function SectionMotion({
+  children, delay = 0, className,
+}: {
+  children: React.ReactNode
+  delay?: number
+  className?: string
+}) {
+  const [ref, inView] = useInView<HTMLDivElement>()
+  return (
+    <div
+      ref={ref}
+      className={className}
+      style={{
+        opacity: inView ? 1 : 0,
+        transform: inView ? 'translateY(0)' : 'translateY(0.5rem)',
+        transition: `opacity 480ms cubic-bezier(0.22, 1, 0.36, 1) ${delay}ms, transform 480ms cubic-bezier(0.22, 1, 0.36, 1) ${delay}ms`,
+        willChange: inView ? 'auto' : 'opacity, transform',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
 // ─── Per-slide theming ────────────────────────────────────────────────────
 //
 // Each section's data may include `theme: 'brand_glass' | 'toned_light' |
 // 'light' | 'dark'` (set in the admin editor). Some types default to dark
 // (retainer_offer is the premium-CTA dark slab); everything else defaults
-// to light. The palettes below are the source of truth — all renderers
+// to light. The palettes below are the source of truth : all renderers
 // read from these tokens rather than hardcoding hex.
 
 export type SlideTheme = 'brand_glass' | 'toned_light' | 'light' | 'dark'
@@ -254,6 +337,7 @@ export function ProposalSectionBlock({ section }: { section: PublicSection }) {
     case 'guarantee':          return <Guarantee section={section} />
     case 'retainer_offer':     return <RetainerOffer section={section} />
     case 'founders':           return <Founders section={section} />
+    case 'partner_badges':     return <PartnerBadges section={section} />
     default:                   return <HtmlSection section={section} />
   }
 }
@@ -266,11 +350,13 @@ function HtmlSection({ section }: { section: PublicSection }) {
   const c = themeColours(theme)
   return (
     <section style={{ ...slideShell, background: c.bg, color: c.text }} className="proposal-slide">
-      <div style={slideInner}>
-        {section.subtitle && <div style={{ ...slideEyebrow, color: c.eyebrow }}>{section.subtitle}</div>}
-        {section.title && <h2 style={{ ...slideTitle, color: c.text }}>{section.title}</h2>}
-        <div style={{ ...proseStyle, color: c.text }} dangerouslySetInnerHTML={{ __html: html }} />
-      </div>
+      <SectionMotion>
+        <div style={slideInner}>
+          {section.subtitle && <div style={{ ...slideEyebrow, color: c.eyebrow }}>{section.subtitle}</div>}
+          {section.title && <h2 style={{ ...slideTitle, color: c.text }}>{section.title}</h2>}
+          <div style={{ ...proseStyle, color: c.text }} dangerouslySetInnerHTML={{ __html: html }} />
+        </div>
+      </SectionMotion>
     </section>
   )
 }
@@ -280,16 +366,20 @@ function SingleTestimonial({ section }: { section: PublicSection }) {
   if (!data?.quote) return null
   return (
     <section style={slideShell} className="proposal-slide">
-      {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
-      {section.title && <h2 style={slideTitle}>{section.title}</h2>}
-      <blockquote style={{ fontSize: '1.375rem', lineHeight: 1.45, color: '#1f2c1a', margin: '1.25rem 0 1rem 0', fontStyle: 'italic', fontWeight: 500 }}>
-        &ldquo;{data.quote}&rdquo;
-      </blockquote>
-      <div style={{ fontSize: '0.875rem', color: '#5a6657' }}>
-        <strong style={{ color: '#1f2c1a' }}>{data.author ?? ''}</strong>
-        {data.role ? <span> · {data.role}</span> : null}
-        {data.company ? <span style={{ color: '#8a9987' }}> · {data.company}</span> : null}
-      </div>
+      <SectionMotion>
+        <div style={slideInner}>
+          {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
+          {section.title && <h2 style={slideTitle}>{section.title}</h2>}
+          <blockquote style={{ fontSize: '1.375rem', lineHeight: 1.45, color: '#1f2c1a', margin: '1.25rem 0 1rem 0', fontStyle: 'italic', fontWeight: 500 }}>
+            &ldquo;{data.quote}&rdquo;
+          </blockquote>
+          <div style={{ fontSize: '0.875rem', color: '#5a6657' }}>
+            <strong style={{ color: '#1f2c1a' }}>{data.author ?? ''}</strong>
+            {data.role ? <span> · {data.role}</span> : null}
+            {data.company ? <span style={{ color: '#8a9987' }}> · {data.company}</span> : null}
+          </div>
+        </div>
+      </SectionMotion>
     </section>
   )
 }
@@ -312,6 +402,8 @@ function ValueAnchor({ section }: { section: PublicSection }) {
   const fmt = (n: number) => `$${n.toLocaleString()}`
   return (
     <section style={slideShell} className="proposal-slide">
+      <SectionMotion>
+      <div style={slideInner}>
       {(data?.eyebrow ?? section.subtitle) && <div style={slideEyebrow}>{data?.eyebrow ?? section.subtitle}</div>}
       {section.title && <h2 style={slideTitle}>{section.title}</h2>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(15rem, 1fr))', gap: '1rem', marginTop: '1rem' }}>
@@ -325,7 +417,7 @@ function ValueAnchor({ section }: { section: PublicSection }) {
               <div key={a.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: '0.875rem', color: '#1f2c1a' }}>
                 <span>{a.label}</span>
                 <span style={{ color: '#5a6657', fontVariantNumeric: 'tabular-nums' }}>
-                  {fmt(a.lo)}–{fmt(a.hi)}
+                  {fmt(a.lo)} to {fmt(a.hi)}
                 </span>
               </div>
             ))}
@@ -333,7 +425,7 @@ function ValueAnchor({ section }: { section: PublicSection }) {
           <div style={{ borderTop: '1px solid #e8f0e6', marginTop: '0.875rem', paddingTop: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
             <strong style={{ fontSize: '0.875rem' }}>Total</strong>
             <strong style={{ fontSize: '1.125rem', fontVariantNumeric: 'tabular-nums', color: '#1f2c1a' }}>
-              {fmt(lo)}–{fmt(hi)}{data?.unit === 'mo' ? '/mo' : ''}
+              {fmt(lo)} to {fmt(hi)}{data?.unit === 'mo' ? '/mo' : ''}
             </strong>
           </div>
         </div>
@@ -354,37 +446,109 @@ function ValueAnchor({ section }: { section: PublicSection }) {
       {data?.footer && (
         <p style={{ fontSize: '0.875rem', color: '#5a6657', marginTop: '1rem', marginBottom: 0 }}>{data.footer}</p>
       )}
+      </div>
+      </SectionMotion>
     </section>
   )
 }
 
+/**
+ * <Process> : proper editorial timeline.
+ *
+ * Desktop: horizontal connecting line behind oversized step numerals
+ * (3.5rem). Steps lay out as a 5-column flex row when there are <=5
+ * items, wrapping to multi-row if more. Each step has generous breathing
+ * room and step body capped to two lines for scannability.
+ *
+ * Mobile: vertical timeline with a connecting line on the left.
+ */
 function Process({ section }: { section: PublicSection }) {
   const data = safeParse<{ steps?: { title: string; body: string; eyebrow?: string }[] }>(section.data)
   const steps = data?.steps ?? []
   const theme = readTheme(section)
   const c = themeColours(theme)
+  const onDark = theme === 'dark' || theme === 'brand_glass'
+  const numeralColor = onDark ? c.brandAccent : '#5A824E'
+  const lineColor = onDark ? 'rgba(220,239,216,0.18)' : '#dcefd8'
   return (
     <section style={{ ...slideShell, background: c.bg, color: c.text }} className="proposal-slide">
+      <SectionMotion>
       <div style={slideInner}>
-      {section.subtitle && <div style={{ ...slideEyebrow, color: c.eyebrow }}>{section.subtitle}</div>}
-      {section.title && <h2 style={{ ...slideTitle, color: c.text }}>{section.title}</h2>}
-      <ol style={{ listStyle: 'none', padding: 0, margin: '1.25rem 0 0 0', display: 'grid', gap: '0.75rem' }}>
-        {steps.map((s, i) => (
-          <li key={i} style={{ display: 'grid', gridTemplateColumns: '2.25rem 1fr', gap: '1rem', alignItems: 'flex-start', padding: '1rem 1.125rem', background: c.cardBg, border: `1px solid ${c.cardBorder}`, borderRadius: '0.875rem' }}>
-            <div style={{
-              width: '2.25rem', height: '2.25rem', borderRadius: '0 12px 0 12px',
-              background: '#5A824E', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '0.875rem', fontWeight: 800,
-            }}>{i + 1}</div>
-            <div>
-              {s.eyebrow && <div style={{ fontSize: '0.625rem', fontWeight: 700, color: c.textSubtle, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.125rem' }}>{s.eyebrow}</div>}
-              <div style={{ fontSize: '1rem', fontWeight: 700, color: c.text, marginBottom: '0.25rem' }}>{s.title}</div>
-              <div style={{ fontSize: '0.875rem', color: c.textMuted, lineHeight: 1.55 }}>{s.body}</div>
-            </div>
-          </li>
-        ))}
-      </ol>
+        {section.subtitle && <div style={{ ...slideEyebrow, color: c.eyebrow }}>{section.subtitle}</div>}
+        {section.title && <h2 style={{ ...slideTitle, color: c.text }}>{section.title}</h2>}
+        <ol className="proposal-process" style={{ listStyle: 'none', padding: 0, margin: '2.5rem 0 0 0' }}>
+          {/* The connecting line : absolute element behind the numerals.
+              Desktop horizontal, mobile vertical. */}
+          <span aria-hidden="true" className="proposal-process-line" style={{ background: lineColor }} />
+          {steps.map((s, i) => (
+            <li key={i} className="proposal-process-step">
+              <div className="proposal-process-numeral" style={{ color: numeralColor, background: c.bg }}>
+                {String(i + 1).padStart(2, '0')}
+              </div>
+              <div className="proposal-process-body">
+                {s.eyebrow && <div style={{ fontSize: '0.625rem', fontWeight: 700, color: c.textSubtle, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.375rem' }}>{s.eyebrow}</div>}
+                <div style={{ fontSize: '1rem', fontWeight: 700, color: c.text, marginBottom: '0.375rem', letterSpacing: '-0.005em' }}>{s.title}</div>
+                <div style={{ fontSize: '0.875rem', color: c.textMuted, lineHeight: 1.55 }}>{s.body}</div>
+              </div>
+            </li>
+          ))}
+        </ol>
       </div>
+      </SectionMotion>
+      <style>{`
+        .proposal-process { position: relative; display: flex; flex-direction: column; gap: 1.5rem; }
+        .proposal-process-line {
+          position: absolute;
+          left: 1.125rem;
+          top: 1.5rem;
+          bottom: 1.5rem;
+          width: 0.125rem;
+          border-radius: 999px;
+        }
+        .proposal-process-step {
+          display: grid;
+          grid-template-columns: 2.5rem 1fr;
+          gap: 1.125rem;
+          align-items: flex-start;
+          position: relative;
+        }
+        .proposal-process-numeral {
+          position: relative;
+          width: 2.5rem;
+          font-size: 1.5rem;
+          font-weight: 800;
+          letter-spacing: -0.02em;
+          line-height: 1;
+          padding: 0.375rem 0;
+          font-variant-numeric: tabular-nums;
+          z-index: 1;
+        }
+        .proposal-process-body { padding-top: 0.125rem; }
+        @media (min-width: 768px) {
+          .proposal-process { flex-direction: row; gap: 2rem; }
+          .proposal-process-line {
+            left: 0;
+            right: 0;
+            top: 1.875rem;
+            bottom: auto;
+            width: auto;
+            height: 0.125rem;
+          }
+          .proposal-process-step {
+            flex: 1 1 0;
+            min-width: 0;
+            grid-template-columns: 1fr;
+            gap: 1.125rem;
+          }
+          .proposal-process-numeral {
+            width: auto;
+            font-size: 3.5rem;
+            line-height: 1;
+            padding: 0;
+          }
+          .proposal-process-body { padding-top: 0; padding-right: 1rem; }
+        }
+      `}</style>
     </section>
   )
 }
@@ -395,21 +559,41 @@ function Differentiators({ section }: { section: PublicSection }) {
   const items = data?.items ?? []
   const theme = readTheme(section)
   const c = themeColours(theme)
+  // Choose a column count that keeps the bottom row full whenever possible.
+  // 3 items → 3 cols, 4 items → 2 cols (balanced 2x2), 6 items → 3 cols, etc.
+  const cols = items.length === 4 ? 2 : items.length === 6 || items.length === 3 ? 3 : items.length >= 4 ? 3 : Math.max(1, items.length)
   return (
     <section style={{ ...slideShell, background: c.bg, color: c.text }} className="proposal-slide">
+      <SectionMotion>
       <div style={slideInner}>
-      {section.subtitle && <div style={{ ...slideEyebrow, color: c.eyebrow }}>{section.subtitle}</div>}
-      {section.title && <h2 style={{ ...slideTitle, color: c.text }}>{section.title}</h2>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(15rem, 1fr))', gap: '0.875rem', marginTop: '1.25rem' }}>
-        {items.map((it, i) => (
-          <div key={i} style={{ background: theme === 'dark' ? c.cardBg : '#ffffff', border: `1px solid ${c.cardBorder}`, borderRadius: '0 16px 0 16px', padding: '1.125rem' }}>
-            <DiffIcon name={it.icon} />
-            <div style={{ fontSize: '0.9375rem', fontWeight: 700, color: c.text, marginTop: '0.625rem', marginBottom: '0.25rem' }}>{it.title}</div>
-            <div style={{ fontSize: '0.8125rem', color: c.textMuted, lineHeight: 1.55 }}>{it.body}</div>
-          </div>
-        ))}
+        {section.subtitle && <div style={{ ...slideEyebrow, color: c.eyebrow }}>{section.subtitle}</div>}
+        {section.title && <h2 style={{ ...slideTitle, color: c.text }}>{section.title}</h2>}
+        <div className="proposal-diff-grid" style={{ ['--diff-cols' as string]: String(cols), marginTop: '1.5rem' }}>
+          {items.map((it, i) => (
+            <div
+              key={i}
+              className="proposal-diff-card"
+              style={{
+                background: theme === 'dark' ? c.cardBg : '#ffffff',
+                border: `1px solid ${c.cardBorder}`,
+                borderRadius: '0 16px 0 16px',
+                padding: '1.5rem 1.5rem 1.625rem 1.5rem',
+                transition: 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), border-color 240ms ease, box-shadow 320ms ease',
+              }}
+            >
+              <DiffIcon name={it.icon} />
+              <div style={{ fontSize: '1rem', fontWeight: 700, color: c.text, marginTop: '0.875rem', marginBottom: '0.375rem', letterSpacing: '-0.005em' }}>{it.title}</div>
+              <div style={{ fontSize: '0.875rem', color: c.textMuted, lineHeight: 1.55 }}>{it.body}</div>
+            </div>
+          ))}
+        </div>
       </div>
-      </div>
+      </SectionMotion>
+      <style>{`
+        .proposal-diff-grid { display: grid; grid-template-columns: 1fr; gap: 0.875rem; }
+        .proposal-diff-card:hover { transform: translateY(-0.125rem); box-shadow: 0 12px 32px -16px rgba(31,44,26,0.12); }
+        @media (min-width: 768px) { .proposal-diff-grid { grid-template-columns: repeat(var(--diff-cols, 3), minmax(0, 1fr)); gap: 1rem; } }
+      `}</style>
     </section>
   )
 }
@@ -437,44 +621,82 @@ function DiffIcon({ name }: { name?: string }) {
   }
 }
 
+/**
+ * <CaseStudies> : 3-column grid of editorial case study cards.
+ *
+ * Each card shows client + metric pill, then problem/outcome stacked.
+ * When the item has a `link` URL the whole card becomes a clickable
+ * anchor with hover-lift and a subtle external-link affordance.
+ */
 function CaseStudies({ section }: { section: PublicSection }) {
-  type Item = { logo?: string; client: string; problem: string; outcome: string; metric?: string; quote?: string; quoteAuthor?: string }
+  type Item = { logo?: string; client: string; problem: string; outcome: string; metric?: string; quote?: string; quoteAuthor?: string; link?: string }
   const data = safeParse<{ items?: Item[] }>(section.data)
   const items = data?.items ?? []
+  const theme = readTheme(section)
+  const c = themeColours(theme)
+  const onDark = theme === 'dark' || theme === 'brand_glass'
+  const cols = items.length === 1 ? 1 : items.length === 2 || items.length === 4 ? 2 : 3
   return (
-    <section style={slideShell} className="proposal-slide">
-      {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
-      {section.title && <h2 style={slideTitle}>{section.title}</h2>}
-      <div style={{ display: 'grid', gap: '0.875rem', marginTop: '1.25rem' }}>
-        {items.map((it, i) => (
-          <div key={i} style={{ background: '#fdfefd', border: '1px solid #e8f0e6', borderRadius: '0.875rem', padding: '1.125rem 1.25rem' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.625rem', flexWrap: 'wrap' }}>
-              <strong style={{ fontSize: '1rem', color: '#1f2c1a' }}>{it.client}</strong>
-              {it.metric && (
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#425F39', background: '#dcefd8', padding: '0.125rem 0.5rem', borderRadius: '999px' }}>
-                  {it.metric}
-                </span>
-              )}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(15rem, 1fr))', gap: '0.5rem 1.25rem', marginTop: '0.5rem' }}>
-              <div>
-                <div style={{ fontSize: '0.625rem', fontWeight: 700, color: '#8a9987', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.125rem' }}>Problem</div>
-                <div style={{ fontSize: '0.875rem', color: '#1f2c1a', lineHeight: 1.5 }}>{it.problem}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '0.625rem', fontWeight: 700, color: '#8a9987', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.125rem' }}>Outcome</div>
-                <div style={{ fontSize: '0.875rem', color: '#1f2c1a', lineHeight: 1.5 }}>{it.outcome}</div>
-              </div>
-            </div>
-            {it.quote && (
-              <blockquote style={{ marginTop: '0.875rem', fontSize: '0.875rem', color: '#5a6657', fontStyle: 'italic', borderLeft: '3px solid #5A824E', paddingLeft: '0.75rem' }}>
-                &ldquo;{it.quote}&rdquo;
-                {it.quoteAuthor && <div style={{ fontStyle: 'normal', fontSize: '0.75rem', color: '#8a9987', marginTop: '0.25rem' }}>— {it.quoteAuthor}</div>}
-              </blockquote>
-            )}
-          </div>
-        ))}
+    <section style={{ ...slideShell, background: c.bg, color: c.text }} className="proposal-slide">
+      <SectionMotion>
+      <div style={slideInner}>
+        {section.subtitle && <div style={{ ...slideEyebrow, color: c.eyebrow }}>{section.subtitle}</div>}
+        {section.title && <h2 style={{ ...slideTitle, color: c.text }}>{section.title}</h2>}
+        <div className="proposal-case-grid" style={{ ['--case-cols' as string]: String(cols), marginTop: '1.75rem' }}>
+          {items.map((it, i) => {
+            const inner = (
+              <>
+                {it.metric && (
+                  <span style={{ display: 'inline-flex', alignSelf: 'flex-start', fontSize: '0.6875rem', fontWeight: 700, color: '#425F39', background: '#dcefd8', padding: '0.25rem 0.625rem', borderRadius: '999px', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
+                    {it.metric}
+                  </span>
+                )}
+                <div style={{ fontSize: '1.125rem', fontWeight: 700, color: c.text, marginTop: '0.875rem', marginBottom: '0.875rem', letterSpacing: '-0.01em', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{it.client}</span>
+                  {it.link && (
+                    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: c.brandAccent, flexShrink: 0 }}>
+                      <path d="M7 17L17 7M9 7h8v8" />
+                    </svg>
+                  )}
+                </div>
+                <div style={{ fontSize: '0.625rem', fontWeight: 700, color: c.textSubtle, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.25rem' }}>Problem</div>
+                <div style={{ fontSize: '0.875rem', color: c.textMuted, lineHeight: 1.55, marginBottom: '0.875rem' }}>{it.problem}</div>
+                <div style={{ fontSize: '0.625rem', fontWeight: 700, color: c.textSubtle, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.25rem' }}>Outcome</div>
+                <div style={{ fontSize: '0.875rem', color: c.text, lineHeight: 1.55 }}>{it.outcome}</div>
+                {it.quote && (
+                  <blockquote style={{ marginTop: '1rem', fontSize: '0.8125rem', color: c.textMuted, fontStyle: 'italic', borderLeft: `2px solid ${c.brandAccent}`, paddingLeft: '0.75rem', margin: '1rem 0 0 0' }}>
+                    &ldquo;{it.quote}&rdquo;
+                    {it.quoteAuthor && <div style={{ fontStyle: 'normal', fontSize: '0.6875rem', color: c.textSubtle, marginTop: '0.25rem' }}>{it.quoteAuthor}</div>}
+                  </blockquote>
+                )}
+              </>
+            )
+            const cardStyleObj: React.CSSProperties = {
+              display: 'flex',
+              flexDirection: 'column',
+              background: onDark ? c.cardBg : '#ffffff',
+              border: `1px solid ${c.cardBorder}`,
+              borderRadius: '0 16px 0 16px',
+              padding: '1.5rem',
+              textDecoration: 'none',
+              color: 'inherit',
+              transition: 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), border-color 240ms ease, box-shadow 320ms ease',
+              height: '100%',
+            }
+            return it.link ? (
+              <a key={i} href={it.link} target="_blank" rel="noopener noreferrer" className="proposal-case-card" style={cardStyleObj}>{inner}</a>
+            ) : (
+              <div key={i} className="proposal-case-card" style={cardStyleObj}>{inner}</div>
+            )
+          })}
+        </div>
       </div>
+      </SectionMotion>
+      <style>{`
+        .proposal-case-grid { display: grid; grid-template-columns: 1fr; gap: 1rem; align-items: stretch; }
+        .proposal-case-card:hover { transform: translateY(-0.25rem); border-color: ${c.cardBorderStrong}; box-shadow: 0 16px 36px -18px rgba(31,44,26,0.18); }
+        @media (min-width: 768px) { .proposal-case-grid { grid-template-columns: repeat(var(--case-cols, 3), minmax(0, 1fr)); gap: 1.125rem; } }
+      `}</style>
     </section>
   )
 }
@@ -484,28 +706,41 @@ function TestimonialStack({ section }: { section: PublicSection }) {
   const data = safeParse<{ items?: Item[] }>(section.data)
   const items = data?.items ?? []
   if (items.length === 0) return null
+  // Eyebrow + title centred so the cards below sit in a clean editorial axis.
+  const headBlock = (
+    <div style={{ textAlign: 'center', maxWidth: '36rem', marginLeft: 'auto', marginRight: 'auto' }}>
+      {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
+      {section.title && <h2 style={slideTitle}>{section.title}</h2>}
+    </div>
+  )
   if (items.length === 1) {
     return (
       <section style={slideShell} className="proposal-slide">
-        {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
-        {section.title && <h2 style={slideTitle}>{section.title}</h2>}
-        <div style={{ marginTop: '1.5rem', maxWidth: '40rem', margin: '1.5rem auto 0' }}>
-          <TestimonialCard item={items[0]} variant="static" />
-        </div>
+        <SectionMotion>
+          <div style={slideInner}>
+            {headBlock}
+            <div style={{ marginTop: '1.5rem', maxWidth: '40rem', marginLeft: 'auto', marginRight: 'auto' }}>
+              <TestimonialCard item={items[0]} variant="static" />
+            </div>
+          </div>
+        </SectionMotion>
       </section>
     )
   }
   return (
     <section style={slideShell} className="proposal-slide">
-      {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
-      {section.title && <h2 style={slideTitle}>{section.title}</h2>}
-      <TestimonialCarousel items={items} />
+      <SectionMotion>
+        <div style={slideInner}>
+          {headBlock}
+          <TestimonialCarousel items={items} />
+        </div>
+      </SectionMotion>
     </section>
   )
 }
 
 /**
- * <TestimonialCarousel> — single quote in focus, prev/next visible at the
+ * <TestimonialCarousel> : single quote in focus, prev/next visible at the
  * edges, soft fade. Auto-advances every 6s; pauses on hover, focus, or
  * pointer-down. Drag works with both mouse and touch via pointer events,
  * with a 40px threshold for a committed swipe (snaps back below that).
@@ -523,6 +758,7 @@ function TestimonialCarousel({
   const [progress, setProgress] = React.useState(0)
   const [dragOffset, setDragOffset] = React.useState(0)
   const [isDragging, setIsDragging] = React.useState(false)
+  const [isMobile, setIsMobile] = React.useState(false)
   const trackRef = React.useRef<HTMLDivElement>(null)
   const pointerRef = React.useRef<{ startX: number; pointerId: number; pointerType: string } | null>(null)
   const reducedMotion = React.useRef(false)
@@ -530,6 +766,18 @@ function TestimonialCarousel({
   React.useEffect(() => {
     reducedMotion.current = typeof window !== 'undefined'
       && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  }, [])
+
+  // Mobile (≤767px): the 70% card + edge fades + peek-of-neighbour design
+  // makes the active quote unreadable. Below the breakpoint we collapse to
+  // a single full-width card with dot nav only.
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mql = window.matchMedia('(max-width: 767px)')
+    const update = () => setIsMobile(mql.matches)
+    update()
+    mql.addEventListener?.('change', update)
+    return () => mql.removeEventListener?.('change', update)
   }, [])
 
   // Auto-advance with progress bar.
@@ -558,7 +806,7 @@ function TestimonialCarousel({
     window.setTimeout(() => setPaused(false), 1200)
   }
 
-  // Pointer events — covers mouse, touch, and pen with one code path.
+  // Pointer events : covers mouse, touch, and pen with one code path.
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     pointerRef.current = { startX: e.clientX, pointerId: e.pointerId, pointerType: e.pointerType }
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -581,16 +829,18 @@ function TestimonialCarousel({
   }
 
   // Card width is 70% of the container; offset the track so the active
-  // card lands centred. Drag adds a temporary live offset in pixels.
-  const trackTransform = `translate3d(calc(15% - ${active * 70}% + ${dragOffset}px), 0, 0)`
+  // card lands centred. Drag adds a temporary live offset in pixels. On
+  // mobile we collapse to a single full-width card (no peek, no fades),
+  // dot nav only : peeks make the active quote unreadable on small screens.
+  const cardPercent = isMobile ? 100 : 70
+  const sidePercent = isMobile ? 0 : 15
+  const trackTransform = `translate3d(calc(${sidePercent}% - ${active * cardPercent}% + ${dragOffset}px), 0, 0)`
 
   return (
     <div
       style={{
         marginTop: '1.5rem',
         position: 'relative',
-        // Cap the carousel width so a 4K display doesn't blow the cards
-        // up to billboard size. Inside this rail the cards still scale.
         maxWidth: '64rem',
         marginLeft: 'auto',
         marginRight: 'auto',
@@ -600,8 +850,12 @@ function TestimonialCarousel({
       onFocus={() => setPaused(true)}
       onBlur={() => setPaused(false)}
     >
-      <div aria-hidden="true" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '6%', background: 'linear-gradient(to right, var(--color-bg, #FFFFFF), transparent)', pointerEvents: 'none', zIndex: 2 }} />
-      <div aria-hidden="true" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '6%', background: 'linear-gradient(to left, var(--color-bg, #FFFFFF), transparent)', pointerEvents: 'none', zIndex: 2 }} />
+      {!isMobile && (
+        <>
+          <div aria-hidden="true" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '6%', background: 'linear-gradient(to right, var(--color-bg, #FFFFFF), transparent)', pointerEvents: 'none', zIndex: 2 }} />
+          <div aria-hidden="true" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '6%', background: 'linear-gradient(to left, var(--color-bg, #FFFFFF), transparent)', pointerEvents: 'none', zIndex: 2 }} />
+        </>
+      )}
 
       <div
         ref={trackRef}
@@ -631,11 +885,11 @@ function TestimonialCarousel({
             <div
               key={i}
               style={{
-                flex: '0 0 70%',
+                flex: `0 0 ${cardPercent}%`,
                 minWidth: 0,
-                padding: '0 0.75rem',
-                opacity: i === active ? 1 : 0.4,
-                transform: i === active ? 'scale(1)' : 'scale(0.94)',
+                padding: isMobile ? '0' : '0 0.75rem',
+                opacity: i === active ? 1 : isMobile ? 0 : 0.4,
+                transform: i === active || isMobile ? 'scale(1)' : 'scale(0.94)',
                 transition: 'opacity 320ms ease, transform 360ms cubic-bezier(0.22, 1, 0.36, 1)',
                 pointerEvents: i === active ? 'auto' : 'none',
               }}
@@ -732,13 +986,15 @@ function FAQ({ section }: { section: PublicSection }) {
   const items = data?.items ?? []
   return (
     <section style={slideShell} className="proposal-slide">
-      <div style={slideInner}>
-        {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
-        {section.title && <h2 style={slideTitle}>{section.title}</h2>}
-        <div style={{ display: 'grid', gap: '0.625rem', marginTop: '1.25rem' }}>
-          {items.map((it, i) => <FAQItem key={i} q={it.q} a={it.a} />)}
+      <SectionMotion>
+        <div style={slideInner}>
+          {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
+          {section.title && <h2 style={slideTitle}>{section.title}</h2>}
+          <div style={{ display: 'grid', gap: '0.625rem', marginTop: '1.5rem' }}>
+            {items.map((it, i) => <FAQItem key={i} q={it.q} a={it.a} />)}
+          </div>
         </div>
-      </div>
+      </SectionMotion>
     </section>
   )
 }
@@ -830,21 +1086,33 @@ function FAQItem({ q, a }: { q: string; a: string }) {
 
 function Guarantee({ section }: { section: PublicSection }) {
   const data = safeParse<{ headline?: string; body?: string; badges?: string[] }>(section.data)
+  // Flat brand-50 tint with a single soft radial glow for depth : no
+  // top-to-bottom gradient. The price/promise area should read calm and
+  // confident, not airy. Memo: user feedback "month-to-month uses a
+  // gradient that we shouldn't be" : replaced the linear gradient base.
+  const bg = [
+    'radial-gradient(60% 60% at 80% 0%, rgba(220,239,216,0.45) 0%, transparent 60%)',
+    '#f0f7ee',
+  ].join(', ')
   return (
-    <section style={{ ...slideShell, background: 'linear-gradient(180deg, #f0f7ee 0%, #ffffff 100%)', borderColor: '#dcefd8' }} className="proposal-slide">
-      {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
-      <h2 style={{ ...slideTitle, color: '#1f2c1a' }}>{data?.headline ?? section.title ?? 'Our promise to you'}</h2>
-      {data?.body && <p style={{ fontSize: '1rem', lineHeight: 1.6, color: '#1f2c1a', margin: '0.75rem 0 1rem 0', maxWidth: '40rem' }}>{data.body}</p>}
-      {data?.badges && data.badges.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-          {data.badges.map((b, i) => (
-            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.8125rem', fontWeight: 600, color: '#425F39', background: '#ffffff', border: '1px solid #dcefd8', padding: '0.375rem 0.75rem', borderRadius: '999px' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5A824E" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              {b}
-            </span>
-          ))}
+    <section style={{ ...slideShell, background: bg, borderColor: '#dcefd8' }} className="proposal-slide">
+      <SectionMotion>
+        <div style={slideInner}>
+          {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
+          <h2 style={{ ...slideTitle, color: '#1f2c1a' }}>{data?.headline ?? section.title ?? 'Our promise to you'}</h2>
+          {data?.body && <p style={{ fontSize: '1rem', lineHeight: 1.6, color: '#1f2c1a', margin: '0.875rem 0 1.25rem 0', maxWidth: '40rem' }}>{data.body}</p>}
+          {data?.badges && data.badges.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              {data.badges.map((b, i) => (
+                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.8125rem', fontWeight: 600, color: '#425F39', background: '#ffffff', border: '1px solid #dcefd8', padding: '0.4375rem 0.75rem', borderRadius: '999px' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5A824E" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  {b}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+      </SectionMotion>
     </section>
   )
 }
@@ -852,41 +1120,52 @@ function Guarantee({ section }: { section: PublicSection }) {
 function RetainerOffer({ section }: { section: PublicSection }) {
   type Plan = { name: string; regular: number; discounted: number; currency: string; unit: string; tagline?: string }
   const data = safeParse<{ eyebrow?: string; headline?: string; body?: string; plans?: Plan[]; footnote?: string }>(section.data)
+  // Same depth language as the brand-glass cover: the deep dark base
+  // gets two radial glows so the slab reads premium, not flat.
+  const bg = [
+    'radial-gradient(120% 80% at 85% -20%, rgba(147,201,138,0.20) 0%, transparent 55%)',
+    'radial-gradient(80% 60% at -10% 110%, rgba(122,170,114,0.14) 0%, transparent 50%)',
+    '#1f2c1a',
+  ].join(', ')
   return (
-    <section style={{ ...slideShell, background: '#1f2c1a', color: '#ffffff', border: 'none', boxShadow: '0 24px 48px rgba(31,44,26,0.18)' }} className="proposal-slide">
-      <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#93c98a', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>
-        {data?.eyebrow ?? section.subtitle ?? 'Already earned'}
-      </div>
-      <h2 style={{ fontSize: 'clamp(1.5rem, 3.4vw, 2.25rem)', fontWeight: 800, lineHeight: 1.15, color: '#ffffff', margin: 0, letterSpacing: '-0.015em' }}>
-        {data?.headline ?? section.title ?? 'Your 10% lifetime discount, already earned'}
-      </h2>
-      {data?.body && <p style={{ fontSize: '1rem', lineHeight: 1.6, color: '#dcefd8', maxWidth: '38rem', margin: '0.875rem 0 0 0' }}>{data.body}</p>}
-      {data?.plans && data.plans.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(15rem, 1fr))', gap: '0.875rem', marginTop: '1.5rem' }}>
-          {data.plans.map((p, i) => (
-            <div key={i} style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(220,239,216,0.2)', borderRadius: '0 16px 0 16px', padding: '1rem 1.125rem' }}>
-              <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#ffffff' }}>{p.name}</div>
-              {p.tagline && <div style={{ fontSize: '0.75rem', color: '#a8c89e', marginTop: '0.25rem', marginBottom: '0.625rem' }}>{p.tagline}</div>}
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
-                <span style={{ fontSize: '1.625rem', fontWeight: 800, color: '#ffffff', letterSpacing: '-0.015em' }}>
-                  {p.currency === 'GBP' ? '£' : p.currency === 'NZD' ? 'NZ$' : '$'}{p.discounted.toLocaleString()}
-                </span>
-                <span style={{ fontSize: '0.75rem', color: '#93c98a' }}>/{p.unit}</span>
-                <span style={{ fontSize: '0.75rem', color: '#7aaa72', textDecoration: 'line-through', marginLeft: '0.25rem' }}>
-                  {p.currency === 'GBP' ? '£' : p.currency === 'NZD' ? 'NZ$' : '$'}{p.regular.toLocaleString()}
-                </span>
-              </div>
-            </div>
-          ))}
+    <section style={{ ...slideShell, background: bg, color: '#ffffff', border: 'none', boxShadow: '0 24px 48px rgba(31,44,26,0.18)' }} className="proposal-slide">
+      <SectionMotion>
+      <div style={slideInner}>
+        <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#93c98a', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>
+          {data?.eyebrow ?? section.subtitle ?? 'Already earned'}
         </div>
-      )}
-      {data?.footnote && <p style={{ fontSize: '0.8125rem', color: '#a8c89e', marginTop: '1.25rem', marginBottom: 0 }}>{data.footnote}</p>}
+        <h2 style={{ fontSize: 'clamp(1.75rem, 4vw, 2.75rem)', fontWeight: 800, lineHeight: 1.05, color: '#ffffff', margin: 0, letterSpacing: '-0.02em' }}>
+          {data?.headline ?? section.title ?? 'Your 10% lifetime discount, already earned'}
+        </h2>
+        {data?.body && <p style={{ fontSize: '1rem', lineHeight: 1.6, color: '#dcefd8', maxWidth: '38rem', margin: '1rem 0 0 0' }}>{data.body}</p>}
+        {data?.plans && data.plans.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))', gap: '1rem', marginTop: '2rem' }}>
+            {data.plans.map((p, i) => (
+              <div key={i} style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(220,239,216,0.22)', borderRadius: '0 20px 0 20px', padding: '1.5rem 1.5rem 1.625rem 1.5rem' }}>
+                <div style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#ffffff', letterSpacing: '-0.005em' }}>{p.name}</div>
+                {p.tagline && <div style={{ fontSize: '0.8125rem', color: '#a8c89e', marginTop: '0.375rem', marginBottom: '1rem', lineHeight: 1.5 }}>{p.tagline}</div>}
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '2.25rem', fontWeight: 800, color: '#ffffff', letterSpacing: '-0.02em', lineHeight: 1 }}>
+                    {p.currency === 'GBP' ? '£' : p.currency === 'NZD' ? 'NZ$' : '$'}{p.discounted.toLocaleString()}
+                  </span>
+                  <span style={{ fontSize: '0.8125rem', color: '#93c98a', fontWeight: 600 }}>/{p.unit}</span>
+                  <span style={{ fontSize: '0.8125rem', color: '#7aaa72', textDecoration: 'line-through', marginLeft: '0.25rem' }}>
+                    {p.currency === 'GBP' ? '£' : p.currency === 'NZD' ? 'NZ$' : '$'}{p.regular.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {data?.footnote && <p style={{ fontSize: '0.8125rem', color: '#a8c89e', marginTop: '1.5rem', marginBottom: 0 }}>{data.footnote}</p>}
+      </div>
+      </SectionMotion>
     </section>
   )
 }
 
 /**
- * <Founders> — founder-led credibility slide.
+ * <Founders> : founder-led credibility slide.
  *
  * Single composition, two columns on desktop, stacked on mobile:
  *   [ text panel ]   [ shared photo ]
@@ -912,6 +1191,7 @@ function Founders({ section }: { section: PublicSection }) {
 
   return (
     <section style={{ ...slideShell, background: c.bg, color: c.text }} className="proposal-slide">
+      <SectionMotion>
       <div style={{ ...slideInner, maxWidth: '72rem' }}>
         <div
           style={{
@@ -922,7 +1202,9 @@ function Founders({ section }: { section: PublicSection }) {
           }}
           className="founders-grid"
         >
-          {/* Image side */}
+          {/* Image side. No hover transform here : consistent scroll-fade
+              micro-motion is the only animation across the deck, applied
+              uniformly via <SectionMotion> on every section's wrapper. */}
           <div style={{ order: 1 }}>
             <div
               style={{
@@ -938,13 +1220,6 @@ function Founders({ section }: { section: PublicSection }) {
                 boxShadow: theme === 'dark' || theme === 'brand_glass'
                   ? '0 24px 60px -24px rgba(0,0,0,0.45)'
                   : '0 24px 60px -24px rgba(31,44,26,0.30)',
-                transition: 'transform 480ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 480ms ease',
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.transform = 'translateY(-0.25rem)'
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.transform = 'translateY(0)'
               }}
             >
               {data?.image ? (
@@ -959,7 +1234,6 @@ function Founders({ section }: { section: PublicSection }) {
                     height: '100%',
                     objectFit: 'cover',
                     objectPosition: data.imagePosition ?? '50% 25%',
-                    transition: 'transform 1200ms cubic-bezier(0.22, 1, 0.36, 1)',
                   }}
                 />
               ) : (
@@ -980,7 +1254,7 @@ function Founders({ section }: { section: PublicSection }) {
                   {initials || 'L+S'}
                 </div>
               )}
-              {/* Soft inside-edge highlight — gives the image a glass-frame feel */}
+              {/* Soft inside-edge highlight : gives the image a glass-frame feel */}
               <div
                 aria-hidden="true"
                 style={{
@@ -1039,11 +1313,86 @@ function Founders({ section }: { section: PublicSection }) {
           </div>
         </div>
       </div>
+      </SectionMotion>
       <style>{`
         @media (min-width: 768px) {
           .founders-grid { grid-template-columns: 1fr 1fr !important; }
           .founders-grid > div:first-child { order: 2 !important; }
           .founders-grid > div:last-child { order: 1 !important; }
+        }
+      `}</style>
+    </section>
+  )
+}
+
+// ─── Partner badges ───────────────────────────────────────────────────────
+//
+// Horizontal row of credential pills (Webflow Premium Partner, Client First
+// Partner, Optibase Partner, etc). Each pill is leaf-radius framed,
+// brand-bordered, and lifts on hover. Optional `logo` (URL) renders before
+// the label; otherwise a small green dot stands in.
+function PartnerBadges({ section }: { section: PublicSection }) {
+  type Item = { label: string; sub?: string; logo?: string }
+  const data = safeParse<{ eyebrow?: string; intro?: string; items?: Item[] }>(section.data)
+  const items = data?.items ?? []
+  const theme = readTheme(section)
+  const c = themeColours(theme)
+  const onDark = theme === 'dark' || theme === 'brand_glass'
+  return (
+    <section style={{ ...slideShell, background: c.bg, color: c.text }} className="proposal-slide">
+      <SectionMotion>
+        <div style={{ ...slideInner, textAlign: 'center', maxWidth: '60rem' }}>
+          {(data?.eyebrow ?? section.subtitle) && (
+            <div style={{ ...slideEyebrow, color: c.eyebrow }}>{data?.eyebrow ?? section.subtitle}</div>
+          )}
+          {section.title && <h2 style={{ ...slideTitle, color: c.text }}>{section.title}</h2>}
+          {data?.intro && (
+            <p style={{ fontSize: '1rem', color: c.textMuted, lineHeight: 1.55, maxWidth: '36rem', margin: '0.875rem auto 0' }}>{data.intro}</p>
+          )}
+          <div className="proposal-partner-row" style={{ marginTop: '2rem' }}>
+            {items.map((it, i) => (
+              <div
+                key={i}
+                className="proposal-partner-pill"
+                style={{
+                  display: 'inline-flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: '0.375rem',
+                  padding: '1rem 1.25rem',
+                  background: onDark ? c.cardBg : '#ffffff',
+                  border: `1px solid ${c.cardBorderStrong}`,
+                  borderRadius: '0 16px 0 16px',
+                  textAlign: 'left',
+                  transition: 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), border-color 240ms ease, box-shadow 320ms ease',
+                  minWidth: '12rem',
+                }}
+              >
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {it.logo ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={it.logo} alt="" aria-hidden="true" style={{ width: '1.125rem', height: '1.125rem', objectFit: 'contain' }} />
+                  ) : (
+                    <span aria-hidden="true" style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: c.brandAccent, flexShrink: 0 }} />
+                  )}
+                  <span style={{ fontSize: '0.9375rem', fontWeight: 700, color: c.text, letterSpacing: '-0.005em' }}>{it.label}</span>
+                </div>
+                {it.sub && <span style={{ fontSize: '0.75rem', color: c.textSubtle, paddingLeft: '1.625rem' }}>{it.sub}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </SectionMotion>
+      <style>{`
+        .proposal-partner-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.75rem;
+          justify-content: center;
+        }
+        .proposal-partner-pill:hover {
+          transform: translateY(-0.125rem);
+          box-shadow: 0 12px 28px -16px rgba(31,44,26,0.15);
         }
       `}</style>
     </section>
@@ -1083,7 +1432,7 @@ const slideEyebrow: React.CSSProperties = {
 }
 const slideTitle: React.CSSProperties = {
   // Larger, more confident type. Manrope at heavier weight, tighter
-  // letter spacing — the section title earns the slide.
+  // letter spacing : the section title earns the slide.
   fontSize: 'clamp(1.75rem, 4.5vw, 3rem)',
   fontWeight: 800,
   lineHeight: 1.05,
