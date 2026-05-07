@@ -32,6 +32,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       decidedVariantId: schema.proposals.decidedVariantId,
       publishedSnapshot: schema.proposals.publishedSnapshot,
       publishedAt: schema.proposals.publishedAt,
+      coverTheme: schema.proposals.coverTheme,
       orgName: schema.organisations.name,
     })
     .from(schema.proposals)
@@ -71,6 +72,9 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         status: proposal.status,
         decidedAt: proposal.decidedAt,
         decidedVariantId: proposal.decidedVariantId,
+        // Cover theme stays live (it's metadata, not content) so admin
+        // toggles flow through immediately without re-publishing.
+        coverTheme: proposal.coverTheme,
         orgName: proposal.orgName,
       }
       return NextResponse.json({

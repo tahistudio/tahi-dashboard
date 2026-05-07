@@ -31,6 +31,7 @@ interface Proposal {
   decidedAt: string | null
   decidedVariantId: string | null
   publishedAt: string | null
+  coverTheme: 'light' | 'dark' | null
   orgName: string | null
   dealTitle: string | null
   createdAt: string
@@ -403,6 +404,37 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
           </FieldGroup>
           <FieldGroup label="Expires">
             <input type="date" value={proposal.expiresAt ?? ''} onChange={e => patchProposal({ expiresAt: e.currentTarget.value || null })} style={metaInputStyle} />
+          </FieldGroup>
+          <FieldGroup label="Cover theme">
+            <div className="flex" style={{ gap: '0.375rem' }}>
+              {(['light', 'dark'] as const).map(t => {
+                const active = (proposal.coverTheme ?? 'light') === t
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => {
+                      setProposal(p => p ? { ...p, coverTheme: t } : p)
+                      void patchProposal({ coverTheme: t })
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '0.4375rem 0.625rem',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      background: active ? (t === 'dark' ? '#1f2c1a' : '#FFFFFF') : 'var(--color-bg)',
+                      color: active ? (t === 'dark' ? '#FFFFFF' : '#121A0F') : 'var(--color-text-muted)',
+                      border: `1px solid ${active ? 'var(--color-brand)' : 'var(--color-border)'}`,
+                      borderRadius: 'var(--radius-sm)',
+                      cursor: 'pointer',
+                      textTransform: 'capitalize',
+                    }}
+                  >
+                    {t}
+                  </button>
+                )
+              })}
+            </div>
           </FieldGroup>
         </div>
       </div>

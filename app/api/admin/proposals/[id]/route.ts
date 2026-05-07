@@ -32,6 +32,8 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       publicSharedAt: schema.proposals.publicSharedAt,
       decidedAt: schema.proposals.decidedAt,
       decidedVariantId: schema.proposals.decidedVariantId,
+      publishedAt: schema.proposals.publishedAt,
+      coverTheme: schema.proposals.coverTheme,
       createdAt: schema.proposals.createdAt,
       updatedAt: schema.proposals.updatedAt,
       orgName: schema.organisations.name,
@@ -76,6 +78,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     effectiveDate?: string | null
     expiresAt?: string | null
     status?: 'draft' | 'shared' | 'accepted' | 'declined' | 'withdrawn' | 'expired'
+    coverTheme?: 'light' | 'dark'
   }
 
   const database = await db() as unknown as D1
@@ -98,6 +101,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.effectiveDate !== undefined) updates.effectiveDate = body.effectiveDate
   if (body.expiresAt !== undefined) updates.expiresAt = body.expiresAt
   if (body.status !== undefined) updates.status = body.status
+  if (body.coverTheme !== undefined) updates.coverTheme = body.coverTheme
 
   await database.update(schema.proposals).set(updates).where(eq(schema.proposals.id, id))
 

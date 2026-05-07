@@ -635,6 +635,13 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE proposals ADD COLUMN published_at text`,
     ],
   },
+  {
+    name: '0033',
+    description: 'Phase 9 round 2: proposals.cover_theme — light or dark cover. Independent of per-section themes (those live on section.data.theme).',
+    statements: [
+      `ALTER TABLE proposals ADD COLUMN cover_theme text DEFAULT 'light'`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

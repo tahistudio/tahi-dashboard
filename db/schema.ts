@@ -1596,6 +1596,10 @@ export const proposals = sqliteTable('proposals', {
   // OR show a "not yet published" state, depending on context.
   publishedSnapshot: text('published_snapshot'),
   publishedAt: text('published_at'),
+  // Cover slide theme — separate from per-section themes (which live on
+  // section.data.theme). 'light' (default) or 'dark'. Lets the admin set
+  // the cover's mood independently of how the body slides flow.
+  coverTheme: text('cover_theme').default('light'),
   createdById: text('created_by_id').notNull(),
   ...timestamps,
 }, (table) => [

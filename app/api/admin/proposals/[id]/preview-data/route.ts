@@ -37,6 +37,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       status: schema.proposals.status,
       decidedAt: schema.proposals.decidedAt,
       decidedVariantId: schema.proposals.decidedVariantId,
+      coverTheme: schema.proposals.coverTheme,
       orgName: schema.organisations.name,
     })
     .from(schema.proposals)

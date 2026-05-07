@@ -36,6 +36,7 @@ interface PublicProposal {
   status: string
   decidedAt: string | null
   decidedVariantId: string | null
+  coverTheme?: 'light' | 'dark' | null
   orgName: string | null
 }
 
@@ -359,19 +360,29 @@ export function ProposalViewer(props: ProposalViewerProps) {
         className="proposal-track"
         style={{ transform: `translateX(-${activeSlide * 100}vw)` }}
       >
-        {/* Cover slide */}
-        <section style={coverShell} className="proposal-slide proposal-cover">
-          <BrandCircleBackdrop />
-          <div style={coverInner}>
-            <BrandMark />
-            <CoverHeroStats />
-            <div style={{ marginTop: 'auto' }}>
-              {proposal.subtitle && <div style={coverEyebrow}>{proposal.subtitle}</div>}
-              <h1 style={coverTitle}>{proposal.title}</h1>
-            </div>
-            <CoverMetaGrid proposal={proposal} />
-          </div>
-        </section>
+        {/* Cover slide — light or dark per proposal.coverTheme */}
+        {(() => {
+          const dark = proposal.coverTheme === 'dark'
+          return (
+            <section
+              style={{ ...coverShell, background: dark ? '#1f2c1a' : '#FFFFFF', color: dark ? '#FFFFFF' : '#121A0F' }}
+              className="proposal-slide proposal-cover"
+            >
+              <BrandCircleBackdrop dark={dark} />
+              <div style={coverInner}>
+                <BrandMark dark={dark} />
+                <CoverHeroStats dark={dark} />
+                <div style={{ marginTop: 'auto' }}>
+                  {proposal.subtitle && (
+                    <div style={{ ...coverEyebrow, color: dark ? '#a8c89e' : '#8a9987' }}>{proposal.subtitle}</div>
+                  )}
+                  <h1 style={{ ...coverTitle, color: dark ? '#FFFFFF' : '#121A0F' }}>{proposal.title}</h1>
+                </div>
+                <CoverMetaGrid proposal={proposal} dark={dark} />
+              </div>
+            </section>
+          )
+        })()}
 
         {/* Shared sections in order */}
         {sections.map(s => <ProposalSectionBlock key={s.id} section={s} />)}
@@ -663,7 +674,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
 
 // ─── Subcomponents ───────────────────────────────────────────────────────
 
-function CoverMetaGrid({ proposal }: { proposal: PublicProposal }) {
+function CoverMetaGrid({ proposal, dark = false }: { proposal: PublicProposal; dark?: boolean }) {
   const cells: { label: string; value: string }[] = []
   if (proposal.preparedFor) cells.push({ label: 'Prepared for', value: proposal.preparedFor })
   if (proposal.preparedBy) cells.push({ label: 'Prepared by', value: proposal.preparedBy })
@@ -674,10 +685,10 @@ function CoverMetaGrid({ proposal }: { proposal: PublicProposal }) {
     <div style={coverMetaGrid}>
       {cells.map(c => (
         <div key={c.label} style={{ minWidth: 0 }}>
-          <div style={{ fontSize: '0.625rem', fontWeight: 600, color: '#8a9987', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.25rem' }}>
+          <div style={{ fontSize: '0.625rem', fontWeight: 600, color: dark ? '#a8c89e' : '#8a9987', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.25rem' }}>
             {c.label}
           </div>
-          <div style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#1f2c1a', overflowWrap: 'break-word', wordBreak: 'break-word' }}>
+          <div style={{ fontSize: '0.9375rem', fontWeight: 600, color: dark ? '#FFFFFF' : '#1f2c1a', overflowWrap: 'break-word', wordBreak: 'break-word' }}>
             {c.value}
           </div>
         </div>
@@ -820,7 +831,7 @@ function SlideNav({ active, total, onChange }: {
  * 20–60% opacity, partial-cropped at the canvas edge, in Brand Green.
  * Replaces the off-brand radial gradient that used to sit on covers.
  */
-function BrandCircleBackdrop() {
+function BrandCircleBackdrop({ dark = false }: { dark?: boolean }) {
   return (
     <svg
       aria-hidden="true"
@@ -833,7 +844,9 @@ function BrandCircleBackdrop() {
         width: '50vw',
         maxWidth: '52rem',
         height: 'auto',
-        opacity: 0.22,
+        // Slightly higher opacity on dark mode so the ring still reads
+        // against the forest backdrop.
+        opacity: dark ? 0.32 : 0.22,
         pointerEvents: 'none',
         zIndex: 0,
       }}
@@ -842,13 +855,13 @@ function BrandCircleBackdrop() {
         fillRule="evenodd"
         clipRule="evenodd"
         d="M225.5 79.2391C67.9548 79.2391 -59.7609 206.955 -59.7609 364.5C-59.7609 522.045 67.9548 649.761 225.5 649.761C383.045 649.761 510.761 522.045 510.761 364.5C510.761 206.955 383.045 79.2391 225.5 79.2391ZM-139 364.5C-139 163.192 24.1922 0 225.5 0C426.808 0 590 163.192 590 364.5C590 565.808 426.808 729 225.5 729C24.1922 729 -139 565.808 -139 364.5Z"
-        fill="#5A824E"
+        fill={dark ? '#93c98a' : '#5A824E'}
       />
     </svg>
   )
 }
 
-function CoverHeroStats() {
+function CoverHeroStats({ dark = false }: { dark?: boolean }) {
   const stats: { value: string; label: string }[] = [
     { value: '12 days', label: 'median project → sign' },
     { value: 'Premium', label: 'Webflow Partner' },
@@ -858,9 +871,18 @@ function CoverHeroStats() {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))', gap: '0.625rem', marginTop: '0.875rem' }}>
       {stats.map(s => (
-        <div key={s.label} style={{ background: 'rgba(255,255,255,0.65)', border: '1px solid #e8f0e6', borderRadius: '0 12px 0 12px', padding: '0.625rem 0.875rem', minWidth: 0 }}>
-          <div style={{ fontSize: '0.875rem', fontWeight: 800, color: '#1f2c1a', letterSpacing: '-0.01em' }}>{s.value}</div>
-          <div style={{ fontSize: '0.6875rem', color: '#5a6657' }}>{s.label}</div>
+        <div
+          key={s.label}
+          style={{
+            background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.65)',
+            border: `1px solid ${dark ? 'rgba(220,239,216,0.2)' : '#e8f0e6'}`,
+            borderRadius: '0 12px 0 12px',
+            padding: '0.625rem 0.875rem',
+            minWidth: 0,
+          }}
+        >
+          <div style={{ fontSize: '0.875rem', fontWeight: 800, color: dark ? '#FFFFFF' : '#1f2c1a', letterSpacing: '-0.01em' }}>{s.value}</div>
+          <div style={{ fontSize: '0.6875rem', color: dark ? '#a8c89e' : '#5a6657' }}>{s.label}</div>
         </div>
       ))}
     </div>
@@ -1078,7 +1100,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
-function BrandMark({ size = 'md' }: { size?: 'sm' | 'md' }) {
+function BrandMark({ size = 'md', dark = false }: { size?: 'sm' | 'md'; dark?: boolean }) {
   const dim = size === 'sm' ? '1.25rem' : '1.625rem'
   return (
     <div className="inline-flex items-center" style={{ gap: '0.5rem' }}>
@@ -1092,7 +1114,7 @@ function BrandMark({ size = 'md' }: { size?: 'sm' | 'md' }) {
       <span style={{
         fontSize: size === 'sm' ? '0.8125rem' : '0.9375rem',
         fontWeight: 700,
-        color: '#1f2c1a',
+        color: dark ? '#FFFFFF' : '#1f2c1a',
         letterSpacing: '-0.01em',
       }}>
         Tahi Studio
