@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink, Mail, BookmarkPlus, Eye, ChevronUp, ChevronDown, Settings as SettingsIcon, MessageSquare, BarChart3, MoreHorizontal, Check, FileText } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink, Mail, BookmarkPlus, Eye, ChevronUp, ChevronDown, MessageSquare, BarChart3, MoreHorizontal, Check, FileText } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
@@ -453,13 +453,29 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
   return (
     <div style={builderShell} className="proposal-builder">
       <style>{`
+        @media (max-width: 1280px) {
+          .proposal-builder-grid {
+            grid-template-columns: 17rem minmax(0, 1fr) !important;
+          }
+          .proposal-builder-rail {
+            position: static !important;
+            height: auto !important;
+            grid-column: 1 / -1 !important;
+            border-left: none !important;
+            border-top: 1px solid var(--color-border-subtle) !important;
+            padding: 1.125rem clamp(1rem, 3vw, 2.5rem) !important;
+          }
+        }
         @media (max-width: 900px) {
           .proposal-builder-grid {
             grid-template-columns: 1fr !important;
           }
           .proposal-builder-nav {
             position: static !important;
+            height: auto !important;
             max-height: none !important;
+            border-right: none !important;
+            border-bottom: 1px solid var(--color-border-subtle) !important;
           }
         }
         @keyframes editorFadeIn {
@@ -503,10 +519,22 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
           {hasUnpublished && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+              padding: '0.25rem 0.625rem',
+              fontSize: '0.625rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+              background: '#fff7ed', color: '#9a3412',
+              border: '1px solid #fed7aa', borderRadius: '999px',
+            }} title="Edits are not yet on the public link">
+              <span aria-hidden="true" style={{ width: '0.375rem', height: '0.375rem', borderRadius: '50%', background: '#fb923c' }} />
+              Unpublished
+            </span>
+          )}
+          {hasUnpublished && (
             <button
               onClick={() => trackSave(handlePublish())}
               disabled={publishing}
-              style={{ ...toolbarPrimary, background: '#fb923c', borderColor: '#fb923c' }}
+              style={toolbarPrimary}
               title="Push the latest edits to the public viewer"
             >
               {publishing ? 'Publishing…' : 'Publish'}
@@ -516,31 +544,12 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
             <Eye size={13} />
             Preview
           </Link>
-          {publicUrl ? (
-            <>
-              <button onClick={() => { void ensureContacts(); setShowEmail(true) }} className="inline-flex items-center" style={toolbarPrimary}>
-                <Mail size={13} />
-                Email
-              </button>
-              <button onClick={() => { navigator.clipboard.writeText(publicUrl).then(() => showToast('Public link copied', 'success')) }} className="inline-flex items-center" style={toolbarBtn} title={publicUrl}>
-                <Copy size={13} />
-                Copy
-              </button>
-            </>
-          ) : (
-            <button onClick={handleShare} disabled={sharing} className="inline-flex items-center" style={toolbarPrimary}>
-              <Share2 size={13} />
-              {sharing ? 'Sharing…' : 'Share'}
-            </button>
-          )}
           <BuilderMoreMenu
             open={moreMenuOpen}
             onToggle={() => setMoreMenuOpen(v => !v)}
             onClose={() => setMoreMenuOpen(false)}
             items={[
-              { icon: <ExternalLink size={13} />, label: 'Open public link', disabled: !publicUrl, onClick: () => publicUrl && window.open(publicUrl, '_blank', 'noreferrer') },
               { icon: <BookmarkPlus size={13} />, label: 'Save as template', onClick: () => setShowSaveTemplate(true) },
-              ...(publicUrl ? [{ icon: <Trash2 size={13} />, label: 'Revoke public link', danger: true, onClick: () => trackSave(handleUnshare()) }] : []),
               { icon: <Trash2 size={13} />, label: 'Delete proposal', danger: true, onClick: () => setShowDeleteConfirm(true) },
             ]}
           />
@@ -598,33 +607,28 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
             </button>
           </BuilderNavGroup>
 
-          <BuilderNavGroup label="More">
-            <BuilderNavItem
-              active={activeView === 'settings'}
-              onClick={() => setActiveView('settings')}
-              icon={<SettingsIcon size={12} />}
-              label="Settings"
-              hint="Linked to, dates, theme"
-            />
-            {acceptances.length > 0 && (
-              <BuilderNavItem
-                active={activeView === 'decisions'}
-                onClick={() => setActiveView('decisions')}
-                icon={<MessageSquare size={12} />}
-                label="Decisions"
-                hint={`${acceptances.length} response${acceptances.length === 1 ? '' : 's'}`}
-              />
-            )}
-            {proposal.publicShareToken && (
-              <BuilderNavItem
-                active={activeView === 'analytics'}
-                onClick={() => setActiveView('analytics')}
-                icon={<BarChart3 size={12} />}
-                label="Analytics"
-                hint="View, time on page"
-              />
-            )}
-          </BuilderNavGroup>
+          {(acceptances.length > 0 || proposal.publicShareToken) && (
+            <BuilderNavGroup label="More">
+              {acceptances.length > 0 && (
+                <BuilderNavItem
+                  active={activeView === 'decisions'}
+                  onClick={() => setActiveView('decisions')}
+                  icon={<MessageSquare size={12} />}
+                  label="Decisions"
+                  hint={`${acceptances.length} response${acceptances.length === 1 ? '' : 's'}`}
+                />
+              )}
+              {proposal.publicShareToken && (
+                <BuilderNavItem
+                  active={activeView === 'analytics'}
+                  onClick={() => setActiveView('analytics')}
+                  icon={<BarChart3 size={12} />}
+                  label="Analytics"
+                  hint="View, time on page"
+                />
+              )}
+            </BuilderNavGroup>
+          )}
         </aside>
 
         {/* Active editor */}
@@ -685,16 +689,6 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
             )
           })()}
 
-          {activeView === 'settings' && (
-            <SettingsPanel
-              proposal={proposal}
-              setProposal={setProposal}
-              onPatch={(p) => trackSave(patchProposal(p))}
-              proposalId={proposalId}
-              onLinkChanged={() => void fetchAll({ silent: true })}
-            />
-          )}
-
           {activeView === 'decisions' && (
             <DecisionsPanel acceptances={acceptances} variants={variants} proposalTitle={proposal.title} />
           )}
@@ -705,6 +699,23 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
             </SlideEditorShell>
           )}
         </main>
+
+        {/* Right rail — proposal-level settings, always visible on desktop */}
+        <aside style={builderRail} className="proposal-builder-rail">
+          <BuilderRail
+            proposal={proposal}
+            setProposal={setProposal}
+            onPatch={(p) => trackSave(patchProposal(p))}
+            proposalId={proposalId}
+            onLinkChanged={() => void fetchAll({ silent: true })}
+            publicUrl={publicUrl}
+            sharing={sharing}
+            onShare={() => trackSave(handleShare())}
+            onUnshare={() => trackSave(handleUnshare())}
+            onCopy={(url) => navigator.clipboard.writeText(url).then(() => showToast('Public link copied', 'success'))}
+            onEmail={() => { void ensureContacts(); setShowEmail(true) }}
+          />
+        </aside>
       </div>
 
       <EmailShareModal
@@ -791,7 +802,7 @@ const builderTitleInput: React.CSSProperties = {
 
 const builderGrid: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '17rem minmax(0, 1fr)',
+  gridTemplateColumns: '17rem minmax(0, 1fr) 19rem',
   flex: 1,
   minHeight: 0,
 }
@@ -813,6 +824,21 @@ const builderNav: React.CSSProperties = {
 const builderMain: React.CSSProperties = {
   padding: 'clamp(1rem, 3vw, 2.5rem)',
   animation: 'editorFadeIn 240ms cubic-bezier(0.22, 1, 0.36, 1)',
+  minWidth: 0,
+}
+
+const builderRail: React.CSSProperties = {
+  position: 'sticky',
+  top: '3.625rem',
+  alignSelf: 'start',
+  height: 'calc(100vh - 3.625rem)',
+  overflowY: 'auto',
+  borderLeft: '1px solid var(--color-border-subtle)',
+  padding: '1.125rem 1rem',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '1rem',
+  background: 'var(--color-bg)',
 }
 
 const navAddBtn: React.CSSProperties = {
@@ -1237,22 +1263,91 @@ function CoverEditor({
   )
 }
 
-function SettingsPanel({
+/**
+ * <BuilderRail> — always-visible right rail of proposal-level settings.
+ *
+ * Mirrors the deal-detail layout pattern (sidebar of metadata next to the
+ * working surface). On screens under 1280px the rail moves to a panel
+ * below the editor; under 900px the whole grid stacks vertically.
+ *
+ * Sections, top to bottom: public link controls, cover theme, linked-to
+ * (org + deal), cover meta (prepared for, prepared by, dates).
+ */
+function BuilderRail({
   proposal, setProposal, onPatch, proposalId, onLinkChanged,
+  publicUrl, sharing, onShare, onUnshare, onCopy, onEmail,
 }: {
   proposal: Proposal
   setProposal: React.Dispatch<React.SetStateAction<Proposal | null>>
   onPatch: (changes: Partial<Proposal>) => void
   proposalId: string
   onLinkChanged: () => void
+  publicUrl: string | null
+  sharing: boolean
+  onShare: () => void
+  onUnshare: () => void
+  onCopy: (url: string) => void
+  onEmail: () => void
 }) {
   return (
-    <div style={{ maxWidth: '52rem', margin: '0 auto' }}>
-      <div style={{ marginBottom: '1.25rem' }}>
-        <div style={{ fontSize: '0.625rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Settings</div>
-        <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text)', marginTop: '0.25rem', letterSpacing: '-0.01em' }}>Proposal metadata</div>
-      </div>
-      <div style={{ display: 'grid', gap: '1rem' }}>
+    <>
+      <RailSection title="Public link">
+        {publicUrl ? (
+          <div style={{ display: 'grid', gap: '0.5rem' }}>
+            <div style={{
+              padding: '0.5rem 0.625rem',
+              fontSize: '0.6875rem',
+              color: 'var(--color-text-muted)',
+              background: 'var(--color-bg-secondary)',
+              border: '1px solid var(--color-border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              wordBreak: 'break-all',
+              fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+            }}>
+              {publicUrl}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem' }}>
+              <button onClick={onEmail} className="inline-flex items-center" style={{ ...railBtn, background: 'var(--color-brand)', color: '#FFFFFF', borderColor: 'var(--color-brand)', flex: 1 }}>
+                <Mail size={12} />
+                Email
+              </button>
+              <button onClick={() => onCopy(publicUrl)} className="inline-flex items-center" style={railBtn} title="Copy URL">
+                <Copy size={12} />
+                Copy
+              </button>
+              <a href={publicUrl} target="_blank" rel="noreferrer" className="inline-flex items-center" style={railBtn} title="Open in new tab">
+                <ExternalLink size={12} />
+                Open
+              </a>
+            </div>
+            <button onClick={onUnshare} className="inline-flex items-center" style={{ ...railBtn, color: 'var(--color-danger)', justifyContent: 'center' }}>
+              Revoke link
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: '0.5rem' }}>
+            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.5 }}>
+              Generate a public link to send the proposal to the client.
+            </p>
+            <button onClick={onShare} disabled={sharing} className="inline-flex items-center" style={{ ...railBtn, background: 'var(--color-brand)', color: '#FFFFFF', borderColor: 'var(--color-brand)', justifyContent: 'center' }}>
+              <Share2 size={12} />
+              {sharing ? 'Generating…' : 'Generate public link'}
+            </button>
+          </div>
+        )}
+      </RailSection>
+
+      <RailSection title="Cover theme">
+        <CoverThemePicker
+          value={proposal.coverTheme ?? 'brand_glass'}
+          onChange={t => {
+            setProposal(p => p ? { ...p, coverTheme: t } : p)
+            onPatch({ coverTheme: t })
+          }}
+        />
+      </RailSection>
+
+      <RailSection title="Linked to">
         <LinkedToPanel
           resourceType="proposal"
           resourceId={proposalId}
@@ -1262,15 +1357,17 @@ function SettingsPanel({
           dealTitle={proposal.dealTitle}
           onChanged={onLinkChanged}
         />
-        <div style={{ padding: '1.25rem', background: 'var(--color-bg)', border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-lg)', display: 'grid', gap: '0.875rem' }}>
-          <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--color-text)' }}>Cover meta</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '0.875rem' }}>
-            <FieldGroup label="Prepared for">
-              <input type="text" value={proposal.preparedFor ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedFor: e.target.value } : p)} onBlur={e => onPatch({ preparedFor: e.currentTarget.value || null })} style={metaInputStyle} />
-            </FieldGroup>
-            <FieldGroup label="Prepared by">
-              <input type="text" value={proposal.preparedBy ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedBy: e.target.value } : p)} onBlur={e => onPatch({ preparedBy: e.currentTarget.value || null })} style={metaInputStyle} />
-            </FieldGroup>
+      </RailSection>
+
+      <RailSection title="Cover meta">
+        <div style={{ display: 'grid', gap: '0.625rem' }}>
+          <FieldGroup label="Prepared for">
+            <input type="text" value={proposal.preparedFor ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedFor: e.target.value } : p)} onBlur={e => onPatch({ preparedFor: e.currentTarget.value || null })} style={metaInputStyle} />
+          </FieldGroup>
+          <FieldGroup label="Prepared by">
+            <input type="text" value={proposal.preparedBy ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedBy: e.target.value } : p)} onBlur={e => onPatch({ preparedBy: e.currentTarget.value || null })} style={metaInputStyle} />
+          </FieldGroup>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
             <FieldGroup label="Effective">
               <input type="date" value={proposal.effectiveDate ?? ''} onChange={e => onPatch({ effectiveDate: e.currentTarget.value || null })} style={metaInputStyle} />
             </FieldGroup>
@@ -1278,19 +1375,35 @@ function SettingsPanel({
               <input type="date" value={proposal.expiresAt ?? ''} onChange={e => onPatch({ expiresAt: e.currentTarget.value || null })} style={metaInputStyle} />
             </FieldGroup>
           </div>
-          <FieldGroup label="Cover theme">
-            <CoverThemePicker
-              value={proposal.coverTheme ?? 'brand_glass'}
-              onChange={t => {
-                setProposal(p => p ? { ...p, coverTheme: t } : p)
-                onPatch({ coverTheme: t })
-              }}
-            />
-          </FieldGroup>
         </div>
+      </RailSection>
+    </>
+  )
+}
+
+function RailSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div style={{ fontSize: '0.625rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>
+        {title}
       </div>
+      {children}
     </div>
   )
+}
+
+const railBtn: React.CSSProperties = {
+  padding: '0.4375rem 0.625rem',
+  fontSize: '0.75rem',
+  fontWeight: 600,
+  background: 'var(--color-bg)',
+  color: 'var(--color-text)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  cursor: 'pointer',
+  gap: '0.375rem',
+  textDecoration: 'none',
+  whiteSpace: 'nowrap',
 }
 
 function DecisionsPanel({
@@ -1394,6 +1507,7 @@ function SectionEditor({ section, onChange, onDelete, onMoveUp, onMoveDown, isFi
         <CoverThemePicker
           value={(data.theme as CoverThemeValue) ?? 'light'}
           onChange={t => { const next = { ...data, theme: t }; setData(next); onChange({ data: next }) }}
+          showSuggested={false}
         />
       </FieldGroup>
       {STRUCTURED_TYPES.has(section.type) ? (
@@ -1622,9 +1736,17 @@ const COVER_THEMES: ReadonlyArray<{
 function CoverThemePicker({
   value,
   onChange,
+  showSuggested = true,
 }: {
   value: CoverThemeValue
   onChange: (v: CoverThemeValue) => void
+  /**
+   * Whether to show the "Suggested" callout next to brand_glass. The cover
+   * picker shows it (brand_glass is the recommended cover); per-slide
+   * pickers pass false so individual slides don't all suggest the same
+   * theme.
+   */
+  showSuggested?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const current = COVER_THEMES.find(t => t.value === value) ?? COVER_THEMES[0]
@@ -1682,7 +1804,7 @@ function CoverThemePicker({
         <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {current.label}
         </span>
-        {current.suggested && (
+        {showSuggested && current.suggested && (
           <span style={{ fontSize: '0.625rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-brand)' }}>
             Suggested
           </span>
@@ -1744,13 +1866,18 @@ function CoverThemePicker({
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
                     <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>{t.label}</span>
-                    {t.suggested && (
+                    {showSuggested && t.suggested && (
                       <span style={{ fontSize: '0.5625rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-brand)' }}>
                         Suggested
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', marginTop: '0.0625rem' }}>{t.hint}</div>
+                  {(showSuggested || !t.suggested) && (
+                    <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', marginTop: '0.0625rem' }}>{t.hint}</div>
+                  )}
+                  {!showSuggested && t.suggested && (
+                    <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', marginTop: '0.0625rem' }}>Brand green with glass cards</div>
+                  )}
                 </span>
                 {active && <span aria-hidden="true" style={{ width: '0.375rem', height: '0.375rem', borderRadius: '50%', background: 'var(--color-brand)', flexShrink: 0 }} />}
               </button>
@@ -1787,12 +1914,3 @@ const toolbarPrimary: React.CSSProperties = {
   cursor: 'pointer',
 }
 
-const emptyHint: React.CSSProperties = {
-  padding: '1rem',
-  textAlign: 'center',
-  background: 'var(--color-bg-secondary)',
-  border: '1px dashed var(--color-border)',
-  borderRadius: 'var(--radius-md)',
-  fontSize: '0.8125rem',
-  color: 'var(--color-text-subtle)',
-}
