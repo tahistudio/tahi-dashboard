@@ -3,9 +3,17 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Plus, FileText, ExternalLink, Search } from 'lucide-react'
+import { formatDistanceToNow } from 'date-fns'
+import {
+  FileText, Plus, Search, RefreshCw, Building2, Target, Trash2, ExternalLink, Eye,
+} from 'lucide-react'
+import { TahiButton } from '@/components/tahi/tahi-button'
+import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
+import { EmptyState } from '@/components/tahi/empty-state'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
 import { PageHeader } from '@/components/tahi/page-header'
+import { Input } from '@/components/tahi/input'
 import { useToast } from '@/components/tahi/toast'
 
 interface ProposalListItem {
@@ -26,16 +34,41 @@ interface ProposalListItem {
   dealTitle: string | null
 }
 
-const STATUS_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
-  draft: { bg: 'var(--color-bg-tertiary)', fg: 'var(--color-text-muted)', label: 'Draft' },
-  shared: { bg: 'var(--color-brand-50)', fg: 'var(--color-brand-dark)', label: 'Shared' },
-  accepted: { bg: '#f0fdf4', fg: '#15803d', label: 'Accepted' },
-  declined: { bg: '#fef2f2', fg: '#dc2626', label: 'Declined' },
-  withdrawn: { bg: 'var(--color-bg-secondary)', fg: 'var(--color-text-subtle)', label: 'Withdrawn' },
-  expired: { bg: 'var(--color-bg-secondary)', fg: 'var(--color-text-subtle)', label: 'Expired' },
+type ProposalStatus = 'draft' | 'shared' | 'accepted' | 'declined' | 'withdrawn' | 'expired'
+
+const STATUS_STYLES: Record<ProposalStatus, { bg: string; color: string; label: string }> = {
+  draft: { bg: 'var(--color-bg-tertiary)', color: 'var(--color-text-muted)', label: 'Draft' },
+  shared: { bg: '#eff6ff', color: '#1e40af', label: 'Shared' },
+  accepted: { bg: '#f0fdf4', color: '#166534', label: 'Accepted' },
+  declined: { bg: '#fef2f2', color: '#991b1b', label: 'Declined' },
+  withdrawn: { bg: 'var(--color-bg-secondary)', color: 'var(--color-text-subtle)', label: 'Withdrawn' },
+  expired: { bg: '#fff7ed', color: '#9a3412', label: 'Expired' },
 }
 
+const STATUS_TABS: { value: 'all' | ProposalStatus; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'draft', label: 'Draft' },
+  { value: 'shared', label: 'Shared' },
+  { value: 'accepted', label: 'Accepted' },
+  { value: 'declined', label: 'Declined' },
+  { value: 'withdrawn', label: 'Withdrawn' },
+  { value: 'expired', label: 'Expired' },
+]
+
 interface TemplateOption { id: string; name: string; description: string | null }
+
+function statusKey(status: string): ProposalStatus {
+  return (status in STATUS_STYLES ? status : 'draft') as ProposalStatus
+}
+
+function relativeTime(iso: string | null): string {
+  if (!iso) return '-'
+  try {
+    return formatDistanceToNow(new Date(iso), { addSuffix: true })
+  } catch {
+    return iso
+  }
+}
 
 export function ProposalsContent() {
   const router = useRouter()
@@ -44,8 +77,10 @@ export function ProposalsContent() {
   const [templates, setTemplates] = useState<TemplateOption[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | ProposalStatus>('all')
   const [creating, setCreating] = useState(false)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<ProposalListItem | null>(null)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -57,6 +92,8 @@ export function ProposalsContent() {
       if (pRes.ok) {
         const data = await pRes.json() as { items: ProposalListItem[] }
         setItems(data.items ?? [])
+      } else {
+        setItems([])
       }
       if (tRes.ok) {
         const data = await tRes.json() as { items: TemplateOption[] }
@@ -72,14 +109,15 @@ export function ProposalsContent() {
   useEffect(() => { void fetchAll() }, [fetchAll])
 
   const filtered = items.filter(p => {
-    if (!search.trim()) return true
-    const q = search.toLowerCase()
-    return (
-      p.title.toLowerCase().includes(q) ||
-      (p.orgName ?? '').toLowerCase().includes(q) ||
-      (p.dealTitle ?? '').toLowerCase().includes(q) ||
-      (p.preparedFor ?? '').toLowerCase().includes(q)
-    )
+    if (statusFilter !== 'all' && statusKey(p.status) !== statusFilter) return false
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      if (!p.title.toLowerCase().includes(q) &&
+          !(p.orgName ?? '').toLowerCase().includes(q) &&
+          !(p.dealTitle ?? '').toLowerCase().includes(q) &&
+          !(p.preparedFor ?? '').toLowerCase().includes(q)) return false
+    }
+    return true
   })
 
   async function createBlankProposal() {
@@ -132,123 +170,186 @@ export function ProposalsContent() {
     }
   }
 
-  function handleCreate() {
+  async function handleDelete() {
+    if (!deleteTarget) return
+    const res = await fetch(apiPath(`/api/admin/proposals/${deleteTarget.id}`), { method: 'DELETE' })
+    if (res.ok) {
+      setDeleteTarget(null)
+      void fetchAll()
+    } else {
+      showToast('Failed to delete proposal', 'error')
+    }
+  }
+
+  function openCreate() {
     setShowCreateDialog(true)
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+    <div className="space-y-6">
       <PageHeader
         title="Proposals"
-        subtitle="Premium client proposals with package variants and public links"
+        subtitle="Premium client proposals with package variants and public links."
       >
-        <button
-          onClick={handleCreate}
-          disabled={creating}
-          className="inline-flex items-center font-medium hover:-translate-y-px"
-          style={{
-            padding: 'var(--space-2) var(--space-4)',
-            fontSize: 'var(--text-sm)',
-            fontWeight: 600,
-            background: 'var(--color-brand)',
-            color: 'white',
-            border: 'none',
-            borderRadius: 'var(--radius-leaf-sm)',
-            gap: 'var(--space-1-5)',
-            transition: 'background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease',
-            height: '2.25rem',
-            cursor: creating ? 'not-allowed' : 'pointer',
-            opacity: creating ? 0.6 : 1,
-          }}
-        >
-          <Plus size={15} aria-hidden="true" />
-          {creating ? 'Creating…' : 'New proposal'}
-        </button>
+        <TahiButton variant="secondary" size="sm" onClick={fetchAll} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+          Refresh
+        </TahiButton>
+        <TahiButton size="sm" onClick={openCreate} disabled={creating} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+          {creating ? 'Creating...' : 'New proposal'}
+        </TahiButton>
       </PageHeader>
 
-      <div className="relative" style={{ maxWidth: '24rem' }}>
-        <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-subtle)', pointerEvents: 'none' }} aria-hidden="true" />
-        <input
-          type="search"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search by title, client or deal…"
-          style={{
-            width: '100%',
-            padding: '0.5rem 0.75rem 0.5rem 2.25rem',
-            fontSize: '0.875rem',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-md)',
-            background: 'var(--color-bg)',
-            color: 'var(--color-text)',
-          }}
-        />
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex-1 max-w-sm">
+          <Input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search proposals..."
+            leadingIcon={<Search size={14} aria-hidden="true" />}
+            style={{ width: '100%' }}
+          />
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {STATUS_TABS.map(tab => (
+            <button
+              key={tab.value}
+              onClick={() => setStatusFilter(tab.value)}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+              style={{
+                background: statusFilter === tab.value ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
+                color: statusFilter === tab.value ? 'white' : 'var(--color-text-muted)',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {loading ? (
-        <div className="flex flex-col gap-2">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="animate-pulse rounded-lg" style={{ height: '5rem', background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border-subtle)' }} />
-          ))}
-        </div>
+        <LoadingSkeleton rows={6} />
       ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl" style={{ padding: '3rem 2rem', border: '1px dashed var(--color-border)', background: 'var(--color-bg)' }}>
-          <div className="flex items-center justify-center" style={{ width: '3rem', height: '3rem', borderRadius: 'var(--radius-leaf)', background: 'var(--color-brand-50)', color: 'var(--color-brand)', marginBottom: '1rem' }}>
-            <FileText size={20} aria-hidden="true" />
-          </div>
-          <h3 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)', marginBottom: '0.25rem' }}>
-            {search.trim() ? 'No proposals match your search' : 'No proposals yet'}
-          </h3>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
-            {search.trim() ? 'Try a different keyword' : 'Create one to send a premium 16:9 deck with 1-3 packages.'}
-          </p>
-          {!search.trim() && (
-            <button
-              onClick={handleCreate}
-              disabled={creating}
-              className="inline-flex items-center font-medium"
-              style={{ padding: 'var(--space-2) var(--space-4)', fontSize: '0.875rem', fontWeight: 600, background: 'var(--color-brand)', color: 'white', border: 'none', borderRadius: 'var(--radius-leaf-sm)', gap: 'var(--space-1-5)', cursor: 'pointer' }}
-            >
-              <Plus size={15} />
-              New proposal
-            </button>
-          )}
-        </div>
+        items.length === 0 ? (
+          <EmptyState
+            icon={<FileText className="w-8 h-8 text-white" />}
+            title="No proposals yet"
+            description="Create one to send a premium 16:9 deck with 1-3 packages."
+            ctaLabel="New proposal"
+            onCtaClick={openCreate}
+          />
+        ) : (
+          <EmptyState
+            variant="inline"
+            icon={<FileText className="w-8 h-8" />}
+            title="No proposals match your filters"
+            description="Try clearing the search or changing the status tab."
+          />
+        )
       ) : (
-        <div className="flex flex-col" style={{ gap: '0.5rem' }}>
-          {filtered.map(p => {
-            const tone = STATUS_STYLE[p.status] ?? STATUS_STYLE.draft
-            return (
-              <Link
-                key={p.id}
-                href={`/proposals/${p.id}`}
-                className="block rounded-xl transition-colors"
-                style={{ padding: '1rem 1.25rem', border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg)', textDecoration: 'none', color: 'inherit' }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-subtle)'; e.currentTarget.style.background = 'var(--color-bg)' }}
-              >
-                <div className="flex items-center justify-between" style={{ gap: '1rem' }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="flex items-center" style={{ gap: '0.5rem', marginBottom: '0.25rem' }}>
-                      <h3 className="font-semibold truncate" style={{ fontSize: '0.9375rem', color: 'var(--color-text)' }}>
-                        {p.title}
-                      </h3>
-                      <span style={{ padding: '0.125rem 0.5rem', fontSize: '0.6875rem', fontWeight: 600, background: tone.bg, color: tone.fg, borderRadius: 'var(--radius-full)', textTransform: 'uppercase', letterSpacing: '0.03em', flexShrink: 0 }}>
-                        {tone.label}
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--color-border)]">
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Name</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Status</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)] hidden md:table-cell">Org</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)] hidden md:table-cell">Deal</th>
+                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)] hidden lg:table-cell">Updated</th>
+                <th className="text-right px-4 py-3 font-medium text-[var(--color-text-muted)]">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(p => {
+                const sty = STATUS_STYLES[statusKey(p.status)]
+                return (
+                  <tr
+                    key={p.id}
+                    className="border-b border-[var(--color-border-subtle)] last:border-0 hover:bg-[var(--color-bg-secondary)] transition-colors cursor-pointer"
+                    onClick={() => router.push(`/proposals/${p.id}`)}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-[var(--color-text)]">{p.title}</div>
+                      {p.preparedFor && (
+                        <div className="text-xs text-[var(--color-text-subtle)] mt-0.5 md:hidden">
+                          for {p.preparedFor}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className="text-xs font-medium px-2 py-0.5 rounded-full"
+                        style={{ background: sty.bg, color: sty.color }}
+                      >
+                        {sty.label}
                       </span>
-                    </div>
-                    <div className="flex items-center" style={{ gap: '0.75rem', fontSize: '0.75rem', color: 'var(--color-text-subtle)', flexWrap: 'wrap' }}>
-                      {p.orgName && <span>{p.orgName}</span>}
-                      {p.dealTitle && <span>· {p.dealTitle}</span>}
-                      {p.preparedFor && <span>· for {p.preparedFor}</span>}
-                      {p.expiresAt && <span>· expires {new Date(p.expiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>}
-                    </div>
-                  </div>
-                  {p.publicShareToken && <ExternalLink size={14} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} aria-hidden="true" />}
-                </div>
-              </Link>
-            )
-          })}
+                    </td>
+                    <td className="px-4 py-3 text-[var(--color-text-muted)] hidden md:table-cell">
+                      {p.orgId && p.orgName ? (
+                        <Link
+                          href={`/clients/${p.orgId}`}
+                          onClick={e => e.stopPropagation()}
+                          className="inline-flex items-center gap-1.5 hover:text-[var(--color-brand-dark)] transition-colors"
+                        >
+                          <Building2 className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span className="truncate max-w-[14rem]">{p.orgName}</span>
+                        </Link>
+                      ) : <span className="text-[var(--color-text-subtle)]">-</span>}
+                    </td>
+                    <td className="px-4 py-3 text-[var(--color-text-muted)] hidden md:table-cell">
+                      {p.dealId && p.dealTitle ? (
+                        <Link
+                          href={`/pipeline/${p.dealId}`}
+                          onClick={e => e.stopPropagation()}
+                          className="inline-flex items-center gap-1.5 hover:text-[var(--color-brand-dark)] transition-colors"
+                        >
+                          <Target className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span className="truncate max-w-[14rem]">{p.dealTitle}</span>
+                        </Link>
+                      ) : <span className="text-[var(--color-text-subtle)]">-</span>}
+                    </td>
+                    <td className="px-4 py-3 text-[var(--color-text-muted)] hidden lg:table-cell">
+                      {relativeTime(p.updatedAt)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div
+                        className="flex items-center justify-end gap-1"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        {p.publicShareToken && (
+                          <a
+                            href={`/dashboard/p/proposal/${p.publicShareToken}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-subtle)] hover:text-[var(--color-text)] transition-colors"
+                            aria-label="Open public viewer"
+                            title="Open public viewer"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        <Link
+                          href={`/proposals/${p.id}`}
+                          className="p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-subtle)] hover:text-[var(--color-text)] transition-colors"
+                          aria-label="Preview"
+                          title="Preview"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </Link>
+                        <button
+                          onClick={() => setDeleteTarget(p)}
+                          className="p-1.5 rounded-lg hover:bg-red-50 text-[var(--color-text-subtle)] hover:text-red-500 transition-colors"
+                          aria-label="Delete"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -261,6 +362,16 @@ export function ProposalsContent() {
           onPickTemplate={(t) => { setShowCreateDialog(false); void createFromTemplate(t.id, t.name) }}
         />
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete proposal"
+        description={deleteTarget ? `Delete "${deleteTarget.title}"? This removes all sections and variants. Cannot be undone.` : ''}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }
