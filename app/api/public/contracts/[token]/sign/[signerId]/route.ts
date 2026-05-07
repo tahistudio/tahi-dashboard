@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, asc } from 'drizzle-orm'
+import { getCloudflareContext } from '@opennextjs/cloudflare'
+import { sendFullySignedContractEmails } from '@/lib/contract-fully-signed-emails'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ token: string; signerId: string }> }
@@ -162,6 +164,36 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     finalHash: finalHash ?? undefined,
     updatedAt: now,
   }).where(eq(schema.contractDocuments.id, doc.id))
+
+  // ── Fully signed? Kick off the signed-PDF email send asynchronously.
+  // We re-verify status from the DB to guard against race conditions (two
+  // signers POST'ing at once), then hand the heavy work (PDF render +
+  // multi-recipient send + audit log) to ctx.waitUntil so the signer's
+  // HTTP response isn't blocked.
+  if (contractStatus === 'signed') {
+    try {
+      const [verify] = await database
+        .select({ status: schema.contractDocuments.status })
+        .from(schema.contractDocuments)
+        .where(eq(schema.contractDocuments.id, doc.id))
+        .limit(1)
+      if (verify?.status === 'signed') {
+        const cfCtx = await getCloudflareContext({ async: true })
+        const work = sendFullySignedContractEmails(doc.id)
+        if (cfCtx?.ctx?.waitUntil) {
+          cfCtx.ctx.waitUntil(work)
+        } else {
+          // No execution context (e.g. local dev): fire-and-forget.
+          // The promise still runs; we just don't get the worker to wait
+          // for it before tearing down.
+          void work
+        }
+      }
+    } catch (err) {
+      // Trigger errors must never block the signer response.
+      console.error('[sign route] fully-signed trigger setup failed:', err)
+    }
+  }
 
   return NextResponse.json({
     id: sigId,
