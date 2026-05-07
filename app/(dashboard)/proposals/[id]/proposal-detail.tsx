@@ -702,6 +702,35 @@ function SectionEditor({ section, onChange, onDelete }: {
         <FieldGroup label="Subtitle (eyebrow)">
           <input type="text" value={section.subtitle ?? ''} onChange={e => onChange({ subtitle: e.target.value })} style={metaInputStyle} />
         </FieldGroup>
+        {/* Theme toggle — light vs dark slide. Renderer reads section.data.theme. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Slide theme
+          </span>
+          {(['light', 'dark'] as const).map(t => {
+            const active = (data.theme ?? 'light') === t
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => { const next = { ...data, theme: t }; setData(next); onChange({ data: next }) }}
+                style={{
+                  padding: '0.3125rem 0.625rem',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  background: active ? (t === 'dark' ? '#1f2c1a' : '#FFFFFF') : 'var(--color-bg)',
+                  color: active ? (t === 'dark' ? '#FFFFFF' : '#121A0F') : 'var(--color-text-muted)',
+                  border: `1px solid ${active ? 'var(--color-brand)' : 'var(--color-border)'}`,
+                  borderRadius: 'var(--radius-sm)',
+                  cursor: 'pointer',
+                  textTransform: 'capitalize',
+                }}
+              >
+                {t}
+              </button>
+            )
+          })}
+        </div>
         {STRUCTURED_TYPES.has(section.type) ? (
           <TypedSectionFields
             type={section.type}

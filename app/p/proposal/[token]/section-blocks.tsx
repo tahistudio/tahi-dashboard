@@ -128,6 +128,67 @@ function safeParse<T>(json: string | null): T | null {
   try { return JSON.parse(json) as T } catch { return null }
 }
 
+// ─── Per-slide light / dark theming ────────────────────────────────────────
+//
+// Each section's data may include `theme: 'light' | 'dark'` (set in the
+// admin editor). Some types default to dark (retainer_offer is the
+// premium-CTA dark slab); everything else defaults to light. The brand
+// palette below is the source of truth for both modes — all renderers
+// read from these tokens rather than hardcoding hex.
+
+type SlideTheme = 'light' | 'dark'
+
+function readTheme(section: PublicSection, fallback: SlideTheme = 'light'): SlideTheme {
+  try {
+    if (!section.data) return fallback
+    const parsed = JSON.parse(section.data) as { theme?: string }
+    if (parsed.theme === 'dark' || parsed.theme === 'light') return parsed.theme
+  } catch { /* ignore */ }
+  return fallback
+}
+
+interface ThemeColours {
+  bg: string
+  text: string
+  textMuted: string
+  textSubtle: string
+  eyebrow: string
+  cardBg: string
+  cardBorder: string
+  cardBorderStrong: string
+  divider: string
+  brandAccent: string
+}
+
+function themeColours(theme: SlideTheme): ThemeColours {
+  if (theme === 'dark') {
+    return {
+      bg: '#1f2c1a',
+      text: '#ffffff',
+      textMuted: '#dcefd8',
+      textSubtle: '#a8c89e',
+      eyebrow: '#93c98a',
+      cardBg: 'rgba(255,255,255,0.06)',
+      cardBorder: 'rgba(220,239,216,0.18)',
+      cardBorderStrong: 'rgba(220,239,216,0.35)',
+      divider: 'rgba(220,239,216,0.16)',
+      brandAccent: '#93c98a',
+    }
+  }
+  return {
+    bg: '#FFFFFF',
+    text: '#121A0F',
+    textMuted: '#5a6657',
+    textSubtle: '#8a9987',
+    eyebrow: '#5A824E',
+    cardBg: '#fdfefd',
+    cardBorder: '#e8f0e6',
+    cardBorderStrong: '#d4e0d0',
+    divider: '#e8f0e6',
+    brandAccent: '#5A824E',
+  }
+}
+
 export function ProposalSectionBlock({ section }: { section: PublicSection }) {
   switch (section.type) {
     case 'value_anchor':       return <ValueAnchor section={section} />
@@ -147,11 +208,15 @@ export function ProposalSectionBlock({ section }: { section: PublicSection }) {
 function HtmlSection({ section }: { section: PublicSection }) {
   const data = safeParse<{ html?: string }>(section.data)
   const html = data?.html ?? ''
+  const theme = readTheme(section)
+  const c = themeColours(theme)
   return (
-    <section style={slideShell} className="proposal-slide">
-      {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
-      {section.title && <h2 style={slideTitle}>{section.title}</h2>}
-      <div style={proseStyle} dangerouslySetInnerHTML={{ __html: html }} />
+    <section style={{ ...slideShell, background: c.bg, color: c.text }} className="proposal-slide">
+      <div style={slideInner}>
+        {section.subtitle && <div style={{ ...slideEyebrow, color: c.eyebrow }}>{section.subtitle}</div>}
+        {section.title && <h2 style={{ ...slideTitle, color: c.text }}>{section.title}</h2>}
+        <div style={{ ...proseStyle, color: c.text }} dangerouslySetInnerHTML={{ __html: html }} />
+      </div>
     </section>
   )
 }
@@ -242,26 +307,30 @@ function ValueAnchor({ section }: { section: PublicSection }) {
 function Process({ section }: { section: PublicSection }) {
   const data = safeParse<{ steps?: { title: string; body: string; eyebrow?: string }[] }>(section.data)
   const steps = data?.steps ?? []
+  const theme = readTheme(section)
+  const c = themeColours(theme)
   return (
-    <section style={slideShell} className="proposal-slide">
-      {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
-      {section.title && <h2 style={slideTitle}>{section.title}</h2>}
+    <section style={{ ...slideShell, background: c.bg, color: c.text }} className="proposal-slide">
+      <div style={slideInner}>
+      {section.subtitle && <div style={{ ...slideEyebrow, color: c.eyebrow }}>{section.subtitle}</div>}
+      {section.title && <h2 style={{ ...slideTitle, color: c.text }}>{section.title}</h2>}
       <ol style={{ listStyle: 'none', padding: 0, margin: '1.25rem 0 0 0', display: 'grid', gap: '0.75rem' }}>
         {steps.map((s, i) => (
-          <li key={i} style={{ display: 'grid', gridTemplateColumns: '2.25rem 1fr', gap: '1rem', alignItems: 'flex-start', padding: '1rem 1.125rem', background: '#fdfefd', border: '1px solid #e8f0e6', borderRadius: '0.875rem' }}>
+          <li key={i} style={{ display: 'grid', gridTemplateColumns: '2.25rem 1fr', gap: '1rem', alignItems: 'flex-start', padding: '1rem 1.125rem', background: c.cardBg, border: `1px solid ${c.cardBorder}`, borderRadius: '0.875rem' }}>
             <div style={{
               width: '2.25rem', height: '2.25rem', borderRadius: '0 12px 0 12px',
               background: '#5A824E', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: '0.875rem', fontWeight: 800,
             }}>{i + 1}</div>
             <div>
-              {s.eyebrow && <div style={{ fontSize: '0.625rem', fontWeight: 700, color: '#8a9987', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.125rem' }}>{s.eyebrow}</div>}
-              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#1f2c1a', marginBottom: '0.25rem' }}>{s.title}</div>
-              <div style={{ fontSize: '0.875rem', color: '#5a6657', lineHeight: 1.55 }}>{s.body}</div>
+              {s.eyebrow && <div style={{ fontSize: '0.625rem', fontWeight: 700, color: c.textSubtle, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.125rem' }}>{s.eyebrow}</div>}
+              <div style={{ fontSize: '1rem', fontWeight: 700, color: c.text, marginBottom: '0.25rem' }}>{s.title}</div>
+              <div style={{ fontSize: '0.875rem', color: c.textMuted, lineHeight: 1.55 }}>{s.body}</div>
             </div>
           </li>
         ))}
       </ol>
+      </div>
     </section>
   )
 }
@@ -270,18 +339,22 @@ function Differentiators({ section }: { section: PublicSection }) {
   type Item = { icon?: string; title: string; body: string }
   const data = safeParse<{ items?: Item[] }>(section.data)
   const items = data?.items ?? []
+  const theme = readTheme(section)
+  const c = themeColours(theme)
   return (
-    <section style={slideShell} className="proposal-slide">
-      {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
-      {section.title && <h2 style={slideTitle}>{section.title}</h2>}
+    <section style={{ ...slideShell, background: c.bg, color: c.text }} className="proposal-slide">
+      <div style={slideInner}>
+      {section.subtitle && <div style={{ ...slideEyebrow, color: c.eyebrow }}>{section.subtitle}</div>}
+      {section.title && <h2 style={{ ...slideTitle, color: c.text }}>{section.title}</h2>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(15rem, 1fr))', gap: '0.875rem', marginTop: '1.25rem' }}>
         {items.map((it, i) => (
-          <div key={i} style={{ background: '#ffffff', border: '1px solid #e8f0e6', borderRadius: '0 16px 0 16px', padding: '1.125rem' }}>
+          <div key={i} style={{ background: theme === 'dark' ? c.cardBg : '#ffffff', border: `1px solid ${c.cardBorder}`, borderRadius: '0 16px 0 16px', padding: '1.125rem' }}>
             <DiffIcon name={it.icon} />
-            <div style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#1f2c1a', marginTop: '0.625rem', marginBottom: '0.25rem' }}>{it.title}</div>
-            <div style={{ fontSize: '0.8125rem', color: '#5a6657', lineHeight: 1.55 }}>{it.body}</div>
+            <div style={{ fontSize: '0.9375rem', fontWeight: 700, color: c.text, marginTop: '0.625rem', marginBottom: '0.25rem' }}>{it.title}</div>
+            <div style={{ fontSize: '0.8125rem', color: c.textMuted, lineHeight: 1.55 }}>{it.body}</div>
           </div>
         ))}
+      </div>
       </div>
     </section>
   )
