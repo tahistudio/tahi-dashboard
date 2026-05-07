@@ -63,11 +63,40 @@ function median(nums: number[]): number | null {
     : sorted[mid]
 }
 
+/**
+ * Coerce a possibly-old-shape scope object back to the four-line
+ * shape compute() expects. Old shape used flat `estimatedDevHours` /
+ * `estimatedDesignHours` / `estimatedStrategyHours` / `contractorHours` /
+ * `contractorRate` fields. Map each onto the new four-category model
+ * so existing saved calcs don't crash.
+ */
+function normaliseScope(scope: CalculationInputs['scope'] | unknown): CalculationInputs['scope'] {
+  const s = scope as Record<string, unknown>
+  if (s && typeof s === 'object' && s.webflow && typeof s.webflow === 'object') {
+    return scope as CalculationInputs['scope']
+  }
+  // Old shape — migrate.
+  const dev = Number((s as Record<string, unknown>)?.estimatedDevHours ?? 0)
+  const design = Number((s as Record<string, unknown>)?.estimatedDesignHours ?? 0)
+  const strategy = Number((s as Record<string, unknown>)?.estimatedStrategyHours ?? 0)
+  const contractorHours = Number((s as Record<string, unknown>)?.contractorHours ?? 0)
+  const contractorRate = Number((s as Record<string, unknown>)?.contractorRate ?? 0)
+  const tools = Number((s as Record<string, unknown>)?.toolLicenceCost ?? 0)
+  return {
+    webflow:     { hours: 0, delivery: 'ourselves', contractorRate: 0 },
+    engineering: { hours: dev, delivery: contractorHours > 0 ? 'contractor' : 'ourselves', contractorRate },
+    design:      { hours: design, delivery: 'ourselves', contractorRate: 0 },
+    strategy:    { hours: strategy, delivery: 'ourselves', contractorRate: 0 },
+    toolLicenceCost: tools,
+  }
+}
+
 export function compute(
   inputs: CalculationInputs,
   ctx: ComputeContext,
 ): CalculationOutputs {
-  const { scope, timeline, retainer, client } = inputs
+  const scope = normaliseScope(inputs.scope)
+  const { timeline, retainer, client } = inputs
   const { complexityMultiplier, currency, isReturning } = client
 
   // ── Cost ─────────────────────────────────────────────────────────
