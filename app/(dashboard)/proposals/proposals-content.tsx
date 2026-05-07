@@ -194,6 +194,11 @@ export function ProposalsContent() {
         <TahiButton variant="secondary" size="sm" onClick={fetchAll} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
           Refresh
         </TahiButton>
+        <Link href="/proposals/templates">
+          <TahiButton variant="secondary" size="sm">
+            Templates
+          </TahiButton>
+        </Link>
         <TahiButton size="sm" onClick={openCreate} disabled={creating} iconLeft={<Plus className="w-3.5 h-3.5" />}>
           {creating ? 'Creating...' : 'New proposal'}
         </TahiButton>
