@@ -26,7 +26,7 @@ interface ScheduleListItem {
   effectiveDate: string | null
   targetLaunchDate: string | null
   numberOfWeeks: number
-  status: 'draft' | 'shared' | 'archived'
+  status: 'draft' | 'shared' | 'sent' | 'signed' | 'completed' | 'archived'
   publicShareToken: string | null
   createdAt: string
   updatedAt: string
@@ -44,16 +44,22 @@ interface ScheduleTemplateOption {
 type ScheduleStatus = ScheduleListItem['status']
 
 const STATUS_STYLES: Record<ScheduleStatus, { bg: string; color: string; label: string }> = {
-  draft: { bg: 'var(--color-bg-tertiary)', color: 'var(--color-text-muted)', label: 'Draft' },
-  shared: { bg: '#eff6ff', color: '#1e40af', label: 'Shared' },
-  archived: { bg: 'var(--color-bg-secondary)', color: 'var(--color-text-subtle)', label: 'Archived' },
+  draft:     { bg: 'var(--color-bg-tertiary)', color: 'var(--color-text-muted)', label: 'Draft' },
+  shared:    { bg: '#eff6ff', color: '#1e40af', label: 'Shared' },
+  sent:      { bg: '#eef2ff', color: '#4338ca', label: 'Sent' },
+  signed:    { bg: '#f0fdf4', color: '#15803d', label: 'Signed' },
+  completed: { bg: '#ecfdf5', color: '#047857', label: 'Completed' },
+  archived:  { bg: 'var(--color-bg-secondary)', color: 'var(--color-text-subtle)', label: 'Archived' },
 }
 
 const STATUS_TABS: { value: 'all' | ScheduleStatus; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'draft', label: 'Draft' },
-  { value: 'shared', label: 'Shared' },
-  { value: 'archived', label: 'Archived' },
+  { value: 'all',       label: 'All' },
+  { value: 'draft',     label: 'Draft' },
+  { value: 'shared',    label: 'Shared' },
+  { value: 'sent',      label: 'Sent' },
+  { value: 'signed',    label: 'Signed' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'archived',  label: 'Archived' },
 ]
 
 function statusKey(status: string): ScheduleStatus {

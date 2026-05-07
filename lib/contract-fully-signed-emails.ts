@@ -1,23 +1,24 @@
 /**
  * Trigger handler for "this contract was just fully signed".
  *
- * Generates a signed-state PDF via @react-pdf/renderer and emails it as
- * an attachment to every signer + the contract creator. Audit-logs the
+ * Builds a signed-state PDF via jsPDF (pure JS, runs cleanly on
+ * Workers — see lib/contract-signed-pdf.ts) and emails it as an
+ * attachment to every signer + the contract creator. Audit-logs the
  * send so we can prove (and debug) what went out.
  *
  * Designed to run inside `ctx.waitUntil()` from the public sign route —
  * the signer's HTTP response should not block on PDF generation. Any
  * failure inside this function is caught and logged so a partially-failed
- * send never crashes the request.
+ * send never crashes the request. If the PDF build itself throws we
+ * still send the covering email without the attachment so signers at
+ * least get notified.
  */
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, asc, inArray } from 'drizzle-orm'
 import { render as renderEmail } from '@react-email/render'
-import { renderToBuffer, type DocumentProps } from '@react-pdf/renderer'
-import type { ReactElement } from 'react'
-import { ContractSignedPdf } from '@/emails/contract-signed-pdf'
 import { ContractFullySignedEmail } from '@/emails/contract-fully-signed'
+import { buildSignedPdfBase64 } from '@/lib/contract-signed-pdf'
 import { publicUrl } from '@/lib/app-url'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -156,38 +157,36 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
       ? publicUrl(`/p/contract/${doc.token}`)
       : publicUrl(`/contracts/${contractId}`)
 
-    // ── Try to render the PDF. @react-pdf/renderer depends on pdfkit
-    //    which uses Node APIs that nodejs_compat doesn't always cover on
-    //    Workers. If render fails we still send the covering email so
-    //    everyone gets notified — just without the attachment. The
-    //    public viewer link gets stronger billing in that case.
+    // ── Build the PDF via jsPDF (pure JS, runs cleanly on Workers).
+    //    The previous implementation used @react-pdf/renderer which
+    //    depends on pdfkit + Node APIs that nodejs_compat doesn't
+    //    fully cover. If anything still goes wrong we fall back to a
+    //    no-attachment covering email so signers always get notified.
     const pdfFilename = `${slugify(doc.name)}-signed.pdf`
     const signerNames = signers.map(s => s.name).filter(Boolean)
 
     let pdfBase64: string | null = null
     let pdfError: string | null = null
     try {
-      pdfBase64 = await renderPdfBase64(
-        ContractSignedPdf({
-          contractName: doc.name,
-          contractType: doc.type,
-          signedAt: doc.signedAt ?? new Date().toISOString(),
-          finalHash: doc.finalHash,
-          publicViewerUrl,
-          bodyHtml: doc.bodyHtml,
-          signers: signers.map(s => {
-            const sig = sigBySigner.get(s.id)
-            return {
-              id: s.id,
-              name: s.name,
-              email: s.email,
-              role: s.role,
-              signedAt: sig?.signedAt ?? s.signedAt ?? null,
-              signatureDataUrl: sig?.signatureDataUrl ?? null,
-            }
-          }),
-        }) as ReactElement<DocumentProps>,
-      )
+      pdfBase64 = buildSignedPdfBase64({
+        contractName: doc.name,
+        contractType: doc.type,
+        signedAt: doc.signedAt ?? new Date().toISOString(),
+        finalHash: doc.finalHash,
+        publicViewerUrl,
+        bodyHtml: doc.bodyHtml,
+        signers: signers.map(s => {
+          const sig = sigBySigner.get(s.id)
+          return {
+            id: s.id,
+            name: s.name,
+            email: s.email,
+            role: s.role,
+            signedAt: sig?.signedAt ?? s.signedAt ?? null,
+            signatureDataUrl: sig?.signatureDataUrl ?? null,
+          }
+        }),
+      })
     } catch (err) {
       pdfError = err instanceof Error ? err.message : 'Unknown PDF render error'
       console.error('[contract-fully-signed-emails] PDF render failed, falling back to no-attachment email:', pdfError)
@@ -249,13 +248,6 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
     // hiccup, etc) doesn't crash the parent waitUntil promise.
     console.error('[contract-fully-signed-emails] fatal error:', err)
   }
-}
-
-async function renderPdfBase64(doc: ReactElement<DocumentProps>): Promise<string> {
-  const buf = await renderToBuffer(doc)
-  // renderToBuffer returns a Node Buffer at runtime. Workers' Buffer
-  // polyfill (via nodejs_compat) supports toString('base64').
-  return buf.toString('base64')
 }
 
 function slugify(s: string): string {

@@ -39,7 +39,7 @@ interface Schedule {
   targetLaunchDate: string | null
   numberOfWeeks: number
   overviewHtml: string | null
-  status: 'draft' | 'shared' | 'archived'
+  status: 'draft' | 'shared' | 'sent' | 'signed' | 'completed' | 'archived'
   publicShareToken: string | null
   publicSharedAt: string | null
   orgName: string | null
@@ -61,9 +61,12 @@ interface RowDraft {
 // renders the visual; we just hand it the right colours per status. Keep
 // in sync with the schedule list page chip palette.
 const STATUS_PALETTE: Record<Schedule['status'], { bg: string; fg: string; bd: string }> = {
-  draft:    { bg: '#f7f9f6', fg: '#5a6657', bd: '#e8f0e6' },
-  shared:   { bg: '#eff6ff', fg: '#1e40af', bd: '#bfdbfe' },
-  archived: { bg: '#f5f5f4', fg: '#525252', bd: '#e7e5e4' },
+  draft:     { bg: '#f7f9f6', fg: '#5a6657', bd: '#e8f0e6' },
+  shared:    { bg: '#eff6ff', fg: '#1e40af', bd: '#bfdbfe' },
+  sent:      { bg: '#eef2ff', fg: '#4338ca', bd: '#c7d2fe' },
+  signed:    { bg: '#f0fdf4', fg: '#15803d', bd: '#bbf7d0' },
+  completed: { bg: '#ecfdf5', fg: '#047857', bd: '#a7f3d0' },
+  archived:  { bg: '#f5f5f4', fg: '#525252', bd: '#e7e5e4' },
 }
 
 const OWNER_LABEL: Record<RowOwner, string> = {

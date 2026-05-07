@@ -105,7 +105,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     targetLaunchDate?: string | null
     numberOfWeeks?: number
     overviewHtml?: string | null
-    status?: 'draft' | 'shared' | 'archived'
+    status?: 'draft' | 'shared' | 'sent' | 'signed' | 'completed' | 'archived'
   }
 
   const database = await db() as unknown as D1
