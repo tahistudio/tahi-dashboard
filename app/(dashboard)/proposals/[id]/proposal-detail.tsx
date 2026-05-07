@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink, Mail, BookmarkPlus, Eye } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink, Mail, BookmarkPlus, Eye, ChevronUp, ChevronDown } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
@@ -231,6 +231,40 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
     } catch {
       await fetchAll({ silent: true })
       showToast('Failed to delete section', 'error')
+    }
+  }
+
+  // Reorder by swapping a section with its neighbor. Optimistic UI: we
+  // swap locally first, then persist both new positions. A failed write
+  // refetches the truth so we never end up out of sync.
+  async function moveSection(sectionId: string, dir: -1 | 1) {
+    const sorted = [...sections].sort((a, b) => a.position - b.position)
+    const idx = sorted.findIndex(s => s.id === sectionId)
+    if (idx < 0) return
+    const target = idx + dir
+    if (target < 0 || target >= sorted.length) return
+    const a = sorted[idx]
+    const b = sorted[target]
+    // Optimistic local swap
+    setSections(prev => prev.map(s => {
+      if (s.id === a.id) return { ...s, position: b.position }
+      if (s.id === b.id) return { ...s, position: a.position }
+      return s
+    }))
+    try {
+      await Promise.all([
+        fetch(apiPath(`/api/admin/proposals/${proposalId}/sections/${a.id}`), {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ position: b.position }),
+        }),
+        fetch(apiPath(`/api/admin/proposals/${proposalId}/sections/${b.id}`), {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ position: a.position }),
+        }),
+      ])
+    } catch {
+      await fetchAll({ silent: true })
+      showToast('Failed to reorder', 'error')
     }
   }
 
@@ -562,12 +596,16 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
           <div style={emptyHint}>No sections yet. Use the dropdown to add one.</div>
         ) : (
           <div className="flex flex-col" style={{ gap: '0.75rem' }}>
-            {sections.map(s => (
+            {[...sections].sort((a, b) => a.position - b.position).map((s, i, sorted) => (
               <SectionEditor
                 key={s.id}
                 section={s}
+                isFirst={i === 0}
+                isLast={i === sorted.length - 1}
                 onChange={changes => patchSection(s.id, changes)}
                 onDelete={() => deleteSection(s.id)}
+                onMoveUp={() => moveSection(s.id, -1)}
+                onMoveDown={() => moveSection(s.id, 1)}
               />
             ))}
           </div>
@@ -699,10 +737,14 @@ interface SectionPatch {
   data?: unknown
 }
 
-function SectionEditor({ section, onChange, onDelete }: {
+function SectionEditor({ section, onChange, onDelete, onMoveUp, onMoveDown, isFirst, isLast }: {
   section: Section
   onChange: (changes: SectionPatch) => void
   onDelete: () => void
+  onMoveUp?: () => void
+  onMoveDown?: () => void
+  isFirst?: boolean
+  isLast?: boolean
 }) {
   const [data, setData] = useState<Record<string, unknown>>(() => {
     if (!section.data) return {}
@@ -723,9 +765,29 @@ function SectionEditor({ section, onChange, onDelete }: {
           </span>
           {section.title || '(no title)'}
         </span>
-        <button onClick={(e) => { e.preventDefault(); onDelete() }} style={{ ...toolbarBtn, padding: '0.25rem 0.625rem' }}>
-          <Trash2 size={12} />
-        </button>
+        <span className="flex items-center" style={{ gap: '0.25rem' }}>
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMoveUp?.() }}
+            disabled={isFirst}
+            aria-label="Move section up"
+            title="Move up"
+            style={{ ...toolbarBtn, padding: '0.25rem 0.4375rem', opacity: isFirst ? 0.35 : 1, cursor: isFirst ? 'not-allowed' : 'pointer' }}
+          >
+            <ChevronUp size={12} />
+          </button>
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMoveDown?.() }}
+            disabled={isLast}
+            aria-label="Move section down"
+            title="Move down"
+            style={{ ...toolbarBtn, padding: '0.25rem 0.4375rem', opacity: isLast ? 0.35 : 1, cursor: isLast ? 'not-allowed' : 'pointer' }}
+          >
+            <ChevronDown size={12} />
+          </button>
+          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete() }} style={{ ...toolbarBtn, padding: '0.25rem 0.625rem' }}>
+            <Trash2 size={12} />
+          </button>
+        </span>
       </summary>
       <div style={{ padding: '0.75rem 0.875rem', borderTop: '1px solid var(--color-border-subtle)', display: 'grid', gap: '0.625rem' }}>
         <FieldGroup label="Title">
