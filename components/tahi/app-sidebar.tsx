@@ -7,7 +7,7 @@ import {
   BarChart2, BookOpen, UserCog, Settings, MessageSquare,
   FolderOpen, ShoppingBag, PanelLeftClose, PanelLeftOpen,
   LayoutDashboard, Moon, Sun, Star, TrendingUp, FileSignature, Gauge,
-  Calendar, Megaphone, Briefcase,
+  Calendar, Megaphone, Briefcase, Layers,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
@@ -57,11 +57,12 @@ const ADMIN_NAV: NavGroup[] = [
   {
     group: 'Sales',
     items: [
-      { label: 'Pipeline',        href: '/pipeline',        icon: TrendingUp,    adminOnly: true },
-      { label: 'Proposals',       href: '/proposals',       icon: FileText,      adminOnly: true },
-      { label: 'Schedules',       href: '/schedules',       icon: Calendar,      adminOnly: true },
-      { label: 'Contracts',       href: '/contracts',       icon: FileSignature, adminOnly: true },
-      { label: 'Sales analytics', href: '/sales-analytics', icon: BarChart2,     adminOnly: true },
+      { label: 'Pipeline',           href: '/pipeline',            icon: TrendingUp,    adminOnly: true },
+      { label: 'Proposals',          href: '/proposals',           icon: FileText,      adminOnly: true },
+      { label: 'Proposal templates', href: '/proposals/templates', icon: Layers,        adminOnly: true },
+      { label: 'Schedules',          href: '/schedules',           icon: Calendar,      adminOnly: true },
+      { label: 'Contracts',          href: '/contracts',           icon: FileSignature, adminOnly: true },
+      { label: 'Sales analytics',    href: '/sales-analytics',     icon: BarChart2,     adminOnly: true },
     ],
   },
   {
@@ -269,9 +270,13 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               {group.items.map(item => {
                 const Icon = item.icon
+                // /proposals is excluded from prefix-match because /proposals/templates
+                // is its own sibling nav entry. Without this, both would highlight when
+                // visiting the templates page.
+                const exactOnly = new Set(['/requests', '/overview', '/proposals'])
                 const isActive =
                   pathname === item.href ||
-                  (item.href !== '/requests' && item.href !== '/overview' && pathname.startsWith(item.href))
+                  (!exactOnly.has(item.href) && pathname.startsWith(item.href))
 
                 return (
                   <li key={item.href} style={{ marginBottom: '2px' }}>
