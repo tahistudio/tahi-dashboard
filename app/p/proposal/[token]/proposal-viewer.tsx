@@ -20,7 +20,8 @@
  */
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useShareViewTracking } from '@/components/tahi/use-share-view-tracking'
 import { ProposalSectionBlock } from './section-blocks'
@@ -109,6 +110,57 @@ export function ProposalViewer(props: ProposalViewerProps) {
   // Question state — non-locking. After submit we show a thank-you banner but
   // keep the accept / decline buttons live so the prospect can still proceed.
   const [questionAcked, setQuestionAcked] = useState(false)
+
+  // ── Slide navigation (desktop) ─────────────────────────────────────────
+  // Horizontal slide deck on desktop, natural long-scroll on mobile. Track
+  // the active slide index and advance via side arrows, keyboard arrows,
+  // or the dot indicator. Mobile bypasses this entirely (CSS overrides
+  // the track transform to none and switches to flow layout).
+  const [activeSlide, setActiveSlide] = useState(0)
+  const totalSlides = useMemo(() => {
+    let n = 1 // cover
+    n += sections.length
+    if (variants.length > 0) n += 1 // variants slide
+    if (submitted === 'accepted') n += 1 // post-accept timeline
+    return n
+  }, [sections.length, variants.length, submitted])
+
+  // Clamp activeSlide if total shrinks (e.g. data refresh).
+  useEffect(() => {
+    if (activeSlide >= totalSlides) setActiveSlide(Math.max(0, totalSlides - 1))
+  }, [activeSlide, totalSlides])
+
+  // Keyboard navigation. Skip when the user is interacting with form
+  // fields (decision modal etc.) — checking document.activeElement avoids
+  // hijacking arrow keys inside text inputs.
+  useEffect(() => {
+    function isTypingTarget(): boolean {
+      const el = document.activeElement
+      if (!el) return false
+      const tag = el.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+      return (el as HTMLElement).isContentEditable === true
+    }
+    function onKey(e: KeyboardEvent) {
+      if (decisionMode) return // modal owns keyboard while open
+      if (isTypingTarget()) return
+      if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+        e.preventDefault()
+        setActiveSlide(s => Math.min(s + 1, totalSlides - 1))
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault()
+        setActiveSlide(s => Math.max(s - 1, 0))
+      } else if (e.key === 'Home') {
+        e.preventDefault()
+        setActiveSlide(0)
+      } else if (e.key === 'End') {
+        e.preventDefault()
+        setActiveSlide(totalSlides - 1)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [totalSlides, decisionMode])
 
   const reload = useCallback(async () => {
     try {
@@ -223,18 +275,31 @@ export function ProposalViewer(props: ProposalViewerProps) {
 
   return (
     <div style={pageWrap} className="proposal-deck">
-      {/* Slide-deck behaviour: scroll-snap + viewport sizing on desktop,
-          natural long-scroll on mobile. Injected as a global stylesheet
-          because inline styles can't carry media queries or scroll-snap
-          on parent + child together. The deck container is the page body
-          itself so the snap works against the document scroll. */}
+      {/* Horizontal slide deck on desktop, natural long-scroll on mobile.
+          Track translates by viewport-widths for slide advance; vertical
+          scroll within a slide is preserved when content overflows.
+          Mobile (<768px) bypasses the track entirely — slides stack and
+          flow naturally so the experience doesn't fight the touch model. */}
       <style>{`
         @media (min-width: 768px) {
-          html { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
-          .proposal-slide { scroll-snap-align: start; scroll-snap-stop: always; }
+          html, body { overflow: hidden; height: 100%; }
+          .proposal-track {
+            display: flex;
+            flex-direction: row;
+            height: 100vh;
+            transition: transform 480ms cubic-bezier(0.22, 1, 0.36, 1);
+          }
+          .proposal-slide {
+            width: 100vw;
+            flex-shrink: 0;
+            min-height: 100vh;
+            overflow-y: auto;
+            border-top: none !important;
+          }
         }
         @media (max-width: 767px) {
-          .proposal-slide { min-height: auto !important; border-top: none !important; padding: 2rem 1rem !important; }
+          .proposal-track { display: block; transform: none !important; height: auto; }
+          .proposal-slide { min-height: auto !important; border-top: none !important; padding: 2rem 1rem !important; width: 100% !important; }
           .proposal-cover { min-height: auto !important; }
         }
       `}</style>
@@ -267,23 +332,10 @@ export function ProposalViewer(props: ProposalViewerProps) {
         </div>
       )}
 
-      {/* Cover slide */}
-      <section style={coverShell} className="proposal-slide proposal-cover">
-        <div style={coverBackdrop} aria-hidden="true" />
-        <div style={coverInner}>
-          <BrandMark />
-          <CoverHeroStats />
-          <div style={{ marginTop: 'auto' }}>
-            {proposal.subtitle && <div style={coverEyebrow}>{proposal.subtitle}</div>}
-            <h1 style={coverTitle}>{proposal.title}</h1>
-          </div>
-          <CoverMetaGrid proposal={proposal} />
-        </div>
-      </section>
-
-      {/* Already-decided banner */}
+      {/* Already-decided banner — fixed at top so it's visible regardless
+          of which slide the prospect is on. */}
       {submitted && (
-        <div style={decidedBanner(submitted)}>
+        <div style={{ ...decidedBanner(submitted), position: 'fixed', top: '1rem', left: '1rem', right: '1rem', zIndex: 40, maxWidth: 'calc(100% - 2rem)' }}>
           {submitted === 'accepted' ? (
             <>
               <strong>Accepted{decidedVariant ? ` · ${decidedVariant.name}` : ''}</strong>
@@ -298,8 +350,31 @@ export function ProposalViewer(props: ProposalViewerProps) {
         </div>
       )}
 
-      {/* Shared sections in order */}
-      {sections.map(s => <ProposalSectionBlock key={s.id} section={s} />)}
+      {/* Side arrows + slide counter — desktop only via media query. */}
+      <SlideNav active={activeSlide} total={totalSlides} onChange={setActiveSlide} />
+
+      {/* Slide track. Each direct child is one slide; CSS lays them out as
+          a horizontal row on desktop and stacks them vertically on mobile. */}
+      <div
+        className="proposal-track"
+        style={{ transform: `translateX(-${activeSlide * 100}vw)` }}
+      >
+        {/* Cover slide */}
+        <section style={coverShell} className="proposal-slide proposal-cover">
+          <BrandCircleBackdrop />
+          <div style={coverInner}>
+            <BrandMark />
+            <CoverHeroStats />
+            <div style={{ marginTop: 'auto' }}>
+              {proposal.subtitle && <div style={coverEyebrow}>{proposal.subtitle}</div>}
+              <h1 style={coverTitle}>{proposal.title}</h1>
+            </div>
+            <CoverMetaGrid proposal={proposal} />
+          </div>
+        </section>
+
+        {/* Shared sections in order */}
+        {sections.map(s => <ProposalSectionBlock key={s.id} section={s} />)}
 
       {/* Variants picker + active variant detail */}
       {variants.length > 0 && (
@@ -459,16 +534,34 @@ export function ProposalViewer(props: ProposalViewerProps) {
         </section>
       )}
 
-      {/* Post-accept timeline — shown once the prospect has accepted */}
-      {submitted === 'accepted' && (
-        <PostAcceptTimeline variantName={decidedVariant?.name ?? null} />
-      )}
+        {/* Post-accept timeline — included as the final slide once accepted */}
+        {submitted === 'accepted' && (
+          <PostAcceptTimeline variantName={decidedVariant?.name ?? null} />
+        )}
+      </div>{/* /proposal-track */}
 
-      {/* Footer */}
-      <footer style={footer}>
+      {/* Footer — fixed to the bottom-left so it stays visible across slides */}
+      <footer
+        style={{
+          position: 'fixed',
+          bottom: '1rem',
+          left: '1rem',
+          zIndex: 30,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.625rem',
+          padding: '0.5rem 0.875rem',
+          background: 'rgba(255,255,255,0.85)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid #e8f0e6',
+          borderRadius: '999px',
+          fontSize: '0.6875rem',
+          color: '#5a6657',
+        }}
+      >
         <BrandMark size="sm" />
-        <span style={{ fontSize: '0.6875rem', color: '#8a9987' }}>
-          Confidential proposal · {formatDate(proposal.effectiveDate) ?? 'this period'}
+        <span style={{ color: '#8a9987' }}>
+          Confidential · {formatDate(proposal.effectiveDate) ?? 'this period'}
           {proposal.expiresAt ? ` · expires ${formatDate(proposal.expiresAt)}` : ''}
         </span>
       </footer>
@@ -594,6 +687,166 @@ function CoverMetaGrid({ proposal }: { proposal: PublicProposal }) {
 }
 
 // ─── Cover hero — credibility row above the title ─────────────────────────
+
+/**
+ * <SlideNav> — desktop-only side arrows + bottom-centre slide counter.
+ *
+ * Hidden under the 768px breakpoint via media query (mobile uses natural
+ * vertical scroll). Disabled state on the prev/next buttons at the ends
+ * of the deck. The dot row doubles as direct-jump nav.
+ */
+function SlideNav({ active, total, onChange }: {
+  active: number
+  total: number
+  onChange: (i: number) => void
+}) {
+  return (
+    <>
+      <style>{`
+        @media (max-width: 767px) { .proposal-nav-arrow, .proposal-nav-counter { display: none !important; } }
+      `}</style>
+      <button
+        type="button"
+        aria-label="Previous slide"
+        disabled={active === 0}
+        onClick={() => onChange(Math.max(0, active - 1))}
+        className="proposal-nav-arrow"
+        style={{
+          position: 'fixed',
+          left: '1.25rem',
+          top: '50%',
+          transform: 'translateY(-50%)',
+          zIndex: 35,
+          width: '3rem',
+          height: '3rem',
+          borderRadius: '50%',
+          background: 'rgba(255,255,255,0.85)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid #e8f0e6',
+          color: '#1f2c1a',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: active === 0 ? 'default' : 'pointer',
+          opacity: active === 0 ? 0.35 : 1,
+          boxShadow: '0 4px 16px rgba(31, 44, 26, 0.08)',
+          transition: 'opacity 200ms ease, transform 200ms ease',
+        }}
+      >
+        <ChevronLeft size={20} />
+      </button>
+      <button
+        type="button"
+        aria-label="Next slide"
+        disabled={active >= total - 1}
+        onClick={() => onChange(Math.min(total - 1, active + 1))}
+        className="proposal-nav-arrow"
+        style={{
+          position: 'fixed',
+          right: '1.25rem',
+          top: '50%',
+          transform: 'translateY(-50%)',
+          zIndex: 35,
+          width: '3rem',
+          height: '3rem',
+          borderRadius: '50%',
+          background: 'rgba(255,255,255,0.85)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid #e8f0e6',
+          color: '#1f2c1a',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: active >= total - 1 ? 'default' : 'pointer',
+          opacity: active >= total - 1 ? 0.35 : 1,
+          boxShadow: '0 4px 16px rgba(31, 44, 26, 0.08)',
+          transition: 'opacity 200ms ease',
+        }}
+      >
+        <ChevronRight size={20} />
+      </button>
+      {/* Counter + dots */}
+      <div
+        className="proposal-nav-counter"
+        style={{
+          position: 'fixed',
+          bottom: '1rem',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 30,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.875rem',
+          padding: '0.5rem 1rem',
+          background: 'rgba(255,255,255,0.85)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid #e8f0e6',
+          borderRadius: '999px',
+          fontSize: '0.75rem',
+          color: '#5a6657',
+        }}
+      >
+        <span style={{ fontWeight: 700, color: '#1f2c1a', fontVariantNumeric: 'tabular-nums' }}>
+          {active + 1} <span style={{ color: '#8a9987', fontWeight: 500 }}>/ {total}</span>
+        </span>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3125rem' }}>
+          {Array.from({ length: total }).map((_, i) => (
+            <button
+              key={i}
+              type="button"
+              aria-label={`Go to slide ${i + 1}`}
+              onClick={() => onChange(i)}
+              style={{
+                width: i === active ? '1.25rem' : '0.5rem',
+                height: '0.5rem',
+                borderRadius: '999px',
+                background: i === active ? '#5A824E' : '#d4e0d0',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                transition: 'width 200ms ease, background 200ms ease',
+              }}
+            />
+          ))}
+        </div>
+      </div>
+    </>
+  )
+}
+
+/**
+ * <BrandCircleBackdrop> — the brand circle ring used as atmospheric depth
+ * on the cover slide. Per Brand Guidelines §"Circle Background Element":
+ * 20–60% opacity, partial-cropped at the canvas edge, in Brand Green.
+ * Replaces the off-brand radial gradient that used to sit on covers.
+ */
+function BrandCircleBackdrop() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 590 729"
+      preserveAspectRatio="xMaxYMin meet"
+      style={{
+        position: 'absolute',
+        top: '-12rem',
+        right: '-14rem',
+        width: '50vw',
+        maxWidth: '52rem',
+        height: 'auto',
+        opacity: 0.22,
+        pointerEvents: 'none',
+        zIndex: 0,
+      }}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M225.5 79.2391C67.9548 79.2391 -59.7609 206.955 -59.7609 364.5C-59.7609 522.045 67.9548 649.761 225.5 649.761C383.045 649.761 510.761 522.045 510.761 364.5C510.761 206.955 383.045 79.2391 225.5 79.2391ZM-139 364.5C-139 163.192 24.1922 0 225.5 0C426.808 0 590 163.192 590 364.5C590 565.808 426.808 729 225.5 729C24.1922 729 -139 565.808 -139 364.5Z"
+        fill="#5A824E"
+      />
+    </svg>
+  )
+}
 
 function CoverHeroStats() {
   const stats: { value: string; label: string }[] = [
@@ -882,14 +1135,9 @@ const coverShell: React.CSSProperties = {
   // `md:snap-start md:snap-always`.
 }
 
-const coverBackdrop: React.CSSProperties = {
-  position: 'absolute',
-  inset: 0,
-  pointerEvents: 'none',
-  background:
-    'radial-gradient(circle at 92% 8%, rgba(122, 170, 107, 0.22) 0, transparent 38%),' +
-    'radial-gradient(circle at 4% 96%, rgba(220, 239, 216, 0.7) 0, transparent 32%)',
-}
+// Note: coverBackdrop (the off-brand radial gradient) was retired in Phase 9
+// round 2 in favour of the on-brand <BrandCircleBackdrop> SVG. Kept the
+// const removed entirely so nothing reaches for the old gradient.
 
 const coverInner: React.CSSProperties = {
   position: 'relative',
@@ -934,8 +1182,8 @@ const coverMetaGrid: React.CSSProperties = {
 }
 
 const slideShell: React.CSSProperties = {
-  // Each section is a true slide on desktop: full viewport, no card border,
-  // generous padding, content centred horizontally with a max-width band.
+  // Each section is one slide. On desktop the track lays them out in a
+  // row and translates between them; on mobile they stack vertically.
   width: '100%',
   background: '#FFFFFF',
   border: 'none',
@@ -946,9 +1194,6 @@ const slideShell: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   justifyContent: 'center',
-  // Soft separator between slides on desktop (so the deck doesn't feel
-  // entirely seamless). Mobile drops this via a stylesheet override.
-  borderTop: '1px solid #e8f0e6',
 }
 
 const slideEyebrow: React.CSSProperties = {

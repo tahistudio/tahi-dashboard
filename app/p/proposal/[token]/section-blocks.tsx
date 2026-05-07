@@ -384,21 +384,99 @@ function FAQ({ section }: { section: PublicSection }) {
   const items = data?.items ?? []
   return (
     <section style={slideShell} className="proposal-slide">
-      {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
-      {section.title && <h2 style={slideTitle}>{section.title}</h2>}
-      <div style={{ display: 'grid', gap: '0.625rem', marginTop: '1.25rem' }}>
-        {items.map((it, i) => (
-          <details key={i} style={{ background: '#fdfefd', border: '1px solid #e8f0e6', borderRadius: '0.625rem', padding: '0.875rem 1.125rem' }}>
-            <summary style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#1f2c1a', cursor: 'pointer', listStyle: 'none' }}>
-              {it.q}
-            </summary>
-            <div style={{ marginTop: '0.625rem', fontSize: '0.875rem', color: '#5a6657', lineHeight: 1.55 }}>
-              {it.a}
-            </div>
-          </details>
-        ))}
+      <div style={slideInner}>
+        {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
+        {section.title && <h2 style={slideTitle}>{section.title}</h2>}
+        <div style={{ display: 'grid', gap: '0.625rem', marginTop: '1.25rem' }}>
+          {items.map((it, i) => <FAQItem key={i} q={it.q} a={it.a} />)}
+        </div>
       </div>
     </section>
+  )
+}
+
+/**
+ * Animated FAQ accordion item. Replaces the bare <details> which gave no
+ * chevron, no animation, and no clear "this is clickable" affordance. Uses
+ * grid-template-rows: 0fr/1fr trick for smooth height animation without JS
+ * measurement, plus a chevron that rotates 180° on open.
+ */
+function FAQItem({ q, a }: { q: string; a: string }) {
+  const [open, setOpen] = React.useState(false)
+  return (
+    <div
+      style={{
+        background: open ? '#ffffff' : '#fdfefd',
+        border: open ? '1px solid #d4e0d0' : '1px solid #e8f0e6',
+        borderRadius: '0.875rem',
+        overflow: 'hidden',
+        transition: 'border-color 200ms ease, background 200ms ease, box-shadow 200ms ease',
+        boxShadow: open ? '0 4px 16px rgba(31, 44, 26, 0.04)' : 'none',
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        style={{
+          width: '100%',
+          textAlign: 'left',
+          padding: '1rem 1.25rem',
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.875rem',
+          fontFamily: 'inherit',
+          color: '#121A0F',
+        }}
+      >
+        <span style={{ fontSize: '1rem', fontWeight: 700, flex: 1, lineHeight: 1.45 }}>
+          {q}
+        </span>
+        <span
+          aria-hidden="true"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '1.75rem',
+            height: '1.75rem',
+            borderRadius: '50%',
+            background: open ? '#5A824E' : '#dcefd8',
+            color: open ? '#FFFFFF' : '#425F39',
+            transition: 'background 200ms ease, color 200ms ease, transform 280ms cubic-bezier(0.22, 1, 0.36, 1)',
+            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+            flexShrink: 0,
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </span>
+      </button>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateRows: open ? '1fr' : '0fr',
+          transition: 'grid-template-rows 280ms cubic-bezier(0.22, 1, 0.36, 1)',
+        }}
+      >
+        <div style={{ overflow: 'hidden' }}>
+          <div
+            style={{
+              padding: '0 1.25rem 1rem 1.25rem',
+              fontSize: '0.9375rem',
+              color: '#5a6657',
+              lineHeight: 1.6,
+            }}
+          >
+            {a}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -461,15 +539,14 @@ function RetainerOffer({ section }: { section: PublicSection }) {
 
 // ─── Shared styles (mirror proposal-viewer.tsx) ─────────────────────────────
 
-// Full-viewport slide on desktop, natural on mobile (the global stylesheet
-// in proposal-viewer.tsx overrides min-height + border on the .proposal-slide
-// class at <768px). Pure white per Brand Guidelines.
+// One slide per section. On desktop the parent track lays slides out in
+// a horizontal row; on mobile they stack vertically (CSS in proposal-viewer
+// rewrites this on the .proposal-slide class).
 const slideShell: React.CSSProperties = {
   width: '100%',
   background: '#FFFFFF',
   border: 'none',
   borderRadius: 0,
-  borderTop: '1px solid #e8f0e6',
   padding: 'clamp(2rem, 6vw, 5rem) clamp(1.25rem, 5vw, 3rem)',
   minHeight: '100svh',
   display: 'flex',
