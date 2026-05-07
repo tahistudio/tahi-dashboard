@@ -642,6 +642,22 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE proposals ADD COLUMN cover_theme text DEFAULT 'light'`,
     ],
   },
+  {
+    name: '0034',
+    description: 'Schedule templates: reusable schedule blueprints. snapshot column stores frozen sections + rows + meta. Mirrors the proposal template pattern. Instantiated into fresh schedule_sections + schedule_rows at create time.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS schedule_templates (
+        id text PRIMARY KEY NOT NULL,
+        name text NOT NULL,
+        description text,
+        snapshot text NOT NULL,
+        is_default integer NOT NULL DEFAULT 0,
+        created_by_id text NOT NULL,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

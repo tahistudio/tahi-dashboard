@@ -6,10 +6,12 @@ import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Plus, Trash2, AlertTriangle, Share2, Copy, ExternalLink, Mail, Eye,
   Diamond, FileText, ChevronUp, ChevronDown, BarChart3, GitBranch, Grid3x3, AlignLeft,
+  BookmarkPlus,
 } from 'lucide-react'
 import { EmailShareModal, type EmailRecipientSuggestion } from '@/components/tahi/email-share-modal'
 import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
+import { PromptDialog } from '@/components/tahi/prompt-dialog'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { GanttGrid, type GanttRow, type RowOwner, type RowType } from '@/components/tahi/gantt-grid'
@@ -124,6 +126,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   const [activeView, setActiveView] = useState<string>('cover')
   const [moreMenuOpen, setMoreMenuOpen] = useState(false)
   const [showAddSectionMenu, setShowAddSectionMenu] = useState(false)
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false)
 
   // Save indicator state — tracks in-flight saves and the most recent
   // successful save timestamp. trackSave wraps any promise so the
@@ -441,6 +444,24 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
     }
   }
 
+  async function saveAsTemplate(name: string) {
+    try {
+      const res = await fetch(apiPath('/api/admin/schedules/templates'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          fromScheduleId: scheduleId,
+        }),
+      })
+      if (!res.ok) throw new Error('Failed')
+      showToast('Template saved.', 'success')
+      setShowSaveTemplate(false)
+    } catch {
+      showToast('Could not save template.', 'error')
+    }
+  }
+
   // ── Share / unshare ──────────────────────────────────────────────────
   async function handleShare() {
     setSharing(true)
@@ -552,6 +573,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
             onToggle={() => setMoreMenuOpen(v => !v)}
             onClose={() => setMoreMenuOpen(false)}
             items={[
+              { icon: <BookmarkPlus size={13} />, label: 'Save as template', onClick: () => setShowSaveTemplate(true) },
               { icon: <Trash2 size={13} />, label: 'Delete schedule', danger: true, onClick: () => setShowDeleteConfirm(true) },
             ]}
           />
@@ -825,6 +847,17 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         variant="danger"
         onConfirm={async () => { setShowDeleteConfirm(false); await deleteSchedule() }}
         onCancel={() => setShowDeleteConfirm(false)}
+      />
+
+      <PromptDialog
+        open={showSaveTemplate}
+        title="Save as template"
+        description="Reusable schedule blueprints. Sections, rows, and weekly layout are captured so the next schedule can start from this structure in one click."
+        defaultValue={schedule.title}
+        placeholder="Template name"
+        confirmLabel="Save template"
+        onConfirm={saveAsTemplate}
+        onCancel={() => setShowSaveTemplate(false)}
       />
     </BuilderShell>
   )

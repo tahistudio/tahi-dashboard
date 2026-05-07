@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   Calendar, Plus, Search, RefreshCw, Building2, Target, Trash2, ExternalLink, Eye,
+  ChevronDown, Sparkles, FilePlus2,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -31,6 +32,13 @@ interface ScheduleListItem {
   updatedAt: string
   orgName: string | null
   dealTitle: string | null
+}
+
+interface ScheduleTemplateOption {
+  id: string
+  name: string
+  description: string | null
+  updatedAt: string
 }
 
 type ScheduleStatus = ScheduleListItem['status']
@@ -65,19 +73,51 @@ export function SchedulesContent() {
   const router = useRouter()
   const { showToast } = useToast()
   const [items, setItems] = useState<ScheduleListItem[]>([])
+  const [templates, setTemplates] = useState<ScheduleTemplateOption[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | ScheduleStatus>('all')
   const [creating, setCreating] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<ScheduleListItem | null>(null)
+  const [newMenuOpen, setNewMenuOpen] = useState(false)
+  const newMenuRef = useRef<HTMLDivElement | null>(null)
+
+  // Click-outside handling for the New menu.
+  useEffect(() => {
+    if (!newMenuOpen) return
+    function onDoc(e: MouseEvent) {
+      if (newMenuRef.current && !newMenuRef.current.contains(e.target as Node)) {
+        setNewMenuOpen(false)
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setNewMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [newMenuOpen])
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(apiPath('/api/admin/schedules'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { items: ScheduleListItem[] }
-      setItems(data.items ?? [])
+      const [schedulesRes, templatesRes] = await Promise.all([
+        fetch(apiPath('/api/admin/schedules')),
+        fetch(apiPath('/api/admin/schedules/templates')),
+      ])
+      if (schedulesRes.ok) {
+        const data = await schedulesRes.json() as { items: ScheduleListItem[] }
+        setItems(data.items ?? [])
+      } else {
+        setItems([])
+      }
+      if (templatesRes.ok) {
+        const data = await templatesRes.json() as { items: ScheduleTemplateOption[] }
+        setTemplates(data.items ?? [])
+      }
     } catch {
       setItems([])
     } finally {
@@ -99,17 +139,21 @@ export function SchedulesContent() {
     return true
   })
 
-  async function handleCreate() {
+  async function handleCreate(opts: { templateId?: string } = {}) {
     setCreating(true)
+    setNewMenuOpen(false)
     try {
+      const body: Record<string, unknown> = opts.templateId
+        ? { templateId: opts.templateId }
+        : {
+            title: 'New project schedule',
+            subtitle: 'PROJECT SCHEDULE, GANTT',
+            numberOfWeeks: 12,
+          }
       const res = await fetch(apiPath('/api/admin/schedules'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: 'New project schedule',
-          subtitle: 'PROJECT SCHEDULE, GANTT',
-          numberOfWeeks: 12,
-        }),
+        body: JSON.stringify(body),
       })
       const data = await res.json() as { id?: string }
       if (res.ok && data.id) {
@@ -144,9 +188,79 @@ export function SchedulesContent() {
         <TahiButton variant="secondary" size="sm" onClick={fetchAll} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
           Refresh
         </TahiButton>
-        <TahiButton size="sm" onClick={handleCreate} disabled={creating} iconLeft={<Plus className="w-3.5 h-3.5" />}>
-          {creating ? 'Creating...' : 'New schedule'}
-        </TahiButton>
+        <Link href="/schedules/templates">
+          <TahiButton variant="secondary" size="sm">
+            Templates
+          </TahiButton>
+        </Link>
+        <div ref={newMenuRef} style={{ position: 'relative' }}>
+          <TahiButton
+            size="sm"
+            onClick={() => {
+              if (templates.length === 0) {
+                void handleCreate()
+              } else {
+                setNewMenuOpen(v => !v)
+              }
+            }}
+            disabled={creating}
+            iconLeft={<Plus className="w-3.5 h-3.5" />}
+            iconRight={templates.length > 0 ? <ChevronDown className="w-3.5 h-3.5" /> : undefined}
+          >
+            {creating ? 'Creating...' : 'New schedule'}
+          </TahiButton>
+          {newMenuOpen && templates.length > 0 && (
+            <div
+              role="menu"
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 0.375rem)',
+                right: 0,
+                minWidth: '17rem',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                borderRadius: '0.625rem',
+                boxShadow: '0 8px 24px rgba(31, 44, 26, 0.12)',
+                padding: '0.375rem',
+                zIndex: 50,
+              }}
+            >
+              <button
+                role="menuitem"
+                onClick={() => void handleCreate()}
+                className="w-full flex items-start gap-2 text-left px-3 py-2 rounded-md hover:bg-[var(--color-bg-secondary)] transition-colors"
+              >
+                <FilePlus2 className="w-4 h-4 mt-0.5 flex-shrink-0 text-[var(--color-text-muted)]" />
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-[var(--color-text)]">Blank schedule</div>
+                  <div className="text-xs text-[var(--color-text-muted)] mt-0.5">Empty 12-week gantt to start from scratch.</div>
+                </div>
+              </button>
+              <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '0.375rem 0.25rem' }} />
+              <div className="px-3 pt-1 pb-1.5 text-[0.625rem] font-bold tracking-wider uppercase text-[var(--color-text-subtle)]">
+                From template
+              </div>
+              <div style={{ maxHeight: '14rem', overflowY: 'auto' }}>
+                {templates.map(t => (
+                  <button
+                    key={t.id}
+                    role="menuitem"
+                    onClick={() => void handleCreate({ templateId: t.id })}
+                    className="w-full flex items-start gap-2 text-left px-3 py-2 rounded-md hover:bg-[var(--color-bg-secondary)] transition-colors"
+                  >
+                    <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0 text-[var(--color-brand)]" />
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-[var(--color-text)] truncate">{t.name}</div>
+                      {t.description && (
+                        <div className="text-xs text-[var(--color-text-muted)] mt-0.5 truncate">{t.description}</div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </PageHeader>
 
       <div className="flex flex-col sm:flex-row gap-3">
@@ -185,7 +299,7 @@ export function SchedulesContent() {
             title="No schedules yet"
             description="Create one to map a project timeline you can share with clients."
             ctaLabel="New schedule"
-            onCtaClick={handleCreate}
+            onCtaClick={() => void handleCreate()}
           />
         ) : (
           <EmptyState

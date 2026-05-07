@@ -57,9 +57,51 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ items })
 }
 
+// ── Schedule template snapshot shape ────────────────────────────────────
+//
+// Frozen at template-save time and unpacked at create time. `rows.sectionIndex`
+// maps each row back to its parent section by index, so we can re-wire FK
+// references when minting fresh UUIDs.
+interface SnapshotSection {
+  type: string
+  title: string | null
+  subtitle: string | null
+  startWeek: number | null
+  endWeek: number | null
+  data: unknown
+  position: number
+}
+interface SnapshotRow {
+  sectionIndex: number | null
+  rowType: 'section_header' | 'task' | 'gate' | 'critical_gate'
+  label: string
+  owner: 'tahi' | 'client' | 'joint' | 'tahi_parallel' | null
+  startWeek: number | null
+  endWeek: number | null
+  riskFlag: number
+  position: number
+}
+interface ScheduleTemplateSnapshot {
+  scheduleMeta?: {
+    title?: string | null
+    subtitle?: string | null
+    preparedBy?: string | null
+    numberOfWeeks?: number | null
+    overviewHtml?: string | null
+  }
+  sections?: SnapshotSection[]
+  rows?: SnapshotRow[]
+}
+
 // ── POST /api/admin/schedules ──────────────────────────────────────────
-// Create a new schedule. Body accepts top-level metadata and an optional
-// `rows` array for seeding from a template.
+// Create a new schedule. Three modes:
+//   1. Default: create a blank schedule with a single empty 'gantt' section.
+//   2. Body has `rows`: legacy template flow — seed rows under the default
+//      gantt section.
+//   3. Body has `templateId`: instantiate sections + rows from a saved
+//      schedule_template snapshot. Schedule meta (title, subtitle, weeks,
+//      overview, preparedBy) defaults to the snapshot's values when not
+//      explicitly overridden in the body.
 export async function POST(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -77,6 +119,7 @@ export async function POST(req: NextRequest) {
     targetLaunchDate?: string
     numberOfWeeks?: number
     overviewHtml?: string
+    templateId?: string
     rows?: Array<{
       rowType: 'section_header' | 'task' | 'gate' | 'critical_gate'
       label: string
@@ -87,37 +130,128 @@ export async function POST(req: NextRequest) {
     }>
   }
 
-  if (!body.title?.trim()) {
-    return NextResponse.json({ error: 'title is required' }, { status: 400 })
-  }
-
   const database = await db() as unknown as D1
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
+
+  // Resolve template snapshot if requested. We load it before validation
+  // so the snapshot can supply a default title.
+  let templateSnapshot: ScheduleTemplateSnapshot | null = null
+  if (body.templateId) {
+    const [tpl] = await database
+      .select({ snapshot: schema.scheduleTemplates.snapshot })
+      .from(schema.scheduleTemplates)
+      .where(eq(schema.scheduleTemplates.id, body.templateId))
+      .limit(1)
+    if (!tpl) return NextResponse.json({ error: 'Template not found' }, { status: 404 })
+    try { templateSnapshot = JSON.parse(tpl.snapshot) as ScheduleTemplateSnapshot }
+    catch { return NextResponse.json({ error: 'Template snapshot is corrupt' }, { status: 500 }) }
+  }
+
+  const meta = templateSnapshot?.scheduleMeta ?? {}
+  const resolvedTitle = body.title?.trim() || meta.title?.trim() || ''
+  if (!resolvedTitle) {
+    return NextResponse.json({ error: 'title is required' }, { status: 400 })
+  }
+
+  const resolvedNumberOfWeeks = Math.max(1, Math.min(52,
+    body.numberOfWeeks ?? meta.numberOfWeeks ?? 12,
+  ))
 
   await database.insert(schema.projectSchedules).values({
     id,
     orgId: body.orgId ?? null,
     dealId: body.dealId ?? null,
     proposalId: body.proposalId ?? null,
-    title: body.title.trim(),
-    subtitle: body.subtitle?.trim() ?? null,
+    title: resolvedTitle,
+    subtitle: body.subtitle?.trim() ?? meta.subtitle ?? null,
     preparedFor: body.preparedFor?.trim() ?? null,
-    preparedBy: body.preparedBy?.trim() ?? null,
+    preparedBy: body.preparedBy?.trim() ?? meta.preparedBy ?? null,
     effectiveDate: body.effectiveDate ?? null,
     targetLaunchDate: body.targetLaunchDate ?? null,
-    numberOfWeeks: Math.max(1, Math.min(52, body.numberOfWeeks ?? 12)),
-    overviewHtml: body.overviewHtml ?? null,
+    numberOfWeeks: resolvedNumberOfWeeks,
+    overviewHtml: body.overviewHtml ?? meta.overviewHtml ?? null,
     status: 'draft',
     createdById: userId,
     createdAt: now,
     updatedAt: now,
   })
 
-  // Every schedule starts with a default 'gantt' section so the editor
-  // and viewer have something to render against. Seed rows (if any)
-  // attach to this section. Future sections (overview, risk register,
-  // RACI, etc.) are added via /sections endpoints.
+  // ── Template flow: unpack snapshot into fresh sections + rows ────────
+  if (templateSnapshot) {
+    const tplSections = (templateSnapshot.sections ?? []).slice()
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+
+    // If the template has no sections (defensive), seed a single default
+    // gantt section so the schedule still renders.
+    const sectionsToInsert = tplSections.length > 0 ? tplSections : [{
+      type: 'gantt',
+      title: 'Project schedule',
+      subtitle: 'Whole project, one view.',
+      startWeek: null,
+      endWeek: null,
+      data: null,
+      position: 0,
+    }]
+
+    const sectionIds: string[] = sectionsToInsert.map(() => crypto.randomUUID())
+    const sectionRows = sectionsToInsert.map((s, i) => ({
+      id: sectionIds[i],
+      scheduleId: id,
+      type: s.type,
+      title: s.title ?? null,
+      subtitle: s.subtitle ?? null,
+      startWeek: s.startWeek ?? null,
+      endWeek: s.endWeek ?? null,
+      data: s.data == null ? null : JSON.stringify(s.data),
+      position: s.position ?? i,
+      createdAt: now,
+      updatedAt: now,
+    }))
+    // 10 columns per section row → 9 per chunk = 90 vars (under the 100 cap).
+    const SEC_CHUNK = 9
+    for (let i = 0; i < sectionRows.length; i += SEC_CHUNK) {
+      await database.insert(schema.scheduleSections).values(sectionRows.slice(i, i + SEC_CHUNK))
+    }
+
+    const tplRows = templateSnapshot.rows ?? []
+    if (tplRows.length > 0) {
+      const seeded = tplRows.map((r, idx) => {
+        const idxLookup = r.sectionIndex
+        const targetSectionId = (typeof idxLookup === 'number' && idxLookup >= 0 && idxLookup < sectionIds.length)
+          ? sectionIds[idxLookup]
+          // Fallback: first gantt section, else first section.
+          : sectionIds[Math.max(0, sectionsToInsert.findIndex(s => s.type === 'gantt'))] ?? sectionIds[0]
+        return {
+          id: crypto.randomUUID(),
+          scheduleId: id,
+          sectionId: targetSectionId,
+          rowType: r.rowType,
+          label: (r.label ?? '').trim() || 'Untitled',
+          owner: r.owner ?? null,
+          startWeek: r.startWeek ?? null,
+          endWeek: r.endWeek ?? null,
+          riskFlag: r.riskFlag ? 1 : 0,
+          position: r.position ?? idx,
+          createdAt: now,
+          updatedAt: now,
+        }
+      })
+      // 12 placeholders per row → 8 per chunk = 96 vars (safe).
+      const ROW_CHUNK = 8
+      for (let i = 0; i < seeded.length; i += ROW_CHUNK) {
+        await database.insert(schema.scheduleRows).values(seeded.slice(i, i + ROW_CHUNK))
+      }
+    }
+
+    return NextResponse.json({
+      id,
+      defaultSectionId: sectionIds[0],
+      fromTemplate: true,
+    }, { status: 201 })
+  }
+
+  // ── No template: every schedule starts with a single empty gantt section.
   const defaultSectionId = crypto.randomUUID()
   await database.insert(schema.scheduleSections).values({
     id: defaultSectionId,
@@ -130,9 +264,9 @@ export async function POST(req: NextRequest) {
     updatedAt: now,
   })
 
-  // Seed rows if provided (e.g. from a template). Chunked to stay under
-  // D1's per-statement bind-variable cap (100 vars per query). Each row
-  // now takes 12 placeholders (added section_id), so 8 rows per chunk = 96 vars (safe).
+  // Seed rows if provided (legacy template-as-rows flow). Chunked to stay
+  // under D1's per-statement bind-variable cap. Each row takes 12
+  // placeholders (added section_id), so 8 rows per chunk = 96 vars (safe).
   if (body.rows?.length) {
     const seeded = body.rows.map((r, idx) => ({
       id: crypto.randomUUID(),

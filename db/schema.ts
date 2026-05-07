@@ -1753,6 +1753,35 @@ export const proposalTemplates = sqliteTable('proposal_templates', {
   ...timestamps,
 })
 
+/**
+ * Schedule templates — reusable schedule blueprints. Mirrors the proposal
+ * template pattern: `snapshot` is a frozen JSON capture of {scheduleMeta,
+ * sections, rows} at template-save time. At create time the snapshot is
+ * unpacked into fresh schedule_sections + schedule_rows rows on a brand-new
+ * project_schedules row.
+ *
+ * Snapshot shape:
+ *   {
+ *     scheduleMeta: { title, subtitle, preparedBy, numberOfWeeks, overviewHtml },
+ *     sections: [{ type, title, subtitle, startWeek, endWeek, data, position }],
+ *     rows: [{ sectionIndex, rowType, label, owner, startWeek, endWeek,
+ *              riskFlag, position }]
+ *   }
+ *
+ * Row.sectionIndex points at sections[index] so when we instantiate the
+ * template we can map old (template-time) section IDs to freshly-minted ones.
+ */
+export const scheduleTemplates = sqliteTable('schedule_templates', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
+  description: text('description'),
+  // Frozen JSON snapshot — see module-level docs for shape.
+  snapshot: text('snapshot').notNull(),
+  isDefault: integer('is_default').notNull().default(0),
+  createdById: text('created_by_id').notNull(),
+  ...timestamps,
+})
+
 export const contractTemplates = sqliteTable('contract_templates', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text('name').notNull(),

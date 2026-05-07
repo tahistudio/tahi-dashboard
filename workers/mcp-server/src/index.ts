@@ -498,8 +498,8 @@ const TOOLS: ToolDef[] = [
   tool('get_schedule', 'Get a single project schedule with all rows in display order', {
     scheduleId: prop('string', 'Schedule ID'),
   }, ['scheduleId']),
-  tool('create_schedule', 'Create a new project schedule. Optionally seed with a `rows` array (templates). Each row: { rowType, label, owner?, startWeek?, endWeek?, riskFlag? }', {
-    title: prop('string', 'Schedule title'),
+  tool('create_schedule', 'Create a new project schedule. Optionally seed via `templateId` (instantiates sections + rows from a saved schedule_template snapshot) or with a `rows` array (legacy). Each row: { rowType, label, owner?, startWeek?, endWeek?, riskFlag? }', {
+    title: prop('string', 'Schedule title (optional when templateId is provided — falls back to template title)'),
     subtitle: prop('string', 'Subtitle / eyebrow text (default "PROJECT SCHEDULE, GANTT")'),
     orgId: prop('string', 'Client org ID this schedule belongs to'),
     dealId: prop('string', 'Deal ID this schedule is attached to'),
@@ -509,8 +509,9 @@ const TOOLS: ToolDef[] = [
     targetLaunchDate: prop('string', 'Target launch date (YYYY-MM-DD)'),
     numberOfWeeks: prop('number', 'Number of weeks in the gantt (default 12, max 52)'),
     overviewHtml: prop('string', 'Tiptap HTML for executive overview'),
-    rows: { type: 'array', description: 'Optional initial rows', items: { type: 'object' } },
-  }, ['title']),
+    templateId: prop('string', 'Schedule template ID — instantiates sections + rows from the template snapshot. Body fields override template meta when set.'),
+    rows: { type: 'array', description: 'Optional initial rows (legacy — prefer templateId)', items: { type: 'object' } },
+  }),
   tool('update_schedule', 'Update a schedule\'s top-level metadata. Pass any subset.', {
     scheduleId: prop('string', 'Schedule ID'),
     title: prop('string', 'New title'),
@@ -599,6 +600,19 @@ const TOOLS: ToolDef[] = [
     scheduleId: prop('string', 'Schedule ID'),
     order: { type: 'array', description: 'Section IDs in new order', items: { type: 'string' } },
   }, ['scheduleId', 'order']),
+
+  // ── Schedule Templates ───────────────────────────────────────────────
+  tool('list_schedule_templates', 'List reusable schedule blueprints. Use the returned id with create_schedule(templateId) to instantiate.'),
+  tool('create_schedule_template', 'Create a reusable schedule template. Either snapshot the live state of an existing schedule (fromScheduleId) or pass a hand-authored snapshot { scheduleMeta, sections, rows }.', {
+    name: prop('string', 'Template name'),
+    description: prop('string', 'Optional description shown in the template picker'),
+    fromScheduleId: prop('string', 'Source schedule ID — snapshot its sections + rows + meta'),
+    snapshot: { type: 'object', description: 'Hand-authored snapshot { scheduleMeta, sections, rows }' },
+    isDefault: prop('boolean', 'Mark as default'),
+  }, ['name']),
+  tool('delete_schedule_template', 'Delete a schedule template. Existing schedules created from this template are unaffected.', {
+    templateId: prop('string', 'Template ID'),
+  }, ['templateId']),
 
   // ── Proposals (Phase 2) ─────────────────────────────────────────────
   tool('list_proposals', 'List proposals. Filter by orgId, dealId, or status (draft|shared|accepted|declined|withdrawn|expired).', {
@@ -1273,6 +1287,14 @@ async function executeTool(
       const { scheduleId, order } = args
       return json(await apiWrite(`/api/admin/schedules/${scheduleId}/sections/reorder`, token, 'POST', { order }))
     }
+
+    // ── Schedule Templates ───────────────────────────────────────────
+    case 'list_schedule_templates':
+      return json(await apiGet('/api/admin/schedules/templates', token))
+    case 'create_schedule_template':
+      return json(await apiWrite('/api/admin/schedules/templates', token, 'POST', args as Record<string, unknown>))
+    case 'delete_schedule_template':
+      return json(await apiWrite(`/api/admin/schedules/templates/${s('templateId')}`, token, 'DELETE'))
 
     // ── Proposals ────────────────────────────────────────────────────
     case 'list_proposals': {
