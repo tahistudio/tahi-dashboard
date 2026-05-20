@@ -286,11 +286,14 @@ lib/
   utils.ts
 emails/
 drizzle/
-SPECS/
-TASKS.md
-DECISIONS.md
+SPECS/                — per-feature design specs (north-star, CRM, AI task wizard, etc)
+STATUS.md             — live snapshot: trusted features, known bugs, current sprint
+TASKS.md              — full backlog (~1,200 lines; Phase 11 at the bottom is the active block)
+DECISIONS.md          — numbered architectural decisions with rationale
 AGENTS.md
 ```
+
+Read `STATUS.md` at the start of any session — it tells you what surfaces the user actually trusts on production today, what's broken, and what's currently being worked on. The `CLAUDE.md` you're reading now is the bible; `STATUS.md` is the heartbeat.
 
 ---
 
@@ -521,13 +524,21 @@ See `TASKS.md` for the full prioritised list. The high-level categories:
 5. No `console.log` in production code.
 6. No em dashes or en dashes anywhere — not in strings, comments, or JSX text.
 7. Agents commit directly to main after type-check and lint pass.
-8. Significant features require QA approval and UIUX spacing review before done.
+8. **Definition of Done.** A task only flips to `[x]` after all of:
+   1. `npm run type-check` zero errors
+   2. `npm run lint` zero errors
+   3. Pushed to main + Webflow Cloud deploy green
+   4. **Live browser smoke**: golden-path flow exercised on the deployed URL
+   5. **Mobile 375px**: layout verified — no horizontal scroll, touch targets ≥ 44px
+   6. **Dark mode**: page rendered with `.dark` class — no contrast regressions
+   7. **Screenshot or note** added to the commit body or PR confirming 4–6
+   Tasks failing any of 4–7 must stay `[ ]` even if 1–3 pass. See `STATUS.md` for current sprint and known live bugs.
 9. Playwright e2e for critical flows. Vitest unit tests for API routes with non-trivial logic.
 10. Every new page needs `export const metadata` with a descriptive title.
 11. All admin API routes that return requests, clients, or tasks must enforce team member access scoping.
 12. All portal API routes must scope queries to the authenticated user's `orgId`.
 13. All components using CSS tokens must use CSS var references, not hardcoded hex, so dark mode works correctly.
-14. MCP parity: any API capability used in the dashboard must also be exposed via MCP tools. Both MCP servers (`mcp-server/index.ts` and `workers/mcp-server/src/index.ts`) must stay in sync. See Decision #036.
+14. MCP parity: any API capability used in the dashboard must be exposed via MCP tools on the worker server (`workers/mcp-server/src/index.ts`). The local stdio server (`mcp-server/index.ts`) is dormant — do not extend it. See Decision #036 (partly superseded) and memory `feedback_mcp_worker_only.md`.
 
 ---
 
