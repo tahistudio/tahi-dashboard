@@ -164,37 +164,38 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .where(eq(schema.organisations.id, id))
 
   // Handle billing fields via raw SQL (not in Drizzle schema to avoid
-  // crashing SELECT * before migration 0016 is applied).
-  const billingFields = ['customMrr', 'billingModel', 'retainerStartDate', 'retainerEndDate'] as const
-  const billingUpdates: string[] = []
-  const billingValues: unknown[] = []
+  // crashing SELECT * before migration 0016 is applied). Each field that
+  // is explicitly present in the request body flips its `_is_manual`
+  // companion column to 1 so the next auto-derivation pass leaves it
+  // alone. To re-enable auto-derivation for a field, POST to
+  // /api/admin/clients/[id]/auto-derive with clearOverrides.
+  const billingColumnMap: Record<string, { col: string; manualFlag: string | null }> = {
+    customMrr: { col: 'custom_mrr', manualFlag: 'custom_mrr_is_manual' },
+    billingModel: { col: 'billing_model', manualFlag: 'billing_model_is_manual' },
+    retainerStartDate: { col: 'retainer_start_date', manualFlag: 'retainer_dates_is_manual' },
+    retainerEndDate: { col: 'retainer_end_date', manualFlag: 'retainer_dates_is_manual' },
+  }
+  const billingFields = Object.keys(billingColumnMap) as Array<keyof typeof billingColumnMap>
+  const touchedManualFlags = new Set<string>()
+
   for (const field of billingFields) {
     if (field in body) {
-      const colMap: Record<string, string> = {
-        customMrr: 'custom_mrr',
-        billingModel: 'billing_model',
-        retainerStartDate: 'retainer_start_date',
-        retainerEndDate: 'retainer_end_date',
+      const { col, manualFlag } = billingColumnMap[field]
+      const val = body[field as keyof typeof body] ?? null
+      try {
+        await drizzle.run(sql`UPDATE organisations SET ${sql.raw(col)} = ${val} WHERE id = ${id}`)
+        if (manualFlag) touchedManualFlags.add(manualFlag)
+      } catch {
+        // Column does not exist yet (pre-migration-0016) — silently skip.
       }
-      billingUpdates.push(`${colMap[field]} = ?`)
-      billingValues.push(body[field] ?? null)
     }
   }
-  if (billingUpdates.length > 0) {
+
+  for (const flag of touchedManualFlags) {
     try {
-      const setClause = billingUpdates.join(', ')
-      await drizzle.run(
-        sql.raw(`UPDATE organisations SET ${setClause} WHERE id = '${id}'`),
-      )
-      // Re-run with parameterised values via individual updates
-      // (sql.raw doesn't support params, so do one at a time)
-      for (let i = 0; i < billingUpdates.length; i++) {
-        const col = billingUpdates[i].split(' = ')[0]
-        const val = billingValues[i]
-        await drizzle.run(sql`UPDATE organisations SET ${sql.raw(col)} = ${val} WHERE id = ${id}`)
-      }
+      await drizzle.run(sql`UPDATE organisations SET ${sql.raw(flag)} = 1 WHERE id = ${id}`)
     } catch {
-      // Columns don't exist yet (pre-migration-0016), silently skip
+      // Flag column does not exist yet — silently skip.
     }
   }
 

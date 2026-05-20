@@ -4,6 +4,24 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { importStripeInvoice, type StripeInvoiceLike } from '@/lib/stripe-import'
+import { applyBillingDerivation } from '@/lib/billing-derivation'
+
+type BillingDb = Parameters<typeof applyBillingDerivation>[0]
+
+/**
+ * Re-derive billing model + retainer dates for an org. Wrapped to never
+ * throw — a derivation failure must not bounce the Stripe webhook (Stripe
+ * will retry the event and we don't want repeat side-effects on the
+ * invoice / subscription state).
+ */
+async function tryDerive(database: unknown, orgId: string | null | undefined) {
+  if (!orgId) return
+  try {
+    await applyBillingDerivation(database as BillingDb, orgId)
+  } catch (err) {
+    console.warn('[stripe-webhook] billing derivation failed for org', orgId, err instanceof Error ? err.message : err)
+  }
+}
 
 // Convert Stripe SDK Invoice into the loose shape importStripeInvoice wants.
 function toImportable(inv: Stripe.Invoice): StripeInvoiceLike {
@@ -104,6 +122,16 @@ export async function POST(req: Request) {
             .update(schema.invoices)
             .set({ status: 'paid', paidAt: now, updatedAt: now })
             .where(eq(schema.invoices.id, existing[0].id))
+
+          // Auto-derive: a paid invoice can flip an org from project to
+          // retainer or extend the retainerStartDate when it's the first
+          // financial activity we've seen. Cheap idempotent write.
+          const orgRow = await database
+            .select({ orgId: schema.invoices.orgId })
+            .from(schema.invoices)
+            .where(eq(schema.invoices.id, existing[0].id))
+            .limit(1)
+          await tryDerive(database, orgRow[0]?.orgId)
         }
       }
       break
@@ -159,6 +187,13 @@ export async function POST(req: Request) {
               updatedAt: now,
             })
             .where(eq(schema.subscriptions.id, existing[0].id))
+
+          const orgRow = await database
+            .select({ orgId: schema.subscriptions.orgId })
+            .from(schema.subscriptions)
+            .where(eq(schema.subscriptions.id, existing[0].id))
+            .limit(1)
+          await tryDerive(database, orgRow[0]?.orgId)
         }
       }
       break
@@ -182,13 +217,32 @@ export async function POST(req: Request) {
               updatedAt: now,
             })
             .where(eq(schema.subscriptions.id, existing[0].id))
+
+          const orgRow = await database
+            .select({ orgId: schema.subscriptions.orgId })
+            .from(schema.subscriptions)
+            .where(eq(schema.subscriptions.id, existing[0].id))
+            .limit(1)
+          await tryDerive(database, orgRow[0]?.orgId)
         }
       }
       break
     }
 
     case 'customer.subscription.created': {
-      // For now, just log. Full provisioning requires matching the customer to an org.
+      // Full provisioning still requires the manual customer-to-org match, but
+      // if a sub was created for an already-known stripeCustomerId we can fire
+      // a derivation for that org so the retainer state catches up immediately.
+      const sub = event.data.object as Stripe.Subscription
+      const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id
+      if (customerId) {
+        const orgRow = await database
+          .select({ id: schema.organisations.id })
+          .from(schema.organisations)
+          .where(eq(schema.organisations.stripeCustomerId, customerId))
+          .limit(1)
+        await tryDerive(database, orgRow[0]?.id)
+      }
       break
     }
 
