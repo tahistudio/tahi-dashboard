@@ -113,6 +113,10 @@ interface Organisation {
   defaultHourlyRate: number | null
   retainerStartDate: string | null
   retainerEndDate: string | null
+  /** true when a user explicitly set the field; auto-derivation will not overwrite it. */
+  billingModelIsManual?: boolean
+  retainerDatesIsManual?: boolean
+  customMrrIsManual?: boolean
   createdAt: string
   updatedAt: string
 }
@@ -646,6 +650,57 @@ interface TeamMemberPm {
   name: string
 }
 
+/**
+ * AutoPill — tiny inline indicator next to a billing field that shows
+ * whether the value is auto-derived from signals (green "Auto") or
+ * manually set by the user (amber "Manual" + "use auto" link).
+ *
+ * Hidden entirely when `isManual` is undefined, which happens when the
+ * GET response predates migration 0016 and the flag columns don't exist.
+ */
+function AutoPill({
+  isManual,
+  onReenableAuto,
+  reenabling,
+}: {
+  isManual: boolean | undefined
+  onReenableAuto: () => void
+  reenabling: boolean
+}) {
+  if (isManual === undefined) return null
+  if (isManual) {
+    return (
+      <span className="inline-flex items-center gap-1.5 ml-2 align-middle">
+        <span
+          className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide"
+          style={{ background: 'var(--color-warning-bg)', color: 'var(--color-warning)' }}
+        >
+          Manual
+        </span>
+        <button
+          type="button"
+          onClick={onReenableAuto}
+          disabled={reenabling}
+          className="text-[10px] underline hover:no-underline disabled:opacity-50"
+          style={{ color: 'var(--color-text-muted)' }}
+          title="Clear manual override and let the system auto-derive this field from current signals"
+        >
+          {reenabling ? 'Resetting...' : 'use auto'}
+        </button>
+      </span>
+    )
+  }
+  return (
+    <span
+      className="inline-flex items-center ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide align-middle"
+      style={{ background: 'var(--color-brand-50)', color: 'var(--color-brand)' }}
+      title="This field is auto-derived from current signals (Stripe subscription, MRR, billable hours, paid invoices, won deals)."
+    >
+      Auto
+    </span>
+  )
+}
+
 function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () => void }) {
   const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()
   const [editing, setEditing] = useState(false)
@@ -653,6 +708,42 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
   const [teamMembers, setTeamMembers] = useState<TeamMemberPm[]>([])
   const [assignedPm, setAssignedPm] = useState<string | null>(null)
   const [pmLoading, setPmLoading] = useState(false)
+  const [autoDeriving, setAutoDeriving] = useState(false)
+  const [reenablingField, setReenablingField] = useState<'billingModel' | 'retainerDates' | 'customMrr' | null>(null)
+
+  /** Re-derive billing model + retainer dates from current signals. */
+  const runAutoDerive = async () => {
+    setAutoDeriving(true)
+    try {
+      await fetch(apiPath(`/api/admin/clients/${org.id}/auto-derive`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      onUpdated()
+    } catch {
+      // silent
+    } finally {
+      setAutoDeriving(false)
+    }
+  }
+
+  /** Reset one field's manual override and immediately re-derive it. */
+  const reenableAuto = async (field: 'billingModel' | 'retainerDates' | 'customMrr') => {
+    setReenablingField(field)
+    try {
+      await fetch(apiPath(`/api/admin/clients/${org.id}/auto-derive`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clearOverrides: { [field]: true } }),
+      })
+      onUpdated()
+    } catch {
+      // silent
+    } finally {
+      setReenablingField(null)
+    }
+  }
 
   useEffect(() => {
     // Load team members for PM selector
@@ -735,13 +826,24 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-semibold text-[var(--color-text)]">Organisation details</h2>
         {!editing ? (
-          <button
-            onClick={() => setEditing(true)}
-            className="flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-          >
-            <Edit2 className="w-3.5 h-3.5" />
-            Edit
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={runAutoDerive}
+              disabled={autoDeriving}
+              title="Re-derive billing model + retainer dates from current signals (Stripe subscription, MRR, paid invoices, billable hours, won deals). Manual overrides are preserved."
+              className="flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={cn('w-3.5 h-3.5', autoDeriving && 'animate-spin')} />
+              {autoDeriving ? 'Detecting...' : 'Auto-detect'}
+            </button>
+            <button
+              onClick={() => setEditing(true)}
+              className="flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+              Edit
+            </button>
+          </div>
         ) : (
           <div className="flex gap-2">
             <button
@@ -951,7 +1053,14 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
           </div>
           <div>
             <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Billing model</dt>
-            <dd className="text-[var(--color-text)] capitalize">{org.billingModel ?? 'none'}</dd>
+            <dd className="text-[var(--color-text)] capitalize">
+              {org.billingModel ?? 'none'}
+              <AutoPill
+                isManual={org.billingModelIsManual}
+                onReenableAuto={() => reenableAuto('billingModel')}
+                reenabling={reenablingField === 'billingModel'}
+              />
+            </dd>
           </div>
           {org.billingModel === 'retainer' || org.customMrr ? (
             <div>
@@ -967,6 +1076,11 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
                     )}
                   </>
                 ) : '--'}
+                <AutoPill
+                  isManual={org.customMrrIsManual}
+                  onReenableAuto={() => reenableAuto('customMrr')}
+                  reenabling={reenablingField === 'customMrr'}
+                />
               </dd>
             </div>
           ) : org.billingModel === 'hourly' ? (
@@ -995,6 +1109,11 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
                 {org.retainerEndDate && (
                   <span style={{ color: 'var(--color-warning)', fontWeight: 500 }}>{org.retainerEndDate}</span>
                 )}
+                <AutoPill
+                  isManual={org.retainerDatesIsManual}
+                  onReenableAuto={() => reenableAuto('retainerDates')}
+                  reenabling={reenablingField === 'retainerDates'}
+                />
               </dd>
             </div>
           )}

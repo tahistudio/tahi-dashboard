@@ -33,7 +33,9 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   // billingModel, customMrr, retainerStartDate, retainerEndDate live in DB
   // via migration 0016 but are NOT in Drizzle schema (to avoid crashing
-  // SELECT * before migration is applied). Access via raw SQL.
+  // SELECT * before migration is applied). Same for the *_is_manual flags
+  // that let auto-derivation know which fields the user explicitly set.
+  // Access via raw SQL.
   let billingExtras: Record<string, unknown> = {}
   try {
     const rows = await drizzle.all<{
@@ -41,8 +43,12 @@ export async function GET(req: NextRequest, { params }: Params) {
       billing_model: string | null
       retainer_start_date: string | null
       retainer_end_date: string | null
+      billing_model_is_manual: number | null
+      retainer_dates_is_manual: number | null
+      custom_mrr_is_manual: number | null
     }>(
-      sql`SELECT custom_mrr, billing_model, retainer_start_date, retainer_end_date
+      sql`SELECT custom_mrr, billing_model, retainer_start_date, retainer_end_date,
+                 billing_model_is_manual, retainer_dates_is_manual, custom_mrr_is_manual
           FROM organisations WHERE id = ${id} LIMIT 1`
     )
     if (rows?.[0]) {
@@ -51,10 +57,36 @@ export async function GET(req: NextRequest, { params }: Params) {
         billingModel: rows[0].billing_model,
         retainerStartDate: rows[0].retainer_start_date,
         retainerEndDate: rows[0].retainer_end_date,
+        billingModelIsManual: Boolean(rows[0].billing_model_is_manual),
+        retainerDatesIsManual: Boolean(rows[0].retainer_dates_is_manual),
+        customMrrIsManual: Boolean(rows[0].custom_mrr_is_manual),
       }
     }
   } catch {
-    // Columns don't exist yet (pre-migration-0016)
+    // Columns don't exist yet (pre-migration-0016) — try a fallback that
+    // doesn't reference the _is_manual flags so the rest of the response
+    // still works on pre-0016 environments.
+    try {
+      const rows = await drizzle.all<{
+        custom_mrr: number | null
+        billing_model: string | null
+        retainer_start_date: string | null
+        retainer_end_date: string | null
+      }>(
+        sql`SELECT custom_mrr, billing_model, retainer_start_date, retainer_end_date
+            FROM organisations WHERE id = ${id} LIMIT 1`
+      )
+      if (rows?.[0]) {
+        billingExtras = {
+          customMrr: rows[0].custom_mrr,
+          billingModel: rows[0].billing_model,
+          retainerStartDate: rows[0].retainer_start_date,
+          retainerEndDate: rows[0].retainer_end_date,
+        }
+      }
+    } catch {
+      // Even the base columns are missing — leave billingExtras empty.
+    }
   }
 
   const [contacts, subscription, recentRequests] = await Promise.all([
