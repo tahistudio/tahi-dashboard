@@ -32,9 +32,30 @@ export function convertCurrency(
   return usdAmount * rate
 }
 
+/**
+ * Parse a date that may have come from Xero in the old Microsoft JSON.NET
+ * format like "/Date(1776038400000+0000)/". Falls through to native Date
+ * parsing for ISO strings, YYYY-MM-DD, etc.
+ *
+ * Exported so any list view that surfaces Xero-imported dates can use it
+ * directly (e.g. invoice rows showing raw paid_at strings).
+ */
+export function parseLooseDate(value: string | Date | null | undefined): Date | null {
+  if (!value) return null
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
+  const dotNet = /^\/Date\((-?\d+)(?:[+-]\d{4})?\)\/$/.exec(value)
+  if (dotNet) {
+    const d = new Date(Number(dotNet[1]))
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
 /** Format a date in NZ-friendly format */
 export function formatDate(date: string | Date, format: 'short' | 'long' | 'relative' = 'short'): string {
-  const d = typeof date === 'string' ? new Date(date) : date
+  const d = parseLooseDate(date)
+  if (!d) return typeof date === 'string' ? date : ''
 
   if (format === 'relative') {
     const now = new Date()

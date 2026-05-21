@@ -679,6 +679,14 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_project_calculations_org ON project_calculations(org_id)`,
     ],
   },
+  {
+    name: '0036',
+    description: 'Add org_id to active_timers so a timer can be tracked against a client directly (not just a request or task). Exactly one of request_id / task_id / org_id is required at the API layer.',
+    statements: [
+      `ALTER TABLE active_timers ADD COLUMN org_id text REFERENCES organisations(id) ON DELETE CASCADE`,
+      `CREATE INDEX IF NOT EXISTS idx_active_timers_org ON active_timers(org_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

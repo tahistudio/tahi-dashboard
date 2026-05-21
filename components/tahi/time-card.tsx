@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Play, Pause, Square, ArrowRightLeft, Loader2, Plus, Clock } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { formatElapsed } from '@/lib/timer-helpers'
+import { notifyTimerChanged, subscribeToTimerChanges } from '@/lib/timer-events'
 import { Card } from '@/components/tahi/card'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { useToast } from '@/components/tahi/toast'
@@ -58,7 +59,11 @@ export function TimeCard({ requestId }: Props) {
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const [entriesLoaded, setEntriesLoaded] = useState(false)
   const [logOpen, setLogOpen] = useState(false)
-  const [hours, setHours] = useState('')
+  const [logMode, setLogMode] = useState<'duration' | 'range'>('duration')
+  const [logHours, setLogHours] = useState('')
+  const [logMinutes, setLogMinutes] = useState('')
+  const [rangeFrom, setRangeFrom] = useState('')
+  const [rangeTo, setRangeTo] = useState('')
   const [notes, setNotes] = useState('')
   const [billable, setBillable] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -95,6 +100,13 @@ export function TimeCard({ requestId }: Props) {
   useEffect(() => { void fetchTimer() }, [fetchTimer])
   useEffect(() => { void fetchEntries() }, [fetchEntries])
 
+  // Cross-component sync — if the nav stops the timer, our local display
+  // should reset immediately instead of waiting for the next poll.
+  useEffect(() => subscribeToTimerChanges(() => {
+    void fetchTimer()
+    void fetchEntries()
+  }), [fetchTimer, fetchEntries])
+
   // Live counter — only while the timer is on THIS request + not paused.
   useEffect(() => {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
@@ -118,6 +130,7 @@ export function TimeCard({ requestId }: Props) {
         setSwitchConfirm(true)
       } else if (res.ok) {
         await fetchTimer()
+        notifyTimerChanged()
         showToast('Timer started')
       } else {
         const j = await res.json().catch(() => ({})) as { error?: string }
@@ -141,6 +154,7 @@ export function TimeCard({ requestId }: Props) {
       })
       if (res.ok) {
         await fetchTimer()
+        notifyTimerChanged()
         showToast(timer.isPaused ? 'Timer resumed' : 'Timer paused')
       } else {
         const j = await res.json().catch(() => ({})) as { error?: string }
@@ -163,11 +177,11 @@ export function TimeCard({ requestId }: Props) {
       if (res.ok) {
         const data = await res.json() as { hours?: number; logged?: boolean; reason?: string }
         setTimer(null)
+        notifyTimerChanged()
         if (data.logged && typeof data.hours === 'number') {
           // Refresh entries so the new row appears in the list immediately.
           await fetchEntries()
-          const pretty = data.hours >= 0.01 ? `${data.hours.toFixed(2)}h` : `${Math.round((data.hours ?? 0) * 3600)}s`
-          showToast(`Logged ${pretty}`)
+          showToast(`Logged ${prettyHours(data.hours)}`)
         } else if (data.reason) {
           showToast(`Timer stopped — not logged (${data.reason})`)
         } else {
@@ -186,10 +200,54 @@ export function TimeCard({ requestId }: Props) {
 
   // --- manual log ---------------------------------------------------------
 
+  // Pretty-print decimal hours — uses minutes for sub-hour values so a
+  // 12-minute entry shows "12m" instead of the misleading "0.2h".
+  function prettyHours(h: number): string {
+    if (!h || h <= 0) return '0m'
+    if (h >= 1) return `${h.toFixed(h % 1 === 0 ? 0 : 2)}h`
+    const minutes = Math.round(h * 60)
+    if (minutes >= 1) return `${minutes}m`
+    return `${Math.round(h * 3600)}s`
+  }
+
+  // Convert the form state into decimal hours, regardless of input mode.
+  // Returns null if the input is empty / invalid / non-positive.
+  function computeLoggedHours(): number | null {
+    if (logMode === 'duration') {
+      const h = parseFloat(logHours || '0') || 0
+      const m = parseFloat(logMinutes || '0') || 0
+      const total = h + m / 60
+      return total > 0 ? Math.round(total * 10000) / 10000 : null
+    }
+    // Range mode: HH:MM strings → minutes from midnight, end - start.
+    if (!rangeFrom || !rangeTo) return null
+    const [fh, fm] = rangeFrom.split(':').map(Number)
+    const [th, tm] = rangeTo.split(':').map(Number)
+    if (Number.isNaN(fh) || Number.isNaN(th)) return null
+    const fromMin = fh * 60 + (fm || 0)
+    let toMin = th * 60 + (tm || 0)
+    if (toMin <= fromMin) toMin += 24 * 60 // assume overnight
+    const total = (toMin - fromMin) / 60
+    return total > 0 ? Math.round(total * 10000) / 10000 : null
+  }
+
+  function resetLogForm() {
+    setLogHours('')
+    setLogMinutes('')
+    setRangeFrom('')
+    setRangeTo('')
+    setNotes('')
+    setBillable(true)
+    setLogMode('duration')
+  }
+
   async function handleLogSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const h = parseFloat(hours)
-    if (!h || h <= 0) return
+    const h = computeLoggedHours()
+    if (!h) {
+      showToast('Enter a duration or a time range first')
+      return
+    }
     setSaving(true)
     try {
       const res = await fetch(apiPath(`/api/admin/requests/${requestId}/time-entries`), {
@@ -198,14 +256,14 @@ export function TimeCard({ requestId }: Props) {
         body: JSON.stringify({ hours: h, description: notes.trim() || undefined, billable }),
       })
       if (res.ok) {
-        setHours('')
-        setNotes('')
-        setBillable(true)
+        resetLogForm()
         setLogOpen(false)
         await fetchEntries()
-        showToast(`Logged ${h}h manually`)
+        const pretty = h >= 1 ? `${h.toFixed(2)}h` : `${Math.round(h * 60)}m`
+        showToast(`Logged ${pretty}`)
       } else {
-        showToast('Failed to log time')
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        showToast(j.error ?? 'Failed to log time')
       }
     } catch {
       showToast('Network error — try again')
@@ -249,7 +307,7 @@ export function TimeCard({ requestId }: Props) {
         </h3>
         {entriesLoaded && totalHours > 0 && (
           <span className="font-mono tabular-nums" style={{ fontSize: '0.75rem', color: 'var(--color-text)', fontWeight: 600 }}>
-            {totalHours.toFixed(1)}h logged
+            {prettyHours(totalHours)} logged
           </span>
         )}
       </div>
@@ -369,7 +427,7 @@ export function TimeCard({ requestId }: Props) {
                   className="font-mono tabular-nums font-medium"
                   style={{ color: 'var(--color-text)', flexShrink: 0 }}
                 >
-                  {entry.hours.toFixed(1)}h
+                  {prettyHours(entry.hours)}
                 </span>
               </div>
             ))}
@@ -396,48 +454,115 @@ export function TimeCard({ requestId }: Props) {
           </p>
         )}
 
-        {/* Manual log form — collapsed behind a small button */}
+        {/* Manual log form — collapsed behind a small button. Two modes:
+            duration (hours + minutes) or range (from–to clock times). */}
         {logOpen ? (
-          <form onSubmit={handleLogSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', marginTop: '0.375rem' }}>
-            <div className="flex items-center" style={{ gap: '0.375rem' }}>
-              <input
-                type="number"
-                step="0.25"
-                min="0"
-                value={hours}
-                onChange={e => setHours(e.target.value)}
-                placeholder="Hours"
-                autoFocus
-                required
-                style={{
-                  width: '4.5rem',
-                  padding: '0.3125rem 0.5rem',
-                  fontSize: '0.75rem',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--color-bg)',
-                  color: 'var(--color-text)',
-                  outline: 'none',
-                }}
-              />
-              <input
-                type="text"
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                placeholder="What did you work on?"
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  padding: '0.3125rem 0.5rem',
-                  fontSize: '0.75rem',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--color-bg)',
-                  color: 'var(--color-text)',
-                  outline: 'none',
-                }}
-              />
+          <form onSubmit={handleLogSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.375rem' }}>
+            {/* Mode tabs */}
+            <div
+              role="tablist"
+              aria-label="Time entry mode"
+              style={{
+                display: 'inline-flex',
+                gap: '0.125rem',
+                padding: '0.125rem',
+                background: 'var(--color-bg-secondary)',
+                borderRadius: 'var(--radius-sm)',
+                alignSelf: 'flex-start',
+              }}
+            >
+              {(['duration', 'range'] as const).map(m => (
+                <button
+                  key={m}
+                  type="button"
+                  role="tab"
+                  aria-selected={logMode === m}
+                  onClick={() => setLogMode(m)}
+                  style={{
+                    padding: '0.1875rem 0.5rem',
+                    fontSize: '0.625rem',
+                    fontWeight: 500,
+                    color: logMode === m ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                    background: logMode === m ? 'var(--color-bg)' : 'transparent',
+                    border: 'none',
+                    borderRadius: 'var(--radius-sm)',
+                    cursor: 'pointer',
+                    textTransform: 'capitalize',
+                    boxShadow: logMode === m ? 'var(--shadow-xs)' : 'none',
+                  }}
+                >
+                  {m === 'duration' ? 'Duration' : 'Time range'}
+                </button>
+              ))}
             </div>
+
+            {/* Time inputs */}
+            {logMode === 'duration' ? (
+              <div className="flex items-center" style={{ gap: '0.375rem' }}>
+                <NumInput
+                  value={logHours}
+                  onChange={setLogHours}
+                  placeholder="0"
+                  suffix="h"
+                  autoFocus
+                />
+                <NumInput
+                  value={logMinutes}
+                  onChange={setLogMinutes}
+                  placeholder="0"
+                  suffix="m"
+                  max={59}
+                />
+                <span style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)' }}>
+                  {(() => {
+                    const h = computeLoggedHours()
+                    return h ? `= ${h.toFixed(2)}h` : ''
+                  })()}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center" style={{ gap: '0.375rem' }}>
+                <input
+                  type="time"
+                  value={rangeFrom}
+                  onChange={e => setRangeFrom(e.target.value)}
+                  autoFocus
+                  style={timeInputStyle}
+                />
+                <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>→</span>
+                <input
+                  type="time"
+                  value={rangeTo}
+                  onChange={e => setRangeTo(e.target.value)}
+                  style={timeInputStyle}
+                />
+                <span style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)' }}>
+                  {(() => {
+                    const h = computeLoggedHours()
+                    return h ? `= ${h.toFixed(2)}h` : ''
+                  })()}
+                </span>
+              </div>
+            )}
+
+            {/* Notes */}
+            <input
+              type="text"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="What did you work on? (optional)"
+              style={{
+                width: '100%',
+                padding: '0.3125rem 0.5rem',
+                fontSize: '0.75rem',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                outline: 'none',
+              }}
+            />
+
             <div className="flex items-center justify-between" style={{ gap: '0.375rem' }}>
               <label className="flex items-center" style={{ gap: '0.3125rem', fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
                 <input
@@ -451,7 +576,7 @@ export function TimeCard({ requestId }: Props) {
               <div className="flex items-center" style={{ gap: '0.25rem' }}>
                 <button
                   type="button"
-                  onClick={() => { setLogOpen(false); setHours(''); setNotes(''); setBillable(true) }}
+                  onClick={() => { setLogOpen(false); resetLogForm() }}
                   style={{
                     fontSize: '0.6875rem',
                     padding: '0.25rem 0.5rem',
@@ -466,7 +591,7 @@ export function TimeCard({ requestId }: Props) {
                 </button>
                 <button
                   type="submit"
-                  disabled={saving || !hours || parseFloat(hours) <= 0}
+                  disabled={saving || !computeLoggedHours()}
                   style={{
                     fontSize: '0.6875rem',
                     fontWeight: 600,
@@ -475,7 +600,7 @@ export function TimeCard({ requestId }: Props) {
                     background: 'var(--color-brand)',
                     color: '#fff',
                     cursor: saving ? 'not-allowed' : 'pointer',
-                    opacity: saving ? 0.6 : 1,
+                    opacity: (saving || !computeLoggedHours()) ? 0.5 : 1,
                     borderRadius: 'var(--radius-sm)',
                   }}
                 >
@@ -585,5 +710,67 @@ function ActionButton({
       <span aria-hidden="true" style={{ display: 'inline-flex' }}>{icon}</span>
       {label}
     </button>
+  )
+}
+
+// ── Manual log form helpers ──────────────────────────────────────────────────
+
+const timeInputStyle: React.CSSProperties = {
+  padding: '0.3125rem 0.5rem',
+  fontSize: '0.75rem',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--color-bg)',
+  color: 'var(--color-text)',
+  outline: 'none',
+  fontFamily: 'inherit',
+}
+
+function NumInput({
+  value, onChange, placeholder, suffix, autoFocus, max,
+}: {
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  suffix?: string
+  autoFocus?: boolean
+  max?: number
+}) {
+  return (
+    <span
+      className="inline-flex items-center"
+      style={{
+        gap: '0.1875rem',
+        padding: '0.1875rem 0.4375rem',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-sm)',
+        background: 'var(--color-bg)',
+      }}
+    >
+      <input
+        type="number"
+        min={0}
+        max={max}
+        step={1}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+        style={{
+          width: '2.25rem',
+          padding: 0,
+          border: 'none',
+          background: 'transparent',
+          outline: 'none',
+          fontSize: '0.75rem',
+          color: 'var(--color-text)',
+          textAlign: 'right',
+          fontFamily: 'inherit',
+        }}
+      />
+      {suffix && (
+        <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>{suffix}</span>
+      )}
+    </span>
   )
 }

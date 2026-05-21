@@ -46,13 +46,14 @@ import {
   Pencil,
   ListOrdered,
   Percent,
+  Lock,
 } from 'lucide-react'
 import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badge'
 import { TrackMeter } from '@/components/tahi/track-meter'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { RequestCard } from '@/components/tahi/request-card'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
-import { cn } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
 import { TrackQueueView } from '@/components/tahi/track-queue-view'
 import type { TrackWithQueue, TrackActiveRequest } from '@/components/tahi/track-queue-view'
 import { trackCanHandle } from '@/lib/plan-utils'
@@ -1104,10 +1105,10 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
             <div>
               <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Retainer period</dt>
               <dd className="text-[var(--color-text)]">
-                {org.retainerStartDate && <span>{org.retainerStartDate}</span>}
+                {org.retainerStartDate && <span>{formatDate(org.retainerStartDate)}</span>}
                 {org.retainerStartDate && org.retainerEndDate && ' \u2192 '}
                 {org.retainerEndDate && (
-                  <span style={{ color: 'var(--color-warning)', fontWeight: 500 }}>{org.retainerEndDate}</span>
+                  <span style={{ color: 'var(--color-warning)', fontWeight: 500 }}>{formatDate(org.retainerEndDate)}</span>
                 )}
                 <AutoPill
                   isManual={org.retainerDatesIsManual}
@@ -1481,17 +1482,37 @@ function InternalNotesCard({ org, onUpdated }: { org: Organisation; onUpdated: (
 
   return (
     <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="font-semibold text-sm text-[var(--color-text)]">Internal notes</h3>
+      <div className="flex items-center justify-between mb-3" style={{ gap: '0.75rem' }}>
+        <div className="flex items-center" style={{ gap: '0.5rem', minWidth: 0 }}>
+          <h3 className="font-semibold text-sm text-[var(--color-text)]" style={{ margin: 0 }}>Internal notes</h3>
+          <span
+            className="inline-flex items-center"
+            style={{
+              gap: '0.25rem',
+              padding: '0.0625rem 0.4375rem',
+              fontSize: '0.625rem',
+              fontWeight: 500,
+              color: 'var(--color-text-subtle)',
+              background: 'var(--color-bg-secondary)',
+              border: '1px solid var(--color-border-subtle)',
+              borderRadius: '9999px',
+              flexShrink: 0,
+            }}
+            title="Visible to the Tahi team only — never shown in the client portal"
+          >
+            <Lock size={9} aria-hidden="true" />
+            Private
+          </span>
+        </div>
         {!editing ? (
           <button
             onClick={() => setEditing(true)}
-            className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex-shrink-0"
           >
             Edit
           </button>
         ) : (
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-shrink-0">
             <button onClick={() => { setEditing(false); setNotes(org.internalNotes ?? '') }} className="text-xs text-[var(--color-text-muted)]">Cancel</button>
             <button onClick={save} disabled={saving} className="text-xs text-[var(--color-brand)] font-medium disabled:opacity-50">
               {saving ? 'Saving…' : 'Save'}
@@ -1499,8 +1520,6 @@ function InternalNotesCard({ org, onUpdated }: { org: Organisation; onUpdated: (
           </div>
         )}
       </div>
-
-      <p className="text-xs text-amber-600 bg-amber-50 rounded px-2 py-1 mb-2">Never shown to clients</p>
 
       {editing ? (
         <textarea

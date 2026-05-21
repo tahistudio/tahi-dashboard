@@ -29,6 +29,7 @@ import {
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { formatElapsed, isStaleTimer } from '@/lib/timer-helpers'
+import { notifyTimerChanged, subscribeToTimerChanges } from '@/lib/timer-events'
 import { useToast } from '@/components/tahi/toast'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { Popover } from '@/components/tahi/popover'
@@ -58,7 +59,28 @@ interface RequestOption {
   requestNumber: number | null
 }
 
+interface TaskOption {
+  id: string
+  title: string
+  orgName: string | null
+}
+
+interface ClientOption {
+  id: string
+  name: string
+}
+
+type TimerSource = 'request' | 'task' | 'client'
+
 const POLL_MS = 30_000
+
+function prettyHoursShort(h: number | undefined): string {
+  if (!h || h <= 0) return '0m'
+  if (h >= 1) return `${h.toFixed(h % 1 === 0 ? 0 : 2)}h`
+  const minutes = Math.round(h * 60)
+  if (minutes >= 1) return `${minutes}m`
+  return `${Math.round(h * 3600)}s`
+}
 
 export function TimerChip() {
   const [timer, setTimer] = useState<ActiveTimerResponse['timer']>(null)
@@ -70,7 +92,12 @@ export function TimerChip() {
   const [staleTimer, setStaleTimer] = useState<ActiveTimerResponse['timer']>(null)
 
   const [requests, setRequests] = useState<RequestOption[]>([])
+  const [tasks, setTasks] = useState<TaskOption[]>([])
+  const [clients, setClients] = useState<ClientOption[]>([])
   const [requestsLoading, setRequestsLoading] = useState(false)
+  const [tasksLoading, setTasksLoading] = useState(false)
+  const [clientsLoading, setClientsLoading] = useState(false)
+  const [pickerSource, setPickerSource] = useState<TimerSource>('request')
   const [pickerQuery, setPickerQuery] = useState('')
 
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -102,6 +129,11 @@ export function TimerChip() {
 
   useEffect(() => { void fetchTimer() }, [fetchTimer])
 
+  // Other components (per-request TimeCard etc.) broadcast a custom event
+  // when they mutate the timer; we re-fetch immediately instead of waiting
+  // for the 30s poll so the nav stays accurate.
+  useEffect(() => subscribeToTimerChanges(() => { void fetchTimer() }), [fetchTimer])
+
   useEffect(() => {
     const id = setInterval(() => {
       void fetchTimer()
@@ -116,16 +148,32 @@ export function TimerChip() {
     return () => clearInterval(id)
   }, [timer])
 
-  // Lazy-load requests the first time the user opens the picker.
+  // Lazy-load each source list the first time its tab is activated.
   useEffect(() => {
-    if (!pickerOpen || requests.length > 0 || requestsLoading) return
-    setRequestsLoading(true)
-    fetch(apiPath('/api/admin/requests?status=active'))
-      .then(r => r.json() as Promise<{ requests: Array<{ id: string; title: string; orgName: string | null; requestNumber: number | null }> }>)
-      .then(d => setRequests(d.requests ?? []))
-      .catch(() => setRequests([]))
-      .finally(() => setRequestsLoading(false))
-  }, [pickerOpen, requests.length, requestsLoading])
+    if (!pickerOpen) return
+    if (pickerSource === 'request' && requests.length === 0 && !requestsLoading) {
+      setRequestsLoading(true)
+      fetch(apiPath('/api/admin/requests?status=active'))
+        .then(r => r.json() as Promise<{ requests: RequestOption[] }>)
+        .then(d => setRequests(d.requests ?? []))
+        .catch(() => setRequests([]))
+        .finally(() => setRequestsLoading(false))
+    } else if (pickerSource === 'task' && tasks.length === 0 && !tasksLoading) {
+      setTasksLoading(true)
+      fetch(apiPath('/api/admin/tasks?status=all'))
+        .then(r => r.json() as Promise<{ items: TaskOption[] }>)
+        .then(d => setTasks(d.items ?? []))
+        .catch(() => setTasks([]))
+        .finally(() => setTasksLoading(false))
+    } else if (pickerSource === 'client' && clients.length === 0 && !clientsLoading) {
+      setClientsLoading(true)
+      fetch(apiPath('/api/admin/clients?status=active'))
+        .then(r => r.json() as Promise<{ organisations: Array<{ id: string; name: string }> }>)
+        .then(d => setClients((d.organisations ?? []).map(o => ({ id: o.id, name: o.name }))))
+        .catch(() => setClients([]))
+        .finally(() => setClientsLoading(false))
+    }
+  }, [pickerOpen, pickerSource, requests.length, tasks.length, clients.length, requestsLoading, tasksLoading, clientsLoading])
 
   // Close either popover if the other opens, so we don't get stacked.
   useEffect(() => { if (pickerOpen) setControlsOpen(false) }, [pickerOpen])
@@ -133,14 +181,18 @@ export function TimerChip() {
 
   // --- actions -------------------------------------------------------------
 
-  async function startOnRequest(requestId: string, confirmed = false) {
+  async function startTimer(source: TimerSource, id: string, confirmed = false) {
     setActing(true)
     try {
       const url = confirmed ? apiPath('/api/admin/timers?confirmed=true') : apiPath('/api/admin/timers')
+      const body =
+        source === 'request' ? { requestId: id } :
+        source === 'task' ? { taskId: id } :
+        { orgId: id }
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId }),
+        body: JSON.stringify(body),
       })
       if (res.status === 409) {
         // If there's already a timer running, just tell the user to stop
@@ -150,6 +202,7 @@ export function TimerChip() {
         showToast(j.currentTimer?.requestId ? 'Stop the active timer first' : 'A timer is already running')
       } else if (res.ok) {
         await fetchTimer()
+        notifyTimerChanged()
         setPickerOpen(false)
         setPickerQuery('')
         showToast('Timer started')
@@ -176,6 +229,7 @@ export function TimerChip() {
       })
       if (res.ok) {
         await fetchTimer()
+        notifyTimerChanged()
         showToast(timer.isPaused ? 'Timer resumed' : 'Timer paused')
       } else {
         const j = await res.json().catch(() => ({})) as { error?: string }
@@ -200,9 +254,9 @@ export function TimerChip() {
         const data = await res.json() as { logged?: boolean; hours?: number; reason?: string }
         setTimer(null)
         setStaleTimer(null)
+        notifyTimerChanged()
         if (action === 'log' && data.logged && typeof data.hours === 'number') {
-          const pretty = data.hours >= 0.01 ? `${data.hours.toFixed(2)}h` : `${Math.round((data.hours ?? 0) * 3600)}s`
-          showToast(`Timer stopped — ${pretty} logged`)
+          showToast(`Timer stopped — ${prettyHoursShort(data.hours)} logged`)
         } else if (action === 'log' && data.reason) {
           showToast(`Stopped — not logged (${data.reason})`)
         } else {
@@ -293,16 +347,23 @@ export function TimerChip() {
           anchorRef={triggerRef}
           open={pickerOpen}
           onClose={() => { setPickerOpen(false); setPickerQuery('') }}
-          width="18rem"
+          width="20rem"
           align="end"
-          maxHeight="24rem"
+          maxHeight="26rem"
         >
-          <RequestPicker
+          <SourcePicker
+            source={pickerSource}
+            setSource={s => { setPickerSource(s); setPickerQuery('') }}
             requests={requests}
-            loading={requestsLoading}
+            tasks={tasks}
+            clients={clients}
+            loading={
+              pickerSource === 'request' ? requestsLoading :
+              pickerSource === 'task' ? tasksLoading : clientsLoading
+            }
             query={pickerQuery}
             setQuery={setPickerQuery}
-            onPick={id => void startOnRequest(id)}
+            onPick={id => void startTimer(pickerSource, id)}
             acting={acting}
           />
         </Popover>
@@ -462,35 +523,109 @@ export function TimerChip() {
   )
 }
 
-function RequestPicker({
+/**
+ * Three-tab picker: Request | Task | Client. Common search bar across all
+ * three; tab swap clears the query. Each tab shows up to 40 results so the
+ * popover never grows unbounded.
+ */
+function SourcePicker({
+  source,
+  setSource,
   requests,
+  tasks,
+  clients,
   loading,
   query,
   setQuery,
   onPick,
   acting,
 }: {
+  source: TimerSource
+  setSource: (s: TimerSource) => void
   requests: RequestOption[]
+  tasks: TaskOption[]
+  clients: ClientOption[]
   loading: boolean
   query: string
   setQuery: (v: string) => void
   onPick: (id: string) => void
   acting: boolean
 }) {
-  const filtered = requests.filter(r => {
-    const q = query.toLowerCase().trim()
-    if (!q) return true
-    return r.title.toLowerCase().includes(q)
-      || (r.orgName?.toLowerCase().includes(q) ?? false)
-      || (r.requestNumber != null && String(r.requestNumber).includes(q))
-  })
+  const q = query.toLowerCase().trim()
+
+  // Normalise the active list into a common shape so we can render once.
+  let items: Array<{ id: string; label: string; sub?: string; mono?: string }> = []
+  if (source === 'request') {
+    items = requests
+      .filter(r => !q
+        || r.title.toLowerCase().includes(q)
+        || (r.orgName?.toLowerCase().includes(q) ?? false)
+        || (r.requestNumber != null && String(r.requestNumber).includes(q)))
+      .map(r => ({
+        id: r.id,
+        label: r.title,
+        sub: r.orgName ?? undefined,
+        mono: r.requestNumber != null ? `#${String(r.requestNumber).padStart(3, '0')}` : undefined,
+      }))
+  } else if (source === 'task') {
+    items = tasks
+      .filter(t => !q
+        || t.title.toLowerCase().includes(q)
+        || (t.orgName?.toLowerCase().includes(q) ?? false))
+      .map(t => ({ id: t.id, label: t.title, sub: t.orgName ?? 'Internal' }))
+  } else {
+    items = clients
+      .filter(c => !q || c.name.toLowerCase().includes(q))
+      .map(c => ({ id: c.id, label: c.name }))
+  }
+
   return (
     <>
+      {/* Source tabs */}
+      <div
+        role="tablist"
+        aria-label="Track time on"
+        style={{
+          display: 'flex',
+          gap: '0.125rem',
+          padding: '0.375rem',
+          borderBottom: '1px solid var(--color-border-subtle)',
+          background: 'var(--color-bg-secondary)',
+        }}
+      >
+        {(['request', 'task', 'client'] as const).map(s => (
+          <button
+            key={s}
+            type="button"
+            role="tab"
+            aria-selected={source === s}
+            onClick={() => setSource(s)}
+            style={{
+              flex: 1,
+              padding: '0.3125rem 0.5rem',
+              fontSize: '0.6875rem',
+              fontWeight: 500,
+              color: source === s ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+              background: source === s ? 'var(--color-bg)' : 'transparent',
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              cursor: 'pointer',
+              textTransform: 'capitalize',
+              boxShadow: source === s ? 'var(--shadow-xs)' : 'none',
+            }}
+          >
+            {s === 'request' ? 'Request' : s === 'task' ? 'Task' : 'Client'}
+          </button>
+        ))}
+      </div>
+
+      {/* Search */}
       <div
         style={{
           padding: '0.5rem',
           borderBottom: '1px solid var(--color-border-subtle)',
-          background: 'var(--color-bg-secondary)',
+          background: 'var(--color-bg)',
+          flexShrink: 0,
         }}
       >
         <div
@@ -498,7 +633,7 @@ function RequestPicker({
           style={{
             gap: '0.375rem',
             padding: '0.375rem 0.5rem',
-            background: 'var(--color-bg)',
+            background: 'var(--color-bg-secondary)',
             border: '1px solid var(--color-border-subtle)',
             borderRadius: 'var(--radius-sm)',
           }}
@@ -508,7 +643,7 @@ function RequestPicker({
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Search requests…"
+            placeholder={source === 'request' ? 'Search requests…' : source === 'task' ? 'Search tasks…' : 'Search clients…'}
             autoFocus
             style={{
               flex: 1, minWidth: 0,
@@ -520,21 +655,22 @@ function RequestPicker({
         </div>
       </div>
 
+      {/* Items */}
       <div role="list" style={{ overflowY: 'auto', flex: 1 }}>
         {loading ? (
           <p style={{ padding: '0.75rem', fontSize: '0.75rem', color: 'var(--color-text-subtle)', textAlign: 'center', margin: 0 }}>
             Loading…
           </p>
-        ) : filtered.length === 0 ? (
+        ) : items.length === 0 ? (
           <p style={{ padding: '0.75rem', fontSize: '0.75rem', color: 'var(--color-text-subtle)', textAlign: 'center', margin: 0 }}>
-            {query ? 'No matches.' : 'No active requests.'}
+            {q ? 'No matches.' : `No active ${source}s.`}
           </p>
         ) : (
-          filtered.slice(0, 40).map(r => (
+          items.slice(0, 40).map(item => (
             <button
-              key={r.id}
+              key={item.id}
               type="button"
-              onClick={() => onPick(r.id)}
+              onClick={() => onPick(item.id)}
               disabled={acting}
               className="flex items-center w-full transition-colors"
               style={{
@@ -551,29 +687,25 @@ function RequestPicker({
               onMouseEnter={e => { if (!acting) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
             >
-              <Play
-                size={11}
-                aria-hidden="true"
-                style={{ color: 'var(--color-brand)', flexShrink: 0 }}
-              />
+              <Play size={11} aria-hidden="true" style={{ color: 'var(--color-brand)', flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="truncate" style={{ fontWeight: 500 }}>
-                  {r.requestNumber != null && (
+                  {item.mono && (
                     <span
                       className="font-mono"
                       style={{ color: 'var(--color-text-subtle)', marginRight: '0.3125rem', fontWeight: 400 }}
                     >
-                      #{String(r.requestNumber).padStart(3, '0')}
+                      {item.mono}
                     </span>
                   )}
-                  {r.title}
+                  {item.label}
                 </div>
-                {r.orgName && (
+                {item.sub && (
                   <div
                     className="truncate"
                     style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}
                   >
-                    {r.orgName}
+                    {item.sub}
                   </div>
                 )}
               </div>

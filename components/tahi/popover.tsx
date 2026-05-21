@@ -91,15 +91,25 @@ export function Popover({
     const spaceAbove = r.top
     const flip = spaceBelow < Math.min(panelH, 240) && spaceAbove > spaceBelow
     const placement: 'below' | 'above' = flip ? 'above' : 'below'
+    // Resolve the panel's actual width. When `width` is a string ("16rem"
+    // etc.) we don't know the px until after layout, so measure the rendered
+    // panel; fall back to anchor width.
+    const measuredW = panelRef.current?.offsetWidth ?? 0
     const resolvedWidth = typeof width === 'number'
       ? width
       : typeof width === 'string'
-      ? null
+      ? (measuredW || r.width)
       : r.width
-    const panelW = resolvedWidth ?? r.width
-    const left = align === 'end'
-      ? r.right - panelW
-      : r.left
+    const panelW = resolvedWidth || r.width
+
+    let left = align === 'end' ? r.right - panelW : r.left
+    // Viewport clamp — keep an 8px margin from each edge so the panel can't
+    // hang off the screen on mobile when align='end' is used near the right.
+    const margin = 8
+    const maxLeft = window.innerWidth - panelW - margin
+    if (left > maxLeft) left = maxLeft
+    if (left < margin) left = margin
+
     const top = placement === 'below' ? r.bottom + offset : r.top - offset - panelH
     setPosition({ left, top, width: r.width, placement })
   }, [anchorRef, onClose, width, offset, align])

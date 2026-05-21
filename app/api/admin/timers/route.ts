@@ -39,9 +39,9 @@ export async function GET(req: NextRequest) {
     .limit(1)
   if (!timer) return NextResponse.json({ timer: null })
 
-  // Join the target title (request or task).
+  // Join the target title (request, task, or client).
   let targetTitle: string | null = null
-  let targetType: 'request' | 'task' = 'request'
+  let targetType: 'request' | 'task' | 'org' = 'request'
   if (timer.requestId) {
     const [r] = await drizzle
       .select({ title: schema.requests.title, requestNumber: schema.requests.requestNumber })
@@ -58,6 +58,14 @@ export async function GET(req: NextRequest) {
       .limit(1)
     targetTitle = t?.title ?? null
     targetType = 'task'
+  } else if (timer.orgId) {
+    const [o] = await drizzle
+      .select({ name: schema.organisations.name })
+      .from(schema.organisations)
+      .where(eq(schema.organisations.id, timer.orgId))
+      .limit(1)
+    targetTitle = o?.name ?? null
+    targetType = 'org'
   }
 
   const elapsed = elapsedSeconds(timer)
@@ -81,11 +89,17 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null) as {
     requestId?: string | null
     taskId?: string | null
+    orgId?: string | null
     notes?: string | null
   } | null
 
-  if ((!body?.requestId && !body?.taskId) || (body?.requestId && body?.taskId)) {
-    return NextResponse.json({ error: 'Exactly one of requestId or taskId required' }, { status: 400 })
+  // Exactly one of requestId / taskId / orgId is required.
+  if (!body) {
+    return NextResponse.json({ error: 'Body required' }, { status: 400 })
+  }
+  const targetCount = [body.requestId, body.taskId, body.orgId].filter(Boolean).length
+  if (targetCount !== 1) {
+    return NextResponse.json({ error: 'Exactly one of requestId, taskId, or orgId required' }, { status: 400 })
   }
 
   const { searchParams } = new URL(req.url)
@@ -116,6 +130,14 @@ export async function POST(req: NextRequest) {
       .limit(1)
     if (!t) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     targetOrgId = t.orgId // may be null for tahi_internal tasks
+  } else if (body.orgId) {
+    const [o] = await drizzle
+      .select({ id: schema.organisations.id })
+      .from(schema.organisations)
+      .where(eq(schema.organisations.id, body.orgId))
+      .limit(1)
+    if (!o) return NextResponse.json({ error: 'Client not found' }, { status: 404 })
+    targetOrgId = body.orgId
   }
 
   // Check for existing timer.
@@ -144,6 +166,7 @@ export async function POST(req: NextRequest) {
     userId,
     requestId: body.requestId ?? null,
     taskId: body.taskId ?? null,
+    orgId: body.orgId ?? null,
     startedAt: now,
     pausedAt: null,
     pausedSeconds: 0,

@@ -83,9 +83,10 @@ export async function stopAndLogTimer(
     .limit(1)
   const teamMemberId = member?.id ?? null
 
-  // Derive orgId for the timeEntry. If the target is a task without an org,
-  // we skip logging (active timer row still cleared).
-  let orgId = orgIdHint
+  // Derive orgId for the timeEntry. Priority: explicit hint → timer.orgId
+  // (client-direct timer) → request's orgId. If we still can't find one
+  // (Tahi-internal task) we skip logging — active timer is still cleared.
+  let orgId = orgIdHint ?? timer.orgId ?? null
   if (!orgId && timer.requestId) {
     const [r] = await drizzle
       .select({ orgId: schema.requests.orgId })
