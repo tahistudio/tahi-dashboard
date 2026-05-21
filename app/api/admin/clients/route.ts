@@ -57,6 +57,14 @@ export async function GET(req: NextRequest) {
     conditions.push(ne(schema.organisations.status, 'archived'))
   }
 
+  // Prospects belong to the pipeline / CRM surface, not the clients list.
+  // Excluded by default; pass ?includeProspects=1 if you really need them
+  // (e.g. for a Companies super-list view).
+  const includeProspects = url.searchParams.get('includeProspects') === '1'
+  if (!includeProspects && status !== 'prospect') {
+    conditions.push(ne(schema.organisations.status, 'prospect'))
+  }
+
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
   const orgs = await drizzle

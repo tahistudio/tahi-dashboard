@@ -1198,21 +1198,51 @@ function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { subscrip
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [planType, setPlanType] = useState(subscription.planType)
+  const [togglingAddon, setTogglingAddon] = useState<'priority' | 'seo' | null>(null)
 
   const PLAN_OPTIONS = ['maintain', 'scale', 'tune', 'launch', 'hourly', 'custom']
 
   const savePlan = async () => {
     setSaving(true)
     try {
-      await fetch(apiPath(`/api/admin/clients/${orgId}`), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planType }),
-      })
+      // Update both the org's planType (used as a quick filter on lists)
+      // and the subscription row's planType (the authoritative one for
+      // billing math). Two writes — keep them parallel so a single network
+      // hiccup doesn't leave the two out of sync indefinitely.
+      await Promise.all([
+        fetch(apiPath(`/api/admin/clients/${orgId}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ planType }),
+        }),
+        fetch(apiPath(`/api/admin/subscriptions/${subscription.id}`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ planType }),
+        }),
+      ])
       onUpdated()
       setEditing(false)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const toggleAddon = async (which: 'priority' | 'seo') => {
+    if (togglingAddon) return
+    setTogglingAddon(which)
+    try {
+      const patch = which === 'priority'
+        ? { hasPrioritySupport: !subscription.hasPrioritySupport }
+        : { hasSeoAddon: !subscription.hasSeoAddon }
+      await fetch(apiPath(`/api/admin/subscriptions/${subscription.id}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      onUpdated()
+    } finally {
+      setTogglingAddon(null)
     }
   }
 
@@ -1274,18 +1304,18 @@ function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { subscrip
             </span>
           </div>
         )}
-        <div className="flex justify-between">
-          <span>Priority support</span>
-          <span className={subscription.hasPrioritySupport ? 'text-emerald-600' : 'text-[var(--color-text-muted)]'}>
-            {subscription.hasPrioritySupport ? 'Yes' : 'No'}
-          </span>
-        </div>
-        <div className="flex justify-between">
-          <span>SEO add-on</span>
-          <span className={subscription.hasSeoAddon ? 'text-emerald-600' : 'text-[var(--color-text-muted)]'}>
-            {subscription.hasSeoAddon ? 'Yes' : 'No'}
-          </span>
-        </div>
+        <AddonToggleRow
+          label="Priority support"
+          on={!!subscription.hasPrioritySupport}
+          busy={togglingAddon === 'priority'}
+          onToggle={() => toggleAddon('priority')}
+        />
+        <AddonToggleRow
+          label="SEO add-on"
+          on={!!subscription.hasSeoAddon}
+          busy={togglingAddon === 'seo'}
+          onToggle={() => toggleAddon('seo')}
+        />
       </div>
 
       {/* Billing interval editor */}
@@ -1319,6 +1349,64 @@ const INTERVAL_LABELS: Record<BillingInterval, string> = {
   monthly: 'Monthly',
   quarterly: '3-Month',
   annual: '12-Month',
+}
+
+// Toggle row used inside the SubscriptionCard for Priority + SEO add-ons.
+// Click anywhere on the row to flip; spinner shows during the PUT.
+function AddonToggleRow({
+  label, on, busy, onToggle,
+}: {
+  label: string
+  on: boolean
+  busy: boolean
+  onToggle: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={busy}
+      className="flex items-center justify-between w-full text-left transition-colors"
+      style={{
+        padding: '0.25rem 0.375rem',
+        marginLeft: '-0.375rem',
+        marginRight: '-0.375rem',
+        background: 'transparent',
+        border: 'none',
+        borderRadius: 'var(--radius-sm)',
+        cursor: busy ? 'wait' : 'pointer',
+        opacity: busy ? 0.6 : 1,
+      }}
+      onMouseEnter={e => { if (!busy) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+      aria-pressed={on}
+      aria-label={`${label}: ${on ? 'on' : 'off'} — click to toggle`}
+    >
+      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{label}</span>
+      <span
+        className="inline-flex items-center"
+        style={{
+          gap: '0.3125rem',
+          padding: '0.0625rem 0.4375rem',
+          borderRadius: '9999px',
+          background: on ? 'var(--color-brand-50)' : 'var(--color-bg-secondary)',
+          color: on ? 'var(--color-brand-dark)' : 'var(--color-text-subtle)',
+          fontSize: '0.6875rem',
+          fontWeight: 500,
+          border: `1px solid ${on ? 'var(--color-brand-100)' : 'var(--color-border-subtle)'}`,
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            width: '0.375rem', height: '0.375rem', borderRadius: '9999px',
+            background: on ? 'var(--color-brand)' : 'var(--color-text-subtle)',
+          }}
+        />
+        {on ? 'On' : 'Off'}
+      </span>
+    </button>
+  )
 }
 
 function BillingIntervalEditor({ subscription, onUpdated }: { subscription: Subscription; onUpdated: () => void }) {

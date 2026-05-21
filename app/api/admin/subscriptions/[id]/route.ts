@@ -90,6 +90,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
     includedAddons?: string[]
     discountPercent?: number | null
     billingCountry?: string | null
+    hasPrioritySupport?: boolean
+    hasSeoAddon?: boolean
+    planType?: string
   }
 
   // Validate billing interval if provided
@@ -146,6 +149,16 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
   if (body.billingCountry !== undefined) {
     patch.billingCountry = body.billingCountry
+  }
+  // Add-on toggles + plan-type changes (admin-only fields the client never sees)
+  if (typeof body.hasPrioritySupport === 'boolean') {
+    patch.hasPrioritySupport = body.hasPrioritySupport
+  }
+  if (typeof body.hasSeoAddon === 'boolean') {
+    patch.hasSeoAddon = body.hasSeoAddon
+  }
+  if (typeof body.planType === 'string' && body.planType.length > 0) {
+    patch.planType = body.planType
   }
 
   await drizzle
