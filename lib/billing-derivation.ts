@@ -196,40 +196,62 @@ export async function applyBillingDerivation(database: AnyDb, orgId: string): Pr
   const signals = await gatherBillingSignals(database, orgId)
   const derived = deriveBilling(signals)
 
-  const flagRow = await database.all<{
-    billing_model_is_manual: number | null
-    retainer_dates_is_manual: number | null
-  }>(sql`
-    SELECT billing_model_is_manual, retainer_dates_is_manual
-    FROM organisations WHERE id = ${orgId}
-  `)
+  // Manual override flags live in migration 0016. If those columns don't
+  // exist yet on this environment (legacy prod before the migration runs),
+  // treat the org as not-manually-overridden and proceed. Without this
+  // fallback the entire derivation would 500 on every legacy env.
+  let flags = { billing_model_is_manual: 0, retainer_dates_is_manual: 0 }
+  try {
+    const flagRow = await database.all<{
+      billing_model_is_manual: number | null
+      retainer_dates_is_manual: number | null
+    }>(sql`
+      SELECT billing_model_is_manual, retainer_dates_is_manual
+      FROM organisations WHERE id = ${orgId}
+    `)
+    if (flagRow[0]) {
+      flags = {
+        billing_model_is_manual: flagRow[0].billing_model_is_manual ?? 0,
+        retainer_dates_is_manual: flagRow[0].retainer_dates_is_manual ?? 0,
+      }
+    }
+  } catch {
+    // Flag columns not present — default to no overrides.
+  }
 
-  const flags = flagRow[0] ?? { billing_model_is_manual: 0, retainer_dates_is_manual: 0 }
   const skipped: string[] = []
   const applied = { billingModel: false, retainerStartDate: false, retainerEndDate: false }
   const now = new Date().toISOString()
 
   if (!flags.billing_model_is_manual) {
-    await database.run(sql`
-      UPDATE organisations
-      SET billing_model = ${derived.billingModel}, updated_at = ${now}
-      WHERE id = ${orgId}
-    `)
-    applied.billingModel = true
+    try {
+      await database.run(sql`
+        UPDATE organisations
+        SET billing_model = ${derived.billingModel}, updated_at = ${now}
+        WHERE id = ${orgId}
+      `)
+      applied.billingModel = true
+    } catch {
+      // billing_model column missing — pre-migration env. Skip silently.
+    }
   } else {
     skipped.push('billingModel')
   }
 
   if (!flags.retainer_dates_is_manual) {
-    await database.run(sql`
-      UPDATE organisations
-      SET retainer_start_date = ${derived.retainerStartDate},
-          retainer_end_date = ${derived.retainerEndDate},
-          updated_at = ${now}
-      WHERE id = ${orgId}
-    `)
-    applied.retainerStartDate = true
-    applied.retainerEndDate = true
+    try {
+      await database.run(sql`
+        UPDATE organisations
+        SET retainer_start_date = ${derived.retainerStartDate},
+            retainer_end_date = ${derived.retainerEndDate},
+            updated_at = ${now}
+        WHERE id = ${orgId}
+      `)
+      applied.retainerStartDate = true
+      applied.retainerEndDate = true
+    } catch {
+      // Date columns missing — pre-migration env. Skip silently.
+    }
   } else {
     skipped.push('retainerDates')
   }
@@ -258,7 +280,8 @@ export async function applyBillingDerivationToAllOrgs(database: AnyDb): Promise<
 
 /**
  * Reset the manual-override flags for one org so the next derivation pass
- * reclaims the affected fields. Used by the "Re-enable auto" UI.
+ * reclaims the affected fields. Used by the "Re-enable auto" UI. Silent
+ * no-op when the flag columns don't exist yet.
  */
 export async function clearManualOverrides(
   database: AnyDb,
@@ -271,5 +294,11 @@ export async function clearManualOverrides(
   if (fields.customMrr) updates.push(sql`custom_mrr_is_manual = 0`)
   if (updates.length === 0) return
   const setClause = sql.join(updates, sql`, `)
-  await database.run(sql`UPDATE organisations SET ${setClause} WHERE id = ${orgId}`)
+  try {
+    await database.run(sql`UPDATE organisations SET ${setClause} WHERE id = ${orgId}`)
+  } catch {
+    // Flag columns missing — caller will still hit applyBillingDerivation
+    // which treats absent flags as "no manual override," so the desired
+    // outcome (auto reclaims the field) still happens.
+  }
 }

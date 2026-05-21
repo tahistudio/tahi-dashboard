@@ -4,6 +4,9 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, sql } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { applyBillingDerivation } from '@/lib/billing-derivation'
+
+type BillingDb = Parameters<typeof applyBillingDerivation>[0]
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -30,6 +33,16 @@ export async function GET(req: NextRequest, { params }: Params) {
     .limit(1)
 
   if (!org) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  // Always-on auto-derivation: every client-detail load re-derives billing
+  // model + retainer dates from current signals. Manual overrides are
+  // respected (skipped) inside applyBillingDerivation. Wrapped in try/catch
+  // so a derivation failure never breaks the page load.
+  try {
+    await applyBillingDerivation(drizzle as unknown as BillingDb, id)
+  } catch (err) {
+    console.warn('[clients/[id] GET] auto-derive failed:', err instanceof Error ? err.message : err)
+  }
 
   // billingModel, customMrr, retainerStartDate, retainerEndDate live in DB
   // via migration 0016 but are NOT in Drizzle schema (to avoid crashing
