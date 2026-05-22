@@ -11,24 +11,44 @@
   /* Typography */
   --font-sans: 'Manrope', ui-sans-serif, system-ui, sans-serif;
 
-  /* Brand Colours */
+  /* Brand Colours
+     Forest palette. -dark / -darker / -deep / -deepest step into the
+     full-bleed dark sections. -light / -lighter sit on dark surfaces.
+     -bright is the lime CTA accent (used sparingly, primary action only). */
   --color-brand: #5A824E;
   --color-brand-dark: #425F39;
+  --color-brand-darker: #354D2E;
+  --color-brand-deep: #2A3626;
+  --color-brand-deepest: #1E3019;
   --color-brand-light: #7aab6b;
+  --color-brand-lighter: #97BA8C;
+  --color-brand-bright: #78C45E;
   --color-brand-50: #f0f7ee;
   --color-brand-100: #dcefd8;
   --color-brand-200: #b9deb1;
   --color-brand-900: #1e3019;
 
+  /* Accent : the lime primary CTA. Reserved for high-conversion moments. */
+  --color-accent: #78C45E;
+  --color-accent-text: #1D1E1D;
+
+  /* One-off highlight yellow. Sticky-note callouts, not a status. */
+  --color-highlight: #F7CE48;
+
   /* Surface : Light mode */
   --color-bg: #ffffff;
+  --color-bg-cream: #F3F4F2;        /* warm off-white page background */
   --color-bg-secondary: #f7f9f6;
   --color-bg-tertiary: #eef3ec;
+  --color-bg-mist: #E3E6E2;         /* very subtle divider strip / panel bg */
   --color-text: #121A0F;
   --color-text-muted: #5a6657;
   --color-text-subtle: #8a9987;
+  --color-text-on-dark: #FDFDFC;
+  --color-text-dim-on-dark: #DCE8D9;
   --color-border: #d4e0d0;
   --color-border-subtle: #e8f0e6;
+  --color-border-strong: #CDCFCC;   /* canonical 1px card border */
 
   /* Surface : Dark mode */
   --color-bg-dark: #2A3626;
@@ -38,9 +58,19 @@
   --color-text-dark-muted: #a8c4a0;
   --color-border-dark: #3d5238;
 
-  /* Glass effect (for dark sections) */
+  /* Glass effect (for dark sections only — never on light cream) */
   --color-glass: rgba(53, 77, 46, 0.20);
   --color-glass-border: rgba(90, 130, 78, 0.3);
+  --color-glass-strong: rgba(53, 77, 46, 0.35);
+  --color-glass-border-strong: rgba(151, 186, 140, 0.55);
+
+  /* Gradients */
+  --gradient-brand-soft: radial-gradient(ellipse at 30% 30%,
+      rgba(119, 165, 105, 0.4) 23%,
+      rgba(90, 130, 78, 0.4) 64%,
+      rgba(66, 95, 57, 0.4) 100%);
+  --gradient-brand-button: linear-gradient(135deg, #7AAB6B, #425F39);
+  --gradient-leaf-icon: linear-gradient(135deg, #97BA8C, #425F39);
 
   /* Semantic status colours.
      One red across the whole system : --color-danger is the primary
@@ -169,6 +199,7 @@
   --space-12: 3rem;
 
   /* ── Typography scale ─────────────────────────────────── */
+  /* Dashboard UI ladder. Tight, dense — used inside the app. */
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text-base: 0.875rem;
@@ -176,6 +207,31 @@
   --text-lg: 1.125rem;
   --text-xl: 1.25rem;
   --text-2xl: 1.5rem;
+
+  /* Marketing display ladder. Used on the public site + any hero / display
+     surface inside the app (e.g. empty-state title, billing-period total). */
+  --display-hero: 4rem;          /* 64px — H0, 700, tracking -1.5px */
+  --display-h1: 5rem;            /* 80px — site headlines, 500, -3% */
+  --display-h2: 3rem;            /* 48px — major section, 500, -2% */
+  --display-h3: 2.25rem;         /* 36px — card title, 500 */
+  --display-h4: 1.5rem;          /* 24px — sub-section */
+  --display-body-lg: 1.25rem;    /* 20px — lead paragraph */
+  --display-body: 1rem;          /* 16px — body */
+  --display-meta: 0.875rem;      /* 14px — meta */
+  --display-tagline: 0.875rem;   /* 14px — paired with leaf glyph */
+
+  /* Line heights and letter tracking */
+  --lh-tight: 1.0;
+  --lh-snug: 1.09;
+  --lh-display: 1.17;
+  --lh-body: 1.63;
+  --lh-meta: 1.57;
+  --lh-ui: 1.5;
+  --tracking-display: -0.030em;
+  --tracking-hero: -1.5px;
+  --tracking-h3: -0.75px;
+  --tracking-tight: -0.01em;
+  --tracking-button: 0.020em;
 
   /* ── Icon sizes ───────────────────────────────────────── */
   --icon-sm: 0.875rem;
@@ -187,9 +243,11 @@
   --radius-leaf: 0 1rem 0 1rem;
   --radius-leaf-sm: 0 0.625rem 0 0.625rem;
   --radius-leaf-lg: 0 1.5rem 0 1.5rem;
+  --radius-leaf-xl: 0 4rem 0 4rem;   /* 64px — full-bleed section radius */
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
   --radius-card: 0.75rem;
   --radius-button: 0.5rem;
   --radius-input: 0.5rem;
@@ -202,7 +260,27 @@
   --shadow-md: 0 4px 6px -1px rgba(18, 26, 15, 0.06), 0 2px 4px -2px rgba(18, 26, 15, 0.04);
   --shadow-lg: 0 10px 15px -3px rgba(18, 26, 15, 0.08), 0 4px 6px -4px rgba(18, 26, 15, 0.05);
   --shadow-brand: 0 4px 14px 0 rgba(90, 130, 78, 0.25);
+  --shadow-leaf: 0 2px 6px rgba(91, 130, 78, 0.18);
   --shadow-ring: 0 0 0 2px var(--color-brand-light);
+
+  /* ── Motion ──────────────────────────────────────────────
+     The Tahi tempo is calm — slower than most systems, ease-out
+     only, never bounce. --motion-base (420ms) is the studio default
+     hover; --motion-quick (220ms) is for fast micro-feedback
+     (colour swaps, focus rings). The cubic 0.22, 1, 0.36, 1 reads
+     as premium without feeling sluggish. */
+  --motion-quick: 220ms;
+  --motion-base: 420ms;
+  --motion-medium: 520ms;
+  --motion-slow: 720ms;
+  --motion-grand: 1100ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Layout */
+  --container-max: 90rem;
+  --container-pad: 3rem;
+  --nav-height: 4rem;
 }
 
 /* ============================================================
@@ -355,12 +433,19 @@ body {
   display: none;
 }
 
-/* Glass panel : used in dark sections */
+/* Glass panel : used in dark sections, never on light cream.
+   .glass = standard depth; .glass-strong = hero / pricing / CTA backdrops. */
 .glass {
   background: var(--color-glass);
   border: 1px solid var(--color-glass-border);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+}
+.glass-strong {
+  background: var(--color-glass-strong);
+  border: 1px solid var(--color-glass-border-strong);
+  backdrop-filter: blur(20px) saturate(120%);
+  -webkit-backdrop-filter: blur(20px) saturate(120%);
 }
 
 /* Brand gradient : used for icons and accents */

@@ -3,8 +3,8 @@
  *
  *   GET  → current user's active timer (null if none). Includes computed
  *          elapsedSeconds + the target's title for convenience.
- *   POST → start a timer. Body : { requestId?, taskId?, notes? }.
- *          Exactly one of requestId / taskId required.
+ *   POST → start a timer. Body : { requestId?, taskId?, orgId?, notes? }.
+ *          Exactly one of requestId / taskId / orgId required.
  *          If the user already has an active timer :
  *            - without `?confirmed=true` : respond 409 with the current
  *              timer so the UI can prompt "stop that and switch?"

@@ -22,7 +22,7 @@ export default async function DashboardLayout({
   return (
     <ToastProvider>
     <DisplayCurrencyProvider>
-      <div className="flex h-screen overflow-hidden" style={{ background: 'var(--color-bg-secondary)' }}>
+      <div className="flex h-screen overflow-hidden" style={{ background: 'var(--color-bg-cream)' }}>
         <div className="hidden md:flex">
           <AppSidebar isAdmin={isAdmin} />
         </div>
