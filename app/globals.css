@@ -361,6 +361,18 @@ body {
   }
 }
 
+/* Sidebar / mobile-drawer nav links. The icon inside lifts subtly on
+   link hover even when its underlying glyph is a static Lucide icon
+   that has no semantic animated variant of its own. Keeps the sidebar
+   feeling alive without forcing every nav item to ship its own
+   bespoke animation. */
+.tahi-nav-link .tahi-nav-icon {
+  transition: transform var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
+}
+.tahi-nav-link:hover .tahi-nav-icon {
+  transform: translateY(-1px);
+}
+
 /* Inner page wrapper (max-w-7xl mx-auto w-full). Owns the top spacing that
    used to live on `.dashboard-main`. Since this wrapper isn't a scroll
    container, its padding-top doesn't affect sticky positioning. */

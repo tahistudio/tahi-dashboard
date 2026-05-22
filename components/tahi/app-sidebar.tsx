@@ -44,7 +44,28 @@ import { useSidebar } from '@/components/tahi/sidebar-context'
 import { Tooltip } from '@/components/tahi/tooltip'
 import { TahiIconMark } from '@/components/tahi/tahi-glyphs'
 import { SidebarUserCard } from '@/components/tahi/sidebar-user-card'
+import {
+  AnimatedSettings, AnimatedInbox, AnimatedCheckSquare,
+  AnimatedMessageSquare, AnimatedCalendar, AnimatedClock,
+  AnimatedTrendingUp, AnimatedBarChart, AnimatedUsers,
+} from '@/components/tahi/animated-icons'
 import * as React from 'react'
+
+// Map nav href to the matching animated-icon component when one exists.
+// Items without a mapping fall back to the static Lucide icon plus a
+// CSS hover-lift (see .tahi-nav-icon in globals.css).
+const ANIMATED_NAV_ICON: Record<string, React.ComponentType<{ size?: number, color?: string }>> = {
+  '/requests':        AnimatedInbox,
+  '/tasks':           AnimatedCheckSquare,
+  '/messages':        AnimatedMessageSquare,
+  '/schedules':       AnimatedCalendar,
+  '/pipeline':        AnimatedTrendingUp,
+  '/clients':         AnimatedUsers,
+  '/sales-analytics': AnimatedBarChart,
+  '/reports':         AnimatedBarChart,
+  '/time':            AnimatedClock,
+  '/settings':        AnimatedSettings,
+}
 
 type NavItem = {
   label: string
@@ -199,7 +220,11 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
       return next
     })
   }
-  const isGroupOpen = (g: NavGroup) => !g.collapsible || openGroups[g.group] !== false
+  // When the sidebar itself is collapsed (icon-only), force every group
+  // visually open so the icons are always reachable. The per-group toggle
+  // only applies when the sidebar is expanded and the labels are visible.
+  const isGroupOpen = (g: NavGroup) =>
+    collapsed || !g.collapsible || openGroups[g.group] !== false
 
   const showAsAdmin = isAdmin && !isImpersonatingClient
   const isViewerRole = isImpersonatingTeamMember
@@ -335,7 +360,16 @@ function SidebarContent({
           const open = isGroupOpen(group)
           const groupId = 'nav-group-' + group.group.toLowerCase().replace(/\s+/g, '-')
           return (
-            <div key={group.group} style={{ marginTop: gi > 0 ? '1rem' : 0 }}>
+            <div
+              key={group.group}
+              style={{
+                marginTop: gi > 0 ? (collapsed ? '0.75rem' : '1rem') : 0,
+                paddingTop: gi > 0 && collapsed ? '0.75rem' : 0,
+                // Subtle divider between groups in collapsed mode so the
+                // user can still feel the categories without seeing labels.
+                borderTop: gi > 0 && collapsed ? '1px solid var(--color-border-subtle)' : 'none',
+              }}
+            >
               {!collapsed && (
                 group.collapsible ? (
                   <button
@@ -403,11 +437,13 @@ function SidebarContent({
                     // they read as nested under the group label. Workspace and
                     // Account are not collapsible and stay at the base indent.
                     const itemIndent = group.collapsible && !collapsed ? '1.5rem' : '0.625rem'
+                    const Animated = ANIMATED_NAV_ICON[item.href]
                     const link = (
                       <Link
                         href={item.href}
                         aria-current={active ? 'page' : undefined}
                         data-tour={`nav-${item.label.toLowerCase()}`}
+                        className="tahi-nav-link"
                         style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -442,13 +478,18 @@ function SidebarContent({
                           }
                         }}
                       >
-                        <span style={{
-                          display: 'flex',
-                          flexShrink: 0,
-                          color: active ? 'var(--color-brand)' : 'var(--color-text-muted)',
-                          transition: 'color var(--motion-quick, 220ms) var(--ease-out)',
-                        }}>
-                          <Icon className={cn(collapsed ? 'w-5 h-5' : 'w-4 h-4')} />
+                        <span
+                          className="tahi-nav-icon"
+                          style={{
+                            display: 'flex',
+                            flexShrink: 0,
+                            color: active ? 'var(--color-brand)' : 'var(--color-text-muted)',
+                            transition: 'color var(--motion-quick, 220ms) var(--ease-out)',
+                          }}
+                        >
+                          {Animated
+                            ? <Animated size={collapsed ? 20 : 16} />
+                            : <Icon className={cn(collapsed ? 'w-5 h-5' : 'w-4 h-4')} />}
                         </span>
                         {!collapsed && (
                           <span style={{

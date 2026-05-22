@@ -309,16 +309,230 @@ export function AnimatedTrash(props: AnimatedIconProps) {
   )
 }
 
+// ── Inbox · lid lifts on hover then settles ───────────────────────────
+export function AnimatedInbox(props: AnimatedIconProps) {
+  const lidControls = useAnimationControls()
+  const playing = React.useRef(false)
+  const onMouseEnter = React.useCallback(async () => {
+    if (playing.current) return
+    playing.current = true
+    try {
+      await lidControls.start({ y: -1.5, transition: { duration: 0.3, ease: TAHI_EASE } })
+      await new Promise(r => setTimeout(r, 200))
+      await lidControls.start({ y: 0, transition: { duration: 0.4, ease: TAHI_EASE } })
+    } finally { playing.current = false }
+  }, [lidControls])
+  return (
+    <motion.svg {...baseSvgProps(props)} onMouseEnter={onMouseEnter}>
+      <motion.g initial={{ y: 0 }} animate={lidControls}>
+        <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+        <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+      </motion.g>
+    </motion.svg>
+  )
+}
+
+// ── Check-square · tick draws on inside the square ────────────────────
+export function AnimatedCheckSquare(props: AnimatedIconProps) {
+  const tickControls = useAnimationControls()
+  const playing = React.useRef(false)
+  const onMouseEnter = React.useCallback(async () => {
+    if (playing.current) return
+    playing.current = true
+    try {
+      await tickControls.start({ pathLength: 1, transition: { duration: 0.45, ease: TAHI_EASE } })
+      await new Promise(r => setTimeout(r, 280))
+      await tickControls.start({ pathLength: 0, transition: { duration: 0.22, ease: TAHI_EASE } })
+    } finally { playing.current = false }
+  }, [tickControls])
+  return (
+    <motion.svg {...baseSvgProps(props)} onMouseEnter={onMouseEnter}>
+      <polyline points="9 11 12 14 22 4" />
+      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+      <motion.polyline points="9 11 12 14 22 4" initial={{ pathLength: 0 }} animate={tickControls} />
+    </motion.svg>
+  )
+}
+
+// ── Message-square · bubble pulses + tail wiggles slightly ────────────
+export function AnimatedMessageSquare(props: AnimatedIconProps) {
+  const controls = useAnimationControls()
+  const onMouseEnter = useHoverSequence(
+    controls,
+    { scale: 1 },
+    { scale: [1, 1.08, 0.98, 1.04, 1] },
+    { duration: 0.65, ease: TAHI_EASE, times: [0, 0.25, 0.5, 0.75, 1] },
+  )
+  return (
+    <motion.svg
+      {...baseSvgProps(props)}
+      animate={controls}
+      initial={{ scale: 1 }}
+      onMouseEnter={onMouseEnter}
+      style={{ transformOrigin: 'center' }}
+    >
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </motion.svg>
+  )
+}
+
+// ── Calendar · today's date pulses ────────────────────────────────────
+export function AnimatedCalendar(props: AnimatedIconProps) {
+  const dayControls = useAnimationControls()
+  const playing = React.useRef(false)
+  const onMouseEnter = React.useCallback(async () => {
+    if (playing.current) return
+    playing.current = true
+    try {
+      await dayControls.start({ opacity: [0, 1, 1, 0], transition: { duration: 0.7, times: [0, 0.3, 0.7, 1], ease: TAHI_EASE } })
+    } finally { playing.current = false }
+  }, [dayControls])
+  return (
+    <motion.svg {...baseSvgProps(props)} onMouseEnter={onMouseEnter}>
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+      <motion.rect
+        x="10" y="13" width="4" height="4" rx="1"
+        fill="currentColor"
+        stroke="none"
+        initial={{ opacity: 0 }}
+        animate={dayControls}
+      />
+    </motion.svg>
+  )
+}
+
+// ── Clock · second hand sweeps once ───────────────────────────────────
+export function AnimatedClock(props: AnimatedIconProps) {
+  const handControls = useAnimationControls()
+  const playing = React.useRef(false)
+  const onMouseEnter = React.useCallback(async () => {
+    if (playing.current) return
+    playing.current = true
+    try {
+      await handControls.start({ rotate: 360, transition: { duration: 0.9, ease: TAHI_EASE } })
+      await handControls.start({ rotate: 0, transition: { duration: 0 } })
+    } finally { playing.current = false }
+  }, [handControls])
+  return (
+    <motion.svg {...baseSvgProps(props)} onMouseEnter={onMouseEnter}>
+      <circle cx="12" cy="12" r="10" />
+      <motion.line
+        x1="12" y1="12" x2="12" y2="7"
+        initial={{ rotate: 0 }}
+        animate={handControls}
+        style={{ transformOrigin: '12px 12px', transformBox: 'fill-box' }}
+      />
+      <line x1="12" y1="12" x2="16" y2="14" />
+    </motion.svg>
+  )
+}
+
+// ── Trending-up · line extends from origin ────────────────────────────
+export function AnimatedTrendingUp(props: AnimatedIconProps) {
+  const lineControls = useAnimationControls()
+  const playing = React.useRef(false)
+  const onMouseEnter = React.useCallback(async () => {
+    if (playing.current) return
+    playing.current = true
+    try {
+      await lineControls.start({ pathLength: [0, 1], transition: { duration: 0.5, ease: TAHI_EASE } })
+      await new Promise(r => setTimeout(r, 300))
+      await lineControls.start({ pathLength: 0, transition: { duration: 0.2 } })
+    } finally { playing.current = false }
+  }, [lineControls])
+  return (
+    <motion.svg {...baseSvgProps(props)} onMouseEnter={onMouseEnter}>
+      <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" opacity="0.25" />
+      <polyline points="16 7 22 7 22 13" />
+      <motion.polyline
+        points="22 7 13.5 15.5 8.5 10.5 2 17"
+        initial={{ pathLength: 0 }}
+        animate={lineControls}
+      />
+    </motion.svg>
+  )
+}
+
+// ── Bar-chart · bars grow from bottom ─────────────────────────────────
+export function AnimatedBarChart(props: AnimatedIconProps) {
+  const barControls = useAnimationControls()
+  const playing = React.useRef(false)
+  const onMouseEnter = React.useCallback(async () => {
+    if (playing.current) return
+    playing.current = true
+    try {
+      await barControls.start({ scaleY: [0.2, 1], transition: { duration: 0.5, ease: TAHI_EASE } })
+    } finally { playing.current = false }
+  }, [barControls])
+  return (
+    <motion.svg {...baseSvgProps(props)} onMouseEnter={onMouseEnter}>
+      <motion.line
+        x1="12" y1="20" x2="12" y2="10"
+        initial={{ scaleY: 1 }}
+        animate={barControls}
+        style={{ transformOrigin: '12px 20px', transformBox: 'fill-box' }}
+      />
+      <motion.line
+        x1="18" y1="20" x2="18" y2="4"
+        initial={{ scaleY: 1 }}
+        animate={barControls}
+        style={{ transformOrigin: '18px 20px', transformBox: 'fill-box' }}
+      />
+      <motion.line
+        x1="6" y1="20" x2="6" y2="16"
+        initial={{ scaleY: 1 }}
+        animate={barControls}
+        style={{ transformOrigin: '6px 20px', transformBox: 'fill-box' }}
+      />
+    </motion.svg>
+  )
+}
+
+// ── Users · gentle bounce on the group ────────────────────────────────
+export function AnimatedUsers(props: AnimatedIconProps) {
+  const controls = useAnimationControls()
+  const onMouseEnter = useHoverSequence(
+    controls,
+    { y: 0 },
+    { y: [0, -1.5, 0.5, 0] },
+    { duration: 0.55, ease: TAHI_SPRING, times: [0, 0.35, 0.7, 1] },
+  )
+  return (
+    <motion.svg
+      {...baseSvgProps(props)}
+      animate={controls}
+      initial={{ y: 0 }}
+      onMouseEnter={onMouseEnter}
+    >
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </motion.svg>
+  )
+}
+
 export const ANIMATED_ICONS = {
-  'settings':     AnimatedSettings,
-  'bell':         AnimatedBell,
-  'heart':        AnimatedHeart,
-  'refresh-cw':   AnimatedRefresh,
-  'search':       AnimatedSearch,
-  'eye':          AnimatedEye,
-  'sparkles':     AnimatedSparkles,
-  'check-circle': AnimatedCheckCircle,
-  'trash':        AnimatedTrash,
+  'settings':       AnimatedSettings,
+  'bell':           AnimatedBell,
+  'heart':          AnimatedHeart,
+  'refresh-cw':     AnimatedRefresh,
+  'search':         AnimatedSearch,
+  'eye':            AnimatedEye,
+  'sparkles':       AnimatedSparkles,
+  'check-circle':   AnimatedCheckCircle,
+  'trash':          AnimatedTrash,
+  'inbox':          AnimatedInbox,
+  'check-square':   AnimatedCheckSquare,
+  'message-square': AnimatedMessageSquare,
+  'calendar':       AnimatedCalendar,
+  'clock':          AnimatedClock,
+  'trending-up':    AnimatedTrendingUp,
+  'bar-chart':      AnimatedBarChart,
+  'users':          AnimatedUsers,
 } as const satisfies Record<string, React.ComponentType<AnimatedIconProps>>
 
 export type AnimatedIconName = keyof typeof ANIMATED_ICONS
