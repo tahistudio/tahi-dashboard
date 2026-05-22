@@ -45,6 +45,15 @@
   --color-text-muted: #5a6657;
   --color-text-subtle: #647461;        /* WCAG AA on cream (4.52:1) + white (4.99:1) */
   --color-text-on-dark: #FDFDFC;
+
+  /* Mode-aware "active item text". Light mode = darkest forest so
+     active sidebar items pop on cream. Dark mode flips this to a
+     light cream so the same component reads correctly. */
+  --color-text-active: #1E3019;
+
+  /* Mode-aware "ink wash" used for subtle hover backgrounds.
+     Light: near-black at 4%. Dark: near-white at 5%. */
+  --color-hover-tint: rgba(18, 26, 15, 0.04);
   --color-text-dim-on-dark: #DCE8D9;
   --color-border: #d4e0d0;
   --color-border-subtle: #e8f0e6;
@@ -308,6 +317,7 @@
 
 html {
   font-family: var(--font-sans);
+  color-scheme: light;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -316,6 +326,10 @@ body {
   background-color: var(--color-bg);
   color: var(--color-text);
   line-height: 1.6;
+  /* Smooth theme swap. Light <-> dark is a 320ms cross-fade. */
+  transition:
+    background-color var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1)),
+    color var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
 }
 
 /* ============================================================
@@ -614,31 +628,88 @@ textarea,
    DARK MODE
    ============================================================ */
 
+/* Toggled by SidebarUserCard's theme menu. Adds `.dark` to <html>.
+   Persistence lives in localStorage('tahi-theme'). The mapping below
+   is deep-forest dark, not pitch black. Premium calm feel. Cards sit
+   above the page bg with a subtle lift. Status pills swap to
+   translucent tinted backgrounds with lighter text. */
 .dark {
-  --color-bg: var(--color-bg-dark);
-  --color-bg-secondary: var(--color-bg-dark-secondary);
-  --color-bg-tertiary: var(--color-bg-dark-tertiary);
-  --color-text: #f0f4ee;
-  --color-text-muted: #b3cead;
-  --color-text-subtle: #7fa878;
-  --color-border: #4a6544;
-  --color-border-subtle: #384d33;
-  --color-row-hover: #313e2d;
-  --color-row-border: #2d3a28;
-  --color-th-bg: #2d3a28;
-  --color-th-text: #7a9a72;
+  color-scheme: dark;
 
-  /* Shadows need higher opacity in dark mode to be visible */
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.15);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.25), 0 2px 4px -2px rgba(0, 0, 0, 0.15);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.15);
-  --shadow-ring: 0 0 0 2px #93c98a;
+  /* Surfaces. Page bg sits darkest; cards float above slightly lighter. */
+  --color-bg: #1B2419;                 /* cards */
+  --color-bg-cream: #0F1410;           /* page background (was cream) */
+  --color-bg-secondary: #222C20;       /* hover, sub-card */
+  --color-bg-tertiary: #283224;        /* inset / kbd hint surface */
+  --color-bg-mist: #1F2820;            /* divider strip */
 
-  /* Brand colors need to pop more in dark */
-  --color-brand-50: rgba(90, 130, 78, 0.15);
-  --color-brand-100: rgba(90, 130, 78, 0.25);
-  --color-brand-200: rgba(90, 130, 78, 0.35);
+  /* Borders. Range from very subtle to canonical card border. */
+  --color-border: #2F3D2B;
+  --color-border-subtle: #252F22;
+  --color-border-strong: #3A4A36;
+
+  /* Text. Off-cream foreground, muted readable greens behind. */
+  --color-text: #F0F2EF;
+  --color-text-muted: #B3C2AC;
+  --color-text-subtle: #8AA481;        /* still passes AA on the page bg */
+
+  /* Mode-aware active item text. Sidebar / bottom-bar active items
+     use this so they're visible on either surface. */
+  --color-text-active: #DCE8D9;
+
+  /* Mode-aware hover ink wash. Near-white at 5%. */
+  --color-hover-tint: rgba(240, 242, 239, 0.05);
+
+  /* Brand chip tints. Translucent so they sit over any dark surface. */
+  --color-brand-50: rgba(122, 171, 107, 0.10);
+  --color-brand-100: rgba(122, 171, 107, 0.18);
+  --color-brand-200: rgba(122, 171, 107, 0.30);
+
+  /* Row chrome */
+  --color-row-hover: #222C20;
+  --color-row-border: #1F2820;
+  --color-th-bg: #1B2419;
+  --color-th-text: #8AA481;
+
+  /* Shadows: higher opacity for visibility against dark surfaces. */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.40), 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.50), 0 2px 4px -2px rgba(0, 0, 0, 0.30);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.55), 0 4px 6px -4px rgba(0, 0, 0, 0.30);
+  --shadow-leaf: 0 2px 6px rgba(122, 171, 107, 0.22);
+  --shadow-brand: 0 2px 8px rgba(122, 171, 107, 0.28);
+  --shadow-ring: 0 0 0 2px #93C98A;
+
+  /* Status palette. Tinted-on-dark via translucent backgrounds with
+     borders for definition, and lighter text colours to keep the same
+     hue family while reading against the dark surface. */
+  --status-draft-bg:           rgba(156, 163, 175, 0.10);
+  --status-draft-text:         #BFC4BC;
+  --status-draft-border:       rgba(156, 163, 175, 0.25);
+
+  --status-submitted-bg:       rgba(59, 130, 246, 0.15);
+  --status-submitted-text:     #98B7F7;
+  --status-submitted-border:   rgba(59, 130, 246, 0.30);
+
+  --status-in-review-bg:       rgba(245, 158, 11, 0.15);
+  --status-in-review-text:     #F4C77A;
+  --status-in-review-border:   rgba(245, 158, 11, 0.30);
+
+  --status-in-progress-bg:     rgba(6, 182, 212, 0.15);
+  --status-in-progress-text:   #7DD7E5;
+  --status-in-progress-border: rgba(6, 182, 212, 0.30);
+
+  --status-client-review-bg:   rgba(217, 70, 239, 0.15);
+  --status-client-review-text: #EAA6F3;
+  --status-client-review-border: rgba(217, 70, 239, 0.30);
+
+  --status-delivered-bg:       rgba(34, 197, 94, 0.15);
+  --status-delivered-text:     #8FD9A8;
+  --status-delivered-border:   rgba(34, 197, 94, 0.30);
+
+  --status-archived-bg:        rgba(124, 108, 95, 0.18);
+  --status-archived-text:      #BBA89A;
+  --status-archived-border:    rgba(124, 108, 95, 0.32);
 }
 
 /* ============================================================

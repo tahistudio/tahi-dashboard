@@ -204,7 +204,7 @@ export function MobileBottomNav({ isAdmin = false }: MobileBottomNavProps) {
               className="flex flex-col items-center justify-center flex-1 gap-0.5"
               style={{
                 textDecoration: 'none',
-                color: active ? 'var(--color-brand-deepest)' : 'var(--color-text-muted)',
+                color: active ? 'var(--color-text-active)' : 'var(--color-text-muted)',
                 minHeight: '2.75rem',
                 fontWeight: active ? 600 : 500,
                 transition: 'color var(--motion-quick, 220ms) var(--ease-out, ease-out)',
@@ -235,7 +235,7 @@ export function MobileBottomNav({ isAdmin = false }: MobileBottomNavProps) {
           style={{
             background: 'transparent',
             border: 'none',
-            color: drawerOpen ? 'var(--color-brand-deepest)' : 'var(--color-text-muted)',
+            color: drawerOpen ? 'var(--color-text-active)' : 'var(--color-text-muted)',
             minHeight: '2.75rem',
             fontWeight: drawerOpen ? 600 : 500,
             transition: 'color var(--motion-quick, 220ms) var(--ease-out, ease-out)',
@@ -318,7 +318,7 @@ export function MobileBottomNav({ isAdmin = false }: MobileBottomNavProps) {
                   cursor: 'pointer',
                   transition: 'background var(--motion-quick, 220ms) var(--ease-out, ease-out)',
                 }}
-                onTouchStart={e => { e.currentTarget.style.background = 'rgba(18, 26, 15, 0.06)' }}
+                onTouchStart={e => { e.currentTarget.style.background = 'var(--color-hover-tint)' }}
                 onTouchEnd={e => { e.currentTarget.style.background = 'transparent' }}
               >
                 <X size={18} aria-hidden="true" />
@@ -362,7 +362,7 @@ export function MobileBottomNav({ isAdmin = false }: MobileBottomNavProps) {
                               borderRadius: 'var(--radius-leaf-sm)',
                               fontSize: '0.9375rem',
                               fontWeight: active ? 600 : 500,
-                              color: active ? 'var(--color-brand-deepest)' : 'var(--color-text-muted)',
+                              color: active ? 'var(--color-text-active)' : 'var(--color-text-muted)',
                               background: active ? 'var(--color-bg)' : 'transparent',
                               boxShadow: active ? 'inset 0 0 0 1px var(--color-border-subtle)' : 'none',
                               textDecoration: 'none',

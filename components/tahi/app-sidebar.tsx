@@ -315,7 +315,7 @@ function SidebarContent({
             <span style={{
               fontSize: '0.9375rem',
               fontWeight: 700,
-              color: 'var(--color-brand-deepest)',
+              color: 'var(--color-text-active)',
               letterSpacing: '-0.01em',
               whiteSpace: 'nowrap',
             }}>
@@ -413,7 +413,7 @@ function SidebarContent({
                           borderRadius: 'var(--radius-leaf-sm)',
                           fontSize: '0.8125rem',
                           fontWeight: active ? 600 : 500,
-                          color: active ? 'var(--color-brand-deepest)' : 'var(--color-text-muted)',
+                          color: active ? 'var(--color-text-active)' : 'var(--color-text-muted)',
                           background: active ? 'var(--color-bg)' : 'transparent',
                           boxShadow: active ? 'inset 0 0 0 1px var(--color-border-subtle)' : 'none',
                           textDecoration: 'none',
@@ -422,7 +422,7 @@ function SidebarContent({
                         }}
                         onMouseEnter={e => {
                           if (!active) {
-                            e.currentTarget.style.background = 'rgba(18, 26, 15, 0.04)'
+                            e.currentTarget.style.background = 'var(--color-hover-tint)'
                             e.currentTarget.style.color = 'var(--color-text)'
                           }
                         }}
@@ -453,7 +453,7 @@ function SidebarContent({
                         )}
                         {!collapsed && item.count != null && (
                           <span style={{
-                            background: active ? 'var(--color-brand-deepest)' : 'var(--color-bg-secondary)',
+                            background: active ? 'var(--color-brand)' : 'var(--color-bg-secondary)',
                             color: active ? '#ffffff' : 'var(--color-text-muted)',
                             border: active ? 'none' : '1px solid var(--color-border-subtle)',
                             fontSize: '0.625rem',
@@ -546,7 +546,7 @@ function FooterButton({ onClick, collapsed, children, tooltip, ...rest }: Footer
         transition: 'background var(--motion-quick, 220ms) var(--ease-out), color var(--motion-quick, 220ms) var(--ease-out)',
       }}
       onMouseEnter={e => {
-        e.currentTarget.style.background = 'rgba(18, 26, 15, 0.04)'
+        e.currentTarget.style.background = 'var(--color-hover-tint)'
         e.currentTarget.style.color = 'var(--color-text)'
       }}
       onMouseLeave={e => {

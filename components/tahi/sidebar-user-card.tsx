@@ -99,7 +99,7 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
           textAlign: 'left',
           transition: 'background var(--motion-quick, 220ms) var(--ease-out, ease-out)',
         }}
-        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(18, 26, 15, 0.04)' }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-hover-tint)' }}
         onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
       >
         <Avatar name={fullName} src={imageUrl} size="md" noRing />
