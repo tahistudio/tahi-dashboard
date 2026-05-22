@@ -386,6 +386,15 @@ body {
 [data-sidebar="collapsed"] .tahi-sidebar-expanded-only {
   display: none !important;
 }
+/* Mirror class for elements that should only appear when the sidebar
+   is collapsed (the icon-mark in the brand area, for example). Default
+   hidden, revealed when [data-sidebar="collapsed"] is set on <html>. */
+.tahi-sidebar-collapsed-only {
+  display: none;
+}
+[data-sidebar="collapsed"] .tahi-sidebar-collapsed-only {
+  display: inline-flex;
+}
 [data-sidebar-ready] .tahi-sidebar {
   transition:
     width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1)),

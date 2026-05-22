@@ -320,23 +320,26 @@ function SidebarContent({
             minWidth: 0,
           }}
         >
-          {/* Fixed size at 34. The previous {collapsed ? 30 : 34}
-              caused a brand-mark resize flicker on every refresh
-              because SSR rendered the expanded size before React's
-              useState initializer read the data-sidebar attribute. */}
-          <TahiIconMark size={34} variant="on-light" />
-          {!collapsed && (
-            <span
-              className="tahi-sidebar-expanded-only"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                color: 'var(--color-text-active)',
-              }}
-            >
-              <TahiStudioWordmark height={26} title="Tahi Studio" />
-            </span>
-          )}
+          {/* One brand mark at a time. CSS-driven visibility: the icon
+              mark shows only when [data-sidebar="collapsed"] is set,
+              the wordmark only when it isn't. Both render in the DOM
+              so the swap can't flash on refresh. */}
+          <span
+            className="tahi-sidebar-collapsed-only"
+            style={{ alignItems: 'center' }}
+          >
+            <TahiIconMark size={34} variant="on-light" />
+          </span>
+          <span
+            className="tahi-sidebar-expanded-only"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              color: 'var(--color-text-active)',
+            }}
+          >
+            <TahiStudioWordmark height={26} title="Tahi Studio" />
+          </span>
         </Link>
       </div>
 
