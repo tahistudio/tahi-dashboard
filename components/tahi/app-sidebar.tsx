@@ -35,15 +35,15 @@ import {
   Inbox, Users, CreditCard, FileText, Clock, CheckSquare,
   BarChart2, BookOpen, UserCog, Settings, MessageSquare,
   FolderOpen, ShoppingBag, PanelLeftClose, PanelLeftOpen,
-  LayoutDashboard, Moon, Sun, Star, TrendingUp, FileSignature, Gauge,
-  Calendar, Megaphone, X, ChevronDown,
+  LayoutDashboard, Star, TrendingUp, FileSignature, Gauge,
+  Calendar, Megaphone, ChevronDown,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { useSidebar } from '@/components/tahi/sidebar-context'
-import { FocusTrap } from '@/components/tahi/focus-trap'
 import { Tooltip } from '@/components/tahi/tooltip'
 import { TahiIconMark } from '@/components/tahi/tahi-glyphs'
+import { SidebarUserCard } from '@/components/tahi/sidebar-user-card'
 import * as React from 'react'
 
 type NavItem = {
@@ -164,10 +164,11 @@ const VIEWER_HIDDEN_PAGES = new Set(['/team', '/settings', '/billing', '/contrac
 
 export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname()
-  const { collapsed, setCollapsed, mobileOpen, setMobileOpen } = useSidebar()
+  const { collapsed, setCollapsed } = useSidebar()
   const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
 
-  // Theme state
+  // Theme state. Lives here so we can pass it into the SidebarUserCard
+  // menu where the toggle now sits.
   const [darkMode, setDarkMode] = React.useState(false)
   React.useEffect(() => {
     try {
@@ -224,14 +225,9 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const isItemActive = (href: string) =>
     pathname === href || (!exactOnly.has(href) && pathname.startsWith(href))
 
-  // Click handler for nav links closes the drawer on mobile.
-  const closeOnMobileNav = () => {
-    if (mobileOpen) setMobileOpen(false)
-  }
-
-  // ── Desktop sidebar ────────────────────────────────────────────────
-  // Always rendered. On mobile we hide it with CSS. The drawer copy is
-  // rendered separately below with a different transform.
+  // Desktop sidebar. On mobile we hide it with CSS (md:flex). Mobile
+  // gets the bottom-bar drawer via <MobileBottomNav>; the sidebar
+  // itself stays desktop-only.
   const desktopWidth = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH
 
   const sidebarContent = (
@@ -239,108 +235,28 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
       collapsed={collapsed}
       visibleNav={visibleNav}
       isItemActive={isItemActive}
-      onNavClick={closeOnMobileNav}
       isGroupOpen={isGroupOpen}
       toggleGroup={toggleGroup}
       darkMode={darkMode}
       toggleDarkMode={toggleDarkMode}
       setCollapsed={setCollapsed}
-      isDrawer={false}
     />
   )
 
   return (
-    <>
-      {/* Desktop persistent sidebar */}
-      <aside
-        className="hidden md:flex flex-col h-full flex-shrink-0"
-        aria-label="Primary navigation"
-        style={{
-          width: `${desktopWidth}px`,
-          minWidth: `${desktopWidth}px`,
-          background: 'var(--color-bg-cream)',
-          borderRight: '1px solid var(--color-border-subtle)',
-          transition: 'width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1)), min-width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1))',
-        }}
-      >
-        {sidebarContent}
-      </aside>
-
-      {/* Mobile drawer + backdrop. Rendered via portal-equivalent fixed
-          overlay so it sits above the dashboard content. */}
-      <MobileDrawer open={mobileOpen} onClose={() => setMobileOpen(false)}>
-        <SidebarContent
-          collapsed={false}
-          visibleNav={visibleNav}
-          isItemActive={isItemActive}
-          onNavClick={closeOnMobileNav}
-          isGroupOpen={isGroupOpen}
-          toggleGroup={toggleGroup}
-          darkMode={darkMode}
-          toggleDarkMode={toggleDarkMode}
-          setCollapsed={setCollapsed}
-          isDrawer={true}
-          onCloseDrawer={() => setMobileOpen(false)}
-        />
-      </MobileDrawer>
-    </>
-  )
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Mobile drawer wrapper
-// ────────────────────────────────────────────────────────────────────
-function MobileDrawer({
-  open,
-  onClose,
-  children,
-}: {
-  open: boolean
-  onClose: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <>
-      {/* Backdrop. Fades + blocks pointer events. Click closes. */}
-      <div
-        className="md:hidden fixed inset-0"
-        aria-hidden="true"
-        onClick={onClose}
-        style={{
-          background: 'rgba(18, 26, 15, 0.5)',
-          opacity: open ? 1 : 0,
-          pointerEvents: open ? 'auto' : 'none',
-          transition: 'opacity var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1))',
-          zIndex: 40,
-        }}
-      />
-      {/* Drawer panel. Slides from left. */}
-      <FocusTrap
-        active={open}
-        onEscape={onClose}
-        className="md:hidden fixed top-0 left-0 h-full"
-        style={{
-          width: 'min(280px, 85vw)',
-          background: 'var(--color-bg-cream)',
-          borderRight: '1px solid var(--color-border-subtle)',
-          transform: open ? 'translateX(0)' : 'translateX(-100%)',
-          transition: 'transform var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1))',
-          zIndex: 50,
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Navigation menu"
-          aria-hidden={!open}
-          style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
-        >
-          {children}
-        </div>
-      </FocusTrap>
-    </>
+    <aside
+      className="hidden md:flex flex-col h-full flex-shrink-0"
+      aria-label="Primary navigation"
+      style={{
+        width: `${desktopWidth}px`,
+        minWidth: `${desktopWidth}px`,
+        background: 'var(--color-bg-cream)',
+        borderRight: '1px solid var(--color-border-subtle)',
+        transition: 'width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1)), min-width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1))',
+      }}
+    >
+      {sidebarContent}
+    </aside>
   )
 }
 
@@ -351,44 +267,37 @@ interface SidebarContentProps {
   collapsed: boolean
   visibleNav: NavGroup[]
   isItemActive: (href: string) => boolean
-  onNavClick: () => void
   isGroupOpen: (g: NavGroup) => boolean
   toggleGroup: (groupName: string) => void
   darkMode: boolean
   toggleDarkMode: () => void
   setCollapsed: (next: boolean) => void
-  isDrawer: boolean
-  onCloseDrawer?: () => void
 }
 
 function SidebarContent({
   collapsed,
   visibleNav,
   isItemActive,
-  onNavClick,
   isGroupOpen,
   toggleGroup,
   darkMode,
   toggleDarkMode,
   setCollapsed,
-  isDrawer,
-  onCloseDrawer,
 }: SidebarContentProps) {
   return (
     <>
-      {/* Brand + drawer close (mobile) */}
+      {/* Brand lockup */}
       <div
         className="flex items-center flex-shrink-0"
         style={{
           padding: collapsed ? '0.875rem 0' : '0.875rem 1rem',
-          justifyContent: collapsed ? 'center' : 'space-between',
+          justifyContent: collapsed ? 'center' : 'flex-start',
           borderBottom: '1px solid var(--color-border-subtle)',
           height: '3.5rem',
         }}
       >
         <Link
           href="/overview"
-          onClick={onNavClick}
           aria-label="Tahi Studio. Go to overview"
           style={{
             display: 'flex',
@@ -398,8 +307,6 @@ function SidebarContent({
             minWidth: 0,
           }}
         >
-          {/* Light variant since the sidebar surface is cream.
-              The dark "1" reads against the brand-gradient leaf. */}
           <TahiIconMark
             size={collapsed ? 30 : 34}
             variant="on-light"
@@ -416,30 +323,6 @@ function SidebarContent({
             </span>
           )}
         </Link>
-        {isDrawer && (
-          <button
-            onClick={onCloseDrawer}
-            aria-label="Close navigation menu"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              padding: '0.5rem',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--color-text-muted)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minWidth: '44px',
-              minHeight: '44px',
-              transition: 'background var(--motion-quick, 220ms) var(--ease-out)',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(18, 26, 15, 0.05)' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-          >
-            <X className="w-5 h-5" />
-          </button>
-        )}
       </div>
 
       {/* Nav region */}
@@ -519,7 +402,6 @@ function SidebarContent({
                     const link = (
                       <Link
                         href={item.href}
-                        onClick={onNavClick}
                         aria-current={active ? 'page' : undefined}
                         data-tour={`nav-${item.label.toLowerCase()}`}
                         style={{
@@ -601,7 +483,8 @@ function SidebarContent({
         })}
       </nav>
 
-      {/* Footer: theme toggle + collapse (desktop only) */}
+      {/* Footer: collapse toggle + user card. Theme toggle now lives
+          inside the user card menu so the footer stays tight. */}
       <div
         style={{
           padding: '0.5rem',
@@ -610,29 +493,22 @@ function SidebarContent({
         }}
       >
         <FooterButton
-          onClick={toggleDarkMode}
+          onClick={() => setCollapsed(!collapsed)}
           collapsed={collapsed}
-          aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-          tooltip={darkMode ? 'Light mode' : 'Dark mode'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          tooltip={collapsed ? 'Expand' : 'Collapse'}
         >
           <span style={{ display: 'flex', flexShrink: 0, color: 'var(--color-text-muted)' }}>
-            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </span>
-          {!collapsed && <span>{darkMode ? 'Light mode' : 'Dark mode'}</span>}
+          {!collapsed && <span>Collapse</span>}
         </FooterButton>
-        {!isDrawer && (
-          <FooterButton
-            onClick={() => setCollapsed(!collapsed)}
-            collapsed={collapsed}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            tooltip={collapsed ? 'Expand' : 'Collapse'}
-          >
-            <span style={{ display: 'flex', flexShrink: 0, color: 'var(--color-text-muted)' }}>
-              {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
-            </span>
-            {!collapsed && <span>Collapse</span>}
-          </FooterButton>
-        )}
+        <div style={{ height: '1px', background: 'var(--color-border-subtle)', margin: '0.375rem 0' }} />
+        <SidebarUserCard
+          collapsed={collapsed}
+          darkMode={darkMode}
+          onToggleDarkMode={toggleDarkMode}
+        />
       </div>
     </>
   )

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { UserButton, OrganizationSwitcher } from '@clerk/nextjs'
+import { OrganizationSwitcher } from '@clerk/nextjs'
 import { Search, X, Eye, UserCog, Menu } from 'lucide-react'
 import { NotificationBell } from './notification-bell'
 import { useImpersonation } from './impersonation-banner'
@@ -188,19 +188,13 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
         )}
       </div>
 
-      {/* Right */}
+      {/* Right cluster. Identity (avatar + dropdown) now lives in the
+          sidebar bottom (SidebarUserCard), so the top-nav right side
+          is just live tools: timer, currency, notifications. */}
       <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
         {isAdmin && <TimerChip />}
-        {/* Currency switcher: shown at all widths so mobile users can switch
-            without diving into Settings. The button itself is compact (3-letter
-            code + chevron, ~64px wide). */}
         {isAdmin && <CurrencySwitcher />}
         <NotificationBell />
-        <UserButton
-          appearance={{
-            elements: { avatarBox: 'w-7 h-7' },
-          }}
-        />
       </div>
 
       {/* Search overlay */}
