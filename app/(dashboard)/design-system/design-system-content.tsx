@@ -18,6 +18,7 @@ import { TahiButton, TahiLink } from '@/components/tahi/tahi-button'
 import { Avatar } from '@/components/tahi/avatar'
 import { Badge } from '@/components/tahi/badge'
 import { Card as CardPrim } from '@/components/tahi/card'
+import { Tooltip } from '@/components/tahi/tooltip'
 
 /**
  * /design-system. The canonical token + primitive reference.
@@ -945,18 +946,19 @@ function BrandSection() {
 // ────────────────────────────────────────────────────────────────────────
 
 const COMPONENTS_NAV = [
-  { id: 'comp-button', label: 'Button',  ready: true },
-  { id: 'comp-avatar', label: 'Avatar',  ready: true },
-  { id: 'comp-badge',  label: 'Badge',   ready: true },
-  { id: 'comp-card',   label: 'Card',    ready: true },
-  { id: 'comp-chip',     label: 'Chip',          ready: false },
-  { id: 'comp-empty',    label: 'Empty state',   ready: false },
-  { id: 'comp-callout',  label: 'Callout',       ready: false },
-  { id: 'comp-toast',    label: 'Toast',         ready: false },
-  { id: 'comp-pagination', label: 'Pagination',  ready: false },
-  { id: 'comp-stepper',    label: 'Stepper',     ready: false },
-  { id: 'comp-progress',   label: 'Progress',    ready: false },
-  { id: 'comp-table',      label: 'Data table',  ready: false },
+  { id: 'comp-button',  label: 'Button',  ready: true },
+  { id: 'comp-avatar',  label: 'Avatar',  ready: true },
+  { id: 'comp-badge',   label: 'Badge',   ready: true },
+  { id: 'comp-card',    label: 'Card',    ready: true },
+  { id: 'comp-tooltip', label: 'Tooltip', ready: true },
+  { id: 'comp-chip',       label: 'Chip',          ready: false },
+  { id: 'comp-empty',      label: 'Empty state',   ready: false },
+  { id: 'comp-callout',    label: 'Callout',       ready: false },
+  { id: 'comp-toast',      label: 'Toast',         ready: false },
+  { id: 'comp-pagination', label: 'Pagination',    ready: false },
+  { id: 'comp-stepper',    label: 'Stepper',       ready: false },
+  { id: 'comp-progress',   label: 'Progress',      ready: false },
+  { id: 'comp-table',      label: 'Data table',    ready: false },
 ]
 
 function ComponentsSubNav() {
@@ -1308,12 +1310,110 @@ function CardShowcase() {
   )
 }
 
+function TooltipShowcase() {
+  // Tiny inline glyphs so we can show icon-only buttons.
+  const g = (paths: React.ReactNode) => (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths}</svg>
+  )
+  const iconButtonStyle: React.CSSProperties = {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    width: '2.25rem', height: '2.25rem',
+    background: 'var(--color-bg)',
+    border: '1px solid var(--color-border-strong)',
+    borderRadius: 'var(--radius-md)',
+    color: 'var(--color-text-muted)',
+    cursor: 'pointer',
+    transition: 'background var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
+  }
+  return (
+    <PrimitiveShell
+      id="comp-tooltip"
+      title="Tooltip"
+      source="components/tahi/tooltip.tsx"
+      intro="Small dark label on hover or keyboard focus. Portaled to body so it never clips. 400ms hover delay, instant on focus. Forest-dark surface against any background. Use sparingly: icon-only buttons, truncated text, status hints."
+    >
+      <Card padded={false}>
+        <div style={{ padding: '0 1.5rem' }}>
+          <StateRow label="Icon buttons">
+            <Tooltip label="Sync with Stripe">
+              <button aria-label="Sync" style={iconButtonStyle}>{g(<><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></>)}</button>
+            </Tooltip>
+            <Tooltip label="Notifications">
+              <button aria-label="Notifications" style={iconButtonStyle}>{g(<><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></>)}</button>
+            </Tooltip>
+            <Tooltip label="Settings">
+              <button aria-label="Settings" style={iconButtonStyle}>{g(<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></>)}</button>
+            </Tooltip>
+            <Tooltip label="More actions">
+              <button aria-label="More" style={iconButtonStyle}>{g(<><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></>)}</button>
+            </Tooltip>
+          </StateRow>
+          <StateRow label="On truncated text">
+            <Tooltip label="Webflow Cloud worker deployment via wf-app-prod.cosmic">
+              <span style={{
+                display: 'inline-block',
+                maxWidth: '14rem',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontSize: '0.8125rem',
+                color: 'var(--color-text-muted)',
+                padding: '0.25rem 0.5rem',
+                background: 'var(--color-bg-secondary)',
+                borderRadius: 'var(--radius-md)',
+                tabIndex: 0,
+              } as React.CSSProperties}>
+                Webflow Cloud worker deployment via wf-app-prod.cosmic
+              </span>
+            </Tooltip>
+          </StateRow>
+          <StateRow label="Sides (auto-flips)">
+            <Tooltip label="Above by default" side="top">
+              <button style={iconButtonStyle} aria-label="Top">▲</button>
+            </Tooltip>
+            <Tooltip label="Below when forced" side="bottom">
+              <button style={iconButtonStyle} aria-label="Bottom">▼</button>
+            </Tooltip>
+          </StateRow>
+        </div>
+      </Card>
+
+      <Card>
+        <GroupHeading>How and when to use it</GroupHeading>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-subtle)', marginBottom: '0.5rem' }}>Use it on</div>
+            <ul style={{ fontSize: '0.8125rem', lineHeight: 1.7 }} className="space-y-1">
+              <li>Icon-only buttons (kebab, bell, gear, refresh)</li>
+              <li>Truncated text that needs the full value on hover</li>
+              <li>Status badges where the meaning isn&apos;t obvious from the label</li>
+              <li>Disabled controls where the reason needs explaining</li>
+            </ul>
+          </div>
+          <div>
+            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-subtle)', marginBottom: '0.5rem' }}>Don&apos;t use it on</div>
+            <ul style={{ fontSize: '0.8125rem', lineHeight: 1.7 }} className="space-y-1">
+              <li>Elements that already show a visible label</li>
+              <li>Actions that need long explanation (use a popover or inline help)</li>
+              <li>Touch-only surfaces (tooltips don&apos;t trigger on tap)</li>
+              <li>Decoration. If a user can ignore it, it&apos;s noise</li>
+            </ul>
+          </div>
+        </div>
+        <div style={{ marginTop: '1rem', fontSize: '0.78rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+          Defaults: 400ms hover delay (no pop on accidental cursor pass), instant on keyboard focus, auto-flip if there&apos;s no room above. Always pass an <Mono>aria-label</Mono> on the wrapped element too. The tooltip is decorative; the label is the source of truth for assistive tech.
+        </div>
+      </Card>
+    </PrimitiveShell>
+  )
+}
+
 function ComponentsSection() {
   return (
     <SectionShell
       id="components"
       title="Components"
-      intro="The reusable primitives in components/tahi/. Each block below shows every state and the source path. Batch 1 covers Button, Avatar, Badge, Card. The foundation that every later primitive composes on."
+      intro="The reusable primitives in components/tahi/. Each block below shows every state and the source path. Batch 1 covers Button, Avatar, Badge, Card, Tooltip. The foundation every later primitive composes on."
     >
       <ComponentsSubNav />
       <div className="space-y-12">
@@ -1321,6 +1421,7 @@ function ComponentsSection() {
         <AvatarShowcase />
         <BadgeShowcase />
         <CardShowcase />
+        <TooltipShowcase />
       </div>
     </SectionShell>
   )
@@ -1344,12 +1445,14 @@ function labelForTone(t: BadgeTonePick): string {
 }
 
 // Tiny SVG glyphs used inside the button showcase. We don't import
-// Lucide here to keep this demo self-contained.
+// Lucide here to keep this demo self-contained. The default trailing
+// glyph is arrow-up-right so the hover translate(3px, -3px) points the
+// arrow toward where it's lifting.
 function ArrowGlyph({ size = 14 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M5 12h14" />
-      <path d="m12 5 7 7-7 7" />
+      <path d="M7 7h10v10" />
+      <path d="M7 17 17 7" />
     </svg>
   )
 }
