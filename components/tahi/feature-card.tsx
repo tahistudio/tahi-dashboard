@@ -54,26 +54,37 @@ const PADDING_VALUE: Record<Padding, string> = {
 function variantStyle(variant: Variant, imageUrl?: string): React.CSSProperties {
   switch (variant) {
     case 'lime':
-      return {
-        background: 'var(--color-accent)',
-        color: 'var(--color-accent-text)',
-        border: '1px solid transparent',
-      }
-    case 'forest':
+      // Soft lime gradient so the surface has shape and depth without
+      // being a flat slab of saturated lime. Brighter top-left, muted
+      // bottom-right. Still dark text for AA contrast.
       return {
         background:
-          'radial-gradient(ellipse at 5% 0%, rgba(151,186,140,0.32), transparent 55%), ' +
+          'radial-gradient(circle at 0% 0%, rgba(255, 255, 255, 0.35), transparent 60%), ' +
+          'linear-gradient(135deg, var(--color-brand-bright), var(--color-brand-light) 80%)',
+        color: 'var(--color-brand-deepest)',
+        border: '1px solid rgba(255, 255, 255, 0.40)',
+        boxShadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.20)',
+      }
+    case 'forest':
+      // Brighter inset highlight ring for more pop. Brand-light at low
+      // alpha catches the eye against the dark gradient.
+      return {
+        background:
+          'radial-gradient(ellipse at 5% 0%, rgba(151, 186, 140, 0.35), transparent 55%), ' +
           'linear-gradient(135deg, var(--color-brand-darker), var(--color-brand-deepest))',
         color: 'var(--color-text-on-dark)',
         border: '1px solid var(--color-brand-darker)',
+        boxShadow: 'inset 0 0 0 1px rgba(151, 186, 140, 0.18)',
       }
     case 'photo':
+      // Same brighter inset ring as forest. Photo overlay handles tone.
       return {
         background: imageUrl
-          ? `linear-gradient(135deg, rgba(30, 48, 25, 0.45), rgba(15, 20, 16, 0.75)), url(${imageUrl}) center / cover no-repeat`
+          ? `linear-gradient(135deg, rgba(30, 48, 25, 0.45), rgba(15, 20, 16, 0.78)), url(${imageUrl}) center / cover no-repeat`
           : 'linear-gradient(135deg, var(--color-brand-deep), var(--color-brand-deepest))',
         color: 'var(--color-text-on-dark)',
         border: '1px solid var(--color-brand-darker)',
+        boxShadow: 'inset 0 0 0 1px rgba(151, 186, 140, 0.20)',
       }
     case 'cream':
     default:
@@ -100,6 +111,13 @@ function FeatureCardRoot({
   const shouldLift = hover ?? isInteractive
   const [hovered, setHovered] = React.useState(false)
 
+  // Compose the variant's static box-shadow (inset highlight ring) with
+  // the optional hover-lift shadow so neither overrides the other.
+  const v = variantStyle(variant, imageUrl)
+  const variantShadow = (v.boxShadow as string | undefined) ?? ''
+  const liftShadow = shouldLift && hovered ? 'var(--shadow-leaf)' : ''
+  const composedShadow = [variantShadow, liftShadow].filter(Boolean).join(', ') || undefined
+
   const baseStyle: React.CSSProperties = {
     position: 'relative',
     overflow: 'hidden',
@@ -110,8 +128,8 @@ function FeatureCardRoot({
       'transform var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1)), ' +
       'box-shadow var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1))',
     transform: shouldLift && hovered ? 'translateY(-1px)' : 'translateY(0)',
-    boxShadow: shouldLift && hovered ? 'var(--shadow-leaf)' : 'none',
-    ...variantStyle(variant, imageUrl),
+    ...v,
+    boxShadow: composedShadow,
     ...style,
   }
 
@@ -155,20 +173,15 @@ function FeatureCardRoot({
 // ── Slots ──────────────────────────────────────────────────────────────
 
 function FeatureCardEyebrow({
-  icon,
   children,
   style,
 }: {
-  icon?: React.ReactNode
   children: React.ReactNode
   style?: React.CSSProperties
 }) {
   return (
     <div
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.5rem',
         fontSize: '0.6875rem',
         fontWeight: 600,
         textTransform: 'uppercase',
@@ -178,12 +191,7 @@ function FeatureCardEyebrow({
         ...style,
       }}
     >
-      {icon && (
-        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '1.125rem', height: '1.125rem', borderRadius: '0 4px 0 4px', background: 'rgba(120,196,94,0.20)', color: 'var(--color-brand-bright)' }}>
-          {icon}
-        </span>
-      )}
-      <span>{children}</span>
+      {children}
     </div>
   )
 }

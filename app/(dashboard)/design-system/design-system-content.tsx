@@ -1432,14 +1432,12 @@ function FeatureCardShowcase() {
             24 active across pipeline, delivery, and onboarding. Up 18% on last quarter.
           </FeatureCard.Description>
           <FeatureCard.Footer>
-            <TahiButton variant="secondary" size="sm">Open reports</TahiButton>
+            <TahiLink href="#">Open reports</TahiLink>
           </FeatureCard.Footer>
         </FeatureCard>
 
         <FeatureCard variant="forest" padding="lg">
-          <FeatureCard.Eyebrow icon={<svg width={11} height={11} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 14 9 21 9 15.5 13.5 17.5 21 12 16.5 6.5 21 8.5 13.5 3 9 10 9z"/></svg>}>
-            Tahi AI · daily briefing
-          </FeatureCard.Eyebrow>
+          <FeatureCard.Eyebrow>Tahi AI &middot; daily briefing</FeatureCard.Eyebrow>
           <FeatureCard.Title>Three things to look at today</FeatureCard.Title>
           <FeatureCard.Description>
             Physitrack proposal has been in negotiation for 12 days. BCS Q2 retainer renewed for $48,000. Glasswall is 110% allocated next week.
@@ -1458,7 +1456,7 @@ function FeatureCardShowcase() {
           </FeatureCard.Description>
           <FeatureCard.Footer>
             <TahiButton variant="primary" size="sm">Pause</TahiButton>
-            <TahiButton variant="secondary" size="sm">Stop &amp; log</TahiButton>
+            <TahiLink href="#">Stop &amp; log</TahiLink>
           </FeatureCard.Footer>
         </FeatureCard>
 

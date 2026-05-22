@@ -54,6 +54,11 @@
   /* Mode-aware "ink wash" used for subtle hover backgrounds.
      Light: near-black at 4%. Dark: near-white at 5%. */
   --color-hover-tint: rgba(18, 26, 15, 0.04);
+
+  /* Mode-aware inset highlight ring used on cards. Invisible in light
+     (relies on the regular border) but pops as a faint brand-light edge
+     in dark so cards have visible definition against the dark page. */
+  --card-highlight-ring: transparent;
   --color-text-dim-on-dark: #DCE8D9;
   --color-border: #d4e0d0;
   --color-border-subtle: #e8f0e6;
@@ -659,6 +664,9 @@ textarea,
 
   /* Mode-aware hover ink wash. Near-white at 5%. */
   --color-hover-tint: rgba(240, 242, 239, 0.05);
+
+  /* Inset highlight ring on cards. Visible in dark to add definition. */
+  --card-highlight-ring: rgba(151, 186, 140, 0.14);
 
   /* Brand chip tints. Translucent so they sit over any dark surface. */
   --color-brand-50: rgba(122, 171, 107, 0.10);
