@@ -6,7 +6,8 @@ Format: one bullet per item, prefix with the page name it belongs to, end with a
 
 ## Pending
 
-- **A4 / icons** — Install Lucide Animated. Decide the small subset that gets animated variants (likely refresh-cw, bell, gear/settings, sparkles, check-circle, search, trash). Everything else stays static Lucide. Added 2026-05-22.
-- **A4 / icons** — Once the animated subset is wired, retire the hand-coded hover transforms from the design-system iconography grid in favour of the real Lucide Animated components. Added 2026-05-22.
+- **A4 / icons** — Animated icons are built (`components/tahi/animated-icons.tsx`). Decide where each one ships: refresh-cw on sync buttons, bell on notification badge, settings on the cog nav item, sparkles on AI moments, check-circle on save success, search on top-nav, trash on row delete-confirm hover. Static Lucide elsewhere. Added 2026-05-22.
+- **A4 / chips** — `components/tahi/status-badge.tsx` currently has no leading glyph. Add `<LeafIcon size={11} />` tinted to the chip's text colour, matching the design-system status palette demo. Submitted token colours already updated to indigo. Added 2026-05-22.
+- **A4 / icons grid polish** — Retire the hand-coded hover transforms in the iconography grid (`<IconTile motion=...>`) once the relevant icons have animated equivalents in `animated-icons.tsx`. Added 2026-05-22.
 
 ## Done

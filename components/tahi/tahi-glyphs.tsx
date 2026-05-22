@@ -56,6 +56,39 @@ export function LeafGlyph({
   )
 }
 
+// ── Solid leaf (no gradient, inherits currentColor) ────────────────────
+// Use this when the leaf needs to tint to a status / chip colour. The
+// gradient version above (LeafGlyph) is reserved for brand contexts
+// where the green-on-green gradient is desired.
+export function LeafIcon({
+  size = 12,
+  title,
+  className,
+}: {
+  size?: number | string
+  title?: string
+  className?: string
+}) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 12 16"
+      width={size}
+      height={typeof size === 'number' ? Math.round((size * 16) / 12) : undefined}
+      role={title ? 'img' : 'presentation'}
+      aria-label={title}
+      aria-hidden={title ? undefined : true}
+      className={className}
+      style={{ flexShrink: 0 }}
+    >
+      <path
+        d="M11.68 4.45C11.58 6.13 11.17 7.78 10.38 9.27C8.63 12.56 5.35 14.15 1.85 14.94C2.91 11.61 4.91 8.51 7.29 5.97C7.35 5.91 7.4 5.86 7.45 5.8L7.45 5.8C7.23 6.12 6.83 6.29 6.54 6.52C6.16 6.82 5.8 7.18 5.46 7.52C3.99 9.01 2.83 10.78 1.83 12.61C1.6 13.04 1.37 13.48 1.16 13.92C1.06 14.11 0.95 14.31 0.87 14.51C0.81 14.66 0.66 15 0.73 15.17C0.66 14.86 0.6 14.55 0.54 14.24C0.14 11.85 0.14 9.29 1.21 7.07C1.93 5.56 3.1 4.29 4.46 3.3C6.46 1.84 8.86 0.87 11.23 0.18C11.36 0.14 11.36 0.23 11.37 0.3C11.65 1.65 11.77 3.06 11.68 4.45Z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
 // ── Short wordmark ─────────────────────────────────────────────────────
 // "Tahi" — uses currentColor for the letters, brand green for the
 // little leaf glyph that replaces the dot on the i.

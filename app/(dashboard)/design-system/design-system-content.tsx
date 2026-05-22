@@ -2,7 +2,18 @@
 
 import * as React from 'react'
 import { useState } from 'react'
-import { LeafGlyph, TahiWordmark, TahiStudioWordmark, TahiIconMark } from '@/components/tahi/tahi-glyphs'
+import { LeafGlyph, LeafIcon, TahiWordmark, TahiStudioWordmark, TahiIconMark } from '@/components/tahi/tahi-glyphs'
+import {
+  AnimatedSettings,
+  AnimatedBell,
+  AnimatedHeart,
+  AnimatedRefresh,
+  AnimatedSearch,
+  AnimatedEye,
+  AnimatedSparkles,
+  AnimatedCheckCircle,
+  AnimatedTrash,
+} from '@/components/tahi/animated-icons'
 
 /**
  * /design-system — the canonical token + primitive reference.
@@ -226,14 +237,17 @@ const SEMANTIC_SWATCHES: Swatch[] = [
   { token: '--color-highlight', hex: '#F7CE48', label: 'Sticky-note callout only.' },
 ]
 
-const STATUS_SWATCHES: Array<{ key: string, dot: string, bg: string, text: string, label: string }> = [
-  { key: 'draft',          dot: '#9CA3AF', bg: '#F3F4F6', text: '#4B5563', label: 'Draft' },
-  { key: 'submitted',      dot: '#60A5FA', bg: '#EFF6FF', text: '#1D4ED8', label: 'Submitted' },
-  { key: 'in-review',      dot: '#FBBF24', bg: '#FFFBEB', text: '#92400E', label: 'In review' },
-  { key: 'in-progress',    dot: '#06B6D4', bg: '#ECFEFF', text: '#0E7490', label: 'In progress' },
-  { key: 'client-review',  dot: '#A78BFA', bg: '#F5F3FF', text: '#6D28D9', label: 'Client review' },
-  { key: 'delivered',      dot: '#22C55E', bg: '#F0FDF4', text: '#15803D', label: 'Delivered' },
-  { key: 'archived',       dot: '#D1D5DB', bg: '#F9FAFB', text: '#6B7280', label: 'Archived' },
+// Submitted shifted to indigo so it reads distinct from in-progress (teal).
+// Chips now lead with the LeafIcon tinted to the chip's text colour —
+// brand-consistent leading glyph that replaces the generic circle dot.
+const STATUS_SWATCHES: Array<{ key: string, bg: string, text: string, label: string }> = [
+  { key: 'draft',          bg: '#F3F4F6', text: '#4B5563', label: 'Draft' },
+  { key: 'submitted',      bg: '#EEF2FF', text: '#4338CA', label: 'Submitted' },
+  { key: 'in-review',      bg: '#FFFBEB', text: '#92400E', label: 'In review' },
+  { key: 'in-progress',    bg: '#ECFEFF', text: '#0E7490', label: 'In progress' },
+  { key: 'client-review',  bg: '#F5F3FF', text: '#6D28D9', label: 'Client review' },
+  { key: 'delivered',      bg: '#F0FDF4', text: '#15803D', label: 'Delivered' },
+  { key: 'archived',       bg: '#F9FAFB', text: '#6B7280', label: 'Archived' },
 ]
 
 function SwatchTile({ s }: { s: Swatch }) {
@@ -297,19 +311,20 @@ function ColoursSection() {
 
         <Card>
           <GroupHeading>Status palette (request / deal / invoice)</GroupHeading>
+          <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: '-0.5rem', marginBottom: '0.875rem', lineHeight: 1.5 }}>
+            Each chip leads with the brand leaf glyph tinted to the chip&apos;s text colour. Submitted is indigo (was blue) so it reads distinct from in-progress (teal).
+          </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
             {STATUS_SWATCHES.map(s => (
               <div key={s.key} style={{
                 background: s.bg, color: s.text,
-                padding: '0.625rem 0.875rem',
+                padding: '0.5rem 0.875rem',
                 borderRadius: 'var(--radius-leaf-sm)',
-                display: 'flex', alignItems: 'center', gap: '0.625rem',
+                display: 'flex', alignItems: 'center', gap: '0.5rem',
                 fontSize: '0.8125rem', fontWeight: 500,
+                width: 'fit-content',
               }}>
-                <span style={{
-                  width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: s.dot,
-                  flexShrink: 0,
-                }} />
+                <LeafIcon size={11} />
                 {s.label}
               </div>
             ))}
@@ -884,164 +899,56 @@ function IconographySection() {
 }
 
 // ────────────────────────────────────────────────────────────────────────
-// Animation styles — comparison of animated-icon library aesthetics
+// Animation styles — the Lucide Animated pack
 //
-// Pure CSS keyframes (no Motion / Lottie runtime). Each demo mirrors the
-// motion style a specific library ships out of the box. Hover any tile
-// to play. Pick a style → we install the matching library and replace
-// the static Lucide icons across the dashboard.
+// Pack locked in 2026-05-22. All animated icons live in
+// components/tahi/animated-icons.tsx and are powered by Motion
+// (Framer Motion's lighter package). Hover behaviour:
+//   - Enter: animation plays toward keyframes.
+//   - Leave mid-animation: Motion smoothly interpolates back to rest.
+//     No snap, no jump. Multi-keyframe sequences always end at rest so
+//     the leave-mid-play case resolves naturally.
+//   - Continuous loops (refresh-cw) stop on leave and rotate back to 0.
+//
+// The static Lucide set stays the default everywhere. Animated variants
+// are applied only on a selected subset (see BACKLOG-UIUX.md / A4).
 // ────────────────────────────────────────────────────────────────────────
 
 type AnimDemo = {
   key: string
-  family: 'Lucide Animated' | 'AnimateIcons' | 'Lordicon' | 'useAnimations' | 'Motion Icons'
   label: string
   note: string
-  iconClass: string
-  iconPaths: React.ReactNode
+  Component: React.ComponentType<{ size?: number }>
 }
 
 const ANIM_DEMOS: AnimDemo[] = [
-  // — Lucide Animated style: calm, ease-out, one-shot, semantic —
-  {
-    key: 'gear',
-    family: 'Lucide Animated',
-    label: 'Settings · rotates 60°',
-    note: 'Calm, single-axis, ease-out. The default tempo.',
-    iconClass: 'ds-anim-gear',
-    iconPaths: (<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></>),
-  },
-  {
-    key: 'bell-ring',
-    family: 'Lucide Animated',
-    label: 'Bell · rings once',
-    note: '-12° → +10° → 0. Like the clapper struck the bell once.',
-    iconClass: 'ds-anim-bell-ring',
-    iconPaths: (<><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></>),
-  },
-  {
-    key: 'heart',
-    family: 'Lucide Animated',
-    label: 'Heart · beats',
-    note: 'Two soft pulses. No bounce, no overshoot.',
-    iconClass: 'ds-anim-heart',
-    iconPaths: (<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>),
-  },
-
-  // — AnimateIcons style: springy, energetic —
-  {
-    key: 'bell-shake',
-    family: 'AnimateIcons',
-    label: 'Bell · shakes 4×',
-    note: 'Cubic-spring easing, oscillates harder than Lucide Animated.',
-    iconClass: 'ds-anim-bell-shk',
-    iconPaths: (<><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></>),
-  },
-  {
-    key: 'search',
-    family: 'AnimateIcons',
-    label: 'Search · wiggles',
-    note: '±15° tilt, three swings. Reads as "looking around".',
-    iconClass: 'ds-anim-search',
-    iconPaths: (<><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></>),
-  },
-
-  // — Lordicon style: polished, multi-stage, premium —
-  {
-    key: 'eye',
-    family: 'Lordicon',
-    label: 'Eye · blinks',
-    note: 'scaleY collapses then snaps back. Looks like the eye blinked.',
-    iconClass: 'ds-anim-eye',
-    iconPaths: (<><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>),
-  },
-  {
-    key: 'star',
-    family: 'Lordicon',
-    label: 'Star · sparkles',
-    note: 'Scale + rotate combined. Often paired with colour shift in Lottie.',
-    iconClass: 'ds-anim-star',
-    iconPaths: (<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>),
-  },
-
-  // — useAnimations style: continuous loop while hovered —
-  {
-    key: 'refresh',
-    family: 'useAnimations',
-    label: 'Refresh · loops 360°',
-    note: 'Spins continuously while hovered. Stops when you leave.',
-    iconClass: 'ds-anim-refresh',
-    iconPaths: (<><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></>),
-  },
-
-  // — Motion Icons style: generic preset (draw-on stroke) —
-  {
-    key: 'draw',
-    family: 'Motion Icons',
-    label: 'Send · draws on',
-    note: 'Stroke draws from start. Generic preset applied across the set.',
-    iconClass: 'ds-anim-draw',
-    iconPaths: (<><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></>),
-  },
+  { key: 'settings',     label: 'Settings · rotates 60°',     note: 'Stops at 60° while hovered, glides back to 0° on leave.',        Component: AnimatedSettings },
+  { key: 'bell',         label: 'Bell · rings once',           note: 'Single clapper sequence. -12° → +10° → -6° → 0°.',               Component: AnimatedBell },
+  { key: 'heart',        label: 'Heart · beats twice',         note: 'Two soft pulses. No bounce, no overshoot.',                     Component: AnimatedHeart },
+  { key: 'sparkles',     label: 'Sparkles · pulses',           note: 'Scale + soft opacity flicker. AI moments only.',                Component: AnimatedSparkles },
+  { key: 'check-circle', label: 'Check · draws on',            note: 'Tick draws in via pathLength. Use on save success.',            Component: AnimatedCheckCircle },
+  { key: 'search',       label: 'Search · wiggles',            note: 'Spring oscillation, three swings. Reads as "looking around".', Component: AnimatedSearch },
+  { key: 'eye',          label: 'Eye · blinks',                note: 'scaleY collapses then recovers. Single blink.',                 Component: AnimatedEye },
+  { key: 'trash',        label: 'Trash · lid lifts',           note: 'Lid hinges open -18°. Use on delete-confirm hover.',            Component: AnimatedTrash },
+  { key: 'refresh',      label: 'Refresh · spins continuously',note: 'Loops 360° while hovered. Stops + reverses to 0° on leave.',    Component: AnimatedRefresh },
 ]
-
-const FAMILY_COLOURS: Record<AnimDemo['family'], { bg: string, fg: string, dot: string }> = {
-  'Lucide Animated': { bg: '#EEF5EB', fg: '#3F6235', dot: '#5A824E' },
-  'AnimateIcons':    { bg: '#EFF1FE', fg: '#3B2DAA', dot: '#6366F1' },
-  'Lordicon':        { bg: '#FBE9F2', fg: '#9D1F62', dot: '#EC4899' },
-  'useAnimations':   { bg: '#E6F6F9', fg: '#0E6E81', dot: '#06B6D4' },
-  'Motion Icons':    { bg: '#FEF6E6', fg: '#8A5A12', dot: '#F59E0B' },
-}
-
-function FamilyChip({ family }: { family: AnimDemo['family'] }) {
-  const c = FAMILY_COLOURS[family]
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-      padding: '0.125rem 0.5rem',
-      background: c.bg, color: c.fg,
-      borderRadius: 'var(--radius-leaf-sm)',
-      fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.01em',
-      width: 'fit-content',
-    }}>
-      <span style={{ width: '0.375rem', height: '0.375rem', borderRadius: '50%', background: c.dot }} />
-      {family}
-    </span>
-  )
-}
 
 function AnimCard({ demo }: { demo: AnimDemo }) {
   return (
-    <div
-      className="ds-anim-card"
-      style={{
-        background: 'var(--color-bg)',
-        borderRadius: 'var(--radius-leaf)',
-        padding: '1.25rem',
-        display: 'flex', flexDirection: 'column', gap: '0.875rem',
-        minHeight: '11rem',
-        transition: 'background var(--motion-quick) var(--ease-out)',
-      }}
-      onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
-    >
-      <FamilyChip family={demo.family} />
+    <div style={{
+      background: 'var(--color-bg)',
+      borderRadius: 'var(--radius-leaf)',
+      padding: '1.25rem',
+      display: 'flex', flexDirection: 'column', gap: '0.875rem',
+      minHeight: '10.5rem',
+      transition: 'background var(--motion-quick) var(--ease-out)',
+    }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '3.5rem',
+        height: '3.75rem',
         color: 'var(--color-brand-dark)',
       }}>
-        <span className="ds-anim-icon">
-          <svg
-            className={demo.iconClass}
-            width={40} height={40} viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth={1.5}
-            strokeLinecap="round" strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            {demo.iconPaths}
-          </svg>
-        </span>
+        <demo.Component size={40} />
       </div>
       <div style={{ marginTop: 'auto' }}>
         <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>{demo.label}</div>
@@ -1055,8 +962,8 @@ function AnimationStylesSection() {
   return (
     <SectionShell
       id="animations"
-      title="Animation styles — pick a pack"
-      intro="Hover each tile to play. Same icons across libraries would behave like these representative demos. Once you pick a style, we install the matching library (or copy-paste their components in) and standardise the dashboard on it. All animations here honour prefers-reduced-motion."
+      title="Animated icons"
+      intro="Lucide Animated pack — Motion-powered, calm ease-out tempo. Hover each tile to feel it. Mouse-out mid-play smoothly reverses to rest — no snap. Static Lucide stays the default across the dashboard; animated variants below are applied only where motion adds meaning."
     >
       <div style={{
         background: 'var(--color-bg-secondary)',
@@ -1070,29 +977,15 @@ function AnimationStylesSection() {
       </div>
 
       <Card>
-        <GroupHeading>How to read this</GroupHeading>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-          <div>
-            <FamilyChip family="Lucide Animated" />
-            <p style={{ marginTop: '0.375rem' }}>Calm. Ease-out. One-shot. Each icon&apos;s animation maps to its meaning. <strong style={{ color: 'var(--color-text)' }}>Closest to our brand tempo.</strong> Drop-in for our existing Lucide setup.</p>
-          </div>
-          <div>
-            <FamilyChip family="AnimateIcons" />
-            <p style={{ marginTop: '0.375rem' }}>Springier. Energetic. Oscillates more before settling. Feels &ldquo;alive&rdquo; — possibly too active for a calm dashboard.</p>
-          </div>
-          <div>
-            <FamilyChip family="Lordicon" />
-            <p style={{ marginTop: '0.375rem' }}>Lottie-rich, multi-stage, often with colour shifts. Highest fidelity, can feel playful. Paid for full set.</p>
-          </div>
-          <div>
-            <FamilyChip family="useAnimations" />
-            <p style={{ marginTop: '0.375rem' }}>Continuous loops while hovered (refresh spinning, etc.). Useful for &ldquo;processing&rdquo; states. Smaller set (~80 icons).</p>
-          </div>
-          <div>
-            <FamilyChip family="Motion Icons" />
-            <p style={{ marginTop: '0.375rem' }}>Generic motion presets (draw-on, fade-in, bounce) applied across all 3,500 Lucide icons. Less semantic — every icon animates the same way.</p>
-          </div>
-        </div>
+        <GroupHeading>How animation behaves</GroupHeading>
+        <ul style={{ fontSize: '0.8125rem', lineHeight: 1.7, color: 'var(--color-text)' }} className="space-y-1.5">
+          <li><strong>Mouse-enter:</strong> animation plays toward its keyframes.</li>
+          <li><strong>Mouse-leave mid-play:</strong> Motion smoothly interpolates back to rest. No snap, no jump.</li>
+          <li><strong>Multi-keyframe sequences</strong> (bell, search, heart) start and end at rest, so leaving mid-sequence always resolves to a calm zero.</li>
+          <li><strong>Continuous loops</strong> (refresh) stop wherever they are on leave and rotate back to 0°.</li>
+          <li><strong>Reduced motion:</strong> all animations honour <Mono>prefers-reduced-motion</Mono> via the global rule in <Mono>globals.css</Mono>.</li>
+          <li><strong>Components live in:</strong> <Mono>components/tahi/animated-icons.tsx</Mono>. Import as <Mono>{`<AnimatedSettings />`}</Mono>, <Mono>{`<AnimatedBell />`}</Mono>, etc.</li>
+        </ul>
       </Card>
     </SectionShell>
   )
@@ -1268,7 +1161,7 @@ const CONTRAST_PAIRS: ContrastPair[] = [
   { label: 'Brand-lighter on deepest',    fg: '#97BA8C', fgToken: '--color-brand-lighter',bg: '#1E3019', bgToken: '--color-brand-deepest',ratio: 6.51,  badge: 'AA' },
 
   // Status pills
-  { label: 'Status submitted',            fg: '#1D4ED8', fgToken: '--status-submitted-text',  bg: '#EFF6FF', bgToken: '--status-submitted-bg',  ratio: 6.16,  badge: 'AA' },
+  { label: 'Status submitted (new indigo)', fg: '#4338CA', fgToken: '--status-submitted-text',  bg: '#EEF2FF', bgToken: '--status-submitted-bg',  ratio: 7.07,  badge: 'AAA',    note: 'Shifted from blue (#1D4ED8 on #EFF6FF, 6.16:1 AA) to indigo (7.07:1 AAA) to widen visual distance from in-progress teal.' },
   { label: 'Status in-review',            fg: '#92400E', fgToken: '--status-in-review-text',  bg: '#FFFBEB', bgToken: '--status-in-review-bg',  ratio: 6.84,  badge: 'AA' },
   { label: 'Status in-progress',          fg: '#0E7490', fgToken: '--status-in-progress-text',bg: '#ECFEFF', bgToken: '--status-in-progress-bg',ratio: 5.15,  badge: 'AA' },
   { label: 'Status client-review',        fg: '#6D28D9', fgToken: '--status-client-review-text', bg: '#F5F3FF', bgToken: '--status-client-review-bg', ratio: 6.48, badge: 'AA' },
