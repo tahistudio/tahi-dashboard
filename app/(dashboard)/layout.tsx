@@ -7,6 +7,8 @@ import { MobileBottomNav } from '@/components/tahi/mobile-bottom-nav'
 import { ProductTour } from '@/components/tahi/product-tour'
 import { ToastProvider } from '@/components/tahi/toast'
 import { KeyboardShortcuts } from '@/components/tahi/keyboard-shortcuts'
+import { SidebarProvider } from '@/components/tahi/sidebar-context'
+import { SkipToContent } from '@/components/tahi/skip-to-content'
 import { DisplayCurrencyProvider } from '@/lib/display-currency-context'
 
 export default async function DashboardLayout({
@@ -22,23 +24,26 @@ export default async function DashboardLayout({
   return (
     <ToastProvider>
     <DisplayCurrencyProvider>
-      <div className="flex h-screen overflow-hidden" style={{ background: 'var(--color-bg-cream)' }}>
-        <div className="hidden md:flex">
+      <SidebarProvider>
+        <SkipToContent />
+        <div className="flex h-screen overflow-hidden" style={{ background: 'var(--color-bg-cream)' }}>
+          {/* AppSidebar handles its own responsive visibility:
+              desktop persistent, mobile drawer triggered from top-nav hamburger. */}
           <AppSidebar isAdmin={isAdmin} />
+          <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+            {isAdmin && <ImpersonationBanner />}
+            <AppTopNav isAdmin={isAdmin} />
+            <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto dashboard-main">
+              <div className="max-w-7xl mx-auto w-full dashboard-page-inner">
+                {children}
+              </div>
+            </main>
+          </div>
+          <MobileBottomNav isAdmin={isAdmin} />
+          <ProductTour isAdmin={isAdmin} />
+          <KeyboardShortcuts />
         </div>
-        <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-          {isAdmin && <ImpersonationBanner />}
-          <AppTopNav isAdmin={isAdmin} />
-          <main className="flex-1 overflow-y-auto dashboard-main">
-            <div className="max-w-7xl mx-auto w-full dashboard-page-inner">
-              {children}
-            </div>
-          </main>
-        </div>
-        <MobileBottomNav isAdmin={isAdmin} />
-        <ProductTour isAdmin={isAdmin} />
-        <KeyboardShortcuts />
-      </div>
+      </SidebarProvider>
     </DisplayCurrencyProvider>
     </ToastProvider>
   )

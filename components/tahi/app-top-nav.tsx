@@ -3,11 +3,13 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { UserButton, OrganizationSwitcher } from '@clerk/nextjs'
-import { Search, X, Eye, UserCog } from 'lucide-react'
+import { Search, X, Eye, UserCog, Menu } from 'lucide-react'
 import { NotificationBell } from './notification-bell'
 import { useImpersonation } from './impersonation-banner'
 import { CurrencySwitcher } from './currency-switcher'
 import { TimerChip } from './timer-chip'
+import { useSidebar } from './sidebar-context'
+import { Tooltip } from './tooltip'
 
 interface AppTopNavProps {
   isAdmin: boolean
@@ -19,6 +21,7 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
   const [searchValue, setSearchValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedContactName, impersonatedOrgName, impersonatedTeamMemberName } = useImpersonation()
+  const { mobileOpen, setMobileOpen } = useSidebar()
 
   const handleSearch = useCallback(() => {
     const q = searchValue.trim()
@@ -63,6 +66,30 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
     >
       {/* Left */}
       <div className="flex items-center flex-1 min-w-0" style={{ gap: 'var(--space-3)' }}>
+        {/* Mobile hamburger. Opens the sidebar drawer. Hidden on md+. */}
+        <Tooltip label="Open navigation" side="bottom">
+          <button
+            className="md:hidden flex items-center justify-center flex-shrink-0"
+            onClick={() => setMobileOpen(!mobileOpen)}
+            aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}
+            aria-expanded={mobileOpen}
+            aria-controls="primary-sidebar"
+            style={{
+              width: '2.75rem',
+              height: '2.75rem',
+              borderRadius: 'var(--radius-md)',
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--color-text-muted)',
+              cursor: 'pointer',
+              transition: 'background var(--motion-quick, 220ms) var(--ease-out, ease-out)',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+          >
+            <Menu size={20} aria-hidden="true" />
+          </button>
+        </Tooltip>
         {isAdmin && isImpersonatingClient ? (
           <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
             <Eye size={16} style={{ color: 'var(--color-warning)', flexShrink: 0 }} aria-hidden="true" />

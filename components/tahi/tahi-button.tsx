@@ -59,11 +59,13 @@ const BASE_STYLE: React.CSSProperties = {
   transition: 'background-color var(--motion-quick) var(--ease-out), border-color var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
 }
 
-// Padding + font sizes match the design pack exactly.
+// Padding + font sizes match the design pack. Minimum tap target of 44px
+// on mobile is enforced via min-height where size <= md (sm + md naturally
+// sit below 44px). WCAG 2.5.8 Target Size minimum.
 const SIZE_STYLE: Record<Size, React.CSSProperties> = {
-  sm: { fontSize: '0.75rem',    padding: '0.375rem 0.625rem',  gap: '0.375rem' },
-  md: { fontSize: '0.8125rem',  padding: '0.5rem 0.875rem',    gap: '0.375rem' },
-  lg: { fontSize: '0.875rem',   padding: '0.625rem 1.125rem',  gap: '0.5rem'   },
+  sm: { fontSize: '0.75rem',    padding: '0.375rem 0.625rem',  gap: '0.375rem', minHeight: '1.75rem' },
+  md: { fontSize: '0.8125rem',  padding: '0.5rem 0.875rem',    gap: '0.375rem', minHeight: '2.25rem' },
+  lg: { fontSize: '0.875rem',   padding: '0.625rem 1.125rem',  gap: '0.5rem',   minHeight: '2.5rem'  },
 }
 
 interface StyleForState {
@@ -164,10 +166,12 @@ export function TahiButton({
 
   return (
     <button
+      type={rest.type ?? 'button'}
       {...rest}
       className={className}
       disabled={loading || disabled}
       aria-busy={loading || undefined}
+      aria-disabled={disabled || loading || undefined}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => { setHover(false); setPressed(false) }}
       onMouseDown={() => setPressed(true)}

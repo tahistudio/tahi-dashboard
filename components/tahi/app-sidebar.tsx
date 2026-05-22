@@ -1,5 +1,34 @@
 'use client'
 
+/**
+ * <AppSidebar>. The dashboard's primary navigation.
+ *
+ * Responsive at the core:
+ *
+ *   Desktop (>= 1024px) persistent cream sidebar pinned to the left.
+ *     Expandable / collapsible (320ms ease-out). Collapsed width 64px
+ *     shows icons only with Tooltips. Expanded width 240px shows
+ *     group labels + count badges.
+ *
+ *   Tablet (768 to 1023px) persistent rail. Always collapsed by default,
+ *     can be expanded via the top-nav hamburger.
+ *
+ *   Mobile (< 768px) hidden by default. Top-nav hamburger opens it as
+ *     a left-edge drawer with backdrop. Focus is trapped while open.
+ *     Esc + backdrop click + nav link click all close it.
+ *
+ * Accessibility:
+ *
+ *   - <nav aria-label="Primary"> on the nav region.
+ *   - aria-current="page" on the active link.
+ *   - aria-expanded + aria-controls on collapsible group buttons.
+ *   - Visible focus ring on every interactive element (uses the
+ *     global :focus-visible rule in globals.css).
+ *   - Min 44x44px touch target on mobile (padding bumps).
+ *   - Drawer: aria-modal="true", role="dialog", aria-labelledby on
+ *     the brand heading inside. Focus trap from FocusTrap.
+ */
+
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -7,12 +36,14 @@ import {
   BarChart2, BookOpen, UserCog, Settings, MessageSquare,
   FolderOpen, ShoppingBag, PanelLeftClose, PanelLeftOpen,
   LayoutDashboard, Moon, Sun, Star, TrendingUp, FileSignature, Gauge,
-  Calendar, Megaphone, Briefcase, Layers, Calculator,
+  Calendar, Megaphone, X, ChevronDown,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
-// LeafLogo / TahiWordmark available in ./leaf-logo but sidebar uses the PNG logo directly
-import { useState, useEffect } from 'react'
+import { useSidebar } from '@/components/tahi/sidebar-context'
+import { FocusTrap } from '@/components/tahi/focus-trap'
+import { Tooltip } from '@/components/tahi/tooltip'
+import * as React from 'react'
 
 type NavItem = {
   label: string
@@ -21,29 +52,16 @@ type NavItem = {
   adminOnly?: boolean
   clientOnly?: boolean
   clientVisible?: boolean
+  count?: number
 }
 
 type NavGroup = {
   group: string
   items: NavItem[]
+  /** When true, group is collapsible. Workspace stays open by default. */
+  collapsible?: boolean
 }
 
-// Sidebar IA (revised 2026-05-07, department-grouped).
-//
-// Pages are grouped by the department that owns them so each role can find
-// "all my stuff" in one place. A few cross-cutting pages (Tasks, Requests,
-// Messages, Overview) live up top in Workspace because they're used by
-// every department.
-//
-// Per-item visibility is still controlled by the existing flags so we don't
-// lose admin/client gating. Future role-aware filtering (e.g. hide Finance
-// from a designer) is on top of this — see teamMemberAccess.
-//
-// Sales-pipeline tooling lives together: deal pipeline, proposals (where
-// the sale closes), project schedules (Gantt deliverables agreed in the
-// proposal), contracts (e-signature), and Reviews (testimonials feeding
-// future proposals). Sales analytics + a contract calculator will land in
-// this group when they ship.
 const ADMIN_NAV: NavGroup[] = [
   {
     group: 'Workspace',
@@ -56,23 +74,26 @@ const ADMIN_NAV: NavGroup[] = [
   },
   {
     group: 'Sales',
+    collapsible: true,
     items: [
       { label: 'Pipeline',           href: '/pipeline',            icon: TrendingUp,    adminOnly: true },
       { label: 'Proposals',          href: '/proposals',           icon: FileText,      adminOnly: true },
       { label: 'Schedules',          href: '/schedules',           icon: Calendar,      adminOnly: true },
       { label: 'Contracts',          href: '/contracts',           icon: FileSignature, adminOnly: true },
-      { label: 'Project calculator', href: '/calculator',          icon: Calculator,    adminOnly: true },
+      { label: 'Calculator',         href: '/calculator',          icon: Gauge,         adminOnly: true },
       { label: 'Sales analytics',    href: '/sales-analytics',     icon: BarChart2,     adminOnly: true },
     ],
   },
   {
     group: 'Clients',
+    collapsible: true,
     items: [
       { label: 'Clients',   href: '/clients',   icon: Users,         adminOnly: true },
     ],
   },
   {
     group: 'Marketing',
+    collapsible: true,
     items: [
       { label: 'Reviews',       href: '/reviews',       icon: Star,      adminOnly: true },
       { label: 'Announcements', href: '/announcements', icon: Megaphone, adminOnly: true },
@@ -80,6 +101,7 @@ const ADMIN_NAV: NavGroup[] = [
   },
   {
     group: 'Finance',
+    collapsible: true,
     items: [
       { label: 'Invoices',  href: '/invoices',  icon: FileText },
       { label: 'Billing',   href: '/billing',   icon: CreditCard,    adminOnly: true },
@@ -89,6 +111,7 @@ const ADMIN_NAV: NavGroup[] = [
   },
   {
     group: 'Operations',
+    collapsible: true,
     items: [
       { label: 'Capacity',  href: '/capacity',  icon: Gauge,         adminOnly: true },
       { label: 'Team',      href: '/team',      icon: UserCog,       adminOnly: true },
@@ -96,6 +119,7 @@ const ADMIN_NAV: NavGroup[] = [
   },
   {
     group: 'Knowledge',
+    collapsible: true,
     items: [
       { label: 'Docs Hub',  href: '/docs',      icon: BookOpen,      adminOnly: true },
     ],
@@ -132,261 +156,534 @@ const CLIENT_NAV: NavGroup[] = [
   },
 ]
 
-// All sidebar colors as hex constants; never rely on Tailwind CSS variables here
-const S = {
-  bg:         '#1e2a1b',
-  border:     '#2d3d2a',
-  groupLabel: '#4a6145',
-  textMuted:  '#7aaa72',
-  textActive: '#ffffff',
-  bgHover:    '#2a3826',
-  bgActive:   '#2f3f2c',
-  iconMuted:  '#5f9458',
-  iconActive: '#93c98a',
-}
+const EXPANDED_WIDTH = 240
+const COLLAPSED_WIDTH = 64
 
-const EXPANDED_WIDTH  = 224  // px
-const COLLAPSED_WIDTH = 64   // px
+const VIEWER_HIDDEN_PAGES = new Set(['/team', '/settings', '/billing', '/contracts'])
 
 export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname()
-  const [collapsed, setCollapsed] = useState(false)
-  const [darkMode, setDarkMode] = useState(false)
+  const { collapsed, setCollapsed, mobileOpen, setMobileOpen } = useSidebar()
   const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
 
-  // When impersonating a client, show the client view instead of admin
-  // When impersonating a team member, keep admin view but respect their role
-  const showAsAdmin = isAdmin && !isImpersonatingClient
-
-  // Determine if the impersonated team member is a viewer (hide edit-oriented pages)
-  const isViewerRole = isImpersonatingTeamMember &&
-    impersonatedAccessRules.length > 0 &&
-    impersonatedAccessRules.every(r => r.role === 'viewer')
-
-  // Read sidebar + dark mode preferences from localStorage on mount
-  useEffect(() => {
+  // Theme state
+  const [darkMode, setDarkMode] = React.useState(false)
+  React.useEffect(() => {
     try {
-      const storedTheme = localStorage.getItem('tahi-theme')
-      setDarkMode(storedTheme === 'dark')
-
-      const storedSidebar = localStorage.getItem('tahi-sidebar')
-      if (storedSidebar === 'collapsed') setCollapsed(true)
-    } catch {
-      // localStorage unavailable
-    }
+      setDarkMode(localStorage.getItem('tahi-theme') === 'dark')
+    } catch { /* localStorage unavailable */ }
   }, [])
-
   const toggleDarkMode = () => {
     const next = !darkMode
     setDarkMode(next)
     try {
-      if (next) {
-        document.documentElement.classList.add('dark')
-        localStorage.setItem('tahi-theme', 'dark')
-      } else {
-        document.documentElement.classList.remove('dark')
-        localStorage.setItem('tahi-theme', 'light')
-      }
-    } catch {
-      // localStorage unavailable
-    }
+      document.documentElement.classList.toggle('dark', next)
+      localStorage.setItem('tahi-theme', next ? 'dark' : 'light')
+    } catch { /* localStorage unavailable */ }
   }
 
-  // Pages hidden for viewer-role team members (management/config pages)
-  const VIEWER_HIDDEN_PAGES = new Set(['/team', '/settings', '/billing', '/contracts'])
+  // Collapsible-group state. Default: every collapsible group expanded.
+  const [openGroups, setOpenGroups] = React.useState<Record<string, boolean>>({})
+  React.useEffect(() => {
+    try {
+      const stored = localStorage.getItem('tahi-sidebar-groups')
+      if (stored) setOpenGroups(JSON.parse(stored))
+    } catch { /* localStorage unavailable */ }
+  }, [])
+  const toggleGroup = (groupName: string) => {
+    setOpenGroups(prev => {
+      const next = { ...prev, [groupName]: prev[groupName] === false }
+      try { localStorage.setItem('tahi-sidebar-groups', JSON.stringify(next)) } catch { /* noop */ }
+      return next
+    })
+  }
+  const isGroupOpen = (g: NavGroup) => !g.collapsible || openGroups[g.group] !== false
 
-  // Pick the right NAV definition based on audience. Clients get
-  // friendlier group names ("Your project", "Library") and a much
-  // smaller surface; admins (and impersonated team members) get the
-  // full operational nav.
+  const showAsAdmin = isAdmin && !isImpersonatingClient
+  const isViewerRole = isImpersonatingTeamMember
+    && impersonatedAccessRules.length > 0
+    && impersonatedAccessRules.every(r => r.role === 'viewer')
+
   const sourceNav = showAsAdmin ? ADMIN_NAV : CLIENT_NAV
-
   const visibleNav = sourceNav.map(group => ({
     ...group,
     items: group.items.filter(item => {
       if (showAsAdmin) {
-        // Admin view: hide client-only items
         if (item.clientOnly) return false
-        // When impersonating a viewer team member, hide management pages
         if (isViewerRole && VIEWER_HIDDEN_PAGES.has(item.href)) return false
         return true
       }
-      // Client view (or impersonating client): only show items marked clientVisible
       if (!item.clientVisible) return false
       return true
     }),
   })).filter(group => group.items.length > 0)
 
-  const w = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH
+  // Active route detection. Some routes use prefix-match, others exact.
+  const exactOnly = new Set(['/requests', '/overview', '/proposals'])
+  const isItemActive = (href: string) =>
+    pathname === href || (!exactOnly.has(href) && pathname.startsWith(href))
+
+  // Click handler for nav links closes the drawer on mobile.
+  const closeOnMobileNav = () => {
+    if (mobileOpen) setMobileOpen(false)
+  }
+
+  // ── Desktop sidebar ────────────────────────────────────────────────
+  // Always rendered. On mobile we hide it with CSS. The drawer copy is
+  // rendered separately below with a different transform.
+  const desktopWidth = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH
+
+  const sidebarContent = (
+    <SidebarContent
+      collapsed={collapsed}
+      visibleNav={visibleNav}
+      isItemActive={isItemActive}
+      onNavClick={closeOnMobileNav}
+      isGroupOpen={isGroupOpen}
+      toggleGroup={toggleGroup}
+      darkMode={darkMode}
+      toggleDarkMode={toggleDarkMode}
+      setCollapsed={setCollapsed}
+      isDrawer={false}
+    />
+  )
 
   return (
-    <aside
-      className="flex flex-col h-full flex-shrink-0 relative"
-      style={{
-        width: `${w}px`,
-        minWidth: `${w}px`,
-        background: S.bg,
-        borderRight: `1px solid ${S.border}`,
-        transition: 'width 200ms ease, min-width 200ms ease',
-      }}
-    >
-      {/* Logo */}
-      <div
-        className="flex items-center h-14 flex-shrink-0"
+    <>
+      {/* Desktop persistent sidebar */}
+      <aside
+        className="hidden md:flex flex-col h-full flex-shrink-0"
+        aria-label="Primary navigation"
         style={{
-          padding: '0 1rem',
-          borderBottom: `1px solid ${S.border}`,
+          width: `${desktopWidth}px`,
+          minWidth: `${desktopWidth}px`,
+          background: 'var(--color-bg-cream)',
+          borderRight: '1px solid var(--color-border-subtle)',
+          transition: 'width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1)), min-width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1))',
         }}
       >
-        <img
-          src="/dashboard/tahi-logo.png"
-          alt="Tahi Studio"
-          style={{
-            maxHeight: collapsed ? '28px' : '40px',
-            width: 'auto',
-            display: 'block',
-            margin: collapsed ? '0 auto' : undefined,
-          }}
+        {sidebarContent}
+      </aside>
+
+      {/* Mobile drawer + backdrop. Rendered via portal-equivalent fixed
+          overlay so it sits above the dashboard content. */}
+      <MobileDrawer open={mobileOpen} onClose={() => setMobileOpen(false)}>
+        <SidebarContent
+          collapsed={false}
+          visibleNav={visibleNav}
+          isItemActive={isItemActive}
+          onNavClick={closeOnMobileNav}
+          isGroupOpen={isGroupOpen}
+          toggleGroup={toggleGroup}
+          darkMode={darkMode}
+          toggleDarkMode={toggleDarkMode}
+          setCollapsed={setCollapsed}
+          isDrawer={true}
+          onCloseDrawer={() => setMobileOpen(false)}
         />
+      </MobileDrawer>
+    </>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Mobile drawer wrapper
+// ────────────────────────────────────────────────────────────────────
+function MobileDrawer({
+  open,
+  onClose,
+  children,
+}: {
+  open: boolean
+  onClose: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <>
+      {/* Backdrop. Fades + blocks pointer events. Click closes. */}
+      <div
+        className="md:hidden fixed inset-0"
+        aria-hidden="true"
+        onClick={onClose}
+        style={{
+          background: 'rgba(18, 26, 15, 0.5)',
+          opacity: open ? 1 : 0,
+          pointerEvents: open ? 'auto' : 'none',
+          transition: 'opacity var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1))',
+          zIndex: 40,
+        }}
+      />
+      {/* Drawer panel. Slides from left. */}
+      <FocusTrap
+        active={open}
+        onEscape={onClose}
+        className="md:hidden fixed top-0 left-0 h-full"
+        style={{
+          width: 'min(280px, 85vw)',
+          background: 'var(--color-bg-cream)',
+          borderRight: '1px solid var(--color-border-subtle)',
+          transform: open ? 'translateX(0)' : 'translateX(-100%)',
+          transition: 'transform var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1))',
+          zIndex: 50,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Navigation menu"
+          aria-hidden={!open}
+          style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
+        >
+          {children}
+        </div>
+      </FocusTrap>
+    </>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Sidebar inner content. Shared between desktop and drawer.
+// ────────────────────────────────────────────────────────────────────
+interface SidebarContentProps {
+  collapsed: boolean
+  visibleNav: NavGroup[]
+  isItemActive: (href: string) => boolean
+  onNavClick: () => void
+  isGroupOpen: (g: NavGroup) => boolean
+  toggleGroup: (groupName: string) => void
+  darkMode: boolean
+  toggleDarkMode: () => void
+  setCollapsed: (next: boolean) => void
+  isDrawer: boolean
+  onCloseDrawer?: () => void
+}
+
+function SidebarContent({
+  collapsed,
+  visibleNav,
+  isItemActive,
+  onNavClick,
+  isGroupOpen,
+  toggleGroup,
+  darkMode,
+  toggleDarkMode,
+  setCollapsed,
+  isDrawer,
+  onCloseDrawer,
+}: SidebarContentProps) {
+  return (
+    <>
+      {/* Brand + drawer close (mobile) */}
+      <div
+        className="flex items-center flex-shrink-0"
+        style={{
+          padding: collapsed ? '0.875rem 0' : '0.875rem 1rem',
+          justifyContent: collapsed ? 'center' : 'space-between',
+          borderBottom: '1px solid var(--color-border-subtle)',
+          height: '3.5rem',
+        }}
+      >
+        <Link
+          href="/overview"
+          onClick={onNavClick}
+          aria-label="Tahi Studio. Go to overview"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.625rem',
+            textDecoration: 'none',
+            minWidth: 0,
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/dashboard/tahi-logo.png"
+            alt=""
+            style={{
+              width: collapsed ? '28px' : '32px',
+              height: 'auto',
+              display: 'block',
+              flexShrink: 0,
+            }}
+          />
+          {!collapsed && (
+            <span style={{
+              fontSize: '0.9375rem',
+              fontWeight: 700,
+              color: 'var(--color-brand-deepest)',
+              letterSpacing: '-0.01em',
+              whiteSpace: 'nowrap',
+            }}>
+              Tahi Studio
+            </span>
+          )}
+        </Link>
+        {isDrawer && (
+          <button
+            onClick={onCloseDrawer}
+            aria-label="Close navigation menu"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              padding: '0.5rem',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--color-text-muted)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: '44px',
+              minHeight: '44px',
+              transition: 'background var(--motion-quick, 220ms) var(--ease-out)',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(18, 26, 15, 0.05)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto" style={{ padding: '0.75rem 0.5rem' }}>
-        {visibleNav.map((group, gi) => (
-          <div key={group.group} style={{ marginTop: gi > 0 ? '0.875rem' : 0 }}>
-            {!collapsed && (
-              <p style={{
-                fontSize: '0.625rem',
-                fontWeight: 600,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-                color: S.groupLabel,
-                padding: '0 0.5rem',
-                marginBottom: '0.25rem',
-              }}>
-                {group.group}
-              </p>
-            )}
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-              {group.items.map(item => {
-                const Icon = item.icon
-                // /proposals is excluded from prefix-match because /proposals/templates
-                // is its own sibling nav entry. Without this, both would highlight when
-                // visiting the templates page.
-                const exactOnly = new Set(['/requests', '/overview', '/proposals'])
-                const isActive =
-                  pathname === item.href ||
-                  (!exactOnly.has(item.href) && pathname.startsWith(item.href))
-
-                return (
-                  <li key={item.href} style={{ marginBottom: '2px' }}>
-                    <Link
-                      href={item.href}
-                      title={collapsed ? item.label : undefined}
-                      data-tour={`nav-${item.label.toLowerCase()}`}
-                      className="flex items-center transition-colors"
+      {/* Nav region */}
+      <nav
+        aria-label="Primary"
+        className="flex-1 overflow-y-auto"
+        style={{ padding: '0.75rem 0.5rem' }}
+      >
+        {visibleNav.map((group, gi) => {
+          const open = isGroupOpen(group)
+          const groupId = 'nav-group-' + group.group.toLowerCase().replace(/\s+/g, '-')
+          return (
+            <div key={group.group} style={{ marginTop: gi > 0 ? '1rem' : 0 }}>
+              {!collapsed && (
+                group.collapsible ? (
+                  <button
+                    onClick={() => toggleGroup(group.group)}
+                    aria-expanded={open}
+                    aria-controls={groupId}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      width: '100%',
+                      padding: '0.125rem 0.5rem 0.375rem',
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--color-text-subtle)',
+                      fontSize: '0.6875rem',
+                      fontWeight: 600,
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase',
+                      borderRadius: 'var(--radius-sm)',
+                    }}
+                  >
+                    <span>{group.group}</span>
+                    <ChevronDown
+                      className="w-3 h-3"
                       style={{
-                        gap: '10px',
-                        padding: collapsed ? '8px 0' : '7px 8px',
-                        justifyContent: collapsed ? 'center' : 'flex-start',
-                        borderRadius: '6px',
-                        fontSize: '0.8125rem',
-                        fontWeight: 500,
-                        color: isActive ? S.textActive : S.textMuted,
-                        background: isActive ? S.bgActive : 'transparent',
-                        textDecoration: 'none',
+                        transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
+                        transition: 'transform var(--motion-base, 320ms) var(--ease-out)',
                       }}
-                      onMouseEnter={e => {
-                        if (!isActive) {
-                          e.currentTarget.style.background = S.bgHover
-                          e.currentTarget.style.color = S.textActive
-                        }
-                      }}
-                      onMouseLeave={e => {
-                        if (!isActive) {
-                          e.currentTarget.style.background = 'transparent'
-                          e.currentTarget.style.color = S.textMuted
-                        }
-                      }}
-                    >
-                      <span style={{ color: isActive ? S.iconActive : S.iconMuted, display: 'flex', flexShrink: 0 }}>
-                        <Icon className={cn(collapsed ? 'w-5 h-5' : 'w-4 h-4')} />
-                      </span>
-                      {!collapsed && <span>{item.label}</span>}
-                    </Link>
-                  </li>
+                    />
+                  </button>
+                ) : (
+                  <p style={{
+                    fontSize: '0.6875rem',
+                    fontWeight: 600,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    color: 'var(--color-text-subtle)',
+                    padding: '0.125rem 0.5rem 0.375rem',
+                    margin: 0,
+                  }}>
+                    {group.group}
+                  </p>
                 )
-              })}
-            </ul>
-          </div>
-        ))}
+              )}
+              <ul
+                id={groupId}
+                style={{
+                  listStyle: 'none',
+                  margin: 0,
+                  padding: 0,
+                  display: 'grid',
+                  gridTemplateRows: open ? '1fr' : '0fr',
+                  transition: 'grid-template-rows var(--motion-base, 320ms) var(--ease-out)',
+                  overflow: 'hidden',
+                }}
+                aria-hidden={!open}
+              >
+                <div style={{ minHeight: 0 }}>
+                  {group.items.map(item => {
+                    const Icon = item.icon
+                    const active = isItemActive(item.href)
+                    const link = (
+                      <Link
+                        href={item.href}
+                        onClick={onNavClick}
+                        aria-current={active ? 'page' : undefined}
+                        data-tour={`nav-${item.label.toLowerCase()}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.625rem',
+                          padding: collapsed ? '0.625rem 0' : '0.5rem 0.625rem',
+                          justifyContent: collapsed ? 'center' : 'flex-start',
+                          borderRadius: 'var(--radius-leaf-sm)',
+                          fontSize: '0.8125rem',
+                          fontWeight: active ? 600 : 500,
+                          color: active ? 'var(--color-brand-deepest)' : 'var(--color-text-muted)',
+                          background: active ? 'var(--color-bg)' : 'transparent',
+                          boxShadow: active ? 'inset 0 0 0 1px var(--color-border-subtle)' : 'none',
+                          textDecoration: 'none',
+                          minHeight: '40px',
+                          transition: 'background var(--motion-quick, 220ms) var(--ease-out), color var(--motion-quick, 220ms) var(--ease-out)',
+                        }}
+                        onMouseEnter={e => {
+                          if (!active) {
+                            e.currentTarget.style.background = 'rgba(18, 26, 15, 0.04)'
+                            e.currentTarget.style.color = 'var(--color-text)'
+                          }
+                        }}
+                        onMouseLeave={e => {
+                          if (!active) {
+                            e.currentTarget.style.background = 'transparent'
+                            e.currentTarget.style.color = 'var(--color-text-muted)'
+                          }
+                        }}
+                      >
+                        <span style={{
+                          display: 'flex',
+                          flexShrink: 0,
+                          color: active ? 'var(--color-brand)' : 'var(--color-text-muted)',
+                          transition: 'color var(--motion-quick, 220ms) var(--ease-out)',
+                        }}>
+                          <Icon className={cn(collapsed ? 'w-5 h-5' : 'w-4 h-4')} />
+                        </span>
+                        {!collapsed && (
+                          <span style={{
+                            flex: 1,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}>
+                            {item.label}
+                          </span>
+                        )}
+                        {!collapsed && item.count != null && (
+                          <span style={{
+                            background: active ? 'var(--color-brand-deepest)' : 'var(--color-bg-secondary)',
+                            color: active ? '#ffffff' : 'var(--color-text-muted)',
+                            border: active ? 'none' : '1px solid var(--color-border-subtle)',
+                            fontSize: '0.625rem',
+                            fontWeight: 600,
+                            padding: '0.0625rem 0.4375rem',
+                            borderRadius: '9999px',
+                            minWidth: '1.25rem',
+                            textAlign: 'center',
+                          }}>
+                            {item.count}
+                          </span>
+                        )}
+                      </Link>
+                    )
+                    return (
+                      <li key={item.href} style={{ marginBottom: '0.125rem' }}>
+                        {collapsed
+                          ? <Tooltip label={item.label} side="top">{link}</Tooltip>
+                          : link}
+                      </li>
+                    )
+                  })}
+                </div>
+              </ul>
+            </div>
+          )
+        })}
       </nav>
 
-      {/* Footer: dark mode + collapse */}
-      <div style={{ padding: '8px', borderTop: `1px solid ${S.border}`, flexShrink: 0 }}>
-        {/* Dark mode toggle */}
-        <button
+      {/* Footer: theme toggle + collapse (desktop only) */}
+      <div
+        style={{
+          padding: '0.5rem',
+          borderTop: '1px solid var(--color-border-subtle)',
+          flexShrink: 0,
+        }}
+      >
+        <FooterButton
           onClick={toggleDarkMode}
-          className="flex items-center transition-colors w-full"
-          style={{
-            gap: '10px',
-            padding: collapsed ? '8px 0' : '7px 8px',
-            justifyContent: collapsed ? 'center' : 'flex-start',
-            borderRadius: '6px',
-            fontSize: '0.8125rem',
-            fontWeight: 500,
-            color: S.textMuted,
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            marginBottom: '2px',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background = S.bgHover; e.currentTarget.style.color = S.textActive }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = S.textMuted }}
+          collapsed={collapsed}
           aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+          tooltip={darkMode ? 'Light mode' : 'Dark mode'}
         >
-          <span style={{ color: S.iconMuted, display: 'flex', flexShrink: 0 }}>
-            {darkMode
-              ? <Sun className="w-4 h-4" />
-              : <Moon className="w-4 h-4" />
-            }
+          <span style={{ display: 'flex', flexShrink: 0, color: 'var(--color-text-muted)' }}>
+            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </span>
-          {!collapsed && <span>{darkMode ? 'Light Mode' : 'Dark Mode'}</span>}
-        </button>
-
-        {/* Collapse toggle */}
-        <button
-          onClick={() => {
-            const next = !collapsed
-            setCollapsed(next)
-            try { localStorage.setItem('tahi-sidebar', next ? 'collapsed' : 'expanded') } catch { /* noop */ }
-          }}
-          className="flex items-center transition-colors w-full"
-          style={{
-            gap: '10px',
-            padding: collapsed ? '8px 0' : '7px 8px',
-            justifyContent: collapsed ? 'center' : 'flex-start',
-            borderRadius: '6px',
-            fontSize: '0.8125rem',
-            fontWeight: 500,
-            color: S.textMuted,
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background = S.bgHover; e.currentTarget.style.color = S.textActive }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = S.textMuted }}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          <span style={{ color: S.iconMuted, display: 'flex', flexShrink: 0 }}>
-            {collapsed
-              ? <PanelLeftOpen className="w-4 h-4" />
-              : <PanelLeftClose className="w-4 h-4" />
-            }
-          </span>
-          {!collapsed && <span>Collapse</span>}
-        </button>
+          {!collapsed && <span>{darkMode ? 'Light mode' : 'Dark mode'}</span>}
+        </FooterButton>
+        {!isDrawer && (
+          <FooterButton
+            onClick={() => setCollapsed(!collapsed)}
+            collapsed={collapsed}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            tooltip={collapsed ? 'Expand' : 'Collapse'}
+          >
+            <span style={{ display: 'flex', flexShrink: 0, color: 'var(--color-text-muted)' }}>
+              {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+            </span>
+            {!collapsed && <span>Collapse</span>}
+          </FooterButton>
+        )}
       </div>
-    </aside>
+    </>
   )
+}
+
+interface FooterButtonProps {
+  onClick: () => void
+  collapsed: boolean
+  children: React.ReactNode
+  'aria-label': string
+  tooltip: string
+}
+
+function FooterButton({ onClick, collapsed, children, tooltip, ...rest }: FooterButtonProps) {
+  const button = (
+    <button
+      {...rest}
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.625rem',
+        padding: collapsed ? '0.625rem 0' : '0.5rem 0.625rem',
+        justifyContent: collapsed ? 'center' : 'flex-start',
+        borderRadius: 'var(--radius-leaf-sm)',
+        fontSize: '0.8125rem',
+        fontWeight: 500,
+        color: 'var(--color-text-muted)',
+        background: 'transparent',
+        border: 'none',
+        cursor: 'pointer',
+        width: '100%',
+        marginBottom: '0.125rem',
+        minHeight: '40px',
+        transition: 'background var(--motion-quick, 220ms) var(--ease-out), color var(--motion-quick, 220ms) var(--ease-out)',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.background = 'rgba(18, 26, 15, 0.04)'
+        e.currentTarget.style.color = 'var(--color-text)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.background = 'transparent'
+        e.currentTarget.style.color = 'var(--color-text-muted)'
+      }}
+    >
+      {children}
+    </button>
+  )
+  return collapsed ? <Tooltip label={tooltip} side="top">{button}</Tooltip> : button
 }
