@@ -43,7 +43,7 @@
   --color-bg-mist: #E3E6E2;         /* very subtle divider strip / panel bg */
   --color-text: #121A0F;
   --color-text-muted: #5a6657;
-  --color-text-subtle: #8a9987;
+  --color-text-subtle: #647461;        /* WCAG AA on cream (4.52:1) + white (4.99:1) */
   --color-text-on-dark: #FDFDFC;
   --color-text-dim-on-dark: #DCE8D9;
   --color-border: #d4e0d0;
@@ -928,4 +928,92 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     transform: translateX(0);
     opacity: 1;
   }
+}
+
+/* ============================================================
+   DESIGN-SYSTEM PAGE ANIMATION DEMOS
+   Used only on /design-system to demo animated-icon library
+   styles. Each keyframe roughly imitates what the named library
+   ships out of the box. Not used in production UI.
+   ============================================================ */
+
+/* "Lucide Animated" feel — calm semantic motion, ease-out, one-shot. */
+@keyframes ds-gear-tilt {
+  to { transform: rotate(60deg); }
+}
+@keyframes ds-bell-ring {
+  0%   { transform: rotate(0); }
+  20%  { transform: rotate(-12deg); }
+  45%  { transform: rotate(10deg); }
+  70%  { transform: rotate(-6deg); }
+  100% { transform: rotate(0); }
+}
+@keyframes ds-heart-beat {
+  0%, 100% { transform: scale(1); }
+  25%      { transform: scale(1.16); }
+  50%      { transform: scale(1); }
+  75%      { transform: scale(1.12); }
+}
+
+/* "AnimateIcons" feel — springy, energetic. */
+@keyframes ds-bell-shake {
+  0%, 100% { transform: rotate(0); }
+  15%  { transform: rotate(-18deg); }
+  30%  { transform: rotate(16deg); }
+  45%  { transform: rotate(-12deg); }
+  60%  { transform: rotate(8deg); }
+  75%  { transform: rotate(-4deg); }
+}
+@keyframes ds-search-wiggle {
+  0%, 100% { transform: rotate(0); }
+  20%  { transform: rotate(-15deg); }
+  40%  { transform: rotate(15deg); }
+  60%  { transform: rotate(-10deg); }
+  80%  { transform: rotate(5deg); }
+}
+
+/* "Lordicon" feel — polished multi-stage motion. */
+@keyframes ds-eye-blink {
+  0%, 100% { transform: scaleY(1); }
+  45%      { transform: scaleY(1); }
+  55%      { transform: scaleY(0.05); }
+  60%      { transform: scaleY(1); }
+}
+@keyframes ds-star-sparkle {
+  0%   { transform: scale(1) rotate(0); }
+  50%  { transform: scale(1.2) rotate(20deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+
+/* "useAnimations" feel — continuous loop while hovered. */
+@keyframes ds-refresh-loop {
+  to { transform: rotate(360deg); }
+}
+
+/* "Motion Icons" feel — generic preset: draw-on (stroke-dasharray). */
+@keyframes ds-draw-on {
+  from { stroke-dashoffset: 100; }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* Tile-level helpers used by the design-system page. The animation is
+   applied to the inner icon span only when the parent .ds-anim-card
+   is hovered. Animations honour prefers-reduced-motion via the global
+   rule at the top of this file. */
+.ds-anim-card { cursor: default; }
+.ds-anim-card .ds-anim-icon { transform-origin: center; display: inline-flex; }
+.ds-anim-card:hover .ds-anim-gear      { animation: ds-gear-tilt    700ms var(--ease-out)  forwards; }
+.ds-anim-card:hover .ds-anim-bell-ring { animation: ds-bell-ring    700ms var(--ease-out); transform-origin: 50% 10%; }
+.ds-anim-card:hover .ds-anim-heart     { animation: ds-heart-beat   650ms var(--ease-out); }
+.ds-anim-card:hover .ds-anim-bell-shk  { animation: ds-bell-shake   900ms var(--ease-spring); transform-origin: 50% 10%; }
+.ds-anim-card:hover .ds-anim-search    { animation: ds-search-wiggle 720ms var(--ease-spring); }
+.ds-anim-card:hover .ds-anim-eye       { animation: ds-eye-blink    800ms var(--ease-out); }
+.ds-anim-card:hover .ds-anim-star      { animation: ds-star-sparkle 700ms var(--ease-out); }
+.ds-anim-card:hover .ds-anim-refresh   { animation: ds-refresh-loop 1400ms linear infinite; }
+.ds-anim-card:hover .ds-anim-draw path,
+.ds-anim-card:hover .ds-anim-draw polyline,
+.ds-anim-card:hover .ds-anim-draw circle,
+.ds-anim-card:hover .ds-anim-draw line {
+  animation: ds-draw-on 700ms var(--ease-out) forwards;
+  stroke-dasharray: 100;
 }
