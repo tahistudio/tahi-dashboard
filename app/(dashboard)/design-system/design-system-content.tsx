@@ -237,17 +237,19 @@ const SEMANTIC_SWATCHES: Swatch[] = [
   { token: '--color-highlight', hex: '#F7CE48', label: 'Sticky-note callout only.' },
 ]
 
-// Submitted shifted to indigo so it reads distinct from in-progress (teal).
-// Chips now lead with the LeafIcon tinted to the chip's text colour .
-// brand-consistent leading glyph that replaces the generic circle dot.
+// Palette pulled from the Tahi design pack with two refinements:
+//   Client review shifted to fuchsia so it sits in a different hue family
+//   from the cool blue / teal cluster (CIE-Lab distance from submitted
+//   jumps from 17 to 84).
+//   Archived shifted to warm taupe to pull further from cool draft gray.
 const STATUS_SWATCHES: Array<{ key: string, bg: string, text: string, label: string }> = [
-  { key: 'draft',          bg: '#F3F4F6', text: '#4B5563', label: 'Draft' },
-  { key: 'submitted',      bg: '#EEF2FF', text: '#4338CA', label: 'Submitted' },
-  { key: 'in-review',      bg: '#FFFBEB', text: '#92400E', label: 'In review' },
-  { key: 'in-progress',    bg: '#ECFEFF', text: '#0E7490', label: 'In progress' },
-  { key: 'client-review',  bg: '#F5F3FF', text: '#6D28D9', label: 'Client review' },
-  { key: 'delivered',      bg: '#F0FDF4', text: '#15803D', label: 'Delivered' },
-  { key: 'archived',       bg: '#F9FAFB', text: '#6B7280', label: 'Archived' },
+  { key: 'draft',          bg: '#F2F4F2', text: '#525A52', label: 'Draft' },
+  { key: 'submitted',      bg: '#EBF1FE', text: '#1F4FBA', label: 'Submitted' },
+  { key: 'in-review',      bg: '#FEF6E6', text: '#8A5A12', label: 'In review' },
+  { key: 'in-progress',    bg: '#E6F6F9', text: '#0E6E81', label: 'In progress' },
+  { key: 'client-review',  bg: '#FDF4FF', text: '#A21CAF', label: 'Client review' },
+  { key: 'delivered',      bg: '#E9F7EE', text: '#176B3D', label: 'Delivered' },
+  { key: 'archived',       bg: '#F5F0E8', text: '#7C6C5F', label: 'Archived' },
 ]
 
 function SwatchTile({ s }: { s: Swatch }) {
@@ -318,13 +320,12 @@ function ColoursSection() {
             {STATUS_SWATCHES.map(s => (
               <div key={s.key} style={{
                 background: s.bg, color: s.text,
-                padding: '0.5rem 0.875rem',
-                borderRadius: 'var(--radius-leaf-sm)',
-                display: 'flex', alignItems: 'center', gap: '0.5rem',
-                fontSize: '0.8125rem', fontWeight: 500,
+                padding: '0.25rem 0.5625rem',
+                borderRadius: 'var(--radius-sm)',
+                display: 'flex', alignItems: 'center', gap: '0.375rem',
+                fontSize: '0.75rem', fontWeight: 500,
                 width: 'fit-content',
               }}>
-                <LeafIcon size={11} />
                 {s.label}
               </div>
             ))}
@@ -1195,34 +1196,56 @@ function AvatarShowcase() {
 
 function BadgeShowcase() {
   const tones: BadgeTonePick[] = ['brand', 'positive', 'warning', 'danger', 'info', 'teal', 'purple', 'rose', 'neutral']
+  // Compact inline Lucide icons for the icon-leader demo.
+  const i = (paths: React.ReactNode) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" width="100%" height="100%">{paths}</svg>
+  )
+  const iconForTone: Record<BadgeTonePick, React.ReactNode> = {
+    brand:    i(<><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19.2 2.96a1 1 0 0 1 1.8.56c0 5.62-1.34 10.83-5 14.6A7 7 0 0 1 11 20Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6"/></>),
+    positive: i(<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>),
+    warning:  i(<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>),
+    danger:   i(<><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>),
+    info:     i(<><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></>),
+    teal:     i(<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>),
+    purple:   i(<><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>),
+    rose:     i(<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>),
+    neutral:  i(<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></>),
+  }
   return (
     <PrimitiveShell
       id="comp-badge"
       title="Badge"
       source="components/tahi/badge.tsx"
-      intro="Status pills, chips, count badges. One component, three drivers (tone, stage, source). New: leader='leaf' to lead with the brand leaf glyph instead of a circle dot. Status tones now default to the leaf."
+      intro="Status pills, chips, count badges. Default has no leader (Stripe-style, label carries the meaning). Optional leaders: 'dot' (classic 6px circle), 'icon' (Lucide icon, most informative), 'leaf' (Tahi-branded chips only)."
     >
       <Card padded={false}>
         <div style={{ padding: '0 1.5rem' }}>
-          <StateRow label="Tones · leaf leader">
+          <StateRow label="No leader (default)">
             {tones.map(t => (
-              <Badge key={t} tone={t} leader="leaf">{labelForTone(t)}</Badge>
+              <Badge key={t} tone={t}>{labelForTone(t)}</Badge>
             ))}
           </StateRow>
-          <StateRow label="Tones · dot leader (legacy)">
-            {tones.slice(0, 5).map(t => (
+          <StateRow label="Dot leader">
+            {tones.map(t => (
               <Badge key={t} tone={t} leader="dot">{labelForTone(t)}</Badge>
             ))}
           </StateRow>
+          <StateRow label="Icon leader">
+            {tones.map(t => (
+              <Badge key={t} tone={t} leader="icon" icon={iconForTone[t]}>{labelForTone(t)}</Badge>
+            ))}
+          </StateRow>
           <StateRow label="Variants">
-            <Badge tone="positive" variant="soft"    leader="leaf">Soft</Badge>
+            <Badge tone="positive" variant="soft">Soft (no leader)</Badge>
             <Badge tone="positive" variant="solid">Solid</Badge>
-            <Badge tone="positive" variant="outline" leader="leaf">Outline</Badge>
+            <Badge tone="positive" variant="outline" leader="dot">Outline + dot</Badge>
             <Badge tone="brand"    variant="count">12</Badge>
           </StateRow>
           <StateRow label="Sizes">
-            <Badge tone="info" leader="leaf" size="sm">Small</Badge>
-            <Badge tone="info" leader="leaf" size="md">Medium</Badge>
+            <Badge tone="info" size="sm">Small</Badge>
+            <Badge tone="info" size="md">Medium</Badge>
+            <Badge tone="info" leader="dot" size="sm">Small dot</Badge>
+            <Badge tone="info" leader="dot" size="md">Medium dot</Badge>
           </StateRow>
         </div>
       </Card>

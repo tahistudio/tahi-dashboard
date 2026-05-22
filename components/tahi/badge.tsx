@@ -69,12 +69,16 @@ interface BadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'childr
   /** Size. */
   size?: BadgeSize
   /**
-   * Leading glyph. Pass `'leaf'` to lead with the brand leaf glyph
-   * tinted to the chip's text colour (the new default for status pills),
-   * `'dot'` for a legacy coloured circle, or `false` / omit for no
-   * leader.
+   * Optional leading glyph. Default is no leader (cleanest, Stripe-style,
+   * label carries all the meaning).
+   *   'icon' a user-supplied Lucide icon via the `icon` prop. Most informative.
+   *   'dot'  small 6px coloured circle. Classic, calm.
+   *   'leaf' brand leaf glyph. Reserved for Tahi-branded chips only.
+   *   false  no leader (default).
    */
-  leader?: 'leaf' | 'dot' | false
+  leader?: 'leaf' | 'dot' | 'icon' | false
+  /** Lucide icon node when leader='icon'. Sized + tinted automatically. */
+  icon?: React.ReactNode
   /**
    * Legacy alias for `leader='dot'`. Prefer `leader` for new code.
    * @deprecated
@@ -121,6 +125,7 @@ export function Badge({
   variant = 'soft',
   size = 'md',
   leader,
+  icon,
   dot = false,
   children,
   className,
@@ -128,8 +133,8 @@ export function Badge({
   ...rest
 }: BadgeProps) {
   // Resolve the leader: explicit `leader` prop wins, then legacy `dot`
-  // fallback, otherwise undefined (no leader).
-  const resolvedLeader: 'leaf' | 'dot' | undefined =
+  // fallback, otherwise no leader.
+  const resolvedLeader: 'leaf' | 'dot' | 'icon' | undefined =
     leader === false ? undefined
     : leader ?? (dot ? 'dot' : undefined)
 
@@ -221,6 +226,21 @@ export function Badge({
           }}
         >
           <LeafIcon size={size === 'sm' ? 9 : 10} />
+        </span>
+      )}
+      {resolvedLeader === 'icon' && variant !== 'count' && icon && (
+        <span
+          aria-hidden="true"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            color: dotColour,
+            flexShrink: 0,
+            width: size === 'sm' ? '0.6875rem' : '0.75rem',
+            height: size === 'sm' ? '0.6875rem' : '0.75rem',
+          }}
+        >
+          {icon}
         </span>
       )}
       {resolvedLeader === 'dot' && variant !== 'count' && (

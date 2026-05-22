@@ -124,21 +124,27 @@
   --status-in-progress-text:   #0e6e81;
   --status-in-progress-border: #c2e7ee;
 
-  --status-client-review-dot:      #8b5cf6;
-  --status-client-review-bg:       #f0ebfc;
-  --status-client-review-text:     #5a30c3;
-  --status-client-review-border:   #dcd2f4;
+  /* Client review shifted from violet (#5a30c3) to fuchsia (#a21caf) to
+     pull it out of the cool blue / teal cluster. CIE-Lab distance from
+     submitted (royal blue) jumps from 30 to 84. Reads "warm, attention"
+     vs Tahi's cool work tones. Still distinct from rose urgent (#9d174d). */
+  --status-client-review-dot:      #d946ef;
+  --status-client-review-bg:       #fdf4ff;
+  --status-client-review-text:     #a21caf;
+  --status-client-review-border:   #f5d0fe;
 
   --status-delivered-dot:      #22c55e;
   --status-delivered-bg:       #e9f7ee;
   --status-delivered-text:     #176b3d;
   --status-delivered-border:   #c8e8d2;
 
-  /* Archived: warm beige-gray, distinct from cool draft gray. */
-  --status-archived-dot:       #a39e93;
-  --status-archived-bg:        #edeae5;
-  --status-archived-text:      #6b6258;
-  --status-archived-border:    #ddd6cc;
+  /* Archived: deeper warm taupe to pull further from draft (cool gray).
+     Plus the StatusBadge ships with an archive-box icon for the second
+     visual signal. */
+  --status-archived-dot:       #9c8f80;
+  --status-archived-bg:        #f5f0e8;
+  --status-archived-text:      #7c6c5f;
+  --status-archived-border:    #e3d9cc;
 
   /* ── Category palette ───────────────────────────────────── */
   --cat-design-bg:        #fce7f3;

@@ -156,6 +156,12 @@ export function TahiButton({
     ...(pressed && !disabled && v.active ? v.active : {}),
   }
 
+  // Trailing icon translates up + right on hover. Matches the marketing
+  // site signature: the arrow lifts toward where it's pointing.
+  const trailingTransform = hover && !disabled
+    ? 'translate(3px, -3px)'
+    : 'translate(0, 0)'
+
   return (
     <button
       {...rest}
@@ -180,7 +186,19 @@ export function TahiButton({
         <Loader2 style={{ width: '1em', height: '1em' }} className="animate-spin" />
       ) : leading}
       {children}
-      {!loading && trailing}
+      {!loading && trailing && (
+        <span
+          aria-hidden="true"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            transform: trailingTransform,
+            transition: 'transform var(--motion-base) var(--ease-out)',
+          }}
+        >
+          {trailing}
+        </span>
+      )}
     </button>
   )
 }
