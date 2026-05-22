@@ -19,6 +19,10 @@ import { Avatar } from '@/components/tahi/avatar'
 import { Badge } from '@/components/tahi/badge'
 import { Card as CardPrim } from '@/components/tahi/card'
 import { Tooltip } from '@/components/tahi/tooltip'
+import { FeatureCard } from '@/components/tahi/feature-card'
+import { KPICard } from '@/components/tahi/kpi-card'
+import { Menu } from '@/components/tahi/menu'
+import { useToast } from '@/components/tahi/toast'
 
 /**
  * /design-system. The canonical token + primitive reference.
@@ -946,19 +950,22 @@ function BrandSection() {
 // ────────────────────────────────────────────────────────────────────────
 
 const COMPONENTS_NAV = [
-  { id: 'comp-button',  label: 'Button',  ready: true },
-  { id: 'comp-avatar',  label: 'Avatar',  ready: true },
-  { id: 'comp-badge',   label: 'Badge',   ready: true },
-  { id: 'comp-card',    label: 'Card',    ready: true },
-  { id: 'comp-tooltip', label: 'Tooltip', ready: true },
-  { id: 'comp-chip',       label: 'Chip',          ready: false },
-  { id: 'comp-empty',      label: 'Empty state',   ready: false },
-  { id: 'comp-callout',    label: 'Callout',       ready: false },
-  { id: 'comp-toast',      label: 'Toast',         ready: false },
-  { id: 'comp-pagination', label: 'Pagination',    ready: false },
-  { id: 'comp-stepper',    label: 'Stepper',       ready: false },
-  { id: 'comp-progress',   label: 'Progress',      ready: false },
-  { id: 'comp-table',      label: 'Data table',    ready: false },
+  { id: 'comp-button',       label: 'Button',       ready: true },
+  { id: 'comp-avatar',       label: 'Avatar',       ready: true },
+  { id: 'comp-badge',        label: 'Badge',        ready: true },
+  { id: 'comp-card',         label: 'Card',         ready: true },
+  { id: 'comp-feature-card', label: 'Feature card', ready: true },
+  { id: 'comp-kpi-card',     label: 'KPI card',     ready: true },
+  { id: 'comp-tooltip',      label: 'Tooltip',      ready: true },
+  { id: 'comp-menu',         label: 'Menu',         ready: true },
+  { id: 'comp-toast',        label: 'Toast',        ready: true },
+  { id: 'comp-chip',         label: 'Chip',         ready: false },
+  { id: 'comp-empty',        label: 'Empty state',  ready: false },
+  { id: 'comp-callout',      label: 'Callout',      ready: false },
+  { id: 'comp-pagination',   label: 'Pagination',   ready: false },
+  { id: 'comp-stepper',      label: 'Stepper',      ready: false },
+  { id: 'comp-progress',     label: 'Progress',     ready: false },
+  { id: 'comp-table',        label: 'Data table',   ready: false },
 ]
 
 function ComponentsSubNav() {
@@ -1408,12 +1415,243 @@ function TooltipShowcase() {
   )
 }
 
+// ── Feature card showcase ──────────────────────────────────────────────
+function FeatureCardShowcase() {
+  return (
+    <PrimitiveShell
+      id="comp-feature-card"
+      title="Feature card"
+      source="components/tahi/feature-card.tsx"
+      intro="The loud card for hero moments. Use sparingly: the AI briefing, the one featured KPI in a strip, a launch banner. Variants: lime fill, forest gradient, photo background, plain cream."
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <FeatureCard variant="lime" padding="lg">
+          <FeatureCard.Eyebrow>Featured</FeatureCard.Eyebrow>
+          <FeatureCard.Title>Total projects</FeatureCard.Title>
+          <FeatureCard.Description>
+            24 active across pipeline, delivery, and onboarding. Up 18% on last quarter.
+          </FeatureCard.Description>
+          <FeatureCard.Footer>
+            <TahiButton variant="secondary" size="sm">Open reports</TahiButton>
+          </FeatureCard.Footer>
+        </FeatureCard>
+
+        <FeatureCard variant="forest" padding="lg">
+          <FeatureCard.Eyebrow icon={<svg width={11} height={11} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 14 9 21 9 15.5 13.5 17.5 21 12 16.5 6.5 21 8.5 13.5 3 9 10 9z"/></svg>}>
+            Tahi AI · daily briefing
+          </FeatureCard.Eyebrow>
+          <FeatureCard.Title>Three things to look at today</FeatureCard.Title>
+          <FeatureCard.Description>
+            Physitrack proposal has been in negotiation for 12 days. BCS Q2 retainer renewed for $48,000. Glasswall is 110% allocated next week.
+          </FeatureCard.Description>
+          <FeatureCard.Footer>
+            <TahiButton variant="primary" size="sm">Open briefing</TahiButton>
+            <TahiLink href="#">All AI features</TahiLink>
+          </FeatureCard.Footer>
+        </FeatureCard>
+
+        <FeatureCard variant="photo" padding="lg">
+          <FeatureCard.Eyebrow>Time tracker</FeatureCard.Eyebrow>
+          <FeatureCard.Title>02:48:06</FeatureCard.Title>
+          <FeatureCard.Description>
+            Currently tracking on Glasswall &middot; WCAG audit.
+          </FeatureCard.Description>
+          <FeatureCard.Footer>
+            <TahiButton variant="primary" size="sm">Pause</TahiButton>
+            <TahiButton variant="secondary" size="sm">Stop &amp; log</TahiButton>
+          </FeatureCard.Footer>
+        </FeatureCard>
+
+        <FeatureCard variant="cream" padding="lg">
+          <FeatureCard.Eyebrow>Quiet variant</FeatureCard.Eyebrow>
+          <FeatureCard.Title>For when the surface should sit still</FeatureCard.Title>
+          <FeatureCard.Description>
+            Use the plain cream variant when the content needs to be the hero, not the card.
+          </FeatureCard.Description>
+        </FeatureCard>
+      </div>
+    </PrimitiveShell>
+  )
+}
+
+// ── KPI card showcase ──────────────────────────────────────────────────
+function KPICardShowcase() {
+  // Tiny inline icons so we don't bring in Lucide here.
+  const i = (paths: React.ReactNode) => (
+    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths}</svg>
+  )
+  return (
+    <PrimitiveShell
+      id="comp-kpi-card"
+      title="KPI card"
+      source="components/tahi/kpi-card.tsx"
+      intro="Single-metric tile. Big bold number, delta with up / down chevron, optional icon and trailing sub-label. One per strip can be variant='featured' (lime) to mark the hero metric."
+    >
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KPICard
+          variant="featured"
+          label="Total revenue"
+          value="$689,372"
+          icon={i(<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></>)}
+          delta={{ value: '+15%', direction: 'up' }}
+          trailing="vs last month"
+        />
+        <KPICard
+          label="Total earnings"
+          value="$950"
+          icon={i(<><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></>)}
+          delta={{ value: '+8%', direction: 'up' }}
+          trailing="vs last month"
+        />
+        <KPICard
+          label="Total spending"
+          value="$700"
+          icon={i(<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></>)}
+          delta={{ value: '-4%', direction: 'down' }}
+          trailing="vs last month"
+        />
+        <KPICard
+          label="Saved"
+          value="$1,050"
+          icon={i(<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>)}
+          delta={{ value: '+12%', direction: 'up' }}
+          trailing="vs last month"
+        />
+      </div>
+
+      <Card>
+        <GroupHeading>How to use it</GroupHeading>
+        <ul style={{ fontSize: '0.8125rem', lineHeight: 1.7 }} className="space-y-1">
+          <li>One featured (lime) variant per strip, marking the hero metric.</li>
+          <li>Pair delta with trailing sub-label (&ldquo;vs last month&rdquo;, &ldquo;7-day&rdquo;) so the number reads in context.</li>
+          <li>Pass children to add a sparkline below the value (chart-area placeholder).</li>
+        </ul>
+      </Card>
+    </PrimitiveShell>
+  )
+}
+
+// ── Toast showcase ─────────────────────────────────────────────────────
+function ToastShowcase() {
+  const { showToast } = useToast()
+  return (
+    <PrimitiveShell
+      id="comp-toast"
+      title="Toast"
+      source="components/tahi/toast.tsx"
+      intro="Transient feedback at the bottom-right. Dark forest surface, no icon, tone-coloured leading word (Saved, Error, Heads up, Tip). Optional action button (Undo, View). Auto-dismiss after 3.5s."
+    >
+      <Card padded={false}>
+        <div style={{ padding: '0 1.5rem' }}>
+          <StateRow label="Tones">
+            <TahiButton variant="secondary" size="sm" onClick={() => showToast('Client saved', 'success')}>Success</TahiButton>
+            <TahiButton variant="secondary" size="sm" onClick={() => showToast("Couldn't connect to Xero", 'error')}>Error</TahiButton>
+            <TahiButton variant="secondary" size="sm" onClick={() => showToast('Capacity over 100% next week', 'warning')}>Warning</TahiButton>
+            <TahiButton variant="secondary" size="sm" onClick={() => showToast('Syncing with Stripe', 'info')}>Info</TahiButton>
+          </StateRow>
+          <StateRow label="With action">
+            <TahiButton variant="secondary" size="sm" onClick={() => showToast('Deal moved to Won', 'success', { action: { label: 'Undo', onClick: () => showToast('Reverted', 'info') } })}>Undoable</TahiButton>
+            <TahiButton variant="secondary" size="sm" onClick={() => showToast('Invoice INV-0042 sent', 'success', { action: { label: 'View', onClick: () => showToast('Opening invoice', 'info') } })}>With view</TahiButton>
+          </StateRow>
+        </div>
+      </Card>
+    </PrimitiveShell>
+  )
+}
+
+// ── Menu showcase ──────────────────────────────────────────────────────
+function MenuShowcase() {
+  const g = (paths: React.ReactNode) => (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths}</svg>
+  )
+  return (
+    <PrimitiveShell
+      id="comp-menu"
+      title="Menu"
+      source="components/tahi/menu.tsx"
+      intro="Standardised dropdown menu built on top of Popover. Used for kebab menus, sort/filter pickers, user dropdowns. Composable: Menu.Item, Menu.Divider, Menu.Label. Tone='danger' for destructive actions."
+    >
+      <Card padded={false}>
+        <div style={{ padding: '0 1.5rem' }}>
+          <StateRow label="Kebab menu (row action)">
+            <Menu
+              trigger={
+                <button
+                  type="button"
+                  aria-label="Row actions"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '2.25rem',
+                    height: '2.25rem',
+                    background: 'var(--color-bg)',
+                    border: '1px solid var(--color-border-strong)',
+                    borderRadius: 'var(--radius-md)',
+                    color: 'var(--color-text-muted)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {g(<><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></>)}
+                </button>
+              }
+              align="start"
+              width="11rem"
+            >
+              <Menu.Item icon={g(<><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></>)}>Rename</Menu.Item>
+              <Menu.Item icon={g(<><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></>)} trailing="⌘D">Duplicate</Menu.Item>
+              <Menu.Item icon={g(<><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></>)}>Share</Menu.Item>
+              <Menu.Divider />
+              <Menu.Label>Move</Menu.Label>
+              <Menu.Item icon={g(<><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></>)}>Archive</Menu.Item>
+              <Menu.Item icon={g(<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></>)} tone="danger">Delete</Menu.Item>
+            </Menu>
+          </StateRow>
+
+          <StateRow label="Sort picker">
+            <Menu
+              trigger={
+                <button
+                  type="button"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.375rem',
+                    padding: '0.5rem 0.75rem',
+                    background: 'var(--color-bg)',
+                    border: '1px solid var(--color-border-strong)',
+                    borderRadius: 'var(--radius-md)',
+                    color: 'var(--color-text)',
+                    fontSize: '0.8125rem',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Sort: Newest first
+                  {g(<polyline points="6 9 12 15 18 9"/>)}
+                </button>
+              }
+              align="start"
+              width="12rem"
+            >
+              <Menu.Item>Newest first</Menu.Item>
+              <Menu.Item>Oldest first</Menu.Item>
+              <Menu.Item>Highest value</Menu.Item>
+              <Menu.Item>Most recent activity</Menu.Item>
+            </Menu>
+          </StateRow>
+        </div>
+      </Card>
+    </PrimitiveShell>
+  )
+}
+
 function ComponentsSection() {
   return (
     <SectionShell
       id="components"
       title="Components"
-      intro="The reusable primitives in components/tahi/. Each block below shows every state and the source path. Batch 1 covers Button, Avatar, Badge, Card, Tooltip. The foundation every later primitive composes on."
+      intro="The reusable primitives in components/tahi/. Each block below shows every state and the source path."
     >
       <ComponentsSubNav />
       <div className="space-y-12">
@@ -1421,7 +1659,11 @@ function ComponentsSection() {
         <AvatarShowcase />
         <BadgeShowcase />
         <CardShowcase />
+        <FeatureCardShowcase />
+        <KPICardShowcase />
         <TooltipShowcase />
+        <MenuShowcase />
+        <ToastShowcase />
       </div>
     </SectionShell>
   )
