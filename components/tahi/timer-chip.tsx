@@ -26,6 +26,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import {
   Play, Pause, Square, Loader2, Clock3, ChevronDown, ExternalLink, Search,
+  Inbox, CheckSquare, Users,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { formatElapsed, isStaleTimer } from '@/lib/timer-helpers'
@@ -33,6 +34,7 @@ import { notifyTimerChanged, subscribeToTimerChanges } from '@/lib/timer-events'
 import { useToast } from '@/components/tahi/toast'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { Popover } from '@/components/tahi/popover'
+import { EmptyState } from '@/components/tahi/empty-state'
 
 interface ActiveTimerResponse {
   timer: {
@@ -211,7 +213,7 @@ export function TimerChip() {
         showToast(j.error ?? `Couldn't start timer (${res.status})`)
       }
     } catch {
-      showToast('Network error — timer not started')
+      showToast('Network error. Timer not started.')
     } finally {
       setActing(false)
     }
@@ -236,7 +238,7 @@ export function TimerChip() {
         showToast(j.error ?? 'Timer action failed')
       }
     } catch {
-      showToast('Network error — try again')
+      showToast('Network error. Try again.')
     } finally {
       setActing(false)
       setControlsOpen(false)
@@ -256,9 +258,9 @@ export function TimerChip() {
         setStaleTimer(null)
         notifyTimerChanged()
         if (action === 'log' && data.logged && typeof data.hours === 'number') {
-          showToast(`Timer stopped — ${prettyHoursShort(data.hours)} logged`)
+          showToast(`Timer stopped. ${prettyHoursShort(data.hours)} logged.`)
         } else if (action === 'log' && data.reason) {
-          showToast(`Stopped — not logged (${data.reason})`)
+          showToast(`Stopped. Not logged (${data.reason}).`)
         } else {
           showToast(action === 'discard' ? 'Timer discarded' : 'Timer stopped')
         }
@@ -658,13 +660,31 @@ function SourcePicker({
       {/* Items */}
       <div role="list" style={{ overflowY: 'auto', flex: 1 }}>
         {loading ? (
-          <p style={{ padding: '0.75rem', fontSize: '0.75rem', color: 'var(--color-text-subtle)', textAlign: 'center', margin: 0 }}>
-            Loading…
-          </p>
+          <div style={{ padding: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: 'var(--color-text-subtle)', fontSize: '0.75rem' }}>
+            <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+            Loading
+          </div>
         ) : items.length === 0 ? (
-          <p style={{ padding: '0.75rem', fontSize: '0.75rem', color: 'var(--color-text-subtle)', textAlign: 'center', margin: 0 }}>
-            {q ? 'No matches.' : `No active ${source}s.`}
-          </p>
+          <div style={{ padding: '0.5rem' }}>
+            <EmptyState
+              variant="inline"
+              icon={
+                source === 'request' ? <Inbox className="w-5 h-5" /> :
+                source === 'task' ? <CheckSquare className="w-5 h-5" /> :
+                <Users className="w-5 h-5" />
+              }
+              title={q
+                ? 'No matches'
+                : source === 'request' ? 'No open requests'
+                : source === 'task' ? 'No open tasks'
+                : 'No active clients'}
+              description={q
+                ? 'Try a shorter search.'
+                : source === 'request' ? 'Track time straight from a request once one is open.'
+                : source === 'task' ? 'Pick up a task to start timing work against it.'
+                : 'Track miscellaneous time against a client when needed.'}
+            />
+          </div>
         ) : (
           items.slice(0, 40).map(item => (
             <button

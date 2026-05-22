@@ -80,7 +80,7 @@ export function CurrencySwitcher() {
             position: 'absolute',
             top: 'calc(100% + 0.25rem)',
             right: 0,
-            minWidth: '11rem',
+            minWidth: '6rem',
             maxHeight: '18rem',
             overflowY: 'auto',
             background: 'var(--color-bg)',
@@ -105,11 +105,12 @@ export function CurrencySwitcher() {
                     setDisplayCurrency(opt.code as CurrencyCode)
                     setOpen(false)
                   }}
-                  className="w-full inline-flex items-center"
+                  className="w-full inline-flex items-center justify-between"
                   style={{
                     gap: 'var(--space-2)',
-                    padding: 'var(--space-1-5) var(--space-2)',
+                    padding: 'var(--space-1-5) var(--space-2-5, 0.625rem)',
                     fontSize: 'var(--text-sm)',
+                    fontWeight: 500,
                     color: selected ? 'var(--color-text)' : 'var(--color-text-muted)',
                     background: selected ? 'var(--color-bg-secondary)' : 'transparent',
                     border: 'none',
@@ -124,14 +125,10 @@ export function CurrencySwitcher() {
                   onMouseLeave={e => {
                     e.currentTarget.style.background = selected ? 'var(--color-bg-secondary)' : 'transparent'
                   }}
+                  title={opt.name}
                 >
-                  <span className="tabular-nums" style={{ fontWeight: 600, minWidth: '2.25rem' }}>
-                    {opt.code}
-                  </span>
-                  <span style={{ flex: 1, fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
-                    {opt.name}
-                  </span>
-                  {selected && <Check size={12} aria-hidden="true" style={{ color: 'var(--color-brand)' }} />}
+                  <span className="tabular-nums">{opt.code}</span>
+                  {selected && <Check size={13} aria-hidden="true" style={{ color: 'var(--color-brand)', flexShrink: 0 }} />}
                 </button>
               </li>
             )

@@ -9,6 +9,7 @@ import { useImpersonation } from './impersonation-banner'
 import { CurrencySwitcher } from './currency-switcher'
 import { TimerChip } from './timer-chip'
 import { Tooltip } from './tooltip'
+import { Input } from './input'
 
 interface AppTopNavProps {
   isAdmin: boolean
@@ -86,51 +87,57 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
           />
         ) : isAdmin ? (
           <>
-            {/* Desktop search pill */}
+            {/* Desktop search trigger. Uses the dashboard's Input.Group
+                shape so it visually matches every other form field in
+                the app. The trigger itself is a button that opens the
+                full-screen search overlay. */}
             <button
               type="button"
               onClick={() => setSearchOpen(true)}
               onFocus={() => setSearchFocused(true)}
               onBlur={() => setSearchFocused(false)}
-              className="hidden md:flex items-center group"
+              className="hidden md:flex items-center"
               style={{
-                padding: '0 var(--space-3)',
-                gap: 'var(--space-2)',
-                fontSize: 'var(--text-sm)',
-                fontWeight: 400,
-                color: 'var(--color-text-muted)',
-                background: 'var(--color-bg-secondary)',
-                border: '1px solid var(--color-border-subtle)',
-                borderRadius: 'var(--radius-md)',
-                maxWidth: '24rem',
-                width: '100%',
-                minWidth: '14rem',
                 height: '2.25rem',
-                transition:
-                  'border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease',
+                width: '100%',
+                maxWidth: '24rem',
+                minWidth: '14rem',
+                padding: '0 var(--space-2)',
+                gap: 'var(--space-2)',
+                background: 'var(--color-bg)',
+                border: `1px solid ${searchFocused ? 'var(--color-brand)' : 'var(--color-border-subtle)'}`,
+                borderRadius: 'var(--radius-md)',
                 boxShadow: searchFocused ? 'var(--shadow-ring)' : 'none',
+                cursor: 'pointer',
                 outline: 'none',
+                transition:
+                  'border-color 150ms ease, box-shadow 150ms ease',
               }}
               onMouseEnter={e => {
                 if (searchFocused) return
                 e.currentTarget.style.borderColor = 'var(--color-border)'
-                e.currentTarget.style.background = 'var(--color-bg)'
-                e.currentTarget.style.boxShadow = 'var(--shadow-xs)'
               }}
               onMouseLeave={e => {
                 if (searchFocused) return
                 e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
-                e.currentTarget.style.background = 'var(--color-bg-secondary)'
-                e.currentTarget.style.boxShadow = 'none'
               }}
-              aria-label="Search requests, clients, and tasks"
+              aria-label="Open search"
             >
               <Search
                 size={15}
                 aria-hidden="true"
                 style={{ flexShrink: 0, color: 'var(--color-text-subtle)' }}
               />
-              <span className="flex-1 text-left truncate">Search</span>
+              <span
+                className="flex-1 text-left truncate"
+                style={{
+                  fontSize: 'var(--text-sm)',
+                  fontWeight: 400,
+                  color: 'var(--color-text-subtle)',
+                }}
+              >
+                Search the dashboard
+              </span>
               <KbdHint />
             </button>
 
@@ -204,15 +211,18 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
         <NotificationBell />
       </div>
 
-      {/* Search overlay */}
+      {/* Search overlay. Backdrop blur + centered modal feel. The
+          input itself uses Input.Group so it inherits the same
+          radius / padding / focus styling as every other form field
+          in the app. */}
       {searchOpen && (
         <div
-          className="fixed inset-0 z-[70] flex items-start justify-center"
+          className="fixed inset-0 z-[70] flex items-center justify-center"
           style={{
             background: 'rgba(15, 20, 16, 0.45)',
-            paddingTop: '10vh',
-            backdropFilter: 'blur(2px)',
-            WebkitBackdropFilter: 'blur(2px)',
+            backdropFilter: 'blur(3px)',
+            WebkitBackdropFilter: 'blur(3px)',
+            padding: 'var(--space-4)',
           }}
           onClick={(e) => {
             if (e.target === e.currentTarget) {
@@ -228,8 +238,7 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
             aria-label="Search"
             style={{
               width: '100%',
-              maxWidth: '34rem',
-              margin: '0 var(--space-4)',
+              maxWidth: '36rem',
               background: 'var(--color-bg)',
               borderRadius: 'var(--radius-lg)',
               border: '1px solid var(--color-border)',
@@ -237,75 +246,92 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
               overflow: 'hidden',
             }}
           >
-            <div
-              className="flex items-center"
-              style={{
-                padding: 'var(--space-3) var(--space-4)',
-                gap: 'var(--space-2)',
-              }}
-            >
-              <Search
-                size={18}
-                style={{ color: 'var(--color-brand)', flexShrink: 0 }}
-                aria-hidden="true"
-              />
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder="Search requests, clients, tasks..."
-                value={searchValue}
-                onChange={(e) => setSearchValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                className="flex-1 outline-none"
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--color-text)',
-                  fontSize: 'var(--text-md)',
-                  fontWeight: 500,
-                  minWidth: 0,
-                }}
-              />
-              <button
-                onClick={() => { setSearchOpen(false); setSearchValue('') }}
-                className="flex items-center justify-center flex-shrink-0"
-                style={{
-                  width: '1.75rem',
-                  height: '1.75rem',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--color-bg-tertiary)',
-                  border: 'none',
-                  color: 'var(--color-text-muted)',
-                  cursor: 'pointer',
-                  transition: 'background-color 150ms ease',
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.background = 'var(--color-border-subtle)'
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.background = 'var(--color-bg-tertiary)'
-                }}
-                aria-label="Close search (Escape)"
-              >
-                <X size={14} aria-hidden="true" />
-              </button>
+            {/* Reusable Input.Group shell, sized lg, with leading
+                search icon, the input itself, and a trailing close
+                button + Esc hint. */}
+            <div style={{ padding: 'var(--space-4)' }}>
+              <Input.Group inputSize="lg" style={{ width: '100%' }}>
+                <Input.Icon>
+                  <Search size={16} style={{ color: 'var(--color-brand)' }} aria-hidden="true" />
+                </Input.Icon>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Search requests, clients, tasks, docs..."
+                  value={searchValue}
+                  onChange={(e) => setSearchValue(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  aria-label="Search the dashboard"
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    border: 'none',
+                    outline: 'none',
+                    background: 'transparent',
+                    fontSize: 'var(--text-base)',
+                    color: 'var(--color-text)',
+                    fontWeight: 500,
+                  }}
+                />
+                <Input.Addon>
+                  <button
+                    type="button"
+                    onClick={() => { setSearchOpen(false); setSearchValue('') }}
+                    className="flex items-center justify-center"
+                    style={{
+                      width: '1.5rem',
+                      height: '1.5rem',
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'var(--color-bg-secondary)',
+                      border: 'none',
+                      color: 'var(--color-text-muted)',
+                      cursor: 'pointer',
+                      transition: 'background-color 150ms ease, color 150ms ease',
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.background = 'var(--color-bg-tertiary)'
+                      e.currentTarget.style.color = 'var(--color-text)'
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.background = 'var(--color-bg-secondary)'
+                      e.currentTarget.style.color = 'var(--color-text-muted)'
+                    }}
+                    aria-label="Close search (Escape)"
+                  >
+                    <X size={12} aria-hidden="true" />
+                  </button>
+                </Input.Addon>
+              </Input.Group>
             </div>
-            {/* Keyboard hints (desktop only). Kept light: search is
-                obviously the primary action, the hint just reminds. */}
+
+            {/* Global search is queued as a separate feature: it'll
+                return grouped results (requests / tasks / clients /
+                pipeline / docs) with suggestions on top. Until that
+                lands, Enter still routes to the requests list with
+                the query pre-filled. */}
             <div
-              className="hidden sm:flex items-center justify-between"
               style={{
                 borderTop: '1px solid var(--color-border-subtle)',
                 padding: '0.625rem var(--space-4)',
                 background: 'var(--color-bg-secondary)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 'var(--space-3)',
+                flexWrap: 'wrap',
               }}
             >
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
-                <KbdLabel>Enter</KbdLabel> to search
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', margin: 0 }}>
+                Searches across requests for now. Cross-entity search coming soon.
               </p>
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
-                <KbdLabel>Esc</KbdLabel> to close
-              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }} className="hidden sm:flex">
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
+                  <KbdLabel>Enter</KbdLabel> search
+                </span>
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
+                  <KbdLabel>Esc</KbdLabel> close
+                </span>
+              </div>
             </div>
           </div>
         </div>
