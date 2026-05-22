@@ -1432,7 +1432,7 @@ function FeatureCardShowcase() {
             24 active across pipeline, delivery, and onboarding. Up 18% on last quarter.
           </FeatureCard.Description>
           <FeatureCard.Footer>
-            <TahiLink href="#">Open reports</TahiLink>
+            <TahiButton variant="secondary" size="sm">Open reports</TahiButton>
           </FeatureCard.Footer>
         </FeatureCard>
 
@@ -1456,7 +1456,7 @@ function FeatureCardShowcase() {
           </FeatureCard.Description>
           <FeatureCard.Footer>
             <TahiButton variant="primary" size="sm">Pause</TahiButton>
-            <TahiLink href="#">Stop &amp; log</TahiLink>
+            <TahiButton variant="secondary" size="sm">Stop &amp; log</TahiButton>
           </FeatureCard.Footer>
         </FeatureCard>
 
@@ -1474,54 +1474,51 @@ function FeatureCardShowcase() {
 
 // ── KPI card showcase ──────────────────────────────────────────────────
 function KPICardShowcase() {
-  // Tiny inline icons so we don't bring in Lucide here.
-  const i = (paths: React.ReactNode) => (
-    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths}</svg>
-  )
   return (
     <PrimitiveShell
       id="comp-kpi-card"
       title="KPI card"
       source="components/tahi/kpi-card.tsx"
-      intro="Single-metric tile. Big bold number, delta with up / down chevron, optional icon and trailing sub-label. One per strip can be variant='featured' (lime) to mark the hero metric."
+      intro="Single-metric tile. Big bold number, delta with up / down chevron, optional trailing sub-label. Clickable cards show an arrow-up-right top-right that translates on hover. One per strip can be variant='featured' (lime) to mark the hero metric."
     >
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KPICard
           variant="featured"
           label="Total revenue"
           value="$689,372"
-          icon={i(<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></>)}
           delta={{ value: '+15%', direction: 'up' }}
           trailing="vs last month"
+          href="#"
         />
         <KPICard
           label="Total earnings"
           value="$950"
-          icon={i(<><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></>)}
           delta={{ value: '+8%', direction: 'up' }}
           trailing="vs last month"
+          href="#"
         />
         <KPICard
           label="Total spending"
           value="$700"
-          icon={i(<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></>)}
           delta={{ value: '-4%', direction: 'down' }}
           trailing="vs last month"
+          href="#"
         />
         <KPICard
           label="Saved"
           value="$1,050"
-          icon={i(<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>)}
           delta={{ value: '+12%', direction: 'up' }}
           trailing="vs last month"
+          href="#"
         />
       </div>
 
       <Card>
         <GroupHeading>How to use it</GroupHeading>
         <ul style={{ fontSize: '0.8125rem', lineHeight: 1.7 }} className="space-y-1">
-          <li>One featured (lime) variant per strip, marking the hero metric.</li>
+          <li>One featured (lime) variant per strip marks the hero metric.</li>
           <li>Pair delta with trailing sub-label (&ldquo;vs last month&rdquo;, &ldquo;7-day&rdquo;) so the number reads in context.</li>
+          <li>Set <Mono>href</Mono> or <Mono>onClick</Mono> for clickable tiles. The arrow-up-right indicator appears in the top-right and translates on hover.</li>
           <li>Pass children to add a sparkline below the value (chart-area placeholder).</li>
         </ul>
       </Card>

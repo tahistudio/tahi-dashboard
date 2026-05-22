@@ -161,29 +161,42 @@ export function KPICard({
     color: featured ? 'rgba(30, 48, 25, 0.62)' : 'var(--color-text-subtle)',
   }
 
+  // Top-right slot. Clickable cards take precedence and show an
+  // arrow-up-right indicator that translates on hover. Static cards
+  // show the optional icon as a plain glyph (no background tile).
+  const indicatorColor = featured ? 'rgba(30, 48, 25, 0.72)' : 'var(--color-text-muted)'
+  const indicatorHoverColor = featured ? 'var(--color-brand-deepest)' : 'var(--color-brand-dark)'
+  const indicatorStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '1.25rem',
+    height: '1.25rem',
+    color: hovered ? indicatorHoverColor : indicatorColor,
+    transform: interactive && hovered ? 'translate(2px, -2px)' : 'translate(0, 0)',
+    transition:
+      'transform var(--motion-base, 320ms) var(--ease-out), ' +
+      'color var(--motion-quick, 220ms) var(--ease-out)',
+  }
+  const arrowUpRight = (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M7 7h10v10" />
+      <path d="M7 17 17 7" />
+    </svg>
+  )
+
   const innerContent = (
     <>
-      {/* Top row: label left, optional icon right. */}
+      {/* Top row: label left, indicator right (arrow when clickable,
+          plain icon when static, nothing when neither). */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.5rem' }}>
         <span style={labelStyle}>{label}</span>
-        {icon && (
-          <span
-            aria-hidden="true"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '1.75rem',
-              height: '1.75rem',
-              borderRadius: 'var(--radius-leaf-sm)',
-              flexShrink: 0,
-              background: featured ? 'rgba(30, 48, 25, 0.08)' : 'var(--color-brand-50)',
-              color: featured ? 'var(--color-brand-deepest)' : 'var(--color-brand)',
-            }}
-          >
-            {icon}
-          </span>
-        )}
+        {interactive ? (
+          <span style={indicatorStyle} aria-hidden="true">{arrowUpRight}</span>
+        ) : icon ? (
+          <span style={{ ...indicatorStyle, transform: 'translate(0, 0)' }} aria-hidden="true">{icon}</span>
+        ) : null}
       </div>
 
       {/* Big value on its own line. */}
