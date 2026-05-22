@@ -33,7 +33,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   Inbox, Users, CreditCard, FileText, Clock, CheckSquare,
-  BarChart2, BookOpen, UserCog, Settings, MessageSquare,
+  BarChart2, BookOpen, UserCog, MessageSquare,
   FolderOpen, ShoppingBag, PanelLeftClose, PanelLeftOpen,
   LayoutDashboard, Star, TrendingUp, FileSignature, Gauge,
   Calendar, Megaphone, ChevronDown,
@@ -125,12 +125,6 @@ const ADMIN_NAV: NavGroup[] = [
       { label: 'Docs Hub',  href: '/docs',      icon: BookOpen,      adminOnly: true },
     ],
   },
-  {
-    group: 'Account',
-    items: [
-      { label: 'Settings',  href: '/settings',  icon: Settings,      adminOnly: true },
-    ],
-  },
 ]
 
 const CLIENT_NAV: NavGroup[] = [
@@ -161,7 +155,7 @@ const CLIENT_NAV: NavGroup[] = [
 // Inline-script sync on <html data-sidebar="collapsed"> drives the
 // width before React hydrates so there's no flash on refresh.
 
-const VIEWER_HIDDEN_PAGES = new Set(['/team', '/settings', '/billing', '/contracts'])
+const VIEWER_HIDDEN_PAGES = new Set(['/team', '/billing', '/contracts'])
 
 export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname()
@@ -305,12 +299,12 @@ function SidebarContent({
 }: SidebarContentProps) {
   return (
     <>
-      {/* Brand lockup */}
+      {/* Brand lockup. Padding + justify-content flip via CSS keyed off
+          [data-sidebar="collapsed"], so the inline script in the layout
+          can drive layout before React hydrates. */}
       <div
-        className="flex items-center flex-shrink-0"
+        className="tahi-sidebar-brand flex items-center flex-shrink-0"
         style={{
-          padding: collapsed ? '0.875rem 0' : '0.875rem 1rem',
-          justifyContent: collapsed ? 'center' : 'flex-start',
           borderBottom: '1px solid var(--color-border-subtle)',
           height: '3.5rem',
         }}
@@ -326,10 +320,11 @@ function SidebarContent({
             minWidth: 0,
           }}
         >
-          <TahiIconMark
-            size={collapsed ? 30 : 34}
-            variant="on-light"
-          />
+          {/* Fixed size at 34. The previous {collapsed ? 30 : 34}
+              caused a brand-mark resize flicker on every refresh
+              because SSR rendered the expanded size before React's
+              useState initializer read the data-sidebar attribute. */}
+          <TahiIconMark size={34} variant="on-light" />
           {!collapsed && (
             <span
               className="tahi-sidebar-expanded-only"
@@ -351,20 +346,14 @@ function SidebarContent({
         className="flex-1 overflow-y-auto"
         style={{ padding: '1.25rem 0.5rem 0.75rem' }}
       >
-        {visibleNav.map((group, gi) => {
+        {visibleNav.map((group) => {
           const open = isGroupOpen(group)
           const groupId = 'nav-group-' + group.group.toLowerCase().replace(/\s+/g, '-')
           return (
-            <div
-              key={group.group}
-              style={{
-                marginTop: gi > 0 ? (collapsed ? '0.75rem' : '1rem') : 0,
-                paddingTop: gi > 0 && collapsed ? '0.75rem' : 0,
-                // Subtle divider between groups in collapsed mode so the
-                // user can still feel the categories without seeing labels.
-                borderTop: gi > 0 && collapsed ? '1px solid var(--color-border-subtle)' : 'none',
-              }}
-            >
+            // Group spacing + collapsed-mode divider come from CSS
+            // (.tahi-sidebar-nav-group + first-child) so the layout is
+            // correct before React hydrates.
+            <div key={group.group} className="tahi-sidebar-nav-group">
               {!collapsed && (
                 group.collapsible ? (
                   <button
@@ -432,28 +421,26 @@ function SidebarContent({
                   {group.items.map(item => {
                     const Icon = item.icon
                     const active = isItemActive(item.href)
-                    // Items inside a collapsible group get extra left padding so
-                    // they read as nested under the group label. Workspace and
-                    // Account are not collapsible and stay at the base indent.
-                    const itemIndent = group.collapsible && !collapsed ? '1.5rem' : '0.625rem'
+                    // Padding + justify-content + nested left-indent come
+                    // from CSS (.tahi-nav-link[.tahi-nav-link-nested]) so
+                    // the layout is correct before React hydrates.
                     const link = (
                       <Link
                         href={item.href}
                         aria-current={active ? 'page' : undefined}
                         data-tour={`nav-${item.label.toLowerCase()}`}
-                        className="tahi-nav-link"
+                        className={cn(
+                          'tahi-nav-link',
+                          group.collapsible && 'tahi-nav-link-nested',
+                        )}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
                           gap: '0.625rem',
-                          padding: collapsed
-                            ? '0.625rem 0'
-                            : `0.5rem 0.625rem 0.5rem ${itemIndent}`,
-                          justifyContent: collapsed ? 'center' : 'flex-start',
-                          // Active state is the rare leaf-radius moment in the
-                          // sidebar. Brand-100 tint, leaf-sm corner, brand
-                          // text. Reads as "this is where you are right now"
-                          // without being a loud surface.
+                          // Active state is the rare leaf-radius moment in
+                          // the sidebar. Brand-100 tint, leaf-sm corner,
+                          // brand text. Reads as "this is where you are
+                          // right now" without being a loud surface.
                           borderRadius: active ? 'var(--radius-leaf-sm)' : 'var(--radius-md)',
                           fontSize: '0.8125rem',
                           fontWeight: active ? 600 : 500,
@@ -485,7 +472,10 @@ function SidebarContent({
                             transition: 'color var(--motion-quick, 220ms) var(--ease-out)',
                           }}
                         >
-                          <Icon className={cn(collapsed ? 'w-5 h-5' : 'w-4 h-4')} />
+                          {/* Icon size is CSS-driven via
+                              .tahi-nav-icon svg + [data-sidebar="collapsed"]
+                              so it can't lag behind React state. */}
+                          <Icon />
                         </span>
                         {!collapsed && (
                           <span
@@ -579,12 +569,13 @@ function FooterButton({ onClick, collapsed, children, tooltip, ...rest }: Footer
     <button
       {...rest}
       onClick={onClick}
+      className="tahi-sidebar-footer-btn"
       style={{
         display: 'flex',
         alignItems: 'center',
         gap: '0.625rem',
-        padding: collapsed ? '0.625rem 0' : '0.5rem 0.625rem',
-        justifyContent: collapsed ? 'center' : 'flex-start',
+        // padding + justifyContent come from CSS so they don't lag
+        // React state on the first paint after refresh.
         borderRadius: 'var(--radius-md)',
         fontSize: '0.8125rem',
         fontWeight: 500,

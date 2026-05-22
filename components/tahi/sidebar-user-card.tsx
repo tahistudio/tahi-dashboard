@@ -18,7 +18,7 @@ import * as React from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useUser, useClerk } from '@clerk/nextjs'
-import { Sun, Moon, Settings, LogOut, ChevronDown, User as UserIcon } from 'lucide-react'
+import { Sun, Moon, Settings, LogOut, ChevronDown, User as UserIcon, Eye, EyeOff } from 'lucide-react'
 import { Avatar } from '@/components/tahi/avatar'
 import { Popover } from '@/components/tahi/popover'
 
@@ -28,6 +28,13 @@ interface SidebarUserCardProps {
   onToggleDarkMode: () => void
 }
 
+// Super-admin allowlist. Only these emails see the Demo / Private mode
+// menu items. Lowercased for case-insensitive match.
+const SUPER_ADMIN_EMAILS = new Set([
+  'business@tahi.studio',
+  'staci@tahi.studio',
+])
+
 export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: SidebarUserCardProps) {
   const { user, isLoaded } = useUser()
   const { signOut } = useClerk()
@@ -36,12 +43,14 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
   const triggerRef = React.useRef<HTMLButtonElement | null>(null)
 
   // While Clerk is loading the user, render a skeleton placeholder so
-  // the sidebar doesn't shift layout when data arrives.
+  // the sidebar doesn't shift layout when data arrives. Padding flips
+  // via CSS keyed off [data-sidebar="collapsed"] so the placeholder
+  // doesn't lag React state on refresh.
   if (!isLoaded || !user) {
     return (
       <div
+        className="tahi-sidebar-footer-btn"
         style={{
-          padding: collapsed ? '0.625rem' : '0.625rem 0.75rem',
           display: 'flex',
           alignItems: 'center',
           gap: '0.625rem',
@@ -70,6 +79,9 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
   const fullName = user.fullName || user.firstName || user.username || 'Account'
   const email = user.primaryEmailAddress?.emailAddress ?? ''
   const imageUrl = user.imageUrl ?? undefined
+  const isSuperAdmin = email
+    ? SUPER_ADMIN_EMAILS.has(email.toLowerCase())
+    : false
 
   const handleSignOut = async () => {
     setOpen(false)
@@ -84,13 +96,14 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Account menu for ${fullName}`}
+        className="tahi-sidebar-footer-btn"
         style={{
           width: '100%',
-          padding: collapsed ? '0.5rem' : '0.5rem 0.625rem',
+          // padding + justifyContent come from CSS keyed off
+          // [data-sidebar="collapsed"] so they don't lag React state.
           display: 'flex',
           alignItems: 'center',
           gap: '0.625rem',
-          justifyContent: collapsed ? 'center' : 'flex-start',
           background: 'transparent',
           border: 'none',
           borderRadius: 'var(--radius-md)',
@@ -170,6 +183,26 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
             label={darkMode ? 'Light mode' : 'Dark mode'}
             onClick={() => { onToggleDarkMode(); setOpen(false) }}
           />
+          {isSuperAdmin && (
+            <>
+              <div style={{ height: '1px', background: 'var(--color-border-subtle)', margin: '0.25rem 0' }} />
+              {/* Demo + Private mode are super-admin-only. They render
+                  for liam + staci. No-op for now: backend wiring lands
+                  in a later phase. See BACKLOG-UIUX.md for spec. */}
+              <MenuItem
+                icon={<Eye className="w-4 h-4" />}
+                label="Client view"
+                disabled
+                onClick={() => setOpen(false)}
+              />
+              <MenuItem
+                icon={<EyeOff className="w-4 h-4" />}
+                label="Private mode"
+                disabled
+                onClick={() => setOpen(false)}
+              />
+            </>
+          )}
           <div style={{ height: '1px', background: 'var(--color-border-subtle)', margin: '0.25rem 0' }} />
           <MenuItem
             icon={<LogOut className="w-4 h-4" />}
@@ -189,15 +222,18 @@ function MenuItem({
   href,
   onClick,
   tone,
+  disabled,
 }: {
   icon: React.ReactNode
   label: string
   href?: string
   onClick?: () => void
   tone?: 'danger'
+  disabled?: boolean
 }) {
   const colour = tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text)'
   const hoverBg = tone === 'danger' ? 'var(--color-danger-bg)' : 'var(--color-bg-secondary)'
+  const iconColour = tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text-muted)'
   const style: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
@@ -209,25 +245,41 @@ function MenuItem({
     color: colour,
     background: 'transparent',
     border: 'none',
-    cursor: 'pointer',
+    cursor: disabled ? 'not-allowed' : 'pointer',
     width: '100%',
     textAlign: 'left',
     textDecoration: 'none',
+    opacity: disabled ? 0.5 : 1,
     transition: 'background var(--motion-quick, 220ms) var(--ease-out, ease-out)',
   }
-  const onEnter = (e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.background = hoverBg }
-  const onLeave = (e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.background = 'transparent' }
-  if (href) {
+  const onEnter = (e: React.MouseEvent<HTMLElement>) => {
+    if (disabled) return
+    e.currentTarget.style.background = hoverBg
+  }
+  const onLeave = (e: React.MouseEvent<HTMLElement>) => {
+    if (disabled) return
+    e.currentTarget.style.background = 'transparent'
+  }
+  if (href && !disabled) {
     return (
       <Link href={href} role="menuitem" style={style} onClick={onClick} onMouseEnter={onEnter} onMouseLeave={onLeave}>
-        <span style={{ color: tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text-muted)' }}>{icon}</span>
+        <span style={{ color: iconColour }}>{icon}</span>
         {label}
       </Link>
     )
   }
   return (
-    <button role="menuitem" style={style} onClick={onClick} onMouseEnter={onEnter} onMouseLeave={onLeave}>
-      <span style={{ color: tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text-muted)' }}>{icon}</span>
+    <button
+      role="menuitem"
+      style={style}
+      onClick={disabled ? undefined : onClick}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      disabled={disabled}
+      aria-disabled={disabled || undefined}
+      title={disabled ? 'Coming soon' : undefined}
+    >
+      <span style={{ color: iconColour }}>{icon}</span>
       {label}
     </button>
   )

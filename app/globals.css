@@ -395,6 +395,78 @@ body {
   transition: grid-template-rows var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
 }
 
+/* Sidebar inner layout. All collapse-conditional padding, alignment,
+   and icon sizing live in CSS keyed off [data-sidebar="collapsed"] so
+   the inline script in app/(dashboard)/layout.tsx can drive them
+   BEFORE React hydrates. React inline styles always beat CSS, so any
+   layout property that needs to flip on collapse must be CSS-only. */
+
+/* Brand lockup */
+.tahi-sidebar-brand {
+  padding: 0.875rem 1rem;
+  justify-content: flex-start;
+}
+[data-sidebar="collapsed"] .tahi-sidebar-brand {
+  padding: 0.875rem 0;
+  justify-content: center;
+}
+
+/* Nav groups */
+.tahi-sidebar-nav-group {
+  margin-top: 1rem;
+  padding-top: 0;
+  border-top: none;
+}
+.tahi-sidebar-nav-group:first-child {
+  margin-top: 0;
+}
+[data-sidebar="collapsed"] .tahi-sidebar-nav-group {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border-subtle);
+}
+[data-sidebar="collapsed"] .tahi-sidebar-nav-group:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* Nav links */
+.tahi-nav-link {
+  justify-content: flex-start;
+  padding: 0.5rem 0.625rem;
+}
+.tahi-nav-link.tahi-nav-link-nested {
+  padding-left: 1.5rem;
+}
+[data-sidebar="collapsed"] .tahi-nav-link,
+[data-sidebar="collapsed"] .tahi-nav-link.tahi-nav-link-nested {
+  justify-content: center;
+  padding: 0.625rem 0;
+}
+
+/* Nav icons. Default to 1rem (expanded) and 1.25rem when collapsed.
+   We override Lucide's intrinsic size via the svg child selector so
+   we don't need to flip className based on collapsed state. */
+.tahi-nav-icon svg {
+  width: 1rem;
+  height: 1rem;
+}
+[data-sidebar="collapsed"] .tahi-nav-icon svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* Sidebar footer buttons (collapse toggle + user card trigger) */
+.tahi-sidebar-footer-btn {
+  justify-content: flex-start;
+  padding: 0.5rem 0.625rem;
+}
+[data-sidebar="collapsed"] .tahi-sidebar-footer-btn {
+  justify-content: center;
+  padding: 0.5rem;
+}
+
 /* Inner page wrapper (max-w-7xl mx-auto w-full). Owns the top spacing that
    used to live on `.dashboard-main`. Since this wrapper isn't a scroll
    container, its padding-top doesn't affect sticky positioning. */
