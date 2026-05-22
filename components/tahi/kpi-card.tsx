@@ -57,13 +57,25 @@ interface KPICardProps {
   style?: React.CSSProperties
 }
 
-function deltaColour(direction: DeltaDirection, onLime: boolean): string {
+interface DeltaPalette {
+  fg: string
+  bg: string | null
+}
+
+function deltaPalette(direction: DeltaDirection, onLime: boolean): DeltaPalette {
   if (onLime) {
-    // On lime, all three need to be near-black with weight differences
-    // so the surface stays calm and the lime stays the hero.
-    return direction === 'up' ? '#176B3D' : direction === 'down' ? '#B42318' : '#3F6235'
+    // Lime surface needs a chip background behind the delta so it lifts
+    // off the green. Same hue family as the value but with enough alpha
+    // to read at a glance. Solid forest text inside.
+    if (direction === 'up')   return { fg: 'var(--color-brand-deepest)', bg: 'rgba(255, 255, 255, 0.42)' }
+    if (direction === 'down') return { fg: '#B42318', bg: 'rgba(255, 255, 255, 0.42)' }
+    return { fg: '#3F6235', bg: 'rgba(255, 255, 255, 0.32)' }
   }
-  return direction === 'up' ? '#176B3D' : direction === 'down' ? '#B42318' : 'var(--color-text-muted)'
+  // Default (white) surface. No chip background. Inline coloured text.
+  return {
+    fg: direction === 'up' ? '#176B3D' : direction === 'down' ? '#B42318' : 'var(--color-text-muted)',
+    bg: null,
+  }
 }
 
 function deltaGlyph(direction: DeltaDirection): React.ReactNode {
@@ -145,14 +157,18 @@ export function KPICard({
     fontVariantNumeric: 'tabular-nums',
   }
 
+  const deltaP = delta ? deltaPalette(delta.direction, featured) : null
   const deltaStyle: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
     gap: '0.25rem',
     fontSize: '0.75rem',
     fontWeight: 600,
-    color: delta ? deltaColour(delta.direction, featured) : undefined,
+    color: deltaP?.fg,
     fontVariantNumeric: 'tabular-nums',
+    padding: deltaP?.bg ? '0.125rem 0.4375rem' : 0,
+    borderRadius: deltaP?.bg ? '9999px' : 0,
+    background: deltaP?.bg ?? undefined,
   }
 
   const trailingStyle: React.CSSProperties = {

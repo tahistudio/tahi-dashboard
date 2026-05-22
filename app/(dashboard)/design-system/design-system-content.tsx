@@ -1444,7 +1444,7 @@ function FeatureCardShowcase() {
           </FeatureCard.Description>
           <FeatureCard.Footer>
             <TahiButton variant="primary" size="sm">Open briefing</TahiButton>
-            <TahiLink href="#">All AI features</TahiLink>
+            <TahiLink href="#" tone="on-dark">All AI features</TahiLink>
           </FeatureCard.Footer>
         </FeatureCard>
 

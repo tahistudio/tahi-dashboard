@@ -210,20 +210,34 @@ export function TahiButton({
 // Convenience export for callers that want the variant union for typing.
 export type { Variant as TahiButtonVariant, Size as TahiButtonSize }
 
-// Tiny inline-link helper for the `link` variant. Keeps the sliding
-// underline + arrow translate without forcing callers to wire it.
+// Tone-aware colour pairs for TahiLink. The default brand pair works
+// on cream / white surfaces. on-dark uses light off-cream rest + lime
+// hover for dark / forest backgrounds. on-lime uses dark forest text
+// for lime surfaces (paired with the FeatureCard lime variant).
+const TAHI_LINK_TONE: Record<'brand' | 'on-dark' | 'on-lime', { rest: string, hover: string }> = {
+  brand:    { rest: 'var(--color-brand-dark)',    hover: 'var(--color-brand)' },
+  'on-dark':{ rest: 'var(--color-text-dim-on-dark)', hover: 'var(--color-brand-bright)' },
+  'on-lime':{ rest: 'var(--color-brand-deepest)',  hover: 'var(--color-brand-darker)' },
+}
+
+// Tiny inline-link helper. Keeps the sliding underline + arrow translate
+// without forcing callers to wire it. Pass `tone="on-dark"` or
+// "on-lime" when the surface needs the link colours to flip.
 export function TahiLink({
   href,
   children,
   icon,
   className,
+  tone = 'brand',
 }: {
   href: string
   children: React.ReactNode
   icon?: React.ReactNode
   className?: string
+  tone?: 'brand' | 'on-dark' | 'on-lime'
 }) {
   const [hover, setHover] = React.useState(false)
+  const t = TAHI_LINK_TONE[tone]
   return (
     <a
       href={href}
@@ -233,7 +247,7 @@ export function TahiLink({
       style={{
         fontSize: 'var(--text-sm)',
         fontWeight: 500,
-        color: hover ? 'var(--color-brand)' : 'var(--color-brand-dark)',
+        color: hover ? t.hover : t.rest,
         textDecoration: 'none',
         gap: '0.375rem',
         position: 'relative',
