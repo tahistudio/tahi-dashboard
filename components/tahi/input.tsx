@@ -141,7 +141,7 @@ function InputGroup({ children, className, style, inputSize = 'md' as Size, ...r
   return (
     <div
       {...rest}
-      className={className}
+      className={['tahi-input-group', className].filter(Boolean).join(' ')}
       style={{
         display: 'flex',
         alignItems: 'center',

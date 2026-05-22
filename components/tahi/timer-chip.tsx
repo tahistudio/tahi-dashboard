@@ -272,23 +272,28 @@ export function TimerChip() {
   }
 
   if (!loaded) {
-    // Render a placeholder so the nav doesn't jump when the chip appears.
+    // Render a placeholder that matches the eventual "Track time"
+    // chip's geometry so the nav doesn't jump when state arrives.
     return (
       <button
         disabled
         aria-label="Timer loading"
+        className="flex items-center"
         style={{
-          width: '2.25rem',
-          height: '2.25rem',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: '0.375rem',
+          padding: '0.3125rem 0.625rem',
           borderRadius: 'var(--radius-button)',
           background: 'transparent',
           border: '1px solid var(--color-border-subtle)',
           color: 'var(--color-text-subtle)',
+          fontSize: '0.75rem',
+          fontWeight: 500,
           cursor: 'wait',
+          minHeight: '2rem',
         }}
       >
-        <Clock3 size={14} aria-hidden="true" />
+        <Clock3 size={12} aria-hidden="true" className="animate-pulse" />
+        <span className="hidden sm:inline">Track time</span>
       </button>
     )
   }

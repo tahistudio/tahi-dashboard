@@ -631,6 +631,21 @@ button:disabled,
   border-radius: var(--radius-sm);
 }
 
+/* When a focusable lives inside an <Input.Group> shell, the GROUP gets
+   the focus ring instead of the inner element. Stops the "small inner
+   circle" artefact where the global :focus-visible rule painted a
+   --radius-sm ring on an input that lives inside a --radius-md group. */
+.tahi-input-group:focus-within {
+  border-color: var(--color-brand);
+  box-shadow: var(--shadow-ring);
+}
+.tahi-input-group input:focus-visible,
+.tahi-input-group textarea:focus-visible,
+.tahi-input-group select:focus-visible {
+  box-shadow: none;
+  border-radius: 0;
+}
+
 /* Smooth transitions on interactive properties */
 button,
 a,

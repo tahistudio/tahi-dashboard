@@ -15,11 +15,10 @@
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Search, X, Loader2, Inbox, CheckSquare, Users, User as UserIcon,
+  Search, Loader2, Inbox, CheckSquare, Users, User as UserIcon,
   Briefcase, TrendingUp, FileText, FileSignature, Calendar, BookOpen,
   Phone, ShoppingBag, Megaphone, Zap, UserCog,
 } from 'lucide-react'
-import { Input } from './input'
 import type { SearchGroupType, SearchResultItem, SearchResponse } from '@/app/api/admin/search/route'
 
 interface SearchPaletteProps {
@@ -160,9 +159,9 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center"
       style={{
-        background: 'rgba(15, 20, 16, 0.45)',
-        backdropFilter: 'blur(3px)',
-        WebkitBackdropFilter: 'blur(3px)',
+        background: 'rgba(15, 20, 16, 0.55)',
+        backdropFilter: 'blur(4px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(4px) saturate(140%)',
         padding: 'var(--space-4)',
       }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
@@ -174,69 +173,89 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
         aria-label="Search the dashboard"
         style={{
           width: '100%',
-          maxWidth: '40rem',
+          maxWidth: '42rem',
           maxHeight: '70vh',
           background: 'var(--color-bg)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--color-border)',
-          boxShadow: 'var(--shadow-lg)',
+          boxShadow: '0 24px 60px rgba(15, 20, 16, 0.32), 0 4px 16px rgba(15, 20, 16, 0.10)',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
         }}
       >
-        {/* Input row */}
-        <div style={{ padding: 'var(--space-4)', borderBottom: '1px solid var(--color-border-subtle)' }}>
-          <Input.Group inputSize="lg" style={{ width: '100%' }}>
-            <Input.Icon>
-              {loading
-                ? <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-brand)' }} aria-hidden="true" />
-                : <Search size={16} style={{ color: 'var(--color-brand)' }} aria-hidden="true" />}
-            </Input.Icon>
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search requests, tasks, clients, deals, docs..."
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              onKeyDown={handleKey}
-              aria-label="Search the dashboard"
-              aria-controls="search-palette-results"
-              aria-activedescendant={flatItems[clampedActive] ? `search-result-${clampedActive}` : undefined}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                border: 'none',
-                outline: 'none',
-                background: 'transparent',
-                fontSize: 'var(--text-base)',
-                color: 'var(--color-text)',
-                fontWeight: 500,
-              }}
-            />
-            <Input.Addon>
-              <button
-                type="button"
-                onClick={onClose}
-                className="flex items-center justify-center"
-                style={{
-                  width: '1.5rem',
-                  height: '1.5rem',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--color-bg-secondary)',
-                  border: 'none',
-                  color: 'var(--color-text-muted)',
-                  cursor: 'pointer',
-                  transition: 'background-color 150ms ease',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)' }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-                aria-label="Close search (Escape)"
-              >
-                <X size={12} aria-hidden="true" />
-              </button>
-            </Input.Addon>
-          </Input.Group>
+        {/* Input row. Bigger height (3rem), borderless interior so the
+            search bar reads as a header rather than a form field. The
+            row gets its own focus state via the surrounding container
+            background tint. */}
+        <div
+          className="flex items-center"
+          style={{
+            padding: '0 var(--space-5)',
+            height: '3.5rem',
+            borderBottom: '1px solid var(--color-border-subtle)',
+            background: 'var(--color-bg)',
+            gap: 'var(--space-3)',
+          }}
+        >
+          <span style={{ display: 'inline-flex', flexShrink: 0 }}>
+            {loading
+              ? <Loader2 size={18} className="animate-spin" style={{ color: 'var(--color-brand)' }} aria-hidden="true" />
+              : <Search size={18} style={{ color: 'var(--color-brand)' }} aria-hidden="true" />}
+          </span>
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search requests, tasks, clients, deals, docs..."
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={handleKey}
+            aria-label="Search the dashboard"
+            aria-controls="search-palette-results"
+            aria-activedescendant={flatItems[clampedActive] ? `search-result-${clampedActive}` : undefined}
+            className="search-palette-input"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              border: 'none',
+              outline: 'none',
+              background: 'transparent',
+              fontSize: 'var(--text-base)',
+              color: 'var(--color-text)',
+              fontWeight: 500,
+              padding: '0.5rem 0',
+            }}
+          />
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex items-center justify-center"
+            style={{
+              flexShrink: 0,
+              padding: '0.125rem 0.4375rem',
+              height: '1.5rem',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--color-bg-secondary)',
+              border: '1px solid var(--color-border-subtle)',
+              color: 'var(--color-text-muted)',
+              fontSize: '0.625rem',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+              fontWeight: 500,
+              cursor: 'pointer',
+              transition: 'background-color 150ms ease, color 150ms ease',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'var(--color-bg-tertiary)'
+              e.currentTarget.style.color = 'var(--color-text)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'var(--color-bg-secondary)'
+              e.currentTarget.style.color = 'var(--color-text-muted)'
+            }}
+            aria-label="Close search (Escape)"
+          >
+            Esc
+          </button>
         </div>
 
         {/* Results */}
