@@ -1,6 +1,8 @@
 'use client'
 
+import * as React from 'react'
 import { useState } from 'react'
+import { LeafGlyph, TahiWordmark, TahiStudioWordmark, TahiIconMark } from '@/components/tahi/tahi-glyphs'
 
 /**
  * /design-system — the canonical token + primitive reference.
@@ -49,7 +51,7 @@ export function DesignSystemContent() {
 function Header() {
   return (
     <header className="space-y-3">
-      <div className="tagline-row flex items-center gap-2 text-sm font-medium" style={{ color: 'var(--color-brand-dark)' }}>
+      <div className="flex items-center gap-2 text-sm font-medium" style={{ color: 'var(--color-brand-dark)' }}>
         <LeafGlyph size={14} />
         <span>Design system</span>
       </div>
@@ -90,12 +92,11 @@ function TOC() {
         <a
           key={s.id}
           href={`#${s.id}`}
-          className="px-3 py-1.5 text-sm font-medium transition-colors"
+          className="px-3 py-1.5 text-sm font-medium"
           style={{
             color: 'var(--color-text-muted)',
             borderRadius: 'var(--radius-leaf-sm)',
-            transitionDuration: 'var(--motion-quick)',
-            transitionTimingFunction: 'var(--ease-out)',
+            transition: 'background var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
           }}
           onMouseEnter={e => {
             e.currentTarget.style.background = 'var(--color-brand-50)'
@@ -231,7 +232,7 @@ const STATUS_SWATCHES: Array<{ key: string, dot: string, bg: string, text: strin
   { key: 'archived',       dot: '#D1D5DB', bg: '#F9FAFB', text: '#6B7280', label: 'Archived' },
 ]
 
-function SwatchTile({ s, dark }: { s: Swatch, dark?: boolean }) {
+function SwatchTile({ s }: { s: Swatch }) {
   return (
     <div style={{
       background: 'var(--color-bg)',
@@ -257,7 +258,6 @@ function SwatchTile({ s, dark }: { s: Swatch, dark?: boolean }) {
           </div>
         )}
       </div>
-      {dark && null}
     </div>
   )
 }
@@ -576,32 +576,109 @@ function MotionSection() {
 
 // ────────────────────────────────────────────────────────────────────────
 // Iconography
+//
+// Currently using Lucide at 1.5px stroke. The user flagged that some
+// shapes (notably arrow heads) feel too blocky and asked to compare
+// against Phosphor / Tabler — see the AltArrows panel below.
+//
+// Per-icon micro-animations: each tile is wrapped in <IconTile> which
+// applies a subtle hover lift + colour shift. Specific icons opt into
+// a directional motion (arrows translate, bell rings, plus rotates,
+// search and eye scale). Driven by the `motion` field on each entry.
+// Honours prefers-reduced-motion via the global rule in globals.css.
 // ────────────────────────────────────────────────────────────────────────
-const ICONS: Array<{ name: string, paths: React.ReactNode, use: string }> = [
-  { name: 'leaf',           use: 'Growth metaphor, brand', paths: (<><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19.2 2.96a1 1 0 0 1 1.8.56c0 5.62-1.34 10.83-5 14.6A7 7 0 0 1 11 20Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6"/></>) },
-  { name: 'sprout',         use: 'Stage 1, launch', paths: (<><path d="M7 20h10"/><path d="M10 20c5.5-2.5.8-6.4 3-10"/><path d="M9.5 9.4c1.1.8 1.8 2 2 3.3-1.3.4-2.7.2-3.8-.5-1.1-.8-1.8-2-2-3.3 1.3-.5 2.7-.2 3.8.5z"/><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.7-1 5-2.4.6-.8 1-1.7 1-2.6-1.4-.1-2.8.4-3.9 1z"/></>) },
-  { name: 'tree-pine',      use: 'Carbon negative, stage 3', paths: (<><path d="m17 14 3 3.3a1 1 0 0 1-.7 1.7H4.7a1 1 0 0 1-.7-1.7L7 14h-.3a1 1 0 0 1-.7-1.7L9 9h-.2A1 1 0 0 1 8 7.3L12 3l4 4.3a1 1 0 0 1-.8 1.7H15l3 3.3a1 1 0 0 1-.7 1.7H17Z"/><path d="M12 22v-3"/></>) },
-  { name: 'heart-handshake',use: 'Partnership', paths: (<><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/><path d="M12 5 9.04 7.96a2.17 2.17 0 0 0 0 3.08v0c.82.82 2.13.85 3 .07l2.07-1.9a2.82 2.82 0 0 1 3.79 0l2.96 2.66"/><path d="m18 15-2-2"/><path d="m15 18-2-2"/></>) },
-  { name: 'sparkles',       use: 'AI features', paths: (<><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></>) },
-  { name: 'arrow-up-right', use: 'Outbound, CTA arrow', paths: (<><path d="M7 7h10v10"/><path d="M7 17 17 7"/></>) },
-  { name: 'arrow-right',    use: 'Continue, next', paths: (<><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></>) },
-  { name: 'chevron-down',   use: 'Dropdowns, expand', paths: (<path d="m6 9 6 6 6-6"/>) },
-  { name: 'home',           use: 'Overview', paths: (<><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2h-4v-7H10v7H6a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></>) },
-  { name: 'inbox',          use: 'Requests', paths: (<><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></>) },
-  { name: 'kanban',         use: 'Pipeline / board view', paths: (<><path d="M6 5v11"/><path d="M12 5v6"/><path d="M18 5v14"/></>) },
-  { name: 'users',          use: 'Clients, team', paths: (<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>) },
-  { name: 'receipt',        use: 'Invoices', paths: (<><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></>) },
-  { name: 'bar-chart',      use: 'Reports', paths: (<><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></>) },
-  { name: 'calendar',       use: 'Due dates, calls', paths: (<><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>) },
-  { name: 'clock',          use: 'Time tracker', paths: (<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>) },
-  { name: 'bell',           use: 'Notifications', paths: (<><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></>) },
-  { name: 'search',         use: 'Top-nav search', paths: (<><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></>) },
-  { name: 'plus',           use: 'Create new', paths: (<><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>) },
-  { name: 'check-circle',   use: 'Delivered, complete', paths: (<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>) },
-  { name: 'alert-triangle', use: 'Warning, error', paths: (<><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>) },
-  { name: 'trending-up',    use: 'KPI delta positive', paths: (<><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></>) },
-  { name: 'settings',       use: 'Settings, options', paths: (<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></>) },
-  { name: 'more-horizontal',use: 'Row actions', paths: (<><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></>) },
+
+type IconMotion = 'lift' | 'arrow-up-right' | 'arrow-right' | 'arrow-left' | 'arrow-down' | 'arrow-up' | 'bell' | 'spin' | 'pulse' | 'scale'
+
+type IconDef = { name: string, use: string, paths: React.ReactNode, motion?: IconMotion }
+
+// All paths verified against Lucide v0.359+ (24×24 grid, 1.5px stroke
+// applied by the wrapper). The previous home path closed incorrectly at
+// h-4v-7 — fixed to H5 so the silhouette renders as a proper house.
+const ICONS: IconDef[] = [
+  // Brand & narrative
+  { name: 'leaf',            use: 'Growth, brand',         motion: 'lift',  paths: (<><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19.2 2.96a1 1 0 0 1 1.8.56c0 5.62-1.34 10.83-5 14.6A7 7 0 0 1 11 20Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6"/></>) },
+  { name: 'sprout',          use: 'Launch, stage 1',       motion: 'lift',  paths: (<><path d="M7 20h10"/><path d="M10 20c5.5-2.5.8-6.4 3-10"/><path d="M9.5 9.4c1.1.8 1.8 2 2 3.3-1.3.4-2.7.2-3.8-.5-1.1-.8-1.8-2-2-3.3 1.3-.5 2.7-.2 3.8.5z"/><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.7-1 5-2.4.6-.8 1-1.7 1-2.6-1.4-.1-2.8.4-3.9 1z"/></>) },
+  { name: 'tree-pine',       use: 'Carbon negative',       motion: 'lift',  paths: (<><path d="m17 14 3 3.3a1 1 0 0 1-.7 1.7H4.7a1 1 0 0 1-.7-1.7L7 14h-.3a1 1 0 0 1-.7-1.7L9 9h-.2A1 1 0 0 1 8 7.3L12 3l4 4.3a1 1 0 0 1-.8 1.7H15l3 3.3a1 1 0 0 1-.7 1.7H17Z"/><path d="M12 22v-3"/></>) },
+  { name: 'heart-handshake', use: 'Partnership',           motion: 'pulse', paths: (<><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/><path d="M12 5 9.04 7.96a2.17 2.17 0 0 0 0 3.08v0c.82.82 2.13.85 3 .07l2.07-1.9a2.82 2.82 0 0 1 3.79 0l2.96 2.66"/><path d="m18 15-2-2"/><path d="m15 18-2-2"/></>) },
+  { name: 'sparkles',        use: 'AI features',           motion: 'pulse', paths: (<><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.13 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></>) },
+
+  // Wayfinding
+  { name: 'home',            use: 'Overview',              motion: 'lift',  paths: (<><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></>) },
+  { name: 'inbox',           use: 'Requests',              motion: 'lift',  paths: (<><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></>) },
+  { name: 'kanban',          use: 'Board view',            motion: 'lift',  paths: (<><path d="M6 5v11"/><path d="M12 5v6"/><path d="M18 5v14"/></>) },
+  { name: 'layout-grid',     use: 'Grid view',             motion: 'lift',  paths: (<><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></>) },
+  { name: 'list',            use: 'List view',             motion: 'lift',  paths: (<><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></>) },
+  { name: 'folder',          use: 'Files, group',          motion: 'lift',  paths: (<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>) },
+  { name: 'file-text',       use: 'Docs, contracts',       motion: 'lift',  paths: (<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></>) },
+  { name: 'receipt',         use: 'Invoices',              motion: 'lift',  paths: (<><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></>) },
+  { name: 'bar-chart',       use: 'Reports',               motion: 'lift',  paths: (<><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></>) },
+  { name: 'settings',        use: 'Settings',              motion: 'spin',  paths: (<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></>) },
+
+  // Search / actions
+  { name: 'search',          use: 'Top-nav search',        motion: 'scale', paths: (<><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></>) },
+  { name: 'command',         use: 'Cmd+K palette',         motion: 'lift',  paths: (<path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>) },
+  { name: 'plus',            use: 'Create new',            motion: 'spin',  paths: (<><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>) },
+  { name: 'x',               use: 'Close, dismiss',        motion: 'spin',  paths: (<><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>) },
+  { name: 'edit',            use: 'Edit, rename',          motion: 'lift',  paths: (<><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></>) },
+  { name: 'trash',           use: 'Delete',                motion: 'lift',  paths: (<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></>) },
+  { name: 'copy',            use: 'Duplicate',             motion: 'lift',  paths: (<><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></>) },
+  { name: 'download',        use: 'Download file',         motion: 'arrow-down', paths: (<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>) },
+  { name: 'upload',          use: 'Upload file',           motion: 'arrow-up',   paths: (<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>) },
+  { name: 'share',           use: 'Share link',            motion: 'lift',  paths: (<><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></>) },
+  { name: 'link',            use: 'Internal link',         motion: 'lift',  paths: (<><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></>) },
+  { name: 'external-link',   use: 'Open in new tab',       motion: 'arrow-up-right', paths: (<><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></>) },
+  { name: 'refresh-cw',      use: 'Reload, sync',          motion: 'spin',  paths: (<><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></>) },
+  { name: 'more-horizontal', use: 'Row actions',           motion: 'lift',  paths: (<><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></>) },
+
+  // Arrows
+  { name: 'arrow-up-right',  use: 'Outbound, CTA',         motion: 'arrow-up-right', paths: (<><path d="M7 7h10v10"/><path d="M7 17 17 7"/></>) },
+  { name: 'arrow-right',     use: 'Continue, next',        motion: 'arrow-right',    paths: (<><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></>) },
+  { name: 'arrow-left',      use: 'Back',                  motion: 'arrow-left',     paths: (<><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></>) },
+  { name: 'arrow-up',        use: 'Increase, up',          motion: 'arrow-up',       paths: (<><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></>) },
+  { name: 'arrow-down',      use: 'Decrease, down',        motion: 'arrow-down',     paths: (<><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></>) },
+  { name: 'chevron-right',   use: 'Expand, next page',     motion: 'arrow-right',    paths: (<polyline points="9 18 15 12 9 6"/>) },
+  { name: 'chevron-left',    use: 'Collapse, prev',        motion: 'arrow-left',     paths: (<polyline points="15 18 9 12 15 6"/>) },
+  { name: 'chevron-down',    use: 'Dropdown',              motion: 'arrow-down',     paths: (<polyline points="6 9 12 15 18 9"/>) },
+  { name: 'chevron-up',      use: 'Collapse',              motion: 'arrow-up',       paths: (<polyline points="18 15 12 9 6 15"/>) },
+
+  // Status / feedback
+  { name: 'check-circle',    use: 'Delivered, done',       motion: 'pulse', paths: (<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>) },
+  { name: 'check',           use: 'Inline confirm',        motion: 'pulse', paths: (<polyline points="20 6 9 17 4 12"/>) },
+  { name: 'alert-triangle',  use: 'Warning, error',        motion: 'pulse', paths: (<><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>) },
+  { name: 'alert-circle',    use: 'Heads up',              motion: 'pulse', paths: (<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>) },
+  { name: 'info',            use: 'Informational',         motion: 'pulse', paths: (<><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></>) },
+  { name: 'zap',             use: 'Fast, launch',          motion: 'pulse', paths: (<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>) },
+  { name: 'flame',           use: 'Hot, urgent',           motion: 'pulse', paths: (<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>) },
+
+  // Money & data
+  { name: 'dollar-sign',     use: 'Money, billable',       motion: 'lift',  paths: (<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></>) },
+  { name: 'percent',         use: 'Discount, rate',        motion: 'lift',  paths: (<><line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></>) },
+  { name: 'trending-up',     use: 'KPI delta+',            motion: 'arrow-up-right', paths: (<><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></>) },
+  { name: 'trending-down',   use: 'KPI delta-',            motion: 'arrow-up-right', paths: (<><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></>) },
+  { name: 'pie-chart',       use: 'Breakdown',             motion: 'lift',  paths: (<><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></>) },
+  { name: 'activity',        use: 'Live status',           motion: 'pulse', paths: (<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>) },
+
+  // People & comms
+  { name: 'users',           use: 'Team, clients',         motion: 'lift',  paths: (<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>) },
+  { name: 'user',            use: 'Single person',         motion: 'lift',  paths: (<><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>) },
+  { name: 'user-plus',       use: 'Add member',            motion: 'lift',  paths: (<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></>) },
+  { name: 'message-circle',  use: 'Comments',              motion: 'lift',  paths: (<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>) },
+  { name: 'mail',            use: 'Email',                 motion: 'lift',  paths: (<><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/></>) },
+  { name: 'phone',           use: 'Phone, call',           motion: 'lift',  paths: (<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>) },
+  { name: 'video',           use: 'Video call',            motion: 'lift',  paths: (<><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></>) },
+  { name: 'bell',            use: 'Notifications',         motion: 'bell',  paths: (<><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></>) },
+
+  // Time
+  { name: 'clock',           use: 'Time tracker',          motion: 'spin',  paths: (<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>) },
+  { name: 'calendar',        use: 'Date, due',             motion: 'lift',  paths: (<><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>) },
+  { name: 'timer',           use: 'Live timer',            motion: 'pulse', paths: (<><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="15" y2="11"/><circle cx="12" cy="14" r="8"/></>) },
+
+  // View options
+  { name: 'eye',             use: 'Visible, preview',      motion: 'scale', paths: (<><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>) },
+  { name: 'eye-off',         use: 'Hidden, private',       motion: 'scale', paths: (<><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></>) },
+  { name: 'filter',          use: 'Filter table',          motion: 'lift',  paths: (<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>) },
+  { name: 'sliders',         use: 'Adjust',                motion: 'lift',  paths: (<><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></>) },
 ]
 
 function LucideIcon({ children, size = 24, stroke = 1.5, color = 'currentColor' }: {
@@ -616,58 +693,189 @@ function LucideIcon({ children, size = 24, stroke = 1.5, color = 'currentColor' 
   )
 }
 
+// Per-icon hover transform. Designed to be subtle. All translations cap
+// at 2px; rotations at 45°; scales at 1.10. So they read as polish, not
+// cartoon. Driven off the icon's `motion` field.
+function motionTransform(motion: IconMotion | undefined): string {
+  switch (motion) {
+    case 'arrow-up-right': return 'translate(2px, -2px)'
+    case 'arrow-right':    return 'translateX(2px)'
+    case 'arrow-left':     return 'translateX(-2px)'
+    case 'arrow-up':       return 'translateY(-2px)'
+    case 'arrow-down':     return 'translateY(2px)'
+    case 'bell':           return 'rotate(-10deg)'
+    case 'spin':           return 'rotate(45deg)'
+    case 'pulse':          return 'scale(1.08)'
+    case 'scale':          return 'scale(1.10)'
+    case 'lift':
+    default:               return 'translateY(-1px)'
+  }
+}
+
+function IconTile({ icon }: { icon: IconDef }) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setHovered(true)}
+      onBlur={() => setHovered(false)}
+      tabIndex={0}
+      role="figure"
+      aria-label={`${icon.name} — ${icon.use}`}
+      style={{
+        borderRadius: 'var(--radius-leaf-sm)',
+        padding: '0.875rem',
+        display: 'flex', alignItems: 'center', gap: '0.75rem',
+        background: hovered ? 'var(--color-brand-50)' : 'var(--color-bg)',
+        transition: 'background var(--motion-quick) var(--ease-out)',
+        cursor: 'default',
+        outline: 'none',
+      }}
+    >
+      <div style={{
+        color: hovered ? 'var(--color-brand)' : 'var(--color-brand-dark)',
+        flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: '2rem', height: '2rem',
+        transform: hovered ? motionTransform(icon.motion) : 'none',
+        transition: 'transform var(--motion-base) var(--ease-out), color var(--motion-quick) var(--ease-out)',
+        transformOrigin: 'center',
+      }}>
+        <LucideIcon>{icon.paths}</LucideIcon>
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: '0.8125rem', fontWeight: 500 }}>{icon.name}</div>
+        <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {icon.use}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Same three actions across Lucide / Phosphor (regular) / Tabler so we
+// can compare arrow-head geometry before standardising. Phosphor regular
+// uses a 16-unit stroke on a 256 viewBox which renders as a curved-head
+// arrow with no inner L-angle.
+function AltArrows() {
+  type Sample = { lib: 'Lucide' | 'Phosphor' | 'Tabler', paths: React.ReactNode, viewBox?: string, stroke?: number }
+  type Row = { name: string, samples: Sample[] }
+
+  const rows: Row[] = [
+    {
+      name: 'arrow-up-right',
+      samples: [
+        { lib: 'Lucide',   paths: <><path d="M7 7h10v10"/><path d="M7 17 17 7"/></> },
+        { lib: 'Phosphor', viewBox: '0 0 256 256', stroke: 16, paths: <><path d="M64,192,192,64M88,64H192v104"/></> },
+        { lib: 'Tabler',   paths: <><path d="M17 7l-10 10"/><path d="M8 7l9 0"/><path d="M17 8l0 9"/></> },
+      ],
+    },
+    {
+      name: 'arrow-right',
+      samples: [
+        { lib: 'Lucide',   paths: <><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></> },
+        { lib: 'Phosphor', viewBox: '0 0 256 256', stroke: 16, paths: <><path d="M40,128H216M144,56l72,72-72,72"/></> },
+        { lib: 'Tabler',   paths: <><path d="M5 12l14 0"/><path d="M13 18l6 -6"/><path d="M13 6l6 6"/></> },
+      ],
+    },
+    {
+      name: 'chevron-right',
+      samples: [
+        { lib: 'Lucide',   paths: <polyline points="9 18 15 12 9 6"/> },
+        { lib: 'Phosphor', viewBox: '0 0 256 256', stroke: 16, paths: <polyline points="96,48 176,128 96,208"/> },
+        { lib: 'Tabler',   paths: <path d="M9 6l6 6l-6 6"/> },
+      ],
+    },
+  ]
+
+  return (
+    <Card>
+      <GroupHeading>Arrow refinement — compare</GroupHeading>
+      <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
+        Same three arrows rendered from <Mono>Lucide</Mono> (current), <Mono>Phosphor</Mono> (regular weight, rounded heads), and <Mono>Tabler</Mono> (outline, slightly tighter geometry). Phosphor arrow heads have no inner right-angle, which is what reads as &ldquo;less wide&rdquo;. Pick one to standardise on.
+      </p>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'auto repeat(3, 1fr)',
+        gap: '0.5rem 1rem',
+        alignItems: 'center',
+      }}>
+        <div />
+        {(['Lucide', 'Phosphor', 'Tabler'] as const).map(lib => (
+          <div key={lib} style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            {lib}
+          </div>
+        ))}
+        {rows.map(row => (
+          <React.Fragment key={row.name}>
+            <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>{row.name}</div>
+            {row.samples.map(sample => (
+              <div key={sample.lib} style={{
+                background: 'var(--color-brand-50)',
+                borderRadius: 'var(--radius-leaf-sm)',
+                padding: '1rem',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <svg
+                  width={32} height={32}
+                  viewBox={sample.viewBox ?? '0 0 24 24'}
+                  fill="none"
+                  stroke="var(--color-brand-dark)"
+                  strokeWidth={sample.stroke ?? 1.5}
+                  strokeLinecap="round" strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  {sample.paths}
+                </svg>
+              </div>
+            ))}
+          </React.Fragment>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
 function IconographySection() {
   return (
     <SectionShell
       id="iconography"
       title="Iconography"
-      intro="Lucide at 1.5px stroke is the only icon set. No emoji, ever. The leaf glyph is a separate brand mark — used as the chip dot and the tagline-leader."
+      intro="Currently Lucide at 1.5px stroke (already installed via lucide-react). Set is rich. Arrows feel a bit blocky — compare against Phosphor / Tabler in the panel below before deciding on a swap. The Tahi leaf glyph stays separate either way."
     >
-      <Card>
-        <GroupHeading>Icons in use</GroupHeading>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-          {ICONS.map(icon => (
-            <div key={icon.name} style={{
-              border: '1px solid var(--color-border-subtle)',
-              borderRadius: 'var(--radius-leaf-sm)',
-              padding: '0.875rem',
-              display: 'flex', alignItems: 'center', gap: '0.75rem',
-            }}>
-              <div style={{ color: 'var(--color-brand-dark)', flexShrink: 0 }}>
-                <LucideIcon>{icon.paths}</LucideIcon>
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: '0.8125rem', fontWeight: 500 }}>{icon.name}</div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {icon.use}
-                </div>
-              </div>
-            </div>
-          ))}
+      <Card padded={false}>
+        <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+          <GroupHeading>Icon library — {ICONS.length} icons</GroupHeading>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginTop: '-0.25rem', lineHeight: 1.5 }}>
+            Hover any tile to feel its motion. Arrows nudge in their direction, the bell rings, the cog spins 45°, plus and x rotate, search and eye scale. All motion caps at 2px / 45° / 1.10×.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-1 px-3 pb-3">
+          {ICONS.map(icon => <IconTile key={icon.name} icon={icon} />)}
         </div>
       </Card>
 
+      <AltArrows />
+
       <Card>
         <GroupHeading>The leaf glyph</GroupHeading>
-        <div className="flex flex-wrap items-center gap-6">
-          <div style={{ color: 'var(--color-brand)' }}>
+        <div className="flex flex-wrap items-center gap-8">
+          <div className="flex items-end gap-4">
+            <LeafGlyph size={16} />
+            <LeafGlyph size={24} />
+            <LeafGlyph size={32} />
             <LeafGlyph size={48} />
+            <LeafGlyph size={72} />
           </div>
-          <div className="space-y-1" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', lineHeight: 1.6, maxWidth: '32rem' }}>
-            <div>Separate from Lucide. The Tahi tagline-leader, the chip dot, and the <em>i</em>-dot on the short wordmark.</div>
-            <div>Never substitute with an emoji. Never invert. Rendered in <Mono>var(--color-brand)</Mono> at small sizes; gradient at large.</div>
+          <div className="space-y-1.5" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', lineHeight: 1.6, maxWidth: '32rem' }}>
+            <div>Separate from Lucide. Renders with the brand gradient (brand → brand-dark) built in.</div>
+            <div>Used as the chip dot, tagline-leader, and the <em>i</em>-dot on the wordmarks.</div>
+            <div>Never substituted with an emoji. Never inverted. Source: <Mono>components/tahi/tahi-glyphs.tsx</Mono></div>
           </div>
         </div>
       </Card>
     </SectionShell>
-  )
-}
-
-function LeafGlyph({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19.2 2.96a1 1 0 0 1 1.8.56c0 5.62-1.34 10.83-5 14.6A7 7 0 0 1 11 20Z" />
-    </svg>
   )
 }
 
@@ -679,24 +887,78 @@ function BrandSection() {
     <SectionShell
       id="brand"
       title="Brand"
-      intro="The Tahi mark is itself a leaf — a stylised drop on the i of Tahi. Used as the wordmark, the icon, the chip dot, and the tagline-leader."
+      intro="The Tahi mark is itself a leaf — a stylised drop on the i of Tahi. Real path data, lifted from the live marketing site. The wordmarks inherit colour from their container; the icon marks bake their own gradient and have light / dark variants."
     >
       <Card>
-        <GroupHeading>Wordmark</GroupHeading>
-        <div className="flex flex-wrap items-center gap-12">
-          <div style={{ color: 'var(--color-brand-deepest)', fontSize: '3.5rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
-            Tahi<span style={{ color: 'var(--color-brand)' }}>.</span>
+        <GroupHeading>Wordmarks</GroupHeading>
+        <div className="space-y-6">
+          <div>
+            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-subtle)', marginBottom: '0.75rem' }}>Short — &ldquo;Tahi&rdquo;</div>
+            <div className="flex flex-wrap items-end gap-12">
+              <div style={{ color: 'var(--color-brand-deepest)' }}>
+                <TahiWordmark size={32} />
+              </div>
+              <div style={{ color: 'var(--color-brand-deepest)' }}>
+                <TahiWordmark size={64} />
+              </div>
+              <div style={{
+                background: 'var(--color-brand-deepest)',
+                color: 'var(--color-text-on-dark)',
+                padding: '1.25rem 1.75rem',
+                borderRadius: 'var(--radius-leaf)',
+              }}>
+                <TahiWordmark size={64} />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-subtle)', marginBottom: '0.75rem' }}>Long — &ldquo;Tahi Studio&rdquo;</div>
+            <div className="flex flex-wrap items-center gap-12">
+              <div style={{ color: 'var(--color-brand-deepest)' }}>
+                <TahiStudioWordmark height={36} />
+              </div>
+              <div style={{
+                background: 'var(--color-brand-deepest)',
+                color: 'var(--color-text-on-dark)',
+                padding: '1rem 1.5rem',
+                borderRadius: 'var(--radius-leaf)',
+              }}>
+                <TahiStudioWordmark height={48} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <GroupHeading>Icon mark — the &ldquo;1 + leaf&rdquo;</GroupHeading>
+        <div className="flex flex-wrap items-center gap-10">
+          <div style={{
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border-subtle)',
+            padding: '1.5rem',
+            borderRadius: 'var(--radius-leaf-sm)',
+            display: 'flex', alignItems: 'center', gap: '1.5rem',
+          }}>
+            <TahiIconMark size={32} variant="on-light" />
+            <TahiIconMark size={48} variant="on-light" />
+            <TahiIconMark size={72} variant="on-light" />
           </div>
           <div style={{
             background: 'var(--color-brand-deepest)',
-            color: 'var(--color-text-on-dark)',
-            padding: '1.5rem 2rem',
-            borderRadius: 'var(--radius-leaf)',
-            fontSize: '3.5rem', fontWeight: 700, letterSpacing: '-0.02em',
+            padding: '1.5rem',
+            borderRadius: 'var(--radius-leaf-sm)',
+            display: 'flex', alignItems: 'center', gap: '1.5rem',
           }}>
-            Tahi<span style={{ color: 'var(--color-brand-bright)' }}>.</span>
+            <TahiIconMark size={32} variant="on-dark" />
+            <TahiIconMark size={48} variant="on-dark" />
+            <TahiIconMark size={72} variant="on-dark" />
           </div>
         </div>
+        <p style={{ marginTop: '1rem', fontSize: '0.78rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+          <Mono>variant=&quot;on-light&quot;</Mono> uses a dark &ldquo;1&rdquo; for cream backgrounds. <Mono>variant=&quot;on-dark&quot;</Mono> uses a light &ldquo;1&rdquo; for forest backgrounds. The leaf gradient adapts to read against either surface.
+        </p>
       </Card>
 
       <Card>
