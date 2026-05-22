@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * <Avatar> — user / contact / team-member portrait.
+ * <Avatar>. User / contact / team-member portrait.
  *
  * When `src` is set, renders the image inside a circular crop with a
  * 1px brand-tinted ring. When `src` is missing or fails to load, falls
@@ -48,7 +48,7 @@ interface AvatarProps {
   /** Forces ring colour. Defaults to a very subtle neutral. */
   ring?: string
   className?: string
-  /** Optional click handler — if set, renders as a button. */
+  /** Optional click handler. If set, renders as a button. */
   onClick?: () => void
   /** When `true`, removes the white outer ring used by overlapping stacks. */
   noRing?: boolean
@@ -146,7 +146,7 @@ function AvatarRoot({
   )
 }
 
-// ── Overlapping stack — Avatar.Stack ────────────────────────────────────
+// ── Overlapping stack. Avatar.Stack ────────────────────────────────────
 function AvatarStack({
   children,
   spacing = 'normal',
@@ -169,6 +169,11 @@ function AvatarStack({
     overflowCount = childArray.length - max
   }
 
+  // Explicit z-index so the visual stacking is deterministic across
+  // browsers. Each subsequent avatar sits in front of the previous,
+  // and the overflow tile sits in front of every avatar. This is the
+  // pattern that reads as "and a few more" rather than "ghosted".
+  const total = display.length + (overflowCount > 0 ? 1 : 0)
   return (
     <div className={className} style={{ display: 'inline-flex', alignItems: 'center' }}>
       {display.map((child, i) => (
@@ -177,13 +182,20 @@ function AvatarStack({
           style={{
             marginLeft: i === 0 ? 0 : gap,
             display: 'inline-flex',
+            position: 'relative',
+            zIndex: i + 1,
           }}
         >
           {child}
         </span>
       ))}
       {overflowCount > 0 && (
-        <span style={{ marginLeft: gap, display: 'inline-flex' }}>
+        <span style={{
+          marginLeft: gap,
+          display: 'inline-flex',
+          position: 'relative',
+          zIndex: total + 1,
+        }}>
           <AvatarOverflow count={overflowCount} />
         </span>
       )}
@@ -200,6 +212,9 @@ function AvatarOverflow({
   size?: Size | number
 }) {
   const px = resolveSize(size)
+  // The overflow tile reads as a label, not an avatar. White surface,
+  // strong border, muted text. With the explicit z-index in
+  // Avatar.Stack it sits in front of every avatar.
   return (
     <div
       title={`${count} more`}
@@ -210,11 +225,11 @@ function AvatarOverflow({
         width: px,
         height: px,
         borderRadius: '9999px',
-        background: 'var(--color-brand-50)',
-        color: 'var(--color-brand-dark)',
-        fontSize: Math.max(10, Math.round(px * 0.35)),
+        background: 'var(--color-bg)',
+        color: 'var(--color-text-muted)',
+        fontSize: Math.max(10, Math.round(px * 0.36)),
         fontWeight: 600,
-        boxShadow: '0 0 0 2px var(--color-bg)',
+        boxShadow: '0 0 0 2px var(--color-bg-cream), inset 0 0 0 1px var(--color-border-strong)',
       }}
     >
       +{count}

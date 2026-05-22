@@ -1,12 +1,12 @@
 'use client'
 
 /**
- * Animated icons — Lucide Animated style.
+ * Animated icons. Lucide Animated style.
  *
  * Built on Motion (Framer Motion's lighter package). Hover behaviour:
  *
  *   Mouse-enter starts the animation. The full keyframe sequence plays
- *   through regardless of cursor position — leaving mid-play does NOT
+ *   through regardless of cursor position. Leaving mid-play does NOT
  *   reverse or snap. After the sequence completes, the icon sits at its
  *   rest state and is ready to be re-triggered by the next mouse-enter.
  *
@@ -55,7 +55,7 @@ function baseSvgProps(p: AnimatedIconProps) {
 /**
  * Hook that exposes an `onMouseEnter` handler which plays the given
  * sequence to completion once. While a sequence is in flight, further
- * mouse-enters are ignored — they re-trigger only after the previous
+ * mouse-enters are ignored. They re-trigger only after the previous
  * play finishes.
  */
 function useHoverSequence(

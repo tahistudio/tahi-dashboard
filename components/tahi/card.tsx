@@ -1,5 +1,5 @@
 /**
- * <Card> — the foundational surface primitive.
+ * <Card>. The foundational surface primitive.
  *
  * Webflow-style compound API with named slots. Use this instead of raw
  * `<div className="border rounded-xl ...">` everywhere so the card look
@@ -262,7 +262,7 @@ function CardDivider({ style }: { style?: React.CSSProperties }) {
 }
 
 /**
- * Card.Section — a labelled block inside a Card. Used mostly for the
+ * Card.Section. A labelled block inside a Card. Used mostly for the
  * deal/request/task detail sidebar pattern: one outer Card, many Sections
  * each with a small uppercase label and a divider between them.
  */

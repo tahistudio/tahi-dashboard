@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * <TahiButton> — every button in the app.
+ * <TahiButton>. Every button in the app.
  *
  * Variants:
  *   primary    Lime (#78C45E) with near-black text and the leaf radius.
@@ -19,7 +19,7 @@
  *
  * Motion: --motion-base (420ms) on hover, ease-out. Primary lifts 1px
  * + brand glow. Secondary just shifts border colour to brand. No
- * scale anywhere — feels cheap.
+ * scale anywhere. Feels cheap.
  */
 
 import * as React from 'react'
@@ -33,11 +33,11 @@ interface TahiButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElem
   variant?: Variant
   size?: Size
   loading?: boolean
-  /** Trailing icon (the brand default — arrow on a CTA). */
+  /** Trailing icon (the brand default. Arrow on a CTA). */
   icon?: React.ReactNode
   /** Leading icon. Use when the icon must sit before the label. */
   iconLeft?: React.ReactNode
-  /** Explicit override — sets where `icon` renders if both are passed. */
+  /** Explicit override. Sets where `icon` renders if both are passed. */
   iconRight?: React.ReactNode
   children?: React.ReactNode
 }
@@ -53,13 +53,17 @@ const BASE_STYLE: React.CSSProperties = {
   cursor: 'pointer',
   whiteSpace: 'nowrap',
   userSelect: 'none',
-  transition: 'background-color var(--motion-base) var(--ease-out), border-color var(--motion-base) var(--ease-out), color var(--motion-base) var(--ease-out), box-shadow var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out)',
+  // Calm 220ms swap. No transform / box-shadow transitions because the
+  // hover state stays grounded (no lift, no glow). Premium read comes
+  // from the lime accent + leaf radius, not motion theatre.
+  transition: 'background-color var(--motion-quick) var(--ease-out), border-color var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
 }
 
+// Padding + font sizes match the design pack exactly.
 const SIZE_STYLE: Record<Size, React.CSSProperties> = {
-  sm: { fontSize: 'var(--text-xs)',  padding: '0.4rem 0.7rem',  gap: '0.375rem' },
-  md: { fontSize: 'var(--text-sm)',  padding: '0.55rem 0.9rem', gap: '0.5rem'   },
-  lg: { fontSize: 'var(--text-base)',padding: '0.7rem 1.15rem', gap: '0.5rem'   },
+  sm: { fontSize: '0.75rem',    padding: '0.375rem 0.625rem',  gap: '0.375rem' },
+  md: { fontSize: '0.8125rem',  padding: '0.5rem 0.875rem',    gap: '0.375rem' },
+  lg: { fontSize: '0.875rem',   padding: '0.625rem 1.125rem',  gap: '0.5rem'   },
 }
 
 interface StyleForState {
@@ -77,12 +81,10 @@ function variantStyle(variant: Variant): StyleForState {
           color: 'var(--color-accent-text)',
           borderRadius: 'var(--radius-leaf-sm)',
         },
-        hover: {
-          background: '#6DB853',   // a touch deeper than the rest lime
-          transform: 'translateY(-1px)',
-          boxShadow: 'var(--shadow-brand)',
-        },
-        active: { transform: 'translateY(0)', boxShadow: 'none' },
+        // Match the design pack: hover just lifts the lime brightness.
+        // No translateY, no shadow glow. The premium read comes from the
+        // calm tempo and the lime accent itself, not motion theatre.
+        hover: { background: '#8ACE6F' },
       }
     case 'secondary':
       return {
@@ -92,22 +94,16 @@ function variantStyle(variant: Variant): StyleForState {
           border: '1px solid var(--color-border-strong)',
           borderRadius: 'var(--radius-md)',
         },
-        hover: {
-          borderColor: 'var(--color-brand)',
-          color: 'var(--color-brand-dark)',
-        },
+        hover: { background: 'var(--color-bg-secondary)' },
       }
     case 'ghost':
       return {
         rest: {
           background: 'transparent',
           color: 'var(--color-text-muted)',
-          borderRadius: 'var(--radius-md)',
+          borderRadius: 'var(--radius-sm)',
         },
-        hover: {
-          background: 'var(--color-brand-50)',
-          color: 'var(--color-brand-dark)',
-        },
+        hover: { background: 'var(--color-bg-secondary)', color: 'var(--color-text)' },
       }
     case 'link':
       return {
@@ -127,12 +123,7 @@ function variantStyle(variant: Variant): StyleForState {
           color: '#ffffff',
           borderRadius: 'var(--radius-md)',
         },
-        hover: {
-          background: '#B91C1C',
-          transform: 'translateY(-1px)',
-          boxShadow: '0 2px 8px rgba(220, 38, 38, 0.22)',
-        },
-        active: { transform: 'translateY(0)', boxShadow: 'none' },
+        hover: { background: '#B91C1C' },
       }
   }
 }
@@ -197,7 +188,7 @@ export function TahiButton({
 // Convenience export for callers that want the variant union for typing.
 export type { Variant as TahiButtonVariant, Size as TahiButtonSize }
 
-// Tiny inline-link helper for the `link` variant — keeps the sliding
+// Tiny inline-link helper for the `link` variant. Keeps the sliding
 // underline + arrow translate without forcing callers to wire it.
 export function TahiLink({
   href,

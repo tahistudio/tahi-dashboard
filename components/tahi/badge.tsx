@@ -1,5 +1,5 @@
 /**
- * <Badge> — every pill / chip / status label in the app.
+ * <Badge>. Every pill / chip / status label in the app.
  *
  * One component, two ways to drive colour:
  *   1. Semantic tone: <Badge tone="danger">Overdue</Badge>
@@ -19,11 +19,11 @@
  *   <Badge stage="Closed Won">Closed Won</Badge>
  *   <Badge source="webflow_partner">Webflow Partner</Badge>
  *
- * Tones (one meaning per colour — matches DESIGN.md color language):
+ * Tones (one meaning per colour. Matches DESIGN.md color language):
  *   brand     green (complete / done / positive)
  *   positive  green (alias for brand, reads clearer in tests)
  *   warning   amber (needs attention, in review, paused)
- *   danger    red (high priority, overdue — reserved per DESIGN.md)
+ *   danger    red (high priority, overdue. Reserved per DESIGN.md)
  *   info      blue (new, submitted, incoming)
  *   teal      teal (active, in progress)
  *   purple    purple (client action needed)
@@ -31,7 +31,7 @@
  *   neutral   gray (inactive, draft, archived)
  *
  * Variants:
- *   soft     tinted bg + solid text (default — most of the app)
+ *   soft     tinted bg + solid text (default. Most of the app)
  *   solid    full colour bg + white text (loud callouts)
  *   outline  transparent bg + coloured border + coloured text
  *   count    circular pill for numeric counts
@@ -58,7 +58,7 @@ export type BadgeVariant = 'soft' | 'solid' | 'outline' | 'count'
 export type BadgeSize = 'sm' | 'md'
 
 interface BadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'children'> {
-  /** Semantic tone — one of the tokens above. Ignored if `stage` or `source` is set. */
+  /** Semantic tone. One of the tokens above. Ignored if `stage` or `source` is set. */
   tone?: BadgeTone
   /** Stage name for categorical colour (runs through stageColour() from chart-colors). */
   stage?: string
@@ -85,68 +85,31 @@ interface BadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'childr
 
 // ── Tone → token map ────────────────────────────────────────────────────────
 
+/**
+ * Tone palette. Values come straight from the Tahi Studio design pack
+ * (Stripe-soft Twenty-leaning). Each tone has a deeper text colour for
+ * legibility against the soft tinted background. Borders are reserved
+ * for the outline variant only. Soft variant has no border, which keeps
+ * the visual weight down across dense lists.
+ */
 const TONE_MAP: Record<BadgeTone, { bg: string; text: string; border: string; dot: string }> = {
-  brand: {
-    bg: 'var(--color-brand-50)',
-    text: 'var(--color-brand)',
-    border: 'var(--color-brand-100)',
-    dot: 'var(--color-brand)',
-  },
-  positive: {
-    bg: 'var(--status-delivered-bg)',
-    text: 'var(--status-delivered-text)',
-    border: 'var(--status-delivered-border)',
-    dot: 'var(--status-delivered-dot)',
-  },
-  warning: {
-    bg: 'var(--status-in-review-bg)',
-    text: 'var(--status-in-review-text)',
-    border: 'var(--status-in-review-border)',
-    dot: 'var(--status-in-review-dot)',
-  },
-  danger: {
-    bg: 'var(--color-danger-bg)',
-    text: 'var(--color-danger)',
-    border: 'var(--color-danger)',
-    dot: 'var(--color-danger-dot)',
-  },
-  info: {
-    bg: 'var(--status-submitted-bg)',
-    text: 'var(--status-submitted-text)',
-    border: 'var(--status-submitted-border)',
-    dot: 'var(--status-submitted-dot)',
-  },
-  teal: {
-    bg: 'var(--status-in-progress-bg)',
-    text: 'var(--status-in-progress-text)',
-    border: 'var(--status-in-progress-border)',
-    dot: 'var(--status-in-progress-dot)',
-  },
-  purple: {
-    bg: 'var(--status-client-review-bg)',
-    text: 'var(--status-client-review-text)',
-    border: 'var(--status-client-review-border)',
-    dot: 'var(--status-client-review-dot)',
-  },
-  rose: {
-    bg: 'var(--priority-urgent-bg)',
-    text: 'var(--priority-urgent-text)',
-    border: 'var(--priority-urgent-border)',
-    dot: 'var(--priority-urgent-dot)',
-  },
-  neutral: {
-    bg: 'var(--color-bg-tertiary)',
-    text: 'var(--color-text-muted)',
-    border: 'var(--color-border)',
-    dot: 'var(--color-text-subtle)',
-  },
+  brand:    { bg: '#EEF5EB', text: '#3F6235', border: '#D5E4CF', dot: '#5A824E' },
+  positive: { bg: '#E9F7EE', text: '#176B3D', border: '#C8E8D2', dot: '#22C55E' },
+  info:     { bg: '#EBF1FE', text: '#1F4FBA', border: '#D5E2FB', dot: '#3B82F6' },
+  warning:  { bg: '#FEF6E6', text: '#8A5A12', border: '#F7E2B8', dot: '#F59E0B' },
+  danger:   { bg: '#FDEDEC', text: '#B42318', border: '#F6CDC7', dot: '#EF4444' },
+  teal:     { bg: '#E6F6F9', text: '#0E6E81', border: '#C2E7EE', dot: '#06B6D4' },
+  purple:   { bg: '#F0EBFC', text: '#5A30C3', border: '#DCD2F4', dot: '#8B5CF6' },
+  rose:     { bg: '#FBE9F2', text: '#9D1F62', border: '#F4CADF', dot: '#EC4899' },
+  neutral:  { bg: '#F2F4F2', text: '#525A52', border: '#E1E5E1', dot: '#9CA3AF' },
 }
 
 // ── Size → padding/font map ────────────────────────────────────────────────
 
+// Padding + font sizes match the design pack (3px 9px / 12px / 6px radius).
 const SIZE_MAP: Record<BadgeSize, { padding: string; fontSize: string; dotSize: string; gap: string }> = {
-  sm: { padding: '0.0625rem 0.375rem', fontSize: '0.6875rem', dotSize: '0.3125rem', gap: '0.3125rem' },
-  md: { padding: '0.125rem 0.5rem',    fontSize: '0.75rem',   dotSize: '0.375rem',  gap: '0.375rem'  },
+  sm: { padding: '0.125rem 0.4375rem', fontSize: '0.6875rem', dotSize: '0.3125rem', gap: '0.3125rem' },
+  md: { padding: '0.1875rem 0.5625rem', fontSize: '0.75rem',  dotSize: '0.375rem',  gap: '0.375rem'  },
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -198,11 +161,13 @@ export function Badge({
 
   const s = SIZE_MAP[size]
 
-  // Variant adjusts the final palette
+  // Variant adjusts the final palette. The default soft variant uses the
+  // 6px symmetric radius from the design pack (not pill) so dense tables
+  // and chip rows feel calmer.
   let finalBg = bg
   let finalText = text
   let finalBorder: string | undefined
-  let borderRadius = 'var(--radius-full)'
+  let borderRadius = 'var(--radius-sm)'
 
   switch (variant) {
     case 'soft':
@@ -218,7 +183,7 @@ export function Badge({
       finalBorder = border
       break
     case 'count':
-      // Circular count badge — brand background with white text by default
+      // Circular count badge. Brand background with white text by default.
       finalBg = tone ? bg : 'var(--color-brand)'
       finalText = tone ? text : '#ffffff'
       finalBorder = undefined

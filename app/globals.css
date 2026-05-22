@@ -98,44 +98,47 @@
      Rose   = urgent priority (escalation above high)
      ─────────────────────────────────────────────────────── */
 
-  /* ── Request status palette ─────────────────────────────── */
+  /* ── Request status palette ───────────────────────────────
+     Values lifted from the Tahi Studio design pack. Deeper text on
+     softer tinted backgrounds. Six hues across the lifecycle so each
+     state reads distinct at a glance: warm gray draft, royal blue
+     submitted, golden amber in-review, deep teal in-progress, deep
+     violet client-review, emerald delivered, warm beige archived. */
   --status-draft-dot:          #9ca3af;
-  --status-draft-bg:           #f3f4f6;
-  --status-draft-text:         #4b5563;
-  --status-draft-border:       #e5e7eb;
+  --status-draft-bg:           #f2f4f2;
+  --status-draft-text:         #525a52;
+  --status-draft-border:       #e1e5e1;
 
-  /* Submitted shifted from blue (#60a5fa) → indigo (#818cf8) to widen
-     the visual gap from in-progress (teal). Submitted = "just arrived",
-     in-progress = "we're working on it" — the two should read distinct. */
-  --status-submitted-dot:      #818cf8;
-  --status-submitted-bg:       #eef2ff;
-  --status-submitted-text:     #4338ca;
-  --status-submitted-border:   #c7d2fe;
+  --status-submitted-dot:      #3b82f6;
+  --status-submitted-bg:       #ebf1fe;
+  --status-submitted-text:     #1f4fba;
+  --status-submitted-border:   #d5e2fb;
 
-  --status-in-review-dot:      #fbbf24;
-  --status-in-review-bg:       #fffbeb;
-  --status-in-review-text:     #92400e;
-  --status-in-review-border:   #fde68a;
+  --status-in-review-dot:      #f59e0b;
+  --status-in-review-bg:       #fef6e6;
+  --status-in-review-text:     #8a5a12;
+  --status-in-review-border:   #f7e2b8;
 
   --status-in-progress-dot:    #06b6d4;
-  --status-in-progress-bg:     #ecfeff;
-  --status-in-progress-text:   #0e7490;
-  --status-in-progress-border: #a5f3fc;
+  --status-in-progress-bg:     #e6f6f9;
+  --status-in-progress-text:   #0e6e81;
+  --status-in-progress-border: #c2e7ee;
 
-  --status-client-review-dot:      #a78bfa;
-  --status-client-review-bg:       #f5f3ff;
-  --status-client-review-text:     #6d28d9;
-  --status-client-review-border:   #ede9fe;
+  --status-client-review-dot:      #8b5cf6;
+  --status-client-review-bg:       #f0ebfc;
+  --status-client-review-text:     #5a30c3;
+  --status-client-review-border:   #dcd2f4;
 
   --status-delivered-dot:      #22c55e;
-  --status-delivered-bg:       #f0fdf4;
-  --status-delivered-text:     #15803d;
-  --status-delivered-border:   #bbf7d0;
+  --status-delivered-bg:       #e9f7ee;
+  --status-delivered-text:     #176b3d;
+  --status-delivered-border:   #c8e8d2;
 
-  --status-archived-dot:       #d1d5db;
-  --status-archived-bg:        #f9fafb;
-  --status-archived-text:      #6b7280;
-  --status-archived-border:    #e5e7eb;
+  /* Archived: warm beige-gray, distinct from cool draft gray. */
+  --status-archived-dot:       #a39e93;
+  --status-archived-bg:        #edeae5;
+  --status-archived-text:      #6b6258;
+  --status-archived-border:    #ddd6cc;
 
   /* ── Category palette ───────────────────────────────────── */
   --cat-design-bg:        #fce7f3;

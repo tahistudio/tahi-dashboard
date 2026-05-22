@@ -20,11 +20,11 @@ import { Badge } from '@/components/tahi/badge'
 import { Card as CardPrim } from '@/components/tahi/card'
 
 /**
- * /design-system — the canonical token + primitive reference.
+ * /design-system. The canonical token + primitive reference.
  *
  * Hidden route (no sidebar link). Admin only. Built from the Tahi Studio
  * design-system handoff bundle. When a primitive disagrees with a page,
- * the page is wrong — check this surface and fix the page.
+ * the page is wrong. Check this surface and fix the page.
  *
  * Phase A3 ships the foundation (tokens). Components fleshed out in A4.
  */
@@ -38,9 +38,7 @@ const SECTIONS = [
   { id: 'shadows',      label: 'Shadows' },
   { id: 'motion',       label: 'Motion' },
   { id: 'iconography',  label: 'Iconography' },
-  { id: 'animations',   label: 'Animation styles' },
   { id: 'brand',        label: 'Brand' },
-  { id: 'wcag',         label: 'WCAG 2.2' },
   { id: 'components',   label: 'Components' },
 ] as const
 
@@ -56,9 +54,7 @@ export function DesignSystemContent() {
       <ShadowsSection />
       <MotionSection />
       <IconographySection />
-      <AnimationStylesSection />
       <BrandSection />
-      <WcagSection />
       <ComponentsSection />
     </div>
   )
@@ -242,7 +238,7 @@ const SEMANTIC_SWATCHES: Swatch[] = [
 ]
 
 // Submitted shifted to indigo so it reads distinct from in-progress (teal).
-// Chips now lead with the LeafIcon tinted to the chip's text colour —
+// Chips now lead with the LeafIcon tinted to the chip's text colour .
 // brand-consistent leading glyph that replaces the generic circle dot.
 const STATUS_SWATCHES: Array<{ key: string, bg: string, text: string, label: string }> = [
   { key: 'draft',          bg: '#F3F4F6', text: '#4B5563', label: 'Draft' },
@@ -347,7 +343,7 @@ function TypographySection() {
     <SectionShell
       id="typography"
       title="Typography"
-      intro="Manrope across the entire system at 300 – 800. Two ladders: marketing display (hero, section headlines, big numbers) and dashboard UI (dense, 12 – 24px). 500 is the default body weight — heavier than most systems, which is what gives Manrope its quiet confidence."
+      intro="Manrope across the entire system at 300 to 800. Two ladders: marketing display (hero, section headlines, big numbers) and dashboard UI (dense, 12 to 24px). 500 is the default body weight. Heavier than most systems, which is what gives Manrope its quiet confidence."
     >
       <div className="grid md:grid-cols-2 gap-4">
         <Card>
@@ -371,7 +367,7 @@ function TypographySection() {
             <TypeSpec label="XL"    size="--text-xl"   weight={600} tracking="var(--tracking-tight)" sample="Requests" />
             <TypeSpec label="LG"    size="--text-lg"   weight={500} tracking="0" sample="Sub-page title" />
             <TypeSpec label="MD"    size="--text-md"   weight={500} tracking="0" sample="Card title" />
-            <TypeSpec label="Base"  size="--text-base" weight={500} tracking="0" sample="Default body — every dense list, every form." />
+            <TypeSpec label="Base"  size="--text-base" weight={500} tracking="0" sample="Default body. Every dense list, every form." />
             <TypeSpec label="SM"    size="--text-sm"   weight={500} tracking="0" sample="Secondary text, table cell, nav item." />
             <TypeSpec label="XS"    size="--text-xs"   weight={500} tracking="0.020em" sample="LABEL · META · BADGE" />
           </div>
@@ -473,7 +469,7 @@ function RadiiSection() {
   return (
     <SectionShell
       id="radii"
-      title="Radii — the leaf shape"
+      title="Radii. The leaf shape"
       intro="The single most identifying visual element. Top-left sharp · top-right round · bottom-right sharp · bottom-left round. Applied to buttons, cards, panels. Symmetric radii are reserved for inputs (8px) and pills (full)."
     >
       <Card>
@@ -544,7 +540,7 @@ function ShadowsSection() {
 // ────────────────────────────────────────────────────────────────────────
 const MOTION_TOKENS = [
   { token: '--motion-quick',  ms: '220ms',  use: 'Colour swap, focus ring' },
-  { token: '--motion-base',   ms: '420ms',  use: 'Default hover — the studio tempo' },
+  { token: '--motion-base',   ms: '420ms',  use: 'Default hover. The studio tempo' },
   { token: '--motion-medium', ms: '520ms',  use: 'Underline sweep, arrow translate' },
   { token: '--motion-slow',   ms: '720ms',  use: 'Card lift, scroll reveal' },
   { token: '--motion-grand',  ms: '1100ms', use: 'Arrow loop, hero reveal' },
@@ -556,7 +552,7 @@ function MotionSection() {
     <SectionShell
       id="motion"
       title="Motion"
-      intro="Calm. Slower than most systems. Ease-out only — never bounce. The cubic 0.22, 1, 0.36, 1 reads as premium. All animations honour prefers-reduced-motion."
+      intro="Calm. Slower than most systems. Ease-out only. Never bounce. The cubic 0.22, 1, 0.36, 1 reads as premium. All animations honour prefers-reduced-motion."
     >
       <Card>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
@@ -600,108 +596,103 @@ function MotionSection() {
 // ────────────────────────────────────────────────────────────────────────
 // Iconography
 //
-// Currently using Lucide at 1.5px stroke. The user flagged that some
-// shapes (notably arrow heads) feel too blocky and asked to compare
-// against Phosphor / Tabler — see the AltArrows panel below.
-//
-// Per-icon micro-animations: each tile is wrapped in <IconTile> which
-// applies a subtle hover lift + colour shift. Specific icons opt into
-// a directional motion (arrows translate, bell rings, plus rotates,
-// search and eye scale). Driven by the `motion` field on each entry.
-// Honours prefers-reduced-motion via the global rule in globals.css.
+// Two clearly separated subsections:
+//   1. Static Lucide icons. The default everywhere. Just hover-tint, no
+//      motion. 1.5px stroke. Imported from `lucide-react` in production.
+//   2. Animated icons. Used selectively. Motion-powered. Imported from
+//      `components/tahi/animated-icons.tsx`. Each one has a picked home
+//      where motion carries meaning. Static Lucide everywhere else.
 // ────────────────────────────────────────────────────────────────────────
 
-type IconMotion = 'lift' | 'arrow-up-right' | 'arrow-right' | 'arrow-left' | 'arrow-down' | 'arrow-up' | 'bell' | 'spin' | 'pulse' | 'scale'
-
-type IconDef = { name: string, use: string, paths: React.ReactNode, motion?: IconMotion }
+type IconDef = { name: string, use: string, paths: React.ReactNode }
 
 // All paths verified against Lucide v0.359+ (24×24 grid, 1.5px stroke
 // applied by the wrapper). The previous home path closed incorrectly at
-// h-4v-7 — fixed to H5 so the silhouette renders as a proper house.
+// h-4v-7. Fixed to H5 so the silhouette renders as a proper house.
 const ICONS: IconDef[] = [
   // Brand & narrative
-  { name: 'leaf',            use: 'Growth, brand',         motion: 'lift',  paths: (<><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19.2 2.96a1 1 0 0 1 1.8.56c0 5.62-1.34 10.83-5 14.6A7 7 0 0 1 11 20Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6"/></>) },
-  { name: 'sprout',          use: 'Launch, stage 1',       motion: 'lift',  paths: (<><path d="M7 20h10"/><path d="M10 20c5.5-2.5.8-6.4 3-10"/><path d="M9.5 9.4c1.1.8 1.8 2 2 3.3-1.3.4-2.7.2-3.8-.5-1.1-.8-1.8-2-2-3.3 1.3-.5 2.7-.2 3.8.5z"/><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.7-1 5-2.4.6-.8 1-1.7 1-2.6-1.4-.1-2.8.4-3.9 1z"/></>) },
-  { name: 'tree-pine',       use: 'Carbon negative',       motion: 'lift',  paths: (<><path d="m17 14 3 3.3a1 1 0 0 1-.7 1.7H4.7a1 1 0 0 1-.7-1.7L7 14h-.3a1 1 0 0 1-.7-1.7L9 9h-.2A1 1 0 0 1 8 7.3L12 3l4 4.3a1 1 0 0 1-.8 1.7H15l3 3.3a1 1 0 0 1-.7 1.7H17Z"/><path d="M12 22v-3"/></>) },
-  { name: 'heart-handshake', use: 'Partnership',           motion: 'pulse', paths: (<><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/><path d="M12 5 9.04 7.96a2.17 2.17 0 0 0 0 3.08v0c.82.82 2.13.85 3 .07l2.07-1.9a2.82 2.82 0 0 1 3.79 0l2.96 2.66"/><path d="m18 15-2-2"/><path d="m15 18-2-2"/></>) },
-  { name: 'sparkles',        use: 'AI features',           motion: 'pulse', paths: (<><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.13 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></>) },
+  { name: 'leaf',            use: 'Growth, brand',  paths: (<><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19.2 2.96a1 1 0 0 1 1.8.56c0 5.62-1.34 10.83-5 14.6A7 7 0 0 1 11 20Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6"/></>) },
+  { name: 'sprout',          use: 'Launch, stage 1',  paths: (<><path d="M7 20h10"/><path d="M10 20c5.5-2.5.8-6.4 3-10"/><path d="M9.5 9.4c1.1.8 1.8 2 2 3.3-1.3.4-2.7.2-3.8-.5-1.1-.8-1.8-2-2-3.3 1.3-.5 2.7-.2 3.8.5z"/><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.7-1 5-2.4.6-.8 1-1.7 1-2.6-1.4-.1-2.8.4-3.9 1z"/></>) },
+  { name: 'tree-pine',       use: 'Carbon negative',  paths: (<><path d="m17 14 3 3.3a1 1 0 0 1-.7 1.7H4.7a1 1 0 0 1-.7-1.7L7 14h-.3a1 1 0 0 1-.7-1.7L9 9h-.2A1 1 0 0 1 8 7.3L12 3l4 4.3a1 1 0 0 1-.8 1.7H15l3 3.3a1 1 0 0 1-.7 1.7H17Z"/><path d="M12 22v-3"/></>) },
+  { name: 'heart-handshake', use: 'Partnership', paths: (<><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/><path d="M12 5 9.04 7.96a2.17 2.17 0 0 0 0 3.08v0c.82.82 2.13.85 3 .07l2.07-1.9a2.82 2.82 0 0 1 3.79 0l2.96 2.66"/><path d="m18 15-2-2"/><path d="m15 18-2-2"/></>) },
+  { name: 'sparkles',        use: 'AI features', paths: (<><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.13 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></>) },
 
   // Wayfinding
-  { name: 'home',            use: 'Overview',              motion: 'lift',  paths: (<><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></>) },
-  { name: 'inbox',           use: 'Requests',              motion: 'lift',  paths: (<><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></>) },
-  { name: 'kanban',          use: 'Board view',            motion: 'lift',  paths: (<><path d="M6 5v11"/><path d="M12 5v6"/><path d="M18 5v14"/></>) },
-  { name: 'layout-grid',     use: 'Grid view',             motion: 'lift',  paths: (<><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></>) },
-  { name: 'list',            use: 'List view',             motion: 'lift',  paths: (<><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></>) },
-  { name: 'folder',          use: 'Files, group',          motion: 'lift',  paths: (<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>) },
-  { name: 'file-text',       use: 'Docs, contracts',       motion: 'lift',  paths: (<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></>) },
-  { name: 'receipt',         use: 'Invoices',              motion: 'lift',  paths: (<><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></>) },
-  { name: 'bar-chart',       use: 'Reports',               motion: 'lift',  paths: (<><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></>) },
-  { name: 'settings',        use: 'Settings',              motion: 'spin',  paths: (<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></>) },
+  { name: 'home',            use: 'Overview',  paths: (<><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></>) },
+  { name: 'inbox',           use: 'Requests',  paths: (<><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></>) },
+  { name: 'kanban',          use: 'Board view',  paths: (<><path d="M6 5v11"/><path d="M12 5v6"/><path d="M18 5v14"/></>) },
+  { name: 'layout-grid',     use: 'Grid view',  paths: (<><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></>) },
+  { name: 'list',            use: 'List view',  paths: (<><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></>) },
+  { name: 'folder',          use: 'Files, group',  paths: (<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>) },
+  { name: 'file-text',       use: 'Docs, contracts',  paths: (<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></>) },
+  { name: 'receipt',         use: 'Invoices',  paths: (<><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></>) },
+  { name: 'bar-chart',       use: 'Reports',  paths: (<><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></>) },
+  { name: 'settings',        use: 'Settings',  paths: (<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></>) },
 
   // Search / actions
-  { name: 'search',          use: 'Top-nav search',        motion: 'scale', paths: (<><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></>) },
-  { name: 'command',         use: 'Cmd+K palette',         motion: 'lift',  paths: (<path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>) },
-  { name: 'plus',            use: 'Create new',            motion: 'spin',  paths: (<><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>) },
-  { name: 'x',               use: 'Close, dismiss',        motion: 'spin',  paths: (<><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>) },
-  { name: 'edit',            use: 'Edit, rename',          motion: 'lift',  paths: (<><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></>) },
-  { name: 'trash',           use: 'Delete',                motion: 'lift',  paths: (<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></>) },
-  { name: 'copy',            use: 'Duplicate',             motion: 'lift',  paths: (<><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></>) },
-  { name: 'download',        use: 'Download file',         motion: 'arrow-down', paths: (<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>) },
-  { name: 'upload',          use: 'Upload file',           motion: 'arrow-up',   paths: (<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>) },
-  { name: 'share',           use: 'Share link',            motion: 'lift',  paths: (<><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></>) },
-  { name: 'link',            use: 'Internal link',         motion: 'lift',  paths: (<><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></>) },
-  { name: 'external-link',   use: 'Open in new tab',       motion: 'arrow-up-right', paths: (<><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></>) },
-  { name: 'refresh-cw',      use: 'Reload, sync',          motion: 'spin',  paths: (<><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></>) },
-  { name: 'more-horizontal', use: 'Row actions',           motion: 'lift',  paths: (<><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></>) },
+  { name: 'search',          use: 'Top-nav search', paths: (<><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></>) },
+  { name: 'command',         use: 'Cmd+K palette',  paths: (<path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>) },
+  { name: 'plus',            use: 'Create new',  paths: (<><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>) },
+  { name: 'x',               use: 'Close, dismiss',  paths: (<><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>) },
+  { name: 'edit',            use: 'Edit, rename',  paths: (<><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></>) },
+  { name: 'trash',           use: 'Delete',  paths: (<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></>) },
+  { name: 'copy',            use: 'Duplicate',  paths: (<><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></>) },
+  { name: 'download',        use: 'Download file', paths: (<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>) },
+  { name: 'upload',          use: 'Upload file',   paths: (<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>) },
+  { name: 'share',           use: 'Share link',  paths: (<><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></>) },
+  { name: 'link',            use: 'Internal link',  paths: (<><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></>) },
+  { name: 'external-link',   use: 'Open in new tab', paths: (<><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></>) },
+  { name: 'refresh-cw',      use: 'Reload, sync',  paths: (<><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></>) },
+  { name: 'more-horizontal', use: 'Row actions',  paths: (<><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></>) },
 
   // Arrows
-  { name: 'arrow-up-right',  use: 'Outbound, CTA',         motion: 'arrow-up-right', paths: (<><path d="M7 7h10v10"/><path d="M7 17 17 7"/></>) },
-  { name: 'arrow-right',     use: 'Continue, next',        motion: 'arrow-right',    paths: (<><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></>) },
-  { name: 'arrow-left',      use: 'Back',                  motion: 'arrow-left',     paths: (<><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></>) },
-  { name: 'arrow-up',        use: 'Increase, up',          motion: 'arrow-up',       paths: (<><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></>) },
-  { name: 'arrow-down',      use: 'Decrease, down',        motion: 'arrow-down',     paths: (<><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></>) },
-  { name: 'chevron-right',   use: 'Expand, next page',     motion: 'arrow-right',    paths: (<polyline points="9 18 15 12 9 6"/>) },
-  { name: 'chevron-left',    use: 'Collapse, prev',        motion: 'arrow-left',     paths: (<polyline points="15 18 9 12 15 6"/>) },
-  { name: 'chevron-down',    use: 'Dropdown',              motion: 'arrow-down',     paths: (<polyline points="6 9 12 15 18 9"/>) },
-  { name: 'chevron-up',      use: 'Collapse',              motion: 'arrow-up',       paths: (<polyline points="18 15 12 9 6 15"/>) },
+  { name: 'arrow-up-right',  use: 'Outbound, CTA', paths: (<><path d="M7 7h10v10"/><path d="M7 17 17 7"/></>) },
+  { name: 'arrow-right',     use: 'Continue, next',    paths: (<><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></>) },
+  { name: 'arrow-left',      use: 'Back',     paths: (<><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></>) },
+  { name: 'arrow-up',        use: 'Increase, up',       paths: (<><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></>) },
+  { name: 'arrow-down',      use: 'Decrease, down',     paths: (<><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></>) },
+  { name: 'chevron-right',   use: 'Expand, next page',    paths: (<polyline points="9 18 15 12 9 6"/>) },
+  { name: 'chevron-left',    use: 'Collapse, prev',     paths: (<polyline points="15 18 9 12 15 6"/>) },
+  { name: 'chevron-down',    use: 'Dropdown',     paths: (<polyline points="6 9 12 15 18 9"/>) },
+  { name: 'chevron-up',      use: 'Collapse',       paths: (<polyline points="18 15 12 9 6 15"/>) },
 
   // Status / feedback
-  { name: 'check-circle',    use: 'Delivered, done',       motion: 'pulse', paths: (<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>) },
-  { name: 'check',           use: 'Inline confirm',        motion: 'pulse', paths: (<polyline points="20 6 9 17 4 12"/>) },
-  { name: 'alert-triangle',  use: 'Warning, error',        motion: 'pulse', paths: (<><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>) },
-  { name: 'alert-circle',    use: 'Heads up',              motion: 'pulse', paths: (<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>) },
-  { name: 'info',            use: 'Informational',         motion: 'pulse', paths: (<><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></>) },
-  { name: 'zap',             use: 'Fast, launch',          motion: 'pulse', paths: (<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>) },
-  { name: 'flame',           use: 'Hot, urgent',           motion: 'pulse', paths: (<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>) },
+  { name: 'check-circle',    use: 'Delivered, done', paths: (<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>) },
+  { name: 'check',           use: 'Inline confirm', paths: (<polyline points="20 6 9 17 4 12"/>) },
+  { name: 'alert-triangle',  use: 'Warning, error', paths: (<><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>) },
+  { name: 'alert-circle',    use: 'Heads up', paths: (<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>) },
+  { name: 'info',            use: 'Informational', paths: (<><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></>) },
+  { name: 'zap',             use: 'Fast, launch', paths: (<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>) },
+  { name: 'flame',           use: 'Hot, urgent', paths: (<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>) },
 
   // Money & data
-  { name: 'dollar-sign',     use: 'Money, billable',       motion: 'lift',  paths: (<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></>) },
-  { name: 'percent',         use: 'Discount, rate',        motion: 'lift',  paths: (<><line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></>) },
-  { name: 'trending-up',     use: 'KPI delta+',            motion: 'arrow-up-right', paths: (<><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></>) },
-  { name: 'trending-down',   use: 'KPI delta-',            motion: 'arrow-up-right', paths: (<><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></>) },
-  { name: 'pie-chart',       use: 'Breakdown',             motion: 'lift',  paths: (<><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></>) },
-  { name: 'activity',        use: 'Live status',           motion: 'pulse', paths: (<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>) },
+  { name: 'dollar-sign',     use: 'Money, billable',  paths: (<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></>) },
+  { name: 'percent',         use: 'Discount, rate',  paths: (<><line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></>) },
+  { name: 'trending-up',     use: 'KPI delta+', paths: (<><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></>) },
+  { name: 'trending-down',   use: 'KPI delta-', paths: (<><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></>) },
+  { name: 'pie-chart',       use: 'Breakdown',  paths: (<><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></>) },
+  { name: 'activity',        use: 'Live status', paths: (<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>) },
 
   // People & comms
-  { name: 'users',           use: 'Team, clients',         motion: 'lift',  paths: (<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>) },
-  { name: 'user',            use: 'Single person',         motion: 'lift',  paths: (<><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>) },
-  { name: 'user-plus',       use: 'Add member',            motion: 'lift',  paths: (<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></>) },
-  { name: 'message-circle',  use: 'Comments',              motion: 'lift',  paths: (<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>) },
-  { name: 'mail',            use: 'Email',                 motion: 'lift',  paths: (<><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/></>) },
-  { name: 'phone',           use: 'Phone, call',           motion: 'lift',  paths: (<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>) },
-  { name: 'video',           use: 'Video call',            motion: 'lift',  paths: (<><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></>) },
-  { name: 'bell',            use: 'Notifications',         motion: 'bell',  paths: (<><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></>) },
+  { name: 'users',           use: 'Team, clients',  paths: (<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>) },
+  { name: 'user',            use: 'Single person',  paths: (<><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>) },
+  { name: 'user-plus',       use: 'Add member',  paths: (<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></>) },
+  { name: 'message-circle',  use: 'Comments',  paths: (<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>) },
+  { name: 'mail',            use: 'Email',  paths: (<><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/></>) },
+  { name: 'phone',           use: 'Phone, call',  paths: (<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>) },
+  { name: 'video',           use: 'Video call',  paths: (<><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></>) },
+  { name: 'bell',            use: 'Notifications',  paths: (<><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></>) },
 
   // Time
-  { name: 'clock',           use: 'Time tracker',          motion: 'spin',  paths: (<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>) },
-  { name: 'calendar',        use: 'Date, due',             motion: 'lift',  paths: (<><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>) },
-  { name: 'timer',           use: 'Live timer',            motion: 'pulse', paths: (<><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="15" y2="11"/><circle cx="12" cy="14" r="8"/></>) },
+  { name: 'clock',           use: 'Time tracker',  paths: (<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>) },
+  { name: 'calendar',        use: 'Date, due',  paths: (<><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>) },
+  { name: 'timer',           use: 'Live timer', paths: (<><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="15" y2="11"/><circle cx="12" cy="14" r="8"/></>) },
 
   // View options
-  { name: 'eye',             use: 'Visible, preview',      motion: 'scale', paths: (<><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>) },
-  { name: 'eye-off',         use: 'Hidden, private',       motion: 'scale', paths: (<><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></>) },
-  { name: 'filter',          use: 'Filter table',          motion: 'lift',  paths: (<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>) },
-  { name: 'sliders',         use: 'Adjust',                motion: 'lift',  paths: (<><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></>) },
+  { name: 'eye',             use: 'Visible, preview', paths: (<><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>) },
+  { name: 'eye-off',         use: 'Hidden, private', paths: (<><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></>) },
+  { name: 'filter',          use: 'Filter table',  paths: (<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>) },
+  { name: 'sliders',         use: 'Adjust',  paths: (<><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></>) },
 ]
 
 function LucideIcon({ children, size = 24, stroke = 1.5, color = 'currentColor' }: {
@@ -716,26 +707,9 @@ function LucideIcon({ children, size = 24, stroke = 1.5, color = 'currentColor' 
   )
 }
 
-// Per-icon hover transform. Designed to be subtle. All translations cap
-// at 2px; rotations at 45°; scales at 1.10. So they read as polish, not
-// cartoon. Driven off the icon's `motion` field.
-function motionTransform(motion: IconMotion | undefined): string {
-  switch (motion) {
-    case 'arrow-up-right': return 'translate(2px, -2px)'
-    case 'arrow-right':    return 'translateX(2px)'
-    case 'arrow-left':     return 'translateX(-2px)'
-    case 'arrow-up':       return 'translateY(-2px)'
-    case 'arrow-down':     return 'translateY(2px)'
-    case 'bell':           return 'rotate(-10deg)'
-    case 'spin':           return 'rotate(45deg)'
-    case 'pulse':          return 'scale(1.08)'
-    case 'scale':          return 'scale(1.10)'
-    case 'lift':
-    default:               return 'translateY(-1px)'
-  }
-}
-
-function IconTile({ icon }: { icon: IconDef }) {
+// Single tile used for both static and animated icon grids. Just a
+// hover-tint on the surface and a colour shift on the glyph. No motion.
+function IconTile({ icon, glyph }: { icon: IconDef, glyph?: React.ReactNode }) {
   const [hovered, setHovered] = useState(false)
   return (
     <div
@@ -745,7 +719,7 @@ function IconTile({ icon }: { icon: IconDef }) {
       onBlur={() => setHovered(false)}
       tabIndex={0}
       role="figure"
-      aria-label={`${icon.name} — ${icon.use}`}
+      aria-label={icon.name + ' · ' + icon.use}
       style={{
         borderRadius: 'var(--radius-leaf-sm)',
         padding: '0.875rem',
@@ -761,11 +735,9 @@ function IconTile({ icon }: { icon: IconDef }) {
         flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         width: '2rem', height: '2rem',
-        transform: hovered ? motionTransform(icon.motion) : 'none',
-        transition: 'transform var(--motion-base) var(--ease-out), color var(--motion-quick) var(--ease-out)',
-        transformOrigin: 'center',
+        transition: 'color var(--motion-quick) var(--ease-out)',
       }}>
-        <LucideIcon>{icon.paths}</LucideIcon>
+        {glyph ?? <LucideIcon>{icon.paths}</LucideIcon>}
       </div>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: '0.8125rem', fontWeight: 500 }}>{icon.name}</div>
@@ -777,101 +749,33 @@ function IconTile({ icon }: { icon: IconDef }) {
   )
 }
 
-// Same three actions across Lucide / Phosphor (regular) / Tabler so we
-// can compare arrow-head geometry before standardising. Phosphor regular
-// uses a 16-unit stroke on a 256 viewBox which renders as a curved-head
-// arrow with no inner L-angle.
-function AltArrows() {
-  type Sample = { lib: 'Lucide' | 'Phosphor' | 'Tabler', paths: React.ReactNode, viewBox?: string, stroke?: number }
-  type Row = { name: string, samples: Sample[] }
-
-  const rows: Row[] = [
-    {
-      name: 'arrow-up-right',
-      samples: [
-        { lib: 'Lucide',   paths: <><path d="M7 7h10v10"/><path d="M7 17 17 7"/></> },
-        { lib: 'Phosphor', viewBox: '0 0 256 256', stroke: 16, paths: <><path d="M64,192,192,64M88,64H192v104"/></> },
-        { lib: 'Tabler',   paths: <><path d="M17 7l-10 10"/><path d="M8 7l9 0"/><path d="M17 8l0 9"/></> },
-      ],
-    },
-    {
-      name: 'arrow-right',
-      samples: [
-        { lib: 'Lucide',   paths: <><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></> },
-        { lib: 'Phosphor', viewBox: '0 0 256 256', stroke: 16, paths: <><path d="M40,128H216M144,56l72,72-72,72"/></> },
-        { lib: 'Tabler',   paths: <><path d="M5 12l14 0"/><path d="M13 18l6 -6"/><path d="M13 6l6 6"/></> },
-      ],
-    },
-    {
-      name: 'chevron-right',
-      samples: [
-        { lib: 'Lucide',   paths: <polyline points="9 18 15 12 9 6"/> },
-        { lib: 'Phosphor', viewBox: '0 0 256 256', stroke: 16, paths: <polyline points="96,48 176,128 96,208"/> },
-        { lib: 'Tabler',   paths: <path d="M9 6l6 6l-6 6"/> },
-      ],
-    },
-  ]
-
-  return (
-    <Card>
-      <GroupHeading>Arrow refinement — compare</GroupHeading>
-      <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
-        Same three arrows rendered from <Mono>Lucide</Mono> (current), <Mono>Phosphor</Mono> (regular weight, rounded heads), and <Mono>Tabler</Mono> (outline, slightly tighter geometry). Phosphor arrow heads have no inner right-angle, which is what reads as &ldquo;less wide&rdquo;. Pick one to standardise on.
-      </p>
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'auto repeat(3, 1fr)',
-        gap: '0.5rem 1rem',
-        alignItems: 'center',
-      }}>
-        <div />
-        {(['Lucide', 'Phosphor', 'Tabler'] as const).map(lib => (
-          <div key={lib} style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            {lib}
-          </div>
-        ))}
-        {rows.map(row => (
-          <React.Fragment key={row.name}>
-            <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>{row.name}</div>
-            {row.samples.map(sample => (
-              <div key={sample.lib} style={{
-                background: 'var(--color-brand-50)',
-                borderRadius: 'var(--radius-leaf-sm)',
-                padding: '1rem',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                <svg
-                  width={32} height={32}
-                  viewBox={sample.viewBox ?? '0 0 24 24'}
-                  fill="none"
-                  stroke="var(--color-brand-dark)"
-                  strokeWidth={sample.stroke ?? 1.5}
-                  strokeLinecap="round" strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  {sample.paths}
-                </svg>
-              </div>
-            ))}
-          </React.Fragment>
-        ))}
-      </div>
-    </Card>
-  )
-}
+// Animated icon entries. Each pairs a Lucide name with its animated
+// component and a picked production home (where motion will ship).
+type AnimatedRow = { name: string, use: string, Component: React.ComponentType<{ size?: number }> }
+const ANIMATED_ROWS: AnimatedRow[] = [
+  { name: 'settings',     use: 'Settings nav, options',  Component: AnimatedSettings },
+  { name: 'bell',         use: 'Notification badge',     Component: AnimatedBell },
+  { name: 'refresh-cw',   use: 'Sync, reload buttons',   Component: AnimatedRefresh },
+  { name: 'sparkles',     use: 'AI moments',             Component: AnimatedSparkles },
+  { name: 'check-circle', use: 'Save success',           Component: AnimatedCheckCircle },
+  { name: 'search',       use: 'Top-nav search focus',   Component: AnimatedSearch },
+  { name: 'eye',          use: 'Show / preview',         Component: AnimatedEye },
+  { name: 'trash',        use: 'Delete-confirm hover',   Component: AnimatedTrash },
+  { name: 'heart',        use: 'Favourite, like',        Component: AnimatedHeart },
+]
 
 function IconographySection() {
   return (
     <SectionShell
       id="iconography"
       title="Iconography"
-      intro="Currently Lucide at 1.5px stroke (already installed via lucide-react). Set is rich. Arrows feel a bit blocky — compare against Phosphor / Tabler in the panel below before deciding on a swap. The Tahi leaf glyph stays separate either way."
+      intro="Two libraries, used deliberately. Static Lucide is the default everywhere. Animated icons (Motion-powered) are reserved for a small picked subset where motion carries meaning."
     >
       <Card padded={false}>
         <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
-          <GroupHeading>Icon library — {ICONS.length} icons</GroupHeading>
+          <GroupHeading>Static (Lucide, {ICONS.length} icons)</GroupHeading>
           <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginTop: '-0.25rem', lineHeight: 1.5 }}>
-            Hover any tile to feel its motion. Arrows nudge in their direction, the bell rings, the cog spins 45°, plus and x rotate, search and eye scale. All motion caps at 2px / 45° / 1.10×.
+            1.5px stroke, no hover motion. The default for every nav item, button icon, table header, status row. Import from <Mono>lucide-react</Mono>.
           </p>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-1 px-3 pb-3">
@@ -879,7 +783,23 @@ function IconographySection() {
         </div>
       </Card>
 
-      <AltArrows />
+      <Card padded={false}>
+        <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+          <GroupHeading>Animated ({ANIMATED_ROWS.length} icons)</GroupHeading>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginTop: '-0.25rem', lineHeight: 1.5 }}>
+            Hover any tile to play. Animation runs to completion regardless of cursor position. Each entry lists its picked production home. Import from <Mono>components/tahi/animated-icons.tsx</Mono>.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-1 px-3 pb-3">
+          {ANIMATED_ROWS.map(row => (
+            <IconTile
+              key={row.name}
+              icon={{ name: row.name, use: row.use, paths: null }}
+              glyph={<row.Component size={20} />}
+            />
+          ))}
+        </div>
+      </Card>
 
       <Card>
         <GroupHeading>The leaf glyph</GroupHeading>
@@ -892,104 +812,11 @@ function IconographySection() {
             <LeafGlyph size={72} />
           </div>
           <div className="space-y-1.5" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', lineHeight: 1.6, maxWidth: '32rem' }}>
-            <div>Separate from Lucide. Renders with the brand gradient (brand → brand-dark) built in.</div>
+            <div>Separate from Lucide. Renders with the brand gradient built in.</div>
             <div>Used as the chip dot, tagline-leader, and the <em>i</em>-dot on the wordmarks.</div>
             <div>Never substituted with an emoji. Never inverted. Source: <Mono>components/tahi/tahi-glyphs.tsx</Mono></div>
           </div>
         </div>
-      </Card>
-    </SectionShell>
-  )
-}
-
-// ────────────────────────────────────────────────────────────────────────
-// Animation styles — the Lucide Animated pack
-//
-// Pack locked in 2026-05-22. All animated icons live in
-// components/tahi/animated-icons.tsx and are powered by Motion
-// (Framer Motion's lighter package). Hover behaviour:
-//   - Enter: animation plays toward keyframes.
-//   - Leave mid-animation: Motion smoothly interpolates back to rest.
-//     No snap, no jump. Multi-keyframe sequences always end at rest so
-//     the leave-mid-play case resolves naturally.
-//   - Continuous loops (refresh-cw) stop on leave and rotate back to 0.
-//
-// The static Lucide set stays the default everywhere. Animated variants
-// are applied only on a selected subset (see BACKLOG-UIUX.md / A4).
-// ────────────────────────────────────────────────────────────────────────
-
-type AnimDemo = {
-  key: string
-  label: string
-  note: string
-  Component: React.ComponentType<{ size?: number }>
-}
-
-const ANIM_DEMOS: AnimDemo[] = [
-  { key: 'settings',     label: 'Settings · rotates 60°',     note: 'Stops at 60° while hovered, glides back to 0° on leave.',        Component: AnimatedSettings },
-  { key: 'bell',         label: 'Bell · rings once',           note: 'Single clapper sequence. -12° → +10° → -6° → 0°.',               Component: AnimatedBell },
-  { key: 'heart',        label: 'Heart · beats twice',         note: 'Two soft pulses. No bounce, no overshoot.',                     Component: AnimatedHeart },
-  { key: 'sparkles',     label: 'Sparkles · pulses',           note: 'Scale + soft opacity flicker. AI moments only.',                Component: AnimatedSparkles },
-  { key: 'check-circle', label: 'Check · draws on',            note: 'Tick draws in via pathLength. Use on save success.',            Component: AnimatedCheckCircle },
-  { key: 'search',       label: 'Search · wiggles',            note: 'Spring oscillation, three swings. Reads as "looking around".', Component: AnimatedSearch },
-  { key: 'eye',          label: 'Eye · blinks',                note: 'scaleY collapses then recovers. Single blink.',                 Component: AnimatedEye },
-  { key: 'trash',        label: 'Trash · lid lifts',           note: 'Lid hinges open -18°. Use on delete-confirm hover.',            Component: AnimatedTrash },
-  { key: 'refresh',      label: 'Refresh · spins continuously',note: 'Loops 360° while hovered. Stops + reverses to 0° on leave.',    Component: AnimatedRefresh },
-]
-
-function AnimCard({ demo }: { demo: AnimDemo }) {
-  return (
-    <div style={{
-      background: 'var(--color-bg)',
-      borderRadius: 'var(--radius-leaf)',
-      padding: '1.25rem',
-      display: 'flex', flexDirection: 'column', gap: '0.875rem',
-      minHeight: '10.5rem',
-      transition: 'background var(--motion-quick) var(--ease-out)',
-    }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '3.75rem',
-        color: 'var(--color-brand-dark)',
-      }}>
-        <demo.Component size={40} />
-      </div>
-      <div style={{ marginTop: 'auto' }}>
-        <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>{demo.label}</div>
-        <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: '0.25rem', lineHeight: 1.45 }}>{demo.note}</div>
-      </div>
-    </div>
-  )
-}
-
-function AnimationStylesSection() {
-  return (
-    <SectionShell
-      id="animations"
-      title="Animated icons"
-      intro="Lucide Animated pack — Motion-powered, calm ease-out tempo. Hover each tile to feel it. Mouse-out mid-play smoothly reverses to rest — no snap. Static Lucide stays the default across the dashboard; animated variants below are applied only where motion adds meaning."
-    >
-      <div style={{
-        background: 'var(--color-bg-secondary)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-leaf)',
-        padding: '0.75rem',
-      }}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          {ANIM_DEMOS.map(demo => <AnimCard key={demo.key} demo={demo} />)}
-        </div>
-      </div>
-
-      <Card>
-        <GroupHeading>How animation behaves</GroupHeading>
-        <ul style={{ fontSize: '0.8125rem', lineHeight: 1.7, color: 'var(--color-text)' }} className="space-y-1.5">
-          <li><strong>Mouse-enter:</strong> animation plays toward its keyframes.</li>
-          <li><strong>Mouse-leave mid-play:</strong> Motion smoothly interpolates back to rest. No snap, no jump.</li>
-          <li><strong>Multi-keyframe sequences</strong> (bell, search, heart) start and end at rest, so leaving mid-sequence always resolves to a calm zero.</li>
-          <li><strong>Continuous loops</strong> (refresh) stop wherever they are on leave and rotate back to 0°.</li>
-          <li><strong>Reduced motion:</strong> all animations honour <Mono>prefers-reduced-motion</Mono> via the global rule in <Mono>globals.css</Mono>.</li>
-          <li><strong>Components live in:</strong> <Mono>components/tahi/animated-icons.tsx</Mono>. Import as <Mono>{`<AnimatedSettings />`}</Mono>, <Mono>{`<AnimatedBell />`}</Mono>, etc.</li>
-        </ul>
       </Card>
     </SectionShell>
   )
@@ -1003,13 +830,13 @@ function BrandSection() {
     <SectionShell
       id="brand"
       title="Brand"
-      intro="The Tahi mark is itself a leaf — a stylised drop on the i of Tahi. Real path data, lifted from the live marketing site. The wordmarks inherit colour from their container; the icon marks bake their own gradient and have light / dark variants."
+      intro="The Tahi mark is itself a leaf. A stylised drop on the i of Tahi. Real path data, lifted from the live marketing site. The wordmarks inherit colour from their container; the icon marks bake their own gradient and have light / dark variants."
     >
       <Card>
         <GroupHeading>Wordmarks</GroupHeading>
         <div className="space-y-6">
           <div>
-            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-subtle)', marginBottom: '0.75rem' }}>Short — &ldquo;Tahi&rdquo;</div>
+            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-subtle)', marginBottom: '0.75rem' }}>Short. &ldquo;Tahi&rdquo;</div>
             <div className="flex flex-wrap items-end gap-12">
               <div style={{ color: 'var(--color-brand-deepest)' }}>
                 <TahiWordmark size={32} />
@@ -1029,7 +856,7 @@ function BrandSection() {
           </div>
 
           <div>
-            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-subtle)', marginBottom: '0.75rem' }}>Long — &ldquo;Tahi Studio&rdquo;</div>
+            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-subtle)', marginBottom: '0.75rem' }}>Long. &ldquo;Tahi Studio&rdquo;</div>
             <div className="flex flex-wrap items-center gap-12">
               <div style={{ color: 'var(--color-brand-deepest)' }}>
                 <TahiStudioWordmark height={36} />
@@ -1048,7 +875,7 @@ function BrandSection() {
       </Card>
 
       <Card>
-        <GroupHeading>Icon mark — the &ldquo;1 + leaf&rdquo;</GroupHeading>
+        <GroupHeading>Icon mark. The &ldquo;1 + leaf&rdquo;</GroupHeading>
         <div className="flex flex-wrap items-center gap-10">
           <div style={{
             background: 'var(--color-bg)',
@@ -1083,10 +910,10 @@ function BrandSection() {
           <div>
             <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-subtle)', marginBottom: '0.5rem' }}>Sound like</div>
             <ul style={{ fontSize: '0.875rem', lineHeight: 1.7, color: 'var(--color-text)' }} className="space-y-1.5">
-              <li>Honest — &ldquo;If your brief has a problem, we say so.&rdquo;</li>
-              <li>Concrete — &ldquo;From $2,500. One-off. Scoped individually.&rdquo;</li>
-              <li>Plant-rooted — grow, track, tune, sprout</li>
-              <li>Reassuring — &ldquo;No long queues, no half-finished tasks.&rdquo;</li>
+              <li>Honest. &ldquo;If your brief has a problem, we say so.&rdquo;</li>
+              <li>Concrete. &ldquo;From $2,500. One-off. Scoped individually.&rdquo;</li>
+              <li>Plant-rooted. Grow, track, tune, sprout</li>
+              <li>Reassuring. &ldquo;No long queues, no half-finished tasks.&rdquo;</li>
             </ul>
           </div>
           <div>
@@ -1105,207 +932,7 @@ function BrandSection() {
 }
 
 // ────────────────────────────────────────────────────────────────────────
-// WCAG 2.2 audit
-//
-// All contrast ratios computed via the standard WCAG luminance formula
-// against the actual hex tokens in globals.css. AA threshold = 4.5:1 for
-// normal text, 3:1 for large text (18px regular OR 14px bold) and for
-// non-text UI components (1.4.11). AAA = 7:1.
-//
-// New in WCAG 2.2 (now level AA): 2.4.11 Focus Not Obscured, 2.4.13 Focus
-// Appearance (AAA), 2.5.7 Dragging Movements, 2.5.8 Target Size (24×24px
-// minimum), 3.2.6 Consistent Help (AAA), 3.3.7 Redundant Entry, 3.3.8
-// Accessible Authentication.
-// ────────────────────────────────────────────────────────────────────────
-
-type ContrastBadge = 'AAA' | 'AA' | 'AA-LG' | 'FAIL'
-
-type ContrastPair = {
-  label: string
-  fg: string
-  fgToken: string
-  bg: string
-  bgToken: string
-  ratio: number
-  badge: ContrastBadge
-  note?: string
-}
-
-// Numbers are baked from the WCAG luminance formula — see DESIGN.md for
-// the script that produced them. Do not hand-edit; rerun + paste.
-const CONTRAST_PAIRS: ContrastPair[] = [
-  // Text on surfaces
-  { label: 'Body text on white',          fg: '#121A0F', fgToken: '--color-text',         bg: '#FFFFFF', bgToken: '--color-bg',           ratio: 17.79, badge: 'AAA' },
-  { label: 'Body text on cream',          fg: '#121A0F', fgToken: '--color-text',         bg: '#F3F4F2', bgToken: '--color-bg-cream',     ratio: 16.12, badge: 'AAA' },
-  { label: 'Body text on bg-secondary',   fg: '#121A0F', fgToken: '--color-text',         bg: '#F7F9F6', bgToken: '--color-bg-secondary', ratio: 16.80, badge: 'AAA' },
-  { label: 'Body text on bg-tertiary',    fg: '#121A0F', fgToken: '--color-text',         bg: '#EEF3EC', bgToken: '--color-bg-tertiary',  ratio: 15.81, badge: 'AAA' },
-  { label: 'Muted text on white',         fg: '#5A6657', fgToken: '--color-text-muted',   bg: '#FFFFFF', bgToken: '--color-bg',           ratio: 6.05,  badge: 'AA' },
-  { label: 'Muted text on cream',         fg: '#5A6657', fgToken: '--color-text-muted',   bg: '#F3F4F2', bgToken: '--color-bg-cream',     ratio: 5.48,  badge: 'AA' },
-  { label: 'Subtle text on white',        fg: '#647461', fgToken: '--color-text-subtle',  bg: '#FFFFFF', bgToken: '--color-bg',           ratio: 4.99,  badge: 'AA',     note: 'Bumped from #8A9987 (3.01:1) which failed AA on cream.' },
-  { label: 'Subtle text on cream',        fg: '#647461', fgToken: '--color-text-subtle',  bg: '#F3F4F2', bgToken: '--color-bg-cream',     ratio: 4.52,  badge: 'AA',     note: 'Bumped from #8A9987 (2.72:1) — was the lowest-contrast pair in the system.' },
-
-  // Brand text
-  { label: 'Brand link on white',         fg: '#5A824E', fgToken: '--color-brand',        bg: '#FFFFFF', bgToken: '--color-bg',           ratio: 4.43,  badge: 'AA-LG',  note: 'Borderline AA. Fine for links (underlined). For body text use --color-brand-dark.' },
-  { label: 'Brand link on cream',         fg: '#5A824E', fgToken: '--color-brand',        bg: '#F3F4F2', bgToken: '--color-bg-cream',     ratio: 4.02,  badge: 'AA-LG',  note: 'Same — links OK, body needs --color-brand-dark.' },
-  { label: 'Brand-dark on white',         fg: '#425F39', fgToken: '--color-brand-dark',   bg: '#FFFFFF', bgToken: '--color-bg',           ratio: 7.17,  badge: 'AAA' },
-  { label: 'Brand-dark on cream',         fg: '#425F39', fgToken: '--color-brand-dark',   bg: '#F3F4F2', bgToken: '--color-bg-cream',     ratio: 6.50,  badge: 'AA' },
-  { label: 'Brand text on brand-50 chip', fg: '#5A824E', fgToken: '--color-brand',        bg: '#F0F7EE', bgToken: '--color-brand-50',     ratio: 4.06,  badge: 'AA-LG',  note: 'For chips use --color-brand-dark on brand-50 (6.57:1).' },
-  { label: 'Brand-dark on brand-50 chip', fg: '#425F39', fgToken: '--color-brand-dark',   bg: '#F0F7EE', bgToken: '--color-brand-50',     ratio: 6.57,  badge: 'AA' },
-  { label: 'Brand-dark on brand-100',     fg: '#425F39', fgToken: '--color-brand-dark',   bg: '#DCEFD8', bgToken: '--color-brand-100',    ratio: 5.94,  badge: 'AA' },
-
-  // Accent / CTA
-  { label: 'Accent-text on lime CTA',     fg: '#1D1E1D', fgToken: '--color-accent-text',  bg: '#78C45E', bgToken: '--color-accent',       ratio: 7.85,  badge: 'AAA' },
-  { label: 'White on lime CTA',           fg: '#FFFFFF', fgToken: '—',                    bg: '#78C45E', bgToken: '--color-accent',       ratio: 2.13,  badge: 'FAIL',   note: 'Never use white text on the lime CTA. Use --color-accent-text (#1D1E1D).' },
-
-  // On dark surfaces
-  { label: 'On-dark text on deepest',     fg: '#FDFDFC', fgToken: '--color-text-on-dark', bg: '#1E3019', bgToken: '--color-brand-deepest',ratio: 13.83, badge: 'AAA' },
-  { label: 'On-dark text on deep',        fg: '#FDFDFC', fgToken: '--color-text-on-dark', bg: '#2A3626', bgToken: '--color-brand-deep',   ratio: 12.47, badge: 'AAA' },
-  { label: 'Dim-on-dark on deepest',      fg: '#DCE8D9', fgToken: '--color-text-dim-on-dark', bg: '#1E3019', bgToken: '--color-brand-deepest', ratio: 11.12, badge: 'AAA' },
-  { label: 'Brand-light icon on deepest', fg: '#7AAB6B', fgToken: '--color-brand-light',  bg: '#1E3019', bgToken: '--color-brand-deepest',ratio: 5.27,  badge: 'AA' },
-  { label: 'Brand-lighter on deepest',    fg: '#97BA8C', fgToken: '--color-brand-lighter',bg: '#1E3019', bgToken: '--color-brand-deepest',ratio: 6.51,  badge: 'AA' },
-
-  // Status pills
-  { label: 'Status submitted (new indigo)', fg: '#4338CA', fgToken: '--status-submitted-text',  bg: '#EEF2FF', bgToken: '--status-submitted-bg',  ratio: 7.07,  badge: 'AAA',    note: 'Shifted from blue (#1D4ED8 on #EFF6FF, 6.16:1 AA) to indigo (7.07:1 AAA) to widen visual distance from in-progress teal.' },
-  { label: 'Status in-review',            fg: '#92400E', fgToken: '--status-in-review-text',  bg: '#FFFBEB', bgToken: '--status-in-review-bg',  ratio: 6.84,  badge: 'AA' },
-  { label: 'Status in-progress',          fg: '#0E7490', fgToken: '--status-in-progress-text',bg: '#ECFEFF', bgToken: '--status-in-progress-bg',ratio: 5.15,  badge: 'AA' },
-  { label: 'Status client-review',        fg: '#6D28D9', fgToken: '--status-client-review-text', bg: '#F5F3FF', bgToken: '--status-client-review-bg', ratio: 6.48, badge: 'AA' },
-  { label: 'Status delivered',            fg: '#15803D', fgToken: '--status-delivered-text',  bg: '#F0FDF4', bgToken: '--status-delivered-bg',  ratio: 4.79,  badge: 'AA' },
-  { label: 'Status draft',                fg: '#4B5563', fgToken: '--status-draft-text',      bg: '#F3F4F6', bgToken: '--status-draft-bg',      ratio: 6.87,  badge: 'AA' },
-  { label: 'Status archived',             fg: '#6B7280', fgToken: '--status-archived-text',   bg: '#F9FAFB', bgToken: '--status-archived-bg',   ratio: 4.63,  badge: 'AA' },
-
-  // Semantic
-  { label: 'Danger text on danger-bg',    fg: '#DC2626', fgToken: '--color-danger',       bg: '#FEF2F2', bgToken: '--color-danger-bg',    ratio: 4.41,  badge: 'AA-LG',  note: 'Just under AA. Pair with iconography or use a darker red for body danger text.' },
-  { label: 'Warning text on warning-bg',  fg: '#92400E', fgToken: '—',                    bg: '#FFF7ED', bgToken: '--color-warning-bg',   ratio: 6.68,  badge: 'AA' },
-
-  // Non-text (decorative borders, exempt from 1.4.3 — listed for transparency)
-  { label: 'Border-strong on white',      fg: '#CDCFCC', fgToken: '--color-border-strong',bg: '#FFFFFF', bgToken: '--color-bg',           ratio: 1.57,  badge: 'FAIL',   note: 'Decorative border. 1.4.11 (non-text contrast) only applies to UI controls conveying meaning — borders are exempt.' },
-  { label: 'Border on cream',             fg: '#D4E0D0', fgToken: '--color-border',       bg: '#F3F4F2', bgToken: '--color-bg-cream',     ratio: 1.24,  badge: 'FAIL',   note: 'Same — decorative border, exempt from contrast.' },
-]
-
-function BadgePill({ badge }: { badge: ContrastBadge }) {
-  const styles: Record<ContrastBadge, { bg: string, fg: string, dot: string, label: string }> = {
-    AAA:     { bg: '#E9F7EE', fg: '#176B3D', dot: '#22C55E', label: 'AAA' },
-    AA:      { bg: '#EEF5EB', fg: '#3F6235', dot: '#5A824E', label: 'AA' },
-    'AA-LG': { bg: '#FEF6E6', fg: '#8A5A12', dot: '#F59E0B', label: 'AA · large only' },
-    FAIL:    { bg: '#FDEDEC', fg: '#B42318', dot: '#EF4444', label: 'Fail' },
-  }
-  const s = styles[badge]
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-      padding: '0.1875rem 0.5rem',
-      background: s.bg, color: s.fg,
-      borderRadius: 'var(--radius-leaf-sm)',
-      fontSize: '0.72rem', fontWeight: 600,
-      width: 'fit-content', whiteSpace: 'nowrap',
-    }}>
-      <span style={{ width: '0.4rem', height: '0.4rem', borderRadius: '50%', background: s.dot }} />
-      {s.label}
-    </span>
-  )
-}
-
-function ContrastRow({ pair }: { pair: ContrastPair }) {
-  return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: '1fr auto auto',
-      gap: '1rem',
-      alignItems: 'center',
-      padding: '0.75rem 0',
-      borderBottom: '1px solid var(--color-border-subtle)',
-    }}>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', marginBottom: '0.25rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <span style={{
-              display: 'inline-block', width: '0.875rem', height: '0.875rem',
-              background: pair.fg, borderRadius: '50%',
-              border: '1px solid var(--color-border-subtle)',
-            }} />
-            <span style={{
-              display: 'inline-block', width: '0.875rem', height: '0.875rem',
-              background: pair.bg, borderRadius: '50%',
-              border: '1px solid var(--color-border-subtle)',
-            }} />
-          </div>
-          <span style={{ fontSize: '0.8125rem', fontWeight: 500 }}>{pair.label}</span>
-        </div>
-        <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
-          <Mono>{pair.fgToken}</Mono> <span style={{ margin: '0 0.25rem' }}>on</span> <Mono>{pair.bgToken}</Mono>
-        </div>
-        {pair.note && (
-          <div style={{ fontSize: '0.72rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem', lineHeight: 1.45, maxWidth: '52ch' }}>
-            {pair.note}
-          </div>
-        )}
-      </div>
-      <div style={{ fontSize: '0.8125rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text)' }}>
-        {pair.ratio.toFixed(2)}:1
-      </div>
-      <BadgePill badge={pair.badge} />
-    </div>
-  )
-}
-
-function WcagSection() {
-  const counts = CONTRAST_PAIRS.reduce<Record<ContrastBadge, number>>((acc, p) => {
-    acc[p.badge] = (acc[p.badge] ?? 0) + 1
-    return acc
-  }, { AAA: 0, AA: 0, 'AA-LG': 0, FAIL: 0 })
-  return (
-    <SectionShell
-      id="wcag"
-      title="WCAG 2.2 audit"
-      intro="Contrast ratios computed against the actual hex values in globals.css. Pass thresholds: AA 4.5:1 normal text · 3:1 large or UI · AAA 7:1. Two values were fixed in this audit pass — see notes."
-    >
-      <Card>
-        <GroupHeading>Summary</GroupHeading>
-        <div className="flex flex-wrap gap-2">
-          <BadgePill badge="AAA" /> <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)', alignSelf: 'center' }}>{counts.AAA} pairs</span>
-          <BadgePill badge="AA" /> <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)', alignSelf: 'center' }}>{counts.AA} pairs</span>
-          <BadgePill badge="AA-LG" /> <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)', alignSelf: 'center' }}>{counts['AA-LG']} pairs</span>
-          <BadgePill badge="FAIL" /> <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)', alignSelf: 'center' }}>{counts.FAIL} pairs (all documented exceptions — see table)</span>
-        </div>
-      </Card>
-
-      <Card padded={false}>
-        <div style={{ padding: '1.5rem 1.5rem 0' }}>
-          <GroupHeading>Contrast pairs</GroupHeading>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginTop: '-0.5rem', marginBottom: '0.5rem', lineHeight: 1.5 }}>
-            Every meaningful foreground / background pair in the token set. Sort: text on light → text on brand → text on dark → status pills → decorative.
-          </p>
-        </div>
-        <div style={{ padding: '0 1.5rem 1.5rem' }}>
-          {CONTRAST_PAIRS.map(p => <ContrastRow key={p.label} pair={p} />)}
-        </div>
-      </Card>
-
-      <Card>
-        <GroupHeading>WCAG 2.2 new success criteria</GroupHeading>
-        <ul style={{ fontSize: '0.8125rem', lineHeight: 1.7, color: 'var(--color-text)' }} className="space-y-1.5">
-          <li><strong>2.4.11 Focus Not Obscured (Min.)</strong> — focus indicators must not be hidden by other content. <BadgePill badge="AA" /> No fixed overlays sit above interactive content here.</li>
-          <li><strong>2.4.13 Focus Appearance (AAA)</strong> — focus ring ≥2px, ≥3:1 contrast. Our <Mono>--shadow-ring</Mono> is 2px <Mono>--color-brand-light</Mono> (#7AAB6B) at 3.51:1 on white. <BadgePill badge="AA" /></li>
-          <li><strong>2.5.7 Dragging Movements</strong> — drag actions need a single-pointer alternative. <BadgePill badge="AA" /> Drag-and-drop in the kanban already has click-to-edit + keyboard fallbacks.</li>
-          <li><strong>2.5.8 Target Size (Min., 24×24 CSS px)</strong> — tap targets ≥24×24. <BadgePill badge="AAA" /> CLAUDE.md mandates 44px throughout — comfortably exceeds.</li>
-          <li><strong>3.2.6 Consistent Help (AAA)</strong> — help mechanisms in a consistent location. <BadgePill badge="AAA" /> Help link sits in the same sidebar slot across pages.</li>
-          <li><strong>3.3.7 Redundant Entry</strong> — don&apos;t re-ask the user for info already given. <BadgePill badge="AA" /> Forms auto-populate from previous sessions where possible.</li>
-          <li><strong>3.3.8 Accessible Authentication (Min.)</strong> — no cognitive-puzzle auth (Clerk handles this). <BadgePill badge="AA" /></li>
-        </ul>
-      </Card>
-
-      <Card>
-        <GroupHeading>Typography — 1.4.4 Resize Text</GroupHeading>
-        <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-          All sizes in the ladders above are declared in <Mono>rem</Mono>. Users can resize text up to 200% in browser settings without loss of content or functionality. <BadgePill badge="AA" /> Note: 12px (<Mono>--text-xs</Mono>) at default zoom is on the small side for body text — keep XS for meta/badges only. The 14px (<Mono>--text-base</Mono>) baseline meets WCAG comfort recommendations.
-        </p>
-      </Card>
-    </SectionShell>
-  )
-}
-
-// ────────────────────────────────────────────────────────────────────────
-// Components — Batch 1 (Button · Avatar · Badge · Card)
+// Components. Batch 1 (Button · Avatar · Badge · Card)
 //
 // Each primitive's source lives in components/tahi/. The blocks below
 // render every state we expect to see in production. A second-level
@@ -1573,7 +1200,7 @@ function BadgeShowcase() {
       id="comp-badge"
       title="Badge"
       source="components/tahi/badge.tsx"
-      intro="Status pills, chips, count badges — one component, three drivers (tone, stage, source). New: leader='leaf' to lead with the brand leaf glyph instead of a circle dot. Status tones now default to the leaf."
+      intro="Status pills, chips, count badges. One component, three drivers (tone, stage, source). New: leader='leaf' to lead with the brand leaf glyph instead of a circle dot. Status tones now default to the leaf."
     >
       <Card padded={false}>
         <div style={{ padding: '0 1.5rem' }}>
@@ -1616,7 +1243,7 @@ function CardShowcase() {
           <CardPrim.Header>
             <div>
               <CardPrim.Title>Default card</CardPrim.Title>
-              <CardPrim.Subtitle>Rest state — 1px border-strong, no shadow</CardPrim.Subtitle>
+              <CardPrim.Subtitle>Rest state. 1px border-strong, no shadow</CardPrim.Subtitle>
             </div>
             <CardPrim.Action><TahiButton size="sm" variant="ghost">Edit</TahiButton></CardPrim.Action>
           </CardPrim.Header>
@@ -1631,7 +1258,7 @@ function CardShowcase() {
           <CardPrim.Header>
             <div>
               <CardPrim.Title>Interactive card</CardPrim.Title>
-              <CardPrim.Subtitle>Hover me — border darkens, soft brand shadow, lifts 1px</CardPrim.Subtitle>
+              <CardPrim.Subtitle>Hover me. Border darkens, soft brand shadow, lifts 1px</CardPrim.Subtitle>
             </div>
           </CardPrim.Header>
         </CardPrim>
@@ -1640,7 +1267,7 @@ function CardShowcase() {
           <CardPrim.Header>
             <div>
               <CardPrim.Title>Elevated</CardPrim.Title>
-              <CardPrim.Subtitle>Resting shadow-md — popovers and floating UI</CardPrim.Subtitle>
+              <CardPrim.Subtitle>Resting shadow-md. Popovers and floating UI</CardPrim.Subtitle>
             </div>
           </CardPrim.Header>
         </CardPrim>
@@ -1649,7 +1276,7 @@ function CardShowcase() {
           <CardPrim.Header>
             <div>
               <CardPrim.Title>Flat</CardPrim.Title>
-              <CardPrim.Subtitle>No border, no shadow — for nesting inside another card</CardPrim.Subtitle>
+              <CardPrim.Subtitle>No border, no shadow. For nesting inside another card</CardPrim.Subtitle>
             </div>
           </CardPrim.Header>
         </CardPrim>
@@ -1663,7 +1290,7 @@ function ComponentsSection() {
     <SectionShell
       id="components"
       title="Components"
-      intro="The reusable primitives in components/tahi/. Each block below shows every state and the source path. Batch 1 covers Button, Avatar, Badge, Card — the foundation that every later primitive composes on."
+      intro="The reusable primitives in components/tahi/. Each block below shows every state and the source path. Batch 1 covers Button, Avatar, Badge, Card. The foundation that every later primitive composes on."
     >
       <ComponentsSubNav />
       <div className="space-y-12">
