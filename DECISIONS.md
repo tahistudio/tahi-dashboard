@@ -1059,3 +1059,93 @@ The `AiRequestWizard` React component now takes optional `wizardEndpoint` + `sub
 **Deploy:** This is in `workers/mcp-server/` which is a separate Cloudflare Worker, not the main dashboard. To ship: `cd workers/mcp-server && npm run deploy`. Existing MCP connections will keep their current 1-hour tokens until they expire, then need one more reconnect to pick up a refresh token. After that, no further reconnects required (until the 30-day refresh expires, at which point Claude will silently re-do the OAuth dance).
 
 ---
+
+## #050 - Hybrid Radius Vocabulary: Leaf for Hero, Symmetric for Density
+
+**Date:** 2026-05-23
+
+**Decision:** The leaf radius (`0 16px 0 16px`) is no longer the default for every card and button. It is reserved for hero moments only: the FeatureCard with brand-tinted variants, the active nav item in the sidebar, the icon tile inside KPICard featured variant, and primary CTA. Every other surface (dense lists, modals, popovers, secondary buttons, table rows, badges, tooltips) uses a symmetric radius from `--radius-sm / --radius-md / --radius-lg`.
+
+**Rationale:** When every surface uses the leaf shape, it loses meaning and reads as a busy gimmick. Reserving it for the few "this is special" moments lets the leaf actually signal something. Dense lists with leaf-radius rows look cluttered; the symmetric `--radius-md` keeps them clean.
+
+**Implications:**
+- `<Card>` default uses `--radius-lg`. Pass `variant="featured"` (or use `<FeatureCard>`) to get the leaf shape.
+- `<TahiButton>` primary uses `--radius-md` (was leaf-sm). Too many leafy CTAs scattered around the page made the visual rhythm noisy.
+- Sidebar active nav item is one of the rare in-page leaf moments (`var(--radius-leaf-sm)` with brand-100 background).
+- Tooltip uses `--radius-sm` so it doesn't compete with the underlying surface.
+
+---
+
+## #051 - Sidebar: White Surface + Custom User Card + Leaf-Only Active State
+
+**Date:** 2026-05-23
+
+**Decision:** The dashboard sidebar uses `var(--color-bg)` (white in light mode, deep forest in dark mode), not the cream surface. The active nav item is the only leaf-radius moment in the sidebar (`var(--radius-leaf-sm)` + `var(--color-brand-100)` tint). The footer no longer renders Clerk's `<UserButton>`; it renders our own `<SidebarUserCard>` (avatar + name + email + chevron, opens a popover with Manage account / Settings / Theme toggle / Sign out).
+
+**Rationale:**
+- Cream sidebar created two competing background colors next to the white dashboard main area. White unifies the chrome.
+- Clerk's UserButton is locked into Clerk's visual system and could not be made to look like the rest of the dashboard (border-radius, hover behaviour, popover positioning). Replacing it with our own UI keeps the bottom of the sidebar visually consistent with the rest of the chrome.
+- The leaf shape on the active nav item is one of the few in-frame "this is your current location" moments where the leaf actually communicates something. Pairs with Decision #050.
+
+**Implications:**
+- Sidebar uses `data-sidebar="collapsed"` on `<html>` to drive width via CSS, set by an inline script before React hydrates. See `app/(dashboard)/layout.tsx` for the script and `components/tahi/sidebar-context.tsx` for the state.
+- SidebarUserCard uses `useUser()` + `useClerk().signOut()` so Clerk still owns auth, we just own the UI.
+- The hamburger button has been removed from the top nav. Sidebar toggling is via the collapse arrow at the sidebar footer. Mobile gets its own bottom nav and drawer.
+
+---
+
+## #052 - Dark Mode: Deep Forest, Not Pitch Black
+
+**Date:** 2026-05-23
+
+**Decision:** Dark mode uses a deep forest palette (page `#0F1410`, cards `#1B2419`), not a pure-black or near-black palette. Mode-aware tokens (`--color-text-active`, `--color-hover-tint`, `--card-highlight-ring`, `--tahi-mark-one`, `--tahi-mark-leaf-start/end`) flip per-mode so brand elements (the 1+leaf mark, brand text, hover tints) remain legible against the forest background.
+
+**Rationale:**
+- A near-black "ink" dark mode would clash with the brand colour (warm forest green). The deep-forest palette keeps the brand in family, reducing the jarring "different app" feeling when switching themes.
+- Mode-aware variables let one component declaration handle both modes without per-component `.dark { ... }` overrides. Anywhere in the codebase, using `var(--color-text-active)` gives you the right colour for the active mode without extra logic.
+- WCAG AA contrast is maintained across both modes (verified during the May 2026 overhaul).
+
+**Implications:**
+- Status palette tokens use translucent backgrounds + a lighter text colour per tone in dark mode. Status colours also shift: submitted → royal blue (instead of warm blue), client-review → fuchsia (better differentiation from "in progress"), archived → warm taupe.
+- Theme toggle lives in the SidebarUserCard menu. Persisted to `localStorage` under `tahi-theme`. Applied via `.dark` class on `<html>` by an inline script before React hydrates (mirrors the sidebar-collapse pattern).
+- New components must use `var(--color-*)` references throughout. No hardcoded hex outside the sidebar palette constants and vendor-brand hex (Stripe, Xero etc).
+
+---
+
+## #053 - Animation Policy: Play to Completion on Hover
+
+**Date:** 2026-05-23
+
+**Decision:** Hover-triggered animations (animated icons, micro-interactions, hover-lifts) play their full sequence regardless of whether the cursor is still over the element. They never reverse, never snap back mid-animation. Re-trigger only on a fresh `mouseenter` after the previous play completes.
+
+**Rationale:**
+- Reversing animations on mouseleave produces a janky "the user is fighting the animation" feel, especially for icon morphs where the reverse direction looks broken.
+- A play-to-completion policy lets the user move on (hover briefly, look away) without leaving a half-finished animation on screen. The animation finishes, settles, ready for the next hover.
+
+**Implementation pattern:** `useAnimationControls` from Motion + a `useRef<boolean>` `isPlaying` guard. The mouseenter handler is a no-op if `isPlaying.current === true`. After the animation completes, the handler resets `isPlaying` to false so the next mouseenter re-triggers a fresh play.
+
+**Implications:**
+- Documented in memory as `feedback_animation_reverse_on_leave.md`.
+- All 27 animated icons in `components/tahi/animated-icons.tsx` use this pattern.
+- New animated components must follow the same pattern. Reversing on `mouseleave` is forbidden.
+
+---
+
+## #054 - Icon Pack: Static Lucide Default, Lucide Animated Used Sparingly
+
+**Date:** 2026-05-23
+
+**Decision:** The default icon pack is plain Lucide (static SVGs imported from `lucide-react`). Animated variants from Lucide Animated are reserved for a small picked subset of "moment" icons (refresh-cw on a refresh button, bell on the notification bell, gear on settings, sparkles on AI affordances, check-circle on success toasts). Custom-built animated icon components are not added to chrome surfaces (sidebar, top nav, navigation); they distract more than they communicate.
+
+**Rationale:**
+- Animated icons on every nav item turn the sidebar into a noisy "look at me" surface that competes with the actual content.
+- Reserving animation for moments where there's a real status change (refresh action, new notification, success confirmation) lets the motion mean something.
+- Lucide Animated is a hand-tuned library; building our own animated icons (e.g. the May 2026 custom `AnimatedXxx` set) consistently produced lower-quality results that the user explicitly rejected.
+
+**Implications:**
+- Sidebar uses static Lucide icons only. No custom animated icon components.
+- `components/tahi/animated-icons.tsx` is kept for the design-system showcase page but is not imported into chrome surfaces.
+- Documented in memory as `project_icon_pack.md`.
+- New animated icons go through Lucide Animated, not bespoke Motion implementations.
+
+---

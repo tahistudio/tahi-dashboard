@@ -215,6 +215,87 @@ One colour = one meaning across every chart. "Projected revenue" and "MRR" and "
 
 ---
 
+## May 2026 Design-System Additions
+
+Rules locked in during the May 2026 chrome overhaul. These supersede earlier defaults where they conflict.
+
+### Hybrid radius vocabulary (see Decision #050)
+The leaf radius is no longer the default. It's reserved for hero moments:
+
+| Surface | Radius | Why |
+|---|---|---|
+| FeatureCard (all variants) | `--radius-leaf-lg` | Hero moments only. |
+| KPICard featured variant icon tile | `--radius-leaf-sm` | Pops out of the dense KPI strip. |
+| Sidebar active nav item | `--radius-leaf-sm` | Marks "you are here". |
+| Primary CTA in callouts | leaf-sm | Sparingly. |
+| Everything else (cards, buttons, modals, popovers, table rows, badges, tooltips, secondary CTA) | symmetric `--radius-sm / --radius-md / --radius-lg` | Clean rhythm in dense surfaces. |
+
+Rule of thumb: if the surface is content-dense or shows up more than three times on a page, it gets a symmetric radius. The leaf is for the few "this is special" beats.
+
+### Sidebar pattern (see Decision #051)
+- Surface: `var(--color-bg)` (white light / deep forest dark), not cream.
+- Width via CSS: `[data-sidebar="collapsed"] .tahi-sidebar { width: 64px }`. Inline script in `app/(dashboard)/layout.tsx` sets the attribute before React hydrates. No flash on refresh.
+- Active item is the leaf moment: `var(--radius-leaf-sm)` + `var(--color-brand-100)` bg + `var(--color-text-active)` text.
+- Footer: `<SidebarUserCard>` (custom). Avatar + name + email + chevron. Popover menu owns Settings, Theme toggle, Sign out. Replaces Clerk's `<UserButton>`.
+- Brand lockup: `<TahiIconMark variant="on-light">` + `<TahiStudioWordmark height={26}>`. Mode-aware via CSS vars so the "1" colour flips in dark mode.
+- Custom animated icons are forbidden in the sidebar. Plain Lucide only.
+
+### Dark mode palette (see Decision #052)
+- Page: `#0F1410` (deep forest, not pure black).
+- Cards: `#1B2419`.
+- Status palette uses translucent backgrounds + lighter per-tone text. Shifts: submitted → royal blue, client-review → fuchsia, archived → warm taupe.
+- Mode-aware tokens (`--color-text-active`, `--color-hover-tint`, `--card-highlight-ring`, `--tahi-mark-one`, `--tahi-mark-leaf-start/end`) flip automatically.
+- Toggle lives in `<SidebarUserCard>` popover menu. Persisted to `localStorage` as `tahi-theme`.
+- WCAG AA verified across both modes during the May 2026 sweep.
+
+### Animation principles (see Decision #053)
+- Hover animations play their full sequence regardless of cursor position. They never reverse. Never snap back.
+- Re-trigger only on a fresh `mouseenter` after the previous play completes.
+- Pattern: `useAnimationControls` from Motion + a `useRef<boolean>` `isPlaying` guard.
+- `.hover-lift` and `.row-arrow` are CSS-only and don't need this pattern. The rule is for icon morphs and bespoke animations.
+- No animation on the sidebar nav icons. The hover-lift was explicitly rejected by the user.
+
+### Icon pack (see Decision #054)
+- Default: plain Lucide imported from `lucide-react`.
+- Reserved for animation: refresh-cw, bell, gear, sparkles, check-circle (and a few other moment icons). Use Lucide Animated.
+- Forbidden: custom-built `AnimatedXxx` Motion components in chrome surfaces.
+- `components/tahi/animated-icons.tsx` exists for the design-system showcase only. Don't import from chrome.
+
+### Hard rules (reinforced)
+1. **No side borders.** Borders are all-sides or absent. A single-side border reads as cheap.
+2. **No em dashes.** Anywhere. In strings, comments, JSX text, commit messages, or docs. Use a period, comma, parentheses, or colon.
+3. **Spacing in rem, not px.** Every margin, padding, gap, width, height uses rem or em. Exception: hairline borders (`1px solid ...`).
+4. **CSS tokens, not hardcoded hex.** Use `var(--color-*)` so dark mode works without per-component overrides. Exceptions: sidebar palette constants (always-dark, separate system) and vendor brand hex (Stripe, Xero, Webflow).
+
+### New primitives in `components/tahi/`
+Add to the primitives table:
+
+| Component | Purpose |
+|---|---|
+| `<FeatureCard>` | Hero card with brand-tinted variants. `variant: lime \| forest \| photo \| cream`. Slots: `.Eyebrow`, `.Title`, `.Description`, `.Footer`. Leaf radius, inset ring on dark variants, hover-lift shadow. |
+| `<KPICard>` | KPI surface. Default + `variant="featured"` (forest gradient). Label top-left, indicator top-right (arrow-up-right when clickable, plain icon when static). Big value 2rem. Delta chip on featured variant. |
+| `<Tooltip>` | Portal'd tooltip. Forest-dark surface, 12px text, `--radius-sm`. 400ms hover delay, instant on focus. Touch-suppressed on mobile via a `recentlyTouchedRef`. Wrap icon-only buttons and truncated text. |
+| `<Toast>` | Forest-dark surface with tone-coloured leading word (Saved / Error / Heads up / Tip). No icon, no side rail. Optional action button. `--radius-md`. |
+| `<Menu>` | Wraps `<Popover>`. Children: `Menu.Item`, `Menu.Divider`, `Menu.Label`. |
+| `<Avatar>` | Gradient initials fallback. Sizes `xs \| sm \| md \| lg \| xl`. Optional status dot. `<Avatar.Stack>` with overflow `+N` tile (z-indexed so the counter sits in front). |
+| `<SidebarUserCard>` | Sidebar footer identity card. Replaces Clerk `<UserButton>`. See Decision #051. |
+| `<MobileBottomNav>` | Mobile bottom bar: Overview, Requests, Tasks, Messages, More. "More" opens a drawer that mirrors the sidebar styling with the user card pinned at the bottom. Cream surface, sidebar-style active items. Uses `<FocusTrap>` when open. |
+| `<FocusTrap>` | Utility. Tab-cycles within the container, Esc closes, restores focus on unmount. Used by every modal / drawer. |
+| `<SkipToContent>` | Keyboard-only skip link. Hidden until focus, slides in. First child of the dashboard layout. |
+
+### Tooltip use rules
+Use a Tooltip when:
+- The trigger is an icon-only button (no visible label).
+- A text element is truncated with ellipsis and the full text matters.
+- A control's effect is non-obvious from its label (rare; usually rewrite the label instead).
+
+Don't use a Tooltip when:
+- The control already has a visible label.
+- The information is essential to using the control (move it into the UI itself).
+- The trigger is on mobile-only and likely tapped, not hovered.
+
+---
+
 ## Current Focus
 
 **Pre-redesign batch** (cross-cutting fixes before per-page work) — **COMPLETE**:
