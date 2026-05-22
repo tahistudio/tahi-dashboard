@@ -680,6 +680,14 @@ textarea,
   /* Inset highlight ring on cards. Visible in dark to add definition. */
   --card-highlight-ring: rgba(151, 186, 140, 0.14);
 
+  /* TahiIconMark in 'on-light' variant: when the cream surface flips to
+     dark, the "1" needs to flip from forest to off-cream so it stays
+     visible against the dark surface. The leaf gradient stays branded
+     either way. */
+  --tahi-mark-one: #DCE8D9;
+  --tahi-mark-leaf-start: var(--color-brand-light);
+  --tahi-mark-leaf-end: var(--color-brand);
+
   /* Brand chip tints. Translucent so they sit over any dark surface. */
   --color-brand-50: rgba(122, 171, 107, 0.10);
   --color-brand-100: rgba(122, 171, 107, 0.18);

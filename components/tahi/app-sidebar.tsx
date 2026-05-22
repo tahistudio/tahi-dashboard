@@ -42,29 +42,46 @@ import { cn } from '@/lib/utils'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { useSidebar } from '@/components/tahi/sidebar-context'
 import { Tooltip } from '@/components/tahi/tooltip'
-import { TahiIconMark } from '@/components/tahi/tahi-glyphs'
+import { TahiIconMark, TahiWordmark } from '@/components/tahi/tahi-glyphs'
 import { SidebarUserCard } from '@/components/tahi/sidebar-user-card'
 import {
   AnimatedSettings, AnimatedInbox, AnimatedCheckSquare,
   AnimatedMessageSquare, AnimatedCalendar, AnimatedClock,
   AnimatedTrendingUp, AnimatedBarChart, AnimatedUsers,
+  AnimatedLayoutDashboard, AnimatedFileText, AnimatedGauge,
+  AnimatedStar, AnimatedMegaphone, AnimatedCreditCard,
+  AnimatedBookOpen, AnimatedFolderOpen, AnimatedUserCog,
+  AnimatedFileSignature,
 } from '@/components/tahi/animated-icons'
 import * as React from 'react'
 
-// Map nav href to the matching animated-icon component when one exists.
-// Items without a mapping fall back to the static Lucide icon plus a
-// CSS hover-lift (see .tahi-nav-icon in globals.css).
+// Map nav href to the matching animated-icon component. Every sidebar
+// item should resolve here so the hover motion stays semantic across
+// the whole nav. Anything missing falls back to static Lucide + the
+// generic CSS lift on .tahi-nav-icon.
 const ANIMATED_NAV_ICON: Record<string, React.ComponentType<{ size?: number, color?: string }>> = {
-  '/requests':        AnimatedInbox,
-  '/tasks':           AnimatedCheckSquare,
-  '/messages':        AnimatedMessageSquare,
-  '/schedules':       AnimatedCalendar,
-  '/pipeline':        AnimatedTrendingUp,
-  '/clients':         AnimatedUsers,
-  '/sales-analytics': AnimatedBarChart,
-  '/reports':         AnimatedBarChart,
-  '/time':            AnimatedClock,
-  '/settings':        AnimatedSettings,
+  '/overview':         AnimatedLayoutDashboard,
+  '/requests':         AnimatedInbox,
+  '/tasks':            AnimatedCheckSquare,
+  '/messages':         AnimatedMessageSquare,
+  '/schedules':        AnimatedCalendar,
+  '/pipeline':         AnimatedTrendingUp,
+  '/proposals':        AnimatedFileText,
+  '/contracts':        AnimatedFileSignature,
+  '/calculator':       AnimatedGauge,
+  '/sales-analytics':  AnimatedBarChart,
+  '/clients':          AnimatedUsers,
+  '/reviews':          AnimatedStar,
+  '/announcements':    AnimatedMegaphone,
+  '/invoices':         AnimatedFileText,
+  '/billing':          AnimatedCreditCard,
+  '/time':             AnimatedClock,
+  '/reports':          AnimatedBarChart,
+  '/capacity':         AnimatedGauge,
+  '/team':             AnimatedUserCog,
+  '/docs':             AnimatedBookOpen,
+  '/settings':         AnimatedSettings,
+  '/files':            AnimatedFolderOpen,
 }
 
 type NavItem = {
@@ -188,6 +205,12 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const { collapsed, setCollapsed } = useSidebar()
   const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
 
+  // Track first-paint hydration so the initial state restoration from
+  // localStorage doesn't visibly animate. After the first paint we flip
+  // hydrated=true and user-triggered changes animate normally.
+  const [hydrated, setHydrated] = React.useState(false)
+  React.useEffect(() => { setHydrated(true) }, [])
+
   // Theme state. Lives here so we can pass it into the SidebarUserCard
   // menu where the toggle now sits.
   const [darkMode, setDarkMode] = React.useState(false)
@@ -265,6 +288,7 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
       darkMode={darkMode}
       toggleDarkMode={toggleDarkMode}
       setCollapsed={setCollapsed}
+      hydrated={hydrated}
     />
   )
 
@@ -277,7 +301,12 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
         minWidth: `${desktopWidth}px`,
         background: 'var(--color-bg)',
         borderRight: '1px solid var(--color-border-subtle)',
-        transition: 'width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1)), min-width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1))',
+        // Disable transitions on first paint so the saved width snaps
+        // into place without animating. After hydration the user's
+        // toggles animate normally.
+        transition: hydrated
+          ? 'width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1)), min-width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1))'
+          : 'none',
       }}
     >
       {sidebarContent}
@@ -297,6 +326,7 @@ interface SidebarContentProps {
   darkMode: boolean
   toggleDarkMode: () => void
   setCollapsed: (next: boolean) => void
+  hydrated: boolean
 }
 
 function SidebarContent({
@@ -308,6 +338,7 @@ function SidebarContent({
   darkMode,
   toggleDarkMode,
   setCollapsed,
+  hydrated,
 }: SidebarContentProps) {
   return (
     <>
@@ -338,13 +369,11 @@ function SidebarContent({
           />
           {!collapsed && (
             <span style={{
-              fontSize: '0.9375rem',
-              fontWeight: 700,
+              display: 'inline-flex',
+              alignItems: 'center',
               color: 'var(--color-text-active)',
-              letterSpacing: '-0.01em',
-              whiteSpace: 'nowrap',
             }}>
-              Tahi Studio
+              <TahiWordmark size={20} title="Tahi" />
             </span>
           )}
         </Link>
@@ -354,7 +383,7 @@ function SidebarContent({
       <nav
         aria-label="Primary"
         className="flex-1 overflow-y-auto"
-        style={{ padding: '0.75rem 0.5rem' }}
+        style={{ padding: '1.25rem 0.5rem 0.75rem' }}
       >
         {visibleNav.map((group, gi) => {
           const open = isGroupOpen(group)
@@ -424,7 +453,9 @@ function SidebarContent({
                   padding: 0,
                   display: 'grid',
                   gridTemplateRows: open ? '1fr' : '0fr',
-                  transition: 'grid-template-rows var(--motion-base, 320ms) var(--ease-out)',
+                  transition: hydrated
+                    ? 'grid-template-rows var(--motion-base, 320ms) var(--ease-out)'
+                    : 'none',
                   overflow: 'hidden',
                 }}
                 aria-hidden={!open}

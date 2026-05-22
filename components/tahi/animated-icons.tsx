@@ -430,28 +430,25 @@ export function AnimatedClock(props: AnimatedIconProps) {
   )
 }
 
-// ── Trending-up · line extends from origin ────────────────────────────
+// ── Trending-up · whole icon nudges up-right (the direction of trend) ──
 export function AnimatedTrendingUp(props: AnimatedIconProps) {
-  const lineControls = useAnimationControls()
-  const playing = React.useRef(false)
-  const onMouseEnter = React.useCallback(async () => {
-    if (playing.current) return
-    playing.current = true
-    try {
-      await lineControls.start({ pathLength: [0, 1], transition: { duration: 0.5, ease: TAHI_EASE } })
-      await new Promise(r => setTimeout(r, 300))
-      await lineControls.start({ pathLength: 0, transition: { duration: 0.2 } })
-    } finally { playing.current = false }
-  }, [lineControls])
+  const controls = useAnimationControls()
+  const onMouseEnter = useHoverSequence(
+    controls,
+    { x: 0, y: 0 },
+    { x: [0, 2, 0], y: [0, -2, 0] },
+    { duration: 0.65, ease: TAHI_EASE, times: [0, 0.5, 1] },
+  )
   return (
-    <motion.svg {...baseSvgProps(props)} onMouseEnter={onMouseEnter}>
-      <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" opacity="0.25" />
+    <motion.svg
+      {...baseSvgProps(props)}
+      animate={controls}
+      initial={{ x: 0, y: 0 }}
+      onMouseEnter={onMouseEnter}
+      style={{ transformOrigin: 'center' }}
+    >
+      <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
       <polyline points="16 7 22 7 22 13" />
-      <motion.polyline
-        points="22 7 13.5 15.5 8.5 10.5 2 17"
-        initial={{ pathLength: 0 }}
-        animate={lineControls}
-      />
     </motion.svg>
   )
 }
@@ -515,24 +512,279 @@ export function AnimatedUsers(props: AnimatedIconProps) {
   )
 }
 
+// ── Layout-dashboard · the four tiles pulse sequentially ──────────────
+export function AnimatedLayoutDashboard(props: AnimatedIconProps) {
+  const controls = useAnimationControls()
+  const onMouseEnter = useHoverSequence(
+    controls,
+    { scale: 1 },
+    { scale: [1, 1.08, 1] },
+    { duration: 0.55, ease: TAHI_EASE, times: [0, 0.5, 1] },
+  )
+  return (
+    <motion.svg
+      {...baseSvgProps(props)}
+      animate={controls}
+      initial={{ scale: 1 }}
+      onMouseEnter={onMouseEnter}
+      style={{ transformOrigin: 'center' }}
+    >
+      <rect width="7" height="7" x="3" y="3" rx="1" />
+      <rect width="7" height="7" x="14" y="3" rx="1" />
+      <rect width="7" height="7" x="14" y="14" rx="1" />
+      <rect width="7" height="7" x="3" y="14" rx="1" />
+    </motion.svg>
+  )
+}
+
+// ── File-text · top corner folds down (page-turn cue) ─────────────────
+export function AnimatedFileText(props: AnimatedIconProps) {
+  const controls = useAnimationControls()
+  const onMouseEnter = useHoverSequence(
+    controls,
+    { y: 0 },
+    { y: [0, -1.5, 0] },
+    { duration: 0.55, ease: TAHI_EASE, times: [0, 0.5, 1] },
+  )
+  return (
+    <motion.svg
+      {...baseSvgProps(props)}
+      animate={controls}
+      initial={{ y: 0 }}
+      onMouseEnter={onMouseEnter}
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="16" y1="13" x2="8" y2="13" />
+      <line x1="16" y1="17" x2="8" y2="17" />
+    </motion.svg>
+  )
+}
+
+// ── Gauge · needle swings ─────────────────────────────────────────────
+export function AnimatedGauge(props: AnimatedIconProps) {
+  const needleControls = useAnimationControls()
+  const playing = React.useRef(false)
+  const onMouseEnter = React.useCallback(async () => {
+    if (playing.current) return
+    playing.current = true
+    try {
+      await needleControls.start({ rotate: [0, 45, -20, 0], transition: { duration: 0.75, ease: TAHI_EASE, times: [0, 0.4, 0.7, 1] } })
+    } finally { playing.current = false }
+  }, [needleControls])
+  return (
+    <motion.svg {...baseSvgProps(props)} onMouseEnter={onMouseEnter}>
+      <path d="m12 14 4-4" />
+      <path d="M3.34 19a10 10 0 1 1 17.32 0" />
+      <motion.path
+        d="m12 14 4-4"
+        initial={{ rotate: 0 }}
+        animate={needleControls}
+        style={{ transformOrigin: '12px 14px', transformBox: 'fill-box' }}
+      />
+    </motion.svg>
+  )
+}
+
+// ── Star · sparkle (scale + rotate) ───────────────────────────────────
+export function AnimatedStar(props: AnimatedIconProps) {
+  const controls = useAnimationControls()
+  const onMouseEnter = useHoverSequence(
+    controls,
+    { scale: 1, rotate: 0 },
+    { scale: [1, 1.2, 1], rotate: [0, 20, 0] },
+    { duration: 0.65, ease: TAHI_EASE, times: [0, 0.5, 1] },
+  )
+  return (
+    <motion.svg
+      {...baseSvgProps(props)}
+      animate={controls}
+      initial={{ scale: 1, rotate: 0 }}
+      onMouseEnter={onMouseEnter}
+      style={{ transformOrigin: 'center' }}
+    >
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </motion.svg>
+  )
+}
+
+// ── Megaphone · gentle shake ──────────────────────────────────────────
+export function AnimatedMegaphone(props: AnimatedIconProps) {
+  const controls = useAnimationControls()
+  const onMouseEnter = useHoverSequence(
+    controls,
+    { rotate: 0 },
+    { rotate: [0, -8, 6, -4, 0] },
+    { duration: 0.6, ease: TAHI_SPRING, times: [0, 0.25, 0.5, 0.75, 1] },
+  )
+  return (
+    <motion.svg
+      {...baseSvgProps(props)}
+      animate={controls}
+      initial={{ rotate: 0 }}
+      onMouseEnter={onMouseEnter}
+      style={{ transformOrigin: 'center' }}
+    >
+      <path d="m3 11 18-5v12L3 14v-3z" />
+      <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+    </motion.svg>
+  )
+}
+
+// ── Credit-card · card flips on its long axis ─────────────────────────
+export function AnimatedCreditCard(props: AnimatedIconProps) {
+  const controls = useAnimationControls()
+  const onMouseEnter = useHoverSequence(
+    controls,
+    { rotateY: 0 },
+    { rotateY: [0, 180, 360] },
+    { duration: 0.8, ease: TAHI_EASE, times: [0, 0.5, 1] },
+  )
+  return (
+    <motion.svg
+      {...baseSvgProps(props)}
+      animate={controls}
+      initial={{ rotateY: 0 }}
+      onMouseEnter={onMouseEnter}
+      style={{ transformOrigin: 'center', transformStyle: 'preserve-3d' }}
+    >
+      <rect width="20" height="14" x="2" y="5" rx="2" />
+      <line x1="2" y1="10" x2="22" y2="10" />
+    </motion.svg>
+  )
+}
+
+// ── Book-open · pages flutter ─────────────────────────────────────────
+export function AnimatedBookOpen(props: AnimatedIconProps) {
+  const controls = useAnimationControls()
+  const onMouseEnter = useHoverSequence(
+    controls,
+    { scaleY: 1 },
+    { scaleY: [1, 0.9, 1.05, 1] },
+    { duration: 0.6, ease: TAHI_EASE, times: [0, 0.3, 0.7, 1] },
+  )
+  return (
+    <motion.svg
+      {...baseSvgProps(props)}
+      animate={controls}
+      initial={{ scaleY: 1 }}
+      onMouseEnter={onMouseEnter}
+      style={{ transformOrigin: 'center bottom' }}
+    >
+      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+    </motion.svg>
+  )
+}
+
+// ── Folder-open · folder lid lifts ────────────────────────────────────
+export function AnimatedFolderOpen(props: AnimatedIconProps) {
+  const controls = useAnimationControls()
+  const onMouseEnter = useHoverSequence(
+    controls,
+    { y: 0 },
+    { y: [0, -2, 0] },
+    { duration: 0.55, ease: TAHI_EASE, times: [0, 0.5, 1] },
+  )
+  return (
+    <motion.svg
+      {...baseSvgProps(props)}
+      animate={controls}
+      initial={{ y: 0 }}
+      onMouseEnter={onMouseEnter}
+    >
+      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+    </motion.svg>
+  )
+}
+
+// ── User-cog · the cog spins, user icon stays put ─────────────────────
+export function AnimatedUserCog(props: AnimatedIconProps) {
+  const cogControls = useAnimationControls()
+  const onMouseEnter = useHoverSequence(
+    cogControls,
+    { rotate: 0 },
+    { rotate: [0, 60, 0] },
+    { duration: 0.9, ease: TAHI_EASE, times: [0, 0.6, 1] },
+  )
+  return (
+    <motion.svg {...baseSvgProps(props)} onMouseEnter={onMouseEnter}>
+      <circle cx="10" cy="7" r="4" />
+      <path d="M10 14a7 7 0 0 0-7 7h7" />
+      <motion.g
+        animate={cogControls}
+        initial={{ rotate: 0 }}
+        style={{ transformOrigin: '17.5px 17.5px', transformBox: 'fill-box' }}
+      >
+        <circle cx="17.5" cy="17.5" r="2.5" />
+        <path d="M17.5 14.5v-1" />
+        <path d="M17.5 21.5v-1" />
+        <path d="M20.5 17.5h-1" />
+        <path d="M15.5 17.5h-1" />
+        <path d="m19.6 15.4-.7.7" />
+        <path d="m16.1 18.9-.7.7" />
+        <path d="m19.6 19.6-.7-.7" />
+        <path d="m16.1 16.1-.7-.7" />
+      </motion.g>
+    </motion.svg>
+  )
+}
+
+// ── File-signature · signature line dances ────────────────────────────
+export function AnimatedFileSignature(props: AnimatedIconProps) {
+  const lineControls = useAnimationControls()
+  const playing = React.useRef(false)
+  const onMouseEnter = React.useCallback(async () => {
+    if (playing.current) return
+    playing.current = true
+    try {
+      await lineControls.start({ pathLength: [0, 1], transition: { duration: 0.5, ease: TAHI_EASE } })
+      await new Promise(r => setTimeout(r, 250))
+      await lineControls.start({ pathLength: 0, transition: { duration: 0.2 } })
+    } finally { playing.current = false }
+  }, [lineControls])
+  return (
+    <motion.svg {...baseSvgProps(props)} onMouseEnter={onMouseEnter}>
+      <path d="M20 19.5V14h-5.5" />
+      <path d="M20 14 4 2v18l4-2 4 2 4-2 4 2" />
+      <path d="M9.5 17.5c-.4 0-.6-.4-.4-.7.5-.7 1.6-1.4 3-1.4 1.7 0 3 1 3.5 1.5" />
+      <motion.path
+        d="M3 15c1-2 3-3 5-3 1.5 0 3 .8 4 2"
+        initial={{ pathLength: 0 }}
+        animate={lineControls}
+      />
+    </motion.svg>
+  )
+}
+
 export const ANIMATED_ICONS = {
-  'settings':       AnimatedSettings,
-  'bell':           AnimatedBell,
-  'heart':          AnimatedHeart,
-  'refresh-cw':     AnimatedRefresh,
-  'search':         AnimatedSearch,
-  'eye':            AnimatedEye,
-  'sparkles':       AnimatedSparkles,
-  'check-circle':   AnimatedCheckCircle,
-  'trash':          AnimatedTrash,
-  'inbox':          AnimatedInbox,
-  'check-square':   AnimatedCheckSquare,
-  'message-square': AnimatedMessageSquare,
-  'calendar':       AnimatedCalendar,
-  'clock':          AnimatedClock,
-  'trending-up':    AnimatedTrendingUp,
-  'bar-chart':      AnimatedBarChart,
-  'users':          AnimatedUsers,
+  'settings':         AnimatedSettings,
+  'bell':             AnimatedBell,
+  'heart':            AnimatedHeart,
+  'refresh-cw':       AnimatedRefresh,
+  'search':           AnimatedSearch,
+  'eye':              AnimatedEye,
+  'sparkles':         AnimatedSparkles,
+  'check-circle':     AnimatedCheckCircle,
+  'trash':            AnimatedTrash,
+  'inbox':            AnimatedInbox,
+  'check-square':     AnimatedCheckSquare,
+  'message-square':   AnimatedMessageSquare,
+  'calendar':         AnimatedCalendar,
+  'clock':            AnimatedClock,
+  'trending-up':      AnimatedTrendingUp,
+  'bar-chart':        AnimatedBarChart,
+  'users':            AnimatedUsers,
+  'layout-dashboard': AnimatedLayoutDashboard,
+  'file-text':        AnimatedFileText,
+  'gauge':            AnimatedGauge,
+  'star':             AnimatedStar,
+  'megaphone':        AnimatedMegaphone,
+  'credit-card':      AnimatedCreditCard,
+  'book-open':        AnimatedBookOpen,
+  'folder-open':      AnimatedFolderOpen,
+  'user-cog':         AnimatedUserCog,
+  'file-signature':   AnimatedFileSignature,
 } as const satisfies Record<string, React.ComponentType<AnimatedIconProps>>
 
 export type AnimatedIconName = keyof typeof ANIMATED_ICONS

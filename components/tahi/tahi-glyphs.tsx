@@ -174,12 +174,22 @@ export function TahiIconMark({
 }) {
   const id = React.useMemo(() => nextGradientId('tahi-icon'), [])
   const isOnDark = variant === 'on-dark'
-  // Stroke colour for the "1". Light on dark surfaces, dark on light
-  const oneColour = isOnDark ? '#F3F7F2' : 'var(--color-brand-deep)'
+  // Stroke colour for the "1". Uses CSS vars that flip per theme so the
+  // mark stays legible whether it's sitting on cream (light) or forest
+  // (dark) surface, regardless of which variant the caller picked. The
+  // explicit on-dark / on-light props let callers force a treatment for
+  // e.g. a dark badge that doesn't follow the theme.
+  const oneColour = isOnDark
+    ? 'var(--tahi-mark-one-on-dark, #F3F7F2)'
+    : 'var(--tahi-mark-one, var(--color-brand-deep))'
   // Gradient stops. Brighter on dark surfaces (so the leaf shines),
-  // deeper on light surfaces (so it has presence on cream)
-  const gradStart = isOnDark ? '#77A569' : 'var(--color-brand)'
-  const gradEnd   = isOnDark ? 'var(--color-brand)' : 'var(--color-brand-darker)'
+  // deeper on light surfaces (so it has presence on cream).
+  const gradStart = isOnDark
+    ? 'var(--tahi-mark-leaf-start-on-dark, #77A569)'
+    : 'var(--tahi-mark-leaf-start, var(--color-brand))'
+  const gradEnd   = isOnDark
+    ? 'var(--tahi-mark-leaf-end-on-dark, var(--color-brand))'
+    : 'var(--tahi-mark-leaf-end, var(--color-brand-darker))'
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
