@@ -331,12 +331,15 @@ function SidebarContent({
             variant="on-light"
           />
           {!collapsed && (
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              color: 'var(--color-text-active)',
-            }}>
-              <TahiStudioWordmark height={18} title="Tahi Studio" />
+            <span
+              className="tahi-sidebar-expanded-only"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                color: 'var(--color-text-active)',
+              }}
+            >
+              <TahiStudioWordmark height={26} title="Tahi Studio" />
             </span>
           )}
         </Link>
@@ -368,6 +371,7 @@ function SidebarContent({
                     onClick={() => toggleGroup(group.group)}
                     aria-expanded={open}
                     aria-controls={groupId}
+                    className="tahi-sidebar-expanded-only"
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -395,15 +399,18 @@ function SidebarContent({
                     />
                   </button>
                 ) : (
-                  <p style={{
-                    fontSize: '0.6875rem',
-                    fontWeight: 600,
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase',
-                    color: 'var(--color-text-subtle)',
-                    padding: '0.125rem 0.5rem 0.375rem',
-                    margin: 0,
-                  }}>
+                  <p
+                    className="tahi-sidebar-expanded-only"
+                    style={{
+                      fontSize: '0.6875rem',
+                      fontWeight: 600,
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase',
+                      color: 'var(--color-text-subtle)',
+                      padding: '0.125rem 0.5rem 0.375rem',
+                      margin: 0,
+                    }}
+                  >
                     {group.group}
                   </p>
                 )
@@ -481,27 +488,33 @@ function SidebarContent({
                           <Icon className={cn(collapsed ? 'w-5 h-5' : 'w-4 h-4')} />
                         </span>
                         {!collapsed && (
-                          <span style={{
-                            flex: 1,
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                          }}>
+                          <span
+                            className="tahi-sidebar-expanded-only"
+                            style={{
+                              flex: 1,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
                             {item.label}
                           </span>
                         )}
                         {!collapsed && item.count != null && (
-                          <span style={{
-                            background: active ? 'var(--color-brand)' : 'var(--color-bg-secondary)',
-                            color: active ? '#ffffff' : 'var(--color-text-muted)',
-                            border: active ? 'none' : '1px solid var(--color-border-subtle)',
-                            fontSize: '0.625rem',
-                            fontWeight: 600,
-                            padding: '0.0625rem 0.4375rem',
-                            borderRadius: '9999px',
-                            minWidth: '1.25rem',
-                            textAlign: 'center',
-                          }}>
+                          <span
+                            className="tahi-sidebar-expanded-only"
+                            style={{
+                              background: active ? 'var(--color-brand)' : 'var(--color-bg-secondary)',
+                              color: active ? '#ffffff' : 'var(--color-text-muted)',
+                              border: active ? 'none' : '1px solid var(--color-border-subtle)',
+                              fontSize: '0.625rem',
+                              fontWeight: 600,
+                              padding: '0.0625rem 0.4375rem',
+                              borderRadius: '9999px',
+                              minWidth: '1.25rem',
+                              textAlign: 'center',
+                            }}
+                          >
                             {item.count}
                           </span>
                         )}
@@ -540,7 +553,7 @@ function SidebarContent({
           <span style={{ display: 'flex', flexShrink: 0, color: 'var(--color-text-muted)' }}>
             {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </span>
-          {!collapsed && <span>Collapse</span>}
+          {!collapsed && <span className="tahi-sidebar-expanded-only">Collapse</span>}
         </FooterButton>
         <div style={{ height: '1px', background: 'var(--color-border-subtle)', margin: '0.375rem 0' }} />
         <SidebarUserCard

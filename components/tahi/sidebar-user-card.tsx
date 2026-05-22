@@ -58,7 +58,7 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
           aria-hidden="true"
         />
         {!collapsed && (
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="tahi-sidebar-expanded-only" style={{ flex: 1, minWidth: 0 }}>
             <div style={{ height: '0.625rem', background: 'var(--color-bg-tertiary)', borderRadius: '4px', marginBottom: '0.375rem', width: '70%' }} />
             <div style={{ height: '0.5rem', background: 'var(--color-bg-tertiary)', borderRadius: '4px', width: '90%' }} />
           </div>
@@ -105,7 +105,7 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
         <Avatar name={fullName} src={imageUrl} size="md" noRing />
         {!collapsed && (
           <>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="tahi-sidebar-expanded-only" style={{ flex: 1, minWidth: 0 }}>
               <div style={{
                 fontSize: '0.8125rem',
                 fontWeight: 600,
@@ -132,7 +132,7 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
               )}
             </div>
             <ChevronDown
-              className="w-3.5 h-3.5"
+              className="w-3.5 h-3.5 tahi-sidebar-expanded-only"
               style={{
                 color: 'var(--color-text-subtle)',
                 flexShrink: 0,

@@ -370,10 +370,21 @@ body {
 .tahi-sidebar {
   width: 240px;
   min-width: 240px;
+  /* Clip horizontally-overflowing children. Backstop for the brief
+     pre-hydration window where the SSR HTML may carry full-width labels
+     but the inline script has already shrunk the container to 64px. */
+  overflow-x: hidden;
 }
 [data-sidebar="collapsed"] .tahi-sidebar {
   width: 64px;
   min-width: 64px;
+}
+/* Pre-hydration label backstop. Any element tagged with this class is
+   hidden the moment the inline script sets data-sidebar="collapsed" on
+   <html>. Kills the SSR label flash before React even runs. React then
+   catches up via the useState initializer in sidebar-context.tsx. */
+[data-sidebar="collapsed"] .tahi-sidebar-expanded-only {
+  display: none !important;
 }
 [data-sidebar-ready] .tahi-sidebar {
   transition:
