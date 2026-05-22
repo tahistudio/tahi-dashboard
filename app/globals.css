@@ -361,16 +361,27 @@ body {
   }
 }
 
-/* Sidebar / mobile-drawer nav links. The icon inside lifts subtly on
-   link hover even when its underlying glyph is a static Lucide icon
-   that has no semantic animated variant of its own. Keeps the sidebar
-   feeling alive without forcing every nav item to ship its own
-   bespoke animation. */
-.tahi-nav-link .tahi-nav-icon {
-  transition: transform var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
+/* Sidebar width comes from CSS, not React's inline style. The inline
+   script in the dashboard layout sets <html data-sidebar="collapsed">
+   from localStorage BEFORE React hydrates, so the very first paint is
+   already at the correct width. No JS-driven shrink animation, no
+   flash. The transition only activates after the user has clicked the
+   toggle (via the data-sidebar-ready attribute React adds on mount). */
+.tahi-sidebar {
+  width: 240px;
+  min-width: 240px;
 }
-.tahi-nav-link:hover .tahi-nav-icon {
-  transform: translateY(-1px);
+[data-sidebar="collapsed"] .tahi-sidebar {
+  width: 64px;
+  min-width: 64px;
+}
+[data-sidebar-ready] .tahi-sidebar {
+  transition:
+    width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1)),
+    min-width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
+}
+[data-sidebar-ready] .tahi-nav-group-items {
+  transition: grid-template-rows var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
 }
 
 /* Inner page wrapper (max-w-7xl mx-auto w-full). Owns the top spacing that

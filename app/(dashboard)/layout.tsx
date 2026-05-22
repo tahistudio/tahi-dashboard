@@ -25,6 +25,15 @@ export default async function DashboardLayout({
     <ToastProvider>
     <DisplayCurrencyProvider>
       <SidebarProvider>
+        {/* Inline script that runs synchronously before React hydrates.
+            Reads localStorage and sets data-sidebar="collapsed" on
+            <html> so the CSS can apply the collapsed width on the
+            very first paint. No JavaScript animation, no flash. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var s=localStorage.getItem('tahi-sidebar');if(s==='collapsed'){document.documentElement.setAttribute('data-sidebar','collapsed');}}catch(e){}})();`,
+          }}
+        />
         <SkipToContent />
         <div className="flex h-screen overflow-hidden" style={{ background: 'var(--color-bg-cream)' }}>
           {/* AppSidebar handles its own responsive visibility:

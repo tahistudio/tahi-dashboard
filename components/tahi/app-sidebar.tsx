@@ -157,8 +157,9 @@ const CLIENT_NAV: NavGroup[] = [
   },
 ]
 
-const EXPANDED_WIDTH = 240
-const COLLAPSED_WIDTH = 64
+// Sidebar widths live in CSS now (see .tahi-sidebar in globals.css).
+// Inline-script sync on <html data-sidebar="collapsed"> drives the
+// width before React hydrates so there's no flash on refresh.
 
 const VIEWER_HIDDEN_PAGES = new Set(['/team', '/settings', '/billing', '/contracts'])
 
@@ -167,19 +168,21 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const { collapsed, setCollapsed } = useSidebar()
   const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
 
-  // Transitions are gated on a user-interaction ref. Initial state
-  // restoration from localStorage flips collapsed / openGroups without
-  // any visible animation. Only the user's own toggle clicks animate.
-  // Forcing a re-render after the click ensures the new transition
-  // style is applied before the property change.
-  const userToggled = React.useRef(false)
-  const [, forceRerender] = React.useReducer((x: number) => x + 1, 0)
-  const markUserToggled = React.useCallback(() => {
-    if (!userToggled.current) {
-      userToggled.current = true
-      forceRerender()
-    }
+  // After mount, flag the sidebar as "ready" so user-clicked toggles
+  // can animate. The inline script in the layout sets the data-sidebar
+  // attribute on <html> before React mounts so the initial width is
+  // already correct (no animation needed).
+  React.useEffect(() => {
+    document.documentElement.setAttribute('data-sidebar-ready', '')
+    return () => { document.documentElement.removeAttribute('data-sidebar-ready') }
   }, [])
+
+  // Keep <html data-sidebar> in sync with React state so the CSS can
+  // drive width whenever the user toggles.
+  React.useEffect(() => {
+    if (collapsed) document.documentElement.setAttribute('data-sidebar', 'collapsed')
+    else document.documentElement.removeAttribute('data-sidebar')
+  }, [collapsed])
 
   // Theme state. Lives here so we can pass it into the SidebarUserCard
   // menu where the toggle now sits.
@@ -207,7 +210,6 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
     } catch { /* localStorage unavailable */ }
   }, [])
   const toggleGroup = (groupName: string) => {
-    markUserToggled()
     setOpenGroups(prev => {
       const next = { ...prev, [groupName]: prev[groupName] === false }
       try { localStorage.setItem('tahi-sidebar-groups', JSON.stringify(next)) } catch { /* noop */ }
@@ -246,13 +248,9 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
 
   // Desktop sidebar. On mobile we hide it with CSS (md:flex). Mobile
   // gets the bottom-bar drawer via <MobileBottomNav>; the sidebar
-  // itself stays desktop-only.
-  const desktopWidth = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH
-
-  const handleSetCollapsed = (next: boolean) => {
-    markUserToggled()
-    setCollapsed(next)
-  }
+  // itself stays desktop-only. Width is driven by CSS via
+  // [data-sidebar="collapsed"] on <html>, set by the inline script
+  // before React hydrates (see app/(dashboard)/layout.tsx).
 
   const sidebarContent = (
     <SidebarContent
@@ -263,25 +261,17 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
       toggleGroup={toggleGroup}
       darkMode={darkMode}
       toggleDarkMode={toggleDarkMode}
-      setCollapsed={handleSetCollapsed}
-      userToggled={userToggled.current}
+      setCollapsed={setCollapsed}
     />
   )
 
   return (
     <aside
-      className="hidden md:flex flex-col h-full flex-shrink-0"
+      className="tahi-sidebar hidden md:flex flex-col h-full flex-shrink-0"
       aria-label="Primary navigation"
       style={{
-        width: `${desktopWidth}px`,
-        minWidth: `${desktopWidth}px`,
         background: 'var(--color-bg)',
         borderRight: '1px solid var(--color-border-subtle)',
-        // Disable width transitions until the user clicks the collapse
-        // button. Storage-restore on refresh snaps without animation.
-        transition: userToggled.current
-          ? 'width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1)), min-width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1))'
-          : 'none',
       }}
     >
       {sidebarContent}
@@ -301,7 +291,6 @@ interface SidebarContentProps {
   darkMode: boolean
   toggleDarkMode: () => void
   setCollapsed: (next: boolean) => void
-  userToggled: boolean
 }
 
 function SidebarContent({
@@ -313,7 +302,6 @@ function SidebarContent({
   darkMode,
   toggleDarkMode,
   setCollapsed,
-  userToggled,
 }: SidebarContentProps) {
   return (
     <>
@@ -422,15 +410,13 @@ function SidebarContent({
               )}
               <ul
                 id={groupId}
+                className="tahi-nav-group-items"
                 style={{
                   listStyle: 'none',
                   margin: 0,
                   padding: 0,
                   display: 'grid',
                   gridTemplateRows: open ? '1fr' : '0fr',
-                  transition: userToggled
-                    ? 'grid-template-rows var(--motion-base, 320ms) var(--ease-out)'
-                    : 'none',
                   overflow: 'hidden',
                 }}
                 aria-hidden={!open}
