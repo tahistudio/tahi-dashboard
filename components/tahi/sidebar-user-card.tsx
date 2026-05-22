@@ -93,7 +93,7 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
           justifyContent: collapsed ? 'center' : 'flex-start',
           background: 'transparent',
           border: 'none',
-          borderRadius: 'var(--radius-leaf-sm)',
+          borderRadius: 'var(--radius-md)',
           cursor: 'pointer',
           minHeight: '3rem',
           textAlign: 'left',

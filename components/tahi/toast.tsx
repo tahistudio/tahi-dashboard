@@ -132,7 +132,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                   gap: '0.75rem',
                   padding: '0.625rem 0.75rem 0.625rem 0.875rem',
                   background: 'var(--color-brand-deepest)',
-                  borderRadius: 'var(--radius-leaf-sm)',
+                  borderRadius: 'var(--radius-md)',
                   boxShadow: '0 8px 24px rgba(0, 0, 0, 0.28)',
                   color: 'var(--color-text-on-dark)',
                   fontSize: '0.8125rem',

@@ -106,7 +106,7 @@ export function KPICard({
     flexDirection: 'column',
     gap: '0.875rem',
     padding: '1.25rem 1.375rem',
-    borderRadius: 'var(--radius-leaf)',
+    borderRadius: 'var(--radius-lg)',
     background: featured ? featuredBg : 'var(--color-bg)',
     color: featured ? 'var(--color-brand-deepest)' : 'var(--color-text)',
     border: featured ? '1px solid rgba(255, 255, 255, 0.40)' : '1px solid var(--color-border-strong)',

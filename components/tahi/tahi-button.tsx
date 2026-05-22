@@ -81,7 +81,7 @@ function variantStyle(variant: Variant): StyleForState {
         rest: {
           background: 'var(--color-accent)',
           color: 'var(--color-accent-text)',
-          borderRadius: 'var(--radius-leaf-sm)',
+          borderRadius: 'var(--radius-md)',
         },
         // Match the design pack: hover just lifts the lime brightness.
         // No translateY, no shadow glow. The premium read comes from the

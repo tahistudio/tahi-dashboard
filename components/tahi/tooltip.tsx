@@ -187,7 +187,7 @@ export function Tooltip({
         fontWeight: 500,
         lineHeight: 1.3,
         padding: '0.4rem 0.625rem',
-        borderRadius: 'var(--radius-leaf-sm)',
+        borderRadius: 'var(--radius-sm)',
         boxShadow: '0 4px 16px rgba(18, 26, 15, 0.18)',
         pointerEvents: 'none',
         whiteSpace: 'nowrap',

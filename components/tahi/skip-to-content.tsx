@@ -21,7 +21,7 @@ export function SkipToContent() {
         color: 'var(--color-text-on-dark)',
         fontSize: '0.8125rem',
         fontWeight: 600,
-        borderRadius: 'var(--radius-leaf-sm)',
+        borderRadius: 'var(--radius-md)',
         textDecoration: 'none',
         transform: 'translateY(-200%)',
         transition: 'transform var(--motion-quick, 220ms) var(--ease-out, ease-out)',

@@ -275,8 +275,8 @@ export function MobileBottomNav({ isAdmin = false }: MobileBottomNavProps) {
             className="absolute bottom-0 left-0 right-0 flex flex-col"
             style={{
               background: 'var(--color-bg-cream)',
-              borderTopLeftRadius: 'var(--radius-leaf-lg)',
-              borderTopRightRadius: 'var(--radius-leaf-lg)',
+              borderTopLeftRadius: 'var(--radius-xl)',
+              borderTopRightRadius: 'var(--radius-xl)',
               maxHeight: '90vh',
               paddingBottom: 'env(safe-area-inset-bottom, 0px)',
               animation: 'slideUp 320ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -359,7 +359,7 @@ export function MobileBottomNav({ isAdmin = false }: MobileBottomNavProps) {
                               alignItems: 'center',
                               gap: '0.75rem',
                               padding: '0.6875rem 0.625rem',
-                              borderRadius: 'var(--radius-leaf-sm)',
+                              borderRadius: 'var(--radius-md)',
                               fontSize: '0.9375rem',
                               fontWeight: active ? 600 : 500,
                               color: active ? 'var(--color-text-active)' : 'var(--color-text-muted)',

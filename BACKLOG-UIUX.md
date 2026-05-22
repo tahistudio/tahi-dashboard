@@ -6,6 +6,8 @@ Format: one bullet per item, prefix with the page name it belongs to, end with a
 
 ## Pending
 
+- **Codebase / leaf-to-rounded sweep** Switched core primitives to symmetric rounded (Card, KPICard, TahiButton primary, Toast, Tooltip, sidebar items, bottom-nav items, bottom-sheet corners, skip-to-content) on 2026-05-23. Hero / brand surfaces keep leaf (FeatureCard, leaf-logo, leaf-glyph, marketing site, brand wordmarks). Still using leaf in: `ai-briefing-card.tsx`, `booking-widget.tsx`, `client-card.tsx`, `kpi-strip.tsx` (legacy, KPICard supersedes), `ai-request-wizard.tsx`, `activity-timeline.tsx`, `empty-state.tsx`, `org-chart.tsx`, `prompt-dialog.tsx`, `skeletons.tsx`, `slide-over.tsx`, `dialogs/new-client-dialog.tsx`, `onboarding-checklist.tsx`. Sweep these to `--radius-lg` or `--radius-md` when each page is polished in Phase B.
+
 - **A4 / icons** — Animated icons are built (`components/tahi/animated-icons.tsx`). Decide where each one ships: refresh-cw on sync buttons, bell on notification badge, settings on the cog nav item, sparkles on AI moments, check-circle on save success, search on top-nav, trash on row delete-confirm hover. Static Lucide elsewhere. Added 2026-05-22.
 - **A4 / chips** — `components/tahi/status-badge.tsx` currently has no leading glyph. Add `<LeafIcon size={11} />` tinted to the chip's text colour, matching the design-system status palette demo. Submitted token colours already updated to indigo. Added 2026-05-22.
 - **A4 / icons grid polish** done. Hand-coded hover transforms retired. Static grid is plain hover-tint; animated grid uses `<AnimatedXxx>` components. 2026-05-22.

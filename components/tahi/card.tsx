@@ -83,7 +83,7 @@ function CardRoot({
 
   const baseStyle: React.CSSProperties = {
     background: 'var(--color-bg)',
-    borderRadius: 'var(--radius-leaf)',
+    borderRadius: 'var(--radius-lg)',
     padding: variant === 'grouped' ? 0 : paddingValue(padding),
     overflow: variant === 'grouped' ? 'hidden' : undefined,
     border: variant === 'flat' ? 'none' : '1px solid var(--color-border-strong)',
