@@ -83,12 +83,12 @@ function CardRoot({
 
   const baseStyle: React.CSSProperties = {
     background: 'var(--color-bg)',
-    borderRadius: 'var(--radius-lg)',
+    borderRadius: 'var(--radius-leaf)',
     padding: variant === 'grouped' ? 0 : paddingValue(padding),
     overflow: variant === 'grouped' ? 'hidden' : undefined,
-    border: variant === 'flat' ? 'none' : '1px solid var(--color-border-subtle)',
+    border: variant === 'flat' ? 'none' : '1px solid var(--color-border-strong)',
     boxShadow: variant === 'elevated' ? 'var(--shadow-md)' : undefined,
-    transition: 'border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease',
+    transition: 'border-color var(--motion-base) var(--ease-out), box-shadow var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out)',
     ...style,
   }
 
@@ -96,13 +96,13 @@ function CardRoot({
     ? {
         onMouseEnter: e => {
           const el = e.currentTarget as HTMLElement
-          if (variant !== 'flat') el.style.borderColor = 'var(--color-border)'
-          el.style.boxShadow = 'var(--shadow-sm)'
+          if (variant !== 'flat') el.style.borderColor = 'var(--color-brand-light)'
+          el.style.boxShadow = 'var(--shadow-leaf)'
           if (shouldLift) el.style.transform = 'translateY(-1px)'
         },
         onMouseLeave: e => {
           const el = e.currentTarget as HTMLElement
-          if (variant !== 'flat') el.style.borderColor = 'var(--color-border-subtle)'
+          if (variant !== 'flat') el.style.borderColor = 'var(--color-border-strong)'
           el.style.boxShadow = variant === 'elevated' ? 'var(--shadow-md)' : 'none'
           el.style.transform = ''
         },

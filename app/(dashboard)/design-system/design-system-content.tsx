@@ -14,6 +14,10 @@ import {
   AnimatedCheckCircle,
   AnimatedTrash,
 } from '@/components/tahi/animated-icons'
+import { TahiButton, TahiLink } from '@/components/tahi/tahi-button'
+import { Avatar } from '@/components/tahi/avatar'
+import { Badge } from '@/components/tahi/badge'
+import { Card as CardPrim } from '@/components/tahi/card'
 
 /**
  * /design-system — the canonical token + primitive reference.
@@ -1301,31 +1305,409 @@ function WcagSection() {
 }
 
 // ────────────────────────────────────────────────────────────────────────
-// Components (placeholder for A4)
+// Components — Batch 1 (Button · Avatar · Badge · Card)
+//
+// Each primitive's source lives in components/tahi/. The blocks below
+// render every state we expect to see in production. A second-level
+// sub-nav sits at the top so reviewers can jump between primitives
+// without scrolling through the rest of the design system every time.
+//
+// Sub-nav lives inline here for batch 1; it gets extracted to
+// components/tahi/section-nav.tsx in batch 2.
 // ────────────────────────────────────────────────────────────────────────
+
+const COMPONENTS_NAV = [
+  { id: 'comp-button', label: 'Button',  ready: true },
+  { id: 'comp-avatar', label: 'Avatar',  ready: true },
+  { id: 'comp-badge',  label: 'Badge',   ready: true },
+  { id: 'comp-card',   label: 'Card',    ready: true },
+  { id: 'comp-chip',     label: 'Chip',          ready: false },
+  { id: 'comp-empty',    label: 'Empty state',   ready: false },
+  { id: 'comp-callout',  label: 'Callout',       ready: false },
+  { id: 'comp-toast',    label: 'Toast',         ready: false },
+  { id: 'comp-pagination', label: 'Pagination',  ready: false },
+  { id: 'comp-stepper',    label: 'Stepper',     ready: false },
+  { id: 'comp-progress',   label: 'Progress',    ready: false },
+  { id: 'comp-table',      label: 'Data table',  ready: false },
+]
+
+function ComponentsSubNav() {
+  return (
+    <nav
+      aria-label="Components"
+      style={{
+        position: 'sticky',
+        top: '3.5rem',
+        zIndex: 9,
+        background: 'var(--color-bg-cream)',
+        paddingTop: '0.5rem',
+        paddingBottom: '0.5rem',
+        marginBottom: '0.5rem',
+      }}
+    >
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '0.375rem',
+        padding: '0.375rem',
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-strong)',
+        borderRadius: 'var(--radius-leaf-sm)',
+      }}>
+        {COMPONENTS_NAV.map(item => (
+          <a
+            key={item.id}
+            href={item.ready ? `#${item.id}` : undefined}
+            aria-disabled={!item.ready || undefined}
+            style={{
+              padding: '0.3rem 0.7rem',
+              fontSize: 'var(--text-xs)',
+              fontWeight: 500,
+              borderRadius: 'var(--radius-leaf-sm)',
+              color: item.ready ? 'var(--color-text-muted)' : 'var(--color-text-subtle)',
+              background: 'transparent',
+              opacity: item.ready ? 1 : 0.5,
+              pointerEvents: item.ready ? 'auto' : 'none',
+              cursor: item.ready ? 'pointer' : 'default',
+              transition: 'background var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.375rem',
+            }}
+            onMouseEnter={e => {
+              if (!item.ready) return
+              e.currentTarget.style.background = 'var(--color-brand-50)'
+              e.currentTarget.style.color = 'var(--color-brand-dark)'
+            }}
+            onMouseLeave={e => {
+              if (!item.ready) return
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = 'var(--color-text-muted)'
+            }}
+          >
+            {item.label}
+            {!item.ready && (
+              <span style={{
+                fontSize: '0.6rem',
+                padding: '0.0625rem 0.3125rem',
+                background: 'var(--color-bg-tertiary)',
+                color: 'var(--color-text-subtle)',
+                borderRadius: 'var(--radius-leaf-sm)',
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+              }}>
+                Next
+              </span>
+            )}
+          </a>
+        ))}
+      </div>
+    </nav>
+  )
+}
+
+function PrimitiveShell({
+  id,
+  title,
+  source,
+  intro,
+  children,
+}: {
+  id: string
+  title: string
+  source: string
+  intro: string
+  children: React.ReactNode
+}) {
+  return (
+    <section id={id} className="scroll-mt-32 space-y-4">
+      <div style={{
+        display: 'flex',
+        alignItems: 'baseline',
+        justifyContent: 'space-between',
+        gap: '1rem',
+        flexWrap: 'wrap',
+      }}>
+        <div>
+          <h3 style={{
+            fontSize: 'var(--text-xl)',
+            fontWeight: 600,
+            letterSpacing: 'var(--tracking-tight)',
+          }}>{title}</h3>
+          <p style={{
+            fontSize: 'var(--text-sm)',
+            color: 'var(--color-text-muted)',
+            marginTop: '0.25rem',
+            lineHeight: 1.5,
+            maxWidth: '52ch',
+          }}>{intro}</p>
+        </div>
+        <Mono>{source}</Mono>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function StateRow({ label, children }: { label: string, children: React.ReactNode }) {
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '8rem 1fr',
+      gap: '1rem',
+      padding: '1rem 0',
+      borderBottom: '1px solid var(--color-border-subtle)',
+      alignItems: 'center',
+    }}>
+      <div style={{
+        fontSize: '0.72rem',
+        fontWeight: 600,
+        textTransform: 'uppercase',
+        letterSpacing: '0.06em',
+        color: 'var(--color-text-subtle)',
+      }}>{label}</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function ButtonShowcase() {
+  return (
+    <PrimitiveShell
+      id="comp-button"
+      title="Button"
+      source="components/tahi/tahi-button.tsx"
+      intro="Primary uses the lime CTA + leaf radius. Trailing icon is the brand default; pass `iconLeft` only when you need the icon before the label. Hover lifts 1px with a soft brand glow; never scales."
+    >
+      <Card padded={false}>
+        <div style={{ padding: '0 1.5rem' }}>
+          <StateRow label="Variants">
+            <TahiButton variant="primary" icon={<ArrowGlyph />}>Get started</TahiButton>
+            <TahiButton variant="secondary">View work</TahiButton>
+            <TahiButton variant="ghost">Skip for now</TahiButton>
+            <TahiButton variant="danger">Delete</TahiButton>
+            <TahiLink href="#" icon={<ArrowGlyph />}>How it works</TahiLink>
+          </StateRow>
+          <StateRow label="Sizes (primary)">
+            <TahiButton variant="primary" size="sm" icon={<ArrowGlyph size={12} />}>Small</TahiButton>
+            <TahiButton variant="primary" size="md" icon={<ArrowGlyph />}>Medium</TahiButton>
+            <TahiButton variant="primary" size="lg" icon={<ArrowGlyph size={16} />}>Large</TahiButton>
+          </StateRow>
+          <StateRow label="Icon · trailing default">
+            <TahiButton variant="primary" icon={<ArrowGlyph />}>Continue</TahiButton>
+            <TahiButton variant="secondary" iconLeft={<SearchGlyph />}>Search clients</TahiButton>
+          </StateRow>
+          <StateRow label="Loading + disabled">
+            <TahiButton variant="primary" loading>Saving</TahiButton>
+            <TahiButton variant="secondary" loading>Importing</TahiButton>
+            <TahiButton variant="primary" disabled>Disabled</TahiButton>
+            <TahiButton variant="secondary" disabled>Disabled</TahiButton>
+          </StateRow>
+        </div>
+      </Card>
+    </PrimitiveShell>
+  )
+}
+
+function AvatarShowcase() {
+  return (
+    <PrimitiveShell
+      id="comp-avatar"
+      title="Avatar"
+      source="components/tahi/avatar.tsx"
+      intro="Image when src is set, gradient-initials fallback otherwise (brand-lighter → brand-dark, 135°). Stacked variant overlaps and adds a +N overflow tile when truncated."
+    >
+      <Card padded={false}>
+        <div style={{ padding: '0 1.5rem' }}>
+          <StateRow label="Sizes (initials)">
+            <Avatar name="Liam Miller" size="xs" />
+            <Avatar name="Liam Miller" size="sm" />
+            <Avatar name="Liam Miller" size="md" />
+            <Avatar name="Liam Miller" size="lg" />
+            <Avatar name="Liam Miller" size="xl" />
+          </StateRow>
+          <StateRow label="With status dot">
+            <Avatar name="Olivia Chen"  status="online" />
+            <Avatar name="Pita Tama"    status="away" />
+            <Avatar name="Sam Brooks"   status="offline" />
+          </StateRow>
+          <StateRow label="Stack · max 3">
+            <Avatar.Stack max={3}>
+              <Avatar name="Alex" />
+              <Avatar name="Bree" />
+              <Avatar name="Cara" />
+              <Avatar name="Dean" />
+              <Avatar name="Emma" />
+            </Avatar.Stack>
+          </StateRow>
+          <StateRow label="Stack · spacings">
+            <Avatar.Stack spacing="tight">
+              <Avatar name="A B" />
+              <Avatar name="C D" />
+              <Avatar name="E F" />
+            </Avatar.Stack>
+            <Avatar.Stack spacing="normal">
+              <Avatar name="A B" />
+              <Avatar name="C D" />
+              <Avatar name="E F" />
+            </Avatar.Stack>
+            <Avatar.Stack spacing="loose">
+              <Avatar name="A B" />
+              <Avatar name="C D" />
+              <Avatar name="E F" />
+            </Avatar.Stack>
+          </StateRow>
+        </div>
+      </Card>
+    </PrimitiveShell>
+  )
+}
+
+function BadgeShowcase() {
+  const tones: BadgeTonePick[] = ['brand', 'positive', 'warning', 'danger', 'info', 'teal', 'purple', 'rose', 'neutral']
+  return (
+    <PrimitiveShell
+      id="comp-badge"
+      title="Badge"
+      source="components/tahi/badge.tsx"
+      intro="Status pills, chips, count badges — one component, three drivers (tone, stage, source). New: leader='leaf' to lead with the brand leaf glyph instead of a circle dot. Status tones now default to the leaf."
+    >
+      <Card padded={false}>
+        <div style={{ padding: '0 1.5rem' }}>
+          <StateRow label="Tones · leaf leader">
+            {tones.map(t => (
+              <Badge key={t} tone={t} leader="leaf">{labelForTone(t)}</Badge>
+            ))}
+          </StateRow>
+          <StateRow label="Tones · dot leader (legacy)">
+            {tones.slice(0, 5).map(t => (
+              <Badge key={t} tone={t} leader="dot">{labelForTone(t)}</Badge>
+            ))}
+          </StateRow>
+          <StateRow label="Variants">
+            <Badge tone="positive" variant="soft"    leader="leaf">Soft</Badge>
+            <Badge tone="positive" variant="solid">Solid</Badge>
+            <Badge tone="positive" variant="outline" leader="leaf">Outline</Badge>
+            <Badge tone="brand"    variant="count">12</Badge>
+          </StateRow>
+          <StateRow label="Sizes">
+            <Badge tone="info" leader="leaf" size="sm">Small</Badge>
+            <Badge tone="info" leader="leaf" size="md">Medium</Badge>
+          </StateRow>
+        </div>
+      </Card>
+    </PrimitiveShell>
+  )
+}
+
+function CardShowcase() {
+  return (
+    <PrimitiveShell
+      id="comp-card"
+      title="Card"
+      source="components/tahi/card.tsx"
+      intro="Leaf radius, 1px border-strong at rest. Interactive cards lift 1px on hover with a soft brand-tinted shadow. Compound API: Card.Header / Title / Subtitle / Action / Body / Section / Footer / Divider."
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <CardPrim variant="default" padding="md">
+          <CardPrim.Header>
+            <div>
+              <CardPrim.Title>Default card</CardPrim.Title>
+              <CardPrim.Subtitle>Rest state — 1px border-strong, no shadow</CardPrim.Subtitle>
+            </div>
+            <CardPrim.Action><TahiButton size="sm" variant="ghost">Edit</TahiButton></CardPrim.Action>
+          </CardPrim.Header>
+          <CardPrim.Body>
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
+              Content goes here. Hover the card to see the lift + brand glow.
+            </p>
+          </CardPrim.Body>
+        </CardPrim>
+
+        <CardPrim variant="default" padding="md" interactive>
+          <CardPrim.Header>
+            <div>
+              <CardPrim.Title>Interactive card</CardPrim.Title>
+              <CardPrim.Subtitle>Hover me — border darkens, soft brand shadow, lifts 1px</CardPrim.Subtitle>
+            </div>
+          </CardPrim.Header>
+        </CardPrim>
+
+        <CardPrim variant="elevated" padding="md">
+          <CardPrim.Header>
+            <div>
+              <CardPrim.Title>Elevated</CardPrim.Title>
+              <CardPrim.Subtitle>Resting shadow-md — popovers and floating UI</CardPrim.Subtitle>
+            </div>
+          </CardPrim.Header>
+        </CardPrim>
+
+        <CardPrim variant="flat" padding="md">
+          <CardPrim.Header>
+            <div>
+              <CardPrim.Title>Flat</CardPrim.Title>
+              <CardPrim.Subtitle>No border, no shadow — for nesting inside another card</CardPrim.Subtitle>
+            </div>
+          </CardPrim.Header>
+        </CardPrim>
+      </div>
+    </PrimitiveShell>
+  )
+}
+
 function ComponentsSection() {
   return (
     <SectionShell
       id="components"
       title="Components"
-      intro="Primitives refresh lands in A4 — buttons, badges, chips, callouts, toasts, pagination, stepper, progress, data table, kanban card. Each one tied back to the tokens above."
+      intro="The reusable primitives in components/tahi/. Each block below shows every state and the source path. Batch 1 covers Button, Avatar, Badge, Card — the foundation that every later primitive composes on."
     >
-      <Card>
-        <div style={{
-          padding: '2rem 1.5rem',
-          textAlign: 'center',
-          color: 'var(--color-text-muted)',
-          fontSize: '0.875rem',
-          lineHeight: 1.6,
-        }}>
-          <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-subtle)', marginBottom: '0.5rem' }}>
-            Phase A4
-          </div>
-          <div style={{ maxWidth: '36rem', margin: '0 auto' }}>
-            Ships the refreshed primitives in <Mono>components/tahi/</Mono>. Each will live here with all its states (rest, hover, focus, pressed, disabled, loading) and a usage note.
-          </div>
-        </div>
-      </Card>
+      <ComponentsSubNav />
+      <div className="space-y-12">
+        <ButtonShowcase />
+        <AvatarShowcase />
+        <BadgeShowcase />
+        <CardShowcase />
+      </div>
     </SectionShell>
+  )
+}
+
+// Type alias to avoid name collisions inside this file.
+type BadgeTonePick = 'brand' | 'positive' | 'warning' | 'danger' | 'info' | 'teal' | 'purple' | 'rose' | 'neutral'
+
+function labelForTone(t: BadgeTonePick): string {
+  switch (t) {
+    case 'brand':    return 'Brand'
+    case 'positive': return 'Delivered'
+    case 'warning':  return 'In review'
+    case 'danger':   return 'Overdue'
+    case 'info':     return 'Submitted'
+    case 'teal':     return 'In progress'
+    case 'purple':   return 'Client review'
+    case 'rose':     return 'Urgent'
+    case 'neutral':  return 'Draft'
+  }
+}
+
+// Tiny SVG glyphs used inside the button showcase. We don't import
+// Lucide here to keep this demo self-contained.
+function ArrowGlyph({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 12h14" />
+      <path d="m12 5 7 7-7 7" />
+    </svg>
+  )
+}
+function SearchGlyph({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.3-4.3" />
+    </svg>
   )
 }

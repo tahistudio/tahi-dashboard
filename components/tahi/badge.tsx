@@ -39,6 +39,7 @@
 
 import React from 'react'
 import { stageColour, sourceColour } from '@/lib/chart-colors'
+import { LeafIcon } from '@/components/tahi/tahi-glyphs'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -67,7 +68,17 @@ interface BadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'childr
   variant?: BadgeVariant
   /** Size. */
   size?: BadgeSize
-  /** Adds a leading coloured dot. */
+  /**
+   * Leading glyph. Pass `'leaf'` to lead with the brand leaf glyph
+   * tinted to the chip's text colour (the new default for status pills),
+   * `'dot'` for a legacy coloured circle, or `false` / omit for no
+   * leader.
+   */
+  leader?: 'leaf' | 'dot' | false
+  /**
+   * Legacy alias for `leader='dot'`. Prefer `leader` for new code.
+   * @deprecated
+   */
   dot?: boolean
   children: React.ReactNode
 }
@@ -146,12 +157,19 @@ export function Badge({
   source,
   variant = 'soft',
   size = 'md',
+  leader,
   dot = false,
   children,
   className,
   style,
   ...rest
 }: BadgeProps) {
+  // Resolve the leader: explicit `leader` prop wins, then legacy `dot`
+  // fallback, otherwise undefined (no leader).
+  const resolvedLeader: 'leaf' | 'dot' | undefined =
+    leader === false ? undefined
+    : leader ?? (dot ? 'dot' : undefined)
+
   // Resolve colour source: categorical (stage/source) overrides semantic tone.
   let bg: string
   let text: string
@@ -228,7 +246,19 @@ export function Badge({
         ...style,
       }}
     >
-      {dot && variant !== 'count' && (
+      {resolvedLeader === 'leaf' && variant !== 'count' && (
+        <span
+          aria-hidden="true"
+          style={{
+            display: 'inline-flex',
+            color: dotColour,
+            flexShrink: 0,
+          }}
+        >
+          <LeafIcon size={size === 'sm' ? 9 : 10} />
+        </span>
+      )}
+      {resolvedLeader === 'dot' && variant !== 'count' && (
         <span
           aria-hidden="true"
           style={{
