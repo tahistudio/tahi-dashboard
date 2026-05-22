@@ -42,47 +42,9 @@ import { cn } from '@/lib/utils'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { useSidebar } from '@/components/tahi/sidebar-context'
 import { Tooltip } from '@/components/tahi/tooltip'
-import { TahiIconMark, TahiWordmark } from '@/components/tahi/tahi-glyphs'
+import { TahiIconMark, TahiStudioWordmark } from '@/components/tahi/tahi-glyphs'
 import { SidebarUserCard } from '@/components/tahi/sidebar-user-card'
-import {
-  AnimatedSettings, AnimatedInbox, AnimatedCheckSquare,
-  AnimatedMessageSquare, AnimatedCalendar, AnimatedClock,
-  AnimatedTrendingUp, AnimatedBarChart, AnimatedUsers,
-  AnimatedLayoutDashboard, AnimatedFileText, AnimatedGauge,
-  AnimatedStar, AnimatedMegaphone, AnimatedCreditCard,
-  AnimatedBookOpen, AnimatedFolderOpen, AnimatedUserCog,
-  AnimatedFileSignature,
-} from '@/components/tahi/animated-icons'
 import * as React from 'react'
-
-// Map nav href to the matching animated-icon component. Every sidebar
-// item should resolve here so the hover motion stays semantic across
-// the whole nav. Anything missing falls back to static Lucide + the
-// generic CSS lift on .tahi-nav-icon.
-const ANIMATED_NAV_ICON: Record<string, React.ComponentType<{ size?: number, color?: string }>> = {
-  '/overview':         AnimatedLayoutDashboard,
-  '/requests':         AnimatedInbox,
-  '/tasks':            AnimatedCheckSquare,
-  '/messages':         AnimatedMessageSquare,
-  '/schedules':        AnimatedCalendar,
-  '/pipeline':         AnimatedTrendingUp,
-  '/proposals':        AnimatedFileText,
-  '/contracts':        AnimatedFileSignature,
-  '/calculator':       AnimatedGauge,
-  '/sales-analytics':  AnimatedBarChart,
-  '/clients':          AnimatedUsers,
-  '/reviews':          AnimatedStar,
-  '/announcements':    AnimatedMegaphone,
-  '/invoices':         AnimatedFileText,
-  '/billing':          AnimatedCreditCard,
-  '/time':             AnimatedClock,
-  '/reports':          AnimatedBarChart,
-  '/capacity':         AnimatedGauge,
-  '/team':             AnimatedUserCog,
-  '/docs':             AnimatedBookOpen,
-  '/settings':         AnimatedSettings,
-  '/files':            AnimatedFolderOpen,
-}
 
 type NavItem = {
   label: string
@@ -205,11 +167,19 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const { collapsed, setCollapsed } = useSidebar()
   const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
 
-  // Track first-paint hydration so the initial state restoration from
-  // localStorage doesn't visibly animate. After the first paint we flip
-  // hydrated=true and user-triggered changes animate normally.
-  const [hydrated, setHydrated] = React.useState(false)
-  React.useEffect(() => { setHydrated(true) }, [])
+  // Transitions are gated on a user-interaction ref. Initial state
+  // restoration from localStorage flips collapsed / openGroups without
+  // any visible animation. Only the user's own toggle clicks animate.
+  // Forcing a re-render after the click ensures the new transition
+  // style is applied before the property change.
+  const userToggled = React.useRef(false)
+  const [, forceRerender] = React.useReducer((x: number) => x + 1, 0)
+  const markUserToggled = React.useCallback(() => {
+    if (!userToggled.current) {
+      userToggled.current = true
+      forceRerender()
+    }
+  }, [])
 
   // Theme state. Lives here so we can pass it into the SidebarUserCard
   // menu where the toggle now sits.
@@ -237,6 +207,7 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
     } catch { /* localStorage unavailable */ }
   }, [])
   const toggleGroup = (groupName: string) => {
+    markUserToggled()
     setOpenGroups(prev => {
       const next = { ...prev, [groupName]: prev[groupName] === false }
       try { localStorage.setItem('tahi-sidebar-groups', JSON.stringify(next)) } catch { /* noop */ }
@@ -278,6 +249,11 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   // itself stays desktop-only.
   const desktopWidth = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH
 
+  const handleSetCollapsed = (next: boolean) => {
+    markUserToggled()
+    setCollapsed(next)
+  }
+
   const sidebarContent = (
     <SidebarContent
       collapsed={collapsed}
@@ -287,8 +263,8 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
       toggleGroup={toggleGroup}
       darkMode={darkMode}
       toggleDarkMode={toggleDarkMode}
-      setCollapsed={setCollapsed}
-      hydrated={hydrated}
+      setCollapsed={handleSetCollapsed}
+      userToggled={userToggled.current}
     />
   )
 
@@ -301,10 +277,9 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
         minWidth: `${desktopWidth}px`,
         background: 'var(--color-bg)',
         borderRight: '1px solid var(--color-border-subtle)',
-        // Disable transitions on first paint so the saved width snaps
-        // into place without animating. After hydration the user's
-        // toggles animate normally.
-        transition: hydrated
+        // Disable width transitions until the user clicks the collapse
+        // button. Storage-restore on refresh snaps without animation.
+        transition: userToggled.current
           ? 'width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1)), min-width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1))'
           : 'none',
       }}
@@ -326,7 +301,7 @@ interface SidebarContentProps {
   darkMode: boolean
   toggleDarkMode: () => void
   setCollapsed: (next: boolean) => void
-  hydrated: boolean
+  userToggled: boolean
 }
 
 function SidebarContent({
@@ -338,7 +313,7 @@ function SidebarContent({
   darkMode,
   toggleDarkMode,
   setCollapsed,
-  hydrated,
+  userToggled,
 }: SidebarContentProps) {
   return (
     <>
@@ -373,7 +348,7 @@ function SidebarContent({
               alignItems: 'center',
               color: 'var(--color-text-active)',
             }}>
-              <TahiWordmark size={20} title="Tahi" />
+              <TahiStudioWordmark height={18} title="Tahi Studio" />
             </span>
           )}
         </Link>
@@ -453,7 +428,7 @@ function SidebarContent({
                   padding: 0,
                   display: 'grid',
                   gridTemplateRows: open ? '1fr' : '0fr',
-                  transition: hydrated
+                  transition: userToggled
                     ? 'grid-template-rows var(--motion-base, 320ms) var(--ease-out)'
                     : 'none',
                   overflow: 'hidden',
@@ -468,7 +443,6 @@ function SidebarContent({
                     // they read as nested under the group label. Workspace and
                     // Account are not collapsible and stay at the base indent.
                     const itemIndent = group.collapsible && !collapsed ? '1.5rem' : '0.625rem'
-                    const Animated = ANIMATED_NAV_ICON[item.href]
                     const link = (
                       <Link
                         href={item.href}
@@ -518,9 +492,7 @@ function SidebarContent({
                             transition: 'color var(--motion-quick, 220ms) var(--ease-out)',
                           }}
                         >
-                          {Animated
-                            ? <Animated size={collapsed ? 20 : 16} />
-                            : <Icon className={cn(collapsed ? 'w-5 h-5' : 'w-4 h-4')} />}
+                          <Icon className={cn(collapsed ? 'w-5 h-5' : 'w-4 h-4')} />
                         </span>
                         {!collapsed && (
                           <span style={{
