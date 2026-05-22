@@ -1,26 +1,22 @@
 'use client'
 
-import { useState, useCallback, useRef, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
 import { OrganizationSwitcher } from '@clerk/nextjs'
-import { Search, X, Eye, UserCog } from 'lucide-react'
+import { Search, Eye, UserCog } from 'lucide-react'
 import { NotificationBell } from './notification-bell'
 import { useImpersonation } from './impersonation-banner'
 import { CurrencySwitcher } from './currency-switcher'
 import { TimerChip } from './timer-chip'
 import { Tooltip } from './tooltip'
-import { Input } from './input'
+import { SearchPalette } from './search-palette'
 
 interface AppTopNavProps {
   isAdmin: boolean
 }
 
 export function AppTopNav({ isAdmin }: AppTopNavProps) {
-  const router = useRouter()
   const [searchOpen, setSearchOpen] = useState(false)
-  const [searchValue, setSearchValue] = useState('')
   const [searchFocused, setSearchFocused] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
   const {
     isImpersonatingClient,
     isImpersonatingTeamMember,
@@ -28,24 +24,6 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
     impersonatedOrgName,
     impersonatedTeamMemberName,
   } = useImpersonation()
-
-  const handleSearch = useCallback(() => {
-    const q = searchValue.trim()
-    if (q) {
-      router.push(`/requests?q=${encodeURIComponent(q)}`)
-      setSearchValue('')
-      setSearchOpen(false)
-    }
-  }, [searchValue, router])
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') handleSearch()
-    if (e.key === 'Escape') { setSearchOpen(false); setSearchValue('') }
-  }, [handleSearch])
-
-  useEffect(() => {
-    if (searchOpen && inputRef.current) inputRef.current.focus()
-  }, [searchOpen])
 
   useEffect(() => {
     function handleGlobalKey(e: KeyboardEvent) {
@@ -211,131 +189,8 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
         <NotificationBell />
       </div>
 
-      {/* Search overlay. Backdrop blur + centered modal feel. The
-          input itself uses Input.Group so it inherits the same
-          radius / padding / focus styling as every other form field
-          in the app. */}
-      {searchOpen && (
-        <div
-          className="fixed inset-0 z-[70] flex items-center justify-center"
-          style={{
-            background: 'rgba(15, 20, 16, 0.45)',
-            backdropFilter: 'blur(3px)',
-            WebkitBackdropFilter: 'blur(3px)',
-            padding: 'var(--space-4)',
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              setSearchOpen(false)
-              setSearchValue('')
-            }
-          }}
-          role="presentation"
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Search"
-            style={{
-              width: '100%',
-              maxWidth: '36rem',
-              background: 'var(--color-bg)',
-              borderRadius: 'var(--radius-lg)',
-              border: '1px solid var(--color-border)',
-              boxShadow: 'var(--shadow-lg)',
-              overflow: 'hidden',
-            }}
-          >
-            {/* Reusable Input.Group shell, sized lg, with leading
-                search icon, the input itself, and a trailing close
-                button + Esc hint. */}
-            <div style={{ padding: 'var(--space-4)' }}>
-              <Input.Group inputSize="lg" style={{ width: '100%' }}>
-                <Input.Icon>
-                  <Search size={16} style={{ color: 'var(--color-brand)' }} aria-hidden="true" />
-                </Input.Icon>
-                <input
-                  ref={inputRef}
-                  type="text"
-                  placeholder="Search requests, clients, tasks, docs..."
-                  value={searchValue}
-                  onChange={(e) => setSearchValue(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  aria-label="Search the dashboard"
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    border: 'none',
-                    outline: 'none',
-                    background: 'transparent',
-                    fontSize: 'var(--text-base)',
-                    color: 'var(--color-text)',
-                    fontWeight: 500,
-                  }}
-                />
-                <Input.Addon>
-                  <button
-                    type="button"
-                    onClick={() => { setSearchOpen(false); setSearchValue('') }}
-                    className="flex items-center justify-center"
-                    style={{
-                      width: '1.5rem',
-                      height: '1.5rem',
-                      borderRadius: 'var(--radius-sm)',
-                      background: 'var(--color-bg-secondary)',
-                      border: 'none',
-                      color: 'var(--color-text-muted)',
-                      cursor: 'pointer',
-                      transition: 'background-color 150ms ease, color 150ms ease',
-                    }}
-                    onMouseEnter={e => {
-                      e.currentTarget.style.background = 'var(--color-bg-tertiary)'
-                      e.currentTarget.style.color = 'var(--color-text)'
-                    }}
-                    onMouseLeave={e => {
-                      e.currentTarget.style.background = 'var(--color-bg-secondary)'
-                      e.currentTarget.style.color = 'var(--color-text-muted)'
-                    }}
-                    aria-label="Close search (Escape)"
-                  >
-                    <X size={12} aria-hidden="true" />
-                  </button>
-                </Input.Addon>
-              </Input.Group>
-            </div>
-
-            {/* Global search is queued as a separate feature: it'll
-                return grouped results (requests / tasks / clients /
-                pipeline / docs) with suggestions on top. Until that
-                lands, Enter still routes to the requests list with
-                the query pre-filled. */}
-            <div
-              style={{
-                borderTop: '1px solid var(--color-border-subtle)',
-                padding: '0.625rem var(--space-4)',
-                background: 'var(--color-bg-secondary)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 'var(--space-3)',
-                flexWrap: 'wrap',
-              }}
-            >
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', margin: 0 }}>
-                Searches across requests for now. Cross-entity search coming soon.
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }} className="hidden sm:flex">
-                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
-                  <KbdLabel>Enter</KbdLabel> search
-                </span>
-                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
-                  <KbdLabel>Esc</KbdLabel> close
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Global search palette. Handles its own input + results. */}
+      <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
     </header>
   )
 }
@@ -364,29 +219,6 @@ function KbdHint() {
       <span aria-hidden="true">{'⌘'}</span>
       <span aria-hidden="true">K</span>
     </span>
-  )
-}
-
-// Keyboard hint chip used inside the overlay footer.
-function KbdLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd
-      style={{
-        display: 'inline-block',
-        padding: '0.0625rem var(--space-1-5)',
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-sm)',
-        fontSize: '0.625rem',
-        fontFamily:
-          'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-        color: 'var(--color-text-muted)',
-        fontWeight: 500,
-        lineHeight: 1.4,
-      }}
-    >
-      {children}
-    </kbd>
   )
 }
 
