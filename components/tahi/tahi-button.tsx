@@ -216,7 +216,9 @@ export type { Variant as TahiButtonVariant, Size as TahiButtonSize }
 // for lime surfaces (paired with the FeatureCard lime variant).
 const TAHI_LINK_TONE: Record<'brand' | 'on-dark' | 'on-lime', { rest: string, hover: string }> = {
   brand:    { rest: 'var(--color-brand-dark)',    hover: 'var(--color-brand)' },
-  'on-dark':{ rest: 'var(--color-text-dim-on-dark)', hover: 'var(--color-brand-bright)' },
+  // High-contrast white rest on dark surfaces. Lime on hover so the
+  // shift is clearly readable through the radial gradient overlay.
+  'on-dark':{ rest: '#FFFFFF',                    hover: 'var(--color-brand-bright)' },
   'on-lime':{ rest: 'var(--color-brand-deepest)',  hover: 'var(--color-brand-darker)' },
 }
 

@@ -62,14 +62,12 @@ interface DeltaPalette {
   bg: string | null
 }
 
-function deltaPalette(direction: DeltaDirection, onLime: boolean): DeltaPalette {
-  if (onLime) {
-    // Lime surface needs a chip background behind the delta so it lifts
-    // off the green. Same hue family as the value but with enough alpha
-    // to read at a glance. Solid forest text inside.
-    if (direction === 'up')   return { fg: 'var(--color-brand-deepest)', bg: 'rgba(255, 255, 255, 0.42)' }
-    if (direction === 'down') return { fg: '#B42318', bg: 'rgba(255, 255, 255, 0.42)' }
-    return { fg: '#3F6235', bg: 'rgba(255, 255, 255, 0.32)' }
+function deltaPalette(direction: DeltaDirection, onDarkFeatured: boolean): DeltaPalette {
+  if (onDarkFeatured) {
+    // Forest gradient surface. Lighter chip + light text inside.
+    if (direction === 'up')   return { fg: '#8FD9A8', bg: 'rgba(143, 217, 168, 0.16)' }
+    if (direction === 'down') return { fg: '#F4A0A0', bg: 'rgba(244, 160, 160, 0.16)' }
+    return { fg: 'var(--color-text-dim-on-dark)', bg: 'rgba(220, 232, 217, 0.10)' }
   }
   // Default (white) surface. No chip background. Inline coloured text.
   return {
@@ -106,11 +104,17 @@ export function KPICard({
   const [hovered, setHovered] = React.useState(false)
   const interactive = !!href || !!onClick
 
-  // Featured variant uses the same soft lime gradient as FeatureCard
-  // so the two primitives feel like a family.
+  // Featured variant uses the deep forest gradient. Reads premium on
+  // both light and dark mode, with the inset brand-light highlight ring
+  // catching the eye against the dark surface.
   const featuredBg =
-    'radial-gradient(circle at 0% 0%, rgba(255, 255, 255, 0.32), transparent 60%), ' +
-    'linear-gradient(135deg, var(--color-brand-bright), var(--color-brand-light) 85%)'
+    'radial-gradient(ellipse at 5% 0%, rgba(151, 186, 140, 0.32), transparent 55%), ' +
+    'linear-gradient(135deg, var(--color-brand-darker), var(--color-brand-deepest))'
+
+  // Hover state: prefer border darkening + small shadow (matches the
+  // Card primitive). The previous shadow-leaf felt too intense.
+  const hoverBorderColour = featured ? 'rgba(151, 186, 140, 0.45)' : 'var(--color-brand-light)'
+  const restBorderColour = featured ? 'var(--color-brand-darker)' : 'var(--color-border-strong)'
 
   const baseStyle: React.CSSProperties = {
     position: 'relative',
@@ -120,22 +124,21 @@ export function KPICard({
     padding: '1.25rem 1.375rem',
     borderRadius: 'var(--radius-lg)',
     background: featured ? featuredBg : 'var(--color-bg)',
-    color: featured ? 'var(--color-brand-deepest)' : 'var(--color-text)',
-    border: featured ? '1px solid rgba(255, 255, 255, 0.40)' : '1px solid var(--color-border-strong)',
+    color: featured ? 'var(--color-text-on-dark)' : 'var(--color-text)',
+    border: `1px solid ${interactive && hovered ? hoverBorderColour : restBorderColour}`,
     cursor: interactive ? 'pointer' : undefined,
     transition:
       'transform var(--motion-base, 320ms) var(--ease-out), ' +
       'box-shadow var(--motion-base, 320ms) var(--ease-out), ' +
       'border-color var(--motion-base, 320ms) var(--ease-out)',
     transform: interactive && hovered ? 'translateY(-1px)' : 'translateY(0)',
-    // Compose the highlight ring (mode-aware) + optional hover lift.
-    // The highlight ring is invisible in light mode (alpha 0) and
-    // brightens in dark mode to make the card pop against dark surfaces.
+    // Compose the static highlight ring (brand-light on dark cards,
+    // mode-aware on default cards) + a calm shadow-sm on hover.
     boxShadow: [
       featured
-        ? 'inset 0 0 0 1px rgba(255, 255, 255, 0.20)'
+        ? 'inset 0 0 0 1px rgba(151, 186, 140, 0.18)'
         : 'inset 0 0 0 1px var(--card-highlight-ring, transparent)',
-      interactive && hovered ? 'var(--shadow-leaf)' : null,
+      interactive && hovered ? 'var(--shadow-sm)' : null,
     ].filter(Boolean).join(', ') || undefined,
     ...style,
   }
@@ -143,7 +146,7 @@ export function KPICard({
   const labelStyle: React.CSSProperties = {
     fontSize: '0.75rem',
     fontWeight: 500,
-    color: featured ? 'rgba(30, 48, 25, 0.78)' : 'var(--color-text-muted)',
+    color: featured ? 'var(--color-text-dim-on-dark)' : 'var(--color-text-muted)',
     letterSpacing: '0.005em',
     margin: 0,
   }
@@ -174,7 +177,7 @@ export function KPICard({
   const trailingStyle: React.CSSProperties = {
     fontSize: '0.75rem',
     fontWeight: 500,
-    color: featured ? 'rgba(30, 48, 25, 0.62)' : 'var(--color-text-subtle)',
+    color: featured ? 'rgba(220, 232, 217, 0.62)' : 'var(--color-text-subtle)',
   }
 
   // Top-right slot. Clickable cards take precedence and show an

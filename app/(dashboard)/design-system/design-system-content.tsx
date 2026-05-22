@@ -115,7 +115,7 @@ function TOC() {
           className="px-3 py-1.5 text-sm font-medium"
           style={{
             color: 'var(--color-text-muted)',
-            borderRadius: 'var(--radius-leaf-sm)',
+            borderRadius: 'var(--radius-md)',
             transition: 'background var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
           }}
           onMouseEnter={e => {
@@ -171,7 +171,7 @@ function Card({ children, padded = true }: { children: React.ReactNode, padded?:
     <div style={{
       background: 'var(--color-bg)',
       border: '1px solid var(--color-border-strong)',
-      borderRadius: 'var(--radius-leaf)',
+      borderRadius: 'var(--radius-lg)',
       padding: padded ? '1.5rem' : 0,
     }}>{children}</div>
   )
@@ -262,7 +262,7 @@ function SwatchTile({ s }: { s: Swatch }) {
     <div style={{
       background: 'var(--color-bg)',
       border: '1px solid var(--color-border-subtle)',
-      borderRadius: 'var(--radius-leaf-sm)',
+      borderRadius: 'var(--radius-md)',
       overflow: 'hidden',
     }}>
       <div style={{
@@ -525,7 +525,7 @@ function ShadowsSection() {
             <div key={s.token}>
               <div style={{
                 background: 'var(--color-bg)',
-                borderRadius: 'var(--radius-leaf-sm)',
+                borderRadius: 'var(--radius-md)',
                 height: '5rem',
                 boxShadow: `var(${s.token})`,
               }} />
@@ -574,7 +574,7 @@ function MotionSection() {
                 style={{
                   background: 'var(--color-bg)',
                   border: '1px solid var(--color-border-strong)',
-                  borderRadius: 'var(--radius-leaf-sm)',
+                  borderRadius: 'var(--radius-md)',
                   padding: '1rem',
                   textAlign: 'left',
                   transform: isHover ? 'translateY(-2px)' : 'translateY(0)',
@@ -727,7 +727,7 @@ function IconTile({ icon, glyph }: { icon: IconDef, glyph?: React.ReactNode }) {
       role="figure"
       aria-label={icon.name + ' · ' + icon.use}
       style={{
-        borderRadius: 'var(--radius-leaf-sm)',
+        borderRadius: 'var(--radius-md)',
         padding: '0.875rem',
         display: 'flex', alignItems: 'center', gap: '0.75rem',
         background: hovered ? 'var(--color-brand-50)' : 'var(--color-bg)',
@@ -887,7 +887,7 @@ function BrandSection() {
             background: 'var(--color-bg)',
             border: '1px solid var(--color-border-subtle)',
             padding: '1.5rem',
-            borderRadius: 'var(--radius-leaf-sm)',
+            borderRadius: 'var(--radius-lg)',
             display: 'flex', alignItems: 'center', gap: '1.5rem',
           }}>
             <TahiIconMark size={32} variant="on-light" />
@@ -897,7 +897,7 @@ function BrandSection() {
           <div style={{
             background: 'var(--color-brand-deepest)',
             padding: '1.5rem',
-            borderRadius: 'var(--radius-leaf-sm)',
+            borderRadius: 'var(--radius-lg)',
             display: 'flex', alignItems: 'center', gap: '1.5rem',
           }}>
             <TahiIconMark size={32} variant="on-dark" />
@@ -989,7 +989,7 @@ function ComponentsSubNav() {
         padding: '0.375rem',
         background: 'var(--color-bg)',
         border: '1px solid var(--color-border-strong)',
-        borderRadius: 'var(--radius-leaf-sm)',
+        borderRadius: 'var(--radius-md)',
       }}>
         {COMPONENTS_NAV.map(item => (
           <a
@@ -1000,7 +1000,7 @@ function ComponentsSubNav() {
               padding: '0.3rem 0.7rem',
               fontSize: 'var(--text-xs)',
               fontWeight: 500,
-              borderRadius: 'var(--radius-leaf-sm)',
+              borderRadius: 'var(--radius-sm)',
               color: item.ready ? 'var(--color-text-muted)' : 'var(--color-text-subtle)',
               background: 'transparent',
               opacity: item.ready ? 1 : 0.5,
@@ -1318,41 +1318,40 @@ function CardShowcase() {
 }
 
 function TooltipShowcase() {
-  // Tiny inline glyphs so we can show icon-only buttons.
-  const g = (paths: React.ReactNode) => (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths}</svg>
-  )
   const iconButtonStyle: React.CSSProperties = {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-    width: '2.25rem', height: '2.25rem',
+    width: '2.5rem', height: '2.5rem',
     background: 'var(--color-bg)',
     border: '1px solid var(--color-border-strong)',
     borderRadius: 'var(--radius-md)',
     color: 'var(--color-text-muted)',
     cursor: 'pointer',
-    transition: 'background var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
+    transition: 'background var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out), border-color var(--motion-quick) var(--ease-out)',
   }
   return (
     <PrimitiveShell
       id="comp-tooltip"
       title="Tooltip"
       source="components/tahi/tooltip.tsx"
-      intro="Small dark label on hover or keyboard focus. Portaled to body so it never clips. 400ms hover delay, instant on focus. Forest-dark surface against any background. Use sparingly: icon-only buttons, truncated text, status hints."
+      intro="Small dark label on hover or keyboard focus. Portaled to body so it never clips. 400ms hover delay, instant on focus. Forest-dark surface against any background. Wraps long text up to 20rem. Pairs naturally with animated icons (below) on icon-only buttons."
     >
       <Card padded={false}>
         <div style={{ padding: '0 1.5rem' }}>
-          <StateRow label="Icon buttons">
+          <StateRow label="Icon buttons (animated)">
             <Tooltip label="Sync with Stripe">
-              <button aria-label="Sync" style={iconButtonStyle}>{g(<><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></>)}</button>
+              <button aria-label="Sync" style={iconButtonStyle}><AnimatedRefresh size={18} /></button>
             </Tooltip>
             <Tooltip label="Notifications">
-              <button aria-label="Notifications" style={iconButtonStyle}>{g(<><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></>)}</button>
+              <button aria-label="Notifications" style={iconButtonStyle}><AnimatedBell size={18} /></button>
             </Tooltip>
             <Tooltip label="Settings">
-              <button aria-label="Settings" style={iconButtonStyle}>{g(<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></>)}</button>
+              <button aria-label="Settings" style={iconButtonStyle}><AnimatedSettings size={18} /></button>
             </Tooltip>
-            <Tooltip label="More actions">
-              <button aria-label="More" style={iconButtonStyle}>{g(<><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></>)}</button>
+            <Tooltip label="Tahi AI">
+              <button aria-label="AI" style={iconButtonStyle}><AnimatedSparkles size={18} /></button>
+            </Tooltip>
+            <Tooltip label="Search">
+              <button aria-label="Search" style={iconButtonStyle}><AnimatedSearch size={18} /></button>
             </Tooltip>
           </StateRow>
           <StateRow label="On truncated text">

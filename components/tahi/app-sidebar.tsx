@@ -250,7 +250,7 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
       style={{
         width: `${desktopWidth}px`,
         minWidth: `${desktopWidth}px`,
-        background: 'var(--color-bg-cream)',
+        background: 'var(--color-bg)',
         borderRight: '1px solid var(--color-border-subtle)',
         transition: 'width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1)), min-width var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22,1,0.36,1))',
       }}
@@ -399,6 +399,10 @@ function SidebarContent({
                   {group.items.map(item => {
                     const Icon = item.icon
                     const active = isItemActive(item.href)
+                    // Items inside a collapsible group get extra left padding so
+                    // they read as nested under the group label. Workspace and
+                    // Account are not collapsible and stay at the base indent.
+                    const itemIndent = group.collapsible && !collapsed ? '1.5rem' : '0.625rem'
                     const link = (
                       <Link
                         href={item.href}
@@ -408,14 +412,19 @@ function SidebarContent({
                           display: 'flex',
                           alignItems: 'center',
                           gap: '0.625rem',
-                          padding: collapsed ? '0.625rem 0' : '0.5rem 0.625rem',
+                          padding: collapsed
+                            ? '0.625rem 0'
+                            : `0.5rem 0.625rem 0.5rem ${itemIndent}`,
                           justifyContent: collapsed ? 'center' : 'flex-start',
-                          borderRadius: 'var(--radius-md)',
+                          // Active state is the rare leaf-radius moment in the
+                          // sidebar. Brand-100 tint, leaf-sm corner, brand
+                          // text. Reads as "this is where you are right now"
+                          // without being a loud surface.
+                          borderRadius: active ? 'var(--radius-leaf-sm)' : 'var(--radius-md)',
                           fontSize: '0.8125rem',
                           fontWeight: active ? 600 : 500,
                           color: active ? 'var(--color-text-active)' : 'var(--color-text-muted)',
-                          background: active ? 'var(--color-bg)' : 'transparent',
-                          boxShadow: active ? 'inset 0 0 0 1px var(--color-border-subtle)' : 'none',
+                          background: active ? 'var(--color-brand-100)' : 'transparent',
                           textDecoration: 'none',
                           minHeight: '40px',
                           transition: 'background var(--motion-quick, 220ms) var(--ease-out), color var(--motion-quick, 220ms) var(--ease-out)',
