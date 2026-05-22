@@ -162,21 +162,33 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
   const { collapsed, setCollapsed } = useSidebar()
   const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
 
-  // After mount, flag the sidebar as "ready" so user-clicked toggles
-  // can animate. The inline script in the layout sets the data-sidebar
-  // attribute on <html> before React mounts so the initial width is
-  // already correct (no animation needed).
+  // Flag the sidebar as "ready" so user-clicked toggles can animate.
+  // Defer with two requestAnimationFrame ticks so transitions are
+  // guaranteed to be off across:
+  //   - the initial paint
+  //   - any React re-render triggered by SidebarProvider's
+  //     useLayoutEffect catching up to the data-sidebar attribute
+  // The inline script in app/layout.tsx already set the attribute
+  // before body parsed, so the first paint shows the correct width
+  // with no animation.
   React.useEffect(() => {
-    document.documentElement.setAttribute('data-sidebar-ready', '')
-    return () => { document.documentElement.removeAttribute('data-sidebar-ready') }
+    let raf1 = 0
+    let raf2 = 0
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        document.documentElement.setAttribute('data-sidebar-ready', '')
+      })
+    })
+    return () => {
+      if (raf1) cancelAnimationFrame(raf1)
+      if (raf2) cancelAnimationFrame(raf2)
+      document.documentElement.removeAttribute('data-sidebar-ready')
+    }
   }, [])
 
-  // Keep <html data-sidebar> in sync with React state so the CSS can
-  // drive width whenever the user toggles.
-  React.useEffect(() => {
-    if (collapsed) document.documentElement.setAttribute('data-sidebar', 'collapsed')
-    else document.documentElement.removeAttribute('data-sidebar')
-  }, [collapsed])
+  // No useEffect to sync data-sidebar with React state; setCollapsed
+  // writes the attribute directly so there's no second update window
+  // where the attribute briefly mismatches the state.
 
   // Theme state. Lives here so we can pass it into the SidebarUserCard
   // menu where the toggle now sits.

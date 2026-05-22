@@ -49,6 +49,16 @@ export default function RootLayout({
               __html: `try{if(localStorage.getItem('tahi-theme')==='dark'){document.documentElement.classList.add('dark')}}catch(e){}`,
             }}
           />
+          {/* Sidebar collapsed-state persistence. Runs before body
+              parses so the data attribute is set on <html> before the
+              sidebar is even in the DOM. Mirrors the theme script
+              above. Setting an unused attribute on sign-in routes is
+              harmless. */}
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `try{if(localStorage.getItem('tahi-sidebar')==='collapsed'){document.documentElement.setAttribute('data-sidebar','collapsed')}}catch(e){}`,
+            }}
+          />
           <script
             dangerouslySetInnerHTML={{
               __html: `if('serviceWorker' in navigator){navigator.serviceWorker.register('/dashboard/sw.js').catch(function(){})}`,
