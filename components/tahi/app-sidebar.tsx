@@ -43,6 +43,7 @@ import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { useSidebar } from '@/components/tahi/sidebar-context'
 import { FocusTrap } from '@/components/tahi/focus-trap'
 import { Tooltip } from '@/components/tahi/tooltip'
+import { TahiIconMark } from '@/components/tahi/tahi-glyphs'
 import * as React from 'react'
 
 type NavItem = {
@@ -397,16 +398,11 @@ function SidebarContent({
             minWidth: 0,
           }}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/dashboard/tahi-logo.png"
-            alt=""
-            style={{
-              width: collapsed ? '28px' : '32px',
-              height: 'auto',
-              display: 'block',
-              flexShrink: 0,
-            }}
+          {/* Light variant since the sidebar surface is cream.
+              The dark "1" reads against the brand-gradient leaf. */}
+          <TahiIconMark
+            size={collapsed ? 30 : 34}
+            variant="on-light"
           />
           {!collapsed && (
             <span style={{

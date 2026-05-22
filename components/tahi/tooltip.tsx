@@ -61,6 +61,11 @@ export function Tooltip({
   const triggerRef = React.useRef<HTMLElement | null>(null)
   const tooltipRef = React.useRef<HTMLDivElement | null>(null)
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Touch suppression. On touch devices, a tap fires a synthetic
+  // mouseenter before the click, which makes the tooltip flash. We
+  // track recent touch events and skip the next mouseenter when one
+  // has just happened.
+  const recentlyTouchedRef = React.useRef(false)
 
   React.useEffect(() => { setMounted(true) }, [])
 
@@ -85,6 +90,9 @@ export function Tooltip({
 
   const handleShow = React.useCallback((immediate = false) => {
     if (disabled) return
+    // Skip when a touch just happened. Mobile taps fire mouseenter
+    // before click, which would flash a tooltip during a tap.
+    if (recentlyTouchedRef.current) return
     if (timerRef.current) clearTimeout(timerRef.current)
     const fire = () => {
       setOpen(true)
@@ -120,6 +128,7 @@ export function Tooltip({
     onMouseLeave?: React.MouseEventHandler<HTMLElement>
     onFocus?: React.FocusEventHandler<HTMLElement>
     onBlur?: React.FocusEventHandler<HTMLElement>
+    onTouchStart?: React.TouchEventHandler<HTMLElement>
     'aria-describedby'?: string
   }>
 
@@ -141,8 +150,19 @@ export function Tooltip({
       child.props.onMouseLeave?.(e)
       handleHide()
     },
+    onTouchStart: (e: React.TouchEvent<HTMLElement>) => {
+      child.props.onTouchStart?.(e)
+      // Mark a touch so the next synthetic mouseenter is ignored.
+      // Clear after a short delay (touch + ghost mouseenter both fire
+      // within ~300ms of the tap).
+      recentlyTouchedRef.current = true
+      handleHide()
+      setTimeout(() => { recentlyTouchedRef.current = false }, 600)
+    },
     onFocus: (e: React.FocusEvent<HTMLElement>) => {
       child.props.onFocus?.(e)
+      // Focus on touch devices fires from the tap. Suppress.
+      if (recentlyTouchedRef.current) return
       handleShow(true)
     },
     onBlur: (e: React.FocusEvent<HTMLElement>) => {
