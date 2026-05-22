@@ -1,5 +1,18 @@
 'use client'
 
+/**
+ * <MobileBottomNav>. Fixed bottom tab bar on mobile.
+ *
+ *   Tabs (admin):  Overview | Requests | Tasks | Messages | More
+ *   Tabs (client): Overview | Requests | Messages | Files    | More
+ *
+ *   "More" opens a bottom-sheet drawer with the full nav, styled to
+ *   match the desktop sidebar (cream surface, sidebar-style active
+ *   state, brand-deepest text, leaf-radius selection). No collapsing
+ *   on mobile, just flat group headers + items. User profile card
+ *   pinned to the bottom of the drawer.
+ */
+
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
@@ -10,23 +23,23 @@ import {
   Megaphone,
 } from 'lucide-react'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
+import { SidebarUserCard } from '@/components/tahi/sidebar-user-card'
+import { FocusTrap } from '@/components/tahi/focus-trap'
 
-// Bottom bar: 4 most-used + More button
 const ADMIN_BOTTOM = [
   { label: 'Overview', href: '/overview', icon: LayoutDashboard },
   { label: 'Requests', href: '/requests', icon: Inbox },
+  { label: 'Tasks',    href: '/tasks',    icon: CheckSquare },
   { label: 'Messages', href: '/messages', icon: MessageSquare },
-  { label: 'Clients', href: '/clients', icon: Users },
 ] as const
 
 const CLIENT_BOTTOM = [
   { label: 'Overview', href: '/overview', icon: LayoutDashboard },
   { label: 'Requests', href: '/requests', icon: Inbox },
   { label: 'Messages', href: '/messages', icon: MessageSquare },
-  { label: 'Files', href: '/files', icon: FolderOpen },
+  { label: 'Files',    href: '/files',    icon: FolderOpen },
 ] as const
 
-// More drawer: grouped full nav
 interface DrawerNavItem {
   label: string
   href: string
@@ -43,30 +56,28 @@ const ADMIN_DRAWER: DrawerNavGroup[] = [
     items: [
       { label: 'Overview', href: '/overview', icon: LayoutDashboard },
       { label: 'Requests', href: '/requests', icon: Inbox },
-      { label: 'Tasks', href: '/tasks', icon: CheckSquare },
+      { label: 'Tasks',    href: '/tasks',    icon: CheckSquare },
       { label: 'Messages', href: '/messages', icon: MessageSquare },
     ],
   },
   {
     group: 'Sales',
     items: [
-      { label: 'Pipeline', href: '/pipeline', icon: TrendingUp },
-      { label: 'Proposals', href: '/proposals', icon: FileText },
-      { label: 'Schedules', href: '/schedules', icon: Calendar },
-      { label: 'Contracts', href: '/contracts', icon: FileSignature },
+      { label: 'Pipeline',        href: '/pipeline',        icon: TrendingUp },
+      { label: 'Proposals',       href: '/proposals',       icon: FileText },
+      { label: 'Schedules',       href: '/schedules',       icon: Calendar },
+      { label: 'Contracts',       href: '/contracts',       icon: FileSignature },
       { label: 'Sales analytics', href: '/sales-analytics', icon: BarChart2 },
     ],
   },
   {
     group: 'Clients',
-    items: [
-      { label: 'Clients', href: '/clients', icon: Users },
-    ],
+    items: [{ label: 'Clients', href: '/clients', icon: Users }],
   },
   {
     group: 'Marketing',
     items: [
-      { label: 'Reviews', href: '/reviews', icon: Star },
+      { label: 'Reviews',       href: '/reviews',       icon: Star },
       { label: 'Announcements', href: '/announcements', icon: Megaphone },
     ],
   },
@@ -74,29 +85,25 @@ const ADMIN_DRAWER: DrawerNavGroup[] = [
     group: 'Finance',
     items: [
       { label: 'Invoices', href: '/invoices', icon: FileText },
-      { label: 'Billing', href: '/billing', icon: CreditCard },
-      { label: 'Time', href: '/time', icon: Clock },
-      { label: 'Reports', href: '/reports', icon: BarChart2 },
+      { label: 'Billing',  href: '/billing',  icon: CreditCard },
+      { label: 'Time',     href: '/time',     icon: Clock },
+      { label: 'Reports',  href: '/reports',  icon: BarChart2 },
     ],
   },
   {
     group: 'Operations',
     items: [
       { label: 'Capacity', href: '/capacity', icon: Gauge },
-      { label: 'Team', href: '/team', icon: UserCog },
+      { label: 'Team',     href: '/team',     icon: UserCog },
     ],
   },
   {
     group: 'Knowledge',
-    items: [
-      { label: 'Docs Hub', href: '/docs', icon: BookOpen },
-    ],
+    items: [{ label: 'Docs Hub', href: '/docs', icon: BookOpen }],
   },
   {
     group: 'Account',
-    items: [
-      { label: 'Settings', href: '/settings', icon: Settings },
-    ],
+    items: [{ label: 'Settings', href: '/settings', icon: Settings }],
   },
 ]
 
@@ -112,7 +119,7 @@ const CLIENT_DRAWER: DrawerNavGroup[] = [
   {
     group: 'Library',
     items: [
-      { label: 'Files', href: '/files', icon: FolderOpen },
+      { label: 'Files',    href: '/files',    icon: FolderOpen },
       { label: 'Services', href: '/services', icon: ShoppingBag },
     ],
   },
@@ -120,7 +127,7 @@ const CLIENT_DRAWER: DrawerNavGroup[] = [
     group: 'Billing',
     items: [
       { label: 'Invoices', href: '/invoices', icon: FileText },
-      { label: 'Billing', href: '/billing', icon: CreditCard },
+      { label: 'Billing',  href: '/billing',  icon: CreditCard },
     ],
   },
 ]
@@ -134,193 +141,267 @@ export function MobileBottomNav({ isAdmin = false }: MobileBottomNavProps) {
   const { isImpersonatingClient } = useImpersonation()
   const [drawerOpen, setDrawerOpen] = useState(false)
 
+  // Local theme state for the user card's theme toggle. Mirrors the
+  // sidebar's logic so toggling from either surface stays in sync.
+  const [darkMode, setDarkMode] = useState(false)
+  useEffect(() => {
+    try {
+      setDarkMode(localStorage.getItem('tahi-theme') === 'dark')
+    } catch { /* localStorage unavailable */ }
+  }, [])
+  const toggleDarkMode = () => {
+    const next = !darkMode
+    setDarkMode(next)
+    try {
+      document.documentElement.classList.toggle('dark', next)
+      localStorage.setItem('tahi-theme', next ? 'dark' : 'light')
+    } catch { /* localStorage unavailable */ }
+  }
+
   const showAsAdmin = isAdmin && !isImpersonatingClient
   const bottomItems = showAsAdmin ? ADMIN_BOTTOM : CLIENT_BOTTOM
   const drawerGroups = showAsAdmin ? ADMIN_DRAWER : CLIENT_DRAWER
 
-  // Close drawer on route change
-  useEffect(() => {
-    setDrawerOpen(false)
-  }, [pathname])
+  // Close drawer on route change.
+  useEffect(() => { setDrawerOpen(false) }, [pathname])
 
-  // Lock scroll when drawer is open
+  // Lock scroll while drawer is open.
   useEffect(() => {
     if (drawerOpen) {
+      const prev = document.body.style.overflow
       document.body.style.overflow = 'hidden'
-    } else {
-      document.body.style.overflow = ''
+      return () => { document.body.style.overflow = prev }
     }
-    return () => { document.body.style.overflow = '' }
   }, [drawerOpen])
+
+  // Active route detection mirrors the desktop sidebar's logic so
+  // both surfaces highlight the same items.
+  const exactOnly = new Set(['/requests', '/overview', '/proposals'])
+  const isItemActive = (href: string) =>
+    pathname === href || (!exactOnly.has(href) && pathname.startsWith(href))
 
   return (
     <>
       <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 z-50 flex items-stretch justify-around"
+        className="md:hidden fixed bottom-0 left-0 right-0 flex items-stretch justify-around"
+        aria-label="Primary"
         style={{
-          height: '3.5rem',
-          background: 'var(--color-bg)',
-          borderTop: '1px solid var(--color-border)',
+          height: '3.75rem',
+          background: 'var(--color-bg-cream)',
+          borderTop: '1px solid var(--color-border-subtle)',
           paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          zIndex: 50,
         }}
       >
         {bottomItems.map(item => {
           const Icon = item.icon
-          const isActive =
-            pathname === item.href ||
-            (item.href !== '/overview' && pathname.startsWith(item.href))
-
+          const active = isItemActive(item.href)
           return (
             <Link
               key={item.href}
               href={item.href}
-              className="flex flex-col items-center justify-center flex-1 gap-0.5 transition-colors"
+              aria-current={active ? 'page' : undefined}
+              className="flex flex-col items-center justify-center flex-1 gap-0.5"
               style={{
                 textDecoration: 'none',
-                color: isActive ? 'var(--color-brand)' : 'var(--color-text-muted)',
+                color: active ? 'var(--color-brand-deepest)' : 'var(--color-text-muted)',
                 minHeight: '2.75rem',
+                fontWeight: active ? 600 : 500,
+                transition: 'color var(--motion-quick, 220ms) var(--ease-out, ease-out)',
               }}
             >
               <Icon
-                size={isActive ? 22 : 20}
+                size={20}
                 aria-hidden="true"
                 className="flex-shrink-0"
+                style={{ color: active ? 'var(--color-brand)' : 'var(--color-text-muted)' }}
               />
-              <span
-                style={{
-                  fontSize: '0.625rem',
-                  fontWeight: isActive ? 600 : 500,
-                  lineHeight: 1,
-                }}
-              >
+              <span style={{
+                fontSize: '0.625rem',
+                lineHeight: 1,
+              }}>
                 {item.label}
               </span>
             </Link>
           )
         })}
 
-        {/* More button - opens drawer */}
+        {/* More button. Opens the bottom-sheet drawer with the full nav. */}
         <button
           onClick={() => setDrawerOpen(true)}
-          className="flex flex-col items-center justify-center flex-1 gap-0.5 transition-colors"
+          className="flex flex-col items-center justify-center flex-1 gap-0.5"
+          aria-label="Open full navigation menu"
+          aria-expanded={drawerOpen}
           style={{
             background: 'transparent',
             border: 'none',
-            color: drawerOpen ? 'var(--color-brand)' : 'var(--color-text-muted)',
+            color: drawerOpen ? 'var(--color-brand-deepest)' : 'var(--color-text-muted)',
             minHeight: '2.75rem',
+            fontWeight: drawerOpen ? 600 : 500,
+            transition: 'color var(--motion-quick, 220ms) var(--ease-out, ease-out)',
           }}
-          aria-label="Open full navigation menu"
         >
-          <Menu size={20} aria-hidden="true" className="flex-shrink-0" />
-          <span style={{ fontSize: '0.625rem', fontWeight: 500, lineHeight: 1 }}>
-            More
-          </span>
+          <Menu
+            size={20}
+            aria-hidden="true"
+            className="flex-shrink-0"
+            style={{ color: drawerOpen ? 'var(--color-brand)' : 'var(--color-text-muted)' }}
+          />
+          <span style={{ fontSize: '0.625rem', lineHeight: 1 }}>More</span>
         </button>
       </nav>
 
-      {/* Full nav drawer */}
+      {/* Bottom-sheet drawer. Matches the sidebar's cream surface,
+          sidebar-style active state. Flat groups, no collapsing
+          (mobile users want everything visible). User card pinned
+          to the bottom. */}
       {drawerOpen && (
         <div
-          className="md:hidden fixed inset-0 z-[60]"
+          className="md:hidden fixed inset-0"
           role="dialog"
           aria-modal="true"
           aria-label="Navigation menu"
           onClick={(e) => {
             if (e.target === e.currentTarget) setDrawerOpen(false)
           }}
-          style={{ background: 'rgba(0,0,0,0.4)' }}
+          style={{
+            background: 'rgba(18, 26, 15, 0.5)',
+            zIndex: 60,
+          }}
         >
-          <div
+          <FocusTrap
+            active={drawerOpen}
+            onEscape={() => setDrawerOpen(false)}
             className="absolute bottom-0 left-0 right-0 flex flex-col"
             style={{
-              background: 'var(--color-bg)',
-              borderTopLeftRadius: 'var(--radius-lg)',
-              borderTopRightRadius: 'var(--radius-lg)',
-              maxHeight: '85vh',
+              background: 'var(--color-bg-cream)',
+              borderTopLeftRadius: 'var(--radius-leaf-lg)',
+              borderTopRightRadius: 'var(--radius-leaf-lg)',
+              maxHeight: '90vh',
               paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-              animation: 'slideUp 200ms ease-out',
+              animation: 'slideUp 320ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
-            {/* Drawer header */}
+            {/* Drawer header: grab handle + title + close */}
+            <div className="flex-shrink-0" style={{ padding: '0.75rem 0 0' }}>
+              <div
+                aria-hidden="true"
+                style={{
+                  width: '2.5rem',
+                  height: '0.25rem',
+                  background: 'var(--color-border-strong)',
+                  borderRadius: '9999px',
+                  margin: '0 auto',
+                }}
+              />
+            </div>
             <div
               className="flex items-center justify-between flex-shrink-0"
               style={{
-                padding: 'var(--space-4) var(--space-5)',
-                borderBottom: '1px solid var(--color-border-subtle)',
+                padding: '0.75rem 1.25rem 0.5rem',
               }}
             >
-              <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
+              <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
                 Menu
               </h2>
               <button
                 onClick={() => setDrawerOpen(false)}
+                aria-label="Close menu"
                 className="flex items-center justify-center"
                 style={{
-                  width: '2rem',
-                  height: '2rem',
-                  background: 'var(--color-bg-tertiary)',
+                  width: '2.25rem',
+                  height: '2.25rem',
+                  background: 'transparent',
                   border: 'none',
-                  borderRadius: 'var(--radius-sm)',
+                  borderRadius: 'var(--radius-md)',
                   color: 'var(--color-text-muted)',
+                  cursor: 'pointer',
+                  transition: 'background var(--motion-quick, 220ms) var(--ease-out, ease-out)',
                 }}
-                aria-label="Close menu"
+                onTouchStart={e => { e.currentTarget.style.background = 'rgba(18, 26, 15, 0.06)' }}
+                onTouchEnd={e => { e.currentTarget.style.background = 'transparent' }}
               >
-                <X size={16} aria-hidden="true" />
+                <X size={18} aria-hidden="true" />
               </button>
             </div>
 
-            {/* Drawer nav groups */}
-            <div className="overflow-y-auto flex-1" style={{ padding: 'var(--space-4) var(--space-5) var(--space-6)' }}>
+            {/* Nav groups */}
+            <div
+              className="overflow-y-auto flex-1"
+              style={{
+                padding: '0.25rem 0.75rem 1rem',
+              }}
+            >
               {drawerGroups.map((group) => (
-                <div key={group.group} style={{ marginBottom: 'var(--space-5)' }}>
+                <div key={group.group} style={{ marginTop: '0.75rem' }}>
                   <p style={{
-                    fontSize: 'var(--text-xs)',
+                    fontSize: '0.6875rem',
                     fontWeight: 600,
                     color: 'var(--color-text-subtle)',
                     textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                    marginBottom: 'var(--space-2)',
-                    paddingLeft: 'var(--space-2)',
+                    letterSpacing: '0.08em',
+                    padding: '0 0.625rem 0.375rem',
+                    margin: 0,
                   }}>
                     {group.group}
                   </p>
-                  <div className="flex flex-col" style={{ gap: 'var(--space-0-5)' }}>
+                  <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
                     {group.items.map(item => {
                       const Icon = item.icon
-                      const isActive = pathname === item.href ||
-                        (item.href !== '/overview' && pathname.startsWith(item.href))
+                      const active = isItemActive(item.href)
                       return (
-                        <Link
-                          key={item.href}
-                          href={item.href}
-                          className="flex items-center"
-                          style={{
-                            padding: 'var(--space-3)',
-                            gap: 'var(--space-3)',
-                            borderRadius: 'var(--radius-md)',
-                            textDecoration: 'none',
-                            background: isActive ? 'var(--color-brand-50)' : 'transparent',
-                            color: isActive ? 'var(--color-brand-dark)' : 'var(--color-text)',
-                            fontWeight: isActive ? 600 : 500,
-                            fontSize: 'var(--text-base)',
-                            minHeight: '2.75rem',
-                          }}
-                        >
-                          <Icon
-                            size={18}
-                            aria-hidden="true"
-                            className="flex-shrink-0"
-                            style={{ color: isActive ? 'var(--color-brand)' : 'var(--color-text-muted)' }}
-                          />
-                          {item.label}
-                        </Link>
+                        <li key={item.href} style={{ marginBottom: '0.125rem' }}>
+                          <Link
+                            href={item.href}
+                            aria-current={active ? 'page' : undefined}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.75rem',
+                              padding: '0.6875rem 0.625rem',
+                              borderRadius: 'var(--radius-leaf-sm)',
+                              fontSize: '0.9375rem',
+                              fontWeight: active ? 600 : 500,
+                              color: active ? 'var(--color-brand-deepest)' : 'var(--color-text-muted)',
+                              background: active ? 'var(--color-bg)' : 'transparent',
+                              boxShadow: active ? 'inset 0 0 0 1px var(--color-border-subtle)' : 'none',
+                              textDecoration: 'none',
+                              minHeight: '2.75rem',
+                              transition: 'background var(--motion-quick, 220ms) var(--ease-out, ease-out), color var(--motion-quick, 220ms) var(--ease-out, ease-out)',
+                            }}
+                          >
+                            <Icon
+                              size={18}
+                              aria-hidden="true"
+                              className="flex-shrink-0"
+                              style={{ color: active ? 'var(--color-brand)' : 'var(--color-text-muted)' }}
+                            />
+                            {item.label}
+                          </Link>
+                        </li>
                       )
                     })}
-                  </div>
+                  </ul>
                 </div>
               ))}
             </div>
-          </div>
+
+            {/* User card pinned to the bottom of the drawer */}
+            <div
+              style={{
+                flexShrink: 0,
+                padding: '0.5rem 0.75rem',
+                borderTop: '1px solid var(--color-border-subtle)',
+                background: 'var(--color-bg-cream)',
+              }}
+            >
+              <SidebarUserCard
+                collapsed={false}
+                darkMode={darkMode}
+                onToggleDarkMode={toggleDarkMode}
+              />
+            </div>
+          </FocusTrap>
         </div>
       )}
     </>
