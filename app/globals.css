@@ -883,6 +883,34 @@ textarea,
 .tahi-mention[data-mention-type="request"]::before { background: #60a5fa; }
 .tahi-mention[data-mention-type="task"]::before    { background: #a78bfa; }
 
+/* When the message body wires onMentionClick, mention spans become
+   keyboard / mouse targets. Cursor + hover state surface this. */
+.tahi-message-body--mentions-clickable .tahi-mention {
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.tahi-message-body--mentions-clickable .tahi-mention:hover {
+  background: var(--color-brand-100);
+  border-color: var(--color-brand);
+}
+
+/* Typing indicator. Three dots bounce in sequence to signal "someone
+   is typing" with calm motion, ~1.2s loop. */
+.tahi-typing-dots span {
+  display: inline-block;
+  width: 0.3125rem;
+  height: 0.3125rem;
+  border-radius: 999px;
+  background: var(--color-text-subtle);
+  animation: tahi-typing-dot 1.2s ease-in-out infinite;
+}
+.tahi-typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+.tahi-typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes tahi-typing-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%           { transform: translateY(-2px); opacity: 1; }
+}
+
 /* Hide scrollbar utility */
 .scrollbar-hide {
   -ms-overflow-style: none;

@@ -59,6 +59,12 @@ export interface MentionItem {
   sub?: string
   /** Optional URL the mention chip navigates to on click. */
   href?: string
+  /** When true, this item is hidden from the picker on public
+   *  messages. Use for entities only the Tahi team should see
+   *  (Tahi-internal tasks, other clients' requests, etc.). Internal
+   *  notes show everything so the team can link freely. Default
+   *  false (visible in both public and internal). */
+  internalOnly?: boolean
 }
 
 /** Pluggable mention sources. The composer searches across all four
@@ -134,7 +140,12 @@ export function Composer({
   React.useEffect(() => {
     mentionSourcesRef.current = mentionSources
   }, [mentionSources])
+  // Visibility ref so the mention picker filters by what participants
+  // can see. On public messages the picker hides internalOnly items;
+  // on internal notes everything is fair game.
+  const visibilityRef = React.useRef<ComposerVisibility>(defaultVisibility)
   const [visibility, setVisibility] = React.useState<ComposerVisibility>(defaultVisibility)
+  React.useEffect(() => { visibilityRef.current = visibility }, [visibility])
   const [staged, setStaged] = React.useState<ComposerStagedFile[]>([])
   const [voiceNote, setVoiceNote] = React.useState<ComposerVoiceNote | null>(null)
   const [isDragging, setIsDragging] = React.useState(false)
@@ -152,7 +163,23 @@ export function Composer({
         HTMLAttributes: { rel: 'noopener', target: '_blank' },
       }),
       Placeholder.configure({ placeholder }),
-      Mention.configure({
+      // Extend Mention with a `type` attribute and a `command` that
+      // explicitly replaces the typed @query using the suggestion's
+      // range. Without an explicit command the partial query can be
+      // left behind alongside the inserted mention chip.
+      Mention.extend({
+        addAttributes() {
+          return {
+            id:    { default: null },
+            label: { default: null },
+            type:  {
+              default: 'person',
+              parseHTML: el => el.getAttribute('data-mention-type') ?? 'person',
+              renderHTML: attrs => ({ 'data-mention-type': attrs.type }),
+            },
+          }
+        },
+      }).configure({
         HTMLAttributes: { class: 'tahi-mention' },
         renderHTML: ({ options, node }) => {
           const attrs = node.attrs as { id?: string; label?: string; type?: MentionType }
@@ -168,7 +195,28 @@ export function Composer({
         },
         suggestion: {
           char: '@',
-          items: ({ query }) => searchMentions(mentionSourcesRef.current, query),
+          items: ({ query }) => searchMentions(
+            mentionSourcesRef.current,
+            query,
+            visibilityRef.current,
+          ),
+          // Explicit replace using the suggestion's range so the typed
+          // partial doesn't survive alongside the inserted chip.
+          command: ({ editor, range, props }) => {
+            // Eat a trailing space if there's one after the cursor so
+            // we don't end up with two spaces after insertion.
+            const nodeAfter = editor.view.state.selection.$to.nodeAfter
+            const overrideSpace = nodeAfter?.text?.startsWith(' ')
+            const replaceRange = overrideSpace ? { ...range, to: range.to + 1 } : range
+            editor
+              .chain()
+              .focus()
+              .insertContentAt(replaceRange, [
+                { type: 'mention', attrs: props },
+                { type: 'text', text: ' ' },
+              ])
+              .run()
+          },
           render: createMentionSuggestionRender(),
         },
       }),
@@ -1027,7 +1075,11 @@ interface MentionMatch extends MentionItem {
   rank: number
 }
 
-function searchMentions(sources: MentionSources | undefined, query: string): MentionMatch[] {
+function searchMentions(
+  sources: MentionSources | undefined,
+  query: string,
+  visibility: ComposerVisibility,
+): MentionMatch[] {
   if (!sources) return []
   const q = query.trim().toLowerCase()
   const pools: Array<{ type: MentionType; items: ReadonlyArray<MentionItem> }> = [
@@ -1040,6 +1092,10 @@ function searchMentions(sources: MentionSources | undefined, query: string): Men
   for (const pool of pools) {
     let rank = 0
     for (const item of pool.items) {
+      // Access scoping: on public messages, hide internal-only items
+      // so the user can't accidentally link an entity the recipient
+      // can't see. On internal notes, everything is visible.
+      if (item.internalOnly && visibility === 'public') continue
       if (!q || item.label.toLowerCase().includes(q) || (item.sub?.toLowerCase().includes(q))) {
         out.push({ ...item, type: pool.type, rank: rank++ })
         if (rank >= 6) break // cap each group
@@ -1150,6 +1206,12 @@ function createMentionSuggestionRender() {
           'min-width:16rem',
           'max-width:22rem',
         ].join(';')
+        // Prevent clicks on the popover from blurring the Tiptap
+        // editor. Without this preventDefault, clicking an item moves
+        // focus out of the editor and Tiptap's command() inserts the
+        // mention into nowhere (or duplicates the query text). Apply
+        // on mousedown which fires before blur.
+        popup.addEventListener('mousedown', (e) => e.preventDefault())
         document.body.appendChild(popup)
         position(props)
         rerender()

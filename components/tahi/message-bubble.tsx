@@ -40,7 +40,7 @@
  */
 
 import * as React from 'react'
-import { Smile, MoreHorizontal, CornerDownRight } from 'lucide-react'
+import { Smile, MoreHorizontal, CornerDownRight, Play, Pause, Check, CheckCheck } from 'lucide-react'
 import { Avatar } from '@/components/tahi/avatar'
 import { FileAttachmentList, type FileAttachment } from '@/components/tahi/file-attachment-list'
 import { Popover } from '@/components/tahi/popover'
@@ -53,6 +53,8 @@ export interface MessageAuthor {
   /** Display badge: admin (Tahi team) vs client vs system. Affects nothing
    *  functional, just shown as a small tag next to the name. */
   role?: 'admin' | 'client' | 'system' | string
+  /** Online presence dot on the avatar. */
+  presence?: 'online' | 'away' | 'offline'
 }
 
 export interface MessageReaction {
@@ -118,6 +120,22 @@ interface MessageBubbleProps {
    *  profile. Hover state added when set. */
   onAuthorClick?: (author: MessageAuthor) => void
 
+  /** Click a @-mention chip inside the message body. Receives the
+   *  mention's id + type so the caller can route to the right
+   *  detail page (person, org, request, task). When set, mention
+   *  spans get cursor:pointer + a hover state. */
+  onMentionClick?: (mention: { id: string; type: string; label: string }) => void
+
+  /** Inline-edit mode. When true, the bubble body becomes an
+   *  editable textarea with Save / Cancel. Caller drives the flag
+   *  (typically from an Edit action in the menu). */
+  editing?: boolean
+  /** Save the edited content. Receives the new plain text; the
+   *  caller can wrap it as needed (Tiptap HTML, markdown, etc.). */
+  onSaveEdit?: (nextText: string) => void | Promise<void>
+  /** Cancel out of edit mode. */
+  onCancelEdit?: () => void
+
   className?: string
 }
 
@@ -142,8 +160,27 @@ export function MessageBubble({
   onToggleReaction,
   onReply,
   onAuthorClick,
+  onMentionClick,
+  editing = false,
+  onSaveEdit,
+  onCancelEdit,
   className,
 }: MessageBubbleProps) {
+  // Local draft for inline edit. Seeded from the current body's
+  // plaintext (HTML stripped). Reset when edit mode opens / closes.
+  const [editDraft, setEditDraft] = React.useState('')
+  React.useEffect(() => {
+    if (editing) {
+      const initial = bodyHtml
+        ? stripBodyHtml(bodyHtml)
+        : typeof body === 'string' ? body : ''
+      setEditDraft(initial)
+    }
+  }, [editing, bodyHtml, body])
+  const saveEdit = () => {
+    if (!editDraft.trim()) return
+    void onSaveEdit?.(editDraft.trim())
+  }
   const [emojiOpen, setEmojiOpen] = React.useState(false)
   const [actionsOpen, setActionsOpen] = React.useState(false)
   const emojiRef = React.useRef<HTMLButtonElement | null>(null)
@@ -190,8 +227,10 @@ export function MessageBubble({
         marginBottom: compact ? '0.5rem' : '0.875rem',
       }}
     >
-      {/* Avatar. Clickable to author profile when onAuthorClick is set. */}
-      <span style={{ flexShrink: 0, paddingTop: '0.125rem' }}>
+      {/* Avatar. Clickable to author profile when onAuthorClick is set.
+          No paddingTop: the avatar centers vertically with the name +
+          timestamp header above the bubble. */}
+      <span style={{ flexShrink: 0 }}>
         {onAuthorClick ? (
           <button
             type="button"
@@ -215,6 +254,7 @@ export function MessageBubble({
               name={author.name}
               src={author.avatarUrl}
               size={compact ? 'xs' : 'sm'}
+              status={author.presence}
               noRing
             />
           </button>
@@ -223,6 +263,7 @@ export function MessageBubble({
             name={author.name}
             src={author.avatarUrl}
             size={compact ? 'xs' : 'sm'}
+            status={author.presence}
             noRing
           />
         )}
@@ -361,10 +402,89 @@ export function MessageBubble({
             </button>
           )}
 
-          {/* Body. Either dangerouslySetInnerHTML (Tiptap output) or arbitrary node. */}
-          {bodyHtml
-            ? <div className="tahi-message-body" dangerouslySetInnerHTML={{ __html: bodyHtml }} />
-            : body}
+          {/* Body. When `editing` is true, swap for an inline editor
+              with Save / Cancel. Otherwise either dangerouslySetInnerHTML
+              (Tiptap output) or arbitrary node. */}
+          {editing ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4375rem' }}>
+              <textarea
+                value={editDraft}
+                onChange={(e) => setEditDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault()
+                    saveEdit()
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    onCancelEdit?.()
+                  }
+                }}
+                rows={Math.max(2, editDraft.split('\n').length)}
+                autoFocus
+                style={{
+                  width: '100%',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.4375rem 0.5625rem',
+                  background: 'var(--color-bg)',
+                  fontSize: 'var(--text-sm)',
+                  color: 'var(--color-text)',
+                  outline: 'none',
+                  resize: 'vertical',
+                  fontFamily: 'inherit',
+                  lineHeight: 1.5,
+                }}
+              />
+              <div style={{ display: 'flex', gap: '0.3125rem', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={onCancelEdit}
+                  style={{
+                    padding: '0.25rem 0.625rem',
+                    background: 'transparent',
+                    border: '1px solid var(--color-border-subtle)',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: 'var(--text-xs)',
+                    fontWeight: 500,
+                    color: 'var(--color-text-muted)',
+                    cursor: 'pointer',
+                  }}
+                >Cancel</button>
+                <button
+                  type="button"
+                  onClick={saveEdit}
+                  disabled={!editDraft.trim()}
+                  style={{
+                    padding: '0.25rem 0.75rem',
+                    background: editDraft.trim() ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
+                    border: 'none',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: 'var(--text-xs)',
+                    fontWeight: 600,
+                    color: editDraft.trim() ? '#ffffff' : 'var(--color-text-subtle)',
+                    cursor: editDraft.trim() ? 'pointer' : 'not-allowed',
+                  }}
+                >Save</button>
+              </div>
+              <span style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)' }}>
+                Cmd / Ctrl + Enter to save, Esc to cancel.
+              </span>
+            </div>
+          ) : bodyHtml ? (
+            <div
+              className={onMentionClick ? 'tahi-message-body tahi-message-body--mentions-clickable' : 'tahi-message-body'}
+              dangerouslySetInnerHTML={{ __html: bodyHtml }}
+              onClick={onMentionClick ? (e) => {
+                const target = e.target as HTMLElement
+                const mention = target.closest('.tahi-mention') as HTMLElement | null
+                if (!mention) return
+                const id = mention.getAttribute('data-mention-id') ?? ''
+                const type = mention.getAttribute('data-mention-type') ?? 'person'
+                const label = mention.textContent?.replace(/^@/, '') ?? ''
+                onMentionClick({ id, type, label })
+              } : undefined}
+            />
+          ) : body}
 
           {/* Voice note */}
           {voiceNote && <VoiceNoteInline voiceNote={voiceNote} />}
@@ -485,10 +605,23 @@ export function MessageBubble({
           </div>
         )}
 
-        {/* Seen indicator (DMs only). Tiny muted line. */}
-        {seen && (
-          <span style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)' }}>
-            Seen
+        {/* Read receipt. Single check = delivered, double check = seen.
+            Blue double check when the recipient has seen the message. */}
+        {own && (
+          <span
+            aria-label={seen ? 'Seen' : 'Delivered'}
+            title={seen ? 'Seen' : 'Delivered'}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.125rem',
+              color: seen ? 'var(--color-brand)' : 'var(--color-text-subtle)',
+              fontSize: '0.625rem',
+            }}
+          >
+            {seen
+              ? <CheckCheck size={12} aria-hidden="true" />
+              : <Check size={12} aria-hidden="true" />}
           </span>
         )}
       </div>
@@ -664,6 +797,25 @@ function isProbablyImage(a: FileAttachment): boolean {
   return (a.mime ?? '').startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'].includes(ext)
 }
 
+function stripBodyHtml(html: string): string {
+  // Cheap plaintext for the inline edit seed. Preserves @-mention
+  // labels (without the surrounding span chrome) and converts <br>
+  // / </p> into line breaks so multi-paragraph messages stay
+  // multi-line in the textarea.
+  return html
+    .replace(/<br\s*\/?>(?!\s*<\/p>)/gi, '\n')
+    .replace(/<\/p>\s*<p[^>]*>/gi, '\n\n')
+    .replace(/<\/(p|li|blockquote|h[1-6])>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '- ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 function firstNameOf(fullName: string): string {
   // "Liam Miller" -> "Liam". Falls back to the whole string for
   // single-word names or unusual inputs.
@@ -695,46 +847,167 @@ function formatTimestamp(ts: string): string {
 // + playback infrastructure lives elsewhere; this primitive embeds the
 // playback control consistently in the bubble.
 
+// Simple voice note player. Play/pause button on the left, a clean
+// progress bar with a draggable scrubber in the middle, current
+// time + duration on the right. No music note.
 function VoiceNoteInline({ voiceNote }: { voiceNote: MessageVoiceNote }) {
+  const audioRef = React.useRef<HTMLAudioElement | null>(null)
+  const trackRef = React.useRef<HTMLDivElement | null>(null)
+  const [playing, setPlaying] = React.useState(false)
+  const [current, setCurrent] = React.useState(0)
+  const [duration, setDuration] = React.useState(voiceNote.durationSeconds ?? 0)
+  const [dragging, setDragging] = React.useState(false)
+
+  const togglePlay = () => {
+    const a = audioRef.current
+    if (!a) return
+    if (playing) a.pause()
+    else void a.play()
+  }
+
+  const seek = (clientX: number) => {
+    const a = audioRef.current
+    const track = trackRef.current
+    if (!a || !track || !duration) return
+    const rect = track.getBoundingClientRect()
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+    a.currentTime = ratio * duration
+    setCurrent(ratio * duration)
+  }
+
+  React.useEffect(() => {
+    if (!dragging) return
+    const onMove = (e: MouseEvent) => seek(e.clientX)
+    const onUp = () => setDragging(false)
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp, { once: true })
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragging])
+
+  const progress = duration > 0 ? Math.min(1, current / duration) : 0
+  const remaining = Math.max(0, Math.round((duration - current) || 0))
+
   return (
     <div
       style={{
         marginTop: '0.5rem',
-        padding: '0.4375rem 0.5rem',
+        padding: '0.5rem 0.625rem',
         background: 'var(--color-bg)',
         border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-sm)',
+        borderRadius: 'var(--radius-md)',
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.375rem',
+        gap: '0.4375rem',
+        maxWidth: '20rem',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <span
-          aria-hidden="true"
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+        <button
+          type="button"
+          onClick={togglePlay}
+          aria-label={playing ? 'Pause voice note' : 'Play voice note'}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: '1.5rem',
-            height: '1.5rem',
+            width: '1.875rem',
+            height: '1.875rem',
             borderRadius: 999,
-            background: 'var(--color-brand-50)',
-            color: 'var(--color-brand)',
+            background: 'var(--color-brand)',
+            border: 'none',
+            color: '#ffffff',
+            cursor: 'pointer',
             flexShrink: 0,
-            fontSize: '0.6875rem',
-            fontWeight: 700,
+            transition: 'background-color 150ms ease',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-dark)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-brand)' }}
+        >
+          {playing
+            ? <Pause size={13} aria-hidden="true" />
+            : <Play size={13} aria-hidden="true" style={{ marginLeft: '0.125rem' }} />}
+        </button>
+        <div
+          ref={trackRef}
+          role="slider"
+          tabIndex={0}
+          aria-label="Voice note progress"
+          aria-valuemin={0}
+          aria-valuemax={Math.round(duration)}
+          aria-valuenow={Math.round(current)}
+          onMouseDown={(e) => { setDragging(true); seek(e.clientX) }}
+          onKeyDown={(e) => {
+            const a = audioRef.current
+            if (!a || !duration) return
+            if (e.key === 'ArrowRight') { a.currentTime = Math.min(duration, a.currentTime + 1); setCurrent(a.currentTime) }
+            if (e.key === 'ArrowLeft')  { a.currentTime = Math.max(0,        a.currentTime - 1); setCurrent(a.currentTime) }
+          }}
+          style={{
+            position: 'relative',
+            flex: 1,
+            height: '0.375rem',
+            background: 'var(--color-bg-tertiary)',
+            borderRadius: 999,
+            cursor: 'pointer',
           }}
         >
-          ♪
+          <div
+            style={{
+              position: 'absolute',
+              top: 0, bottom: 0, left: 0,
+              width: `${progress * 100}%`,
+              background: 'var(--color-brand)',
+              borderRadius: 999,
+              transition: dragging ? 'none' : 'width 60ms linear',
+            }}
+          />
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: `calc(${progress * 100}% - 0.4375rem)`,
+              transform: 'translateY(-50%)',
+              width: '0.875rem',
+              height: '0.875rem',
+              borderRadius: 999,
+              background: '#ffffff',
+              boxShadow: '0 1px 2px rgba(15,20,16,0.18), 0 0 0 1px var(--color-brand)',
+              pointerEvents: 'none',
+              opacity: progress > 0 || playing || dragging ? 1 : 0,
+              transition: 'opacity 150ms ease',
+            }}
+          />
+        </div>
+        <span style={{
+          fontSize: '0.6875rem',
+          color: 'var(--color-text-muted)',
+          fontVariantNumeric: 'tabular-nums',
+          flexShrink: 0,
+          minWidth: '2.25rem',
+          textAlign: 'right',
+        }}>
+          {playing || current > 0 ? formatDuration(current) : formatDuration(duration)}
         </span>
-        <audio controls src={voiceNote.url} style={{ width: '100%', maxWidth: '20rem', height: '2rem' }} />
-        {voiceNote.durationSeconds != null && (
-          <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', flexShrink: 0 }}>
-            {formatDuration(voiceNote.durationSeconds)}
-          </span>
-        )}
       </div>
+      <audio
+        ref={audioRef}
+        src={voiceNote.url}
+        preload="metadata"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setCurrent(0) }}
+        onTimeUpdate={(e) => setCurrent((e.target as HTMLAudioElement).currentTime)}
+        onLoadedMetadata={(e) => {
+          const d = (e.target as HTMLAudioElement).duration
+          if (Number.isFinite(d) && d > 0) setDuration(d)
+        }}
+        hidden
+      />
       {voiceNote.transcript && (
         <p style={{
           margin: 0,
@@ -746,6 +1019,7 @@ function VoiceNoteInline({ voiceNote }: { voiceNote: MessageVoiceNote }) {
           &ldquo;{voiceNote.transcript}&rdquo;
         </p>
       )}
+      <span aria-hidden="true" style={{ fontSize: 0 }}>{remaining}</span>
     </div>
   )
 }

@@ -1741,33 +1741,40 @@ function ComponentsSection() {
 
 // ── Composer showcase ──────────────────────────────────────────────────
 
+// Demo data simulates a thread between Liam (Tahi team) and Anna
+// (Glasswall client). The picker should respect what Anna can see:
+// her own org's requests + tasks, the people on her thread. Other
+// clients' work and Tahi-internal stuff is marked internalOnly so it
+// only surfaces when the message visibility is "Internal".
 const DEMO_MENTION_SOURCES: MentionSources = {
   people: [
-    { id: 'p1', type: 'person', label: 'Liam Miller',  sub: 'liam@tahi.studio'  },
-    { id: 'p2', type: 'person', label: 'Staci Orchard', sub: 'staci@tahi.studio' },
-    { id: 'p3', type: 'person', label: 'Sarah Chen',   sub: 'sarah@tahi.studio' },
-    { id: 'p4', type: 'person', label: 'James Park',   sub: 'james@tahi.studio' },
-    { id: 'p5', type: 'person', label: 'Anna Walker',  sub: 'anna@glasswall.com' },
+    { id: 'p1', type: 'person', label: 'Liam Miller',   sub: 'liam@tahi.studio'   },
+    { id: 'p2', type: 'person', label: 'Staci Orchard', sub: 'staci@tahi.studio'  },
+    { id: 'p3', type: 'person', label: 'Sarah Chen',    sub: 'sarah@tahi.studio'  },
+    { id: 'p4', type: 'person', label: 'James Park',    sub: 'james@tahi.studio', internalOnly: true },
+    { id: 'p5', type: 'person', label: 'Anna Walker',   sub: 'anna@glasswall.com' },
   ],
   orgs: [
-    { id: 'o1', type: 'org', label: 'Acme Corp',   sub: 'Maintain plan' },
-    { id: 'o2', type: 'org', label: 'Glasswall',   sub: 'Scale plan'    },
-    { id: 'o3', type: 'org', label: 'Beta Labs',   sub: 'Launch plan'   },
-    { id: 'o4', type: 'org', label: 'Physitrack',  sub: 'Custom plan'   },
-    { id: 'o5', type: 'org', label: 'Tahi Studio', sub: 'Internal'      },
+    { id: 'o1', type: 'org', label: 'Glasswall',   sub: 'Scale plan',  href: '/clients/o1' },
+    { id: 'o2', type: 'org', label: 'Acme Corp',   sub: 'Maintain plan', internalOnly: true, href: '/clients/o2' },
+    { id: 'o3', type: 'org', label: 'Beta Labs',   sub: 'Launch plan',   internalOnly: true, href: '/clients/o3' },
+    { id: 'o4', type: 'org', label: 'Physitrack',  sub: 'Custom plan',   internalOnly: true, href: '/clients/o4' },
+    { id: 'o5', type: 'org', label: 'Tahi Studio', sub: 'Internal',      internalOnly: true, href: '/clients/o5' },
   ],
   requests: [
-    { id: 'r1', type: 'request', label: '#006 test',                       sub: 'Physitrack · Submitted'     },
-    { id: 'r2', type: 'request', label: '#005 retret',                     sub: 'Lifecycle Test Co · Draft'  },
-    { id: 'r3', type: 'request', label: '#004 retret',                     sub: 'Pp · In review'             },
-    { id: 'r4', type: 'request', label: '#003 Build patient intake form',  sub: 'Beta Labs · In progress'    },
-    { id: 'r5', type: 'request', label: '#002 Redesign landing page hero', sub: 'Acme Corp · Client review'  },
+    // Glasswall's own requests: visible to Anna.
+    { id: 'r1', type: 'request', label: '#012 Hero refresh',       sub: 'Glasswall · In progress', href: '/requests/r1' },
+    { id: 'r2', type: 'request', label: '#011 Pricing page',       sub: 'Glasswall · Client review', href: '/requests/r2' },
+    // Other clients' work: hidden from Anna; only show on Internal notes.
+    { id: 'r3', type: 'request', label: '#010 Patient intake form', sub: 'Beta Labs · In progress', internalOnly: true, href: '/requests/r3' },
+    { id: 'r4', type: 'request', label: '#009 Landing hero',        sub: 'Acme Corp · Client review', internalOnly: true, href: '/requests/r4' },
+    { id: 'r5', type: 'request', label: '#008 Onboarding loom',     sub: 'Physitrack · Delivered',  internalOnly: true, href: '/requests/r5' },
   ],
   tasks: [
-    { id: 't1', type: 'task', label: 'Draft Q3 proposal',          sub: 'Due Fri · Sarah'   },
-    { id: 't2', type: 'task', label: 'Update homepage copy',        sub: 'Due Mon · Liam'    },
-    { id: 't3', type: 'task', label: 'Send onboarding loom',        sub: 'Due today · Staci' },
-    { id: 't4', type: 'task', label: 'Review hourly billing export', sub: 'Due Wed · James'   },
+    { id: 't1', type: 'task', label: 'Draft Q3 proposal',           sub: 'Due Fri · Sarah',  internalOnly: true, href: '/tasks/t1' },
+    { id: 't2', type: 'task', label: 'Update Glasswall homepage',   sub: 'Due Mon · Liam',                       href: '/tasks/t2' },
+    { id: 't3', type: 'task', label: 'Send Physitrack loom',        sub: 'Due today · Staci', internalOnly: true, href: '/tasks/t3' },
+    { id: 't4', type: 'task', label: 'Review billing export',       sub: 'Due Wed · James',   internalOnly: true, href: '/tasks/t4' },
   ],
 }
 
@@ -1995,9 +2002,10 @@ function MessageBubbleShowcase() {
 interface DemoMessage {
   id: string
   timestamp: string
-  author: { name: string; role?: 'admin' | 'client' }
+  author: { name: string; role?: 'admin' | 'client'; presence?: 'online' | 'away' | 'offline' }
   bodyHtml: string
   own?: boolean
+  seen?: boolean
   visibility?: 'internal' | 'external'
   /** Local-only object-URL attachments captured from the composer. */
   attachments?: Array<{
@@ -2015,12 +2023,13 @@ interface DemoMessage {
 
 function MessageThreadShowcase() {
   const [reply, setReply] = useState<{ authorName: string; preview: string } | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [messages, setMessages] = useState<DemoMessage[]>([
-    { id: 'm1', timestamp: '2026-05-22T15:30:00Z', author: { name: 'Liam Miller', role: 'admin' },  bodyHtml: '<p>Sent over the brief and creative direction. Take a look when you get a chance.</p>' },
-    { id: 'm2', timestamp: '2026-05-22T16:02:00Z', author: { name: 'Anna Walker', role: 'client' }, bodyHtml: "<p>Just looked &mdash; really like where this is going. I'll get our team's feedback by tomorrow.</p>" },
-    { id: 'm3', timestamp: '2026-05-23T09:14:00Z', author: { name: 'Liam Miller', role: 'admin' },  bodyHtml: '<p>Morning! Pushing the v2 with the darker overlay you asked for.</p>' },
-    { id: 'm4', timestamp: '2026-05-23T09:42:00Z', author: { name: 'Anna Walker', role: 'client' }, bodyHtml: '<p>Beautiful. Approving, go ahead and ship.</p>' },
-    { id: 'm5', timestamp: '2026-05-23T10:30:00Z', author: { name: 'You', role: 'admin' }, own: true, bodyHtml: '<p>On it. Will have staging up in an hour.</p>' },
+    { id: 'm1', timestamp: '2026-05-22T15:30:00Z', author: { name: 'Liam Miller', role: 'admin',  presence: 'online' },  bodyHtml: '<p>Sent over the brief and creative direction. Take a look when you get a chance.</p>' },
+    { id: 'm2', timestamp: '2026-05-22T16:02:00Z', author: { name: 'Anna Walker', role: 'client', presence: 'online' }, bodyHtml: "<p>Just looked, really like where this is going. I'll get our team's feedback by tomorrow.</p>" },
+    { id: 'm3', timestamp: '2026-05-23T09:14:00Z', author: { name: 'Liam Miller', role: 'admin',  presence: 'online' },  bodyHtml: '<p>Morning! Pushing the v2 with the darker overlay you asked for.</p>' },
+    { id: 'm4', timestamp: '2026-05-23T09:42:00Z', author: { name: 'Anna Walker', role: 'client', presence: 'online' }, bodyHtml: '<p>Beautiful. Approving, go ahead and ship.</p>' },
+    { id: 'm5', timestamp: '2026-05-23T10:30:00Z', author: { name: 'You', role: 'admin', presence: 'online' }, own: true, seen: true, bodyHtml: '<p>On it. Will have staging up in an hour.</p>' },
   ])
   return (
     <PrimitiveShell
@@ -2037,6 +2046,7 @@ function MessageThreadShowcase() {
           { id: '2', name: 'Anna Walker' },
           { id: '3', name: 'Sarah Chen' },
         ]}
+        typingNames={['Anna Walker']}
         messages={messages}
         renderMessage={(msg) => (
           <MessageBubble
@@ -2044,12 +2054,24 @@ function MessageThreadShowcase() {
             timestamp={msg.timestamp}
             bodyHtml={msg.bodyHtml}
             own={msg.own}
+            seen={msg.seen}
             visibility={msg.visibility}
             attachments={msg.attachments}
             voiceNote={msg.voiceNote}
             replyTo={msg.replyTo}
+            editing={editingId === msg.id}
+            onSaveEdit={(next) => {
+              setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, bodyHtml: `<p>${next.replace(/\n/g, '</p><p>')}</p>` } : m))
+              setEditingId(null)
+            }}
+            onCancelEdit={() => setEditingId(null)}
             onAuthorClick={(author) => alert(`Open ${author.name}'s profile`)}
+            onMentionClick={(m) => alert(`Open ${m.type}: ${m.label} (${m.id})`)}
             onReply={() => setReply({ authorName: msg.author.name, preview: stripTags(msg.bodyHtml).slice(0, 80) })}
+            actions={msg.own ? [
+              { label: 'Edit', icon: <Pencil size={14} />, onClick: () => setEditingId(msg.id) },
+              { label: 'Delete', icon: <Trash2 size={14} />, tone: 'danger', onClick: () => setMessages(prev => prev.filter(m => m.id !== msg.id)) },
+            ] : undefined}
           />
         )}
         replyTo={reply}
@@ -2082,8 +2104,9 @@ function MessageThreadShowcase() {
               setMessages(prev => [...prev, {
                 id: nextId,
                 timestamp: new Date().toISOString(),
-                author: { name: 'You', role: 'admin' },
+                author: { name: 'You', role: 'admin', presence: 'online' },
                 own: true,
+                seen: false,
                 bodyHtml: payload.html,
                 visibility: payload.visibility === 'internal' ? 'internal' : 'external',
                 attachments: attachments.length > 0 ? attachments : undefined,

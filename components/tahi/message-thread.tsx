@@ -92,6 +92,10 @@ interface MessageThreadProps<M extends MessageThreadItem> {
    *  'none' to let it grow with content (when the parent caps it). */
   maxHeight?: string | 'none'
 
+  /** Show a "X is typing" indicator above the composer. Pass the
+   *  list of currently-typing participant names. */
+  typingNames?: ReadonlyArray<string>
+
   className?: string
 }
 
@@ -112,6 +116,7 @@ export function MessageThread<M extends MessageThreadItem>({
   loading = false,
   empty,
   maxHeight = '32rem',
+  typingNames,
   className,
 }: MessageThreadProps<M>) {
   const scrollRef = React.useRef<HTMLDivElement | null>(null)
@@ -273,11 +278,33 @@ export function MessageThread<M extends MessageThreadItem>({
         )}
       </div>
 
+      {/* Typing indicator. Sits just above the composer so the
+          "Anna is typing…" cue is the last thing the user sees as
+          they're about to reply. */}
+      {typingNames && typingNames.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4375rem',
+            padding: '0.4375rem 0.875rem',
+            borderTop: '1px solid var(--color-border-subtle)',
+            background: 'var(--color-bg)',
+            fontSize: '0.6875rem',
+            color: 'var(--color-text-subtle)',
+          }}
+          aria-live="polite"
+        >
+          <TypingDots />
+          <span>{formatTypingNames(typingNames)} typing…</span>
+        </div>
+      )}
+
       {/* Reply-to strip + composer */}
       {(composer || replyTo) && (
         <div
           style={{
-            borderTop: '1px solid var(--color-border-subtle)',
+            borderTop: (typingNames && typingNames.length > 0) ? 'none' : '1px solid var(--color-border-subtle)',
             background: 'var(--color-bg)',
           }}
         >
@@ -393,4 +420,26 @@ function formatDay(ts: string): string {
     return that.toLocaleDateString('en', { weekday: 'long' })
   }
   return that.toLocaleDateString('en', { day: 'numeric', month: 'short', year: that.getFullYear() === now.getFullYear() ? undefined : 'numeric' })
+}
+
+// ── Typing indicator ────────────────────────────────────────────────────────
+
+function TypingDots() {
+  return (
+    <span className="tahi-typing-dots" aria-hidden="true" style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '0.1875rem',
+    }}>
+      <span /><span /><span />
+    </span>
+  )
+}
+
+function formatTypingNames(names: ReadonlyArray<string>): string {
+  const first = names.map(n => n.trim().split(' ')[0])
+  if (first.length === 0) return ''
+  if (first.length === 1) return `${first[0]} is`
+  if (first.length === 2) return `${first[0]} and ${first[1]} are`
+  return `${first[0]}, ${first[1]} and ${first.length - 2} other${first.length - 2 === 1 ? '' : 's'} are`
 }
