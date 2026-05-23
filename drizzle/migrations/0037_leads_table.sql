@@ -1,4 +1,4 @@
--- Migration 0017: Leads table + activities.lead_id
+-- Migration 0037: Leads table + activities.lead_id
 --
 -- Phase A · 1-2 of the lifecycle roadmap (WORKFLOWS.md).
 --

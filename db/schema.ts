@@ -92,6 +92,11 @@ export const contacts = sqliteTable('contacts', {
 
 export const teamMembers = sqliteTable('team_members', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // personId bridges team_member to the canonical person identity.
+  // A team member IS a person — same human, employment-specific role.
+  // Nullable for existing rows; new inserts populate via lookup-or-
+  // create on email. Existing rows get backfilled via email match.
+  personId: text('person_id'),
   name: text('name').notNull(),
   email: text('email').notNull(),
   title: text('title'),
