@@ -570,9 +570,10 @@ function LeadForm({
         />
       </Field>
 
-      {/* All 2-col rows stack on mobile (<640px) and use proportions
-          on desktop. Tailwind sm: breakpoint = 640px. */}
-      <div className="grid gap-3 grid-cols-1 sm:[grid-template-columns:minmax(0,1.5fr)_minmax(0,1fr)]">
+      {/* All 2-col rows stack on mobile (<640px) and split 50/50 on
+          desktop. Equal columns align cleanly across every row.
+          Tailwind sm: breakpoint = 640px. */}
+      <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
         <Field label="Email">
           <Input
             value={draft.email ?? ''}
@@ -593,7 +594,7 @@ function LeadForm({
         </Field>
       </div>
 
-      <div className="grid gap-3 grid-cols-1 sm:[grid-template-columns:minmax(0,1.5fr)_minmax(0,1fr)]">
+      <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
         <Field label="Company">
           <Input
             value={draft.company ?? ''}
@@ -623,11 +624,12 @@ function LeadForm({
         />
       </Field>
 
-      <div className="grid gap-3 grid-cols-1 sm:[grid-template-columns:minmax(0,1fr)_minmax(0,1.4fr)]">
+      <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
         <Field label="Source">
           <select
             value={draft.source ?? 'manual'}
             onChange={(e) => update({ source: e.target.value })}
+            className="tahi-select"
             style={selectStyle}
           >
             {SOURCES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -643,7 +645,7 @@ function LeadForm({
         </Field>
       </div>
 
-      <div className="grid gap-3 grid-cols-1 sm:[grid-template-columns:minmax(0,2fr)_6.5rem]">
+      <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
         <Field label="Estimated value">
           <Input
             type="number"
@@ -657,6 +659,7 @@ function LeadForm({
           <select
             value={draft.currency ?? 'NZD'}
             onChange={(e) => update({ currency: e.target.value })}
+            className="tahi-select"
             style={selectStyle}
           >
             <option value="NZD">NZD</option>
@@ -674,6 +677,7 @@ function LeadForm({
           onChange={(e) => update({ brief: e.target.value })}
           placeholder="What they want, signals from the first touch, anything that should be top-of-mind on the discovery call."
           rows={4}
+          className="tahi-textarea"
           style={textareaStyle}
         />
       </Field>

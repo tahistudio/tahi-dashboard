@@ -646,6 +646,17 @@ button:disabled,
   border-radius: 0;
 }
 
+/* Plain <Input> / <Textarea> (no icon wrapper) — focus ring sits on
+   the element itself but at --radius-md so the corner matches the
+   field, not the global --radius-sm default. */
+.tahi-input:focus-visible,
+.tahi-textarea:focus-visible,
+.tahi-select:focus-visible {
+  border-color: var(--color-brand);
+  box-shadow: var(--shadow-ring);
+  border-radius: var(--radius-md);
+}
+
 /* The search palette is its own focus indicator (modal is open, the
    cursor is in the input). Don't paint a per-input ring on top - the
    global :focus-visible rule otherwise drew a tight rounded outline

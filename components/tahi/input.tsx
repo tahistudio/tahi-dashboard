@@ -78,13 +78,17 @@ function InputRoot({
   const hasValue = Boolean(value)
 
   if (leadingIcon || trailingIcon) {
-    // When icons are set, render in group-style automatically
+    // When icons are set, render in group-style automatically. The
+    // `tahi-input-group` class hooks into the global :focus-within
+    // rule so the focus ring paints on the OUTER wrapper, not the
+    // inner <input>.
     return (
       <div
-        className={className}
+        className={['tahi-input-group', className].filter(Boolean).join(' ')}
         style={{
           display: 'flex',
           alignItems: 'center',
+          width: '100%',
           height: SIZE_HEIGHT[inputSize],
           padding: '0 var(--space-2)',
           gap: 'var(--space-2)',
@@ -102,6 +106,7 @@ function InputRoot({
           style={{
             flex: 1,
             minWidth: 0,
+            width: '100%',
             border: 'none',
             outline: 'none',
             background: 'transparent',
@@ -118,8 +123,9 @@ function InputRoot({
     <input
       {...rest}
       value={value}
-      className={className}
+      className={['tahi-input', className].filter(Boolean).join(' ')}
       style={{
+        width: '100%',
         height: SIZE_HEIGHT[inputSize],
         padding: SIZE_PADDING[inputSize],
         fontSize: SIZE_FONT[inputSize],
@@ -252,6 +258,7 @@ export function Select({
       <select
         {...rest}
         value={value}
+        className="tahi-select"
         style={{
           appearance: 'none',
           height: SIZE_HEIGHT[selectSize],
@@ -308,7 +315,7 @@ export function Textarea({
     <textarea
       {...rest}
       value={value}
-      className={className}
+      className={['tahi-textarea', className].filter(Boolean).join(' ')}
       style={{
         padding: 'var(--space-3)',
         fontSize: 'var(--text-sm)',

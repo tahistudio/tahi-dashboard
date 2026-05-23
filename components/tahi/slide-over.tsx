@@ -37,8 +37,10 @@
  * For full-screen takeovers, use <FullScreenDialog> (not yet built).
  */
 
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
+
+const EXIT_MS = 220
 
 interface SlideOverProps {
   open: boolean
@@ -69,7 +71,29 @@ function SlideOverRoot({
   hideCloseButton = false,
   children,
 }: SlideOverProps) {
-  // Escape closes + body scroll lock
+  // Track "rendered" separately from "open" so the close transition
+  // can play before unmount. When open flips true → render immediately.
+  // When open flips false → leave mounted, mark `closing`, unmount
+  // after EXIT_MS.
+  const [rendered, setRendered] = useState(open)
+  const [closing, setClosing] = useState(false)
+
+  useEffect(() => {
+    if (open) {
+      setRendered(true)
+      setClosing(false)
+      return
+    }
+    if (!rendered) return
+    setClosing(true)
+    const t = window.setTimeout(() => {
+      setRendered(false)
+      setClosing(false)
+    }, EXIT_MS)
+    return () => window.clearTimeout(t)
+  }, [open, rendered])
+
+  // Escape closes + body scroll lock — only while truly open
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -84,7 +108,7 @@ function SlideOverRoot({
     }
   }, [open, onClose])
 
-  if (!open) return null
+  if (!rendered) return null
 
   const titleId = title ? 'slide-over-title' : undefined
 
@@ -97,7 +121,9 @@ function SlideOverRoot({
           inset: 0,
           zIndex: 60,
           background: 'rgba(0, 0, 0, 0.3)',
-          animation: 'slideOverFadeIn 200ms ease-out',
+          animation: closing
+            ? `slideOverFadeOut ${EXIT_MS}ms ease-in forwards`
+            : 'slideOverFadeIn 200ms ease-out',
         }}
         onClick={onClose}
         aria-hidden="true"
@@ -122,7 +148,9 @@ function SlideOverRoot({
           boxShadow: '-8px 0 30px rgba(0, 0, 0, 0.12)',
           display: 'flex',
           flexDirection: 'column',
-          animation: 'slideOverSlideIn 250ms cubic-bezier(0.22, 1, 0.36, 1)',
+          animation: closing
+            ? `slideOverSlideOut ${EXIT_MS}ms cubic-bezier(0.4, 0, 1, 1) forwards`
+            : 'slideOverSlideIn 250ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       >
         {/* Header (rendered if title is set) */}
@@ -215,9 +243,17 @@ function SlideOverRoot({
           from { opacity: 0; }
           to   { opacity: 1; }
         }
+        @keyframes slideOverFadeOut {
+          from { opacity: 1; }
+          to   { opacity: 0; }
+        }
         @keyframes slideOverSlideIn {
           from { transform: translateX(100%); }
           to   { transform: translateX(0); }
+        }
+        @keyframes slideOverSlideOut {
+          from { transform: translateX(0); }
+          to   { transform: translateX(100%); }
         }
         @media (max-width: 40rem) {
           .slide-over-panel { max-width: 100% !important; }
