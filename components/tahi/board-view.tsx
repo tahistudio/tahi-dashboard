@@ -664,7 +664,7 @@ function BoardTable({
                 borderRadius: 'var(--radius-sm)',
                 fontSize: '0.6875rem',
                 fontWeight: 600,
-                color: col?.color ?? 'var(--color-text-muted)',
+                color: 'var(--color-text)',
               }}>
                 <span
                   aria-hidden="true"
@@ -804,15 +804,17 @@ function BoardTimeline({
     .filter((x): x is TimelineDatum => !!x)
     .sort((a, b) => (a.startTs ?? a.endTs) - (b.startTs ?? b.endTs))
 
-  // Domain. Always extend 30 days into the past and 60 into the
-  // future so the user can scroll to "what's coming" and "what just
-  // happened" even when the active dataset only spans a week.
+  // Domain. Past + future buffers are stateful so the timeline can
+  // dynamically extend as the user scrolls to either edge — the
+  // chart feels infinite even though we render a finite range.
   const dayMs = 86_400_000
   const tsValues = data.flatMap(d => d.startTs ? [d.startTs, d.endTs] : [d.endTs])
   const dataMin = tsValues.length ? Math.min(...tsValues) : now
   const dataMax = tsValues.length ? Math.max(...tsValues) : now
-  const start = Math.min(dataMin, now - 30 * dayMs)
-  const end = Math.max(dataMax, now + 60 * dayMs)
+  const [pastBufferDays, setPastBufferDays] = React.useState(180)
+  const [futureBufferDays, setFutureBufferDays] = React.useState(365)
+  const start = Math.min(dataMin, now - pastBufferDays * dayMs)
+  const end = Math.max(dataMax, now + futureBufferDays * dayMs)
   const span = Math.max(dayMs, end - start)
   const days = Math.ceil(span / dayMs)
   const pct = (ts: number) => ((ts - start) / span) * 100
@@ -846,6 +848,34 @@ function BoardTimeline({
     // Only on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Infinite scroll: when the user nears either edge of the chart,
+  // extend the buffer by another 180 days. When extending into the
+  // past, the chart widens to the left — we have to push scrollLeft
+  // forward by the added width so the user's view stays anchored on
+  // the same dates instead of snapping back.
+  const prevChartWidthRef = React.useRef(chartWidth)
+  const pendingPastExtensionRef = React.useRef(false)
+  React.useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (pendingPastExtensionRef.current) {
+      const delta = chartWidth - prevChartWidthRef.current
+      if (delta > 0) el.scrollLeft += delta
+      pendingPastExtensionRef.current = false
+    }
+    prevChartWidthRef.current = chartWidth
+  }, [chartWidth])
+
+  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    if (el.scrollLeft < 120) {
+      pendingPastExtensionRef.current = true
+      setPastBufferDays(d => d + 180)
+    } else if (el.scrollLeft + el.clientWidth > el.scrollWidth - 120) {
+      setFutureBufferDays(d => d + 180)
+    }
+  }
 
   if (data.length === 0) {
     return (
@@ -931,9 +961,13 @@ function BoardTimeline({
       </div>
 
       {/* Horizontally scrollable chart. Labels are sticky-left so the
-          row context stays visible while the date axis scrolls. */}
+          row context stays visible while the date axis scrolls. The
+          scroll handler extends the past/future buffer by 180 days
+          whenever the user nears either edge, making the timeline
+          feel infinite without rendering the full universe upfront. */}
       <div
         ref={scrollRef}
+        onScroll={onScroll}
         style={{
           overflowX: 'auto',
           overflowY: 'hidden',

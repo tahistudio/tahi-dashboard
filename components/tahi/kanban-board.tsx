@@ -356,7 +356,7 @@ function Column({
         <span style={{
           fontSize: '0.8125rem',
           fontWeight: 600,
-          color: column.color ?? 'var(--color-text)',
+          color: 'var(--color-text)',
           letterSpacing: '-0.005em',
         }}>
           {column.label}
