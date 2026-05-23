@@ -657,6 +657,24 @@ button:disabled,
   border-radius: var(--radius-md);
 }
 
+/* Catch-all: every native form field gets the brand focus ring at its
+   natural radius. Without this, the generic :focus-visible rule above
+   forces --radius-sm and the ring corner mismatches the field. Targeted
+   overrides for icon-wrapped inputs (.tahi-input-group input) and the
+   search palette appear earlier in this file and win on specificity. */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  border-color: var(--color-brand);
+  border-radius: var(--radius-md);
+}
+/* Checkbox/radio keep their native shape — don't paint a square radius
+   on them. */
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  border-radius: initial;
+}
+
 /* The search palette is its own focus indicator (modal is open, the
    cursor is in the input). Don't paint a per-input ring on top - the
    global :focus-visible rule otherwise drew a tight rounded outline
