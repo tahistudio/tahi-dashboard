@@ -431,6 +431,9 @@ const TOOLS: ToolDef[] = [
   tool('delete_lead', 'Delete a lead. Person row is preserved (other roles still apply).', {
     leadId: prop('string', 'Lead ID'),
   }, ['leadId']),
+  tool('triage_pipeline_to_leads', 'Find deals that should have been leads (Lead stage, or Stalled with no proposal+contract) and move them to leads. Set dryRun=true (default) to preview the candidate list; dryRun=false executes the move.', {
+    dryRun: prop('boolean', 'When true (default), return the candidate list without moving. When false, perform the move.'),
+  }),
   tool('promote_lead', 'Promote a qualified lead to a deal. Spins up org (if needed) + contact (sharing person_id) + deal landing in the first open pipeline stage. Lead status flips to "promoted".', {
     leadId: prop('string', 'Lead ID'),
     orgId: prop('string', 'Existing org ID to attach to. Omit to create a new org from the lead\'s company.'),
@@ -1250,6 +1253,11 @@ async function executeTool(
     case 'promote_lead': {
       const { leadId, ...body } = args
       return json(await apiWrite(`/api/admin/leads/${leadId}/promote`, token, 'POST', body))
+    }
+    case 'triage_pipeline_to_leads': {
+      const dryRun = args.dryRun !== false  // default true
+      const p: Record<string, string> = { dryRun: String(dryRun) }
+      return json(await apiWrite(`/api/admin/leads/triage-pipeline?dryRun=${dryRun}`, token, 'POST'))
     }
 
     case 'list_deals':
