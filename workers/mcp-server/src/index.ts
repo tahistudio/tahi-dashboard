@@ -386,6 +386,62 @@ const TOOLS: ToolDef[] = [
     isDefault: prop('boolean', 'Mark as default template for this type'),
   }, ['name', 'type', 'bodyHtml']),
 
+  // ── Leads (pre-qualification, separate from deals) ────────────────────
+  tool('list_leads', 'List leads (pre-qualification prospects). Filters: status (new|qualifying|nurturing|promoted|archived), source, owner.', {
+    status: prop('string', 'Filter by status: new | qualifying | nurturing | promoted | archived'),
+    source: prop('string', 'Filter by source: webflow | website | email | referral | affiliate | event | cold_outreach | manual | other'),
+    owner: prop('string', 'Filter by owner team-member ID'),
+    search: prop('string', 'Free-text search on name / email / company'),
+  }),
+  tool('get_lead', 'Get a lead with its activity timeline', {
+    leadId: prop('string', 'Lead ID'),
+  }, ['leadId']),
+  tool('create_lead', 'Create a new lead. Person identity is resolved via lookup-or-create on email — same person across roles.', {
+    name: prop('string', 'Person full name'),
+    email: prop('string', 'Person email'),
+    phone: prop('string', 'Phone number'),
+    company: prop('string', 'Company name (free text; org row is created on promote)'),
+    jobTitle: prop('string', 'Job title at company'),
+    website: prop('string', 'Company website URL'),
+    source: prop('string', 'Where the lead came from. Default "manual".'),
+    sourceDetail: prop('string', 'Free-text detail e.g. "spoke at Meetup in March"'),
+    affiliateCode: prop('string', 'Referral code if attributed to an affiliate'),
+    brief: prop('string', 'What they want / signals from first touch'),
+    estimatedValue: prop('number', 'Heuristic deal-size estimate'),
+    currency: prop('string', 'Currency code. Default "NZD".'),
+    ownerId: prop('string', 'Owner team-member ID. Defaults to the calling user.'),
+  }, ['name']),
+  tool('update_lead', 'Update a lead. Status flips to "archived" also stamp archiveReason on the activity stream.', {
+    leadId: prop('string', 'Lead ID'),
+    name: prop('string', 'Updated person full name'),
+    email: prop('string', 'Updated email'),
+    phone: prop('string', 'Updated phone'),
+    company: prop('string', 'Updated company'),
+    jobTitle: prop('string', 'Updated job title'),
+    website: prop('string', 'Updated website'),
+    source: prop('string', 'Updated source'),
+    sourceDetail: prop('string', 'Updated source detail'),
+    brief: prop('string', 'Updated brief'),
+    estimatedValue: prop('number', 'Updated deal-size estimate'),
+    currency: prop('string', 'Updated currency'),
+    status: prop('string', 'new | qualifying | nurturing | promoted | archived'),
+    archiveReason: prop('string', 'Why archived (only used when status flips to archived)'),
+    ownerId: prop('string', 'New owner team-member ID'),
+  }, ['leadId']),
+  tool('delete_lead', 'Delete a lead. Person row is preserved (other roles still apply).', {
+    leadId: prop('string', 'Lead ID'),
+  }, ['leadId']),
+  tool('promote_lead', 'Promote a qualified lead to a deal. Spins up org (if needed) + contact (sharing person_id) + deal landing in the first open pipeline stage. Lead status flips to "promoted".', {
+    leadId: prop('string', 'Lead ID'),
+    orgId: prop('string', 'Existing org ID to attach to. Omit to create a new org from the lead\'s company.'),
+    createOrg: prop('boolean', 'Whether to create a new org when no orgId. Default true.'),
+    dealTitle: prop('string', 'Override the deal title; defaults to "<company> · <name>".'),
+    stageId: prop('string', 'Landing stage. Defaults to the first non-closed pipeline stage by position.'),
+    upfrontValue: prop('number', 'Optional override; defaults to the lead\'s estimatedValue.'),
+    monthlyValue: prop('number', 'Optional monthly retainer portion.'),
+    currency: prop('string', 'Currency code. Defaults to the lead\'s currency.'),
+  }, ['leadId']),
+
   // ── Deals / Pipeline ──────────────────────────────────────────────────
   tool('list_deals', 'List all sales pipeline deals with stage, value, owner, company'),
   tool('get_pipeline_stages', 'Get all pipeline stages'),
@@ -1172,6 +1228,30 @@ async function executeTool(
       return json(await apiWrite('/api/admin/contracts/templates', token, 'POST', args as Record<string, unknown>))
 
     // ── Deals / Pipeline ──────────────────────────────────────────────
+    // ── Leads ─────────────────────────────────────────────────────────
+    case 'list_leads': {
+      const p: Record<string, string> = {}
+      if (s('status')) p.status = s('status')!
+      if (s('source')) p.source = s('source')!
+      if (s('owner')) p.owner = s('owner')!
+      if (s('search')) p.search = s('search')!
+      return json(await apiGet('/api/admin/leads', token, p))
+    }
+    case 'get_lead':
+      return json(await apiGet(`/api/admin/leads/${s('leadId')}`, token))
+    case 'create_lead':
+      return json(await apiWrite('/api/admin/leads', token, 'POST', args as Record<string, unknown>))
+    case 'update_lead': {
+      const { leadId, ...body } = args
+      return json(await apiWrite(`/api/admin/leads/${leadId}`, token, 'PATCH', body))
+    }
+    case 'delete_lead':
+      return json(await apiWrite(`/api/admin/leads/${s('leadId')}`, token, 'DELETE'))
+    case 'promote_lead': {
+      const { leadId, ...body } = args
+      return json(await apiWrite(`/api/admin/leads/${leadId}/promote`, token, 'POST', body))
+    }
+
     case 'list_deals':
       return json(await apiGet('/api/admin/deals', token))
     case 'get_pipeline_stages':
