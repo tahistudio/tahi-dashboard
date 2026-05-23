@@ -22,6 +22,7 @@
  */
 
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import {
   ResponsiveContainer,
   BarChart as RechartsBarChart,
@@ -677,18 +678,46 @@ export function DonutChart({
 
 // ── Gantt chart ───────────────────────────────────────────────────────
 //
-// Horizontal-bar timeline. One row per item. Today's date marked with a
-// vertical guide. Optional milestones rendered as inline diamonds.
+// Horizontal-bar timeline. One row per item. Today's date marked with
+// a vertical guide. Inline milestones rendered as diamonds. Optional
+// gate rows render as a single sign-off / critical-gate diamond
+// instead of a bar.
+//
+// Lifts the schedules palette: tahi / client / joint / tahi_parallel
+// owners get fixed brand-locked colours. Risk-of-delay rows get a
+// red diagonal hatching overlay. Legend matches the schedule editor.
 //
 //   <GanttChart
 //     rangeStart={new Date('2026-05-01')}
 //     rangeEnd={new Date('2026-08-01')}
+//     today={new Date('2026-06-12')}
+//     showLegend
 //     rows={[
-//       { id: '1', label: 'Discovery', start, end, tone: 'positive' },
-//       { id: '2', label: 'Design',    start, end, tone: 'neutral', milestones: [date] },
+//       { id: '1', label: 'Discovery', start, end, owner: 'tahi' },
+//       { id: '2', label: 'Sitemap sign-off', rowType: 'gate', gateDate: ... },
+//       { id: '3', label: 'Design',  start, end, owner: 'joint', riskFlag: true },
 //     ]}
-//     today={new Date()}
 //   />
+
+export type GanttOwner = 'tahi' | 'client' | 'joint' | 'tahi_parallel'
+export type GanttRowType = 'task' | 'gate' | 'critical_gate' | 'section_header'
+
+const OWNER_COLOUR: Record<GanttOwner, string> = {
+  tahi: '#5A824E',          // brand green
+  client: '#1f2c1a',         // dark forest (client work)
+  joint: '#d4a017',          // amber
+  tahi_parallel: '#a8c89e',  // light brand
+}
+
+const OWNER_LABEL: Record<GanttOwner, string> = {
+  tahi: 'Tahi',
+  client: 'Client',
+  joint: 'Joint',
+  tahi_parallel: 'Tahi parallel',
+}
+
+const RISK_OVERLAY =
+  'repeating-linear-gradient(45deg, rgba(248, 113, 113, 0.85) 0 4px, rgba(248, 113, 113, 0) 4px 8px)'
 
 export interface GanttMilestone {
   /** ISO date or Date instance. */
@@ -699,16 +728,30 @@ export interface GanttMilestone {
 export interface GanttRow {
   id: string
   label: string
-  /** Inclusive start date. */
-  start: Date
-  /** Inclusive end date. */
-  end: Date
-  tone?: Tone
-  /** Categorical colour index override (uses CHART.categorical). */
+  /** Inclusive start date. Not used for gates or section headers. */
+  start?: Date
+  /** Inclusive end date. Not used for gates or section headers. */
+  end?: Date
+  /** Owner. Drives the bar's colour. */
+  owner?: GanttOwner
+  /** Row type. Default 'task'. */
+  rowType?: GanttRowType
+  /** Single gate date (used when rowType is 'gate' or 'critical_gate'). */
+  gateDate?: Date
+  /** Apply the red diagonal hatching overlay to indicate at-risk work. */
+  riskFlag?: boolean
+  /** Categorical colour index override (uses CHART.categorical).
+   *  Ignored if owner is set. */
   colourIndex?: number
+  /** Semantic tone fallback when neither owner nor colourIndex is set. */
+  tone?: Tone
+  /** Inline milestones drawn on the bar. */
   milestones?: readonly GanttMilestone[]
   /** Optional subtitle / owner displayed under the label. */
   sub?: string
+  /** Optional extra info shown inside the hover tooltip (after the
+   *  built-in label + date line). */
+  tooltipExtra?: React.ReactNode
 }
 
 interface GanttChartProps {
@@ -719,10 +762,12 @@ interface GanttChartProps {
   today?: Date
   /** Pixel width reserved for the left-side label column. Default 10rem. */
   labelColumnWidth?: number | string
-  /** Height per bar row. Default 28. */
+  /** Height per bar row. Default 30. */
   rowHeight?: number
   /** Show month tick labels. Default true. */
   showMonths?: boolean
+  /** Render the legend below the chart. Default false. */
+  showLegend?: boolean
   ariaLabel?: string
 }
 
@@ -731,9 +776,10 @@ export function GanttChart({
   rangeStart,
   rangeEnd,
   today,
-  labelColumnWidth = '10rem',
-  rowHeight = 28,
+  labelColumnWidth = '11rem',
+  rowHeight = 30,
   showMonths = true,
+  showLegend = false,
   ariaLabel,
 }: GanttChartProps) {
   const { ref, visible } = useEnteredViewport<HTMLDivElement>()
@@ -752,7 +798,7 @@ export function GanttChart({
     while (cursor <= rangeEnd) {
       const left = pct(cursor)
       months.push({
-        label: cursor.toLocaleString('en', { month: 'short' }),
+        label: cursor.toLocaleString('en', { month: 'short', year: '2-digit' }),
         left,
       })
       cursor.setMonth(cursor.getMonth() + 1)
@@ -761,199 +807,497 @@ export function GanttChart({
 
   const todayPct = today && today >= rangeStart && today <= rangeEnd ? pct(today) : null
 
+  const gridTemplate = `${typeof labelColumnWidth === 'number' ? `${labelColumnWidth}px` : labelColumnWidth} 1fr`
+
   return (
     <div
       ref={ref}
-      role="img"
-      aria-label={ariaLabel ?? 'Gantt timeline'}
       style={{
         width: '100%',
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.25rem',
-        fontSize: 'var(--text-xs)',
+        gap: '0.5rem',
       }}
     >
-      {/* Header scale */}
-      {showMonths && (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: `${typeof labelColumnWidth === 'number' ? `${labelColumnWidth}px` : labelColumnWidth} 1fr`,
-            alignItems: 'end',
-            paddingBottom: '0.25rem',
-            borderBottom: '1px solid var(--color-border-subtle)',
-            marginBottom: '0.25rem',
-          }}
-        >
-          <div />
-          <div style={{ position: 'relative', height: '1.25rem' }}>
-            {months.map((m, i) => (
-              <span
-                key={i}
-                style={{
-                  position: 'absolute',
-                  left: `${m.left}%`,
-                  transform: 'translateX(-50%)',
-                  color: 'var(--color-text-subtle)',
-                  fontSize: '0.625rem',
-                  fontWeight: 600,
-                  letterSpacing: '0.04em',
-                  textTransform: 'uppercase',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {m.label}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-      {/* Rows */}
-      {rows.map((row, i) => {
-        const left = pct(row.start)
-        const right = pct(row.end)
-        const targetWidth = Math.max(0.5, right - left)
-        const barWidth = visible ? targetWidth : 0
-        const colour = row.colourIndex != null
-          ? CHART.categorical[row.colourIndex % CHART.categorical.length]
-          : TONE_COLOUR[row.tone ?? 'positive']
-        return (
+      <div
+        role="img"
+        aria-label={ariaLabel ?? 'Gantt timeline'}
+        style={{ width: '100%', display: 'flex', flexDirection: 'column' }}
+      >
+        {/* Header scale */}
+        {showMonths && (
           <div
-            key={row.id}
             style={{
               display: 'grid',
-              gridTemplateColumns: `${typeof labelColumnWidth === 'number' ? `${labelColumnWidth}px` : labelColumnWidth} 1fr`,
-              alignItems: 'center',
-              gap: '0.75rem',
-              height: rowHeight,
+              gridTemplateColumns: gridTemplate,
+              alignItems: 'end',
+              paddingBottom: '0.375rem',
+              borderBottom: '1px solid var(--color-border-subtle)',
+              marginBottom: '0.375rem',
             }}
           >
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: 'var(--text-sm)',
-                  color: 'var(--color-text)',
-                  fontWeight: 500,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {row.label}
-              </div>
-              {row.sub && (
-                <div
+            <div />
+            <div style={{ position: 'relative', height: '1.25rem' }}>
+              {months.map((m, i) => (
+                <span
+                  key={i}
                   style={{
-                    fontSize: '0.6875rem',
+                    position: 'absolute',
+                    left: `${m.left}%`,
+                    transform: 'translateX(-50%)',
                     color: 'var(--color-text-subtle)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
+                    fontSize: '0.625rem',
+                    fontWeight: 600,
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {row.sub}
-                </div>
-              )}
-            </div>
-            <div style={{ position: 'relative', height: rowHeight }}>
-              {/* Track */}
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '50%',
-                  left: 0,
-                  right: 0,
-                  height: 1,
-                  background: 'var(--color-border-subtle)',
-                }}
-              />
-              {/* Today line */}
-              {todayPct != null && (
-                <div
-                  aria-hidden="true"
-                  style={{
-                    position: 'absolute',
-                    top: 2,
-                    bottom: 2,
-                    left: `${todayPct}%`,
-                    width: 1,
-                    background: 'var(--color-brand)',
-                    opacity: 0.5,
-                  }}
-                />
-              )}
-              {/* Bar */}
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  left: `${left}%`,
-                  width: `${barWidth}%`,
-                  height: Math.max(10, rowHeight - 12),
-                  background: colour,
-                  borderRadius: 999,
-                  transition: 'width 700ms cubic-bezier(0.22, 1, 0.36, 1)',
-                  transitionDelay: `${i * 60}ms`,
-                  boxShadow: '0 1px 2px rgba(15, 20, 16, 0.08)',
-                }}
-                title={`${row.label}: ${row.start.toLocaleDateString()} - ${row.end.toLocaleDateString()}`}
-              />
-              {/* Milestones */}
-              {row.milestones?.map((m, mi) => {
-                const mLeft = pct(m.date)
-                return (
-                  <div
-                    key={mi}
-                    title={m.label ?? m.date.toLocaleDateString()}
-                    style={{
-                      position: 'absolute',
-                      top: '50%',
-                      left: `${mLeft}%`,
-                      transform: 'translate(-50%, -50%) rotate(45deg)',
-                      width: 8,
-                      height: 8,
-                      background: 'var(--color-bg)',
-                      border: `2px solid ${colour}`,
-                    }}
-                  />
-                )
-              })}
+                  {m.label}
+                </span>
+              ))}
             </div>
           </div>
-        )
-      })}
-      {todayPct != null && (
-        <div
+        )}
+        {/* Rows */}
+        {rows.map((row, i) => (
+          <GanttRowItem
+            key={row.id}
+            row={row}
+            index={i}
+            visible={visible}
+            pct={pct}
+            todayPct={todayPct}
+            rowHeight={rowHeight}
+            gridTemplate={gridTemplate}
+          />
+        ))}
+      </div>
+      {showLegend && <GanttLegendInline />}
+    </div>
+  )
+}
+
+// ── Gantt row item ────────────────────────────────────────────────────
+
+function GanttRowItem({
+  row,
+  index,
+  visible,
+  pct,
+  todayPct,
+  rowHeight,
+  gridTemplate,
+}: {
+  row: GanttRow
+  index: number
+  visible: boolean
+  pct: (d: Date) => number
+  todayPct: number | null
+  rowHeight: number
+  gridTemplate: string
+}) {
+  const rowType: GanttRowType = row.rowType ?? 'task'
+
+  // Section header: a band that spans the whole timeline.
+  if (rowType === 'section_header') {
+    return (
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: gridTemplate,
+          alignItems: 'center',
+          gap: '0.75rem',
+          height: rowHeight,
+          background: 'var(--color-bg-secondary)',
+          marginTop: '0.25rem',
+          marginBottom: '0.125rem',
+          borderRadius: 'var(--radius-sm)',
+        }}
+      >
+        <div style={{
+          padding: '0 0.75rem',
+          fontSize: '0.6875rem',
+          fontWeight: 600,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          color: 'var(--color-text-subtle)',
+        }}>
+          {row.label}
+        </div>
+        <div />
+      </div>
+    )
+  }
+
+  // Gate row: a single diamond at gateDate.
+  if (rowType === 'gate' || rowType === 'critical_gate') {
+    const date = row.gateDate ?? row.start
+    if (!date) return null
+    const isCritical = rowType === 'critical_gate'
+    const left = pct(date)
+    return (
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: gridTemplate,
+          alignItems: 'center',
+          gap: '0.75rem',
+          height: rowHeight,
+        }}
+      >
+        <GanttRowLabel label={row.label} sub={row.sub} />
+        <div style={{ position: 'relative', height: rowHeight }}>
+          <GanttTrack />
+          {todayPct != null && <GanttTodayLine left={todayPct} />}
+          <GanttHoverNode
+            tooltip={
+              <GanttTooltipBody row={row} dateLabel={date.toLocaleDateString()} />
+            }
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: `${left}%`,
+              transform: 'translate(-50%, -50%) rotate(45deg)',
+              width: 14,
+              height: 14,
+              background: isCritical ? '#dc2626' : 'var(--color-bg)',
+              border: `2px solid ${isCritical ? '#dc2626' : '#5A824E'}`,
+              boxShadow: '0 1px 2px rgba(15, 20, 16, 0.10)',
+            }}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  // Standard task row.
+  if (!row.start || !row.end) return null
+  const left = pct(row.start)
+  const right = pct(row.end)
+  const targetWidth = Math.max(0.5, right - left)
+  const barWidth = visible ? targetWidth : 0
+
+  const colour = row.owner
+    ? OWNER_COLOUR[row.owner]
+    : row.colourIndex != null
+      ? CHART.categorical[row.colourIndex % CHART.categorical.length]
+      : TONE_COLOUR[row.tone ?? 'positive']
+
+  const durationMs = row.end.getTime() - row.start.getTime()
+  const durationDays = Math.max(1, Math.round(durationMs / (1000 * 60 * 60 * 24)))
+
+  const subInfo = row.owner
+    ? `${row.sub ? `${row.sub} · ` : ''}${OWNER_LABEL[row.owner]}`
+    : row.sub
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: gridTemplate,
+        alignItems: 'center',
+        gap: '0.75rem',
+        height: rowHeight,
+      }}
+    >
+      <GanttRowLabel label={row.label} sub={subInfo} />
+      <div style={{ position: 'relative', height: rowHeight }}>
+        <GanttTrack />
+        {todayPct != null && <GanttTodayLine left={todayPct} />}
+        <GanttHoverNode
+          tooltip={
+            <GanttTooltipBody
+              row={row}
+              dateLabel={`${row.start.toLocaleDateString()} - ${row.end.toLocaleDateString()}`}
+              durationDays={durationDays}
+            />
+          }
           style={{
-            display: 'grid',
-            gridTemplateColumns: `${typeof labelColumnWidth === 'number' ? `${labelColumnWidth}px` : labelColumnWidth} 1fr`,
-            gap: '0.75rem',
-            paddingTop: '0.25rem',
-            borderTop: '1px solid var(--color-border-subtle)',
-            marginTop: '0.25rem',
+            position: 'absolute',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            left: `${left}%`,
+            width: `${barWidth}%`,
+            height: Math.max(12, rowHeight - 14),
+            background: colour,
+            backgroundImage: row.riskFlag ? RISK_OVERLAY : undefined,
+            borderRadius: 999,
+            transition: 'width 700ms cubic-bezier(0.22, 1, 0.36, 1)',
+            transitionDelay: `${index * 60}ms`,
+            boxShadow: '0 1px 2px rgba(15, 20, 16, 0.10)',
           }}
-        >
-          <div />
-          <div style={{ position: 'relative', height: '1rem' }}>
-            <span
+        />
+        {row.milestones?.map((m, mi) => {
+          const mLeft = pct(m.date)
+          return (
+            <GanttHoverNode
+              key={mi}
+              tooltip={
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
+                  <strong style={{ fontWeight: 600 }}>{m.label ?? 'Milestone'}</strong>
+                  <span style={{ opacity: 0.8 }}>{m.date.toLocaleDateString()}</span>
+                </div>
+              }
               style={{
                 position: 'absolute',
-                left: `${todayPct}%`,
-                transform: 'translateX(-50%)',
-                fontSize: '0.625rem',
-                fontWeight: 600,
-                color: 'var(--color-brand)',
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase',
+                top: '50%',
+                left: `${mLeft}%`,
+                transform: 'translate(-50%, -50%) rotate(45deg)',
+                width: 9,
+                height: 9,
+                background: 'var(--color-bg)',
+                border: `2px solid ${colour}`,
               }}
-            >
-              Today
-            </span>
-          </div>
+            />
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function GanttRowLabel({ label, sub }: { label: string; sub?: string }) {
+  return (
+    <div style={{ minWidth: 0, padding: '0 0.25rem 0 0.5rem' }}>
+      <div
+        style={{
+          fontSize: 'var(--text-sm)',
+          color: 'var(--color-text)',
+          fontWeight: 500,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {label}
+      </div>
+      {sub && (
+        <div
+          style={{
+            fontSize: '0.6875rem',
+            color: 'var(--color-text-subtle)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {sub}
         </div>
       )}
     </div>
+  )
+}
+
+function GanttTrack() {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        position: 'absolute',
+        top: '50%',
+        left: 0,
+        right: 0,
+        height: 1,
+        background: 'var(--color-border-subtle)',
+      }}
+    />
+  )
+}
+
+function GanttTodayLine({ left }: { left: number }) {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        position: 'absolute',
+        top: 2,
+        bottom: 2,
+        left: `${left}%`,
+        width: 1,
+        background: 'var(--color-brand)',
+        opacity: 0.55,
+      }}
+    />
+  )
+}
+
+// Hover node: child of a Tooltip-positioned floating layer. We use a
+// portal'd tooltip via simple state so we can render rich content
+// (the design-system Tooltip only takes a single child wrapper, but
+// here we want the tooltip body to be a structured node).
+function GanttHoverNode({
+  style,
+  tooltip,
+}: {
+  style: React.CSSProperties
+  tooltip: React.ReactNode
+}) {
+  const [hovered, setHovered] = React.useState(false)
+  const [pos, setPos] = React.useState<{ x: number; y: number }>({ x: 0, y: 0 })
+  const ref = React.useRef<HTMLDivElement | null>(null)
+
+  React.useEffect(() => {
+    if (!hovered || !ref.current) return
+    const rect = ref.current.getBoundingClientRect()
+    setPos({ x: rect.left + rect.width / 2, y: rect.top })
+  }, [hovered])
+
+  return (
+    <>
+      <div
+        ref={ref}
+        style={style}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        onFocus={() => setHovered(true)}
+        onBlur={() => setHovered(false)}
+        tabIndex={0}
+      />
+      {hovered && typeof document !== 'undefined' && createPortal(
+        <div
+          role="tooltip"
+          style={{
+            position: 'fixed',
+            top: pos.y - 10,
+            left: pos.x,
+            transform: 'translate(-50%, -100%)',
+            background: '#1E2A1B',
+            color: '#F0F2EF',
+            padding: '0.5rem 0.625rem',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.75rem',
+            lineHeight: 1.4,
+            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.18)',
+            pointerEvents: 'none',
+            zIndex: 100,
+            maxWidth: '14rem',
+            whiteSpace: 'normal',
+          }}
+        >
+          {tooltip}
+        </div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
+function GanttTooltipBody({
+  row,
+  dateLabel,
+  durationDays,
+}: {
+  row: GanttRow
+  dateLabel: string
+  durationDays?: number
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1875rem' }}>
+      <strong style={{ fontWeight: 600 }}>{row.label}</strong>
+      <span style={{ opacity: 0.85 }}>{dateLabel}</span>
+      {durationDays != null && (
+        <span style={{ opacity: 0.7 }}>
+          {durationDays} day{durationDays === 1 ? '' : 's'}
+        </span>
+      )}
+      {row.owner && (
+        <span style={{ opacity: 0.7 }}>Owner: {OWNER_LABEL[row.owner]}</span>
+      )}
+      {row.riskFlag && (
+        <span style={{ color: '#F4A0A0', fontWeight: 500 }}>At risk</span>
+      )}
+      {row.tooltipExtra && <span style={{ opacity: 0.7 }}>{row.tooltipExtra}</span>}
+    </div>
+  )
+}
+
+// ── Inline Gantt legend ───────────────────────────────────────────────
+
+function GanttLegendInline() {
+  return (
+    <div
+      className="flex flex-wrap items-center"
+      style={{
+        gap: '0.875rem',
+        rowGap: '0.5rem',
+        padding: '0.5rem 0.75rem',
+        background: 'var(--color-bg-secondary)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-md)',
+        fontSize: '0.6875rem',
+        color: 'var(--color-text-muted)',
+        fontWeight: 500,
+      }}
+    >
+      <LegendItem swatch={<LegendBar colour={OWNER_COLOUR.tahi} />} label="Tahi" />
+      <LegendItem swatch={<LegendBar colour={OWNER_COLOUR.client} />} label="Client" />
+      <LegendItem swatch={<LegendBar colour={OWNER_COLOUR.joint} />} label="Joint" />
+      <LegendItem swatch={<LegendBar colour={OWNER_COLOUR.tahi_parallel} />} label="Tahi parallel" />
+      <LegendDivider />
+      <LegendItem swatch={<LegendDiamond />} label="Sign-off gate" />
+      <LegendItem swatch={<LegendDiamond critical />} label="Critical gate" />
+      <LegendDivider />
+      <LegendItem
+        swatch={<LegendBar colour={OWNER_COLOUR.tahi} overlay={RISK_OVERLAY} />}
+        label="At risk"
+      />
+    </div>
+  )
+}
+
+function LegendItem({ swatch, label }: { swatch: React.ReactNode; label: string }) {
+  return (
+    <span className="inline-flex items-center" style={{ gap: '0.4375rem' }}>
+      {swatch}
+      <span>{label}</span>
+    </span>
+  )
+}
+
+function LegendBar({ colour, overlay }: { colour: string; overlay?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: 'inline-block',
+        width: '1.125rem',
+        height: '0.625rem',
+        background: colour,
+        backgroundImage: overlay,
+        borderRadius: '0.125rem',
+      }}
+    />
+  )
+}
+
+function LegendDiamond({ critical }: { critical?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: 'inline-block',
+        width: '0.75rem',
+        height: '0.75rem',
+        transform: 'rotate(45deg)',
+        background: critical ? '#dc2626' : 'var(--color-bg)',
+        border: critical ? '1.75px solid #dc2626' : '1.75px solid #5A824E',
+      }}
+    />
+  )
+}
+
+function LegendDivider() {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: 'inline-block',
+        width: '1px',
+        height: '0.875rem',
+        background: 'var(--color-text-subtle)',
+        opacity: 0.4,
+      }}
+    />
   )
 }

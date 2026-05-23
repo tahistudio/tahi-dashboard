@@ -39,6 +39,7 @@
 import * as React from 'react'
 import { ChevronDown, ChevronUp, Loader2, MoreHorizontal, Check } from 'lucide-react'
 import { Popover } from '@/components/tahi/popover'
+import { Badge, type BadgeTone } from '@/components/tahi/badge'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,31 @@ export type SortDir = 'asc' | 'desc'
 export interface DataTableSort {
   key: string
   dir: SortDir
+}
+
+export interface ChipOption {
+  value: string
+  label: string
+  tone?: BadgeTone
+}
+
+/** Editable-chip column declaration. Cell renders as a Badge and
+ *  clicking opens a popover with the option list. */
+export interface ChipColumnConfig<Row> {
+  /** Current value getter. */
+  value: (row: Row) => string
+  /** Options shown in the popover. */
+  options: ChipOption[]
+  /** Fires when the user picks a new option. */
+  onChange: (row: Row, next: string) => void
+}
+
+/** Link-column declaration. Cell renders as a link-styled text and
+ *  clicking it navigates / runs onClick. Click does NOT trigger the
+ *  parent row's onRowClick. */
+export interface LinkColumnConfig<Row> {
+  href?: (row: Row) => string | null | undefined
+  onClick?: (row: Row) => void
 }
 
 export interface DataTableColumn<Row> {
@@ -70,6 +96,13 @@ export interface DataTableColumn<Row> {
   minWidth?: string
   /** Render in a muted text colour. */
   muted?: boolean
+  /** Make this cell a link. Click navigates / runs onClick and does
+   *  NOT trigger the row's onRowClick / preview. */
+  link?: LinkColumnConfig<Row>
+  /** Make this cell an editable chip (Notion-style). Click opens a
+   *  popover with options; selecting calls onChange. Does NOT trigger
+   *  the row's onRowClick / preview. */
+  edit?: ChipColumnConfig<Row>
 }
 
 export interface DataTableAction {
@@ -85,8 +118,14 @@ interface DataTableProps<Row> {
   rows: ReadonlyArray<Row>
   /** Stable row id. Required for keys + click semantics. */
   getRowId: (row: Row) => string
-  /** Row click. Skipped if the row is expandable (toggles expansion instead). */
+  /** Row click. Skipped if the row is expandable (toggles expansion
+   *  instead). Convention: use for full-page navigation. */
   onRowClick?: (row: Row) => void
+  /** Optional preview handler. When set, clicking the row fires this
+   *  instead of `onRowClick`. Convention: wire to a SlideOver for a
+   *  compact record view. Combine with a row-action menu entry
+   *  ("Open full record") for full navigation when both are wanted. */
+  onRowPreview?: (row: Row) => void
   /** Controlled sort. If omitted, the table sorts internally. */
   sort?: DataTableSort | null
   onSortChange?: (next: DataTableSort | null) => void
@@ -147,6 +186,7 @@ export function DataTable<Row>({
   onSelectionChange,
   rowActions,
   renderExpand,
+  onRowPreview,
 }: DataTableProps<Row>) {
   const isControlledSort = sort !== undefined
   const [internalSort, setInternalSort] = React.useState<DataTableSort | null>(defaultSort)
@@ -372,6 +412,7 @@ export function DataTable<Row>({
                     rowIndex={rowIndex}
                     columns={columns}
                     onRowClick={onRowClick}
+                    onRowPreview={onRowPreview}
                     paddingY={rowPaddingY}
                     isLast={isLast}
                     isSelected={isSelected}
@@ -432,6 +473,7 @@ interface DataRowProps<Row> {
   rowIndex: number
   columns: ReadonlyArray<DataTableColumn<Row>>
   onRowClick?: (row: Row) => void
+  onRowPreview?: (row: Row) => void
   paddingY: string
   isLast: boolean
   isSelected: boolean
@@ -452,6 +494,7 @@ function DataRow<Row>({
   rowIndex,
   columns,
   onRowClick,
+  onRowPreview,
   paddingY,
   isLast,
   isSelected,
@@ -467,14 +510,15 @@ function DataRow<Row>({
 }: DataRowProps<Row>) {
   const actionsRef = React.useRef<HTMLButtonElement | null>(null)
   const [menuOpen, setMenuOpen] = React.useState(false)
-  const clickable = isExpandable || !!onRowClick
+  const clickable = isExpandable || !!onRowClick || !!onRowPreview
 
   const handleRowClick = (e: React.MouseEvent) => {
     // Don't fire row-click when the user is interacting with the
-    // checkbox column or the actions column.
+    // checkbox column, actions column, link cell, or chip cell.
     const target = e.target as HTMLElement
     if (target.closest('[data-row-control]')) return
     if (isExpandable) toggleExpand()
+    else if (onRowPreview) onRowPreview(row)
     else if (onRowClick) onRowClick(row)
   }
 
@@ -526,9 +570,11 @@ function DataRow<Row>({
         )}
         {columns.map((col, colIndex) => {
           const align = col.align ?? 'left'
+          const isInteractive = col.link || col.edit
           return (
             <td
               key={col.key}
+              data-row-control={isInteractive ? '' : undefined}
               style={{
                 padding: `${paddingY} 1rem`,
                 textAlign: align,
@@ -538,11 +584,15 @@ function DataRow<Row>({
                 whiteSpace: colIndex === 0 ? 'nowrap' : undefined,
               }}
             >
-              {col.render
-                ? col.render(row, rowIndex)
-                : col.accessor
-                  ? col.accessor(row)
-                  : null}
+              {col.link
+                ? <LinkCell row={row} col={col} link={col.link} />
+                : col.edit
+                  ? <ChipCell row={row} edit={col.edit} />
+                  : col.render
+                    ? col.render(row, rowIndex)
+                    : col.accessor
+                      ? col.accessor(row)
+                      : null}
             </td>
           )
         })}
@@ -667,6 +717,166 @@ function SelectCheckbox({
         <Check size={12} aria-hidden="true" style={{ color: '#ffffff' }} strokeWidth={3} />
       ) : null}
     </button>
+  )
+}
+
+// ── Link cell ───────────────────────────────────────────────────────────────
+
+function LinkCell<Row>({
+  row,
+  col,
+  link,
+}: {
+  row: Row
+  col: DataTableColumn<Row>
+  link: LinkColumnConfig<Row>
+}) {
+  const label =
+    col.render
+      ? col.render(row, 0)
+      : col.accessor
+        ? col.accessor(row)
+        : null
+  const href = link.href?.(row)
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (link.onClick) {
+      e.preventDefault()
+      link.onClick(row)
+    }
+  }
+  const linkStyle: React.CSSProperties = {
+    color: 'var(--color-text)',
+    textDecoration: 'none',
+    borderBottom: '1px solid transparent',
+    transition: 'color 150ms ease, border-color 150ms ease',
+    cursor: 'pointer',
+  }
+  const onEnter = (e: React.MouseEvent<HTMLElement>) => {
+    e.currentTarget.style.color = 'var(--color-brand-dark)'
+    e.currentTarget.style.borderBottomColor = 'var(--color-brand)'
+  }
+  const onLeave = (e: React.MouseEvent<HTMLElement>) => {
+    e.currentTarget.style.color = 'var(--color-text)'
+    e.currentTarget.style.borderBottomColor = 'transparent'
+  }
+  if (href) {
+    return (
+      <a
+        href={href}
+        onClick={handleClick}
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+        style={linkStyle}
+      >
+        {label}
+      </a>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      style={{ ...linkStyle, background: 'transparent', border: 'none', padding: 0, font: 'inherit' }}
+    >
+      {label}
+    </button>
+  )
+}
+
+// ── Edit-chip cell ──────────────────────────────────────────────────────────
+
+function ChipCell<Row>({
+  row,
+  edit,
+}: {
+  row: Row
+  edit: ChipColumnConfig<Row>
+}) {
+  const ref = React.useRef<HTMLButtonElement | null>(null)
+  const [open, setOpen] = React.useState(false)
+  const currentValue = edit.value(row)
+  const selected = edit.options.find(o => o.value === currentValue)
+
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen(o => !o) }}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+        }}
+      >
+        {selected ? (
+          <Badge
+            tone={selected.tone ?? 'neutral'}
+            variant="soft"
+            size="sm"
+            leader={false}
+          >
+            {selected.label}
+          </Badge>
+        ) : (
+          <Badge tone="neutral" variant="soft" size="sm" leader={false}>
+            Set value
+          </Badge>
+        )}
+      </button>
+      <Popover
+        anchorRef={ref}
+        open={open}
+        onClose={() => setOpen(false)}
+        align="start"
+        width="11rem"
+      >
+        <div role="listbox" aria-label="Options">
+          {edit.options.map(opt => {
+            const isActive = opt.value === currentValue
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="option"
+                aria-selected={isActive}
+                onClick={() => {
+                  edit.onChange(row, opt.value)
+                  setOpen(false)
+                }}
+                className="w-full inline-flex items-center"
+                style={{
+                  gap: '0.5rem',
+                  padding: '0.4375rem 0.625rem',
+                  background: isActive ? 'var(--color-bg-secondary)' : 'transparent',
+                  border: 'none',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 'var(--text-sm)',
+                  color: 'var(--color-text)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'background-color 120ms ease',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = isActive ? 'var(--color-bg-secondary)' : 'transparent' }}
+              >
+                <Badge tone={opt.tone ?? 'neutral'} variant="soft" size="sm" leader={false}>{opt.label}</Badge>
+                <span style={{ flex: 1 }} />
+                {isActive && <Check size={13} aria-hidden="true" style={{ color: 'var(--color-brand)' }} />}
+              </button>
+            )
+          })}
+        </div>
+      </Popover>
+    </>
   )
 }
 

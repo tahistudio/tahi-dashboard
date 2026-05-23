@@ -27,6 +27,8 @@ import { BarChart, LineChart, Sparkline, Gauge, DonutChart, GanttChart } from '@
 import { DataTable } from '@/components/tahi/data-table'
 import { statusTone } from '@/components/tahi/badge'
 import { Trash2, ExternalLink, Copy } from 'lucide-react'
+import { FilterBar, type ActiveFilter, type FilterDef } from '@/components/tahi/filter-bar'
+import { SlideOver } from '@/components/tahi/slide-over'
 
 /**
  * /design-system. The canonical token + primitive reference.
@@ -1760,17 +1762,22 @@ function ChartShowcase() {
         </CardPrim>
 
         <CardPrim>
-          <GroupHeading>GanttChart</GroupHeading>
+          <GroupHeading>GanttChart &middot; with owners, gates, risk, legend</GroupHeading>
           <GanttChart
             rangeStart={new Date('2026-05-01')}
-            rangeEnd={new Date('2026-09-01')}
+            rangeEnd={new Date('2026-09-15')}
             today={new Date('2026-06-12')}
+            showLegend
             rows={[
-              { id: 'a', label: 'Discovery', sub: 'Liam',  colourIndex: 0, start: new Date('2026-05-04'), end: new Date('2026-05-22') },
-              { id: 'b', label: 'Strategy',  sub: 'Staci', colourIndex: 1, start: new Date('2026-05-18'), end: new Date('2026-06-08'), milestones: [{ date: new Date('2026-06-01') }] },
-              { id: 'c', label: 'Design',    sub: 'Sarah', colourIndex: 2, start: new Date('2026-06-01'), end: new Date('2026-07-04') },
-              { id: 'd', label: 'Build',     sub: 'James', colourIndex: 3, start: new Date('2026-06-20'), end: new Date('2026-08-12'), milestones: [{ date: new Date('2026-07-15') }] },
-              { id: 'e', label: 'Launch',    sub: 'Team',  colourIndex: 4, start: new Date('2026-08-05'), end: new Date('2026-08-22') },
+              { id: 's1', rowType: 'section_header', label: 'Main build phases' },
+              { id: 'a', label: 'Discovery',      sub: 'Workshops + audit',   owner: 'joint',         start: new Date('2026-05-04'), end: new Date('2026-05-22') },
+              { id: 'b', label: 'Strategy',       sub: 'Brand + IA',          owner: 'tahi',          start: new Date('2026-05-18'), end: new Date('2026-06-08'), milestones: [{ date: new Date('2026-06-01'), label: 'Strategy review' }] },
+              { id: 'g1', rowType: 'gate', label: 'Sitemap sign-off', gateDate: new Date('2026-06-10') },
+              { id: 'c', label: 'Design',         sub: 'Visual + UX',         owner: 'tahi',          start: new Date('2026-06-08'), end: new Date('2026-07-04'), riskFlag: true },
+              { id: 'd', label: 'Build',          sub: 'Frontend + CMS',      owner: 'tahi_parallel', start: new Date('2026-06-20'), end: new Date('2026-08-12'), milestones: [{ date: new Date('2026-07-15'), label: 'Internal beta' }] },
+              { id: 'e', label: 'Content',        sub: 'Copy + photo',        owner: 'client',        start: new Date('2026-06-15'), end: new Date('2026-08-01') },
+              { id: 'g2', rowType: 'critical_gate', label: 'Go / no-go', gateDate: new Date('2026-08-15') },
+              { id: 'f', label: 'Launch',         sub: 'QA + handover',       owner: 'joint',         start: new Date('2026-08-15'), end: new Date('2026-09-05') },
             ]}
           />
         </CardPrim>
@@ -1844,20 +1851,48 @@ const INVOICE_ROWS: InvoiceDemo[] = [
 ]
 
 function DataTableShowcase() {
+  // Rows are stateful so the edit-chip cell can mutate status live.
+  const [rows, setRows] = useState<InvoiceDemo[]>(INVOICE_ROWS)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [filterQuery, setFilterQuery] = useState('')
-  const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [search, setSearch] = useState('')
+  const [active, setActive] = useState<ActiveFilter[]>([])
+  const [previewRow, setPreviewRow] = useState<InvoiceDemo | null>(null)
 
-  const filteredRows = INVOICE_ROWS.filter(r => {
-    if (filterStatus !== 'all' && r.status !== filterStatus) return false
-    if (filterQuery && !`${r.number} ${r.client}`.toLowerCase().includes(filterQuery.toLowerCase())) return false
+  const filterDefs: FilterDef[] = [
+    {
+      id: 'status', label: 'Status', kind: 'select',
+      options: [
+        { value: 'paid',    label: 'Paid',    tone: 'positive' },
+        { value: 'sent',    label: 'Sent',    tone: 'warning' },
+        { value: 'overdue', label: 'Overdue', tone: 'danger' },
+        { value: 'draft',   label: 'Draft',   tone: 'neutral' },
+      ],
+    },
+    {
+      id: 'client', label: 'Client', kind: 'select',
+      options: Array.from(new Set(INVOICE_ROWS.map(r => r.client))).map(c => ({
+        value: c, label: c,
+      })),
+    },
+  ]
+
+  const filteredRows = rows.filter(r => {
+    for (const f of active) {
+      if (f.id === 'status' && r.status !== f.value) return false
+      if (f.id === 'client' && r.client !== f.value) return false
+    }
+    if (search && !`${r.number} ${r.client}`.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
 
+  const updateStatus = (rowId: string, next: string) => {
+    setRows(prev => prev.map(r => (r.id === rowId ? { ...r, status: next as InvoiceDemo['status'] } : r)))
+  }
+
   const rowActionsFor = (r: InvoiceDemo) => ([
-    { label: 'Open in new tab', icon: <ExternalLink size={14} />, onClick: () => alert(`Open ${r.number}`) },
-    { label: 'Duplicate',       icon: <Copy size={14} />,         onClick: () => alert(`Duplicate ${r.number}`) },
-    { label: 'Delete',          icon: <Trash2 size={14} />,       tone: 'danger' as const, onClick: () => alert(`Delete ${r.number}`) },
+    { label: 'Open full record', icon: <ExternalLink size={14} />, onClick: () => alert(`Navigate to ${r.number}`) },
+    { label: 'Duplicate',        icon: <Copy size={14} />,         onClick: () => alert(`Duplicate ${r.number}`) },
+    { label: 'Delete',           icon: <Trash2 size={14} />,       tone: 'danger' as const, onClick: () => alert(`Delete ${r.number}`) },
   ])
 
   const wideColumns = [
@@ -1869,97 +1904,50 @@ function DataTableShowcase() {
       id="comp-table"
       title="Data table"
       source="components/tahi/data-table.tsx"
-      intro="The shared list-page table. Real <table> for semantics, sticky thead, h-scroll for overflow, sortable headers, selectable rows, expandable rows, per-row action menu via 3-dots button OR right-click anywhere on the row."
+      intro="The shared list-page table. Notion-style chip filters above, real <table> below with semantic sortable headers. Cells can be plain, link (navigates), or edit-chip (Notion-style popover). Rows support selection, expandable detail, a 3-dots / right-click action menu, and optional slide-over preview."
     >
-      {/* Primary demo: selection + actions + expand + filter bar */}
+      {/* Primary demo: filter chips + cell kinds + slide-over preview */}
       <div className="space-y-3">
-        {/* Filter bar */}
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--space-2)',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-          }}
-        >
-          <div className="tahi-input-group" style={{
-            display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
-            padding: '0 var(--space-2)', height: '2.25rem',
-            background: 'var(--color-bg)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 'var(--radius-md)',
-            flex: '1 1 16rem', maxWidth: '24rem',
-          }}>
-            <SearchGlyph size={14} />
-            <input
-              type="text"
-              placeholder="Search invoices"
-              value={filterQuery}
-              onChange={e => setFilterQuery(e.target.value)}
-              style={{
-                flex: 1, minWidth: 0,
-                border: 'none', outline: 'none', background: 'transparent',
-                fontSize: 'var(--text-sm)', color: 'var(--color-text)',
-              }}
-              aria-label="Search invoices"
-            />
-          </div>
-          <select
-            value={filterStatus}
-            onChange={e => setFilterStatus(e.target.value)}
-            aria-label="Filter by status"
+        <FilterBar
+          filters={filterDefs}
+          active={active}
+          onChange={setActive}
+          search={{ value: search, onChange: setSearch, placeholder: 'Search invoices' }}
+        />
+        {selected.size > 0 && (
+          <div
+            role="status"
+            aria-live="polite"
             style={{
-              height: '2.25rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
               padding: '0 var(--space-3)',
-              fontSize: 'var(--text-sm)',
-              background: 'var(--color-bg)',
-              border: '1px solid var(--color-border-subtle)',
+              height: '2.25rem',
+              background: 'var(--color-brand-50)',
+              border: '1px solid var(--color-brand-100)',
               borderRadius: 'var(--radius-md)',
-              color: filterStatus === 'all' ? 'var(--color-text-muted)' : 'var(--color-text)',
-              cursor: 'pointer',
+              fontSize: 'var(--text-sm)',
+              color: 'var(--color-text-active)',
+              fontWeight: 500,
+              width: 'fit-content',
             }}
           >
-            <option value="all">All statuses</option>
-            <option value="paid">Paid</option>
-            <option value="sent">Sent</option>
-            <option value="overdue">Overdue</option>
-            <option value="draft">Draft</option>
-          </select>
-          {selected.size > 0 && (
-            <div
-              role="status"
-              aria-live="polite"
+            {selected.size} selected
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
               style={{
-                marginLeft: 'auto',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 'var(--space-2)',
-                padding: '0 var(--space-3)',
-                height: '2.25rem',
-                background: 'var(--color-brand-50)',
-                border: '1px solid var(--color-brand-100)',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 'var(--text-sm)',
-                color: 'var(--color-text-active)',
-                fontWeight: 500,
+                background: 'transparent', border: 'none',
+                padding: '0 var(--space-1)',
+                color: 'var(--color-text-muted)',
+                cursor: 'pointer',
+                fontSize: 'var(--text-xs)',
+                textDecoration: 'underline',
               }}
-            >
-              {selected.size} selected
-              <button
-                type="button"
-                onClick={() => setSelected(new Set())}
-                style={{
-                  background: 'transparent', border: 'none',
-                  padding: '0 var(--space-1)',
-                  color: 'var(--color-text-muted)',
-                  cursor: 'pointer',
-                  fontSize: 'var(--text-xs)',
-                  textDecoration: 'underline',
-                }}
-              >Clear</button>
-            </div>
-          )}
-        </div>
+            >Clear</button>
+          </div>
+        )}
 
         <Card padded={false}>
           <DataTable<InvoiceDemo>
@@ -1970,16 +1958,7 @@ function DataTableShowcase() {
             selectedIds={selected}
             onSelectionChange={setSelected}
             rowActions={rowActionsFor}
-            renderExpand={r => (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-4)' }}>
-                <ExpandField label="Invoice" value={r.number} />
-                <ExpandField label="Status" value={r.status} />
-                <ExpandField label="Issued" value="3 Apr 2026" />
-                <ExpandField label="Client" value={r.client} />
-                <ExpandField label="Due" value={r.due} />
-                <ExpandField label="Total" value={`$${r.amount.toLocaleString()}`} />
-              </div>
-            )}
+            onRowPreview={(r) => setPreviewRow(r)}
             columns={[
               { key: 'number', header: 'Invoice', sortable: true,
                 accessor: r => r.number,
@@ -1988,14 +1967,26 @@ function DataTableShowcase() {
               { key: 'client', header: 'Client', sortable: true,
                 accessor: r => r.client,
                 sortValue: r => r.client,
+                link: {
+                  onClick: (r) => alert(`Navigate to client: ${r.client}`),
+                },
                 minWidth: '10rem' },
               { key: 'amount', header: 'Amount', sortable: true, align: 'right',
                 render: r => `$${r.amount.toLocaleString()}`,
                 sortValue: r => r.amount,
                 minWidth: '7rem' },
               { key: 'status', header: 'Status',
-                render: r => <Badge tone={statusTone(r.status)} variant="soft" size="sm" leader={false}>{r.status}</Badge>,
-                minWidth: '7rem' },
+                edit: {
+                  value: (r) => r.status,
+                  options: [
+                    { value: 'paid',    label: 'Paid',    tone: 'positive' },
+                    { value: 'sent',    label: 'Sent',    tone: 'warning' },
+                    { value: 'overdue', label: 'Overdue', tone: 'danger' },
+                    { value: 'draft',   label: 'Draft',   tone: 'neutral' },
+                  ],
+                  onChange: (r, next) => updateStatus(r.id, next),
+                },
+                minWidth: '8rem' },
               { key: 'due', header: 'Due', sortable: true,
                 accessor: r => r.due,
                 sortValue: r => r.due,
@@ -2005,7 +1996,31 @@ function DataTableShowcase() {
             rows={filteredRows}
           />
         </Card>
+
+        <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', margin: 0 }}>
+          Tip: click <strong>Status</strong> to edit it inline. Click <strong>Client</strong> to navigate.
+          Click anywhere else on the row to open a slide-over preview. Right-click for the action menu.
+        </p>
       </div>
+
+      {/* Slide-over preview wired to onRowPreview */}
+      <SlideOver
+        open={!!previewRow}
+        onClose={() => setPreviewRow(null)}
+        title={previewRow?.number ?? ''}
+        maxWidth="24rem"
+      >
+        <SlideOver.Body>
+          {previewRow && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              <ExpandField label="Client" value={previewRow.client} />
+              <ExpandField label="Status" value={<Badge tone={statusTone(previewRow.status)} variant="soft" size="sm" leader={false}>{previewRow.status}</Badge>} />
+              <ExpandField label="Amount" value={`$${previewRow.amount.toLocaleString()}`} />
+              <ExpandField label="Due" value={previewRow.due} />
+            </div>
+          )}
+        </SlideOver.Body>
+      </SlideOver>
 
       {/* Wide-overflow demo: more columns than fit, h-scroll */}
       <CardPrim>
