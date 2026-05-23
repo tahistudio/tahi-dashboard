@@ -26,12 +26,15 @@ import { useToast } from '@/components/tahi/toast'
 import { BarChart, LineChart, Sparkline, Gauge, DonutChart, GanttChart, FunnelChart, MultiBarChart, Heatmap, CalendarHeatmap } from '@/components/tahi/chart'
 import { DataTable } from '@/components/tahi/data-table'
 import { statusTone } from '@/components/tahi/badge'
-import { Trash2, ExternalLink, Copy } from 'lucide-react'
+import { Trash2, ExternalLink, Copy, Pencil, Reply } from 'lucide-react'
 import { FilterBar, type ActiveFilter, type FilterDef } from '@/components/tahi/filter-bar'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { Stepper } from '@/components/tahi/stepper'
 import { ProgressBar } from '@/components/tahi/progress-bar'
 import { Callout } from '@/components/tahi/callout'
+import { FileAttachmentList } from '@/components/tahi/file-attachment-list'
+import { MessageBubble } from '@/components/tahi/message-bubble'
+import { MessageThread } from '@/components/tahi/message-thread'
 
 /**
  * /design-system. The canonical token + primitive reference.
@@ -973,6 +976,9 @@ const COMPONENTS_NAV = [
   { id: 'comp-callout',      label: 'Callout',      ready: true  },
   { id: 'comp-stepper',      label: 'Stepper',      ready: true  },
   { id: 'comp-progress',     label: 'Progress',     ready: true  },
+  { id: 'comp-files',        label: 'File list',    ready: true  },
+  { id: 'comp-message',      label: 'Message bubble', ready: true },
+  { id: 'comp-thread',       label: 'Message thread', ready: true },
   { id: 'comp-empty',        label: 'Empty state',  ready: false },
   { id: 'comp-pagination',   label: 'Pagination',   ready: false },
 ]
@@ -1722,9 +1728,263 @@ function ComponentsSection() {
         <StepperShowcase />
         <ChartShowcase />
         <DataTableShowcase />
+        <FileAttachmentListShowcase />
+        <MessageBubbleShowcase />
+        <MessageThreadShowcase />
       </div>
     </SectionShell>
   )
+}
+
+// ── FileAttachmentList showcase ─────────────────────────────────────────
+const DEMO_FILES = [
+  { id: 'f1', name: 'brief.pdf',        sizeBytes: 184_000, mime: 'application/pdf', url: '#', uploadedBy: 'Liam' },
+  { id: 'f2', name: 'hero-final.png',   sizeBytes: 412_000, mime: 'image/png',       url: '#', uploadedBy: 'Sarah' },
+  { id: 'f3', name: 'wireframes.fig',   sizeBytes: 980_000, mime: 'application/octet-stream', url: '#', uploadedBy: 'Sarah' },
+  { id: 'f4', name: 'tahi-logo.svg',    sizeBytes:   3_400, mime: 'image/svg+xml',   url: '#', uploadedBy: 'Staci' },
+  { id: 'f5', name: 'transcript.docx',  sizeBytes: 38_000,  mime: 'application/msword', url: '#', uploadedBy: 'Liam' },
+  { id: 'f6', name: 'export.csv',       sizeBytes: 12_400,  mime: 'text/csv',        url: '#', uploadedBy: 'Liam' },
+] as const
+
+function FileAttachmentListShowcase() {
+  return (
+    <PrimitiveShell
+      id="comp-files"
+      title="File list"
+      source="components/tahi/file-attachment-list.tsx"
+      intro="Shared file attachment renderer. Used in messages, requests, contracts, proposals. List variant for compact rows with file-type icons; grid variant for thumbnail-heavy attachments. Each item supports preview, download, and remove actions."
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <CardPrim>
+          <GroupHeading>List variant</GroupHeading>
+          <FileAttachmentList
+            items={[...DEMO_FILES]}
+            onPreview={(item) => alert(`Preview ${item.name}`)}
+            onDownload={(item) => alert(`Download ${item.name}`)}
+          />
+        </CardPrim>
+
+        <CardPrim>
+          <GroupHeading>Grid variant &middot; with remove</GroupHeading>
+          <FileAttachmentList
+            variant="grid"
+            items={[...DEMO_FILES]}
+            onPreview={(item) => alert(`Preview ${item.name}`)}
+            onRemove={(item) => alert(`Remove ${item.name}`)}
+            maxItems={5}
+          />
+        </CardPrim>
+      </div>
+    </PrimitiveShell>
+  )
+}
+
+// ── MessageBubble showcase ──────────────────────────────────────────────
+
+function MessageBubbleShowcase() {
+  const [reactions, setReactions] = useState<Array<{ emoji: string; count: number; mine?: boolean }>>([
+    { emoji: '👍', count: 2 },
+    { emoji: '🎉', count: 1, mine: true },
+  ])
+  const toggleReaction = (emoji: string) => {
+    setReactions(prev => {
+      const existing = prev.find(r => r.emoji === emoji)
+      if (existing) {
+        const nextCount = existing.mine ? existing.count - 1 : existing.count + 1
+        if (nextCount <= 0) return prev.filter(r => r.emoji !== emoji)
+        return prev.map(r => r.emoji === emoji ? { ...r, count: nextCount, mine: !r.mine } : r)
+      }
+      return [...prev, { emoji, count: 1, mine: true }]
+    })
+  }
+  const addReaction = (emoji: string) => toggleReaction(emoji)
+  return (
+    <PrimitiveShell
+      id="comp-message"
+      title="Message bubble"
+      source="components/tahi/message-bubble.tsx"
+      intro="One message. Avatar + author + timestamp + body + attachments + voice note + reactions + reply-to context + hover actions. Variants: own (right-aligned, brand-tinted), other (left-aligned), internal (warning chip)."
+    >
+      <CardPrim>
+        <GroupHeading>External thread &middot; mixed authors</GroupHeading>
+        <div style={{ padding: '0.5rem 0.25rem' }}>
+          <MessageBubble
+            author={{ name: 'Liam Miller', role: 'admin' }}
+            timestamp="2026-05-23T09:14:00Z"
+            bodyHtml="<p>Morning Anna, sharing the latest hero direction for the homepage. Let me know what you think.</p>"
+            attachments={DEMO_FILES.slice(0, 2)}
+            reactions={reactions}
+            onReact={addReaction}
+            onToggleReaction={toggleReaction}
+            actions={[
+              { label: 'Reply',  icon: <Reply size={14} />,    onClick: () => {} },
+              { label: 'Edit',   icon: <Pencil size={14} />,   onClick: () => {} },
+              { label: 'Delete', icon: <Trash2 size={14} />,   tone: 'danger', onClick: () => {} },
+            ]}
+          />
+          <MessageBubble
+            author={{ name: 'Anna Walker', role: 'client' }}
+            timestamp="2026-05-23T09:42:00Z"
+            replyTo={{ authorName: 'Liam Miller', preview: 'Morning Anna, sharing the latest hero direction…' }}
+            bodyHtml="<p>This is looking great. Two things: can we try a darker overlay on the photo, and the headline should reference our 3rd anniversary launch.</p>"
+            onReact={() => {}}
+          />
+          <MessageBubble
+            author={{ name: 'Sarah Chen', role: 'admin' }}
+            timestamp="2026-05-23T10:01:00Z"
+            bodyHtml="<p>Loved the direction. Pushing a v2 with the darker overlay tonight.</p>"
+            voiceNote={{ url: '', durationSeconds: 23, transcript: 'Loved the direction. Pushing a v2 with the darker overlay tonight.' }}
+            onReact={() => {}}
+          />
+        </div>
+      </CardPrim>
+
+      <CardPrim>
+        <GroupHeading>Own message &middot; right-aligned, brand-tinted</GroupHeading>
+        <div style={{ padding: '0.5rem 0.25rem' }}>
+          <MessageBubble
+            own
+            author={{ name: 'You', role: 'admin' }}
+            timestamp="2026-05-23T10:30:00Z"
+            bodyHtml="<p>Sounds great — go for it. I'll get Stacy to look at the copy variations.</p>"
+            seen
+            actions={[
+              { label: 'Edit',   icon: <Pencil size={14} />, onClick: () => {} },
+              { label: 'Delete', icon: <Trash2 size={14} />, tone: 'danger', onClick: () => {} },
+            ]}
+          />
+        </div>
+      </CardPrim>
+
+      <CardPrim>
+        <GroupHeading>Internal note &middot; visible only to Tahi team</GroupHeading>
+        <div style={{ padding: '0.5rem 0.25rem' }}>
+          <MessageBubble
+            author={{ name: 'Liam Miller', role: 'admin' }}
+            timestamp="2026-05-23T10:45:00Z"
+            visibility="internal"
+            bodyHtml="<p>Heads up team: Anna wants the launch tied to the anniversary on June 14. Let's plan our schedule around that — Sarah, can you check capacity?</p>"
+            onReact={() => {}}
+          />
+        </div>
+      </CardPrim>
+    </PrimitiveShell>
+  )
+}
+
+// ── MessageThread showcase ──────────────────────────────────────────────
+
+interface DemoMessage {
+  id: string
+  timestamp: string
+  author: { name: string; role?: 'admin' | 'client' }
+  bodyHtml: string
+  own?: boolean
+  visibility?: 'internal' | 'external'
+}
+
+function MessageThreadShowcase() {
+  const [reply, setReply] = useState<{ authorName: string; preview: string } | null>(null)
+  const [messages, setMessages] = useState<DemoMessage[]>([
+    { id: 'm1', timestamp: '2026-05-22T15:30:00Z', author: { name: 'Liam Miller', role: 'admin' },  bodyHtml: '<p>Sent over the brief and creative direction. Take a look when you get a chance.</p>' },
+    { id: 'm2', timestamp: '2026-05-22T16:02:00Z', author: { name: 'Anna Walker', role: 'client' }, bodyHtml: "<p>Just looked — really like where this is going. I'll get our team's feedback by tomorrow.</p>" },
+    { id: 'm3', timestamp: '2026-05-23T09:14:00Z', author: { name: 'Liam Miller', role: 'admin' },  bodyHtml: '<p>Morning! Pushing the v2 with the darker overlay you asked for.</p>' },
+    { id: 'm4', timestamp: '2026-05-23T09:42:00Z', author: { name: 'Anna Walker', role: 'client' }, bodyHtml: '<p>Beautiful. Approving — go ahead and ship.</p>' },
+    { id: 'm5', timestamp: '2026-05-23T10:30:00Z', author: { name: 'You', role: 'admin' }, own: true, bodyHtml: '<p>On it. Will have staging up in an hour.</p>' },
+  ])
+  return (
+    <PrimitiveShell
+      id="comp-thread"
+      title="Message thread"
+      source="components/tahi/message-thread.tsx"
+      intro="Generic messaging container. Renders day separators, a list of MessageBubbles (or any per-row renderer), a reply-to strip, and a composer slot. Works for 1:1 DMs, group chats, request comments, deal activity."
+    >
+      <MessageThread<DemoMessage>
+        title="Glasswall · Web redesign"
+        subtitle="Direct thread with Anna Walker"
+        participants={[
+          { id: '1', name: 'Liam Miller' },
+          { id: '2', name: 'Anna Walker' },
+          { id: '3', name: 'Sarah Chen' },
+        ]}
+        messages={messages}
+        renderMessage={(msg) => (
+          <MessageBubble
+            author={msg.author}
+            timestamp={msg.timestamp}
+            bodyHtml={msg.bodyHtml}
+            own={msg.own}
+            visibility={msg.visibility}
+            onReply={() => setReply({ authorName: msg.author.name, preview: stripTags(msg.bodyHtml).slice(0, 80) })}
+          />
+        )}
+        replyTo={reply}
+        onCancelReply={() => setReply(null)}
+        hasMore
+        onLoadOlder={() => alert('Load older messages')}
+        composer={
+          <DemoComposer
+            placeholder={reply ? `Reply to ${reply.authorName}…` : 'Write a message…'}
+            onSend={(html) => {
+              const nextId = `m${messages.length + 1}`
+              setMessages([...messages, {
+                id: nextId,
+                timestamp: new Date().toISOString(),
+                author: { name: 'You', role: 'admin' },
+                own: true,
+                bodyHtml: html,
+              }])
+              setReply(null)
+            }}
+          />
+        }
+        maxHeight="28rem"
+      />
+    </PrimitiveShell>
+  )
+}
+
+function DemoComposer({ placeholder, onSend }: { placeholder: string; onSend: (html: string) => void }) {
+  const [text, setText] = useState('')
+  const submit = () => {
+    if (!text.trim()) return
+    onSend(`<p>${text.replace(/</g, '&lt;')}</p>`)
+    setText('')
+  }
+  return (
+    <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-end' }}>
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder={placeholder}
+        rows={2}
+        onKeyDown={e => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault()
+            submit()
+          }
+        }}
+        style={{
+          flex: 1,
+          padding: '0.5rem 0.625rem',
+          border: '1px solid var(--color-border-subtle)',
+          borderRadius: 'var(--radius-md)',
+          background: 'var(--color-bg)',
+          fontSize: 'var(--text-sm)',
+          color: 'var(--color-text)',
+          outline: 'none',
+          resize: 'none',
+          fontFamily: 'inherit',
+          lineHeight: 1.5,
+        }}
+      />
+      <TahiButton variant="primary" size="sm" onClick={submit}>Send</TahiButton>
+    </div>
+  )
+}
+
+function stripTags(html: string): string {
+  return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
 }
 
 
@@ -2076,25 +2336,24 @@ function ChartShowcase() {
           />
         </CardPrim>
 
+        <Card padded={false}>
+          <div style={{ padding: '1.25rem 1.25rem 0.5rem' }}>
+            <GroupHeading>Heatmap &middot; hours x days</GroupHeading>
+          </div>
+          <Heatmap
+            tone="positive"
+            columns={['9', '10', '11', '12', '13', '14', '15', '16', '17']}
+            rows={[
+              { label: 'Mon', cells: [{ key: '9', value: 1 }, { key: '10', value: 3 }, { key: '11', value: 5 }, { key: '12', value: 2 }, { key: '13', value: 4 }, { key: '14', value: 6 }, { key: '15', value: 4 }, { key: '16', value: 2 }, { key: '17', value: 1 }] },
+              { label: 'Tue', cells: [{ key: '9', value: 2 }, { key: '10', value: 4 }, { key: '11', value: 6 }, { key: '12', value: 3 }, { key: '13', value: 7 }, { key: '14', value: 8 }, { key: '15', value: 5 }, { key: '16', value: 3 }, { key: '17', value: 0 }] },
+              { label: 'Wed', cells: [{ key: '9', value: 0 }, { key: '10', value: 2 }, { key: '11', value: 3 }, { key: '12', value: 1 }, { key: '13', value: 5 }, { key: '14', value: 4 }, { key: '15', value: 3 }, { key: '16', value: 1 }, { key: '17', value: 0 }] },
+              { label: 'Thu', cells: [{ key: '9', value: 3 }, { key: '10', value: 5 }, { key: '11', value: 7 }, { key: '12', value: 4 }, { key: '13', value: 6 }, { key: '14', value: 9 }, { key: '15', value: 6 }, { key: '16', value: 4 }, { key: '17', value: 2 }] },
+              { label: 'Fri', cells: [{ key: '9', value: 2 }, { key: '10', value: 3 }, { key: '11', value: 4 }, { key: '12', value: 2 }, { key: '13', value: 3 }, { key: '14', value: 5 }, { key: '15', value: 3 }, { key: '16', value: 2 }, { key: '17', value: 1 }] },
+            ]}
+            formatValue={v => `${v} requests`}
+          />
+        </Card>
       </div>
-
-      <Card padded={false}>
-        <div style={{ padding: '1.25rem 1.25rem 0.5rem' }}>
-          <GroupHeading>Heatmap &middot; hours x days</GroupHeading>
-        </div>
-        <Heatmap
-          tone="positive"
-          columns={['9', '10', '11', '12', '13', '14', '15', '16', '17']}
-          rows={[
-            { label: 'Mon', cells: [{ key: '9', value: 1 }, { key: '10', value: 3 }, { key: '11', value: 5 }, { key: '12', value: 2 }, { key: '13', value: 4 }, { key: '14', value: 6 }, { key: '15', value: 4 }, { key: '16', value: 2 }, { key: '17', value: 1 }] },
-            { label: 'Tue', cells: [{ key: '9', value: 2 }, { key: '10', value: 4 }, { key: '11', value: 6 }, { key: '12', value: 3 }, { key: '13', value: 7 }, { key: '14', value: 8 }, { key: '15', value: 5 }, { key: '16', value: 3 }, { key: '17', value: 0 }] },
-            { label: 'Wed', cells: [{ key: '9', value: 0 }, { key: '10', value: 2 }, { key: '11', value: 3 }, { key: '12', value: 1 }, { key: '13', value: 5 }, { key: '14', value: 4 }, { key: '15', value: 3 }, { key: '16', value: 1 }, { key: '17', value: 0 }] },
-            { label: 'Thu', cells: [{ key: '9', value: 3 }, { key: '10', value: 5 }, { key: '11', value: 7 }, { key: '12', value: 4 }, { key: '13', value: 6 }, { key: '14', value: 9 }, { key: '15', value: 6 }, { key: '16', value: 4 }, { key: '17', value: 2 }] },
-            { label: 'Fri', cells: [{ key: '9', value: 2 }, { key: '10', value: 3 }, { key: '11', value: 4 }, { key: '12', value: 2 }, { key: '13', value: 3 }, { key: '14', value: 5 }, { key: '15', value: 3 }, { key: '16', value: 2 }, { key: '17', value: 1 }] },
-          ]}
-          formatValue={v => `${v} requests`}
-        />
-      </Card>
 
       <Card padded={false}>
         <div style={{ padding: '1.25rem 1.25rem 0.5rem' }}>

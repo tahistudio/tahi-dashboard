@@ -758,6 +758,14 @@ textarea,
   color: var(--color-brand);
 }
 
+/* MessageBubble hover actions. Hidden by default so the bubble row
+   reads as a quiet message; brightens to full opacity when the row
+   is hovered or any focus lands inside (keyboard nav). */
+.tahi-message-bubble:hover .tahi-message-actions,
+.tahi-message-bubble:focus-within .tahi-message-actions {
+  opacity: 1;
+}
+
 /* Hide scrollbar utility */
 .scrollbar-hide {
   -ms-overflow-style: none;
