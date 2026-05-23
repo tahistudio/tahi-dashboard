@@ -748,6 +748,111 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0040',
+    description: 'Pipeline triage (SQL-based equivalent of /api/admin/leads/triage-pipeline). Moves Lead-stage deals + Stalled-no-engagement deals into the leads table. Idempotent — re-running finds no candidates because matching deals were deleted on the first run, and source_detail is keyed on deal id as a belt-and-braces.',
+    statements: [
+      // 1. Backfill people rows for deal contacts that don't already
+      //    have a matching person by email. Idempotent via NOT EXISTS.
+      `INSERT INTO people (id, full_name, email, phone, created_at, updated_at)
+         SELECT DISTINCT
+           lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))),
+           c.name,
+           c.email,
+           NULL,
+           strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+           strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+         FROM contacts c
+         JOIN deal_contacts dc ON dc.contact_id = c.id
+         JOIN deals d ON d.id = dc.deal_id
+         JOIN pipeline_stages ps ON ps.id = d.stage_id
+         WHERE
+           c.email IS NOT NULL AND c.email != ''
+           AND NOT EXISTS (SELECT 1 FROM people p WHERE lower(p.email) = lower(c.email))
+           AND (
+             lower(ps.name) = 'lead'
+             OR (
+               lower(ps.name) = 'stalled'
+               AND NOT EXISTS (SELECT 1 FROM proposals WHERE deal_id = d.id)
+               AND NOT EXISTS (SELECT 1 FROM contract_documents WHERE deal_id = d.id)
+             )
+           )`,
+
+      // 2. Backfill contacts.person_id from the people table by email.
+      `UPDATE contacts
+         SET person_id = (SELECT id FROM people WHERE lower(email) = lower(contacts.email) LIMIT 1)
+         WHERE person_id IS NULL
+           AND email IS NOT NULL AND email != ''
+           AND EXISTS (SELECT 1 FROM people WHERE lower(email) = lower(contacts.email))`,
+
+      // 3. Insert leads from each candidate deal. Idempotent — re-running
+      //    won't re-insert because the deal will be gone after step 5.
+      //    source_detail encodes the original deal id so we never
+      //    duplicate even if step 5 fails and step 3 reruns.
+      `INSERT INTO leads (id, person_id, name, email, phone, company, source, source_detail, brief, estimated_value, currency, status, created_at, updated_at)
+         SELECT
+           lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))),
+           c.person_id,
+           COALESCE(c.name, o.name, d.title),
+           c.email,
+           NULL,
+           o.name,
+           COALESCE(d.source, 'manual'),
+           'Demoted from pipeline (was ' || ps.name || ' stage) · deal:' || d.id,
+           d.notes,
+           COALESCE(d.upfront_value, d.monthly_value, d.value),
+           d.currency,
+           CASE WHEN lower(ps.name) = 'lead' THEN 'new' ELSE 'nurturing' END,
+           strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+           strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+         FROM deals d
+         JOIN pipeline_stages ps ON ps.id = d.stage_id
+         LEFT JOIN deal_contacts pdc ON pdc.deal_id = d.id AND pdc.id = (
+           SELECT id FROM deal_contacts WHERE deal_id = d.id ORDER BY id LIMIT 1
+         )
+         LEFT JOIN contacts c ON c.id = pdc.contact_id
+         LEFT JOIN organisations o ON o.id = d.org_id
+         WHERE
+           (lower(ps.name) = 'lead' OR (
+             lower(ps.name) = 'stalled'
+             AND NOT EXISTS (SELECT 1 FROM proposals WHERE deal_id = d.id)
+             AND NOT EXISTS (SELECT 1 FROM contract_documents WHERE deal_id = d.id)
+           ))
+           AND NOT EXISTS (SELECT 1 FROM leads l WHERE l.source_detail LIKE '%deal:' || d.id)`,
+
+      // 4. Stamp a lead_demoted activity for every new triage-lead.
+      `INSERT INTO activities (id, type, title, description, lead_id, created_by_id, created_at, updated_at)
+         SELECT
+           lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))),
+           'lead_demoted',
+           l.source_detail,
+           CASE WHEN l.status = 'nurturing'
+                THEN 'No proposal, no contract, no real engagement - moved to leads for nurture.'
+                ELSE 'Was sitting at the top of the funnel - moved to leads where it belongs.' END,
+           l.id,
+           'system',
+           strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+           strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+         FROM leads l
+         WHERE l.source_detail LIKE 'Demoted from pipeline%'
+           AND NOT EXISTS (SELECT 1 FROM activities a WHERE a.lead_id = l.id AND a.type = 'lead_demoted')`,
+
+      // 5. Delete the candidate deals. FK cascade removes deal_contacts
+      //    and any deal-scoped activities.
+      `DELETE FROM deals
+         WHERE id IN (
+           SELECT d.id FROM deals d
+           JOIN pipeline_stages ps ON ps.id = d.stage_id
+           WHERE
+             lower(ps.name) = 'lead'
+             OR (
+               lower(ps.name) = 'stalled'
+               AND NOT EXISTS (SELECT 1 FROM proposals WHERE deal_id = d.id)
+               AND NOT EXISTS (SELECT 1 FROM contract_documents WHERE deal_id = d.id)
+             )
+         )`,
+    ],
+  },
+  {
     name: '0039',
     description: 'Phase A · 0: granular permissions foundation (RBAC + ABAC). roles + permissions + role_permissions (with scope filters) + team_member_roles + field_restrictions. Strictly additive — no existing tables touched. Enforcement is a runtime layer that rolls out per feature.',
     statements: [

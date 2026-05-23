@@ -47,9 +47,12 @@ export interface FilterOption {
 export interface FilterDef {
   id: string
   label: string
-  /** select  = single value picked from options
-   *  multiselect = any subset of options, rendered as comma-joined labels */
-  kind: 'select' | 'multiselect'
+  /** select      = single value picked from options
+   *  multiselect = any subset of options, rendered as comma-joined labels
+   *  daterange   = a from-to date pair (YYYY-MM-DD) with quick-pick
+   *                presets (Today, This week, This month, Last 30 days,
+   *                Custom). options is ignored for this kind. */
+  kind: 'select' | 'multiselect' | 'daterange'
   options: FilterOption[]
   /** When true, the chip can't be removed (no X). Use when a filter
    *  is a permanent part of the bar — e.g. a top-level category
@@ -64,6 +67,9 @@ export interface ActiveFilter {
   value?: string
   /** Set when the matching def.kind === 'multiselect'. */
   values?: string[]
+  /** Set when the matching def.kind === 'daterange'. ISO date strings. */
+  from?: string | null
+  to?: string | null
 }
 
 interface FilterBarProps {
@@ -101,9 +107,14 @@ export function FilterBar({
   const availableFilters = filters.filter(f => !active.some(a => a.id === f.id))
 
   const addFilter = (def: FilterDef) => {
-    const next: ActiveFilter = def.kind === 'multiselect'
-      ? { id: def.id, values: [] }
-      : { id: def.id, value: def.options[0]?.value ?? '' }
+    let next: ActiveFilter
+    if (def.kind === 'multiselect') {
+      next = { id: def.id, values: [] }
+    } else if (def.kind === 'daterange') {
+      next = { id: def.id, from: null, to: null }
+    } else {
+      next = { id: def.id, value: def.options[0]?.value ?? '' }
+    }
     onChange([...active, next])
     setAddOpen(false)
     setAutoEditId(def.id)
@@ -119,6 +130,10 @@ export function FilterBar({
 
   const updateMulti = (id: string, next: string[]) => {
     onChange(active.map(a => (a.id === id ? { ...a, values: next } : a)))
+  }
+
+  const updateRange = (id: string, from: string | null, to: string | null) => {
+    onChange(active.map(a => (a.id === id ? { ...a, from, to } : a)))
   }
 
   return (
@@ -196,6 +211,21 @@ export function FilterBar({
               values={a.values ?? []}
               initialOpen={autoEditId === a.id}
               onValuesChange={next => updateMulti(a.id, next)}
+              onRemove={() => removeFilter(a.id)}
+              onEditorClosed={() => { if (autoEditId === a.id) setAutoEditId(null) }}
+              size={size}
+            />
+          )
+        }
+        if (def.kind === 'daterange') {
+          return (
+            <DateRangeChip
+              key={a.id}
+              def={def}
+              from={a.from ?? null}
+              to={a.to ?? null}
+              initialOpen={autoEditId === a.id}
+              onRangeChange={(from, to) => updateRange(a.id, from, to)}
               onRemove={() => removeFilter(a.id)}
               onEditorClosed={() => { if (autoEditId === a.id) setAutoEditId(null) }}
               size={size}
@@ -650,4 +680,257 @@ function MultiSelectChip({
       </Popover>
     </span>
   )
+}
+
+// ── Date range chip ─────────────────────────────────────────────────────────
+
+function DateRangeChip({
+  def,
+  from,
+  to,
+  initialOpen,
+  onRangeChange,
+  onRemove,
+  onEditorClosed,
+  size,
+}: {
+  def: FilterDef
+  from: string | null
+  to: string | null
+  initialOpen: boolean
+  onRangeChange: (from: string | null, to: string | null) => void
+  onRemove: () => void
+  onEditorClosed: () => void
+  size: 'md' | 'sm'
+}) {
+  const ref = React.useRef<HTMLButtonElement | null>(null)
+  const [open, setOpen] = React.useState(initialOpen)
+  React.useEffect(() => {
+    if (initialOpen) setOpen(true)
+  }, [initialOpen])
+
+  const chipHeight = size === 'sm' ? '1.875rem' : '2.25rem'
+  const chipFont = size === 'sm' ? 'var(--text-xs)' : 'var(--text-sm)'
+
+  const displayLabel: React.ReactNode = (!from && !to)
+    ? <span style={{ color: 'var(--color-text-subtle)' }}>Any</span>
+    : <span style={{ color: 'var(--color-text)', whiteSpace: 'nowrap' }}>
+        {formatRangeLabel(from, to)}
+      </span>
+
+  const presets: Array<{ label: string; from: string | null; to: string | null }> = (() => {
+    const today = new Date()
+    const todayISO = isoOf(today)
+    const startOfWeek = new Date(today)
+    startOfWeek.setDate(today.getDate() - today.getDay()) // Sunday
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+    const minus30 = new Date(today)
+    minus30.setDate(today.getDate() - 30)
+    const minus90 = new Date(today)
+    minus90.setDate(today.getDate() - 90)
+    return [
+      { label: 'Today',       from: todayISO, to: todayISO },
+      { label: 'This week',   from: isoOf(startOfWeek), to: todayISO },
+      { label: 'This month',  from: isoOf(startOfMonth), to: todayISO },
+      { label: 'Last 30 days', from: isoOf(minus30), to: todayISO },
+      { label: 'Last 90 days', from: isoOf(minus90), to: todayISO },
+    ]
+  })()
+
+  return (
+    <span style={{ display: 'inline-flex' }}>
+      <button
+        ref={ref}
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="inline-flex items-center"
+        style={{
+          gap: '0.375rem',
+          height: chipHeight,
+          paddingLeft: '0.625rem',
+          paddingRight: def.nonRemovable ? '0.625rem' : '0.25rem',
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-md)',
+          fontSize: chipFont,
+          fontWeight: 500,
+          color: 'var(--color-text)',
+          cursor: 'pointer',
+          transition: 'border-color 150ms ease, background-color 150ms ease',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-border-strong, var(--color-text-subtle))' }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <span style={{ color: 'var(--color-text-muted)' }}>{def.label}</span>
+        {displayLabel}
+        {!def.nonRemovable && (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { e.stopPropagation(); onRemove() }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                e.stopPropagation()
+                onRemove()
+              }
+            }}
+            aria-label={`Remove ${def.label} filter`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '1.25rem',
+              height: '1.25rem',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--color-text-subtle)',
+              transition: 'background-color 120ms ease, color 120ms ease',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'var(--color-bg-tertiary)'
+              e.currentTarget.style.color = 'var(--color-text)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = 'var(--color-text-subtle)'
+            }}
+          >
+            <X size={12} aria-hidden="true" />
+          </span>
+        )}
+      </button>
+      <Popover
+        anchorRef={ref}
+        open={open}
+        onClose={() => { setOpen(false); onEditorClosed() }}
+        align="start"
+        width="16rem"
+      >
+        <div role="group" aria-label={`${def.label} range`}>
+          {/* Preset list */}
+          {presets.map(p => {
+            const isActive = from === p.from && to === p.to
+            return (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => { onRangeChange(p.from, p.to); setOpen(false); onEditorClosed() }}
+                className="w-full inline-flex items-center"
+                style={{
+                  gap: '0.5rem',
+                  padding: '0.4375rem 0.625rem',
+                  background: isActive ? 'var(--color-bg-secondary)' : 'transparent',
+                  border: 'none',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 'var(--text-sm)',
+                  color: 'var(--color-text)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = isActive ? 'var(--color-bg-secondary)' : 'transparent' }}
+              >
+                <span style={{ flex: 1 }}>{p.label}</span>
+                {isActive && <Check size={13} aria-hidden="true" style={{ color: 'var(--color-brand)' }} />}
+              </button>
+            )
+          })}
+          {/* Custom range — two date inputs */}
+          <div style={{
+            marginTop: '0.1875rem',
+            padding: '0.4375rem 0.625rem',
+            borderTop: '1px solid var(--color-border-subtle)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.3125rem',
+          }}>
+            <span style={{
+              fontSize: '0.625rem',
+              fontWeight: 600,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              color: 'var(--color-text-subtle)',
+            }}>Custom</span>
+            <div style={{ display: 'flex', gap: '0.3125rem', alignItems: 'center' }}>
+              <input
+                type="date"
+                value={from ?? ''}
+                onChange={(e) => onRangeChange(e.target.value || null, to)}
+                aria-label="From date"
+                style={dateInputStyle}
+              />
+              <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.75rem' }}>to</span>
+              <input
+                type="date"
+                value={to ?? ''}
+                onChange={(e) => onRangeChange(from, e.target.value || null)}
+                aria-label="To date"
+                style={dateInputStyle}
+              />
+            </div>
+          </div>
+          {(from || to) && (
+            <button
+              type="button"
+              onClick={() => onRangeChange(null, null)}
+              className="w-full"
+              style={{
+                marginTop: '0.1875rem',
+                padding: '0.4375rem 0.625rem',
+                background: 'transparent',
+                border: 'none',
+                borderTop: '1px solid var(--color-border-subtle)',
+                fontSize: 'var(--text-xs)',
+                fontWeight: 600,
+                color: 'var(--color-text-muted)',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text)' }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+            >
+              Clear range
+            </button>
+          )}
+        </div>
+      </Popover>
+    </span>
+  )
+}
+
+const dateInputStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  height: '1.75rem',
+  padding: '0 0.4375rem',
+  background: 'var(--color-bg)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  fontSize: '0.75rem',
+  color: 'var(--color-text)',
+  outline: 'none',
+}
+
+function isoOf(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function formatRangeLabel(from: string | null, to: string | null): string {
+  if (from && to && from === to) return shortDate(from)
+  if (from && to) return `${shortDate(from)} – ${shortDate(to)}`
+  if (from) return `From ${shortDate(from)}`
+  if (to) return `Until ${shortDate(to)}`
+  return ''
+}
+
+function shortDate(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('en', { day: 'numeric', month: 'short' })
 }
