@@ -1,48 +1,72 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
-import { Search, Plus, Users, RefreshCw, ArrowUpDown } from 'lucide-react'
-import { ClientCard } from '@/components/tahi/client-card'
+import {
+  Plus, Users, Globe, MessageSquare, Clock, ArrowUpRight,
+  Building2, Mail, User as UserIcon, RefreshCw, Save,
+} from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
-import { NewClientDialog } from '@/components/tahi/dialogs/new-client-dialog'
 import { apiPath } from '@/lib/api'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { PageHeader } from '@/components/tahi/page-header'
-import { Input } from '@/components/tahi/input'
+import { Avatar } from '@/components/tahi/avatar'
+import { Badge, type BadgeTone } from '@/components/tahi/badge'
+import { Card } from '@/components/tahi/card'
+import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
+import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
+import { EmptyState } from '@/components/tahi/empty-state'
+import { SlideOver } from '@/components/tahi/slide-over'
+import { Input, Select } from '@/components/tahi/input'
+import { useToast } from '@/components/tahi/toast'
+import { formatDistanceToNow } from 'date-fns'
 
-// Tab layout: Active (status='active') first, then a dynamic tab per
-// plan-type present among active clients (Maintain, Scale, Tune, Launch,
-// Hourly, Custom…), then status tabs for Paused / Churned / Archived.
-// Prospects are intentionally absent — they live in the pipeline.
-//
-// A tab's `value` is either a status string ("active" / "paused" / "churned"
-// / "archived") or "plan:<planType>" for the plan tabs. The local filter
-// reads the prefix.
-type TabValue = 'active' | 'paused' | 'churned' | 'archived' | `plan:${string}`
+// ── Static config ───────────────────────────────────────────────────────────
 
-const STATUS_TABS: { label: string; value: TabValue }[] = [
-  { label: 'Active',   value: 'active' },
-  { label: 'Paused',   value: 'paused' },
-  { label: 'Churned',  value: 'churned' },
-  { label: 'Archived', value: 'archived' },
+// Status options drive the Status filter chip. Prospects live in the
+// pipeline so they're absent here. Tones match the rest of the dashboard's
+// status language (positive = active, warning = paused, danger = churned).
+interface StatusDef {
+  value: string
+  label: string
+  tone: BadgeTone
+}
+const STATUSES: StatusDef[] = [
+  { value: 'active',   label: 'Active',   tone: 'positive' },
+  { value: 'paused',   label: 'Paused',   tone: 'warning'  },
+  { value: 'churned',  label: 'Churned',  tone: 'danger'   },
+  { value: 'archived', label: 'Archived', tone: 'neutral'  },
 ]
+const STATUS_BY_VALUE = new Map(STATUSES.map(s => [s.value, s]))
 
-// Display-friendly labels for known plan types — anything else falls back
-// to a Title-Cased version of the raw value.
-const PLAN_LABELS: Record<string, string> = {
-  maintain: 'Maintain',
-  scale: 'Scale',
-  tune: 'Tune',
-  launch: 'Launch',
-  hourly: 'Hourly',
-  custom: 'Custom',
+// Plan tones mirror the per-plan colouring used elsewhere in the dashboard
+// (Maintain = brand green, Scale = teal, Tune = info, Launch = purple,
+// Hourly = warning, Custom = neutral). Anything unrecognised falls through
+// to neutral via the lookup.
+interface PlanDef {
+  value: string
+  label: string
+  tone: BadgeTone
+}
+const PLANS: PlanDef[] = [
+  { value: 'maintain', label: 'Maintain', tone: 'brand'   },
+  { value: 'scale',    label: 'Scale',    tone: 'teal'    },
+  { value: 'tune',     label: 'Tune',     tone: 'info'    },
+  { value: 'launch',   label: 'Launch',   tone: 'purple'  },
+  { value: 'hourly',   label: 'Hourly',   tone: 'warning' },
+  { value: 'custom',   label: 'Custom',   tone: 'neutral' },
+]
+const PLAN_BY_VALUE = new Map(PLANS.map(p => [p.value, p]))
+
+// Health tone map for the small dot column. Green / amber / red are the
+// only values stored.
+const HEALTH_TONE: Record<string, BadgeTone> = {
+  green: 'positive',
+  amber: 'warning',
+  red:   'danger',
 }
 
-function planLabel(plan: string): string {
-  if (PLAN_LABELS[plan]) return PLAN_LABELS[plan]
-  return plan.charAt(0).toUpperCase() + plan.slice(1)
-}
+// ── Types ───────────────────────────────────────────────────────────────────
 
 interface Organisation {
   id: string
@@ -57,55 +81,137 @@ interface Organisation {
   createdAt: string | null
 }
 
+// ── Component ───────────────────────────────────────────────────────────────
+
 export function ClientList() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
 
-  const search = searchParams.get('q') ?? ''
-  // Default to the Active tab when nothing is in the URL.
-  const activeTab = (searchParams.get('tab') ?? 'active') as TabValue
-  const sortParam = searchParams.get('sort') ?? 'name'
+  // URL-backed state. We keep `q` and `status` in the URL so bookmarks /
+  // shared links still work. The plan filter is a client-side multiselect
+  // and lives only in component state. It changes a lot during browsing
+  // and doesn't need URL persistence.
+  const urlSearch = searchParams.get('q') ?? ''
+  // Status URL param is a comma-list of values. Default is the "currently
+  // visible" set: active + paused + churned (everything except archived).
+  // This matches the previous default tab (Active) but lets the user see
+  // multiple status buckets at once via the multiselect chip.
+  const urlStatusRaw = searchParams.get('status')
+  const urlStatuses = useMemo(
+    () => urlStatusRaw ? urlStatusRaw.split(',').filter(Boolean) : ['active'],
+    [urlStatusRaw],
+  )
 
+  const [searchInput, setSearchInput] = useState(urlSearch)
   const [orgs, setOrgs] = useState<Organisation[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(() => searchParams.get('new') === '1')
 
-  // Listen for keyboard shortcut events
+  // New-client form draft. Shape mirrors the POST /api/admin/clients
+  // payload exactly so no API change is needed when this lands.
+  const initialDraft = useMemo(() => ({
+    name: '',
+    website: '',
+    industry: '',
+    planType: '',
+    primaryContactName: '',
+    primaryContactEmail: '',
+  }), [])
+  const [draft, setDraft] = useState(initialDraft)
+  const [saving, setSaving] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const { showToast } = useToast()
+
+  function updateDraft<K extends keyof typeof initialDraft>(k: K, v: string) {
+    setDraft(prev => ({ ...prev, [k]: v }))
+    setCreateError(null)
+  }
+
+  function closeDialog() {
+    setDialogOpen(false)
+    setDraft(initialDraft)
+    setCreateError(null)
+  }
+
+  // Create handler. Calls the same endpoint and accepts the same body
+  // shape as the prior <NewClientDialog>, so the BE contract is untouched.
+  async function handleCreate() {
+    if (!draft.name.trim()) {
+      setCreateError('Client name is required')
+      return
+    }
+    setSaving(true)
+    setCreateError(null)
+    try {
+      const res = await fetch(apiPath('/api/admin/clients'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft),
+      })
+      if (!res.ok) {
+        const data = await res.json() as { error?: string }
+        throw new Error(data.error ?? 'Failed to create client')
+      }
+      const data = await res.json() as { id?: string }
+      showToast('Client created successfully')
+      closeDialog()
+      await fetchClients()
+      if (data.id) {
+        router.push(`/clients/${data.id}`)
+      }
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Something went wrong')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // FilterBar active state. Status + plan are both multiselect chips with
+  // nonRemovable so they're permanent on the bar (no X, no "+ Add filter"
+  // button). Same UX shape as the docs / leads pages.
+  const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>(() => ([
+    { id: 'status', values: urlStatuses },
+    { id: 'plan',   values: [] },
+  ]))
+
+  // Mirror URL changes (back/forward) into local state.
+  useEffect(() => {
+    setSearchInput(urlSearch)
+  }, [urlSearch])
+
+  // Write status changes back to the URL so the view is shareable.
+  // Debounced via the user's filter chip interaction: happens on every
+  // change which is fine because router.replace is cheap and doesn't
+  // re-trigger the fetch (the fetch effect depends on `urlStatuses` which
+  // only changes when the URL param changes).
+  const syncStatusToUrl = useCallback((values: string[]) => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (values.length === 0 || (values.length === 1 && values[0] === 'active')) {
+      params.delete('status')
+    } else {
+      params.set('status', values.join(','))
+    }
+    router.replace(`${pathname}?${params.toString()}`)
+  }, [searchParams, pathname, router])
+
+  // Keyboard shortcut listener. Same `tahi:shortcut` channel used
+  // elsewhere in the dashboard.
   useEffect(() => {
     function handleShortcut(e: Event) {
       const detail = (e as CustomEvent).detail
-      if (detail === 'new-client') setDialogOpen(true)
+      if (detail === 'new-client') {
+        setDraft(initialDraft)
+        setCreateError(null)
+        setDialogOpen(true)
+      }
     }
     window.addEventListener('tahi:shortcut', handleShortcut)
     return () => window.removeEventListener('tahi:shortcut', handleShortcut)
-  }, [])
+  }, [initialDraft])
 
-  // Local input state for debouncing
-  const [searchInput, setSearchInput] = useState(search)
+  // Debounce the search input -> URL.
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Sync input if URL changes externally
-  useEffect(() => {
-    setSearchInput(search)
-  }, [search])
-
-  function toggleSort() {
-    const params = new URLSearchParams(searchParams.toString())
-    params.set('sort', sortParam === 'name' ? 'created' : 'name')
-    router.replace(`${pathname}?${params.toString()}`)
-  }
-
-  function setTab(value: TabValue) {
-    const params = new URLSearchParams(searchParams.toString())
-    if (value === 'active') {
-      params.delete('tab')
-    } else {
-      params.set('tab', value)
-    }
-    router.replace(`${pathname}?${params.toString()}`)
-  }
-
   function handleSearchChange(value: string) {
     setSearchInput(value)
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -120,36 +226,63 @@ export function ClientList() {
     }, 300)
   }
 
-  // Fetch all non-prospect, non-archived clients in one shot and tab between
-  // them locally so each tab is instant + the counts are accurate. Archived
-  // gets its own fetch (kept small via the API filter, only when needed).
-  // Refetch only when we cross the archived boundary, not on every tab.
-  const archivedView = activeTab === 'archived'
+  // Fetch. We let the server filter on `search` and `status=archived`
+  // (because archived rows aren't returned by default) and do everything
+  // else client-side so the FilterBar feels instant.
+  // When the user selects only archived statuses, hit the archived
+  // endpoint variant; otherwise fetch the default (non-archived) set.
+  const needsArchived = urlStatuses.includes('archived')
+  const onlyArchived = needsArchived && urlStatuses.length === 1
   const fetchClients = useCallback(async () => {
     setLoading(true)
     try {
-      const params = new URLSearchParams()
-      if (search) params.set('search', search)
-      if (archivedView) params.set('status', 'archived')
-      const res = await fetch(apiPath(`/api/admin/clients?${params}`))
-      if (!res.ok) throw new Error('Failed to fetch')
-      const data = await res.json() as { organisations?: Organisation[] }
-      setOrgs(data.organisations ?? [])
+      // If only archived is selected, ask the API for the archived bucket.
+      // If archived is part of a wider selection, we do two fetches and
+      // merge (one default, one archived) so the user can see "active plus
+      // archived" together. This keeps the existing API contract.
+      const baseParams = new URLSearchParams()
+      if (urlSearch) baseParams.set('search', urlSearch)
+
+      if (onlyArchived) {
+        baseParams.set('status', 'archived')
+        const res = await fetch(apiPath(`/api/admin/clients?${baseParams}`))
+        if (!res.ok) throw new Error('Failed to fetch')
+        const data = await res.json() as { organisations?: Organisation[] }
+        setOrgs(data.organisations ?? [])
+      } else if (needsArchived) {
+        const [defaultRes, archivedRes] = await Promise.all([
+          fetch(apiPath(`/api/admin/clients?${baseParams}`)),
+          fetch(apiPath(`/api/admin/clients?${new URLSearchParams({
+            ...(urlSearch ? { search: urlSearch } : {}),
+            status: 'archived',
+          })}`)),
+        ])
+        if (!defaultRes.ok || !archivedRes.ok) throw new Error('Failed to fetch')
+        const a = await defaultRes.json() as { organisations?: Organisation[] }
+        const b = await archivedRes.json() as { organisations?: Organisation[] }
+        setOrgs([...(a.organisations ?? []), ...(b.organisations ?? [])])
+      } else {
+        const res = await fetch(apiPath(`/api/admin/clients?${baseParams}`))
+        if (!res.ok) throw new Error('Failed to fetch')
+        const data = await res.json() as { organisations?: Organisation[] }
+        setOrgs(data.organisations ?? [])
+      }
     } catch {
       setOrgs([])
     } finally {
       setLoading(false)
     }
-  }, [search, archivedView])
+  }, [urlSearch, needsArchived, onlyArchived])
 
   useEffect(() => { fetchClients() }, [fetchClients])
 
   const { isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
 
-  // When impersonating a team member, filter clients to only those they have access to
-  const filteredOrgs = isImpersonatingTeamMember
+  // Apply impersonated team-member scoping. Same logic as before: if
+  // there are no rules at all the impersonated user sees nothing; rules
+  // can scope by all_clients / plan_type / specific_clients.
+  const scopedOrgs = isImpersonatingTeamMember
     ? orgs.filter(org => {
-      // No access rules means no access to any client
       if (impersonatedAccessRules.length === 0) return false
       return impersonatedAccessRules.some(rule => {
         if (rule.scopeType === 'all_clients') return true
@@ -160,76 +293,221 @@ export function ClientList() {
     })
     : orgs
 
-  // Determine if the impersonated team member is a viewer (hide create/edit actions)
   const isViewerImpersonation = isImpersonatingTeamMember &&
     impersonatedAccessRules.length > 0 &&
     impersonatedAccessRules.every(r => r.role === 'viewer')
 
-  // Derive tab counts from the fetched set. When viewing Archived, the
-  // fetch only returns archived rows, so the other counts will be zero —
-  // we hide them in that mode to avoid showing misleading "0".
-  const activeOrgs = filteredOrgs.filter(o => o.status === 'active')
-  const tabCounts: Record<string, number> = {
-    active: activeOrgs.length,
-    paused: filteredOrgs.filter(o => o.status === 'paused').length,
-    churned: filteredOrgs.filter(o => o.status === 'churned').length,
-    archived: archivedView ? filteredOrgs.length : 0,
-  }
+  // Read selected filter values out of the FilterBar's active state.
+  const selectedStatuses = useMemo(() => {
+    const f = activeFilters.find(a => a.id === 'status')
+    return new Set(f?.values ?? [])
+  }, [activeFilters])
+  const selectedPlans = useMemo(() => {
+    const f = activeFilters.find(a => a.id === 'plan')
+    return new Set(f?.values ?? [])
+  }, [activeFilters])
 
-  // Dynamic plan tabs: any planType present among active clients gets a
-  // tab. Ordered with the canonical plans first, then anything else.
-  const planSet = new Map<string, number>()
-  for (const org of activeOrgs) {
-    if (org.planType) planSet.set(org.planType, (planSet.get(org.planType) ?? 0) + 1)
-  }
-  const canonicalOrder = ['maintain', 'scale', 'tune', 'launch', 'hourly', 'custom']
-  const planTabs = Array.from(planSet.keys()).sort((a, b) => {
-    const ai = canonicalOrder.indexOf(a)
-    const bi = canonicalOrder.indexOf(b)
-    if (ai === -1 && bi === -1) return a.localeCompare(b)
-    if (ai === -1) return 1
-    if (bi === -1) return -1
-    return ai - bi
-  }).map(plan => ({
-    label: planLabel(plan),
-    value: (`plan:${plan}`) as TabValue,
-    count: planSet.get(plan) ?? 0,
-  }))
+  // Apply client-side filters (status + plan). Search is already applied
+  // on the server side via the `q` URL param.
+  const filteredOrgs = useMemo(() => {
+    return scopedOrgs.filter(o => {
+      if (selectedStatuses.size > 0 && !selectedStatuses.has(o.status)) return false
+      if (selectedPlans.size > 0) {
+        // "No plan" is selected when the user picks zero items; we only
+        // hide rows when at least one plan is picked AND this org's plan
+        // isn't in the set. Orgs with null planType are excluded when any
+        // specific plan is picked.
+        if (!o.planType || !selectedPlans.has(o.planType)) return false
+      }
+      return true
+    })
+  }, [scopedOrgs, selectedStatuses, selectedPlans])
 
-  // Apply the current tab to the list.
-  const tabbedOrgs = filteredOrgs.filter(o => {
-    if (activeTab === 'active') return o.status === 'active'
-    if (activeTab === 'paused') return o.status === 'paused'
-    if (activeTab === 'churned') return o.status === 'churned'
-    if (activeTab === 'archived') return true // already filtered server-side
-    if (activeTab.startsWith('plan:')) {
-      const plan = activeTab.slice('plan:'.length)
-      return o.status === 'active' && o.planType === plan
-    }
-    return true
-  })
+  // FilterBar definitions. Both filters are nonRemovable multiselects so
+  // they always sit on the bar and never expose a "+ Add filter" button.
+  const filterDefs: FilterDef[] = useMemo(() => ([
+    {
+      id: 'status',
+      label: 'Status',
+      kind: 'multiselect',
+      nonRemovable: true,
+      options: STATUSES.map(s => ({ value: s.value, label: s.label, tone: s.tone })),
+    },
+    {
+      id: 'plan',
+      label: 'Plan',
+      kind: 'multiselect',
+      nonRemovable: true,
+      options: PLANS.map(p => ({ value: p.value, label: p.label, tone: p.tone })),
+    },
+  ]), [])
 
-  const sortedOrgs = [...tabbedOrgs].sort((a, b) => {
-    if (sortParam === 'created') {
-      return new Date(b.createdAt ?? '').getTime() - new Date(a.createdAt ?? '').getTime()
-    }
-    return (a.name ?? '').localeCompare(b.name ?? '')
-  })
+  // Push status changes to the URL so the deep-link survives. Plan stays
+  // ephemeral.
+  const handleFiltersChange = useCallback((next: ActiveFilter[]) => {
+    setActiveFilters(next)
+    const statusValues = next.find(a => a.id === 'status')?.values ?? []
+    syncStatusToUrl(statusValues)
+  }, [syncStatusToUrl])
+
+  // ── DataTable columns ────────────────────────────────────────────────────
+
+  const columns: DataTableColumn<Organisation>[] = useMemo(() => ([
+    {
+      key: 'name',
+      header: 'Client',
+      sortable: true,
+      sortValue: r => r.name.toLowerCase(),
+      minWidth: '18rem',
+      render: r => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', minWidth: 0 }}>
+          <Avatar name={r.name} size="sm" />
+          <div style={{ minWidth: 0 }}>
+            <div style={{
+              fontWeight: 600,
+              color: 'var(--color-text)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}>{r.name}</div>
+            {(r.industry || r.website) && (
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.375rem',
+                fontSize: '0.6875rem',
+                color: 'var(--color-text-muted)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {r.industry && <span>{r.industry}</span>}
+                {r.industry && r.website && <span aria-hidden="true">·</span>}
+                {r.website && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <Globe size={10} aria-hidden="true" />
+                    {r.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      sortValue: r => r.status,
+      width: '8rem',
+      render: r => {
+        const s = STATUS_BY_VALUE.get(r.status)
+        return (
+          <Badge tone={s?.tone ?? 'neutral'} variant="soft" size="sm" dot={false}>
+            {s?.label ?? r.status}
+          </Badge>
+        )
+      },
+    },
+    {
+      key: 'plan',
+      header: 'Plan',
+      sortable: true,
+      sortValue: r => r.planType ?? '',
+      width: '7.5rem',
+      render: r => {
+        if (!r.planType) {
+          return <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.6875rem' }}>-</span>
+        }
+        const p = PLAN_BY_VALUE.get(r.planType)
+        return (
+          <Badge tone={p?.tone ?? 'neutral'} variant="soft" size="sm" dot={false}>
+            {p?.label ?? r.planType}
+          </Badge>
+        )
+      },
+    },
+    {
+      key: 'health',
+      header: 'Health',
+      sortable: true,
+      sortValue: r => r.healthStatus ?? '',
+      width: '6.5rem',
+      render: r => {
+        if (!r.healthStatus) {
+          return <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.6875rem' }}>-</span>
+        }
+        const tone = HEALTH_TONE[r.healthStatus] ?? 'neutral'
+        const label = r.healthStatus.charAt(0).toUpperCase() + r.healthStatus.slice(1)
+        return (
+          <Badge tone={tone} variant="soft" size="sm" dot={true}>
+            {label}
+          </Badge>
+        )
+      },
+    },
+    {
+      key: 'openRequests',
+      header: 'Open',
+      sortable: true,
+      sortValue: r => r.openRequestCount ?? 0,
+      width: '6rem',
+      render: r => (
+        <span style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.3125rem',
+          fontSize: '0.75rem',
+          color: r.openRequestCount > 0 ? 'var(--color-text)' : 'var(--color-text-subtle)',
+          fontVariantNumeric: 'tabular-nums',
+        }}>
+          <MessageSquare size={11} aria-hidden="true" />
+          {r.openRequestCount}
+        </span>
+      ),
+    },
+    {
+      key: 'updatedAt',
+      header: 'Last activity',
+      sortable: true,
+      sortValue: r => r.updatedAt ?? r.createdAt ?? '',
+      width: '10rem',
+      render: r => {
+        const ts = r.updatedAt ?? r.createdAt
+        if (!ts) {
+          return <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.6875rem' }}>-</span>
+        }
+        return (
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.3125rem',
+            fontSize: '0.75rem',
+            color: 'var(--color-text-muted)',
+          }}>
+            <Clock size={11} aria-hidden="true" />
+            {formatDistanceToNow(new Date(ts), { addSuffix: true })}
+          </span>
+        )
+      },
+    },
+  ]), [])
+
+  // ── Render ──────────────────────────────────────────────────────────────
+
+  const totalCount = filteredOrgs.length
+  const subtitle = totalCount > 0
+    ? `${totalCount} ${totalCount === 1 ? 'client' : 'clients'} in this view`
+    : 'Active, paused, and churned client organisations. Prospects live in the pipeline.'
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="Clients"
-        subtitle={
-          tabbedOrgs.length > 0
-            ? `${tabbedOrgs.length} ${tabbedOrgs.length === 1 ? 'client' : 'clients'} in this view`
-            : 'Active, paused, and churned client organisations. Prospects live in the pipeline.'
-        }
-      >
+      <PageHeader title="Clients" subtitle={subtitle}>
         {!isViewerImpersonation && (
           <TahiButton
             iconLeft={<Plus className="w-4 h-4" />}
-            onClick={() => setDialogOpen(true)}
+            onClick={() => { setDraft(initialDraft); setCreateError(null); setDialogOpen(true) }}
             size="md"
           >
             Add client
@@ -237,174 +515,262 @@ export function ClientList() {
         )}
       </PageHeader>
 
-      <Input
-        value={searchInput}
-        onChange={e => handleSearchChange(e.target.value)}
-        placeholder="Search clients by name or website..."
-        leadingIcon={<Search size={14} aria-hidden="true" />}
-        style={{ width: '100%' }}
+      <FilterBar
+        filters={filterDefs}
+        active={activeFilters}
+        onChange={handleFiltersChange}
+        search={{
+          value: searchInput,
+          onChange: handleSearchChange,
+          placeholder: 'Search clients by name or website...',
+        }}
+        size="sm"
       />
 
-      {/* Tabs: status (Active / Paused / Churned / Archived) + dynamic
-          per-plan tabs derived from the active set. */}
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide flex-1" style={{ WebkitOverflowScrolling: 'touch' }}>
-          <TabButton
-            label="Active"
-            count={tabCounts.active}
-            active={activeTab === 'active'}
-            onClick={() => setTab('active')}
-          />
-          {planTabs.map(t => (
-            <TabButton
-              key={t.value}
-              label={t.label}
-              count={t.count}
-              active={activeTab === t.value}
-              onClick={() => setTab(t.value)}
-              subtle
+      <Card padding="none">
+        <DataTable<Organisation>
+          ariaLabel="Clients"
+          columns={columns}
+          rows={filteredOrgs}
+          getRowId={r => r.id}
+          defaultSort={{ key: 'name', dir: 'asc' }}
+          loading={loading}
+          onRowClick={(r) => router.push(`/clients/${r.id}`)}
+          rowActions={(r) => [
+            {
+              label: 'Open client',
+              icon: <ArrowUpRight size={14} />,
+              onClick: () => router.push(`/clients/${r.id}`),
+            },
+          ]}
+          empty={
+            <EmptyState
+              icon={<Users className="w-6 h-6" />}
+              title={scopedOrgs.length === 0 ? 'No clients yet' : 'No matches'}
+              description={scopedOrgs.length === 0
+                ? 'Add your first client to get started. They will receive an invite email to access their portal.'
+                : 'Try clearing a filter or adjusting your search.'}
+              action={
+                scopedOrgs.length === 0 && !isViewerImpersonation ? (
+                  <TahiButton
+                    size="sm"
+                    onClick={() => { setDraft(initialDraft); setCreateError(null); setDialogOpen(true) }}
+                    iconLeft={<Plus className="w-3.5 h-3.5" />}
+                  >
+                    Add first client
+                  </TahiButton>
+                ) : undefined
+              }
             />
-          ))}
-          <span aria-hidden="true" style={{ width: 1, alignSelf: 'stretch', background: 'var(--color-border-subtle)', flexShrink: 0, margin: '0 0.25rem' }} />
-          <TabButton
-            label="Paused"
-            count={tabCounts.paused}
-            active={activeTab === 'paused'}
-            onClick={() => setTab('paused')}
+          }
+        />
+      </Card>
+
+      <SlideOver
+        open={dialogOpen}
+        onClose={closeDialog}
+        icon={<Building2 size={15} />}
+        title="Add new client"
+        subtitle="Creates their portal and sends an invite email."
+        maxWidth="48rem"
+      >
+        <SlideOver.Body>
+          <NewClientForm
+            draft={draft}
+            onUpdate={updateDraft}
+            error={createError}
           />
-          <TabButton
-            label="Churned"
-            count={tabCounts.churned}
-            active={activeTab === 'churned'}
-            onClick={() => setTab('churned')}
-          />
-          <TabButton
-            label="Archived"
-            count={archivedView ? tabCounts.archived : undefined}
-            active={activeTab === 'archived'}
-            onClick={() => setTab('archived')}
-          />
-        </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {loading && (
-            <RefreshCw className="w-3.5 h-3.5 text-[var(--color-text-subtle)] animate-spin" />
-          )}
-          <button
-            onClick={toggleSort}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-full transition-colors bg-[var(--color-bg)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-brand)] hover:text-[var(--color-brand-dark)] whitespace-nowrap flex-shrink-0"
+        </SlideOver.Body>
+        <SlideOver.Footer>
+          <TahiButton variant="secondary" size="sm" onClick={closeDialog} disabled={saving}>
+            Cancel
+          </TahiButton>
+          <div style={{ flex: 1 }} />
+          <TahiButton
+            size="sm"
+            onClick={handleCreate}
+            disabled={saving || !draft.name.trim()}
+            iconLeft={saving
+              ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              : <Save className="w-3.5 h-3.5" />}
           >
-            <ArrowUpDown className="w-3 h-3" />
-            {sortParam === 'name' ? 'A-Z' : 'Newest'}
-          </button>
-        </div>
-      </div>
-
-      {/* List */}
-      {!loading && orgs.length === 0 ? (
-        <EmptyState onAdd={() => setDialogOpen(true)} />
-      ) : (
-        <div className="space-y-2">
-          {sortedOrgs.map(org => (
-            <ClientCard
-              key={org.id}
-              id={org.id}
-              name={org.name}
-              website={org.website}
-              status={org.status}
-              planType={org.planType}
-              healthStatus={org.healthStatus}
-              openRequestCount={org.openRequestCount}
-              industry={org.industry}
-              lastActivity={org.updatedAt ?? org.createdAt}
-            />
-          ))}
-        </div>
-      )}
-
-      <NewClientDialog open={dialogOpen} onClose={() => { setDialogOpen(false); fetchClients() }} />
+            {saving ? 'Adding...' : 'Add client'}
+          </TahiButton>
+        </SlideOver.Footer>
+      </SlideOver>
     </div>
   )
 }
 
-function TabButton({
-  label, count, active, onClick, subtle = false,
+// ── New-client form (lives inside the SlideOver) ────────────────────────────
+
+interface NewClientDraft {
+  name: string
+  website: string
+  industry: string
+  planType: string
+  primaryContactName: string
+  primaryContactEmail: string
+}
+
+// Plan + industry option lists. Plan values map 1:1 with the BE schema's
+// retainer plan slugs (see POST /api/admin/clients: Maintain/Scale spin up
+// subscriptions + track records when chosen).
+const PLAN_SELECT_OPTIONS = [
+  { value: '',         label: 'No plan yet'                },
+  { value: 'maintain', label: 'Maintain ($1,500/mo)'       },
+  { value: 'scale',    label: 'Scale ($4,000/mo)'          },
+  { value: 'tune',     label: 'Tune ($750 one-off)'        },
+  { value: 'launch',   label: 'Launch ($2,500 one-off)'    },
+  { value: 'hourly',   label: 'Hourly'                     },
+  { value: 'custom',   label: 'Custom project'             },
+] as const
+
+const INDUSTRY_SELECT_OPTIONS = [
+  { value: '',                        label: 'Select industry...'   },
+  { value: 'Technology',              label: 'Technology'           },
+  { value: 'E-commerce',              label: 'E-commerce'           },
+  { value: 'Healthcare',              label: 'Healthcare'           },
+  { value: 'Finance',                 label: 'Finance'              },
+  { value: 'Education',               label: 'Education'            },
+  { value: 'Hospitality',             label: 'Hospitality'          },
+  { value: 'Real estate',             label: 'Real estate'          },
+  { value: 'Professional services',   label: 'Professional services' },
+  { value: 'Non-profit',              label: 'Non-profit'           },
+  { value: 'Other',                   label: 'Other'                },
+] as const
+
+function NewClientForm({
+  draft,
+  onUpdate,
+  error,
 }: {
-  label: string
-  count?: number
-  active: boolean
-  onClick: () => void
-  /** Plan tabs are visually slightly lighter than status tabs so the eye
-   *  groups Active / Paused / Churned / Archived as the primary axis. */
-  subtle?: boolean
+  draft: NewClientDraft
+  onUpdate: <K extends keyof NewClientDraft>(k: K, v: string) => void
+  error: string | null
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center transition-colors whitespace-nowrap flex-shrink-0"
-      style={{
-        gap: '0.375rem',
-        padding: '0.375rem 0.75rem',
-        fontSize: '0.75rem',
-        fontWeight: 500,
-        borderRadius: '9999px',
-        background: active ? 'var(--color-brand)' : 'var(--color-bg)',
-        color: active ? '#ffffff' : 'var(--color-text-muted)',
-        border: `1px solid ${active ? 'var(--color-brand)' : (subtle ? 'var(--color-border-subtle)' : 'var(--color-border)')}`,
-        cursor: 'pointer',
-      }}
-      onMouseEnter={e => {
-        if (!active) {
-          e.currentTarget.style.borderColor = 'var(--color-brand)'
-          e.currentTarget.style.color = 'var(--color-brand-dark)'
-        }
-      }}
-      onMouseLeave={e => {
-        if (!active) {
-          e.currentTarget.style.borderColor = subtle ? 'var(--color-border-subtle)' : 'var(--color-border)'
-          e.currentTarget.style.color = 'var(--color-text-muted)'
-        }
-      }}
-      aria-pressed={active}
-    >
-      <span>{label}</span>
-      {typeof count === 'number' && (
-        <span
-          style={{
-            fontSize: '0.625rem',
-            fontWeight: 600,
-            padding: '0 0.375rem',
-            borderRadius: '9999px',
-            background: active ? 'rgba(255,255,255,0.22)' : 'var(--color-bg-secondary)',
-            color: active ? '#ffffff' : 'var(--color-text-subtle)',
-            lineHeight: '1.125rem',
-            minWidth: '1.25rem',
-            textAlign: 'center',
-          }}
-        >
-          {count}
-        </span>
-      )}
-    </button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+      <div aria-live="polite">
+        {error && (
+          <div style={{
+            padding: '0.5rem 0.75rem',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--color-danger-bg)',
+            border: '1px solid var(--color-danger)',
+            color: 'var(--color-danger)',
+            fontSize: 'var(--text-sm)',
+          }}>
+            {error}
+          </div>
+        )}
+      </div>
+
+      <Field label="Client / company name *">
+        <Input
+          value={draft.name}
+          onChange={(e) => onUpdate('name', e.target.value)}
+          placeholder="Acme Corp"
+          inputSize="md"
+          leadingIcon={<Building2 size={13} aria-hidden="true" />}
+          autoFocus
+        />
+      </Field>
+
+      {/* Website is the wider field, industry is a short dropdown, so use
+          the 1.5fr / 1fr proportion called out in the brief. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: '0.75rem' }}>
+        <Field label="Website">
+          <Input
+            value={draft.website}
+            onChange={(e) => onUpdate('website', e.target.value)}
+            placeholder="https://..."
+            inputSize="md"
+            type="url"
+            leadingIcon={<Globe size={13} aria-hidden="true" />}
+          />
+        </Field>
+        <Field label="Industry">
+          <Select
+            value={draft.industry}
+            onChange={(e) => onUpdate('industry', e.target.value)}
+            options={INDUSTRY_SELECT_OPTIONS}
+            selectSize="md"
+            style={{ width: '100%' }}
+          />
+        </Field>
+      </div>
+
+      <Field label="Plan">
+        <Select
+          value={draft.planType}
+          onChange={(e) => onUpdate('planType', e.target.value)}
+          options={PLAN_SELECT_OPTIONS}
+          selectSize="md"
+          style={{ width: '100%' }}
+        />
+      </Field>
+
+      <div style={{
+        marginTop: '0.25rem',
+        paddingTop: '0.875rem',
+        borderTop: '1px solid var(--color-border-subtle)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.5rem',
+      }}>
+        <SectionLabel>Primary contact (optional, invite sent on save)</SectionLabel>
+
+        {/* Name + email split: name is shorter on average, email gets the
+            wider column. 1fr / 1.5fr keeps both readable. */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.5fr)', gap: '0.75rem' }}>
+          <Input
+            value={draft.primaryContactName}
+            onChange={(e) => onUpdate('primaryContactName', e.target.value)}
+            placeholder="Full name"
+            inputSize="md"
+            leadingIcon={<UserIcon size={13} aria-hidden="true" />}
+          />
+          <Input
+            value={draft.primaryContactEmail}
+            onChange={(e) => onUpdate('primaryContactEmail', e.target.value)}
+            placeholder="email@company.com"
+            inputSize="md"
+            type="email"
+            leadingIcon={<Mail size={13} aria-hidden="true" />}
+          />
+        </div>
+      </div>
+    </div>
   )
 }
 
-function EmptyState({ onAdd }: { onAdd: () => void }) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col items-center justify-center py-20 text-center">
-      <div
-        className="w-16 h-16 brand-gradient flex items-center justify-center mb-4"
-        style={{ borderRadius: 'var(--radius-leaf)' }}
-      >
-        <Users className="w-8 h-8 text-white" />
-      </div>
-      <h3 className="text-base font-semibold text-[var(--color-text)] mb-2">No clients yet</h3>
-      <p className="text-sm text-[var(--color-text-muted)] max-w-sm">
-        Add your first client to get started. They will receive an invite email to access their portal.
-      </p>
-      <TahiButton className="mt-5" iconLeft={<Plus className="w-4 h-4" />} onClick={onAdd}>
-        Add first client
-      </TahiButton>
+    <div>
+      <label style={{
+        display: 'block',
+        fontSize: '0.625rem',
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        color: 'var(--color-text-subtle)',
+        marginBottom: '0.3125rem',
+      }}>{label}</label>
+      {children}
     </div>
+  )
+}
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <label style={{
+      display: 'block',
+      fontSize: '0.625rem',
+      fontWeight: 600,
+      letterSpacing: '0.06em',
+      textTransform: 'uppercase',
+      color: 'var(--color-text-subtle)',
+    }}>{children}</label>
   )
 }
