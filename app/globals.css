@@ -1333,6 +1333,104 @@ textarea,
   margin-top: 0.375rem;
 }
 
+/* Task lists (Tiptap renders ul[data-type="taskList"] > li[data-type="taskItem"]) */
+.tahi-doc-prose ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.5rem 0;
+}
+.tahi-doc-prose ul[data-type="taskList"] > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4375rem;
+  padding-left: 0;
+  margin: 0.1875rem 0;
+}
+.tahi-doc-prose ul[data-type="taskList"] > li::before {
+  content: none;
+}
+.tahi-doc-prose ul[data-type="taskList"] > li > label {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
+.tahi-doc-prose ul[data-type="taskList"] > li > label > input[type="checkbox"] {
+  width: 0.9375rem;
+  height: 0.9375rem;
+  margin: 0;
+  accent-color: var(--color-brand);
+  cursor: pointer;
+}
+.tahi-doc-prose ul[data-type="taskList"] > li > div {
+  flex: 1;
+  min-width: 0;
+}
+.tahi-doc-prose ul[data-type="taskList"] > li[data-checked="true"] > div {
+  color: var(--color-text-subtle);
+  text-decoration: line-through;
+}
+
+/* Images embedded inside docs */
+.tahi-doc-prose .tahi-doc-image,
+.tahi-doc-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-subtle);
+  margin: 0.625rem 0;
+}
+
+/* Code block (Tiptap renders <pre><code>...</code></pre>) */
+.tahi-doc-prose pre {
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 0.875rem;
+  margin: 0.5rem 0;
+  overflow-x: auto;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+.tahi-doc-prose pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  color: var(--color-text);
+  font-size: inherit;
+}
+
+/* Blockquote */
+.tahi-doc-prose blockquote {
+  margin: 0.625rem 0;
+  padding: 0.25rem 0 0.25rem 0.875rem;
+  border-left: 3px solid var(--color-brand-100);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* Editor-specific overrides: bigger min-height, focus ring, placeholder. */
+.tahi-doc-editor {
+  cursor: text;
+}
+.tahi-doc-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--color-text-subtle);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+.tahi-doc-editor .ProseMirror h1.is-empty::before,
+.tahi-doc-editor .ProseMirror h2.is-empty::before,
+.tahi-doc-editor .ProseMirror h3.is-empty::before {
+  content: attr(data-placeholder);
+  color: var(--color-text-subtle);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
 /* Fix date input calendar icon visibility in light/dark mode */
 input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(0.4);

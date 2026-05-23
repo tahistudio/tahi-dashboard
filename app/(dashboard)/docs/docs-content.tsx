@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
-  BookOpen, Plus, Search, Clock, Save,
-  Trash2, History, RefreshCw, FileText, Edit3,
+  BookOpen, Plus, Clock, Save,
+  Trash2, History, RefreshCw, FileText, Edit3, ArrowLeft,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { EmptyState } from '@/components/tahi/empty-state'
@@ -13,6 +13,7 @@ import { Input } from '@/components/tahi/input'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
+import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
 import dynamic from 'next/dynamic'
 const TiptapDocEditor = dynamic(
   () => import('@/components/tahi/tiptap-doc-editor').then(m => ({ default: m.TiptapDocEditor })),
@@ -164,8 +165,17 @@ export function DocsContent() {
   const [pages, setPages] = useState<DocPage[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  // Multi-select category filter. Empty = no filter.
-  const [activeCategories, setActiveCategories] = useState<Set<string>>(new Set())
+  // FilterBar-style: active filters held as an array of ActiveFilter
+  // (single shape, supports the multiselect kind for categories).
+  const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([])
+  // Read the selected categories out of the categories filter chip,
+  // if it's active. Empty = no filter.
+  const selectedCategories = useMemo(() => {
+    const f = activeFilters.find(a => a.id === 'categories')
+    return new Set(f?.values ?? [])
+  }, [activeFilters])
+  // Historical version the user is viewing. Null = current.
+  const [viewingVersion, setViewingVersion] = useState<DocVersion | null>(null)
 
   const [selectedPage, setSelectedPage] = useState<DocPage | null>(null)
   const [versions, setVersions] = useState<DocVersion[]>([])
@@ -203,6 +213,7 @@ export function DocsContent() {
       setVersions(data.versions)
       setEditing(false)
       setShowVersions(false)
+      setViewingVersion(null)
     } catch {
       // ignore
     }
@@ -219,25 +230,13 @@ export function DocsContent() {
     void loadPage(docParam)
   }, [docParam, loadPage])
 
-  const toggleCategory = (value: string) => {
-    setActiveCategories(prev => {
-      const next = new Set(prev)
-      if (next.has(value)) next.delete(value); else next.add(value)
-      return next
-    })
-  }
-  const clearFilters = () => {
-    setActiveCategories(new Set())
-    setSearch('')
-  }
-
   const filteredPages = useMemo(() => {
     const q = search.trim().toLowerCase()
     return pages.filter(p => {
       const cats = parseCats(p.category)
-      if (activeCategories.size > 0) {
+      if (selectedCategories.size > 0) {
         // Item must carry AT LEAST ONE of the active categories.
-        if (!cats.some(c => activeCategories.has(c))) return false
+        if (!cats.some(c => selectedCategories.has(c))) return false
       }
       if (q) {
         const inTitle = p.title.toLowerCase().includes(q)
@@ -246,7 +245,18 @@ export function DocsContent() {
       }
       return true
     })
-  }, [pages, search, activeCategories])
+  }, [pages, search, selectedCategories])
+
+  // Filter definitions for FilterBar. Categories is multiselect so a
+  // single chip can hold any subset of the available categories.
+  const filterDefs: FilterDef[] = useMemo(() => ([
+    {
+      id: 'categories',
+      label: 'Categories',
+      kind: 'multiselect',
+      options: CATEGORIES.map(c => ({ value: c.value, label: c.label, tone: c.tone })),
+    },
+  ]), [])
 
   const startEdit = (page: DocPage) => {
     setSelectedPage(page)
@@ -329,8 +339,6 @@ export function DocsContent() {
     }
   }
 
-  const filtersActive = activeCategories.size > 0 || search.trim().length > 0
-
   // Column defs for the DataTable. Sortable headers do their own
   // sorting through DataTable's internal state.
   const columns: DataTableColumn<DocPage>[] = [
@@ -364,9 +372,13 @@ export function DocsContent() {
         if (cats.length === 0) {
           return <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.6875rem' }}>—</span>
         }
+        // Cap visible chips at 2 to keep row height stable. Anything
+        // extra collapses to "+N" so the column never expands.
+        const visible = cats.slice(0, 2)
+        const overflow = cats.length - visible.length
         return (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
-            {cats.map(c => {
+          <div style={{ display: 'inline-flex', gap: '0.25rem', alignItems: 'center', whiteSpace: 'nowrap' }}>
+            {visible.map(c => {
               const def = CATEGORY_BY_VALUE.get(c)
               return (
                 <Badge
@@ -380,6 +392,13 @@ export function DocsContent() {
                 </Badge>
               )
             })}
+            {overflow > 0 && (
+              <span style={{
+                fontSize: '0.6875rem',
+                fontWeight: 600,
+                color: 'var(--color-text-muted)',
+              }}>+{overflow}</span>
+            )}
           </div>
         )
       },
@@ -435,61 +454,20 @@ export function DocsContent() {
         </TahiButton>
       </div>
 
-      {/* Filter row */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem' }}>
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search title or content..."
-          inputSize="sm"
-          leadingIcon={<Search size={13} aria-hidden="true" />}
-          style={{ flex: '0 1 22rem', minWidth: '14rem' }}
-        />
-        <span style={{
-          fontSize: '0.625rem',
-          fontWeight: 600,
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
-          color: 'var(--color-text-subtle)',
-          marginLeft: '0.25rem',
-        }}>Categories</span>
-        {CATEGORIES.map(cat => {
-          const active = activeCategories.has(cat.value)
-          return (
-            <Badge
-              key={cat.value}
-              tone={cat.tone}
-              variant={active ? 'solid' : 'outline'}
-              size="sm"
-              dot={false}
-              onClick={() => toggleCategory(cat.value)}
-            >
-              {cat.label}
-            </Badge>
-          )
-        })}
-        {filtersActive && (
-          <button
-            type="button"
-            onClick={clearFilters}
-            className="tahi-focus-ring"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              padding: '0.25rem 0.5rem',
-              fontSize: '0.6875rem',
-              fontWeight: 600,
-              color: 'var(--color-text-muted)',
-              cursor: 'pointer',
-              borderRadius: 'var(--radius-sm)',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text)' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
-          >
-            Clear filters
-          </button>
-        )}
-      </div>
+      {/* Filter row — same FilterBar primitive as the DataTable
+          showcase. Categories is a multiselect chip so a single chip
+          can hold any subset of categories. */}
+      <FilterBar
+        filters={filterDefs}
+        active={activeFilters}
+        onChange={setActiveFilters}
+        search={{
+          value: search,
+          onChange: setSearch,
+          placeholder: 'Search title or content',
+        }}
+        size="sm"
+      />
 
       {/* Table */}
       <DataTable<DocPage>
@@ -522,16 +500,17 @@ export function DocsContent() {
         ]}
       />
 
-      {/* View / inline-edit slide-over */}
+      {/* View / inline-edit slide-over. Wider (56rem) so the doc is
+          easier to read, especially with markdown content + tables. */}
       <SlideOver
         open={!!selectedPage && !showNewForm}
-        onClose={() => { setSelectedPage(null); setEditing(false) }}
+        onClose={() => { setSelectedPage(null); setEditing(false); setViewingVersion(null) }}
         icon={<FileText size={15} />}
         title={editing ? (editTitle || 'Untitled') : (selectedPage?.title ?? '')}
         subtitle={selectedPage && !editing
           ? `Updated ${formatDistanceToNow(new Date(selectedPage.updatedAt), { addSuffix: true })}`
           : undefined}
-        maxWidth="40rem"
+        maxWidth="56rem"
       >
         {selectedPage && (
           <>
@@ -545,8 +524,16 @@ export function DocsContent() {
                   content={editContent}
                   onContentChange={setEditContent}
                 />
+              ) : viewingVersion ? (
+                <VersionView
+                  version={viewingVersion}
+                  onBack={() => setViewingVersion(null)}
+                />
               ) : showVersions ? (
-                <VersionList versions={versions} />
+                <VersionList
+                  versions={versions}
+                  onView={(v) => setViewingVersion(v)}
+                />
               ) : (
                 <>
                   {parseCats(selectedPage.category).length > 0 && (
@@ -620,7 +607,7 @@ export function DocsContent() {
         icon={<Plus size={15} />}
         title="New page"
         subtitle="Add a doc to the team knowledge base."
-        maxWidth="40rem"
+        maxWidth="56rem"
       >
         <SlideOver.Body>
           <EditForm
@@ -763,7 +750,13 @@ function DocBody({ page }: { page: DocPage }) {
   )
 }
 
-function VersionList({ versions }: { versions: DocVersion[] }) {
+function VersionList({
+  versions,
+  onView,
+}: {
+  versions: DocVersion[]
+  onView: (v: DocVersion) => void
+}) {
   if (versions.length === 0) {
     return (
       <p style={{
@@ -778,8 +771,11 @@ function VersionList({ versions }: { versions: DocVersion[] }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
       {versions.map((v, i) => (
-        <div
+        <button
           key={v.id}
+          type="button"
+          onClick={() => onView(v)}
+          className="tahi-focus-ring"
           style={{
             padding: '0.5rem 0.625rem',
             background: 'var(--color-bg-secondary)',
@@ -789,6 +785,18 @@ function VersionList({ versions }: { versions: DocVersion[] }) {
             alignItems: 'center',
             gap: '0.5rem',
             fontSize: '0.75rem',
+            cursor: 'pointer',
+            textAlign: 'left',
+            width: '100%',
+            transition: 'background-color 120ms ease, border-color 120ms ease',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'var(--color-bg)'
+            e.currentTarget.style.borderColor = 'var(--color-border)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'var(--color-bg-secondary)'
+            e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
           }}
         >
           <Clock size={11} aria-hidden="true" style={{ color: 'var(--color-text-subtle)' }} />
@@ -805,8 +813,70 @@ function VersionList({ versions }: { versions: DocVersion[] }) {
               fontWeight: 600,
             }}>Current</span>
           )}
-        </div>
+          <span style={{ flex: 1 }} />
+          <span style={{
+            fontSize: '0.625rem',
+            color: 'var(--color-text-muted)',
+            fontWeight: 600,
+          }}>View →</span>
+        </button>
       ))}
+    </div>
+  )
+}
+
+function VersionView({
+  version,
+  onBack,
+}: {
+  version: DocVersion
+  onBack: () => void
+}) {
+  const html = useMemo(() => {
+    const raw = version.contentTiptap ?? ''
+    if (!raw) return ''
+    return looksLikeHtml(raw) ? raw : renderMarkdown(raw)
+  }, [version.contentTiptap])
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+      <button
+        type="button"
+        onClick={onBack}
+        className="tahi-focus-ring"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.3125rem',
+          padding: '0.25rem 0.5rem',
+          background: 'var(--color-bg-secondary)',
+          border: '1px solid var(--color-border-subtle)',
+          borderRadius: 'var(--radius-sm)',
+          fontSize: '0.6875rem',
+          fontWeight: 600,
+          color: 'var(--color-text)',
+          cursor: 'pointer',
+          width: 'fit-content',
+          transition: 'background-color 120ms ease',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+      >
+        <ArrowLeft size={11} aria-hidden="true" />
+        Back to current
+      </button>
+      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+        Viewing version from {formatDistanceToNow(new Date(version.savedAt), { addSuffix: true })}
+      </span>
+      {html ? (
+        <div
+          className="tahi-doc-prose"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      ) : (
+        <p style={{ fontSize: '0.875rem', color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>
+          This version was empty.
+        </p>
+      )}
     </div>
   )
 }

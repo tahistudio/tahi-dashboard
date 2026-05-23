@@ -47,13 +47,18 @@ export interface FilterOption {
 export interface FilterDef {
   id: string
   label: string
-  kind: 'select'
+  /** select  = single value picked from options
+   *  multiselect = any subset of options, rendered as comma-joined labels */
+  kind: 'select' | 'multiselect'
   options: FilterOption[]
 }
 
 export interface ActiveFilter {
   id: string
-  value: string
+  /** Set when the matching def.kind === 'select'. */
+  value?: string
+  /** Set when the matching def.kind === 'multiselect'. */
+  values?: string[]
 }
 
 interface FilterBarProps {
@@ -91,7 +96,9 @@ export function FilterBar({
   const availableFilters = filters.filter(f => !active.some(a => a.id === f.id))
 
   const addFilter = (def: FilterDef) => {
-    const next: ActiveFilter = { id: def.id, value: def.options[0]?.value ?? '' }
+    const next: ActiveFilter = def.kind === 'multiselect'
+      ? { id: def.id, values: [] }
+      : { id: def.id, value: def.options[0]?.value ?? '' }
     onChange([...active, next])
     setAddOpen(false)
     setAutoEditId(def.id)
@@ -103,6 +110,10 @@ export function FilterBar({
 
   const updateFilter = (id: string, next: string) => {
     onChange(active.map(a => (a.id === id ? { ...a, value: next } : a)))
+  }
+
+  const updateMulti = (id: string, next: string[]) => {
+    onChange(active.map(a => (a.id === id ? { ...a, values: next } : a)))
   }
 
   return (
@@ -172,11 +183,25 @@ export function FilterBar({
       {active.map(a => {
         const def = filters.find(f => f.id === a.id)
         if (!def) return null
+        if (def.kind === 'multiselect') {
+          return (
+            <MultiSelectChip
+              key={a.id}
+              def={def}
+              values={a.values ?? []}
+              initialOpen={autoEditId === a.id}
+              onValuesChange={next => updateMulti(a.id, next)}
+              onRemove={() => removeFilter(a.id)}
+              onEditorClosed={() => { if (autoEditId === a.id) setAutoEditId(null) }}
+              size={size}
+            />
+          )
+        }
         return (
           <FilterChip
             key={a.id}
             def={def}
-            value={a.value}
+            value={a.value ?? ''}
             initialOpen={autoEditId === a.id}
             onValueChange={next => updateFilter(a.id, next)}
             onRemove={() => removeFilter(a.id)}
@@ -410,6 +435,208 @@ function FilterChip({
               </button>
             )
           })}
+        </div>
+      </Popover>
+    </span>
+  )
+}
+
+// ── Multi-select chip ───────────────────────────────────────────────────────
+
+function MultiSelectChip({
+  def,
+  values,
+  initialOpen,
+  onValuesChange,
+  onRemove,
+  onEditorClosed,
+  size,
+}: {
+  def: FilterDef
+  values: string[]
+  initialOpen: boolean
+  onValuesChange: (next: string[]) => void
+  onRemove: () => void
+  onEditorClosed: () => void
+  size: 'md' | 'sm'
+}) {
+  const ref = React.useRef<HTMLButtonElement | null>(null)
+  const [open, setOpen] = React.useState(initialOpen)
+  React.useEffect(() => {
+    if (initialOpen) setOpen(true)
+  }, [initialOpen])
+
+  const chipHeight = size === 'sm' ? '1.875rem' : '2.25rem'
+  const chipFont = size === 'sm' ? 'var(--text-xs)' : 'var(--text-sm)'
+  const selected = def.options.filter(o => values.includes(o.value))
+
+  const toggle = (value: string) => {
+    if (values.includes(value)) onValuesChange(values.filter(v => v !== value))
+    else onValuesChange([...values, value])
+  }
+
+  // Compact label for the chip body: "Brand, Sales" or "+3 more"
+  // when too many to fit cleanly. Keeps the chip height stable.
+  let displayLabel: React.ReactNode
+  if (selected.length === 0) {
+    displayLabel = <span style={{ color: 'var(--color-text-subtle)' }}>Any</span>
+  } else if (selected.length <= 2) {
+    displayLabel = (
+      <span style={{ color: 'var(--color-text)', whiteSpace: 'nowrap' }}>
+        {selected.map(s => s.label).join(', ')}
+      </span>
+    )
+  } else {
+    displayLabel = (
+      <span style={{ color: 'var(--color-text)', whiteSpace: 'nowrap' }}>
+        {selected[0].label}, +{selected.length - 1} more
+      </span>
+    )
+  }
+
+  return (
+    <span style={{ display: 'inline-flex' }}>
+      <button
+        ref={ref}
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="inline-flex items-center"
+        style={{
+          gap: '0.375rem',
+          height: chipHeight,
+          paddingLeft: '0.625rem',
+          paddingRight: '0.25rem',
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-md)',
+          fontSize: chipFont,
+          fontWeight: 500,
+          color: 'var(--color-text)',
+          cursor: 'pointer',
+          transition: 'border-color 150ms ease, background-color 150ms ease',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-border-strong, var(--color-text-subtle))' }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <span style={{ color: 'var(--color-text-muted)' }}>{def.label}</span>
+        {displayLabel}
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(e) => { e.stopPropagation(); onRemove() }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              e.stopPropagation()
+              onRemove()
+            }
+          }}
+          aria-label={`Remove ${def.label} filter`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '1.25rem',
+            height: '1.25rem',
+            borderRadius: 'var(--radius-sm)',
+            color: 'var(--color-text-subtle)',
+            transition: 'background-color 120ms ease, color 120ms ease',
+            cursor: 'pointer',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'var(--color-bg-tertiary)'
+            e.currentTarget.style.color = 'var(--color-text)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'var(--color-text-subtle)'
+          }}
+        >
+          <X size={12} aria-hidden="true" />
+        </span>
+      </button>
+      <Popover
+        anchorRef={ref}
+        open={open}
+        onClose={() => { setOpen(false); onEditorClosed() }}
+        align="start"
+        width="14rem"
+      >
+        <div role="group" aria-label={`${def.label} options`}>
+          {def.options.map(opt => {
+            const isSelected = values.includes(opt.value)
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => toggle(opt.value)}
+                aria-pressed={isSelected}
+                className="w-full inline-flex items-center"
+                style={{
+                  gap: '0.5rem',
+                  padding: '0.4375rem 0.625rem',
+                  background: isSelected ? 'var(--color-bg-secondary)' : 'transparent',
+                  border: 'none',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 'var(--text-sm)',
+                  color: 'var(--color-text)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = isSelected ? 'var(--color-bg-secondary)' : 'transparent' }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '1rem',
+                    height: '1rem',
+                    background: isSelected ? 'var(--color-brand)' : 'transparent',
+                    border: `1px solid ${isSelected ? 'var(--color-brand)' : 'var(--color-border)'}`,
+                    borderRadius: '0.25rem',
+                    color: '#ffffff',
+                    flexShrink: 0,
+                  }}
+                >
+                  {isSelected && <Check size={11} aria-hidden="true" />}
+                </span>
+                {opt.tone ? (
+                  <Badge tone={opt.tone} variant="soft" size="sm" leader={false}>{opt.label}</Badge>
+                ) : (
+                  <span style={{ flex: 1 }}>{opt.label}</span>
+                )}
+                {!opt.tone && <span style={{ flex: 1 }} />}
+              </button>
+            )
+          })}
+          {values.length > 0 && (
+            <button
+              type="button"
+              onClick={() => { onValuesChange([]); }}
+              className="w-full"
+              style={{
+                marginTop: '0.1875rem',
+                padding: '0.4375rem 0.625rem',
+                background: 'transparent',
+                border: 'none',
+                borderTop: '1px solid var(--color-border-subtle)',
+                fontSize: 'var(--text-xs)',
+                fontWeight: 600,
+                color: 'var(--color-text-muted)',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text)' }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+            >
+              Clear all
+            </button>
+          )}
         </div>
       </Popover>
     </span>
