@@ -36,6 +36,8 @@ import { FileAttachmentList } from '@/components/tahi/file-attachment-list'
 import { MessageBubble } from '@/components/tahi/message-bubble'
 import { MessageThread } from '@/components/tahi/message-thread'
 import { Composer, type ComposerSendPayload, type MentionSources } from '@/components/tahi/composer'
+import { KanbanBoard } from '@/components/tahi/kanban-board'
+import { BoardView, type BoardItem, type BoardColumn } from '@/components/tahi/board-view'
 
 /**
  * /design-system. The canonical token + primitive reference.
@@ -981,6 +983,8 @@ const COMPONENTS_NAV = [
   { id: 'comp-composer',     label: 'Composer',     ready: true  },
   { id: 'comp-message',      label: 'Message bubble', ready: true },
   { id: 'comp-thread',       label: 'Message thread', ready: true },
+  { id: 'comp-kanban',       label: 'Kanban board',   ready: true },
+  { id: 'comp-board-view',   label: 'Board view',     ready: true },
   { id: 'comp-empty',        label: 'Empty state',  ready: false },
   { id: 'comp-pagination',   label: 'Pagination',   ready: false },
 ]
@@ -1734,6 +1738,8 @@ function ComponentsSection() {
         <ComposerShowcase />
         <MessageBubbleShowcase />
         <MessageThreadShowcase />
+        <KanbanBoardShowcase />
+        <BoardViewShowcase />
       </div>
     </SectionShell>
   )
@@ -2132,6 +2138,223 @@ function MessageThreadShowcase() {
 
 function stripTags(html: string): string {
   return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+}
+
+
+// ── Kanban + BoardView showcases ───────────────────────────────────────
+
+const DEMO_BOARD_COLUMNS: BoardColumn[] = [
+  { id: 'backlog',  label: 'Backlog',     statusValue: 'backlog',     color: '#94a3b8' },
+  { id: 'inprog',   label: 'In progress', statusValue: 'in_progress', color: '#38bdf8' },
+  { id: 'review',   label: 'Review',      statusValue: 'review',      color: '#a78bfa' },
+  { id: 'done',     label: 'Done',        statusValue: 'done',        color: '#4ade80' },
+]
+
+const DEMO_BOARD_PEOPLE = {
+  liam:  { id: 'liam',  name: 'Liam Miller' },
+  staci: { id: 'staci', name: 'Staci Orchard' },
+  sarah: { id: 'sarah', name: 'Sarah Chen' },
+  james: { id: 'james', name: 'James Park' },
+} as const
+
+const INITIAL_BOARD_ITEMS: BoardItem[] = [
+  {
+    id: 'item-1',
+    status: 'backlog',
+    title: 'Update onboarding tour',
+    description: 'Reshoot the walk-through and refresh the screenshots so the welcome flow matches the new sidebar.',
+    priority: 'medium',
+    tags: [{ id: 't-onb', label: 'Onboarding', color: '#5A824E' }],
+    progress: { current: 1, total: 3 },
+    subtasks: [
+      { id: 'st-1a', label: 'Reorder slides', done: true },
+      { id: 'st-1b', label: 'Re-record voiceover', done: false },
+      { id: 'st-1c', label: 'Update screenshots', done: false },
+    ],
+    dueDate: 'Apr 26',
+    commentCount: 3,
+    attachmentCount: 1,
+    assignees: [DEMO_BOARD_PEOPLE.staci],
+  },
+  {
+    id: 'item-2',
+    status: 'backlog',
+    title: 'Reorder pricing chips',
+    priority: 'low',
+    tags: [{ id: 't-mkt', label: 'Marketing', color: '#c2410c' }],
+    dueDate: 'Apr 30',
+    commentCount: 1,
+    assignees: [DEMO_BOARD_PEOPLE.james, DEMO_BOARD_PEOPLE.liam],
+  },
+  {
+    id: 'item-3',
+    status: 'in_progress',
+    title: 'Migrate analytics → GA4',
+    description: 'Cut UA → GA4. Map events, validate dashboards, communicate downstream.',
+    priority: 'high',
+    tags: [
+      { id: 't-eng', label: 'Engineering', color: '#1f4189' },
+      { id: 't-data', label: 'Data', color: '#7c3aed' },
+    ],
+    progress: { current: 1, total: 3 },
+    subtasks: [
+      { id: 'st-3a', label: 'Map events',     done: true },
+      { id: 'st-3b', label: 'Wire e-commerce', done: false },
+      { id: 'st-3c', label: 'QA dashboards',   done: false },
+    ],
+    dueDate: 'Today',
+    isOverdue: false,
+    commentCount: 8,
+    attachmentCount: 4,
+    assignees: [DEMO_BOARD_PEOPLE.liam, DEMO_BOARD_PEOPLE.james],
+    children: [
+      {
+        id: 'item-3a',
+        status: 'in_progress',
+        title: 'Spike: GA4 event taxonomy',
+        priority: 'medium',
+        progress: { current: 2, total: 2 },
+        dueDate: 'May 1',
+        assignees: [DEMO_BOARD_PEOPLE.liam],
+      },
+    ],
+  },
+  {
+    id: 'item-4',
+    status: 'review',
+    title: 'Q2 report copy',
+    description: 'Last pass on the customer-facing Q2 report before sending the PDF to retainers.',
+    priority: 'medium',
+    tags: [{ id: 't-rep', label: 'Reporting', color: '#0f766e' }],
+    coverColor: '#a78bfa',
+    dueDate: 'May 2',
+    commentCount: 5,
+    assignees: [DEMO_BOARD_PEOPLE.staci],
+  },
+  {
+    id: 'item-5',
+    status: 'review',
+    title: 'WCAG audit notes',
+    priority: 'low',
+    tags: [{ id: 't-a11y', label: 'Accessibility', color: '#1f4189' }],
+    progress: { current: 4, total: 6 },
+    dueDate: 'May 5',
+    commentCount: 2,
+    attachmentCount: 1,
+    assignees: [DEMO_BOARD_PEOPLE.james],
+  },
+  {
+    id: 'item-6',
+    status: 'done',
+    title: 'Brand refresh shipped',
+    priority: 'low',
+    tags: [
+      { id: 't-brand', label: 'Brand', color: '#5A824E' },
+      { id: 't-mkt', label: 'Marketing', color: '#c2410c' },
+    ],
+    coverColor: '#4ade80',
+    progress: { current: 8, total: 8 },
+    dueDate: 'Apr 18',
+    commentCount: 12,
+    attachmentCount: 3,
+    assignees: [
+      DEMO_BOARD_PEOPLE.liam,
+      DEMO_BOARD_PEOPLE.staci,
+      DEMO_BOARD_PEOPLE.james,
+    ],
+  },
+]
+
+function KanbanBoardShowcase() {
+  const [items, setItems] = useState<BoardItem[]>(INITIAL_BOARD_ITEMS)
+
+  const moveItem = (id: string, toStatus: string) => {
+    setItems(prev => prev.map(it => it.id === id ? { ...it, status: toStatus } : it))
+  }
+
+  const toggleSubtask = (id: string, subId: string) => {
+    setItems(prev => prev.map(it => {
+      if (it.id !== id) return it
+      const subtasks = (it.subtasks ?? []).map(st => st.id === subId ? { ...st, done: !st.done } : st)
+      const done = subtasks.filter(s => s.done).length
+      return {
+        ...it,
+        subtasks,
+        progress: it.progress ? { current: done, total: subtasks.length } : it.progress,
+      }
+    }))
+  }
+
+  return (
+    <PrimitiveShell
+      id="comp-kanban"
+      title="Kanban — rich cards"
+      source="components/tahi/kanban-board.tsx"
+      intro="Drag-and-drop board with cover bands, multi-tag chips, priority + progress, collapsible subtask checklists, nested children, and an avatar stack footer. Drop a card on a column to move it; drop on another card to nest. Each column has a +/⋯ menu."
+    >
+      <CardPrim>
+        <KanbanBoard
+          columns={DEMO_BOARD_COLUMNS}
+          items={items}
+          onMove={moveItem}
+          onAdd={(status) => alert(`Add card in ${status}`)}
+          onNest={(child, parent) => alert(`Nest ${child} under ${parent}?`)}
+          onToggleSubtask={toggleSubtask}
+          onItemClick={(it) => alert(`Open ${it.title}`)}
+          columnActions={[
+            { label: 'Rename column',  icon: <Pencil size={13} />, onClick: () => {} },
+            { label: 'Clear column',   icon: <Trash2 size={13} />, tone: 'danger', onClick: () => {} },
+          ]}
+        />
+      </CardPrim>
+    </PrimitiveShell>
+  )
+}
+
+function BoardViewShowcase() {
+  const [items, setItems] = useState<BoardItem[]>(INITIAL_BOARD_ITEMS)
+
+  const moveItem = (id: string, toStatus: string) => {
+    setItems(prev => prev.map(it => it.id === id ? { ...it, status: toStatus } : it))
+  }
+  const toggleSubtask = (id: string, subId: string) => {
+    setItems(prev => prev.map(it => {
+      if (it.id !== id) return it
+      const subtasks = (it.subtasks ?? []).map(st => st.id === subId ? { ...st, done: !st.done } : st)
+      const done = subtasks.filter(s => s.done).length
+      return {
+        ...it,
+        subtasks,
+        progress: it.progress ? { current: done, total: subtasks.length } : it.progress,
+      }
+    }))
+  }
+
+  return (
+    <PrimitiveShell
+      id="comp-board-view"
+      title="Board view"
+      source="components/tahi/board-view.tsx"
+      intro="The same dataset rendered across Kanban / Table / Timeline tabs. Header has title, view tabs, client-side search, filter and a primary +New CTA. Switch tabs to see each renderer use the same items[] and columns[]."
+    >
+      <CardPrim>
+        <BoardView
+          title="Tahi · Tasks"
+          intro="Pick a view to see the same data three ways."
+          columns={DEMO_BOARD_COLUMNS}
+          items={items}
+          onMove={moveItem}
+          onNest={(child, parent) => alert(`Nest ${child} under ${parent}?`)}
+          onAdd={(status) => alert(`Add in ${status}`)}
+          onToggleSubtask={toggleSubtask}
+          onItemClick={(it) => alert(`Open ${it.title}`)}
+          onNew={() => alert('New task')}
+          newLabel="New task"
+          onFilterClick={() => alert('Open filter')}
+        />
+      </CardPrim>
+    </PrimitiveShell>
+  )
 }
 
 
