@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
-  Sparkles, Plus, Clock, RefreshCw, Save, Trash2, ArrowUpRight,
-  Mail, Phone, Building2, Globe, Tag, User, X,
+  UserPlus, Plus, Clock, RefreshCw, Save, Trash2, ArrowUpRight,
+  Mail, Phone, Building2, Globe, Tag, User, Edit3,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { EmptyState } from '@/components/tahi/empty-state'
@@ -402,7 +402,6 @@ export function LeadsContent() {
           loading={loading}
           empty={
             <EmptyState
-              icon={<Sparkles className="w-6 h-6" />}
               title={leads.length === 0 ? 'No leads yet' : 'No matches'}
               description={leads.length === 0
                 ? 'Capture your first lead manually, or wait for one to land via Webflow / referral.'
@@ -418,7 +417,7 @@ export function LeadsContent() {
           }
           onRowPreview={(r) => openLead(r.id)}
           rowActions={(r) => [
-            { label: 'Edit', icon: <Sparkles size={14} />, onClick: () => startEdit(r) },
+            { label: 'Edit', icon: <Edit3 size={14} />, onClick: () => startEdit(r) },
             ...(r.status !== 'promoted' ? [
               { label: 'Promote to deal', icon: <ArrowUpRight size={14} />, onClick: () => setPendingPromote(r) },
             ] : []),
@@ -571,7 +570,7 @@ function LeadForm({
         />
       </Field>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: '0.75rem' }}>
         <Field label="Email">
           <Input
             value={draft.email ?? ''}
@@ -592,7 +591,7 @@ function LeadForm({
         </Field>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: '0.75rem' }}>
         <Field label="Company">
           <Input
             value={draft.company ?? ''}
@@ -622,7 +621,7 @@ function LeadForm({
         />
       </Field>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.4fr)', gap: '0.75rem' }}>
         <Field label="Source">
           <select
             value={draft.source ?? 'manual'}
@@ -642,7 +641,7 @@ function LeadForm({
         </Field>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) 6.5rem', gap: '0.75rem' }}>
         <Field label="Estimated value">
           <Input
             type="number"

@@ -22,7 +22,10 @@
 import React from 'react'
 
 interface EmptyStateProps {
-  icon: React.ReactNode
+  /** Optional. Omit when the surrounding layout already conveys
+   *  the empty meaning (e.g. a table whose context makes a leaf
+   *  tile feel heavy-handed). */
+  icon?: React.ReactNode
   title: string
   description?: string
   ctaLabel?: string
@@ -56,7 +59,7 @@ export function EmptyState({
         ...style,
       }}
     >
-      {isInline ? (
+      {icon && (isInline ? (
         <div
           aria-hidden="true"
           className="flex items-center justify-center"
@@ -83,7 +86,7 @@ export function EmptyState({
         >
           {icon}
         </div>
-      )}
+      ))}
 
       <h3
         style={{
