@@ -6,7 +6,7 @@ import Link from 'next/link'
 import {
   Plus, Search, LayoutList, Columns3, BarChart3,
   AlertTriangle, ChevronDown, Inbox, RefreshCw,
-  Calendar, Zap, Clock, ArrowUpDown, Download,
+  Calendar, Zap, Clock, Download,
   CheckSquare, Square, Users, Loader2, X, Sparkles,
 } from 'lucide-react'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
@@ -18,6 +18,10 @@ import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { ViewToggle } from '@/components/tahi/view-toggle'
 import { Input, Select } from '@/components/tahi/input'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
+import { TahiButton } from '@/components/tahi/tahi-button'
+import { Badge, statusTone, priorityTone } from '@/components/tahi/badge'
+import { Avatar } from '@/components/tahi/avatar'
+import { EmptyState as SharedEmptyState } from '@/components/tahi/empty-state'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -145,13 +149,9 @@ function StatusPill({ status, requestId, isAdmin, onStatusChange }: {
 
   if (!isAdmin || !requestId || !onStatusChange) {
     return (
-      <span
-        className="inline-flex items-center gap-1.5 rounded-full whitespace-nowrap font-medium"
-        style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: c.bg, color: c.text, border: `1px solid ${c.border}` }}
-      >
-        <span className="rounded-full flex-shrink-0" style={{ width: '0.375rem', height: '0.375rem', background: c.dot, display: 'inline-block' }} />
+      <Badge tone={statusTone(status)} variant="soft" size="sm" leader="dot">
         {c.label}
-      </span>
+      </Badge>
     )
   }
 
@@ -204,25 +204,17 @@ function PriorityBadge({ priority }: { priority: string | null }) {
   if (!priority || priority === 'standard') {
     return <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.75rem' }}>--</span>
   }
-  if (priority === 'urgent') {
-    return (
-      <span
-        className="inline-flex items-center gap-1 rounded-full font-medium"
-        style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: 'var(--priority-urgent-bg)', color: 'var(--priority-urgent-text)', border: '1px solid var(--priority-urgent-border)' }}
-      >
-        <Zap className="w-2.5 h-2.5" />
-        Urgent
-      </span>
-    )
-  }
+  const label = priority === 'urgent' ? 'Urgent' : 'High'
   return (
-    <span
-      className="inline-flex items-center gap-1 rounded-full font-medium"
-      style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: 'var(--priority-high-bg)', color: 'var(--priority-high-text)', border: '1px solid var(--priority-high-border)' }}
+    <Badge
+      tone={priorityTone(priority)}
+      variant="soft"
+      size="sm"
+      leader="icon"
+      icon={<Zap className="w-2.5 h-2.5" />}
     >
-      <Zap className="w-2.5 h-2.5" />
-      High
-    </span>
+      {label}
+    </Badge>
   )
 }
 
@@ -259,14 +251,9 @@ function DueDateChip({ dueDate, status }: { dueDate: string | null; status: stri
 }
 
 function OrgAvatar({ name }: { name: string }) {
-  return (
-    <div
-      className="rounded-full flex items-center justify-center font-semibold flex-shrink-0"
-      style={{ width: '1.375rem', height: '1.375rem', fontSize: '0.5625rem', background: 'var(--color-brand)', color: 'white' }}
-    >
-      {getInitials(name)}
-    </div>
-  )
+  // Shared <Avatar> primitive at xs (20px) sits close to the legacy 22px footprint
+  // while giving us auto-tooltips, ring, and dark-mode compatibility for free.
+  return <Avatar name={name} size="xs" />
 }
 
 function HoursChip({ hours }: { hours: number | null }) {
@@ -471,74 +458,53 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <TahiButton
+            variant="secondary"
+            size="md"
             onClick={() => {
               const link = document.createElement('a')
               link.href = apiPath('/api/admin/export/requests')
               link.download = 'requests.csv'
               link.click()
             }}
-            className="flex items-center gap-2 font-medium transition-opacity hover:opacity-80"
-            style={{
-              padding: '0.5rem 1rem',
-              fontSize: '0.875rem',
-              background: 'var(--color-bg)',
-              border: '1px solid var(--color-border)',
-              borderRadius: '0.5rem',
-              cursor: 'pointer',
-              color: 'var(--color-text)',
-            }}
+            iconLeft={<Download className="w-4 h-4" />}
+            aria-label="Export CSV"
           >
-            <Download className="w-4 h-4" />
             <span className="hidden sm:inline">Export CSV</span>
-          </button>
+          </TahiButton>
           {isAdmin && (
-            <button
+            <TahiButton
+              variant="secondary"
+              size="md"
               onClick={() => setBulkCreateOpen(true)}
-              className="hidden sm:flex items-center gap-2 font-medium transition-opacity hover:opacity-80"
-              style={{
-                padding: '0.5rem 1rem',
-                fontSize: '0.875rem',
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
-                borderRadius: '0.5rem',
-                cursor: 'pointer',
-                color: 'var(--color-text)',
-              }}
+              iconLeft={<Users className="w-4 h-4" />}
+              className="hidden sm:inline-flex"
             >
-              <Users className="w-4 h-4" />
               Bulk Create
-            </button>
+            </TahiButton>
           )}
           {!isViewerImpersonation && (
-            <button
+            <TahiButton
+              variant="secondary"
+              size="md"
               onClick={() => setAiWizardOpen(true)}
-              className="hidden sm:flex items-center gap-2 font-medium transition-opacity hover:opacity-80"
-              style={{
-                padding: '0.5rem 0.875rem',
-                fontSize: '0.875rem',
-                background: 'var(--color-brand-50)',
-                border: '1px solid var(--color-brand-100)',
-                borderRadius: '0.5rem',
-                cursor: 'pointer',
-                color: 'var(--color-brand-dark)',
-              }}
+              iconLeft={<Sparkles className="w-4 h-4" />}
               title="Draft a request with AI"
+              className="hidden sm:inline-flex"
             >
-              <Sparkles className="w-4 h-4" />
               AI draft
-            </button>
+            </TahiButton>
           )}
           {!isViewerImpersonation && (
-            <button
+            <TahiButton
+              variant="primary"
+              size="md"
               onClick={() => setDialogOpen(true)}
-              className="flex items-center gap-2 font-semibold text-white transition-opacity hover:opacity-90"
-              style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', background: 'var(--color-brand)', borderRadius: '0.375rem', border: 'none', cursor: 'pointer' }}
+              iconLeft={<Plus className="w-4 h-4" />}
             >
-              <Plus className="w-4 h-4" />
               <span className="hidden sm:inline">Create Request</span>
               <span className="sm:hidden">New</span>
-            </button>
+            </TahiButton>
           )}
         </div>
       </div>
@@ -2285,40 +2251,17 @@ function BulkCreateDialog({
 
 function EmptyState({ isAdmin, onNew }: { isAdmin: boolean; onNew: () => void }) {
   return (
-    <div
-      className="flex flex-col items-center justify-center text-center"
-      style={{ padding: '4rem 1.5rem', background: 'var(--color-bg)' }}
-    >
-      <div
-        className="flex items-center justify-center"
-        style={{
-          width: '3.5rem',
-          height: '3.5rem',
-          borderRadius: 'var(--radius-leaf)',
-          background: 'linear-gradient(135deg, var(--color-brand-light), var(--color-brand-dark))',
-          marginBottom: '1rem',
-        }}
-      >
-        <Inbox style={{ width: '1.75rem', height: '1.75rem', color: 'white' }} />
-      </div>
-      <h3 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)', marginBottom: '0.5rem' }}>
-        No requests found
-      </h3>
-      <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', maxWidth: '20rem', marginBottom: '1.25rem' }}>
-        {isAdmin
-          ? 'Requests will appear here once clients start submitting work.'
-          : 'Submit your first request and the Tahi team will get started.'}
-      </p>
-      {!isAdmin && (
-        <button
-          onClick={onNew}
-          className="flex items-center gap-2 font-semibold text-white transition-opacity hover:opacity-90"
-          style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', background: 'var(--color-brand)', borderRadius: '0.375rem', border: 'none', cursor: 'pointer' }}
-        >
-          <Plus className="w-4 h-4" />
+    <SharedEmptyState
+      icon={<Inbox className="w-7 h-7" />}
+      title="No requests found"
+      description={isAdmin
+        ? 'Requests will appear here once clients start submitting work.'
+        : 'Submit your first request and the Tahi team will get started.'}
+      action={!isAdmin ? (
+        <TahiButton size="md" onClick={onNew} iconLeft={<Plus className="w-4 h-4" />}>
           Submit a request
-        </button>
-      )}
-    </div>
+        </TahiButton>
+      ) : undefined}
+    />
   )
 }
