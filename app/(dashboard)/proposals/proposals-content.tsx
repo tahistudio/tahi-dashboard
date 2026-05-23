@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
@@ -8,13 +8,17 @@ import {
   FileText, Plus, Search, RefreshCw, Building2, Target, Trash2, ExternalLink, Eye,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
-import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Input } from '@/components/tahi/input'
 import { useToast } from '@/components/tahi/toast'
+import { Badge, type BadgeTone } from '@/components/tahi/badge'
+import { Card } from '@/components/tahi/card'
+import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
+import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
+import { SlideOver } from '@/components/tahi/slide-over'
 
 interface ProposalListItem {
   id: string
@@ -36,29 +40,31 @@ interface ProposalListItem {
 
 type ProposalStatus = 'draft' | 'shared' | 'accepted' | 'declined' | 'withdrawn' | 'expired'
 
-const STATUS_STYLES: Record<ProposalStatus, { bg: string; color: string; label: string }> = {
-  draft: { bg: 'var(--color-bg-tertiary)', color: 'var(--color-text-muted)', label: 'Draft' },
-  shared: { bg: '#eff6ff', color: '#1e40af', label: 'Shared' },
-  accepted: { bg: '#f0fdf4', color: '#166534', label: 'Accepted' },
-  declined: { bg: '#fef2f2', color: '#991b1b', label: 'Declined' },
-  withdrawn: { bg: 'var(--color-bg-secondary)', color: 'var(--color-text-subtle)', label: 'Withdrawn' },
-  expired: { bg: '#fff7ed', color: '#9a3412', label: 'Expired' },
+// Status → Badge tone mapping. Tones come from the locked design system
+// (see components/tahi/badge.tsx TONE_MAP) so colours stay consistent
+// with the rest of the dashboard's status chips.
+const STATUS_META: Record<ProposalStatus, { tone: BadgeTone; label: string }> = {
+  draft:     { tone: 'neutral',  label: 'Draft' },
+  shared:    { tone: 'info',     label: 'Shared' },
+  accepted:  { tone: 'positive', label: 'Accepted' },
+  declined:  { tone: 'danger',   label: 'Declined' },
+  withdrawn: { tone: 'neutral',  label: 'Withdrawn' },
+  expired:   { tone: 'warning',  label: 'Expired' },
 }
 
-const STATUS_TABS: { value: 'all' | ProposalStatus; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'draft', label: 'Draft' },
-  { value: 'shared', label: 'Shared' },
-  { value: 'accepted', label: 'Accepted' },
-  { value: 'declined', label: 'Declined' },
-  { value: 'withdrawn', label: 'Withdrawn' },
-  { value: 'expired', label: 'Expired' },
+const STATUS_OPTIONS: { value: ProposalStatus; label: string; tone: BadgeTone }[] = [
+  { value: 'draft',     label: 'Draft',     tone: 'neutral'  },
+  { value: 'shared',    label: 'Shared',    tone: 'info'     },
+  { value: 'accepted',  label: 'Accepted',  tone: 'positive' },
+  { value: 'declined',  label: 'Declined',  tone: 'danger'   },
+  { value: 'withdrawn', label: 'Withdrawn', tone: 'neutral'  },
+  { value: 'expired',   label: 'Expired',   tone: 'warning'  },
 ]
 
 interface TemplateOption { id: string; name: string; description: string | null }
 
 function statusKey(status: string): ProposalStatus {
-  return (status in STATUS_STYLES ? status : 'draft') as ProposalStatus
+  return (status in STATUS_META ? status : 'draft') as ProposalStatus
 }
 
 function relativeTime(iso: string | null): string {
@@ -77,7 +83,17 @@ export function ProposalsContent() {
   const [templates, setTemplates] = useState<TemplateOption[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | ProposalStatus>('all')
+  // Status filter held as an ActiveFilter so the FilterBar primitive
+  // can drive it. Seeded with an empty multiselect so the chip is
+  // permanent (nonRemovable) and the "+ Add filter" button never
+  // appears — status is the only filter we expose here.
+  const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([
+    { id: 'status', values: [] },
+  ])
+  const selectedStatuses = useMemo(() => {
+    const f = activeFilters.find(a => a.id === 'status')
+    return new Set((f?.values ?? []) as ProposalStatus[])
+  }, [activeFilters])
   const [creating, setCreating] = useState(false)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<ProposalListItem | null>(null)
@@ -108,8 +124,8 @@ export function ProposalsContent() {
 
   useEffect(() => { void fetchAll() }, [fetchAll])
 
-  const filtered = items.filter(p => {
-    if (statusFilter !== 'all' && statusKey(p.status) !== statusFilter) return false
+  const filtered = useMemo(() => items.filter(p => {
+    if (selectedStatuses.size > 0 && !selectedStatuses.has(statusKey(p.status))) return false
     if (search.trim()) {
       const q = search.toLowerCase()
       if (!p.title.toLowerCase().includes(q) &&
@@ -118,7 +134,19 @@ export function ProposalsContent() {
           !(p.preparedFor ?? '').toLowerCase().includes(q)) return false
     }
     return true
-  })
+  }), [items, search, selectedStatuses])
+
+  // FilterBar definitions. Status is a multiselect chip so a single
+  // chip can hold any subset of statuses. nonRemovable hides the X.
+  const filterDefs: FilterDef[] = useMemo(() => ([
+    {
+      id: 'status',
+      label: 'Status',
+      kind: 'multiselect',
+      nonRemovable: true,
+      options: STATUS_OPTIONS.map(s => ({ value: s.value, label: s.label, tone: s.tone })),
+    },
+  ]), [])
 
   async function createBlankProposal() {
     setCreating(true)
@@ -185,6 +213,138 @@ export function ProposalsContent() {
     setShowCreateDialog(true)
   }
 
+  // Column defs for the DataTable. Sortable headers use DataTable's
+  // internal sort. Org and Deal cells render as inline links that
+  // stopPropagation so they don't trigger the row open.
+  const columns: DataTableColumn<ProposalListItem>[] = [
+    {
+      key: 'title',
+      header: 'Name',
+      sortable: true,
+      sortValue: r => r.title.toLowerCase(),
+      minWidth: '18rem',
+      render: r => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+          <FileText size={14} aria-hidden="true" style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{
+              fontWeight: 600,
+              color: 'var(--color-text)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}>{r.title}</div>
+            {r.preparedFor && (
+              <div style={{
+                fontSize: '0.6875rem',
+                color: 'var(--color-text-subtle)',
+                marginTop: '0.125rem',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                for {r.preparedFor}
+              </div>
+            )}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      sortValue: r => statusKey(r.status),
+      width: '8rem',
+      render: r => {
+        const meta = STATUS_META[statusKey(r.status)]
+        return (
+          <Badge tone={meta.tone} variant="soft" size="sm" dot>
+            {meta.label}
+          </Badge>
+        )
+      },
+    },
+    {
+      key: 'org',
+      header: 'Org',
+      sortable: true,
+      sortValue: r => (r.orgName ?? '').toLowerCase(),
+      minWidth: '12rem',
+      render: r => (
+        r.orgId && r.orgName ? (
+          <Link
+            href={`/clients/${r.orgId}`}
+            onClick={e => e.stopPropagation()}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.375rem',
+              color: 'var(--color-text-muted)',
+              textDecoration: 'none',
+              transition: 'color 120ms ease',
+              maxWidth: '14rem',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+          >
+            <Building2 size={13} aria-hidden="true" style={{ flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {r.orgName}
+            </span>
+          </Link>
+        ) : (
+          <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.6875rem' }}>—</span>
+        )
+      ),
+    },
+    {
+      key: 'deal',
+      header: 'Deal',
+      sortable: true,
+      sortValue: r => (r.dealTitle ?? '').toLowerCase(),
+      minWidth: '12rem',
+      render: r => (
+        r.dealId && r.dealTitle ? (
+          <Link
+            href={`/pipeline/${r.dealId}`}
+            onClick={e => e.stopPropagation()}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.375rem',
+              color: 'var(--color-text-muted)',
+              textDecoration: 'none',
+              transition: 'color 120ms ease',
+              maxWidth: '14rem',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+          >
+            <Target size={13} aria-hidden="true" style={{ flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {r.dealTitle}
+            </span>
+          </Link>
+        ) : (
+          <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.6875rem' }}>—</span>
+        )
+      ),
+    },
+    {
+      key: 'updatedAt',
+      header: 'Updated',
+      sortable: true,
+      sortValue: r => r.updatedAt,
+      width: '10rem',
+      render: r => (
+        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+          {relativeTime(r.updatedAt)}
+        </span>
+      ),
+    },
+  ]
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -204,169 +364,88 @@ export function ProposalsContent() {
         </TahiButton>
       </PageHeader>
 
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="flex-1 max-w-sm">
-          <Input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search proposals..."
-            leadingIcon={<Search size={14} aria-hidden="true" />}
-            style={{ width: '100%' }}
-          />
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {STATUS_TABS.map(tab => (
-            <button
-              key={tab.value}
-              onClick={() => setStatusFilter(tab.value)}
-              className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
-              style={{
-                background: statusFilter === tab.value ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
-                color: statusFilter === tab.value ? 'white' : 'var(--color-text-muted)',
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* Filter row — FilterBar with search + permanent status
+          multiselect chip. Matches the docs / contracts / leads
+          pattern. */}
+      <FilterBar
+        filters={filterDefs}
+        active={activeFilters}
+        onChange={setActiveFilters}
+        search={{
+          value: search,
+          onChange: setSearch,
+          placeholder: 'Search proposals, orgs, deals',
+        }}
+        size="sm"
+      />
 
-      {loading ? (
-        <LoadingSkeleton rows={6} />
-      ) : filtered.length === 0 ? (
-        items.length === 0 ? (
-          <EmptyState
-            icon={<FileText className="w-8 h-8 text-white" />}
-            title="No proposals yet"
-            description="Create one to send a premium 16:9 deck with 1-3 packages."
-            ctaLabel="New proposal"
-            onCtaClick={openCreate}
-          />
-        ) : (
-          <EmptyState
-            variant="inline"
-            icon={<FileText className="w-8 h-8" />}
-            title="No proposals match your filters"
-            description="Try clearing the search or changing the status tab."
-          />
-        )
-      ) : (
-        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--color-border)]">
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Name</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Status</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)] hidden md:table-cell">Org</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)] hidden md:table-cell">Deal</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)] hidden lg:table-cell">Updated</th>
-                <th className="text-right px-4 py-3 font-medium text-[var(--color-text-muted)]">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(p => {
-                const sty = STATUS_STYLES[statusKey(p.status)]
-                return (
-                  <tr
-                    key={p.id}
-                    className="border-b border-[var(--color-border-subtle)] last:border-0 hover:bg-[var(--color-bg-secondary)] transition-colors cursor-pointer"
-                    onClick={() => router.push(`/proposals/${p.id}`)}
-                  >
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-[var(--color-text)]">{p.title}</div>
-                      {p.preparedFor && (
-                        <div className="text-xs text-[var(--color-text-subtle)] mt-0.5 md:hidden">
-                          for {p.preparedFor}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className="text-xs font-medium px-2 py-0.5 rounded-full"
-                        style={{ background: sty.bg, color: sty.color }}
-                      >
-                        {sty.label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-[var(--color-text-muted)] hidden md:table-cell">
-                      {p.orgId && p.orgName ? (
-                        <Link
-                          href={`/clients/${p.orgId}`}
-                          onClick={e => e.stopPropagation()}
-                          className="inline-flex items-center gap-1.5 hover:text-[var(--color-brand-dark)] transition-colors"
-                        >
-                          <Building2 className="w-3.5 h-3.5 flex-shrink-0" />
-                          <span className="truncate max-w-[14rem]">{p.orgName}</span>
-                        </Link>
-                      ) : <span className="text-[var(--color-text-subtle)]">-</span>}
-                    </td>
-                    <td className="px-4 py-3 text-[var(--color-text-muted)] hidden md:table-cell">
-                      {p.dealId && p.dealTitle ? (
-                        <Link
-                          href={`/pipeline/${p.dealId}`}
-                          onClick={e => e.stopPropagation()}
-                          className="inline-flex items-center gap-1.5 hover:text-[var(--color-brand-dark)] transition-colors"
-                        >
-                          <Target className="w-3.5 h-3.5 flex-shrink-0" />
-                          <span className="truncate max-w-[14rem]">{p.dealTitle}</span>
-                        </Link>
-                      ) : <span className="text-[var(--color-text-subtle)]">-</span>}
-                    </td>
-                    <td className="px-4 py-3 text-[var(--color-text-muted)] hidden lg:table-cell">
-                      {relativeTime(p.updatedAt)}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div
-                        className="flex items-center justify-end gap-1"
-                        onClick={e => e.stopPropagation()}
-                      >
-                        {p.publicShareToken && (
-                          <a
-                            href={`/dashboard/p/proposal/${p.publicShareToken}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-subtle)] hover:text-[var(--color-text)] transition-colors"
-                            aria-label="Open public viewer"
-                            title="Open public viewer"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        )}
-                        <Link
-                          href={`/proposals/${p.id}`}
-                          className="p-1.5 rounded-lg hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-subtle)] hover:text-[var(--color-text)] transition-colors"
-                          aria-label="Preview"
-                          title="Preview"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                        </Link>
-                        <button
-                          onClick={() => setDeleteTarget(p)}
-                          className="p-1.5 rounded-lg hover:bg-red-50 text-[var(--color-text-subtle)] hover:text-red-500 transition-colors"
-                          aria-label="Delete"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {showCreateDialog && (
-        <CreateProposalDialog
-          templates={templates}
-          creating={creating}
-          onClose={() => setShowCreateDialog(false)}
-          onPickBlank={() => { setShowCreateDialog(false); void createBlankProposal() }}
-          onPickTemplate={(t) => { setShowCreateDialog(false); void createFromTemplate(t.id, t.name) }}
+      {/* Table — wrapped in a Card so rows sit on a real white surface
+          with rounded corners, matching the DataTable showcase. */}
+      <Card padding="none">
+        <DataTable<ProposalListItem>
+          ariaLabel="Proposals"
+          columns={columns}
+          rows={filtered}
+          getRowId={r => r.id}
+          defaultSort={{ key: 'updatedAt', dir: 'desc' }}
+          loading={loading}
+          empty={
+            items.length === 0 ? (
+              <EmptyState
+                icon={<FileText className="w-8 h-8 text-white" />}
+                title="No proposals yet"
+                description="Create one to send a premium 16:9 deck with 1-3 packages."
+                ctaLabel="New proposal"
+                onCtaClick={openCreate}
+              />
+            ) : (
+              <EmptyState
+                variant="inline"
+                icon={<FileText className="w-8 h-8" />}
+                title="No proposals match your filters"
+                description="Try clearing the search or changing the status chip."
+              />
+            )
+          }
+          onRowClick={(r) => router.push(`/proposals/${r.id}`)}
+          rowActions={(r) => {
+            const actions = [
+              {
+                label: 'Open',
+                icon: <Eye size={14} />,
+                onClick: () => router.push(`/proposals/${r.id}`),
+              },
+            ]
+            if (r.publicShareToken) {
+              actions.push({
+                label: 'Open public viewer',
+                icon: <ExternalLink size={14} />,
+                onClick: () => {
+                  window.open(`/dashboard/p/proposal/${r.publicShareToken}`, '_blank', 'noopener,noreferrer')
+                },
+              })
+            }
+            return [
+              ...actions,
+              {
+                label: 'Delete',
+                icon: <Trash2 size={14} />,
+                onClick: () => setDeleteTarget(r),
+                tone: 'danger' as const,
+              },
+            ]
+          }}
         />
-      )}
+      </Card>
+
+      <CreateProposalSlideOver
+        open={showCreateDialog}
+        templates={templates}
+        creating={creating}
+        onClose={() => setShowCreateDialog(false)}
+        onPickBlank={() => { setShowCreateDialog(false); void createBlankProposal() }}
+        onPickTemplate={(t) => { setShowCreateDialog(false); void createFromTemplate(t.id, t.name) }}
+      />
 
       <ConfirmDialog
         open={!!deleteTarget}
@@ -381,72 +460,230 @@ export function ProposalsContent() {
   )
 }
 
-function CreateProposalDialog({
-  templates, creating, onClose, onPickBlank, onPickTemplate,
+// ── Create slide-over ──────────────────────────────────────────────────────
+//
+// Replaces the centred modal pattern with the design-system SlideOver so
+// proposal creation matches docs / leads / requests. The picker still
+// fires the same createBlankProposal / createFromTemplate handlers from
+// the parent so business logic is untouched.
+
+function CreateProposalSlideOver({
+  open,
+  templates,
+  creating,
+  onClose,
+  onPickBlank,
+  onPickTemplate,
 }: {
+  open: boolean
   templates: TemplateOption[]
   creating: boolean
   onClose: () => void
   onPickBlank: () => void
   onPickTemplate: (t: TemplateOption) => void
 }) {
+  // Local search across templates so a long catalogue stays usable.
+  const [tplSearch, setTplSearch] = useState('')
+  const filteredTemplates = useMemo(() => {
+    const q = tplSearch.trim().toLowerCase()
+    if (!q) return templates
+    return templates.filter(t =>
+      t.name.toLowerCase().includes(q) ||
+      (t.description ?? '').toLowerCase().includes(q),
+    )
+  }, [templates, tplSearch])
+
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
-      <div
-        className="bg-[var(--color-bg)] rounded-xl shadow-xl w-full max-w-md"
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="px-6 pt-6 pb-2">
-          <h2 className="text-lg font-bold text-[var(--color-text)]">New proposal</h2>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">Start from blank or instantiate from a saved template.</p>
-        </div>
-        <div className="px-6 pb-6 space-y-2">
+    <SlideOver
+      open={open}
+      onClose={onClose}
+      icon={<Plus size={15} />}
+      title="New proposal"
+      subtitle="Start from blank or instantiate from a saved template."
+      maxWidth="48rem"
+    >
+      <SlideOver.Body>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          {/* Blank option — always first */}
           <button
+            type="button"
             onClick={onPickBlank}
             disabled={creating}
-            className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-lg border border-[var(--color-border)] hover:border-[var(--color-brand)] hover:bg-[var(--color-brand-50)] transition-colors"
+            className="tahi-focus-ring"
+            style={{
+              width: '100%',
+              textAlign: 'left',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              padding: '0.875rem 1rem',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-bg)',
+              cursor: creating ? 'not-allowed' : 'pointer',
+              opacity: creating ? 0.6 : 1,
+              transition: 'background-color 150ms ease, border-color 150ms ease',
+            }}
+            onMouseEnter={e => {
+              if (creating) return
+              e.currentTarget.style.background = 'var(--color-brand-50)'
+              e.currentTarget.style.borderColor = 'var(--color-brand)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'var(--color-bg)'
+              e.currentTarget.style.borderColor = 'var(--color-border)'
+            }}
           >
-            <span className="inline-flex items-center justify-center" style={{ width: '2rem', height: '2rem', background: 'var(--color-bg-tertiary)', borderRadius: '0 12px 0 12px' }}>
-              <Plus size={14} className="text-[var(--color-text-muted)]" />
+            <span
+              aria-hidden="true"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '2.25rem',
+                height: '2.25rem',
+                background: 'var(--color-bg-tertiary)',
+                color: 'var(--color-text-muted)',
+                borderRadius: 'var(--radius-leaf-sm)',
+                flexShrink: 0,
+              }}
+            >
+              <Plus size={15} />
             </span>
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-[var(--color-text)]">Blank proposal</div>
-              <div className="text-xs text-[var(--color-text-muted)]">Start from scratch with one default section.</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{
+                fontSize: '0.875rem',
+                fontWeight: 600,
+                color: 'var(--color-text)',
+              }}>Blank proposal</div>
+              <div style={{
+                fontSize: '0.75rem',
+                color: 'var(--color-text-muted)',
+                marginTop: '0.125rem',
+              }}>Start from scratch with one default section.</div>
             </div>
           </button>
+
           {templates.length > 0 && (
             <>
-              <div className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wide pt-3 pb-1">Templates</div>
-              {templates.map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => onPickTemplate(t)}
-                  disabled={creating}
-                  className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-lg border border-[var(--color-border)] hover:border-[var(--color-brand)] hover:bg-[var(--color-brand-50)] transition-colors"
-                >
-                  <span className="inline-flex items-center justify-center" style={{ width: '2rem', height: '2rem', background: 'var(--color-brand-50)', borderRadius: '0 12px 0 12px' }}>
-                    <span className="text-sm font-bold text-[var(--color-brand-dark)]">{t.name.slice(0, 1).toUpperCase()}</span>
-                  </span>
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-[var(--color-text)] truncate">{t.name}</div>
-                    {t.description && <div className="text-xs text-[var(--color-text-muted)] truncate">{t.description}</div>}
-                  </div>
-                </button>
-              ))}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+                marginTop: '0.25rem',
+              }}>
+                <div style={{
+                  fontSize: '0.6875rem',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  color: 'var(--color-text-subtle)',
+                }}>
+                  Templates
+                </div>
+                <div style={{ flex: 1, maxWidth: '18rem' }}>
+                  <Input
+                    value={tplSearch}
+                    onChange={e => setTplSearch(e.target.value)}
+                    placeholder="Search templates"
+                    leadingIcon={<Search size={13} aria-hidden="true" />}
+                    inputSize="sm"
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </div>
+
+              {filteredTemplates.length === 0 ? (
+                <EmptyState
+                  variant="inline"
+                  title="No templates match"
+                  description="Try a different search."
+                />
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {filteredTemplates.map(t => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => onPickTemplate(t)}
+                      disabled={creating}
+                      className="tahi-focus-ring"
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.75rem',
+                        padding: '0.75rem 0.875rem',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--color-border)',
+                        background: 'var(--color-bg)',
+                        cursor: creating ? 'not-allowed' : 'pointer',
+                        opacity: creating ? 0.6 : 1,
+                        transition: 'background-color 150ms ease, border-color 150ms ease',
+                      }}
+                      onMouseEnter={e => {
+                        if (creating) return
+                        e.currentTarget.style.background = 'var(--color-brand-50)'
+                        e.currentTarget.style.borderColor = 'var(--color-brand)'
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.background = 'var(--color-bg)'
+                        e.currentTarget.style.borderColor = 'var(--color-border)'
+                      }}
+                    >
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: '2.25rem',
+                          height: '2.25rem',
+                          background: 'var(--color-brand-50)',
+                          color: 'var(--color-brand-dark)',
+                          borderRadius: 'var(--radius-leaf-sm)',
+                          flexShrink: 0,
+                          fontSize: '0.875rem',
+                          fontWeight: 700,
+                        }}
+                      >
+                        {t.name.slice(0, 1).toUpperCase()}
+                      </span>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{
+                          fontSize: '0.875rem',
+                          fontWeight: 600,
+                          color: 'var(--color-text)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>{t.name}</div>
+                        {t.description && (
+                          <div style={{
+                            fontSize: '0.75rem',
+                            color: 'var(--color-text-muted)',
+                            marginTop: '0.125rem',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}>{t.description}</div>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </>
           )}
         </div>
-        <div className="px-6 pb-6 flex justify-end">
-          <button
-            onClick={onClose}
-            disabled={creating}
-            className="text-sm font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
+      </SlideOver.Body>
+      <SlideOver.Footer>
+        <TahiButton variant="secondary" size="sm" onClick={onClose} disabled={creating}>
+          Cancel
+        </TahiButton>
+      </SlideOver.Footer>
+    </SlideOver>
   )
 }
