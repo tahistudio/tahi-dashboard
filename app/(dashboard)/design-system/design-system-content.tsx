@@ -2060,8 +2060,9 @@ function MessageThreadShowcase() {
             voiceNote={msg.voiceNote}
             replyTo={msg.replyTo}
             editing={editingId === msg.id}
-            onSaveEdit={(next) => {
-              setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, bodyHtml: `<p>${next.replace(/\n/g, '</p><p>')}</p>` } : m))
+            mentionSources={DEMO_MENTION_SOURCES}
+            onSaveEdit={(nextHtml) => {
+              setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, bodyHtml: nextHtml } : m))
               setEditingId(null)
             }}
             onCancelEdit={() => setEditingId(null)}
@@ -2085,21 +2086,26 @@ function MessageThreadShowcase() {
             mentionSources={DEMO_MENTION_SOURCES}
             onSend={(payload) => {
               const nextId = `m${messages.length + 1}`
-              // Capture composer attachments as local previews so the
-              // new bubble can render images / voice notes inline.
-              const attachments = payload.files.map(f => ({
-                id: f.id,
-                name: f.file.name,
-                sizeBytes: f.file.size,
-                mime: f.file.type,
-                // For images we already have an object URL (previewUrl).
-                // For non-image files we mint one so the bubble can
-                // download / display them.
-                url: f.previewUrl ?? URL.createObjectURL(f.file),
-                thumbnailUrl: f.previewUrl,
-              }))
+              // Mint fresh object URLs so the bubble owns its own
+              // references. The composer no longer revokes on send,
+              // but if it ever does we're insulated.
+              const attachments = payload.files.map(f => {
+                const isImg = f.file.type.startsWith('image/')
+                const ownUrl = URL.createObjectURL(f.file)
+                return {
+                  id: f.id,
+                  name: f.file.name,
+                  sizeBytes: f.file.size,
+                  mime: f.file.type,
+                  url: ownUrl,
+                  thumbnailUrl: isImg ? ownUrl : undefined,
+                }
+              })
               const voiceNote = payload.voiceNote
-                ? { url: payload.voiceNote.url, durationSeconds: payload.voiceNote.durationSeconds }
+                ? {
+                    url: URL.createObjectURL(payload.voiceNote.blob),
+                    durationSeconds: payload.voiceNote.durationSeconds,
+                  }
                 : undefined
               setMessages(prev => [...prev, {
                 id: nextId,

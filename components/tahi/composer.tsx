@@ -163,62 +163,9 @@ export function Composer({
         HTMLAttributes: { rel: 'noopener', target: '_blank' },
       }),
       Placeholder.configure({ placeholder }),
-      // Extend Mention with a `type` attribute and a `command` that
-      // explicitly replaces the typed @query using the suggestion's
-      // range. Without an explicit command the partial query can be
-      // left behind alongside the inserted mention chip.
-      Mention.extend({
-        addAttributes() {
-          return {
-            id:    { default: null },
-            label: { default: null },
-            type:  {
-              default: 'person',
-              parseHTML: el => el.getAttribute('data-mention-type') ?? 'person',
-              renderHTML: attrs => ({ 'data-mention-type': attrs.type }),
-            },
-          }
-        },
-      }).configure({
-        HTMLAttributes: { class: 'tahi-mention' },
-        renderHTML: ({ options, node }) => {
-          const attrs = node.attrs as { id?: string; label?: string; type?: MentionType }
-          return [
-            'span',
-            {
-              ...options.HTMLAttributes,
-              'data-mention-type': attrs.type ?? 'person',
-              'data-mention-id': attrs.id ?? '',
-            },
-            `@${attrs.label ?? attrs.id ?? ''}`,
-          ]
-        },
-        suggestion: {
-          char: '@',
-          items: ({ query }) => searchMentions(
-            mentionSourcesRef.current,
-            query,
-            visibilityRef.current,
-          ),
-          // Explicit replace using the suggestion's range so the typed
-          // partial doesn't survive alongside the inserted chip.
-          command: ({ editor, range, props }) => {
-            // Eat a trailing space if there's one after the cursor so
-            // we don't end up with two spaces after insertion.
-            const nodeAfter = editor.view.state.selection.$to.nodeAfter
-            const overrideSpace = nodeAfter?.text?.startsWith(' ')
-            const replaceRange = overrideSpace ? { ...range, to: range.to + 1 } : range
-            editor
-              .chain()
-              .focus()
-              .insertContentAt(replaceRange, [
-                { type: 'mention', attrs: props },
-                { type: 'text', text: ' ' },
-              ])
-              .run()
-          },
-          render: createMentionSuggestionRender(),
-        },
+      buildMentionExtension({
+        sourcesRef: mentionSourcesRef,
+        visibilityRef,
       }),
     ],
     content: '',
@@ -243,6 +190,47 @@ export function Composer({
       editor.off('transaction', update)
     }
   }, [editor])
+
+  // Transient banner that surfaces e.g. "Removed 2 internal-only
+  // references" after the visibility toggle scrubs the draft.
+  const [scrubNotice, setScrubNotice] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    if (!scrubNotice) return
+    const t = setTimeout(() => setScrubNotice(null), 4500)
+    return () => clearTimeout(t)
+  }, [scrubNotice])
+
+  // Strip internalOnly mention nodes from the doc. Returns the count.
+  const stripInternalMentions = React.useCallback((): number => {
+    if (!editor) return 0
+    const positions: Array<{ from: number; to: number }> = []
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'mention' && node.attrs.internalOnly) {
+        positions.push({ from: pos, to: pos + node.nodeSize })
+      }
+    })
+    if (positions.length === 0) return 0
+    // Delete from end to start so positions stay valid.
+    let tr = editor.state.tr
+    for (let i = positions.length - 1; i >= 0; i--) {
+      tr = tr.delete(positions[i].from, positions[i].to)
+    }
+    editor.view.dispatch(tr)
+    return positions.length
+  }, [editor])
+
+  // Security guard. When the user flips visibility back to Public
+  // after inserting any internal-only mentions, strip them
+  // immediately so they can never leak to a public recipient.
+  React.useEffect(() => {
+    if (visibility !== 'public') return
+    const removed = stripInternalMentions()
+    if (removed > 0) {
+      setScrubNotice(
+        `Removed ${removed} internal-only ${removed === 1 ? 'reference' : 'references'} the client can't see.`,
+      )
+    }
+  }, [visibility, stripInternalMentions])
 
   const canSend = !!editor && (hasContent || staged.length > 0 || !!voiceNote) && !sending
 
@@ -292,6 +280,17 @@ export function Composer({
   // ── Submit ──
   const handleSend = async () => {
     if (!editor || !canSend) return
+    // Belt-and-braces: even if the toggle effect missed, never let an
+    // internal-only mention go out on a Public message.
+    if (visibility === 'public') {
+      const removed = stripInternalMentions()
+      if (removed > 0) {
+        setScrubNotice(
+          `Blocked send: removed ${removed} internal-only ${removed === 1 ? 'reference' : 'references'}. Review the message, then send again.`,
+        )
+        return
+      }
+    }
     setSending(true)
     try {
       const payload: ComposerSendPayload = {
@@ -302,11 +301,12 @@ export function Composer({
         visibility,
       }
       await onSend?.(payload)
-      // Reset
+      // Reset. Don't revoke staged previewUrl or voiceNote.url here —
+      // the consumer received those URLs in `payload` and may still
+      // be using them to render the just-sent bubble. Revoking would
+      // break the image / voice preview the consumer just mounted.
       editor.commands.clearContent()
-      staged.forEach(s => s.previewUrl && URL.revokeObjectURL(s.previewUrl))
       setStaged([])
-      if (voiceNote) URL.revokeObjectURL(voiceNote.url)
       setVoiceNote(null)
     } finally {
       setSending(false)
@@ -465,6 +465,46 @@ export function Composer({
             outline: 'none',
           }}
         />
+      )}
+
+      {/* Internal-mention scrub notice. Fires when the visibility flip
+          (or the send guard) strips internalOnly mentions from the
+          draft. Auto-dismisses after a few seconds. */}
+      {scrubNotice && (
+        <div
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '0.4375rem',
+            padding: '0.375rem 0.5625rem',
+            background: 'rgba(245, 158, 11, 0.10)',
+            border: '1px solid rgba(245, 158, 11, 0.30)',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.75rem',
+            color: '#92400e',
+            lineHeight: 1.4,
+          }}
+        >
+          <span aria-hidden="true" style={{ fontSize: '0.875rem', lineHeight: 1 }}>!</span>
+          <span style={{ flex: 1 }}>{scrubNotice}</span>
+          <button
+            type="button"
+            onClick={() => setScrubNotice(null)}
+            aria-label="Dismiss notice"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              padding: 0,
+              color: '#92400e',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+            }}
+          >
+            <X size={11} aria-hidden="true" />
+          </button>
+        </div>
       )}
 
       {/* Image previews + file chips */}
@@ -1070,6 +1110,81 @@ function promptForLink(editor: Editor) {
 
 // ── @-mention search + suggestion popover ─────────────────────────────
 
+/** Builds the Tiptap Mention extension wired to live sources + visibility.
+ *
+ * Refs let the consumer swap sources / visibility without recreating
+ * the editor. Used by Composer for new messages and by MessageBubble
+ * for inline edits — anywhere @ should work the same way. */
+export function buildMentionExtension(opts: {
+  sourcesRef: React.MutableRefObject<MentionSources | undefined>
+  visibilityRef: React.MutableRefObject<ComposerVisibility>
+}) {
+  return Mention.extend({
+    addAttributes() {
+      return {
+        id:    { default: null },
+        label: { default: null },
+        type:  {
+          default: 'person',
+          parseHTML: el => el.getAttribute('data-mention-type') ?? 'person',
+          renderHTML: attrs => ({ 'data-mention-type': attrs.type }),
+        },
+        internalOnly: {
+          default: false,
+          parseHTML: el => el.getAttribute('data-internal-only') === 'true',
+          renderHTML: attrs => attrs.internalOnly ? { 'data-internal-only': 'true' } : {},
+        },
+      }
+    },
+  }).configure({
+    HTMLAttributes: { class: 'tahi-mention' },
+    renderHTML: ({ options, node }) => {
+      const attrs = node.attrs as { id?: string; label?: string; type?: MentionType; internalOnly?: boolean }
+      const extra: Record<string, string> = {
+        'data-mention-type': attrs.type ?? 'person',
+        'data-mention-id': attrs.id ?? '',
+      }
+      if (attrs.internalOnly) extra['data-internal-only'] = 'true'
+      return [
+        'span',
+        { ...options.HTMLAttributes, ...extra },
+        `@${attrs.label ?? attrs.id ?? ''}`,
+      ]
+    },
+    suggestion: {
+      char: '@',
+      items: ({ query }) => searchMentions(
+        opts.sourcesRef.current,
+        query,
+        opts.visibilityRef.current,
+      ),
+      command: ({ editor, range, props }) => {
+        const p = props as { id: string; label: string; type?: MentionType; internalOnly?: boolean }
+        const nodeAfter = editor.view.state.selection.$to.nodeAfter
+        const overrideSpace = nodeAfter?.text?.startsWith(' ')
+        const replaceRange = overrideSpace ? { ...range, to: range.to + 1 } : range
+        editor
+          .chain()
+          .focus()
+          .insertContentAt(replaceRange, [
+            {
+              type: 'mention',
+              attrs: {
+                id: p.id,
+                label: p.label,
+                type: p.type ?? 'person',
+                internalOnly: p.internalOnly ?? false,
+              },
+            },
+            { type: 'text', text: ' ' },
+          ])
+          .run()
+      },
+      render: createMentionSuggestionRender(),
+    },
+  })
+}
+
 interface MentionMatch extends MentionItem {
   /** Order within its group. Lower comes first. */
   rank: number
@@ -1114,7 +1229,7 @@ const MENTION_GROUP_LABEL: Record<MentionType, string> = {
 
 interface SuggestionRenderProps {
   items: MentionMatch[]
-  command: (item: { id: string; label: string; type: MentionType }) => void
+  command: (item: { id: string; label: string; type: MentionType; internalOnly?: boolean }) => void
   clientRect?: (() => DOMRect | null) | null
   event?: KeyboardEvent
 }
@@ -1173,7 +1288,12 @@ function createMentionSuggestionRender() {
         el.addEventListener('click', () => {
           const idx = parseInt(el.getAttribute('data-index') ?? '0')
           if (commandFn && items[idx]) {
-            commandFn({ id: items[idx].id, label: items[idx].label, type: items[idx].type })
+            commandFn({
+              id: items[idx].id,
+              label: items[idx].label,
+              type: items[idx].type,
+              internalOnly: items[idx].internalOnly ?? false,
+            })
           }
         })
       })
@@ -1240,6 +1360,7 @@ function createMentionSuggestionRender() {
               id: items[selectedIndex].id,
               label: items[selectedIndex].label,
               type: items[selectedIndex].type,
+              internalOnly: items[selectedIndex].internalOnly ?? false,
             })
           }
           return true

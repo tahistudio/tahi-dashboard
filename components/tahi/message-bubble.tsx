@@ -41,10 +41,15 @@
 
 import * as React from 'react'
 import { Smile, MoreHorizontal, CornerDownRight, Play, Pause, Check, CheckCheck } from 'lucide-react'
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import Placeholder from '@tiptap/extension-placeholder'
 import { Avatar } from '@/components/tahi/avatar'
 import { FileAttachmentList, type FileAttachment } from '@/components/tahi/file-attachment-list'
 import { Popover } from '@/components/tahi/popover'
 import { Tooltip } from '@/components/tahi/tooltip'
+import { buildMentionExtension } from '@/components/tahi/composer'
+import type { MentionSources, ComposerVisibility } from '@/components/tahi/composer'
 
 export interface MessageAuthor {
   id?: string
@@ -126,15 +131,17 @@ interface MessageBubbleProps {
    *  spans get cursor:pointer + a hover state. */
   onMentionClick?: (mention: { id: string; type: string; label: string }) => void
 
-  /** Inline-edit mode. When true, the bubble body becomes an
-   *  editable textarea with Save / Cancel. Caller drives the flag
-   *  (typically from an Edit action in the menu). */
+  /** Inline-edit mode. When true, the bubble body becomes a Tiptap
+   *  editor with the same @-mention behaviour as the composer. */
   editing?: boolean
-  /** Save the edited content. Receives the new plain text; the
-   *  caller can wrap it as needed (Tiptap HTML, markdown, etc.). */
-  onSaveEdit?: (nextText: string) => void | Promise<void>
+  /** Save the edited content. Receives the new HTML from the inline
+   *  editor (matches what `bodyHtml` expects). */
+  onSaveEdit?: (nextHtml: string) => void | Promise<void>
   /** Cancel out of edit mode. */
   onCancelEdit?: () => void
+  /** Mention picker sources for inline edit. Same shape the composer
+   *  accepts; if omitted, edit mode still works but @ does nothing. */
+  mentionSources?: MentionSources
 
   className?: string
 }
@@ -164,23 +171,9 @@ export function MessageBubble({
   editing = false,
   onSaveEdit,
   onCancelEdit,
+  mentionSources,
   className,
 }: MessageBubbleProps) {
-  // Local draft for inline edit. Seeded from the current body's
-  // plaintext (HTML stripped). Reset when edit mode opens / closes.
-  const [editDraft, setEditDraft] = React.useState('')
-  React.useEffect(() => {
-    if (editing) {
-      const initial = bodyHtml
-        ? stripBodyHtml(bodyHtml)
-        : typeof body === 'string' ? body : ''
-      setEditDraft(initial)
-    }
-  }, [editing, bodyHtml, body])
-  const saveEdit = () => {
-    if (!editDraft.trim()) return
-    void onSaveEdit?.(editDraft.trim())
-  }
   const [emojiOpen, setEmojiOpen] = React.useState(false)
   const [actionsOpen, setActionsOpen] = React.useState(false)
   const emojiRef = React.useRef<HTMLButtonElement | null>(null)
@@ -402,82 +395,28 @@ export function MessageBubble({
             </button>
           )}
 
-          {/* Body. When `editing` is true, swap for an inline editor
-              with Save / Cancel. Otherwise either dangerouslySetInnerHTML
-              (Tiptap output) or arbitrary node. */}
+          {/* Body. When `editing` is true, swap for a Tiptap editor
+              with the same @-mention behaviour as the composer. */}
           {editing ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4375rem' }}>
-              <textarea
-                value={editDraft}
-                onChange={(e) => setEditDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault()
-                    saveEdit()
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault()
-                    onCancelEdit?.()
-                  }
-                }}
-                rows={Math.max(2, editDraft.split('\n').length)}
-                autoFocus
-                style={{
-                  width: '100%',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius-sm)',
-                  padding: '0.4375rem 0.5625rem',
-                  background: 'var(--color-bg)',
-                  fontSize: 'var(--text-sm)',
-                  color: 'var(--color-text)',
-                  outline: 'none',
-                  resize: 'vertical',
-                  fontFamily: 'inherit',
-                  lineHeight: 1.5,
-                }}
-              />
-              <div style={{ display: 'flex', gap: '0.3125rem', justifyContent: 'flex-end' }}>
-                <button
-                  type="button"
-                  onClick={onCancelEdit}
-                  style={{
-                    padding: '0.25rem 0.625rem',
-                    background: 'transparent',
-                    border: '1px solid var(--color-border-subtle)',
-                    borderRadius: 'var(--radius-sm)',
-                    fontSize: 'var(--text-xs)',
-                    fontWeight: 500,
-                    color: 'var(--color-text-muted)',
-                    cursor: 'pointer',
-                  }}
-                >Cancel</button>
-                <button
-                  type="button"
-                  onClick={saveEdit}
-                  disabled={!editDraft.trim()}
-                  style={{
-                    padding: '0.25rem 0.75rem',
-                    background: editDraft.trim() ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
-                    border: 'none',
-                    borderRadius: 'var(--radius-sm)',
-                    fontSize: 'var(--text-xs)',
-                    fontWeight: 600,
-                    color: editDraft.trim() ? '#ffffff' : 'var(--color-text-subtle)',
-                    cursor: editDraft.trim() ? 'pointer' : 'not-allowed',
-                  }}
-                >Save</button>
-              </div>
-              <span style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)' }}>
-                Cmd / Ctrl + Enter to save, Esc to cancel.
-              </span>
-            </div>
+            <InlineMessageEditor
+              initialHtml={bodyHtml ?? (typeof body === 'string' ? body : '')}
+              mentionSources={mentionSources}
+              messageVisibility={visibility === 'internal' ? 'internal' : 'public'}
+              onSave={(html) => { void onSaveEdit?.(html) }}
+              onCancel={() => onCancelEdit?.()}
+            />
           ) : bodyHtml ? (
             <div
               className={onMentionClick ? 'tahi-message-body tahi-message-body--mentions-clickable' : 'tahi-message-body'}
               dangerouslySetInnerHTML={{ __html: bodyHtml }}
               onClick={onMentionClick ? (e) => {
                 const target = e.target as HTMLElement
-                const mention = target.closest('.tahi-mention') as HTMLElement | null
+                // Prefer the data attribute since it survives even if
+                // the .tahi-mention class is stripped by sanitisers.
+                const mention = (target.closest('[data-mention-id]') ?? target.closest('.tahi-mention')) as HTMLElement | null
                 if (!mention) return
+                e.preventDefault()
+                e.stopPropagation()
                 const id = mention.getAttribute('data-mention-id') ?? ''
                 const type = mention.getAttribute('data-mention-type') ?? 'person'
                 const label = mention.textContent?.replace(/^@/, '') ?? ''
@@ -797,25 +736,6 @@ function isProbablyImage(a: FileAttachment): boolean {
   return (a.mime ?? '').startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'].includes(ext)
 }
 
-function stripBodyHtml(html: string): string {
-  // Cheap plaintext for the inline edit seed. Preserves @-mention
-  // labels (without the surrounding span chrome) and converts <br>
-  // / </p> into line breaks so multi-paragraph messages stay
-  // multi-line in the textarea.
-  return html
-    .replace(/<br\s*\/?>(?!\s*<\/p>)/gi, '\n')
-    .replace(/<\/p>\s*<p[^>]*>/gi, '\n\n')
-    .replace(/<\/(p|li|blockquote|h[1-6])>/gi, '\n')
-    .replace(/<li[^>]*>/gi, '- ')
-    .replace(/<[^>]*>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-}
-
 function firstNameOf(fullName: string): string {
   // "Liam Miller" -> "Liam". Falls back to the whole string for
   // single-word names or unusual inputs.
@@ -894,18 +814,14 @@ function VoiceNoteInline({ voiceNote }: { voiceNote: MessageVoiceNote }) {
   return (
     <div
       style={{
-        marginTop: '0.5rem',
-        padding: '0.5rem 0.625rem',
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-md)',
+        marginTop: '0.375rem',
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.4375rem',
-        maxWidth: '20rem',
+        gap: '0.3125rem',
+        maxWidth: '18rem',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         <button
           type="button"
           onClick={togglePlay}
@@ -914,8 +830,8 @@ function VoiceNoteInline({ voiceNote }: { voiceNote: MessageVoiceNote }) {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: '1.875rem',
-            height: '1.875rem',
+            width: '1.5rem',
+            height: '1.5rem',
             borderRadius: 999,
             background: 'var(--color-brand)',
             border: 'none',
@@ -928,8 +844,8 @@ function VoiceNoteInline({ voiceNote }: { voiceNote: MessageVoiceNote }) {
           onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-brand)' }}
         >
           {playing
-            ? <Pause size={13} aria-hidden="true" />
-            : <Play size={13} aria-hidden="true" style={{ marginLeft: '0.125rem' }} />}
+            ? <Pause size={10} aria-hidden="true" />
+            : <Play size={10} aria-hidden="true" style={{ marginLeft: '0.0625rem' }} />}
         </button>
         <div
           ref={trackRef}
@@ -949,8 +865,8 @@ function VoiceNoteInline({ voiceNote }: { voiceNote: MessageVoiceNote }) {
           style={{
             position: 'relative',
             flex: 1,
-            height: '0.375rem',
-            background: 'var(--color-bg-tertiary)',
+            height: '0.25rem',
+            background: 'rgba(15, 26, 15, 0.10)',
             borderRadius: 999,
             cursor: 'pointer',
           }}
@@ -970,13 +886,12 @@ function VoiceNoteInline({ voiceNote }: { voiceNote: MessageVoiceNote }) {
             style={{
               position: 'absolute',
               top: '50%',
-              left: `calc(${progress * 100}% - 0.4375rem)`,
+              left: `calc(${progress * 100}% - 0.34375rem)`,
               transform: 'translateY(-50%)',
-              width: '0.875rem',
-              height: '0.875rem',
+              width: '0.6875rem',
+              height: '0.6875rem',
               borderRadius: 999,
-              background: '#ffffff',
-              boxShadow: '0 1px 2px rgba(15,20,16,0.18), 0 0 0 1px var(--color-brand)',
+              background: 'var(--color-brand)',
               pointerEvents: 'none',
               opacity: progress > 0 || playing || dragging ? 1 : 0,
               transition: 'opacity 150ms ease',
@@ -988,7 +903,7 @@ function VoiceNoteInline({ voiceNote }: { voiceNote: MessageVoiceNote }) {
           color: 'var(--color-text-muted)',
           fontVariantNumeric: 'tabular-nums',
           flexShrink: 0,
-          minWidth: '2.25rem',
+          minWidth: '2rem',
           textAlign: 'right',
         }}>
           {playing || current > 0 ? formatDuration(current) : formatDuration(duration)}
@@ -1028,4 +943,145 @@ function formatDuration(seconds: number): string {
   const min = Math.floor(seconds / 60)
   const sec = Math.floor(seconds % 60)
   return `${min}:${String(sec).padStart(2, '0')}`
+}
+
+// ── Inline message editor (Tiptap with @-mentions) ──────────────────────────
+//
+// Used when the bubble is in `editing` mode. Mirrors the composer's
+// mention behaviour so @ works the same way for new messages and
+// edits. No file / voice / visibility chrome — those don't belong to
+// the act of editing a body.
+function InlineMessageEditor({
+  initialHtml,
+  mentionSources,
+  messageVisibility,
+  onSave,
+  onCancel,
+}: {
+  initialHtml: string
+  mentionSources?: MentionSources
+  /** Existing visibility of the message. Drives whether the mention
+   *  picker shows internal-only items while editing. */
+  messageVisibility: ComposerVisibility
+  onSave: (html: string) => void
+  onCancel: () => void
+}) {
+  const sourcesRef = React.useRef<MentionSources | undefined>(mentionSources)
+  React.useEffect(() => { sourcesRef.current = mentionSources }, [mentionSources])
+  const visibilityRef = React.useRef<ComposerVisibility>(messageVisibility)
+  React.useEffect(() => { visibilityRef.current = messageVisibility }, [messageVisibility])
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      Placeholder.configure({ placeholder: 'Edit message…' }),
+      buildMentionExtension({ sourcesRef, visibilityRef }),
+    ],
+    content: initialHtml || '',
+    autofocus: 'end',
+    immediatelyRender: false,
+    editorProps: {
+      attributes: {
+        class: 'tahi-composer-editor',
+      },
+      handleKeyDown: (_view, event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+          event.preventDefault()
+          const html = editor?.getHTML() ?? ''
+          if (stripped(html).length > 0) onSave(html)
+          return true
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          onCancel()
+          return true
+        }
+        return false
+      },
+    },
+  })
+
+  const [hasContent, setHasContent] = React.useState(false)
+  React.useEffect(() => {
+    if (!editor) return
+    const update = () => setHasContent(!editor.isEmpty)
+    editor.on('update', update)
+    editor.on('transaction', update)
+    update()
+    return () => {
+      editor.off('update', update)
+      editor.off('transaction', update)
+    }
+  }, [editor])
+
+  const save = () => {
+    if (!editor) return
+    const html = editor.getHTML()
+    if (stripped(html).length === 0) return
+    onSave(html)
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4375rem' }}>
+      <div
+        style={{
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '0.4375rem 0.5625rem',
+          background: 'var(--color-bg)',
+        }}
+      >
+        {editor && (
+          <EditorContent
+            editor={editor}
+            style={{
+              fontSize: 'var(--text-sm)',
+              lineHeight: 1.55,
+              color: 'var(--color-text)',
+              outline: 'none',
+              minHeight: '2.25rem',
+            }}
+          />
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: '0.3125rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+        <span style={{ flex: 1, fontSize: '0.625rem', color: 'var(--color-text-subtle)' }}>
+          Cmd / Ctrl + Enter to save, Esc to cancel.
+        </span>
+        <button
+          type="button"
+          onClick={onCancel}
+          style={{
+            padding: '0.25rem 0.625rem',
+            background: 'transparent',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: 'var(--text-xs)',
+            fontWeight: 500,
+            color: 'var(--color-text-muted)',
+            cursor: 'pointer',
+          }}
+        >Cancel</button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={!hasContent}
+          style={{
+            padding: '0.25rem 0.75rem',
+            background: hasContent ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
+            border: 'none',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: 'var(--text-xs)',
+            fontWeight: 600,
+            color: hasContent ? '#ffffff' : 'var(--color-text-subtle)',
+            cursor: hasContent ? 'pointer' : 'not-allowed',
+          }}
+        >Save</button>
+      </div>
+    </div>
+  )
+}
+
+function stripped(html: string): string {
+  return html.replace(/<[^>]*>/g, '').trim()
 }
