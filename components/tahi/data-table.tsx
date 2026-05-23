@@ -3,35 +3,42 @@
 /**
  * <DataTable>. The shared list-page table.
  *
+ * Features:
+ *   - Sortable columns (controlled or internal).
+ *   - Row click navigates or toggles expansion.
+ *   - Row selection with checkbox column and select-all in head.
+ *   - Per-row action menu via 3-dots button OR right-click anywhere
+ *     on the row.
+ *   - Expandable rows (renderExpand) with a slide-down detail panel.
+ *   - Sticky thead, h-scroll on mobile, density toggle.
+ *   - Loading / empty states baked in.
+ *   - Outer wrapper clips to its parent's rounded corners so the
+ *     table doesn't poke past a Card's curve.
+ *
  *   <DataTable
  *     columns={[
- *       { key: 'name',    header: 'Name',  sortable: true },
- *       { key: 'status',  header: 'Status', align: 'left',
- *         render: (row) => <Badge tone={statusTone(row.status)}>{row.status}</Badge> },
- *       { key: 'amount',  header: 'Amount', align: 'right', sortable: true,
- *         render: (row) => formatMoney(row.amount) },
+ *       { key: 'name', header: 'Name', sortable: true },
+ *       { key: 'status', render: r => <Badge ... /> },
  *     ]}
  *     rows={rows}
  *     getRowId={r => r.id}
+ *     selectable
+ *     selectedIds={selected}
+ *     onSelectionChange={setSelected}
  *     onRowClick={r => router.push(`/invoices/${r.id}`)}
- *     empty={<EmptyState ... />}
+ *     rowActions={r => [
+ *       { label: 'Open', onClick: () => navigate(r.id) },
+ *       { label: 'Delete', tone: 'danger', onClick: () => del(r.id) },
+ *     ]}
+ *     renderExpand={r => <DetailsPanel row={r} />}
  *     loading={isLoading}
+ *     empty={<EmptyState ... />}
  *   />
- *
- * Built on a real <table> for accessibility + browser semantics. The
- * outer wrapper carries the .h-scroll utility so the table scrolls
- * horizontally on mobile instead of wrapping cells. The first column
- * sticks to the left edge on h-scroll. Sortable headers toggle on
- * click, indicate direction with a chevron, and call onSortChange if
- * provided (controlled mode); otherwise sort is internal.
- *
- * No row hover ring or single-side borders, per the design system. Row
- * hover applies a brand-tinted background; the cursor turns into a
- * pointer when onRowClick is set.
  */
 
 import * as React from 'react'
-import { ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Loader2, MoreHorizontal, Check } from 'lucide-react'
+import { Popover } from '@/components/tahi/popover'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -47,7 +54,7 @@ export interface DataTableColumn<Row> {
   key: string
   /** Header label. */
   header: React.ReactNode
-  /** Cell renderer. Defaults to (row) => row[key] if `accessor` is set. */
+  /** Cell renderer. */
   render?: (row: Row, rowIndex: number) => React.ReactNode
   /** Convenience accessor when render is a straight property pull. */
   accessor?: (row: Row) => React.ReactNode
@@ -57,7 +64,7 @@ export interface DataTableColumn<Row> {
   sortValue?: (row: Row) => string | number | null | undefined
   /** Cell alignment. Default 'left'. */
   align?: 'left' | 'right' | 'center'
-  /** Fixed width (e.g. '6rem'). Lets actions / status columns stop expanding. */
+  /** Fixed width (e.g. '6rem'). */
   width?: string
   /** Min-width hint for h-scroll. */
   minWidth?: string
@@ -65,12 +72,20 @@ export interface DataTableColumn<Row> {
   muted?: boolean
 }
 
+export interface DataTableAction {
+  label: string
+  icon?: React.ReactNode
+  onClick: () => void
+  tone?: 'default' | 'danger'
+  disabled?: boolean
+}
+
 interface DataTableProps<Row> {
   columns: ReadonlyArray<DataTableColumn<Row>>
   rows: ReadonlyArray<Row>
   /** Stable row id. Required for keys + click semantics. */
   getRowId: (row: Row) => string
-  /** Optional row click. Sets cursor: pointer + hover bg. */
+  /** Row click. Skipped if the row is expandable (toggles expansion instead). */
   onRowClick?: (row: Row) => void
   /** Controlled sort. If omitted, the table sorts internally. */
   sort?: DataTableSort | null
@@ -89,6 +104,26 @@ interface DataTableProps<Row> {
   ariaLabel?: string
   /** Optional class on the outer wrapper. */
   className?: string
+
+  // ── Row selection ──
+  /** Show a leading checkbox column. Defaults to false. */
+  selectable?: boolean
+  /** Controlled selection set of row IDs. */
+  selectedIds?: ReadonlySet<string>
+  /** Selection-change callback (controlled mode). */
+  onSelectionChange?: (next: Set<string>) => void
+
+  // ── Per-row actions ──
+  /** Returns the action menu items for a row. When set, a 3-dots column
+   *  is appended on the right and right-clicking the row opens the
+   *  same menu. */
+  rowActions?: (row: Row) => DataTableAction[]
+
+  // ── Expandable rows ──
+  /** Returns the inline detail panel for a row. When non-null for a
+   *  row, the row click toggles its expansion instead of firing
+   *  onRowClick. */
+  renderExpand?: (row: Row) => React.ReactNode
 }
 
 // ── Implementation ──────────────────────────────────────────────────────────
@@ -107,24 +142,42 @@ export function DataTable<Row>({
   density = 'comfortable',
   ariaLabel,
   className,
+  selectable = false,
+  selectedIds,
+  onSelectionChange,
+  rowActions,
+  renderExpand,
 }: DataTableProps<Row>) {
-  const isControlled = sort !== undefined
+  const isControlledSort = sort !== undefined
   const [internalSort, setInternalSort] = React.useState<DataTableSort | null>(defaultSort)
-  const activeSort: DataTableSort | null = isControlled ? (sort ?? null) : internalSort
+  const activeSort: DataTableSort | null = isControlledSort ? (sort ?? null) : internalSort
+
+  // Internal selection state if not controlled.
+  const isControlledSelection = selectedIds !== undefined
+  const [internalSelection, setInternalSelection] = React.useState<Set<string>>(new Set())
+  const activeSelection = isControlledSelection ? selectedIds : internalSelection
+
+  const setSelection = React.useCallback((next: Set<string>) => {
+    if (isControlledSelection) {
+      onSelectionChange?.(next)
+    } else {
+      setInternalSelection(next)
+      onSelectionChange?.(next)
+    }
+  }, [isControlledSelection, onSelectionChange])
 
   const handleSortClick = (col: DataTableColumn<Row>) => {
     if (!col.sortable) return
     const nextDir: SortDir =
       activeSort?.key === col.key && activeSort.dir === 'asc' ? 'desc' : 'asc'
     const next: DataTableSort = { key: col.key, dir: nextDir }
-    if (isControlled) {
+    if (isControlledSort) {
       onSortChange?.(next)
     } else {
       setInternalSort(next)
     }
   }
 
-  // Internal sort: sort rows by the active column's sortValue (or accessor).
   const sortedRows = React.useMemo(() => {
     if (!activeSort) return rows
     const col = columns.find(c => c.key === activeSort.key)
@@ -147,181 +200,574 @@ export function DataTable<Row>({
 
   const rowPaddingY = density === 'compact' ? '0.5rem' : '0.75rem'
 
+  // Expansion
+  const [expandedId, setExpandedId] = React.useState<string | null>(null)
+  // Right-click action menu state
+  const [actionMenu, setActionMenu] = React.useState<{ row: Row; x: number; y: number } | null>(null)
+
+  // Selection helpers
+  const allRowIds = sortedRows.map(getRowId)
+  const allSelected = selectable && allRowIds.length > 0 && allRowIds.every(id => activeSelection?.has(id))
+  const someSelected = selectable && !allSelected && allRowIds.some(id => activeSelection?.has(id))
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelection(new Set())
+    } else {
+      setSelection(new Set(allRowIds))
+    }
+  }
+
+  const toggleRow = (id: string) => {
+    const next = new Set(activeSelection ?? [])
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setSelection(next)
+  }
+
+  const colCount = columns.length + (selectable ? 1 : 0) + (rowActions ? 1 : 0)
+
   return (
-    <div className={['h-scroll', className].filter(Boolean).join(' ')} style={{ width: '100%' }}>
-      <table
-        role="table"
-        aria-label={ariaLabel}
-        style={{
-          width: '100%',
-          borderCollapse: 'separate',
-          borderSpacing: 0,
-          fontSize: 'var(--text-sm)',
-          minWidth: 'max-content',
-        }}
-      >
-        <thead>
-          <tr>
-            {columns.map(col => {
-              const isSorted = activeSort?.key === col.key
-              const align = col.align ?? 'left'
-              return (
+    <div
+      className={className}
+      style={{
+        width: '100%',
+        // Inherit the parent's rounded corners so a wrapping Card's
+        // curve clips the table cleanly. Combined with overflow:hidden
+        // this removes the "borderBottom past the corner" artefact.
+        borderRadius: 'inherit',
+        overflow: 'hidden',
+      }}
+    >
+      <div className="h-scroll" style={{ width: '100%' }}>
+        <table
+          role="table"
+          aria-label={ariaLabel}
+          style={{
+            width: '100%',
+            borderCollapse: 'separate',
+            borderSpacing: 0,
+            fontSize: 'var(--text-sm)',
+            minWidth: 'max-content',
+          }}
+        >
+          <thead>
+            <tr>
+              {selectable && (
                 <th
-                  key={col.key}
                   scope="col"
-                  aria-sort={col.sortable
-                    ? (isSorted ? (activeSort.dir === 'asc' ? 'ascending' : 'descending') : 'none')
-                    : undefined}
                   style={{
-                    position: 'sticky',
-                    top: stickyOffset,
-                    zIndex: 1,
-                    textAlign: align,
-                    padding: '0.625rem 0.875rem',
-                    background: 'var(--color-bg-secondary)',
-                    borderBottom: '1px solid var(--color-border-subtle)',
-                    fontSize: '0.6875rem',
-                    fontWeight: 600,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    color: 'var(--color-text-subtle)',
-                    width: col.width,
-                    minWidth: col.minWidth,
-                    whiteSpace: 'nowrap',
+                    ...thStyle(stickyOffset),
+                    width: '2.75rem',
+                    paddingRight: 0,
                   }}
                 >
-                  {col.sortable ? (
-                    <button
-                      type="button"
-                      onClick={() => handleSortClick(col)}
-                      className="inline-flex items-center"
-                      style={{
-                        gap: '0.25rem',
-                        padding: 0,
-                        margin: 0,
-                        background: 'transparent',
-                        border: 'none',
-                        cursor: 'pointer',
-                        font: 'inherit',
-                        color: isSorted ? 'var(--color-text)' : 'inherit',
-                        textTransform: 'inherit',
-                        letterSpacing: 'inherit',
-                        fontWeight: 'inherit',
-                      }}
-                    >
-                      {col.header}
-                      <SortIndicator active={isSorted} dir={isSorted ? activeSort.dir : undefined} />
-                    </button>
-                  ) : (
-                    col.header
-                  )}
+                  <SelectCheckbox
+                    checked={!!allSelected}
+                    indeterminate={someSelected}
+                    onChange={toggleAll}
+                    ariaLabel={allSelected ? 'Deselect all rows' : 'Select all rows'}
+                  />
                 </th>
-              )
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {loading ? (
-            <tr>
-              <td colSpan={columns.length} style={{ padding: '2.5rem 1rem' }}>
-                <div
+              )}
+              {columns.map(col => {
+                const isSorted = activeSort?.key === col.key
+                const align = col.align ?? 'left'
+                return (
+                  <th
+                    key={col.key}
+                    scope="col"
+                    aria-sort={col.sortable
+                      ? (isSorted ? (activeSort.dir === 'asc' ? 'ascending' : 'descending') : 'none')
+                      : undefined}
+                    style={{
+                      ...thStyle(stickyOffset),
+                      textAlign: align,
+                      width: col.width,
+                      minWidth: col.minWidth,
+                    }}
+                  >
+                    {col.sortable ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSortClick(col)}
+                        className="inline-flex items-center"
+                        style={{
+                          gap: '0.25rem',
+                          padding: 0,
+                          margin: 0,
+                          background: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          font: 'inherit',
+                          color: isSorted ? 'var(--color-text)' : 'inherit',
+                          textTransform: 'inherit',
+                          letterSpacing: 'inherit',
+                          fontWeight: 'inherit',
+                        }}
+                      >
+                        {col.header}
+                        <SortIndicator active={isSorted} dir={isSorted ? activeSort.dir : undefined} />
+                      </button>
+                    ) : (
+                      col.header
+                    )}
+                  </th>
+                )
+              })}
+              {rowActions && (
+                <th
+                  scope="col"
+                  aria-label="Row actions"
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '0.5rem',
-                    color: 'var(--color-text-subtle)',
-                    fontSize: 'var(--text-sm)',
+                    ...thStyle(stickyOffset),
+                    width: '3rem',
                   }}
-                >
-                  <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-brand)' }} aria-hidden="true" />
-                  Loading
-                </div>
-              </td>
+                />
+              )}
             </tr>
-          ) : sortedRows.length === 0 ? (
-            <tr>
-              <td colSpan={columns.length} style={{ padding: 'var(--space-4)' }}>
-                {empty ?? (
-                  <div style={{ textAlign: 'center', color: 'var(--color-text-subtle)', fontSize: 'var(--text-sm)', padding: '1.5rem 0' }}>
-                    No items to display.
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={colCount} style={{ padding: '2.5rem 1rem' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.5rem',
+                      color: 'var(--color-text-subtle)',
+                      fontSize: 'var(--text-sm)',
+                    }}
+                  >
+                    <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-brand)' }} aria-hidden="true" />
+                    Loading
                   </div>
-                )}
-              </td>
-            </tr>
-          ) : (
-            sortedRows.map((row, rowIndex) => (
-              <DataRow<Row>
-                key={getRowId(row)}
-                row={row}
-                rowIndex={rowIndex}
-                columns={columns}
-                onRowClick={onRowClick}
-                paddingY={rowPaddingY}
-              />
-            ))
-          )}
-        </tbody>
-      </table>
+                </td>
+              </tr>
+            ) : sortedRows.length === 0 ? (
+              <tr>
+                <td colSpan={colCount} style={{ padding: 'var(--space-4)' }}>
+                  {empty ?? (
+                    <div style={{ textAlign: 'center', color: 'var(--color-text-subtle)', fontSize: 'var(--text-sm)', padding: '1.5rem 0' }}>
+                      No items to display.
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ) : (
+              sortedRows.map((row, rowIndex) => {
+                const id = getRowId(row)
+                const isLast = rowIndex === sortedRows.length - 1
+                const isSelected = activeSelection?.has(id) ?? false
+                const expandContent = renderExpand?.(row) ?? null
+                const isExpandable = expandContent != null
+                const isExpanded = isExpandable && expandedId === id
+                return (
+                  <DataRow<Row>
+                    key={id}
+                    row={row}
+                    rowId={id}
+                    rowIndex={rowIndex}
+                    columns={columns}
+                    onRowClick={onRowClick}
+                    paddingY={rowPaddingY}
+                    isLast={isLast}
+                    isSelected={isSelected}
+                    selectable={selectable}
+                    toggleRow={toggleRow}
+                    rowActions={rowActions}
+                    isExpandable={isExpandable}
+                    isExpanded={isExpanded}
+                    toggleExpand={() => setExpandedId(prev => (prev === id ? null : id))}
+                    expandContent={expandContent}
+                    openContextMenu={(x, y) => setActionMenu({ row, x, y })}
+                    extraColumnCount={(selectable ? 1 : 0) + (rowActions ? 1 : 0)}
+                  />
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Right-click action menu. Floating at cursor position. */}
+      {actionMenu && rowActions && (
+        <RightClickMenu
+          x={actionMenu.x}
+          y={actionMenu.y}
+          actions={rowActions(actionMenu.row)}
+          onClose={() => setActionMenu(null)}
+        />
+      )}
     </div>
   )
 }
 
+// ── th style helper ─────────────────────────────────────────────────────────
+
+function thStyle(stickyOffset: string | number): React.CSSProperties {
+  return {
+    position: 'sticky',
+    top: stickyOffset,
+    zIndex: 1,
+    padding: '0.75rem 1rem',
+    background: 'var(--color-bg-secondary)',
+    borderBottom: '1px solid var(--color-border-subtle)',
+    fontSize: '0.6875rem',
+    fontWeight: 600,
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase',
+    color: 'var(--color-text-subtle)',
+    whiteSpace: 'nowrap',
+  }
+}
+
 // ── Row ─────────────────────────────────────────────────────────────────────
 
-function DataRow<Row>({
-  row,
-  rowIndex,
-  columns,
-  onRowClick,
-  paddingY,
-}: {
+interface DataRowProps<Row> {
   row: Row
+  rowId: string
   rowIndex: number
   columns: ReadonlyArray<DataTableColumn<Row>>
   onRowClick?: (row: Row) => void
   paddingY: string
-}) {
-  const clickable = !!onRowClick
+  isLast: boolean
+  isSelected: boolean
+  selectable: boolean
+  toggleRow: (id: string) => void
+  rowActions?: (row: Row) => DataTableAction[]
+  isExpandable: boolean
+  isExpanded: boolean
+  toggleExpand: () => void
+  expandContent: React.ReactNode
+  openContextMenu: (x: number, y: number) => void
+  extraColumnCount: number
+}
+
+function DataRow<Row>({
+  row,
+  rowId,
+  rowIndex,
+  columns,
+  onRowClick,
+  paddingY,
+  isLast,
+  isSelected,
+  selectable,
+  toggleRow,
+  rowActions,
+  isExpandable,
+  isExpanded,
+  toggleExpand,
+  expandContent,
+  openContextMenu,
+  extraColumnCount,
+}: DataRowProps<Row>) {
+  const actionsRef = React.useRef<HTMLButtonElement | null>(null)
+  const [menuOpen, setMenuOpen] = React.useState(false)
+  const clickable = isExpandable || !!onRowClick
+
+  const handleRowClick = (e: React.MouseEvent) => {
+    // Don't fire row-click when the user is interacting with the
+    // checkbox column or the actions column.
+    const target = e.target as HTMLElement
+    if (target.closest('[data-row-control]')) return
+    if (isExpandable) toggleExpand()
+    else if (onRowClick) onRowClick(row)
+  }
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    if (!rowActions) return
+    e.preventDefault()
+    openContextMenu(e.clientX, e.clientY)
+  }
+
+  const rowBg = isSelected ? 'var(--color-brand-50)' : 'transparent'
+
   return (
-    <tr
-      onClick={clickable ? () => onRowClick(row) : undefined}
-      style={{
-        cursor: clickable ? 'pointer' : 'default',
-        transition: 'background-color 120ms ease',
-      }}
-      onMouseEnter={e => {
-        if (!clickable) return
-        e.currentTarget.style.background = 'var(--color-hover-tint)'
-      }}
-      onMouseLeave={e => {
-        if (!clickable) return
-        e.currentTarget.style.background = 'transparent'
-      }}
-    >
-      {columns.map((col, colIndex) => {
-        const align = col.align ?? 'left'
-        return (
+    <>
+      <tr
+        onClick={clickable ? handleRowClick : undefined}
+        onContextMenu={rowActions ? handleContextMenu : undefined}
+        style={{
+          cursor: clickable ? 'pointer' : 'default',
+          background: rowBg,
+          transition: 'background-color 120ms ease',
+        }}
+        onMouseEnter={e => {
+          if (isSelected) return
+          if (!clickable) return
+          e.currentTarget.style.background = 'var(--color-hover-tint)'
+        }}
+        onMouseLeave={e => {
+          if (isSelected) return
+          if (!clickable) return
+          e.currentTarget.style.background = 'transparent'
+        }}
+      >
+        {selectable && (
           <td
-            key={col.key}
+            data-row-control
             style={{
-              padding: `${paddingY} 0.875rem`,
-              textAlign: align,
-              borderBottom: '1px solid var(--color-border-subtle)',
-              color: col.muted ? 'var(--color-text-muted)' : 'var(--color-text)',
+              padding: `${paddingY} 0 ${paddingY} 1rem`,
+              borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
               verticalAlign: 'middle',
-              whiteSpace: colIndex === 0 ? 'nowrap' : undefined,
+              width: '2.75rem',
             }}
           >
-            {col.render
-              ? col.render(row, rowIndex)
-              : col.accessor
-                ? col.accessor(row)
-                : null}
+            <SelectCheckbox
+              checked={isSelected}
+              onChange={() => toggleRow(rowId)}
+              ariaLabel={isSelected ? 'Deselect row' : 'Select row'}
+            />
           </td>
-        )
-      })}
-    </tr>
+        )}
+        {columns.map((col, colIndex) => {
+          const align = col.align ?? 'left'
+          return (
+            <td
+              key={col.key}
+              style={{
+                padding: `${paddingY} 1rem`,
+                textAlign: align,
+                borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
+                color: col.muted ? 'var(--color-text-muted)' : 'var(--color-text)',
+                verticalAlign: 'middle',
+                whiteSpace: colIndex === 0 ? 'nowrap' : undefined,
+              }}
+            >
+              {col.render
+                ? col.render(row, rowIndex)
+                : col.accessor
+                  ? col.accessor(row)
+                  : null}
+            </td>
+          )
+        })}
+        {rowActions && (
+          <td
+            data-row-control
+            style={{
+              padding: `${paddingY} 0.5rem`,
+              borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
+              verticalAlign: 'middle',
+              width: '3rem',
+              textAlign: 'right',
+            }}
+          >
+            <button
+              ref={actionsRef}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setMenuOpen(v => !v)
+              }}
+              className="inline-flex items-center justify-center"
+              style={{
+                width: '1.75rem',
+                height: '1.75rem',
+                borderRadius: 'var(--radius-md)',
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--color-text-subtle)',
+                cursor: 'pointer',
+                transition: 'background-color 150ms ease, color 150ms ease',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = 'var(--color-bg-tertiary)'
+                e.currentTarget.style.color = 'var(--color-text)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = 'var(--color-text-subtle)'
+              }}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label="Row actions"
+            >
+              <MoreHorizontal size={15} aria-hidden="true" />
+            </button>
+            <Popover
+              anchorRef={actionsRef}
+              open={menuOpen}
+              onClose={() => setMenuOpen(false)}
+              align="end"
+              width="12rem"
+            >
+              <ActionMenuList
+                actions={rowActions(row)}
+                onClose={() => setMenuOpen(false)}
+              />
+            </Popover>
+          </td>
+        )}
+      </tr>
+      {isExpanded && expandContent && (
+        <tr>
+          <td
+            colSpan={columns.length + extraColumnCount}
+            style={{
+              padding: 0,
+              borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
+              background: 'var(--color-bg-secondary)',
+            }}
+          >
+            <div style={{ padding: '1rem 1.25rem', animation: 'tahi-row-expand 200ms ease-out' }}>
+              {expandContent}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+// ── Selection checkbox ──────────────────────────────────────────────────────
+
+function SelectCheckbox({
+  checked,
+  indeterminate = false,
+  onChange,
+  ariaLabel,
+}: {
+  checked: boolean
+  indeterminate?: boolean
+  onChange: () => void
+  ariaLabel: string
+}) {
+  const showCheck = checked || indeterminate
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={indeterminate ? 'mixed' : checked}
+      aria-label={ariaLabel}
+      onClick={(e) => { e.stopPropagation(); onChange() }}
+      style={{
+        width: '1.125rem',
+        height: '1.125rem',
+        borderRadius: 'var(--radius-sm)',
+        border: showCheck
+          ? '1px solid var(--color-brand)'
+          : '1px solid var(--color-border)',
+        background: showCheck ? 'var(--color-brand)' : 'var(--color-bg)',
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transition: 'background-color 120ms ease, border-color 120ms ease',
+        padding: 0,
+      }}
+    >
+      {indeterminate ? (
+        <span style={{ width: '0.5rem', height: '2px', background: '#ffffff', borderRadius: 1 }} />
+      ) : checked ? (
+        <Check size={12} aria-hidden="true" style={{ color: '#ffffff' }} strokeWidth={3} />
+      ) : null}
+    </button>
+  )
+}
+
+// ── Action menu (both 3-dots popover and right-click variant share this) ───
+
+function ActionMenuList({
+  actions,
+  onClose,
+}: {
+  actions: DataTableAction[]
+  onClose: () => void
+}) {
+  return (
+    <div role="menu" aria-label="Row actions">
+      {actions.map((action, i) => (
+        <button
+          key={i}
+          type="button"
+          role="menuitem"
+          disabled={action.disabled}
+          onClick={() => { action.onClick(); onClose() }}
+          className="w-full inline-flex items-center"
+          style={{
+            gap: '0.5rem',
+            padding: '0.5rem 0.625rem',
+            background: 'transparent',
+            border: 'none',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: 'var(--text-sm)',
+            color: action.tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text)',
+            cursor: action.disabled ? 'not-allowed' : 'pointer',
+            opacity: action.disabled ? 0.5 : 1,
+            textAlign: 'left',
+            transition: 'background-color 150ms ease',
+          }}
+          onMouseEnter={e => {
+            if (action.disabled) return
+            e.currentTarget.style.background = action.tone === 'danger'
+              ? 'var(--color-danger-bg)'
+              : 'var(--color-bg-secondary)'
+          }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+        >
+          {action.icon && (
+            <span style={{
+              color: action.tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text-muted)',
+              display: 'inline-flex',
+            }}>
+              {action.icon}
+            </span>
+          )}
+          {action.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function RightClickMenu({
+  x,
+  y,
+  actions,
+  onClose,
+}: {
+  x: number
+  y: number
+  actions: DataTableAction[]
+  onClose: () => void
+}) {
+  // Close on outside click + Escape.
+  React.useEffect(() => {
+    const onDocClick = () => onClose()
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('click', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('click', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+
+  return (
+    <div
+      role="menu"
+      onContextMenu={(e) => e.preventDefault()}
+      style={{
+        position: 'fixed',
+        top: y,
+        left: x,
+        zIndex: 9999,
+        width: '13rem',
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-card)',
+        boxShadow: 'var(--shadow-lg)',
+        padding: '0.25rem',
+        animation: 'tahi-row-expand 120ms ease-out',
+      }}
+    >
+      <ActionMenuList actions={actions} onClose={onClose} />
+    </div>
   )
 }
 

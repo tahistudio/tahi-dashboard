@@ -23,9 +23,10 @@ import { FeatureCard } from '@/components/tahi/feature-card'
 import { KPICard } from '@/components/tahi/kpi-card'
 import { Menu } from '@/components/tahi/menu'
 import { useToast } from '@/components/tahi/toast'
-import { BarChart, LineChart, Sparkline, Gauge } from '@/components/tahi/chart'
+import { BarChart, LineChart, Sparkline, Gauge, DonutChart, GanttChart } from '@/components/tahi/chart'
 import { DataTable } from '@/components/tahi/data-table'
 import { statusTone } from '@/components/tahi/badge'
+import { Trash2, ExternalLink, Copy } from 'lucide-react'
 
 /**
  * /design-system. The canonical token + primitive reference.
@@ -1741,6 +1742,40 @@ function ChartShowcase() {
         </CardPrim>
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <CardPrim>
+          <GroupHeading>DonutChart</GroupHeading>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0.5rem 0' }}>
+            <DonutChart
+              centreLabel="Pipeline"
+              centreValue="$287k"
+              segments={[
+                { label: 'Discovery',   value: 32 },
+                { label: 'Proposal',    value: 48 },
+                { label: 'Negotiation', value: 24 },
+                { label: 'Verbal',      value: 16 },
+              ]}
+            />
+          </div>
+        </CardPrim>
+
+        <CardPrim>
+          <GroupHeading>GanttChart</GroupHeading>
+          <GanttChart
+            rangeStart={new Date('2026-05-01')}
+            rangeEnd={new Date('2026-09-01')}
+            today={new Date('2026-06-12')}
+            rows={[
+              { id: 'a', label: 'Discovery', sub: 'Liam',  colourIndex: 0, start: new Date('2026-05-04'), end: new Date('2026-05-22') },
+              { id: 'b', label: 'Strategy',  sub: 'Staci', colourIndex: 1, start: new Date('2026-05-18'), end: new Date('2026-06-08'), milestones: [{ date: new Date('2026-06-01') }] },
+              { id: 'c', label: 'Design',    sub: 'Sarah', colourIndex: 2, start: new Date('2026-06-01'), end: new Date('2026-07-04') },
+              { id: 'd', label: 'Build',     sub: 'James', colourIndex: 3, start: new Date('2026-06-20'), end: new Date('2026-08-12'), milestones: [{ date: new Date('2026-07-15') }] },
+              { id: 'e', label: 'Launch',    sub: 'Team',  colourIndex: 4, start: new Date('2026-08-05'), end: new Date('2026-08-22') },
+            ]}
+          />
+        </CardPrim>
+      </div>
+
       <CardPrim>
         <GroupHeading>Sparkline &middot; inline</GroupHeading>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap', padding: '0.25rem 0' }}>
@@ -1754,10 +1789,13 @@ function ChartShowcase() {
         <GroupHeading>How to use it</GroupHeading>
         <ul style={{ fontSize: '0.8125rem', lineHeight: 1.7 }} className="space-y-1">
           <li>Every chart picks colours from the shared <Mono>CHART</Mono> palette so the same metric stays the same colour across the dashboard.</li>
-          <li>Use <Mono>variant=&quot;pill&quot;</Mono> when bars should feel like data pills (e.g. capacity, time tracked). Combine with <Mono>valueCallout</Mono> to highlight the peak.</li>
-          <li>Use <Mono>striped</Mono> per-bar (or <Mono>variant=&quot;striped&quot;</Mono>) for inactive / projected periods. The pattern is auto-generated from the active tone.</li>
-          <li><Mono>Sparkline</Mono> stays inline (default 100&times;28). Wrap it next to a value + label.</li>
+          <li>Use <Mono>variant=&quot;pill&quot;</Mono> when bars should feel like data pills (capacity, time tracked). Combine with <Mono>valueCallout</Mono> to highlight the peak. Pill rounds the top corners only so bars sit flat on the axis.</li>
+          <li>Use <Mono>striped</Mono> per-bar (or <Mono>variant=&quot;striped&quot;</Mono>) for inactive / projected periods.</li>
+          <li><Mono>DonutChart</Mono> takes any number of segments; centre label + value sit inside the ring. Legend below shows percentages.</li>
+          <li><Mono>GanttChart</Mono> renders horizontal bars across a date range. Pass <Mono>today</Mono> for the brand-coloured guide. <Mono>colourIndex</Mono> picks from the categorical rotation; <Mono>tone</Mono> picks a semantic colour. <Mono>milestones</Mono> render as diamonds on the bar.</li>
+          <li><Mono>Sparkline</Mono> stays inline (default 100&times;28). Wrap next to a value + label.</li>
           <li><Mono>Gauge</Mono> takes a 0-100 value, optional <Mono>label</Mono> + <Mono>sub</Mono> for the centre.</li>
+          <li>Every chart animates when it scrolls into view, not on initial mount. <Mono>prefers-reduced-motion</Mono> disables animation.</li>
         </ul>
       </CardPrim>
     </PrimitiveShell>
@@ -1806,45 +1844,206 @@ const INVOICE_ROWS: InvoiceDemo[] = [
 ]
 
 function DataTableShowcase() {
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [filterQuery, setFilterQuery] = useState('')
+  const [filterStatus, setFilterStatus] = useState<string>('all')
+
+  const filteredRows = INVOICE_ROWS.filter(r => {
+    if (filterStatus !== 'all' && r.status !== filterStatus) return false
+    if (filterQuery && !`${r.number} ${r.client}`.toLowerCase().includes(filterQuery.toLowerCase())) return false
+    return true
+  })
+
+  const rowActionsFor = (r: InvoiceDemo) => ([
+    { label: 'Open in new tab', icon: <ExternalLink size={14} />, onClick: () => alert(`Open ${r.number}`) },
+    { label: 'Duplicate',       icon: <Copy size={14} />,         onClick: () => alert(`Duplicate ${r.number}`) },
+    { label: 'Delete',          icon: <Trash2 size={14} />,       tone: 'danger' as const, onClick: () => alert(`Delete ${r.number}`) },
+  ])
+
+  const wideColumns = [
+    'Invoice','Client','Amount','Status','Due','Issued','Source','Currency','Tax','Discount','Total','Notes',
+  ]
+
   return (
     <PrimitiveShell
       id="comp-table"
       title="Data table"
       source="components/tahi/data-table.tsx"
-      intro="The shared list-page table. Real <table> for semantics, sticky thead, h-scroll on mobile so cells never wrap mid-word, sortable headers with a chevron indicator, optional row click. Pair with Pagination + EmptyState + LoadingSkeleton."
+      intro="The shared list-page table. Real <table> for semantics, sticky thead, h-scroll for overflow, sortable headers, selectable rows, expandable rows, per-row action menu via 3-dots button OR right-click anywhere on the row."
     >
-      <Card padded={false}>
-        <DataTable<InvoiceDemo>
-          ariaLabel="Demo invoices"
-          getRowId={r => r.id}
-          defaultSort={{ key: 'number', dir: 'desc' }}
-          onRowClick={() => { /* would navigate to /invoices/<id> */ }}
-          columns={[
-            { key: 'number', header: 'Invoice', sortable: true,
-              accessor: r => r.number,
-              sortValue: r => r.number,
-              minWidth: '7rem' },
-            { key: 'client', header: 'Client', sortable: true,
-              accessor: r => r.client,
-              sortValue: r => r.client,
-              minWidth: '10rem' },
-            { key: 'amount', header: 'Amount', sortable: true, align: 'right',
-              render: r => `$${r.amount.toLocaleString()}`,
-              sortValue: r => r.amount,
-              minWidth: '6rem' },
-            { key: 'status', header: 'Status',
-              render: r => <Badge tone={statusTone(r.status)} variant="soft" size="sm" leader={false}>{r.status}</Badge>,
-              minWidth: '6rem' },
-            { key: 'due', header: 'Due', sortable: true,
-              accessor: r => r.due,
-              sortValue: r => r.due,
-              muted: true,
-              minWidth: '7rem' },
-          ]}
-          rows={INVOICE_ROWS}
-        />
-      </Card>
+      {/* Primary demo: selection + actions + expand + filter bar */}
+      <div className="space-y-3">
+        {/* Filter bar */}
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--space-2)',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+          }}
+        >
+          <div className="tahi-input-group" style={{
+            display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+            padding: '0 var(--space-2)', height: '2.25rem',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-md)',
+            flex: '1 1 16rem', maxWidth: '24rem',
+          }}>
+            <SearchGlyph size={14} />
+            <input
+              type="text"
+              placeholder="Search invoices"
+              value={filterQuery}
+              onChange={e => setFilterQuery(e.target.value)}
+              style={{
+                flex: 1, minWidth: 0,
+                border: 'none', outline: 'none', background: 'transparent',
+                fontSize: 'var(--text-sm)', color: 'var(--color-text)',
+              }}
+              aria-label="Search invoices"
+            />
+          </div>
+          <select
+            value={filterStatus}
+            onChange={e => setFilterStatus(e.target.value)}
+            aria-label="Filter by status"
+            style={{
+              height: '2.25rem',
+              padding: '0 var(--space-3)',
+              fontSize: 'var(--text-sm)',
+              background: 'var(--color-bg)',
+              border: '1px solid var(--color-border-subtle)',
+              borderRadius: 'var(--radius-md)',
+              color: filterStatus === 'all' ? 'var(--color-text-muted)' : 'var(--color-text)',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="all">All statuses</option>
+            <option value="paid">Paid</option>
+            <option value="sent">Sent</option>
+            <option value="overdue">Overdue</option>
+            <option value="draft">Draft</option>
+          </select>
+          {selected.size > 0 && (
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                marginLeft: 'auto',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-2)',
+                padding: '0 var(--space-3)',
+                height: '2.25rem',
+                background: 'var(--color-brand-50)',
+                border: '1px solid var(--color-brand-100)',
+                borderRadius: 'var(--radius-md)',
+                fontSize: 'var(--text-sm)',
+                color: 'var(--color-text-active)',
+                fontWeight: 500,
+              }}
+            >
+              {selected.size} selected
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                style={{
+                  background: 'transparent', border: 'none',
+                  padding: '0 var(--space-1)',
+                  color: 'var(--color-text-muted)',
+                  cursor: 'pointer',
+                  fontSize: 'var(--text-xs)',
+                  textDecoration: 'underline',
+                }}
+              >Clear</button>
+            </div>
+          )}
+        </div>
 
+        <Card padded={false}>
+          <DataTable<InvoiceDemo>
+            ariaLabel="Demo invoices"
+            getRowId={r => r.id}
+            defaultSort={{ key: 'number', dir: 'desc' }}
+            selectable
+            selectedIds={selected}
+            onSelectionChange={setSelected}
+            rowActions={rowActionsFor}
+            renderExpand={r => (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-4)' }}>
+                <ExpandField label="Invoice" value={r.number} />
+                <ExpandField label="Status" value={r.status} />
+                <ExpandField label="Issued" value="3 Apr 2026" />
+                <ExpandField label="Client" value={r.client} />
+                <ExpandField label="Due" value={r.due} />
+                <ExpandField label="Total" value={`$${r.amount.toLocaleString()}`} />
+              </div>
+            )}
+            columns={[
+              { key: 'number', header: 'Invoice', sortable: true,
+                accessor: r => r.number,
+                sortValue: r => r.number,
+                minWidth: '7rem' },
+              { key: 'client', header: 'Client', sortable: true,
+                accessor: r => r.client,
+                sortValue: r => r.client,
+                minWidth: '10rem' },
+              { key: 'amount', header: 'Amount', sortable: true, align: 'right',
+                render: r => `$${r.amount.toLocaleString()}`,
+                sortValue: r => r.amount,
+                minWidth: '7rem' },
+              { key: 'status', header: 'Status',
+                render: r => <Badge tone={statusTone(r.status)} variant="soft" size="sm" leader={false}>{r.status}</Badge>,
+                minWidth: '7rem' },
+              { key: 'due', header: 'Due', sortable: true,
+                accessor: r => r.due,
+                sortValue: r => r.due,
+                muted: true,
+                minWidth: '7rem' },
+            ]}
+            rows={filteredRows}
+          />
+        </Card>
+      </div>
+
+      {/* Wide-overflow demo: more columns than fit, h-scroll */}
+      <CardPrim>
+        <GroupHeading>Overflow &middot; h-scroll on narrow viewports</GroupHeading>
+        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginTop: '-0.25rem' }}>
+          When the table has more columns than fit, the outer wrapper scrolls horizontally instead of wrapping cells. Scroll the table below sideways to see the rest.
+        </p>
+        <Card padded={false}>
+          <DataTable<InvoiceDemo>
+            getRowId={r => r.id}
+            columns={wideColumns.map((label, i) => ({
+              key: `c${i}`,
+              header: label,
+              render: r =>
+                label === 'Amount' || label === 'Total' || label === 'Tax' || label === 'Discount'
+                  ? `$${r.amount.toLocaleString()}`
+                  : label === 'Status'
+                    ? <Badge tone={statusTone(r.status)} variant="soft" size="sm" leader={false}>{r.status}</Badge>
+                    : label === 'Invoice'
+                      ? r.number
+                      : label === 'Client'
+                        ? r.client
+                        : label === 'Currency'
+                          ? 'NZD'
+                          : label === 'Source'
+                            ? 'Manual'
+                            : label === 'Notes'
+                              ? 'Long notes column that should not wrap'
+                              : r.due,
+              minWidth: '8rem',
+              align: label === 'Amount' || label === 'Total' || label === 'Tax' || label === 'Discount' ? 'right' : 'left',
+            }))}
+            rows={INVOICE_ROWS}
+          />
+        </Card>
+      </CardPrim>
+
+      {/* States */}
       <CardPrim>
         <GroupHeading>States</GroupHeading>
         <StateRow label="Loading">
@@ -1903,14 +2102,34 @@ function DataTableShowcase() {
         <GroupHeading>How to use it</GroupHeading>
         <ul style={{ fontSize: '0.8125rem', lineHeight: 1.7 }} className="space-y-1">
           <li>Define <Mono>columns</Mono> once. Each has a <Mono>key</Mono>, header, and either <Mono>accessor</Mono> (simple value) or <Mono>render</Mono> (full custom cell).</li>
-          <li>Set <Mono>sortable: true</Mono> per column to enable header toggle. Pass <Mono>sort</Mono> + <Mono>onSortChange</Mono> for controlled mode, otherwise sort is internal.</li>
-          <li><Mono>onRowClick</Mono> wires the entire row to a navigation target. Hover applies the brand-tinted background + pointer cursor.</li>
-          <li>Pass a custom <Mono>empty</Mono> prop or fall back to the default &quot;No items&quot; line.</li>
-          <li><Mono>density=&quot;compact&quot;</Mono> tightens row padding for dense lists.</li>
-          <li>The outer wrapper has <Mono>.h-scroll</Mono> so wide tables scroll on mobile instead of wrapping cells.</li>
+          <li>Pass <Mono>selectable</Mono> + <Mono>selectedIds</Mono> + <Mono>onSelectionChange</Mono> for row selection. The header gets a select-all checkbox; the selection bar above is your responsibility (a Card or a coloured chip works).</li>
+          <li>Pass <Mono>rowActions</Mono> to enable the 3-dots menu column AND right-click context menu on the row.</li>
+          <li>Pass <Mono>renderExpand</Mono> to enable inline expansion. Clicking the row toggles the slide-down panel instead of firing <Mono>onRowClick</Mono>.</li>
+          <li>Set <Mono>sortable: true</Mono> per column. Pass <Mono>sort</Mono> + <Mono>onSortChange</Mono> for controlled sort.</li>
+          <li>Default behaviour: <Mono>onRowClick</Mono> navigates. With <Mono>renderExpand</Mono> set, the row expands. With both, the row expands and the 3-dots menu carries the &ldquo;Open&rdquo; action.</li>
+          <li>Outer wrapper inherits its parent&apos;s border-radius + clips overflow so a wrapping Card&apos;s rounded corners cut the table cleanly.</li>
         </ul>
       </CardPrim>
     </PrimitiveShell>
+  )
+}
+
+function ExpandField({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <div style={{
+        fontSize: '0.625rem',
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        color: 'var(--color-text-subtle)',
+      }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text)', marginTop: '0.125rem' }}>
+        {value}
+      </div>
+    </div>
   )
 }
 
