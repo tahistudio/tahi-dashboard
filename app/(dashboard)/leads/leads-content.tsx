@@ -19,6 +19,16 @@ import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 
+/** Safe wrapper for formatDistanceToNow. Returns null for any input
+ *  that doesn't parse to a real date — date-fns throws RangeError on
+ *  Invalid Date, which would crash the SlideOver. */
+function relTime(input: string | number | Date | null | undefined): string | null {
+  if (!input) return null
+  const d = input instanceof Date ? input : new Date(input)
+  if (isNaN(d.getTime())) return null
+  return formatDistanceToNow(d, { addSuffix: true })
+}
+
 // -- Types --
 
 interface Lead {
@@ -421,7 +431,7 @@ export function LeadsContent() {
           fontSize: '0.75rem', color: 'var(--color-text-muted)',
         }}>
           <Clock size={11} aria-hidden="true" />
-          {formatDistanceToNow(new Date(r.updatedAt), { addSuffix: true })}
+          {relTime(r.updatedAt) ?? 'unknown'}
         </span>
       ),
     },
@@ -879,7 +889,7 @@ function LeadDetail({
           fontSize: '0.75rem',
           color: 'var(--color-text-active)',
         }}>
-          ✓ Promoted{lead.promotedAt ? ` ${formatDistanceToNow(new Date(lead.promotedAt), { addSuffix: true })}` : ''}
+          ✓ Promoted{relTime(lead.promotedAt) ? ` ${relTime(lead.promotedAt)}` : ''}
           {' · '}
           <a href={`/pipeline?deal=${lead.promotedDealId}`} style={{ fontWeight: 600, color: 'var(--color-brand-dark)', textDecoration: 'underline' }}>
             Open deal
@@ -971,7 +981,8 @@ function leadSubtitle(lead: Lead): string {
   const parts: string[] = []
   if (lead.company) parts.push(lead.company)
   if (lead.email) parts.push(lead.email)
-  parts.push(`Updated ${formatDistanceToNow(new Date(lead.updatedAt), { addSuffix: true })}`)
+  const updated = relTime(lead.updatedAt)
+  if (updated) parts.push(`Updated ${updated}`)
   return parts.join(' · ')
 }
 
@@ -1024,9 +1035,9 @@ function AiSection({
             Score {lead.aiScore}
           </Badge>
         )}
-        {lead.enrichedAt && (
+        {relTime(lead.enrichedAt) && (
           <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
-            Enriched {formatDistanceToNow(new Date(lead.enrichedAt), { addSuffix: true })}
+            Enriched {relTime(lead.enrichedAt)}
           </span>
         )}
       </header>
