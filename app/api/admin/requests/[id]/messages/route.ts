@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, asc } from 'drizzle-orm'
-import { createNotifications, createNotification } from '@/lib/notifications'
+import { createNotifications, notifyMentionedPerson } from '@/lib/notifications'
 import { parseMentions } from '@/lib/parse-mentions'
 
 type Params = { params: Promise<{ id: string }> }
@@ -128,17 +128,14 @@ export async function POST(req: NextRequest, { params }: Params) {
 
       const authorId = member?.id ?? userId ?? 'unknown'
       for (const m of mentionedPeople) {
-        if (m.id !== authorId) {
-          await createNotification(drizzle, {
-            userId: m.id,
-            userType: m.type,
-            type: 'new_message',
-            title: 'You were mentioned in a request message',
-            body: body.body.trim().slice(0, 200),
-            entityType: 'request',
-            entityId: id,
-          })
-        }
+        await notifyMentionedPerson(drizzle, {
+          mentionedId: m.id,
+          senderTeamMemberId: authorId,
+          title: 'You were mentioned in a request message',
+          body: body.body.trim().slice(0, 200),
+          entityType: 'request',
+          entityId: id,
+        })
       }
     }
 

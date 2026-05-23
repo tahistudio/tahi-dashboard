@@ -10,6 +10,7 @@
  */
 
 import { schema } from '@/db/d1'
+import { eq } from 'drizzle-orm'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -63,6 +64,74 @@ export async function createNotification(
   } catch (err) {
     // Never let notification failures break the caller
     console.error('[createNotification] failed to insert notification:', err)
+  }
+}
+
+/**
+ * Notify someone they were @-mentioned in a message / task / request.
+ *
+ * The mention id from the composer is a team_member or contact row
+ * id, NOT a Clerk user id. The notifications bell queries by Clerk
+ * user id, so we resolve here so the recipient actually sees the
+ * ping.
+ *
+ * Skips when the mention id matches the sender id (no self-pings).
+ * Silently no-ops if the mention id can't be resolved to a Clerk
+ * user, e.g. team members that haven't been invited yet.
+ */
+export async function notifyMentionedPerson(
+  database: DrizzleDB,
+  params: {
+    mentionedId: string
+    /** team_members.id of the user who sent the mention. */
+    senderTeamMemberId: string
+    title: string
+    body?: string | null
+    entityType: NotificationEntityType
+    entityId: string
+  },
+): Promise<void> {
+  if (params.mentionedId === params.senderTeamMemberId) return
+
+  try {
+    // Try team member first.
+    const tm = await database
+      .select({ clerkUserId: schema.teamMembers.clerkUserId })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.id, params.mentionedId))
+      .limit(1)
+    if (tm.length > 0 && tm[0].clerkUserId) {
+      await createNotification(database, {
+        userId: tm[0].clerkUserId,
+        userType: 'team_member',
+        type: 'new_message',
+        title: params.title,
+        body: params.body ?? null,
+        entityType: params.entityType,
+        entityId: params.entityId,
+      })
+      return
+    }
+
+    // Fall back to contacts (portal users).
+    const ct = await database
+      .select({ clerkUserId: schema.contacts.clerkUserId })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.id, params.mentionedId))
+      .limit(1)
+    if (ct.length > 0 && ct[0].clerkUserId) {
+      await createNotification(database, {
+        userId: ct[0].clerkUserId,
+        userType: 'contact',
+        type: 'new_message',
+        title: params.title,
+        body: params.body ?? null,
+        entityType: params.entityType,
+        entityId: params.entityId,
+      })
+    }
+  } catch (err) {
+    console.error('[notifyMentionedPerson] failed:', err)
   }
 }
 

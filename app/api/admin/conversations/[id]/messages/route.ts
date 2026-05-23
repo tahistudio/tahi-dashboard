@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, ne } from 'drizzle-orm'
-import { createNotifications, createNotification } from '@/lib/notifications'
+import { createNotifications, notifyMentionedPerson } from '@/lib/notifications'
 import { parseMentions } from '@/lib/parse-mentions'
 
 // ── GET /api/admin/conversations/[id]/messages ──────────────────────────────
@@ -276,19 +276,17 @@ export async function POST(
         // Mention insert failures should not block message sending
       }
 
-      // Create notifications for mentioned people (skip the sender)
+      // Create notifications for mentioned people (skip the sender,
+      // resolve mention.id → Clerk user id so the bell can find it).
       for (const m of mentionedPeople) {
-        if (m.id !== participantId) {
-          await createNotification(database, {
-            userId: m.id,
-            userType: m.type,
-            type: 'new_message',
-            title: `You were mentioned in a message`,
-            body: body.content.trim().slice(0, 200),
-            entityType: 'message',
-            entityId: conversationId,
-          })
-        }
+        await notifyMentionedPerson(database, {
+          mentionedId: m.id,
+          senderTeamMemberId: participantId,
+          title: 'You were mentioned in a message',
+          body: body.content.trim().slice(0, 200),
+          entityType: 'message',
+          entityId: conversationId,
+        })
       }
     }
 
