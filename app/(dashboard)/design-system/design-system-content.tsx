@@ -35,6 +35,7 @@ import { Callout } from '@/components/tahi/callout'
 import { FileAttachmentList } from '@/components/tahi/file-attachment-list'
 import { MessageBubble } from '@/components/tahi/message-bubble'
 import { MessageThread } from '@/components/tahi/message-thread'
+import { Composer, type ComposerSendPayload } from '@/components/tahi/composer'
 
 /**
  * /design-system. The canonical token + primitive reference.
@@ -977,6 +978,7 @@ const COMPONENTS_NAV = [
   { id: 'comp-stepper',      label: 'Stepper',      ready: true  },
   { id: 'comp-progress',     label: 'Progress',     ready: true  },
   { id: 'comp-files',        label: 'File list',    ready: true  },
+  { id: 'comp-composer',     label: 'Composer',     ready: true  },
   { id: 'comp-message',      label: 'Message bubble', ready: true },
   { id: 'comp-thread',       label: 'Message thread', ready: true },
   { id: 'comp-empty',        label: 'Empty state',  ready: false },
@@ -1729,10 +1731,95 @@ function ComponentsSection() {
         <ChartShowcase />
         <DataTableShowcase />
         <FileAttachmentListShowcase />
+        <ComposerShowcase />
         <MessageBubbleShowcase />
         <MessageThreadShowcase />
       </div>
     </SectionShell>
+  )
+}
+
+// ── Composer showcase ──────────────────────────────────────────────────
+
+function ComposerShowcase() {
+  const [lastSend, setLastSend] = useState<{
+    html: string
+    fileCount: number
+    hasVoiceNote: boolean
+    visibility: string
+  } | null>(null)
+  return (
+    <PrimitiveShell
+      id="comp-composer"
+      title="Composer"
+      source="components/tahi/composer.tsx"
+      intro="Rich-text + voice + files. Tiptap editor with a formatting toolbar (bold, italic, lists, code, quote, link). Attach files or images via the paperclip / image button or drag-and-drop. Record a voice note with the microphone (real MediaRecorder, requires mic permission). Optional Public / Internal segmented toggle for thread visibility. Cmd/Ctrl+Enter to send."
+    >
+      <CardPrim>
+        <GroupHeading>Full composer &middot; everything on</GroupHeading>
+        <Composer
+          placeholder="Reply to Anna…"
+          canBeInternal
+          onSend={(payload: ComposerSendPayload) => {
+            setLastSend({
+              html: payload.html,
+              fileCount: payload.files.length,
+              hasVoiceNote: !!payload.voiceNote,
+              visibility: payload.visibility,
+            })
+          }}
+        />
+        {lastSend && (
+          <Card>
+            <GroupHeading>Last submission</GroupHeading>
+            <div style={{ display: 'grid', gridTemplateColumns: '6rem 1fr', gap: '0.5rem 0.75rem', fontSize: 'var(--text-xs)' }}>
+              <div style={{ color: 'var(--color-text-subtle)', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Visibility</div>
+              <div>{lastSend.visibility}</div>
+              <div style={{ color: 'var(--color-text-subtle)', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Files</div>
+              <div>{lastSend.fileCount}</div>
+              <div style={{ color: 'var(--color-text-subtle)', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Voice</div>
+              <div>{lastSend.hasVoiceNote ? 'attached' : '—'}</div>
+              <div style={{ color: 'var(--color-text-subtle)', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>HTML</div>
+              <pre style={{
+                background: 'var(--color-bg-secondary)',
+                border: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.4375rem 0.5rem',
+                fontSize: '0.6875rem',
+                overflowX: 'auto',
+                margin: 0,
+                whiteSpace: 'pre-wrap',
+              }}>{lastSend.html || '(empty)'}</pre>
+            </div>
+          </Card>
+        )}
+      </CardPrim>
+
+      <CardPrim>
+        <GroupHeading>Compact composer &middot; toolbar hidden, no voice</GroupHeading>
+        <Composer
+          placeholder="Quick reply…"
+          hideToolbar
+          noVoice
+          onSend={() => alert('Sent (compact composer)')}
+        />
+      </CardPrim>
+
+      <CardPrim>
+        <GroupHeading>How to use it</GroupHeading>
+        <ul style={{ fontSize: '0.8125rem', lineHeight: 1.7 }} className="space-y-1">
+          <li><strong>Bold / Italic / Strikethrough</strong>. Standard Tiptap marks. Cmd/Ctrl+B and Cmd/Ctrl+I keyboard shortcuts work in the editor.</li>
+          <li><strong>Bullet / Numbered list / Quote</strong>. Toolbar toggles. Inside a list, Enter starts a new item, Enter on an empty item exits the list.</li>
+          <li><strong>Inline code / Code block / Link</strong>. Code blocks render in a monospace box; links prompt for the URL via a small dialog.</li>
+          <li><strong>File attach</strong>. Paperclip opens the file picker; staged files appear as chips below the editor with name + size + remove X.</li>
+          <li><strong>Image attach</strong>. The image button is the same, scoped to image/*. Staged images preview as thumbnail tiles.</li>
+          <li><strong>Drag and drop</strong>. Drop any file onto the composer surface. A brand-tinted overlay confirms the drop target.</li>
+          <li><strong>Voice note</strong>. Mic button requests microphone permission, opens a recording bar with a live timer and a Stop button. Stop creates an inline audio preview with play / pause and a delete X.</li>
+          <li><strong>Visibility</strong>. When <Mono>canBeInternal</Mono> is set, a Public / Internal segmented control sits next to the send button. Picking Internal tints the composer amber as a reminder.</li>
+          <li><strong>Send</strong>. Click the green button or hit Cmd/Ctrl+Enter. <Mono>onSend</Mono> receives the HTML, the Tiptap JSON, the staged files (raw <Mono>File</Mono> objects), the voice note (<Mono>Blob</Mono>), and the visibility flag. The composer clears itself once <Mono>onSend</Mono> resolves.</li>
+        </ul>
+      </CardPrim>
+    </PrimitiveShell>
   )
 }
 
@@ -1923,16 +2010,18 @@ function MessageThreadShowcase() {
         hasMore
         onLoadOlder={() => alert('Load older messages')}
         composer={
-          <DemoComposer
+          <Composer
             placeholder={reply ? `Reply to ${reply.authorName}…` : 'Write a message…'}
-            onSend={(html) => {
+            canBeInternal
+            onSend={(payload) => {
               const nextId = `m${messages.length + 1}`
               setMessages([...messages, {
                 id: nextId,
                 timestamp: new Date().toISOString(),
                 author: { name: 'You', role: 'admin' },
                 own: true,
-                bodyHtml: html,
+                bodyHtml: payload.html,
+                visibility: payload.visibility === 'internal' ? 'internal' : 'external',
               }])
               setReply(null)
             }}
@@ -1944,44 +2033,6 @@ function MessageThreadShowcase() {
   )
 }
 
-function DemoComposer({ placeholder, onSend }: { placeholder: string; onSend: (html: string) => void }) {
-  const [text, setText] = useState('')
-  const submit = () => {
-    if (!text.trim()) return
-    onSend(`<p>${text.replace(/</g, '&lt;')}</p>`)
-    setText('')
-  }
-  return (
-    <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-end' }}>
-      <textarea
-        value={text}
-        onChange={e => setText(e.target.value)}
-        placeholder={placeholder}
-        rows={2}
-        onKeyDown={e => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault()
-            submit()
-          }
-        }}
-        style={{
-          flex: 1,
-          padding: '0.5rem 0.625rem',
-          border: '1px solid var(--color-border-subtle)',
-          borderRadius: 'var(--radius-md)',
-          background: 'var(--color-bg)',
-          fontSize: 'var(--text-sm)',
-          color: 'var(--color-text)',
-          outline: 'none',
-          resize: 'none',
-          fontFamily: 'inherit',
-          lineHeight: 1.5,
-        }}
-      />
-      <TahiButton variant="primary" size="sm" onClick={submit}>Send</TahiButton>
-    </div>
-  )
-}
 
 function stripTags(html: string): string {
   return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()

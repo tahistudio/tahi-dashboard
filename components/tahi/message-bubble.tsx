@@ -40,9 +40,8 @@
  */
 
 import * as React from 'react'
-import { Smile, MoreHorizontal, CornerDownRight, Lock } from 'lucide-react'
+import { Smile, MoreHorizontal, CornerDownRight } from 'lucide-react'
 import { Avatar } from '@/components/tahi/avatar'
-import { Badge } from '@/components/tahi/badge'
 import { FileAttachmentList, type FileAttachment } from '@/components/tahi/file-attachment-list'
 import { Popover } from '@/components/tahi/popover'
 
@@ -207,7 +206,10 @@ export function MessageBubble({
           alignItems: own ? 'flex-end' : 'flex-start',
         }}
       >
-        {/* Header */}
+        {/* Header. First name + timestamp, with a small orange dot
+            indicating internal-only notes (Tahi team can see, client
+            cannot). Tooltip on the dot explains. Role-based badges
+            (Tahi / Client) intentionally omitted — they were noise. */}
         <div
           style={{
             display: 'flex',
@@ -217,29 +219,32 @@ export function MessageBubble({
             flexWrap: 'wrap',
           }}
         >
-          <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)' }}>
-            {author.name}
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.4375rem',
+            fontSize: 'var(--text-sm)',
+            fontWeight: 600,
+            color: 'var(--color-text)',
+          }}>
+            {firstNameOf(author.name)}
+            {isInternal && (
+              <span
+                role="img"
+                aria-label="Internal note — only the Tahi team can see this"
+                title="Internal note — only the Tahi team can see this"
+                style={{
+                  display: 'inline-block',
+                  width: '0.5rem',
+                  height: '0.5rem',
+                  borderRadius: 999,
+                  background: '#F59E0B',
+                  flexShrink: 0,
+                  cursor: 'help',
+                }}
+              />
+            )}
           </span>
-          {author.role && author.role !== 'admin' && author.role !== 'client' && (
-            <Badge tone="neutral" variant="soft" size="sm" leader={false}>
-              {author.role}
-            </Badge>
-          )}
-          {author.role === 'admin' && (
-            <Badge tone="brand" variant="soft" size="sm" leader={false}>
-              Tahi
-            </Badge>
-          )}
-          {author.role === 'client' && (
-            <Badge tone="info" variant="soft" size="sm" leader={false}>
-              Client
-            </Badge>
-          )}
-          {isInternal && (
-            <Badge tone="warning" variant="soft" size="sm" leader="icon" icon={<Lock />}>
-              Internal
-            </Badge>
-          )}
           <span
             style={{
               fontSize: '0.6875rem',
@@ -601,6 +606,15 @@ function isProbablyImage(a: FileAttachment): boolean {
   if (a.thumbnailUrl) return true
   const ext = (a.name.split('.').pop() ?? '').toLowerCase()
   return (a.mime ?? '').startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'].includes(ext)
+}
+
+function firstNameOf(fullName: string): string {
+  // "Liam Miller" -> "Liam". Falls back to the whole string for
+  // single-word names or unusual inputs.
+  const trimmed = fullName.trim()
+  const space = trimmed.indexOf(' ')
+  if (space < 0) return trimmed
+  return trimmed.slice(0, space)
 }
 
 function formatTimestamp(ts: string): string {

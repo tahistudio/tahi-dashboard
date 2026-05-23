@@ -766,6 +766,70 @@ textarea,
   opacity: 1;
 }
 
+/* Composer Tiptap editor. The editor renders a ProseMirror root
+   inside .tahi-composer-editor; style its block elements so rich
+   text reads cleanly inside the compact composer surface. */
+.tahi-composer-editor.ProseMirror {
+  outline: none;
+  min-height: 4rem;
+}
+.tahi-composer-editor.ProseMirror p {
+  margin: 0 0 0.375rem;
+  line-height: 1.55;
+}
+.tahi-composer-editor.ProseMirror p:last-child {
+  margin-bottom: 0;
+}
+.tahi-composer-editor.ProseMirror ul,
+.tahi-composer-editor.ProseMirror ol {
+  margin: 0 0 0.375rem;
+  padding-left: 1.25rem;
+}
+.tahi-composer-editor.ProseMirror li {
+  margin-bottom: 0.125rem;
+}
+.tahi-composer-editor.ProseMirror li > p {
+  margin: 0;
+}
+.tahi-composer-editor.ProseMirror code {
+  font-size: 0.8125em;
+  padding: 0.0625rem 0.25rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 0.1875rem;
+}
+.tahi-composer-editor.ProseMirror pre.tahi-code-block,
+.tahi-composer-editor.ProseMirror pre {
+  margin: 0 0 0.375rem;
+  padding: 0.5rem 0.625rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+}
+.tahi-composer-editor.ProseMirror blockquote {
+  margin: 0 0 0.375rem;
+  padding-left: 0.625rem;
+  border-left: 2px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+.tahi-composer-editor.ProseMirror a {
+  color: var(--color-brand-dark);
+  text-decoration: underline;
+  text-decoration-color: var(--color-brand-100);
+  text-underline-offset: 0.1875rem;
+}
+.tahi-composer-editor.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--color-text-subtle);
+  pointer-events: none;
+  height: 0;
+}
+
 /* Hide scrollbar utility */
 .scrollbar-hide {
   -ms-overflow-style: none;
