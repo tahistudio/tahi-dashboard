@@ -35,7 +35,7 @@ import { Callout } from '@/components/tahi/callout'
 import { FileAttachmentList } from '@/components/tahi/file-attachment-list'
 import { MessageBubble } from '@/components/tahi/message-bubble'
 import { MessageThread } from '@/components/tahi/message-thread'
-import { Composer, type ComposerSendPayload } from '@/components/tahi/composer'
+import { Composer, type ComposerSendPayload, type MentionSources } from '@/components/tahi/composer'
 
 /**
  * /design-system. The canonical token + primitive reference.
@@ -1741,6 +1741,36 @@ function ComponentsSection() {
 
 // ── Composer showcase ──────────────────────────────────────────────────
 
+const DEMO_MENTION_SOURCES: MentionSources = {
+  people: [
+    { id: 'p1', type: 'person', label: 'Liam Miller',  sub: 'liam@tahi.studio'  },
+    { id: 'p2', type: 'person', label: 'Staci Orchard', sub: 'staci@tahi.studio' },
+    { id: 'p3', type: 'person', label: 'Sarah Chen',   sub: 'sarah@tahi.studio' },
+    { id: 'p4', type: 'person', label: 'James Park',   sub: 'james@tahi.studio' },
+    { id: 'p5', type: 'person', label: 'Anna Walker',  sub: 'anna@glasswall.com' },
+  ],
+  orgs: [
+    { id: 'o1', type: 'org', label: 'Acme Corp',   sub: 'Maintain plan' },
+    { id: 'o2', type: 'org', label: 'Glasswall',   sub: 'Scale plan'    },
+    { id: 'o3', type: 'org', label: 'Beta Labs',   sub: 'Launch plan'   },
+    { id: 'o4', type: 'org', label: 'Physitrack',  sub: 'Custom plan'   },
+    { id: 'o5', type: 'org', label: 'Tahi Studio', sub: 'Internal'      },
+  ],
+  requests: [
+    { id: 'r1', type: 'request', label: '#006 test',                       sub: 'Physitrack · Submitted'     },
+    { id: 'r2', type: 'request', label: '#005 retret',                     sub: 'Lifecycle Test Co · Draft'  },
+    { id: 'r3', type: 'request', label: '#004 retret',                     sub: 'Pp · In review'             },
+    { id: 'r4', type: 'request', label: '#003 Build patient intake form',  sub: 'Beta Labs · In progress'    },
+    { id: 'r5', type: 'request', label: '#002 Redesign landing page hero', sub: 'Acme Corp · Client review'  },
+  ],
+  tasks: [
+    { id: 't1', type: 'task', label: 'Draft Q3 proposal',          sub: 'Due Fri · Sarah'   },
+    { id: 't2', type: 'task', label: 'Update homepage copy',        sub: 'Due Mon · Liam'    },
+    { id: 't3', type: 'task', label: 'Send onboarding loom',        sub: 'Due today · Staci' },
+    { id: 't4', type: 'task', label: 'Review hourly billing export', sub: 'Due Wed · James'   },
+  ],
+}
+
 function ComposerShowcase() {
   const [lastSend, setLastSend] = useState<{
     html: string
@@ -1758,8 +1788,9 @@ function ComposerShowcase() {
       <CardPrim>
         <GroupHeading>Full composer &middot; everything on</GroupHeading>
         <Composer
-          placeholder="Reply to Anna…"
+          placeholder="Reply to Anna… type @ to mention"
           canBeInternal
+          mentionSources={DEMO_MENTION_SOURCES}
           onSend={(payload: ComposerSendPayload) => {
             setLastSend({
               html: payload.html,
@@ -1968,15 +1999,27 @@ interface DemoMessage {
   bodyHtml: string
   own?: boolean
   visibility?: 'internal' | 'external'
+  /** Local-only object-URL attachments captured from the composer. */
+  attachments?: Array<{
+    id: string
+    name: string
+    sizeBytes: number
+    mime: string
+    url: string
+    thumbnailUrl?: string
+  }>
+  /** Voice note recorded from the composer. */
+  voiceNote?: { url: string; durationSeconds: number }
+  replyTo?: { authorName: string; preview: string }
 }
 
 function MessageThreadShowcase() {
   const [reply, setReply] = useState<{ authorName: string; preview: string } | null>(null)
   const [messages, setMessages] = useState<DemoMessage[]>([
     { id: 'm1', timestamp: '2026-05-22T15:30:00Z', author: { name: 'Liam Miller', role: 'admin' },  bodyHtml: '<p>Sent over the brief and creative direction. Take a look when you get a chance.</p>' },
-    { id: 'm2', timestamp: '2026-05-22T16:02:00Z', author: { name: 'Anna Walker', role: 'client' }, bodyHtml: "<p>Just looked — really like where this is going. I'll get our team's feedback by tomorrow.</p>" },
+    { id: 'm2', timestamp: '2026-05-22T16:02:00Z', author: { name: 'Anna Walker', role: 'client' }, bodyHtml: "<p>Just looked &mdash; really like where this is going. I'll get our team's feedback by tomorrow.</p>" },
     { id: 'm3', timestamp: '2026-05-23T09:14:00Z', author: { name: 'Liam Miller', role: 'admin' },  bodyHtml: '<p>Morning! Pushing the v2 with the darker overlay you asked for.</p>' },
-    { id: 'm4', timestamp: '2026-05-23T09:42:00Z', author: { name: 'Anna Walker', role: 'client' }, bodyHtml: '<p>Beautiful. Approving — go ahead and ship.</p>' },
+    { id: 'm4', timestamp: '2026-05-23T09:42:00Z', author: { name: 'Anna Walker', role: 'client' }, bodyHtml: '<p>Beautiful. Approving, go ahead and ship.</p>' },
     { id: 'm5', timestamp: '2026-05-23T10:30:00Z', author: { name: 'You', role: 'admin' }, own: true, bodyHtml: '<p>On it. Will have staging up in an hour.</p>' },
   ])
   return (
@@ -2002,6 +2045,10 @@ function MessageThreadShowcase() {
             bodyHtml={msg.bodyHtml}
             own={msg.own}
             visibility={msg.visibility}
+            attachments={msg.attachments}
+            voiceNote={msg.voiceNote}
+            replyTo={msg.replyTo}
+            onAuthorClick={(author) => alert(`Open ${author.name}'s profile`)}
             onReply={() => setReply({ authorName: msg.author.name, preview: stripTags(msg.bodyHtml).slice(0, 80) })}
           />
         )}
@@ -2011,23 +2058,43 @@ function MessageThreadShowcase() {
         onLoadOlder={() => alert('Load older messages')}
         composer={
           <Composer
-            placeholder={reply ? `Reply to ${reply.authorName}…` : 'Write a message…'}
+            placeholder={reply ? `Reply to ${reply.authorName}…` : 'Write a message… type @ to mention'}
             canBeInternal
+            mentionSources={DEMO_MENTION_SOURCES}
             onSend={(payload) => {
               const nextId = `m${messages.length + 1}`
-              setMessages([...messages, {
+              // Capture composer attachments as local previews so the
+              // new bubble can render images / voice notes inline.
+              const attachments = payload.files.map(f => ({
+                id: f.id,
+                name: f.file.name,
+                sizeBytes: f.file.size,
+                mime: f.file.type,
+                // For images we already have an object URL (previewUrl).
+                // For non-image files we mint one so the bubble can
+                // download / display them.
+                url: f.previewUrl ?? URL.createObjectURL(f.file),
+                thumbnailUrl: f.previewUrl,
+              }))
+              const voiceNote = payload.voiceNote
+                ? { url: payload.voiceNote.url, durationSeconds: payload.voiceNote.durationSeconds }
+                : undefined
+              setMessages(prev => [...prev, {
                 id: nextId,
                 timestamp: new Date().toISOString(),
                 author: { name: 'You', role: 'admin' },
                 own: true,
                 bodyHtml: payload.html,
                 visibility: payload.visibility === 'internal' ? 'internal' : 'external',
+                attachments: attachments.length > 0 ? attachments : undefined,
+                voiceNote,
+                replyTo: reply ?? undefined,
               }])
               setReply(null)
             }}
           />
         }
-        maxHeight="28rem"
+        maxHeight="32rem"
       />
     </PrimitiveShell>
   )

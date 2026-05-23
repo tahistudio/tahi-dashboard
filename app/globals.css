@@ -758,12 +758,30 @@ textarea,
   color: var(--color-brand);
 }
 
-/* MessageBubble hover actions. Hidden by default so the bubble row
-   reads as a quiet message; brightens to full opacity when the row
-   is hovered or any focus lands inside (keyboard nav). */
+/* MessageBubble hover actions. Always discoverable at low opacity
+   so the user knows reply / react / more are there; brightens on
+   row hover or focus. */
+.tahi-message-actions {
+  opacity: 0.45;
+}
 .tahi-message-bubble:hover .tahi-message-actions,
 .tahi-message-bubble:focus-within .tahi-message-actions {
   opacity: 1;
+}
+
+/* Composer surface focus. The brand ring sits OUTSIDE the border so
+   the editor text never visually touches the active highlight. Same
+   shape as .tahi-input-group:focus-within for consistency. */
+.tahi-composer:focus-within {
+  border-color: var(--color-brand);
+  box-shadow: var(--shadow-ring);
+}
+.tahi-composer .tahi-composer-editor:focus,
+.tahi-composer .tahi-composer-editor:focus-visible,
+.tahi-composer .tahi-composer-editor.ProseMirror:focus,
+.tahi-composer .tahi-composer-editor.ProseMirror:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 /* Composer Tiptap editor. The editor renders a ProseMirror root
@@ -829,6 +847,41 @@ textarea,
   pointer-events: none;
   height: 0;
 }
+
+/* @-mention chips inside the Tiptap body. Subtle brand-tinted pill
+   with a type-driven left dot, so people / orgs / requests / tasks
+   are visually distinguishable at a glance. Used by both the
+   composer and the rendered message body (set the same class on
+   server-rendered output). */
+.tahi-mention,
+.tahi-message-body .tahi-mention {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.0625rem 0.4375rem 0.0625rem 0.375rem;
+  background: var(--color-brand-50);
+  border: 1px solid var(--color-brand-100);
+  border-radius: 999px;
+  color: var(--color-text-active);
+  font-weight: 500;
+  font-size: 0.8125rem;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: default;
+}
+.tahi-mention::before {
+  content: "";
+  display: inline-block;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 999px;
+  background: var(--color-brand);
+  flex-shrink: 0;
+}
+.tahi-mention[data-mention-type="org"]::before     { background: #d97706; }
+.tahi-mention[data-mention-type="request"]::before { background: #60a5fa; }
+.tahi-mention[data-mention-type="task"]::before    { background: #a78bfa; }
 
 /* Hide scrollbar utility */
 .scrollbar-hide {

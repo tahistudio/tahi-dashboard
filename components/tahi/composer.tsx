@@ -37,6 +37,7 @@ import { useEditor, EditorContent, Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import LinkExt from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
+import Mention from '@tiptap/extension-mention'
 import {
   Bold, Italic, Strikethrough, List, ListOrdered, Code, Code2,
   Link as LinkIcon, Quote,
@@ -46,6 +47,28 @@ import {
 // ── Types ──────────────────────────────────────────────────────────────
 
 export type ComposerVisibility = 'public' | 'internal'
+
+export type MentionType = 'person' | 'org' | 'request' | 'task'
+
+export interface MentionItem {
+  id: string
+  type: MentionType
+  /** Display label inside the chip and the suggestion list. */
+  label: string
+  /** Optional secondary line in the suggestion list. */
+  sub?: string
+  /** Optional URL the mention chip navigates to on click. */
+  href?: string
+}
+
+/** Pluggable mention sources. The composer searches across all four
+ *  whenever the user types @. Empty arrays are fine. */
+export interface MentionSources {
+  people?: ReadonlyArray<MentionItem>
+  orgs?: ReadonlyArray<MentionItem>
+  requests?: ReadonlyArray<MentionItem>
+  tasks?: ReadonlyArray<MentionItem>
+}
 
 export interface ComposerStagedFile {
   id: string
@@ -81,6 +104,11 @@ interface ComposerProps {
   noFiles?: boolean
   /** Disable voice recording. */
   noVoice?: boolean
+  /** When set, @-mentions are enabled. Provides the sources the
+   *  suggestion popover searches across (people, orgs, requests,
+   *  tasks). Production callers should filter these to entities the
+   *  current conversation participants have access to. */
+  mentionSources?: MentionSources
   /** Fires on Send (button or Cmd/Ctrl+Enter). Receives all the
    *  state needed to persist the message. */
   onSend?: (payload: ComposerSendPayload) => void | Promise<void>
@@ -96,9 +124,16 @@ export function Composer({
   hideToolbar = false,
   noFiles = false,
   noVoice = false,
+  mentionSources,
   onSend,
   className,
 }: ComposerProps) {
+  // Keep the latest sources in a ref so Tiptap's items() can read the
+  // current array without recreating the editor on each render.
+  const mentionSourcesRef = React.useRef<MentionSources | undefined>(mentionSources)
+  React.useEffect(() => {
+    mentionSourcesRef.current = mentionSources
+  }, [mentionSources])
   const [visibility, setVisibility] = React.useState<ComposerVisibility>(defaultVisibility)
   const [staged, setStaged] = React.useState<ComposerStagedFile[]>([])
   const [voiceNote, setVoiceNote] = React.useState<ComposerVoiceNote | null>(null)
@@ -117,6 +152,26 @@ export function Composer({
         HTMLAttributes: { rel: 'noopener', target: '_blank' },
       }),
       Placeholder.configure({ placeholder }),
+      Mention.configure({
+        HTMLAttributes: { class: 'tahi-mention' },
+        renderHTML: ({ options, node }) => {
+          const attrs = node.attrs as { id?: string; label?: string; type?: MentionType }
+          return [
+            'span',
+            {
+              ...options.HTMLAttributes,
+              'data-mention-type': attrs.type ?? 'person',
+              'data-mention-id': attrs.id ?? '',
+            },
+            `@${attrs.label ?? attrs.id ?? ''}`,
+          ]
+        },
+        suggestion: {
+          char: '@',
+          items: ({ query }) => searchMentions(mentionSourcesRef.current, query),
+          render: createMentionSuggestionRender(),
+        },
+      }),
     ],
     content: '',
     editorProps: {
@@ -222,7 +277,7 @@ export function Composer({
 
   return (
     <div
-      className={className}
+      className={['tahi-composer', className].filter(Boolean).join(' ')}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
@@ -232,13 +287,13 @@ export function Composer({
         display: 'flex',
         flexDirection: 'column',
         gap: '0.5rem',
-        padding: '0.625rem',
+        padding: '0.875rem 1rem',
         background: internalTint
           ? 'rgba(245, 158, 11, 0.05)'
           : 'var(--color-bg)',
         border: `1px solid ${internalTint ? 'rgba(245, 158, 11, 0.30)' : 'var(--color-border-subtle)'}`,
         borderRadius: 'var(--radius-md)',
-        transition: 'border-color 150ms ease, background 150ms ease',
+        transition: 'border-color 150ms ease, background 150ms ease, box-shadow 150ms ease',
       }}
     >
       {/* Drag overlay */}
@@ -963,4 +1018,204 @@ function promptForLink(editor: Editor) {
     return
   }
   editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
+}
+
+// ── @-mention search + suggestion popover ─────────────────────────────
+
+interface MentionMatch extends MentionItem {
+  /** Order within its group. Lower comes first. */
+  rank: number
+}
+
+function searchMentions(sources: MentionSources | undefined, query: string): MentionMatch[] {
+  if (!sources) return []
+  const q = query.trim().toLowerCase()
+  const pools: Array<{ type: MentionType; items: ReadonlyArray<MentionItem> }> = [
+    { type: 'person',  items: sources.people   ?? [] },
+    { type: 'org',     items: sources.orgs     ?? [] },
+    { type: 'request', items: sources.requests ?? [] },
+    { type: 'task',    items: sources.tasks    ?? [] },
+  ]
+  const out: MentionMatch[] = []
+  for (const pool of pools) {
+    let rank = 0
+    for (const item of pool.items) {
+      if (!q || item.label.toLowerCase().includes(q) || (item.sub?.toLowerCase().includes(q))) {
+        out.push({ ...item, type: pool.type, rank: rank++ })
+        if (rank >= 6) break // cap each group
+      }
+    }
+  }
+  return out
+}
+
+const MENTION_GROUP_LABEL: Record<MentionType, string> = {
+  person:  'People',
+  org:     'Clients',
+  request: 'Requests',
+  task:    'Tasks',
+}
+
+interface SuggestionRenderProps {
+  items: MentionMatch[]
+  command: (item: { id: string; label: string; type: MentionType }) => void
+  clientRect?: (() => DOMRect | null) | null
+  event?: KeyboardEvent
+}
+
+function createMentionSuggestionRender() {
+  return () => {
+    let popup: HTMLDivElement | null = null
+    let selectedIndex = 0
+    let items: MentionMatch[] = []
+    let commandFn: SuggestionRenderProps['command'] | null = null
+
+    function rerender() {
+      if (!popup) return
+      if (items.length === 0) {
+        popup.innerHTML = `<div style="padding:0.5rem 0.75rem;font-size:0.75rem;color:var(--color-text-subtle)">No matches</div>`
+        return
+      }
+      const groups: Record<MentionType, MentionMatch[]> = {
+        person: [], org: [], request: [], task: [],
+      }
+      items.forEach(item => { groups[item.type].push(item) })
+
+      let flatIndex = 0
+      const sections: string[] = []
+      ;(['person', 'org', 'request', 'task'] as const).forEach(type => {
+        const groupItems = groups[type]
+        if (groupItems.length === 0) return
+        sections.push(`
+          <div style="padding:0.4375rem 0.75rem 0.1875rem;font-size:0.625rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-subtle);">
+            ${MENTION_GROUP_LABEL[type]}
+          </div>
+        `)
+        groupItems.forEach(item => {
+          const i = flatIndex
+          flatIndex += 1
+          const active = i === selectedIndex
+          const iconSvg = iconSvgFor(item.type)
+          sections.push(`
+            <div data-index="${i}"
+                 style="display:flex;align-items:center;gap:0.5rem;padding:0.375rem 0.625rem;cursor:pointer;border-radius:0.25rem;${active ? 'background:var(--color-bg-secondary);' : ''}">
+              <span style="display:inline-flex;align-items:center;justify-content:center;width:1.25rem;height:1.25rem;border-radius:0.25rem;background:var(--color-bg-tertiary);color:var(--color-text-muted);flex-shrink:0;">${iconSvg}</span>
+              <span style="flex:1;min-width:0;">
+                <span style="display:block;font-size:0.8125rem;font-weight:500;color:var(--color-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(item.label)}</span>
+                ${item.sub ? `<span style="display:block;font-size:0.6875rem;color:var(--color-text-subtle);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(item.sub)}</span>` : ''}
+              </span>
+            </div>
+          `)
+        })
+      })
+      popup.innerHTML = sections.join('')
+      popup.querySelectorAll('[data-index]').forEach(el => {
+        el.addEventListener('mouseenter', () => {
+          selectedIndex = parseInt(el.getAttribute('data-index') ?? '0')
+          rerender()
+        })
+        el.addEventListener('click', () => {
+          const idx = parseInt(el.getAttribute('data-index') ?? '0')
+          if (commandFn && items[idx]) {
+            commandFn({ id: items[idx].id, label: items[idx].label, type: items[idx].type })
+          }
+        })
+      })
+    }
+
+    function position(props: { clientRect?: (() => DOMRect | null) | null }) {
+      if (!popup || !props.clientRect) return
+      const rect = props.clientRect()
+      if (!rect) return
+      popup.style.left = `${rect.left}px`
+      popup.style.top  = `${rect.bottom + 6}px`
+    }
+
+    return {
+      onStart: (props: SuggestionRenderProps) => {
+        items = props.items
+        commandFn = props.command
+        selectedIndex = 0
+        popup = document.createElement('div')
+        popup.style.cssText = [
+          'position:fixed',
+          'z-index:60',
+          'background:var(--color-bg)',
+          'border:1px solid var(--color-border)',
+          'border-radius:var(--radius-card)',
+          'padding:0.25rem',
+          'box-shadow:var(--shadow-lg)',
+          'max-height:18rem',
+          'overflow-y:auto',
+          'min-width:16rem',
+          'max-width:22rem',
+        ].join(';')
+        document.body.appendChild(popup)
+        position(props)
+        rerender()
+      },
+      onUpdate: (props: SuggestionRenderProps) => {
+        items = props.items
+        selectedIndex = 0
+        position(props)
+        rerender()
+      },
+      onKeyDown: ({ event }: { event: KeyboardEvent }) => {
+        if (!items.length) return false
+        if (event.key === 'ArrowDown') {
+          selectedIndex = (selectedIndex + 1) % items.length
+          rerender()
+          return true
+        }
+        if (event.key === 'ArrowUp') {
+          selectedIndex = (selectedIndex - 1 + items.length) % items.length
+          rerender()
+          return true
+        }
+        if (event.key === 'Enter') {
+          if (commandFn && items[selectedIndex]) {
+            commandFn({
+              id: items[selectedIndex].id,
+              label: items[selectedIndex].label,
+              type: items[selectedIndex].type,
+            })
+          }
+          return true
+        }
+        if (event.key === 'Escape') {
+          popup?.remove()
+          popup = null
+          return true
+        }
+        return false
+      },
+      onExit: () => {
+        popup?.remove()
+        popup = null
+      },
+    }
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c] ?? c))
+}
+
+// Inline SVG glyphs for the mention popover icon tiles. We don't
+// hydrate React inside the Tiptap popover (it's a vanilla DOM node),
+// so we inline the Lucide path data here.
+function iconSvgFor(type: MentionType): string {
+  const common = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11" viewBox="0 0 24 24"'
+  switch (type) {
+    case 'person':
+      return `<svg ${common}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`
+    case 'org':
+      return `<svg ${common}><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/></svg>`
+    case 'request':
+      return `<svg ${common}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>`
+    case 'task':
+      return `<svg ${common}><rect x="3" y="5" width="6" height="6" rx="1"/><path d="m3 17 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg>`
+  }
 }

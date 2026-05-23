@@ -44,6 +44,7 @@ import { Smile, MoreHorizontal, CornerDownRight } from 'lucide-react'
 import { Avatar } from '@/components/tahi/avatar'
 import { FileAttachmentList, type FileAttachment } from '@/components/tahi/file-attachment-list'
 import { Popover } from '@/components/tahi/popover'
+import { Tooltip } from '@/components/tahi/tooltip'
 
 export interface MessageAuthor {
   id?: string
@@ -113,6 +114,9 @@ interface MessageBubbleProps {
   onToggleReaction?: (emoji: string) => void
   /** Click "Reply". Convenience entry, otherwise add a Reply action. */
   onReply?: () => void
+  /** Click the avatar (or author name) to navigate to the author's
+   *  profile. Hover state added when set. */
+  onAuthorClick?: (author: MessageAuthor) => void
 
   className?: string
 }
@@ -137,6 +141,7 @@ export function MessageBubble({
   onReact,
   onToggleReaction,
   onReply,
+  onAuthorClick,
   className,
 }: MessageBubbleProps) {
   const [emojiOpen, setEmojiOpen] = React.useState(false)
@@ -185,14 +190,42 @@ export function MessageBubble({
         marginBottom: compact ? '0.5rem' : '0.875rem',
       }}
     >
-      {/* Avatar */}
+      {/* Avatar. Clickable to author profile when onAuthorClick is set. */}
       <span style={{ flexShrink: 0, paddingTop: '0.125rem' }}>
-        <Avatar
-          name={author.name}
-          src={author.avatarUrl}
-          size={compact ? 'xs' : 'sm'}
-          noRing
-        />
+        {onAuthorClick ? (
+          <button
+            type="button"
+            onClick={() => onAuthorClick(author)}
+            aria-label={`Open ${author.name}'s profile`}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              padding: 0,
+              borderRadius: '999px',
+              cursor: 'pointer',
+              transition: 'box-shadow 150ms ease',
+              display: 'inline-flex',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 0 0 2px var(--color-brand-100)' }}
+            onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none' }}
+            onFocus={e => { e.currentTarget.style.boxShadow = '0 0 0 2px var(--color-brand-100)' }}
+            onBlur={e => { e.currentTarget.style.boxShadow = 'none' }}
+          >
+            <Avatar
+              name={author.name}
+              src={author.avatarUrl}
+              size={compact ? 'xs' : 'sm'}
+              noRing
+            />
+          </button>
+        ) : (
+          <Avatar
+            name={author.name}
+            src={author.avatarUrl}
+            size={compact ? 'xs' : 'sm'}
+            noRing
+          />
+        )}
       </span>
 
       {/* Body column */}
@@ -227,22 +260,46 @@ export function MessageBubble({
             fontWeight: 600,
             color: 'var(--color-text)',
           }}>
-            {firstNameOf(author.name)}
-            {isInternal && (
-              <span
-                role="img"
-                aria-label="Internal note — only the Tahi team can see this"
-                title="Internal note — only the Tahi team can see this"
+            {onAuthorClick ? (
+              <button
+                type="button"
+                onClick={() => onAuthorClick(author)}
                 style={{
-                  display: 'inline-block',
-                  width: '0.5rem',
-                  height: '0.5rem',
-                  borderRadius: 999,
-                  background: '#F59E0B',
-                  flexShrink: 0,
-                  cursor: 'help',
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  font: 'inherit',
+                  color: 'inherit',
+                  cursor: 'pointer',
                 }}
-              />
+                onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline' }}
+                onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none' }}
+              >
+                {firstNameOf(author.name)}
+              </button>
+            ) : (
+              firstNameOf(author.name)
+            )}
+            {isInternal && (
+              <Tooltip
+                label="Internal note. Only the Tahi team can see this."
+                side="top"
+              >
+                <span
+                  role="img"
+                  aria-label="Internal note"
+                  tabIndex={0}
+                  style={{
+                    display: 'inline-block',
+                    width: '0.5rem',
+                    height: '0.5rem',
+                    borderRadius: 999,
+                    background: '#F59E0B',
+                    flexShrink: 0,
+                    cursor: 'help',
+                  }}
+                />
+              </Tooltip>
             )}
           </span>
           <span
@@ -446,7 +503,6 @@ export function MessageBubble({
             alignItems: 'center',
             gap: '0.125rem',
             paddingTop: '0.25rem',
-            opacity: 0,
             transition: 'opacity 150ms ease',
           }}
         >
