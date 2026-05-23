@@ -757,21 +757,21 @@ function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
         <KPICell
           icon={Users}
           label="Active Clients"
-          value={loading ? '—' : String(kpis?.activeClients ?? 0)}
+          value={loading ? '-' : String(kpis?.activeClients ?? 0)}
           sub="across all plans"
           href="/clients"
         />
         <KPICell
           icon={Inbox}
           label="Open Requests"
-          value={loading ? '—' : String(kpis?.openRequests ?? 0)}
+          value={loading ? '-' : String(kpis?.openRequests ?? 0)}
           sub={kpis ? `${kpis.inProgress} in progress` : undefined}
           href="/requests"
         />
         <KPICell
           icon={FileText}
           label="Outstanding"
-          value={loading ? '—' : format(outstanding)}
+          value={loading ? '-' : format(outstanding)}
           sub="invoices"
           tone={outstanding > 0 ? 'warning' : 'brand'}
           href="/invoices"
@@ -779,7 +779,7 @@ function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
         <KPICell
           icon={BarChart3}
           label="MRR"
-          value={loading ? '—' : format(kpis?.mrr ?? 0)}
+          value={loading ? '-' : format(kpis?.mrr ?? 0)}
           sub="recurring retainers"
           href="/reports"
         />

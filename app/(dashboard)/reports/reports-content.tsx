@@ -25,7 +25,7 @@ import { useDisplayCurrency } from '@/lib/display-currency-context'
 
 // Currencies the commitment form can be entered in (not a display-currency type).
 const CURRENCY_OPTIONS = ['NZD', 'USD', 'AUD', 'GBP', 'EUR'] as const
-// Widened display-currency type — reports sub-components accept anything the
+// Widened display-currency type. Reports sub-components accept anything the
 // nav-bar switcher might pass.
 type DisplayCurrency = string
 
@@ -445,16 +445,16 @@ export function ReportsContent() {
       {/* Retainer Health Monitor (T610) */}
       <div id="retainer-health" className="scroll-mt-20"><RetainerHealthSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
 
-      {/* Fixed Costs / Commitments (T652) — the authoritative "what you pay" */}
+      {/* Fixed Costs / Commitments (T652): the authoritative "what you pay" */}
       <div id="commitments" className="scroll-mt-20"><CommitmentsSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
 
-      {/* Cash Flow Forecast (T599-T600) — combined revenue + cost forward view */}
+      {/* Cash Flow Forecast (T599-T600): combined revenue + cost forward view */}
       <div id="cash-flow" className="scroll-mt-20"><CashFlowForecastSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
 
       {/* Team Utilization (T605) */}
       <div id="utilization" className="scroll-mt-20"><UtilizationSection /></div>
 
-      {/* Xero Expenses + P&L Trend (T592) — HISTORICAL ACTUALS, for reference */}
+      {/* Xero Expenses + P&L Trend (T592): HISTORICAL ACTUALS, for reference */}
       <div id="expenses" className="scroll-mt-20"><ExpenseDashboardSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
 
       {/* Client Profitability Scorecard (T597) */}
@@ -2400,7 +2400,7 @@ function SalesCycleLengthSection() {
   )
 }
 
-// ── (RevenueForecastSection removed — data is covered by CashFlowForecastSection) ──
+// ── (RevenueForecastSection removed: data is covered by CashFlowForecastSection) ──
 
 // ── Retainer Health Section (T610) ─────────────────────────────────────────
 
@@ -2504,7 +2504,7 @@ function RetainerHealthSection({ displayCurrency, exchangeRates }: CurrencyProps
                         {r.utilizationPct.toFixed(0)}%
                       </span>
                     ) : (
-                      <span className="text-xs text-[var(--color-text-subtle)]">—</span>
+                      <span className="text-xs text-[var(--color-text-subtle)]">-</span>
                     )}
                   </td>
                   <td className="py-2 pr-3 text-[var(--color-text-muted)] text-xs">
@@ -2852,7 +2852,7 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
         <div>
           <h2 className="text-lg font-semibold text-[var(--color-text)]">Xero P&amp;L (historical actuals)</h2>
           <p className="text-xs text-[var(--color-text-muted)] mt-1">
-            {windowMonths}-month view of what Xero actually recorded. For reference only — use <strong>Fixed Costs</strong> above for projections.
+            {windowMonths}-month view of what Xero actually recorded. For reference only (use <strong>Fixed Costs</strong> above for projections).
           </p>
           {data?.lastSyncedAt && (
             <p className="text-xs text-[var(--color-text-subtle)] mt-0.5">
@@ -3145,7 +3145,7 @@ const REPORTS_SECTIONS: Array<{ id: string; label: string; group: 'Operations' |
 
 // ── Fixed Costs / Commitments (T652) ───────────────────────────────────────
 // User-maintained fixed costs with cadence. These feed the cash-flow forecast
-// as the authoritative source — Xero P&L is chaotic (reclassifications,
+// as the authoritative source (Xero P&L is chaotic: reclassifications,
 // journal entries) and bad for projection.
 
 interface Commitment {

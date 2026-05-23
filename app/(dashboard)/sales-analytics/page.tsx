@@ -3,8 +3,9 @@ import { redirect } from 'next/navigation'
 import { BarChart2, ArrowRight } from 'lucide-react'
 import { getServerAuth } from '@/lib/server-auth'
 import { PageHeader } from '@/components/tahi/page-header'
+import { Card } from '@/components/tahi/card'
 
-export const metadata = { title: 'Sales analytics — Tahi Dashboard' }
+export const metadata = { title: 'Sales analytics - Tahi Dashboard' }
 
 export default async function SalesAnalyticsPage() {
   const { userId, orgId } = await getServerAuth()
@@ -18,20 +19,15 @@ export default async function SalesAnalyticsPage() {
         subtitle="Close-rate by source, proposal-to-sign time, share-view stats across schedules / proposals / contracts. Coming in Phase 8."
       />
 
-      <div
-        className="border rounded-xl p-6"
-        style={{
-          background: 'var(--color-bg)',
-          borderColor: 'var(--color-border)',
-        }}
-      >
+      <Card padding="lg">
         <div className="flex items-start gap-3">
           <span
             className="inline-flex items-center justify-center flex-shrink-0"
             style={{
-              width: '2.25rem', height: '2.25rem',
+              width: '2.25rem',
+              height: '2.25rem',
               background: 'var(--color-brand-50)',
-              borderRadius: '0 12px 0 12px',
+              borderRadius: 'var(--radius-leaf-sm)',
               color: 'var(--color-brand-dark)',
             }}
           >
@@ -40,9 +36,9 @@ export default async function SalesAnalyticsPage() {
           <div className="min-w-0">
             <h2 className="font-semibold text-[var(--color-text)]">Coming next</h2>
             <p className="text-sm text-[var(--color-text-muted)] mt-1 leading-relaxed">
-              A single rollup of how every proposal, schedule and contract is performing — viewer
+              A single rollup of how every proposal, schedule and contract is performing (viewer
               counts, average time-on-page, accept/decline/question rates, and close-rate per lead
-              source. Until then, share-view stats live on each individual proposal, schedule and
+              source). Until then, share-view stats live on each individual proposal, schedule and
               contract detail page.
             </p>
             <div className="mt-4 grid sm:grid-cols-3 gap-2">
@@ -70,10 +66,10 @@ export default async function SalesAnalyticsPage() {
             </div>
           </div>
         </div>
-      </div>
+      </Card>
 
-      <div
-        className="border rounded-xl p-6"
+      <Card
+        padding="lg"
         style={{
           background: 'var(--color-bg-secondary)',
           borderColor: 'var(--color-border-subtle)',
@@ -84,10 +80,10 @@ export default async function SalesAnalyticsPage() {
           <li>Close rate by source (referral / Webflow partner / LinkedIn / website / cold)</li>
           <li>Median proposal-to-sign time per source and per package</li>
           <li>Top-performing proposals by viewer count, dwell time and accept rate</li>
-          <li>Variant heatmap — which package gets clicked vs which gets accepted</li>
+          <li>Variant heatmap (which package gets clicked vs which gets accepted)</li>
           <li>Open questions / tweak requests across all live proposals</li>
         </ul>
-      </div>
+      </Card>
     </div>
   )
 }
