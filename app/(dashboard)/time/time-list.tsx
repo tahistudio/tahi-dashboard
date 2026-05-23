@@ -1,17 +1,28 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import { Plus, Clock, RefreshCw, DollarSign, Timer, Download, ChevronDown, ChevronUp, Users, Trash2 } from 'lucide-react'
+import {
+  Plus, Clock, RefreshCw, DollarSign, Timer, Download, ChevronDown, ChevronUp,
+  Users, Trash2, Save, Search,
+} from 'lucide-react'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { DateRangePicker, type DateRange } from '@/components/tahi/date-range-picker'
+import { Card } from '@/components/tahi/card'
+import { Badge } from '@/components/tahi/badge'
+import { Avatar } from '@/components/tahi/avatar'
+import { Input } from '@/components/tahi/input'
+import { TahiButton } from '@/components/tahi/tahi-button'
+import { SlideOver } from '@/components/tahi/slide-over'
+import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
+import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 
-// ---- Types ----
+// ── Types ──────────────────────────────────────────────────────────────────
 
 interface TimeEntry {
   id: string
@@ -37,20 +48,20 @@ interface TimeResponse {
   entryCount: number
 }
 
-// ---- Config ----
+interface SelectOption {
+  value: string
+  label: string
+  subtitle?: string
+}
 
-const BILLABLE_TABS = [
-  { label: 'All', value: 'all' },
-  { label: 'Billable', value: '1' },
-  { label: 'Non-billable', value: '0' },
-]
+// ── Config ─────────────────────────────────────────────────────────────────
 
 const VIEW_TABS = [
   { label: 'Entries', value: 'entries' },
-  { label: 'By Client', value: 'by_client' },
-]
+  { label: 'By client', value: 'by_client' },
+] as const
 
-// ---- Helpers ----
+// ── Helpers ────────────────────────────────────────────────────────────────
 
 function formatDate(dateStr: string): string {
   try {
@@ -63,18 +74,14 @@ function formatHours(h: number): string {
   return h.toFixed(1) + 'h'
 }
 
-// ---- Log Time Modal ----
+// ── Log Time SlideOver ─────────────────────────────────────────────────────
 
-interface SelectOption {
-  value: string
-  label: string
-  subtitle?: string
-}
-
-function LogTimeModal({
+function LogTimeSlideOver({
+  open,
   onClose,
   onCreated,
 }: {
+  open: boolean
   onClose: () => void
   onCreated: () => void
 }) {
@@ -95,6 +102,7 @@ function LogTimeModal({
   const [requestOptions, setRequestOptions] = useState<SelectOption[]>([])
 
   useEffect(() => {
+    if (!open) return
     fetch(apiPath('/api/admin/clients'))
       .then(r => r.json() as Promise<{ organisations: Array<{ id: string; name: string }> }>)
       .then(data => {
@@ -121,10 +129,9 @@ function LogTimeModal({
         )
       })
       .catch(() => setRequestOptions([]))
-  }, [])
+  }, [open])
 
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = useCallback(async () => {
     if (!orgId || !teamMemberId || !hours || !date) {
       setError('Client, team member, hours, and date are required.')
       return
@@ -152,6 +159,14 @@ function LogTimeModal({
         return
       }
       showToast('Time entry logged successfully')
+      // Reset form
+      setOrgId(null)
+      setTeamMemberId(null)
+      setRequestId(null)
+      setHours('')
+      setHourlyRate('')
+      setNotes('')
+      setBillable(true)
       onCreated()
     } catch {
       setError('Network error. Please try again.')
@@ -160,49 +175,45 @@ function LogTimeModal({
     }
   }, [orgId, teamMemberId, requestId, hours, hourlyRate, notes, date, billable, onCreated, showToast])
 
-  const inputStyle = {
-    padding: '0.5rem 0.75rem',
-    borderRadius: '0.5rem',
-    fontSize: '0.875rem',
-    border: '1px solid var(--color-border)',
-    outline: 'none',
-    color: 'var(--color-text)',
-    background: 'var(--color-bg)',
+  const labelStyle: React.CSSProperties = {
+    display: 'block',
+    fontSize: '0.625rem',
+    fontWeight: 600,
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase',
+    color: 'var(--color-text-subtle)',
+    marginBottom: '0.3125rem',
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="log-time-title"
-      style={{
-        position: 'fixed', inset: 0, zIndex: 70,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'rgba(0,0,0,0.4)',
-      }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    <SlideOver
+      open={open}
+      onClose={onClose}
+      icon={<Clock size={15} />}
+      title="Log time"
+      subtitle="Record hours against a client and (optionally) a request."
+      maxWidth="48rem"
     >
-      <div
-        style={{
-          background: 'var(--color-bg)', borderRadius: '0.75rem', padding: '1.75rem',
-          width: '100%', maxWidth: '30rem', maxHeight: '90vh', overflowY: 'auto',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
-        }}
-      >
-        <h2 id="log-time-title" className="text-lg font-bold" style={{ color: 'var(--color-text)', marginBottom: '1.25rem' }}>
-          Log Time
-        </h2>
+      <SlideOver.Body>
         {error && (
           <div
             aria-live="polite"
-            style={{ background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger)', borderRadius: '0.5rem', padding: '0.625rem 0.875rem', marginBottom: '1rem', color: 'var(--color-danger)', fontSize: '0.8125rem' }}
+            style={{
+              background: 'var(--color-danger-bg)',
+              border: '1px solid var(--color-danger)',
+              borderRadius: 'var(--radius-md)',
+              padding: '0.625rem 0.875rem',
+              marginBottom: '0.875rem',
+              color: 'var(--color-danger)',
+              fontSize: '0.8125rem',
+            }}
           >
             {error}
           </div>
         )}
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            <label style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Client</label>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          <div>
+            <label style={labelStyle} htmlFor="lt-client">Client</label>
             <SearchableSelect
               options={clientOptions}
               value={orgId}
@@ -212,8 +223,8 @@ function LogTimeModal({
               allowClear
             />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            <label style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Team Member</label>
+          <div>
+            <label style={labelStyle} htmlFor="lt-member">Team member</label>
             <SearchableSelect
               options={memberOptions}
               value={teamMemberId}
@@ -222,8 +233,8 @@ function LogTimeModal({
               searchPlaceholder="Search team members..."
             />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            <label style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Request (optional)</label>
+          <div>
+            <label style={labelStyle} htmlFor="lt-request">Request <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400, color: 'var(--color-text-subtle)' }}>· optional</span></label>
             <SearchableSelect
               options={requestOptions}
               value={requestId}
@@ -233,18 +244,41 @@ function LogTimeModal({
               allowClear
             />
           </div>
-          <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: 1 }}>
-              <label htmlFor="lt-hours" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Hours</label>
-              <input id="lt-hours" type="number" min="0.1" step="0.1" placeholder="0.0" value={hours} onChange={e => setHours(e.target.value)} required style={inputStyle} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.75rem' }}>
+            <div>
+              <label style={labelStyle} htmlFor="lt-hours">Hours</label>
+              <Input
+                id="lt-hours"
+                type="number"
+                min="0.1"
+                step="0.1"
+                placeholder="0.0"
+                value={hours}
+                onChange={e => setHours(e.target.value)}
+                required
+              />
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: 1 }}>
-              <label htmlFor="lt-rate" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Rate ($/hr)</label>
-              <input id="lt-rate" type="number" min="0" step="1" placeholder="e.g. 150" value={hourlyRate} onChange={e => setHourlyRate(e.target.value)} style={inputStyle} />
+            <div>
+              <label style={labelStyle} htmlFor="lt-rate">Rate ($/hr)</label>
+              <Input
+                id="lt-rate"
+                type="number"
+                min="0"
+                step="1"
+                placeholder="e.g. 150"
+                value={hourlyRate}
+                onChange={e => setHourlyRate(e.target.value)}
+              />
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', flex: 1 }}>
-              <label htmlFor="lt-date" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Date</label>
-              <input id="lt-date" type="date" value={date} onChange={e => setDate(e.target.value)} required style={inputStyle} />
+            <div>
+              <label style={labelStyle} htmlFor="lt-date">Date</label>
+              <Input
+                id="lt-date"
+                type="date"
+                value={date}
+                onChange={e => setDate(e.target.value)}
+                required
+              />
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -255,64 +289,63 @@ function LogTimeModal({
               onChange={e => setBillable(e.target.checked)}
               style={{ width: '1rem', height: '1rem', accentColor: 'var(--color-brand)' }}
             />
-            <label htmlFor="lt-billable" style={{ fontSize: '0.875rem', color: 'var(--color-text)' }}>Billable</label>
+            <label htmlFor="lt-billable" style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>Billable</label>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            <label htmlFor="lt-notes" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Notes</label>
-            <textarea id="lt-notes" rows={3} placeholder="What did you work on?" value={notes} onChange={e => setNotes(e.target.value)} style={{ ...inputStyle, resize: 'vertical' as const }} />
-          </div>
-          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '0.25rem' }}>
-            <button
-              type="button"
-              onClick={onClose}
+          <div>
+            <label style={labelStyle} htmlFor="lt-notes">Notes</label>
+            <textarea
+              id="lt-notes"
+              rows={3}
+              placeholder="What did you work on?"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
               style={{
-                padding: '0.5rem 1rem', borderRadius: '0.5rem', fontSize: '0.875rem', fontWeight: 500,
-                border: '1px solid var(--color-border)', background: 'var(--color-bg)',
-                color: 'var(--color-text)', cursor: 'pointer',
+                width: '100%',
+                padding: 'var(--space-1-5) var(--space-3)',
+                fontSize: 'var(--text-sm)',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                color: 'var(--color-text)',
+                outline: 'none',
+                resize: 'vertical',
+                fontFamily: 'inherit',
               }}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              style={{
-                padding: '0.5rem 1.25rem', borderRadius: '0.5rem', fontSize: '0.875rem', fontWeight: 600,
-                border: 'none', background: saving ? 'var(--color-text-subtle)' : 'var(--color-brand)',
-                color: 'white', cursor: saving ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {saving ? 'Saving...' : 'Log Time'}
-            </button>
+            />
           </div>
-        </form>
-      </div>
-    </div>
+        </div>
+      </SlideOver.Body>
+      <SlideOver.Footer>
+        <TahiButton variant="secondary" size="sm" onClick={onClose}>
+          Cancel
+        </TahiButton>
+        <div style={{ flex: 1 }} />
+        <TahiButton
+          size="sm"
+          onClick={handleSubmit}
+          disabled={saving}
+          iconLeft={saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+        >
+          {saving ? 'Saving...' : 'Log time'}
+        </TahiButton>
+      </SlideOver.Footer>
+    </SlideOver>
   )
 }
 
-// ---- Summary Card ----
+// ── Summary Card ───────────────────────────────────────────────────────────
 
 function SummaryCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div
-      style={{
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-card)',
-        padding: '1.5rem',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '1rem',
-        flex: '1 1 200px',
-      }}
-    >
+    <Card padding="md" style={{ flex: '1 1 12rem', display: 'flex', alignItems: 'center', gap: '0.875rem' }}>
       <div
+        aria-hidden="true"
         style={{
-          width: 44,
-          height: 44,
-          borderRadius: '0 10px 0 10px',
-          background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
+          width: '2.5rem',
+          height: '2.5rem',
+          borderRadius: 'var(--radius-leaf-sm)',
+          background: 'linear-gradient(135deg, var(--color-brand-light), var(--color-brand-dark))',
+          color: '#ffffff',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -322,14 +355,14 @@ function SummaryCard({ icon, label, value }: { icon: React.ReactNode; label: str
         {icon}
       </div>
       <div>
-        <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.125rem' }}>{label}</p>
-        <p style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text)' }}>{value}</p>
+        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: 0 }}>{label}</p>
+        <p style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text)', margin: '0.125rem 0 0' }}>{value}</p>
       </div>
-    </div>
+    </Card>
   )
 }
 
-// ---- By Client View ----
+// ── By Client View ─────────────────────────────────────────────────────────
 
 interface ClientGroup {
   orgId: string
@@ -352,7 +385,6 @@ function ByClientView({
 }) {
   const [expandedOrg, setExpandedOrg] = useState<string | null>(null)
 
-  // Group entries by client
   const groups: ClientGroup[] = []
   const groupMap = new Map<string, ClientGroup>()
 
@@ -374,39 +406,38 @@ function ByClientView({
       groups.push(group)
     }
   }
-
-  // Sort by total hours descending
   groups.sort((a, b) => b.totalHours - a.totalHours)
 
   if (loading) {
-    return <LoadingSkeleton rows={5} height={56} />
+    return (
+      <Card padding="none">
+        <LoadingSkeleton rows={5} height={56} />
+      </Card>
+    )
   }
 
   if (error) {
     return (
-      <div
-        style={{ padding: '3rem 1.5rem', textAlign: 'center', color: 'var(--color-text-muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}
-      >
-        <p className="text-sm">Failed to load time entries.</p>
-        <button
-          onClick={onRetry}
-          className="flex items-center gap-2 text-sm font-medium hover:opacity-80 transition-opacity"
-          style={{ color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer' }}
-        >
-          <RefreshCw style={{ width: 14, height: 14 }} aria-hidden="true" />
+      <Card padding="lg" style={{ textAlign: 'center' }}>
+        <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginBottom: '0.75rem' }}>
+          Failed to load time entries.
+        </p>
+        <TahiButton variant="secondary" size="sm" onClick={onRetry} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
           Retry
-        </button>
-      </div>
+        </TahiButton>
+      </Card>
     )
   }
 
   if (groups.length === 0) {
     return (
-      <EmptyState
-        icon={<Users style={{ width: 28, height: 28, color: 'white' }} aria-hidden="true" />}
-        title="No time entries yet"
-        description="Log your first time entry to start tracking hours by client."
-      />
+      <Card padding="none">
+        <EmptyState
+          icon={<Users className="w-6 h-6" />}
+          title="No time entries yet"
+          description="Log your first time entry to start tracking hours by client."
+        />
+      </Card>
     )
   }
 
@@ -415,15 +446,7 @@ function ByClientView({
       {groups.map(group => {
         const isExpanded = expandedOrg === group.orgId
         return (
-          <div
-            key={group.orgId}
-            style={{
-              background: 'var(--color-bg)',
-              borderRadius: 'var(--radius-card)',
-              border: '1px solid var(--color-border)',
-              overflow: 'hidden',
-            }}
-          >
+          <Card key={group.orgId} padding="none" style={{ overflow: 'hidden' }}>
             <button
               onClick={() => setExpandedOrg(isExpanded ? null : group.orgId)}
               style={{
@@ -431,54 +454,45 @@ function ByClientView({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '1rem 1.25rem',
+                padding: '0.875rem 1.125rem',
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
                 textAlign: 'left',
+                transition: 'background-color 120ms ease',
               }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              aria-expanded={isExpanded}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1 }}>
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: '0 8px 0 8px',
-                    background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  <Users style={{ width: 16, height: 16, color: 'white' }} aria-hidden="true" />
-                </div>
-                <div>
-                  <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: 0 }}>
+                <Avatar name={group.orgName} size="sm" tooltip={false} />
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {group.orgName}
                   </p>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: '0.125rem 0 0' }}>
                     {group.entries.length} {group.entries.length === 1 ? 'entry' : 'entries'}
                   </p>
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
                 <div style={{ textAlign: 'right' }}>
-                  <p style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--color-text)' }}>
+                  <p style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--color-text)', margin: 0 }}>
                     {formatHours(group.totalHours)}
                   </p>
-                  <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>total</p>
+                  <p style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', margin: '0.125rem 0 0', textTransform: 'uppercase', letterSpacing: '0.04em' }}>total</p>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-success)' }}>
+                  <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-success)', margin: 0 }}>
                     {formatHours(group.billableHours)}
                   </p>
-                  <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>billable</p>
+                  <p style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', margin: '0.125rem 0 0', textTransform: 'uppercase', letterSpacing: '0.04em' }}>billable</p>
                 </div>
                 {isExpanded ? (
-                  <ChevronUp style={{ width: 16, height: 16, color: 'var(--color-text-subtle)' }} />
+                  <ChevronUp size={16} aria-hidden="true" style={{ color: 'var(--color-text-subtle)' }} />
                 ) : (
-                  <ChevronDown style={{ width: 16, height: 16, color: 'var(--color-text-subtle)' }} />
+                  <ChevronDown size={16} aria-hidden="true" style={{ color: 'var(--color-text-subtle)' }} />
                 )}
               </div>
             </button>
@@ -489,13 +503,13 @@ function ByClientView({
                   <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 500 }}>
                     <thead>
                       <tr style={{ background: 'var(--color-bg-secondary)' }}>
-                        {['Date', 'Team Member', 'Request', 'Hours', 'Billable', 'Notes'].map(h => (
+                        {['Date', 'Team member', 'Request', 'Hours', 'Billable', 'Notes'].map(h => (
                           <th
                             key={h}
                             style={{
                               padding: '0.5rem 1rem', textAlign: 'left', fontSize: '0.6875rem',
-                              fontWeight: 600, color: 'var(--color-text-muted)',
-                              textTransform: 'uppercase', letterSpacing: '0.04em',
+                              fontWeight: 600, color: 'var(--color-text-subtle)',
+                              textTransform: 'uppercase', letterSpacing: '0.06em',
                             }}
                           >
                             {h}
@@ -514,12 +528,15 @@ function ByClientView({
                           <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
                             {formatDate(entry.date)}
                           </td>
-                          <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
-                            {entry.teamMemberName ?? 'Unknown'}
+                          <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text)' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <Avatar name={entry.teamMemberName ?? 'Unknown'} size={22} tooltip />
+                              <span style={{ fontWeight: 500 }}>{entry.teamMemberName ?? 'Unknown'}</span>
+                            </div>
                           </td>
                           <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
                             {entry.requestId && entry.requestTitle ? (
-                              <Link href={`/requests/${entry.requestId}`} style={{ color: 'var(--color-brand)', textDecoration: 'none' }}>
+                              <Link href={`/requests/${entry.requestId}`} style={{ color: 'var(--color-text-active)', textDecoration: 'underline', textDecorationStyle: 'dotted', textDecorationColor: 'var(--color-brand-100)', textUnderlineOffset: '0.1875rem' }}>
                                 {entry.requestTitle}
                               </Link>
                             ) : (
@@ -530,22 +547,16 @@ function ByClientView({
                             {formatHours(entry.hours)}
                           </td>
                           <td style={{ padding: '0.625rem 1rem' }}>
-                            <span
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                padding: '0.125rem 0.5rem',
-                                borderRadius: 99,
-                                fontSize: '0.75rem',
-                                fontWeight: 500,
-                                background: entry.billable ? 'var(--color-success-bg)' : 'var(--status-draft-bg)',
-                                color: entry.billable ? 'var(--color-success)' : 'var(--color-text-muted)',
-                              }}
+                            <Badge
+                              tone={entry.billable ? 'positive' : 'neutral'}
+                              variant="soft"
+                              size="sm"
+                              leader={false}
                             >
                               {entry.billable ? 'Yes' : 'No'}
-                            </span>
+                            </Badge>
                           </td>
-                          <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {entry.notes ?? '--'}
                           </td>
                         </tr>
@@ -555,34 +566,64 @@ function ByClientView({
                 </div>
               </div>
             )}
-          </div>
+          </Card>
         )
       })}
     </div>
   )
 }
 
-// ---- Main Component ----
+// ── Main Component ─────────────────────────────────────────────────────────
 
 export function TimeList() {
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
-  const [billableTab, setBillableTab] = useState('all')
   const [showModal, setShowModal] = useState(false)
-  const [viewTab, setViewTab] = useState('entries')
+  const [viewTab, setViewTab] = useState<'entries' | 'by_client'>('entries')
   const [totalHours, setTotalHours] = useState(0)
   const [billableHours, setBillableHours] = useState(0)
   const [entryCount, setEntryCount] = useState(0)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
+  const [search, setSearch] = useState('')
 
-  // Client-side date filter
-  const filteredEntries = entries.filter(e => {
-    if (!dateRange.from || !dateRange.to) return true
-    const d = new Date(e.date ?? e.createdAt).getTime()
-    return d >= dateRange.from.getTime() && d <= dateRange.to.getTime()
-  })
+  // FilterBar state — billable + client + team member.
+  const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([])
+
+  // Resolve the billable filter chip into the API query value ('all'|'1'|'0').
+  const billableTab: string = useMemo(() => {
+    const f = activeFilters.find(a => a.id === 'billable')
+    return f?.value ?? 'all'
+  }, [activeFilters])
+
+  // Client + team member filter values (multiselect, applied client-side).
+  const selectedClients = useMemo(() => {
+    const f = activeFilters.find(a => a.id === 'client')
+    return new Set(f?.values ?? [])
+  }, [activeFilters])
+  const selectedMembers = useMemo(() => {
+    const f = activeFilters.find(a => a.id === 'member')
+    return new Set(f?.values ?? [])
+  }, [activeFilters])
+
+  // Client-side filter: date range + search + client + member.
+  const filteredEntries = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return entries.filter(e => {
+      if (dateRange.from && dateRange.to) {
+        const d = new Date(e.date ?? e.createdAt).getTime()
+        if (d < dateRange.from.getTime() || d > dateRange.to.getTime()) return false
+      }
+      if (selectedClients.size > 0 && !selectedClients.has(e.orgId)) return false
+      if (selectedMembers.size > 0 && !selectedMembers.has(e.teamMemberId)) return false
+      if (q) {
+        const hay = `${e.orgName ?? ''} ${e.teamMemberName ?? ''} ${e.requestTitle ?? ''} ${e.notes ?? ''}`.toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+  }, [entries, dateRange, search, selectedClients, selectedMembers])
 
   const fetchEntries = useCallback(async (billable: string) => {
     setLoading(true)
@@ -623,268 +664,309 @@ export function TimeList() {
     fetchEntries(billableTab).catch(() => {})
   }, [billableTab, fetchEntries])
 
+  // Filter defs derived from the loaded entries so chip options reflect
+  // what's actually in the dataset. Recomputed on every refresh.
+  const filterDefs: FilterDef[] = useMemo(() => {
+    const clientOpts = Array.from(
+      new Map(entries.map(e => [e.orgId, e.orgName ?? 'Unknown'])).entries()
+    ).map(([value, label]) => ({ value, label }))
+    const memberOpts = Array.from(
+      new Map(entries.map(e => [e.teamMemberId, e.teamMemberName ?? 'Unknown'])).entries()
+    ).map(([value, label]) => ({ value, label }))
+    return [
+      {
+        id: 'billable',
+        label: 'Billable',
+        kind: 'select',
+        options: [
+          { value: 'all', label: 'All' },
+          { value: '1', label: 'Billable', tone: 'positive' },
+          { value: '0', label: 'Non-billable', tone: 'neutral' },
+        ],
+      },
+      { id: 'client', label: 'Client',      kind: 'multiselect', options: clientOpts },
+      { id: 'member', label: 'Team member', kind: 'multiselect', options: memberOpts },
+    ]
+  }, [entries])
+
+  // DataTable columns for the entries view.
+  const columns: DataTableColumn<TimeEntry>[] = useMemo(() => [
+    {
+      key: 'date',
+      header: 'Date',
+      sortable: true,
+      sortValue: r => r.date,
+      width: '8.5rem',
+      render: r => (
+        <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+          {formatDate(r.date)}
+        </span>
+      ),
+    },
+    {
+      key: 'member',
+      header: 'Team member',
+      sortable: true,
+      sortValue: r => (r.teamMemberName ?? '').toLowerCase(),
+      minWidth: '11rem',
+      render: r => (
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Avatar name={r.teamMemberName ?? 'Unknown'} size={22} tooltip />
+          <span style={{ fontWeight: 500, color: 'var(--color-text)' }}>{r.teamMemberName ?? 'Unknown'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'client',
+      header: 'Client',
+      sortable: true,
+      sortValue: r => (r.orgName ?? '').toLowerCase(),
+      minWidth: '11rem',
+      render: r => (
+        <span style={{ color: 'var(--color-text)' }}>{r.orgName ?? 'Unknown'}</span>
+      ),
+    },
+    {
+      key: 'request',
+      header: 'Request',
+      minWidth: '12rem',
+      link: {
+        href: r => (r.requestId ? `/requests/${r.requestId}` : undefined),
+      },
+      render: r => (r.requestId && r.requestTitle ? r.requestTitle : '--'),
+    },
+    {
+      key: 'hours',
+      header: 'Hours',
+      sortable: true,
+      sortValue: r => r.hours,
+      width: '5.5rem',
+      align: 'right',
+      render: r => (
+        <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>{formatHours(r.hours)}</span>
+      ),
+    },
+    {
+      key: 'billable',
+      header: 'Billable',
+      sortable: true,
+      sortValue: r => (r.billable ? 1 : 0),
+      width: '7rem',
+      render: r => (
+        <Badge
+          tone={r.billable ? 'positive' : 'neutral'}
+          variant="soft"
+          size="sm"
+          leader={false}
+        >
+          {r.billable ? 'Billable' : 'Non-billable'}
+        </Badge>
+      ),
+    },
+    {
+      key: 'notes',
+      header: 'Notes',
+      minWidth: '14rem',
+      muted: true,
+      render: r => (
+        <span style={{ display: 'inline-block', maxWidth: '18rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
+          {r.notes ?? '--'}
+        </span>
+      ),
+    },
+  ], [])
+
+  const handleExport = () => {
+    const link = document.createElement('a')
+    link.href = apiPath('/api/admin/export/time')
+    link.download = 'time-entries.csv'
+    link.click()
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+    <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text)', margin: 0 }}>Time Tracking</h1>
-          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: '14rem' }}>
+          <h1 style={{
+            margin: 0,
+            fontSize: '1.5rem',
+            fontWeight: 700,
+            color: 'var(--color-text)',
+            letterSpacing: '-0.015em',
+          }}>Time tracking</h1>
+          <p style={{
+            margin: '0.25rem 0 0',
+            fontSize: '0.875rem',
+            color: 'var(--color-text-muted)',
+            lineHeight: 1.5,
+          }}>
             Log and review hours across all clients and requests.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <button
-            onClick={() => {
-              const link = document.createElement('a')
-              link.href = apiPath('/api/admin/export/time')
-              link.download = 'time-entries.csv'
-              link.click()
-            }}
-            className="flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2"
-            style={{
-              padding: '0.625rem 1.125rem',
-              background: 'var(--color-bg)',
-              border: '1px solid var(--color-border)',
-              borderRadius: '0.5rem',
-              cursor: 'pointer',
-              color: 'var(--color-text)',
-              minHeight: 44,
-            }}
+          <TahiButton
+            variant="secondary"
+            size="sm"
+            onClick={handleExport}
+            iconLeft={<Download className="w-3.5 h-3.5" />}
           >
-            <Download style={{ width: 16, height: 16 }} aria-hidden="true" />
             Export CSV
-          </button>
-          <button
+          </TahiButton>
+          <TahiButton
+            size="sm"
             onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2"
-            style={{
-              padding: '0.625rem 1.125rem',
-              background: 'var(--color-brand)',
-              border: 'none',
-              borderRadius: '0 10px 0 10px',
-              cursor: 'pointer',
-              color: 'white',
-              minHeight: 44,
-            }}
+            iconLeft={<Plus className="w-3.5 h-3.5" />}
           >
-            <Plus style={{ width: 16, height: 16 }} aria-hidden="true" />
-            Log Time
-          </button>
+            Log time
+          </TahiButton>
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+      {/* Summary cards */}
+      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
         <SummaryCard
-          icon={<Timer style={{ width: 22, height: 22, color: 'white' }} />}
-          label="Total Hours"
+          icon={<Timer size={18} aria-hidden="true" />}
+          label="Total hours"
           value={formatHours(totalHours)}
         />
         <SummaryCard
-          icon={<DollarSign style={{ width: 22, height: 22, color: 'white' }} />}
-          label="Billable Hours"
+          icon={<DollarSign size={18} aria-hidden="true" />}
+          label="Billable hours"
           value={formatHours(billableHours)}
         />
         <SummaryCard
-          icon={<Clock style={{ width: 22, height: 22, color: 'white' }} />}
+          icon={<Clock size={18} aria-hidden="true" />}
           label="Entries"
           value={String(entryCount)}
         />
       </div>
 
-      {/* View Tabs */}
-      <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
-        <div style={{ display: 'flex', gap: '0.25rem' }}>
-          {VIEW_TABS.map(tab => (
+      {/* View tabs */}
+      <div role="tablist" aria-label="Time view" style={{ display: 'flex', gap: '0.25rem' }}>
+        {VIEW_TABS.map(tab => {
+          const isActive = viewTab === tab.value
+          return (
             <button
               key={tab.value}
+              role="tab"
+              aria-selected={isActive}
               onClick={() => setViewTab(tab.value)}
               style={{
-                padding: '0.5rem 0.875rem',
+                padding: '0.4375rem 0.875rem',
                 fontSize: '0.8125rem',
-                fontWeight: viewTab === tab.value ? 600 : 400,
-                color: viewTab === tab.value ? 'white' : 'var(--color-text-muted)',
-                background: viewTab === tab.value ? 'var(--color-brand)' : 'var(--color-bg-secondary)',
-                border: viewTab === tab.value ? '1px solid var(--color-brand)' : '1px solid var(--color-border)',
-                borderRadius: '0.5rem',
+                fontWeight: isActive ? 600 : 500,
+                color: isActive ? '#ffffff' : 'var(--color-text-muted)',
+                background: isActive ? 'var(--color-brand)' : 'var(--color-bg)',
+                border: `1px solid ${isActive ? 'var(--color-brand)' : 'var(--color-border)'}`,
+                borderRadius: 'var(--radius-md)',
                 cursor: 'pointer',
-                minHeight: 36,
-                transition: 'all 0.15s',
+                transition: 'background-color 150ms ease, color 150ms ease, border-color 150ms ease',
+              }}
+              onMouseEnter={e => {
+                if (isActive) return
+                e.currentTarget.style.background = 'var(--color-bg-secondary)'
+                e.currentTarget.style.color = 'var(--color-text)'
+              }}
+              onMouseLeave={e => {
+                if (isActive) return
+                e.currentTarget.style.background = 'var(--color-bg)'
+                e.currentTarget.style.color = 'var(--color-text-muted)'
               }}
             >
               {tab.label}
             </button>
-          ))}
+          )
+        })}
+      </div>
+
+      {/* Filter row: search + chips + date range */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+        <FilterBar
+          filters={filterDefs}
+          active={activeFilters}
+          onChange={setActiveFilters}
+          search={{
+            value: search,
+            onChange: setSearch,
+            placeholder: 'Search client, member, request or notes',
+          }}
+          size="sm"
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <DateRangePicker value={dateRange} onChange={setDateRange} label="Entry date" />
         </div>
       </div>
 
-      {/* Filter Tabs */}
-      <div style={{ display: 'flex', gap: '0.25rem', borderBottom: '1px solid var(--color-border)', paddingBottom: 0 }}>
-        {BILLABLE_TABS.map(tab => (
-          <button
-            key={tab.value}
-            onClick={() => setBillableTab(tab.value)}
-            style={{
-              padding: '0.5rem 1rem',
-              fontSize: '0.8125rem',
-              fontWeight: billableTab === tab.value ? 600 : 400,
-              color: billableTab === tab.value ? 'var(--color-brand)' : 'var(--color-text-muted)',
-              background: 'none',
-              border: 'none',
-              borderBottom: billableTab === tab.value ? '2px solid var(--color-brand)' : '2px solid transparent',
-              cursor: 'pointer',
-              marginBottom: -1,
-              minHeight: 44,
-              transition: 'color 0.15s',
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Date filter */}
-      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-        <DateRangePicker value={dateRange} onChange={setDateRange} label="Entry date" />
-      </div>
-
-      {/* By Client View */}
-      {viewTab === 'by_client' && (
-        <ByClientView entries={filteredEntries} loading={loading} error={error} onRetry={() => fetchEntries(billableTab).catch(() => {})} />
-      )}
-
-      {/* Table */}
-      {viewTab === 'entries' && (
-      <div
-        style={{
-          background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
-          border: '1px solid var(--color-border)',
-          overflow: 'hidden',
-        }}
-      >
-        {loading ? (
-          <LoadingSkeleton rows={5} height={56} />
-        ) : error ? (
-          <div
-            style={{ padding: '3rem 1.5rem', textAlign: 'center', color: 'var(--color-text-muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}
-          >
-            <p className="text-sm">Failed to load time entries.</p>
-            <button
-              onClick={() => fetchEntries(billableTab).catch(() => {})}
-              className="flex items-center gap-2 text-sm font-medium hover:opacity-80 transition-opacity"
-              style={{ color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer' }}
-            >
-              <RefreshCw style={{ width: 14, height: 14 }} aria-hidden="true" />
-              Retry
-            </button>
-          </div>
-        ) : filteredEntries.length === 0 ? (
-          <EmptyState
-            icon={<Clock style={{ width: 28, height: 28, color: 'white' }} aria-hidden="true" />}
-            title="No time entries yet"
-            description="Log your first time entry to start tracking hours."
-            ctaLabel="Log Time"
-            onCtaClick={() => setShowModal(true)}
-          />
-        ) : (
-          <div className="h-scroll">
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
-              <thead>
-                <tr style={{ background: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
-                  {['Date', 'Team Member', 'Client', 'Request', 'Hours', 'Billable', 'Notes', ''].map(h => (
-                    <th
-                      key={h}
-                      style={{
-                        padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem',
-                        fontWeight: 600, color: 'var(--color-text-muted)',
-                        textTransform: 'uppercase', letterSpacing: '0.04em',
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredEntries.map((entry, i) => (
-                  <tr
-                    key={entry.id}
-                    style={{
-                      borderBottom: i < entries.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
-                      transition: 'background 0.1s',
-                    }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLTableRowElement).style.background = 'var(--color-bg-secondary)' }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLTableRowElement).style.background = '' }}
-                  >
-                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-                      {formatDate(entry.date)}
-                    </td>
-                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-text)' }}>
-                      {entry.teamMemberName ?? 'Unknown'}
-                    </td>
-                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', color: 'var(--color-text)' }}>
-                      {entry.orgName ?? 'Unknown'}
-                    </td>
-                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-                      {entry.requestId && entry.requestTitle ? (
-                        <Link href={`/requests/${entry.requestId}`} style={{ color: 'var(--color-brand)', textDecoration: 'none' }}>
-                          {entry.requestTitle}
-                        </Link>
-                      ) : (
-                        '--'
-                      )}
-                    </td>
-                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
-                      {formatHours(entry.hours)}
-                    </td>
-                    <td style={{ padding: '0.875rem 1rem' }}>
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          padding: '0.125rem 0.5rem',
-                          borderRadius: 99,
-                          fontSize: '0.75rem',
-                          fontWeight: 500,
-                          background: entry.billable ? 'var(--color-success-bg)' : 'var(--status-draft-bg)',
-                          color: entry.billable ? 'var(--color-success)' : 'var(--color-text-muted)',
-                        }}
-                      >
-                        {entry.billable ? 'Billable' : 'Non-billable'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {entry.notes ?? '--'}
-                    </td>
-                    <td style={{ padding: '0.875rem 0.5rem', width: '2.5rem' }}>
-                      <button
-                        onClick={() => setDeleteTarget(entry.id)}
-                        className="p-1.5 rounded-lg hover:bg-[var(--color-danger-bg)] text-[var(--color-text-subtle)] hover:text-[var(--color-danger)] transition-colors"
-                        aria-label="Delete time entry"
-                        style={{ border: 'none', background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      >
-                        <Trash2 style={{ width: '0.875rem', height: '0.875rem' }} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      )}
-
-      {/* Log Time Modal */}
-      {showModal && (
-        <LogTimeModal
-          onClose={() => setShowModal(false)}
-          onCreated={handleCreated}
+      {/* Body */}
+      {viewTab === 'by_client' ? (
+        <ByClientView
+          entries={filteredEntries}
+          loading={loading}
+          error={error}
+          onRetry={() => fetchEntries(billableTab).catch(() => {})}
         />
+      ) : (
+        <Card padding="none">
+          {error ? (
+            <div style={{ padding: '2.5rem 1.5rem', textAlign: 'center' }}>
+              <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginBottom: '0.75rem' }}>
+                Failed to load time entries.
+              </p>
+              <TahiButton variant="secondary" size="sm" onClick={() => fetchEntries(billableTab).catch(() => {})} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+                Retry
+              </TahiButton>
+            </div>
+          ) : (
+            <DataTable<TimeEntry>
+              ariaLabel="Time entries"
+              columns={columns}
+              rows={filteredEntries}
+              getRowId={r => r.id}
+              defaultSort={{ key: 'date', dir: 'desc' }}
+              loading={loading}
+              empty={
+                <EmptyState
+                  icon={<Clock className="w-6 h-6" />}
+                  title={entries.length === 0 ? 'No time entries yet' : 'No matches'}
+                  description={entries.length === 0
+                    ? 'Log your first time entry to start tracking hours.'
+                    : 'Try clearing a filter, search term, or date range.'}
+                  action={
+                    entries.length === 0 ? (
+                      <TahiButton size="sm" onClick={() => setShowModal(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+                        Log time
+                      </TahiButton>
+                    ) : undefined
+                  }
+                />
+              }
+              rowActions={(r) => [
+                ...(r.requestId
+                  ? [{
+                      label: 'Open request',
+                      icon: <Search size={14} />,
+                      onClick: () => { window.location.href = `/requests/${r.requestId}` },
+                    }]
+                  : []),
+                {
+                  label: 'Delete',
+                  icon: <Trash2 size={14} />,
+                  tone: 'danger' as const,
+                  onClick: () => setDeleteTarget(r.id),
+                },
+              ]}
+            />
+          )}
+        </Card>
       )}
+
+      {/* Log Time SlideOver */}
+      <LogTimeSlideOver
+        open={showModal}
+        onClose={() => setShowModal(false)}
+        onCreated={handleCreated}
+      />
 
       {/* Delete Confirmation */}
       <ConfirmDialog
@@ -892,6 +974,7 @@ export function TimeList() {
         title="Delete time entry"
         description="This time entry will be permanently removed. This action cannot be undone."
         confirmLabel="Delete"
+        variant="danger"
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
       />
