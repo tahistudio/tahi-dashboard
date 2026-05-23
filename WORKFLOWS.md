@@ -21,6 +21,30 @@ A workflow is **`shipped`** only when every surface in its path is `design ✓ +
 
 ## Workflows
 
+### Maintaining the knowledge base (Docs Hub) — **shipped 2026-05-23 ✓**
+
+> Liam captures and finds operating docs, brand notes, services, sales playbooks, team SOPs, and product notes. The dashboard is the source of truth — not Notion, not Google Docs, not Slack threads.
+
+**Steps:**
+1. Open `/docs`
+2. Filter by category (multi-select chip) or search title + content
+3. Click a row → slide-over preview opens
+4. Edit inline (or create new) with the Notion-grade editor
+5. Review version history; click any version to view its content
+
+**Surfaces:**
+- Docs Hub page (`app/(dashboard)/docs/docs-content.tsx`)
+- DataTable + FilterBar (multiselect, nonRemovable Categories chip)
+- SlideOver (56rem) for view + edit + version history
+- TiptapDocEditor (top toolbar, bubble menu on selection, slash commands, task lists, image)
+- ConfirmDialog for destructive deletes
+
+**Status:** design ✓ · data ✓ · feature ✓ · live-tested ✓
+
+**Locked.** Do not change without explicit request. Past iterations covered: edit-bug fix, table layout, multi-category support, FilterBar multi-select extension, capped chips, wider slide-over, clickable historical versions, Notion-grade editor rebuild, white-card row surface.
+
+---
+
 ### Discovery call
 
 > Liam jumps on a discovery call with a prospect. The dashboard should remind him what to ask, record what happened, and turn the call into a deal + next steps.
