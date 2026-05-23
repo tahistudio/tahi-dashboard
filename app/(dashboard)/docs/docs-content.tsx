@@ -675,13 +675,19 @@ function EditForm({
   content: string
   onContentChange: (v: string) => void
 }) {
-  const toggleCat = (value: string) => {
-    if (categories.includes(value)) {
-      onCategoriesChange(categories.filter(c => c !== value))
-    } else {
-      onCategoriesChange([...categories, value])
-    }
-  }
+  // Same dropdown-style multiselect chip as the main /docs filter
+  // row. nonRemovable hides the X so the picker is a permanent
+  // control, never an "added filter".
+  const editFilterDefs: FilterDef[] = [
+    {
+      id: 'categories',
+      label: 'Categories',
+      kind: 'multiselect',
+      nonRemovable: true,
+      options: CATEGORIES.map(c => ({ value: c.value, label: c.label, tone: c.tone })),
+    },
+  ]
+  const editActive: ActiveFilter[] = [{ id: 'categories', values: categories }]
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
       <Input
@@ -702,23 +708,15 @@ function EditForm({
         }}>
           Categories <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400, color: 'var(--color-text-subtle)' }}>· pick none, one or many</span>
         </label>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
-          {CATEGORIES.map(cat => {
-            const active = categories.includes(cat.value)
-            return (
-              <Badge
-                key={cat.value}
-                tone={cat.tone}
-                variant={active ? 'solid' : 'outline'}
-                size="sm"
-                dot={false}
-                onClick={() => toggleCat(cat.value)}
-              >
-                {cat.label}
-              </Badge>
-            )
-          })}
-        </div>
+        <FilterBar
+          filters={editFilterDefs}
+          active={editActive}
+          onChange={(next) => {
+            const cats = next.find(a => a.id === 'categories')?.values ?? []
+            onCategoriesChange(cats)
+          }}
+          size="sm"
+        />
       </div>
       <TiptapDocEditor
         content={content}
