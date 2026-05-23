@@ -2143,11 +2143,16 @@ function stripTags(html: string): string {
 
 // ── Kanban + BoardView showcases ───────────────────────────────────────
 
+// Column colors mirror lib/status-config.ts dot palette so the board
+// matches the requests-page kanban: Backlog = neutral grey, In
+// progress = cyan (--status-in-progress-dot #06b6d4), Review = amber
+// (--status-in-review-dot #f59e0b), Done = green
+// (--status-delivered-dot #22c55e).
 const DEMO_BOARD_COLUMNS: BoardColumn[] = [
   { id: 'backlog',  label: 'Backlog',     statusValue: 'backlog',     color: '#94a3b8' },
-  { id: 'inprog',   label: 'In progress', statusValue: 'in_progress', color: '#38bdf8' },
-  { id: 'review',   label: 'Review',      statusValue: 'review',      color: '#a78bfa' },
-  { id: 'done',     label: 'Done',        statusValue: 'done',        color: '#4ade80' },
+  { id: 'inprog',   label: 'In progress', statusValue: 'in_progress', color: '#06b6d4' },
+  { id: 'review',   label: 'Review',      statusValue: 'review',      color: '#f59e0b' },
+  { id: 'done',     label: 'Done',        statusValue: 'done',        color: '#22c55e' },
 ]
 
 const DEMO_BOARD_PEOPLE = {

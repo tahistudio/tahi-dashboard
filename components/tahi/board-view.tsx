@@ -24,7 +24,7 @@
 
 import * as React from 'react'
 import {
-  LayoutGrid, Rows, CalendarRange, Plus, Filter,
+  LayoutGrid, Rows, CalendarRange, Plus, Filter, Search,
   Calendar, X,
 } from 'lucide-react'
 import { Input } from '@/components/tahi/input'
@@ -290,16 +290,20 @@ export function BoardView({
       {/* Controls row. Search input and the filter pill are direct
           siblings (no nested wrapper) so the filter sits glued to the
           right edge of the search with a single 6px gap. +New sits at
-          the far right of the row, pushed by a flex spacer. */}
+          the far right of the row, pushed by a flex spacer. The
+          search uses Input's leadingIcon variant so the inner input
+          flexes to fill the wrapper — without it, a bare <input>
+          sits at its browser-default ~150px and leaves dead space
+          between it and the filter pill. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap' }}>
-        <div style={{ flex: '0 1 22rem', minWidth: '12rem' }}>
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={searchPlaceholder}
-            inputSize="sm"
-          />
-        </div>
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={searchPlaceholder}
+          inputSize="sm"
+          leadingIcon={<Search size={13} aria-hidden="true" />}
+          style={{ flex: '0 1 22rem', minWidth: '12rem' }}
+        />
         <button
           ref={filterButtonRef}
           type="button"
@@ -741,18 +745,22 @@ function BoardTable({
 
 // ── Timeline view (Gantt-style) ──────────────────────────────────────
 //
-// Higher-level view: one row per item, horizontal bars colored by
-// status. Status tells the story — explicit "to do / in progress /
-// done" labels aren't needed because the color encodes them. Past +
-// not done = red (overdue). Past + done = silent. Future = brand.
-// Today line marker. If an item has startDate we draw a bar across
-// the range; otherwise a milestone diamond at dueDate.
+// Higher-level view: one row per item, horizontal bars colored by the
+// item's STATUS COLUMN so the timeline shares its palette with the
+// kanban. Items past their dueDate but not in a "done" column are
+// overridden to red (overdue). Today line marker. Items with a
+// startDate render as a bar across the range; everything else falls
+// back to a milestone diamond at dueDate.
+
+const OVERDUE_COLOR = '#dc2626'
+const OVERDUE_RING = '#991b1b'
 
 interface TimelineDatum {
   item: BoardItem
   startTs: number | null
   endTs: number
-  state: 'done' | 'overdue' | 'active' | 'upcoming'
+  column: BoardColumn | undefined
+  isOverdue: boolean
 }
 
 function BoardTimeline({
@@ -765,10 +773,17 @@ function BoardTimeline({
   onItemClick?: (item: BoardItem) => void
 }) {
   const now = Date.now()
+
+  // Status → column index. "Done" columns are anything matching
+  // done / complete / deliver / ship; the last column is the
+  // fallback when nothing matches.
+  const columnByStatus = React.useMemo(() => {
+    const m = new Map<string, BoardColumn>()
+    for (const c of columns) m.set(c.statusValue, c)
+    return m
+  }, [columns])
+
   const doneStatuses = React.useMemo(() => {
-    // The last column in the chronological flow is treated as "done".
-    // Callers can override by naming a column whose statusValue
-    // contains 'done' or 'complete'.
     const explicit = columns
       .filter(c => /done|complete|deliver|ship/i.test(c.statusValue) || /done|complete|deliver|ship/i.test(c.label))
       .map(c => c.statusValue)
@@ -776,32 +791,17 @@ function BoardTimeline({
     return new Set(columns.length ? [columns[columns.length - 1].statusValue] : [])
   }, [columns])
 
-  const activeStatuses = React.useMemo(() => {
-    return new Set(
-      columns
-        .filter(c => /progress|review|active|wip|doing/i.test(c.statusValue) || /progress|review|active|wip|doing/i.test(c.label))
-        .map(c => c.statusValue),
-    )
-  }, [columns])
-
   const data: TimelineDatum[] = items
     .map((item): TimelineDatum | null => {
       const endTs = parseDate(item.dueDate)
       if (!endTs) return null
       const startTs = parseDate(item.startDate)
+      const column = columnByStatus.get(item.status)
       const isDone = doneStatuses.has(item.status)
-      const isActive = activeStatuses.has(item.status)
-      const state: TimelineDatum['state'] = isDone
-        ? 'done'
-        : endTs < now
-          ? 'overdue'
-          : isActive
-            ? 'active'
-            : 'upcoming'
-      return { item, startTs, endTs, state }
+      const isOverdue = !isDone && endTs < now
+      return { item, startTs, endTs, column, isOverdue }
     })
     .filter((x): x is TimelineDatum => !!x)
-    // Earliest first.
     .sort((a, b) => (a.startTs ?? a.endTs) - (b.startTs ?? b.endTs))
 
   if (data.length === 0) {
@@ -854,7 +854,9 @@ function BoardTimeline({
         overflowX: 'auto',
       }}
     >
-      {/* Legend */}
+      {/* Legend. Shows every column with its own colour (same dots
+          you see at the top of each kanban column) plus an Overdue
+          swatch for items the timeline has flagged red. */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -863,11 +865,16 @@ function BoardTimeline({
         fontSize: '0.6875rem',
         color: 'var(--color-text-muted)',
         fontWeight: 500,
+        flexWrap: 'wrap',
       }}>
-        <LegendSwatch color={STATE_COLOR.upcoming.bar} label="Upcoming" />
-        <LegendSwatch color={STATE_COLOR.active.bar} label="In flight" />
-        <LegendSwatch color={STATE_COLOR.overdue.bar} label="Overdue" />
-        <LegendSwatch color={STATE_COLOR.done.bar} label="Done" />
+        {columns.map(col => (
+          <LegendSwatch
+            key={col.id}
+            color={col.color ?? 'var(--color-text-muted)'}
+            label={col.label}
+          />
+        ))}
+        <LegendSwatch color={OVERDUE_COLOR} label="Overdue" />
       </div>
 
       {/* Header: axis ticks aligned with the bar track */}
@@ -919,16 +926,6 @@ function BoardTimeline({
   )
 }
 
-// Bars carry inline 10px labels, so foreground/background must clear
-// AA 4.5:1. Active + overdue fills are the darkened variants so the
-// white text passes (brand → brand-dark, #ef4444 → #b91c1c).
-const STATE_COLOR: Record<TimelineDatum['state'], { bar: string; ring: string; text: string }> = {
-  upcoming: { bar: '#5a6657',              ring: 'var(--color-border)',  text: '#ffffff' },
-  active:   { bar: 'var(--color-brand-dark)', ring: '#2e4427',           text: '#ffffff' },
-  overdue:  { bar: '#b91c1c',              ring: '#7f1d1d',              text: '#ffffff' },
-  done:     { bar: '#4ade80',              ring: '#16a34a',              text: '#052e16' },
-}
-
 function TimelineRow({
   datum,
   pct,
@@ -946,7 +943,16 @@ function TimelineRow({
   ticks: Array<{ ratio: number; label: string }>
   onClick?: (item: BoardItem) => void
 }) {
-  const tone = STATE_COLOR[datum.state]
+  // Bar tint: overdue items override the column colour with red so
+  // they pop against the rest of the timeline. Otherwise use the
+  // column dot colour so the timeline matches the kanban palette.
+  const barColor = datum.isOverdue
+    ? OVERDUE_COLOR
+    : datum.column?.color ?? 'var(--color-text-muted)'
+  const ringColor = datum.isOverdue
+    ? OVERDUE_RING
+    : datum.column?.color ?? 'var(--color-text-muted)'
+
   const rangeMode = datum.startTs != null
   const leftPct = rangeMode ? pct(datum.startTs!) : pct(datum.endTs)
   const rightPct = pct(datum.endTs)
@@ -992,7 +998,7 @@ function TimelineRow({
             width: '0.4375rem',
             height: '0.4375rem',
             borderRadius: 999,
-            background: tone.bar,
+            background: barColor,
             flexShrink: 0,
           }}
         />
@@ -1047,10 +1053,11 @@ function TimelineRow({
         )}
 
         {/* Bar (date range) or milestone (single date). Hover shows
-            the dates in a tooltip — the bar itself stays clean. */}
+            the column label + dates in a tooltip — the bar stays
+            clean visually. */}
         {rangeMode ? (
           <Tooltip
-            label={`${formatTooltipDate(datum.startTs!)} → ${formatTooltipDate(datum.endTs)}`}
+            label={`${datum.column?.label ?? 'Status'}${datum.isOverdue ? ' · Overdue' : ''} · ${formatTooltipDate(datum.startTs!)} → ${formatTooltipDate(datum.endTs)}`}
             side="top"
           >
             <div
@@ -1062,8 +1069,8 @@ function TimelineRow({
                 width: `${widthPct}%`,
                 minWidth: '1.25rem',
                 height: '1.5rem',
-                background: tone.bar,
-                border: `1px solid ${tone.ring}`,
+                background: barColor,
+                border: `1px solid ${ringColor}`,
                 borderRadius: '0.3125rem',
                 boxShadow: '0 1px 2px rgba(15, 20, 16, 0.08)',
                 cursor: 'pointer',
@@ -1072,7 +1079,7 @@ function TimelineRow({
           </Tooltip>
         ) : (
           <Tooltip
-            label={`Due ${formatTooltipDate(datum.endTs)}`}
+            label={`${datum.column?.label ?? 'Status'}${datum.isOverdue ? ' · Overdue' : ''} · Due ${formatTooltipDate(datum.endTs)}`}
             side="top"
           >
             <span
@@ -1083,8 +1090,8 @@ function TimelineRow({
                 transform: 'translate(-50%, -50%) rotate(45deg)',
                 width: '0.875rem',
                 height: '0.875rem',
-                background: tone.bar,
-                border: `1.5px solid ${tone.ring}`,
+                background: barColor,
+                border: `1.5px solid ${ringColor}`,
                 boxShadow: '0 1px 2px rgba(15, 20, 16, 0.10)',
                 cursor: 'pointer',
               }}
