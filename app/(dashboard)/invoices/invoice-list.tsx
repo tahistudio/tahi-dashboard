@@ -1,11 +1,10 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Plus, FileText, RefreshCw, Download } from 'lucide-react'
-import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
-import { EmptyState } from '@/components/tahi/empty-state'
+import {
+  Plus, FileText, RefreshCw, Download, X as XIcon,
+} from 'lucide-react'
 import { type DateRange } from '@/components/tahi/date-range-picker'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
@@ -14,6 +13,15 @@ import { formatCurrency } from '@/lib/currency'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { PageHeader } from '@/components/tahi/page-header'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
+
+import { TahiButton } from '@/components/tahi/tahi-button'
+import { Badge, type BadgeTone } from '@/components/tahi/badge'
+import { Card } from '@/components/tahi/card'
+import { EmptyState } from '@/components/tahi/empty-state'
+import { SlideOver } from '@/components/tahi/slide-over'
+import { Input, Select, Textarea } from '@/components/tahi/input'
+import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
+import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -34,25 +42,28 @@ interface Invoice {
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const STATUS_CFG: Record<string, { label: string; bg: string; text: string }> = {
-  draft:        { label: 'Draft',    bg: 'var(--status-draft-bg)', text: 'var(--status-draft-text)' },
-  sent:         { label: 'Sent',     bg: 'var(--status-submitted-bg)', text: 'var(--status-submitted-text)' },
-  viewed:       { label: 'Viewed',   bg: 'var(--status-submitted-bg)', text: 'var(--status-submitted-text)' },
-  overdue:      { label: 'Overdue',  bg: 'var(--color-danger-bg)', text: 'var(--color-danger)' },
-  paid:         { label: 'Paid',     bg: 'var(--color-success-bg)', text: 'var(--color-success)' },
-  written_off:  { label: 'Written Off', bg: 'var(--status-archived-bg)', text: 'var(--status-archived-text)' },
+// Status -> badge tone. paid=positive, overdue=danger, viewed=info,
+// sent=warning, draft=neutral, written_off=neutral. Matches the
+// spec's mapping from INVOICE_STATUS_CONFIG.
+const STATUS_TONE: Record<string, { label: string; tone: BadgeTone }> = {
+  draft:        { label: 'Draft',       tone: 'neutral'  },
+  sent:         { label: 'Sent',        tone: 'warning'  },
+  viewed:       { label: 'Viewed',      tone: 'info'     },
+  overdue:      { label: 'Overdue',     tone: 'danger'   },
+  paid:         { label: 'Paid',        tone: 'positive' },
+  written_off:  { label: 'Written Off', tone: 'neutral'  },
+}
+
+// Source -> badge tone. Manual = neutral, Xero = teal (close to its
+// brand cyan), Stripe = purple. Brand-correct enough to be obvious
+// without hardcoding hex inside the row.
+const SOURCE_TONE: Record<string, { label: string; tone: BadgeTone }> = {
+  manual: { label: 'Manual', tone: 'neutral' },
+  xero:   { label: 'Xero',   tone: 'teal'    },
+  stripe: { label: 'Stripe', tone: 'purple'  },
 }
 
 const SUPPORTED_CURRENCIES = ['NZD', 'USD', 'AUD', 'GBP', 'EUR'] as const
-
-const FILTER_TABS = [
-  { label: 'All',         value: 'all'         },
-  { label: 'Draft',       value: 'draft'       },
-  { label: 'Sent',        value: 'sent'        },
-  { label: 'Overdue',     value: 'overdue'     },
-  { label: 'Paid',        value: 'paid'        },
-  { label: 'Written Off', value: 'written_off' },
-]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -73,36 +84,32 @@ function isOverdue(dueDate: string | null, status: string): boolean {
   return new Date(dueDate + 'T23:59:59') < new Date()
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function StatusBadge({ status, dueDate }: { status: string; dueDate: string | null }) {
-  const effectiveStatus = isOverdue(dueDate, status) && status === 'sent' ? 'overdue' : status
-  const cfg = STATUS_CFG[effectiveStatus] ?? STATUS_CFG['draft']
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        padding: '0.125rem 0.5rem',
-        borderRadius: 99,
-        fontSize: '0.75rem',
-        fontWeight: 500,
-        background: cfg.bg,
-        color: cfg.text,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {cfg.label}
-    </span>
-  )
+function effectiveStatus(inv: { status: string; dueDate: string | null }): string {
+  return isOverdue(inv.dueDate, inv.status) && inv.status === 'sent' ? 'overdue' : inv.status
 }
 
-// ─── Create Invoice Modal ─────────────────────────────────────────────────────
+// ─── Status badge ─────────────────────────────────────────────────────────────
 
-function CreateInvoiceModal({
+function StatusBadge({ status, dueDate }: { status: string; dueDate: string | null }) {
+  const eff = effectiveStatus({ status, dueDate })
+  const cfg = STATUS_TONE[eff] ?? STATUS_TONE['draft']
+  return <Badge tone={cfg.tone} variant="soft" size="sm">{cfg.label}</Badge>
+}
+
+function SourceBadge({ source }: { source: string | null }) {
+  const key = source ?? 'manual'
+  const cfg = SOURCE_TONE[key] ?? SOURCE_TONE['manual']
+  return <Badge tone={cfg.tone} variant="soft" size="sm">{cfg.label}</Badge>
+}
+
+// ─── Create Invoice Slide-over ────────────────────────────────────────────────
+
+function CreateInvoiceSlideOver({
+  open,
   onClose,
   onCreated,
 }: {
+  open: boolean
   onClose: () => void
   onCreated: (invoiceId?: string) => void
 }) {
@@ -120,6 +127,7 @@ function CreateInvoiceModal({
 
   // Fetch clients on mount
   useEffect(() => {
+    if (!open) return
     fetch(apiPath('/api/admin/clients'))
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => {
@@ -127,7 +135,7 @@ function CreateInvoiceModal({
         setOrgOptions(data.organisations ?? [])
       })
       .catch(() => setOrgOptions([]))
-  }, [])
+  }, [open])
 
   // When the org changes, check if it has any contact with email.
   // Used to pre-empt the "Stripe rejects customer without email" failure.
@@ -147,12 +155,28 @@ function CreateInvoiceModal({
       .catch(() => { if (!cancelled) setOrgHasEmailContact(null) })
     return () => { cancelled = true }
   }, [orgId])
-  // quantity and unitAmount are now per-line-item in lineItems array
+
   const [currency, setCurrency] = useState('NZD')
   const [dueDate, setDueDate] = useState('')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  // Reset form when the slide-over closes
+  useEffect(() => {
+    if (open) return
+    setOrgId('')
+    setOrgSearch('')
+    setSelectedOrgName('')
+    setDestination('manual')
+    setLineItems([{ description: '', quantity: '1', unitAmount: '' }])
+    setOrgHasEmailContact(null)
+    setCurrency('NZD')
+    setDueDate('')
+    setNotes('')
+    setSaving(false)
+    setError('')
+  }, [open])
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
@@ -216,7 +240,7 @@ function CreateInvoiceModal({
             const stripeData = await stripeRes.json() as { payUrl?: string }
             if (stripeData.payUrl) {
               await navigator.clipboard.writeText(stripeData.payUrl)
-              showToast('Stripe invoice created — payment link copied to clipboard')
+              showToast('Stripe invoice created, payment link copied to clipboard')
             } else {
               showToast('Stripe invoice created')
             }
@@ -245,32 +269,36 @@ function CreateInvoiceModal({
     }
   }, [orgId, lineItems, currency, dueDate, notes, destination, orgHasEmailContact, selectedOrgName, onCreated, showToast])
 
+  const filteredOrgOptions = orgOptions.filter(o => !orgSearch || o.name.toLowerCase().includes(orgSearch.toLowerCase()))
+
+  const destOptions: { value: 'manual' | 'xero' | 'stripe'; label: string; tone: BadgeTone }[] = [
+    { value: 'manual', label: 'Dashboard only', tone: 'brand'  },
+    { value: 'xero',   label: 'Xero draft',     tone: 'teal'   },
+    { value: 'stripe', label: 'Stripe link',    tone: 'purple' },
+  ]
+
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="create-invoice-title"
-      style={{
-        position: 'fixed', inset: 0, zIndex: 70,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'rgba(0,0,0,0.4)',
-      }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    <SlideOver
+      open={open}
+      onClose={onClose}
+      icon={<FileText size={15} />}
+      title="Create invoice"
+      subtitle="Generate a new invoice in the dashboard, Xero or Stripe."
+      maxWidth="48rem"
     >
-      <div
-        style={{
-          background: 'var(--color-bg)', borderRadius: '0.75rem', padding: '1.75rem',
-          width: '100%', maxWidth: '30rem', maxHeight: '90vh', overflowY: 'auto',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
-        }}
-      >
-        <h2 id="create-invoice-title" className="text-lg font-bold" style={{ color: 'var(--color-text)', marginBottom: '1.25rem' }}>
-          Create Invoice
-        </h2>
+      <SlideOver.Body>
         {error && (
           <div
             aria-live="polite"
-            style={{ background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger)', borderRadius: '0.5rem', padding: '0.625rem 0.875rem', marginBottom: '1rem', color: 'var(--color-danger)', fontSize: '0.8125rem' }}
+            style={{
+              background: 'var(--color-danger-bg)',
+              border: '1px solid var(--color-danger)',
+              borderRadius: '0.5rem',
+              padding: '0.625rem 0.875rem',
+              marginBottom: '1rem',
+              color: 'var(--color-danger)',
+              fontSize: '0.8125rem',
+            }}
           >
             {error}
           </div>
@@ -279,161 +307,195 @@ function CreateInvoiceModal({
         {destination === 'stripe' && orgId && orgHasEmailContact === false && (
           <div
             aria-live="polite"
-            style={{ background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning)', borderRadius: '0.5rem', padding: '0.625rem 0.875rem', marginBottom: '1rem', color: 'var(--color-warning)', fontSize: '0.8125rem' }}
+            style={{
+              background: 'var(--color-warning-bg)',
+              border: '1px solid var(--color-warning)',
+              borderRadius: '0.5rem',
+              padding: '0.625rem 0.875rem',
+              marginBottom: '1rem',
+              color: 'var(--color-warning)',
+              fontSize: '0.8125rem',
+            }}
           >
             <strong>{selectedOrgName}</strong> has no contact with an email. Stripe needs one to invoice them. Add a contact on the client&apos;s Contacts tab first.
           </div>
         )}
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <form id="create-invoice-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           {/* Destination toggle */}
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            {[
-              { value: 'manual' as const, label: 'Dashboard Only', color: 'var(--color-brand)' },
-              { value: 'xero' as const, label: 'Xero Draft', color: '#13b5ea' },
-              { value: 'stripe' as const, label: 'Stripe Link', color: '#635bff' },
-            ].map(opt => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setDestination(opt.value)}
-                className="rounded-full font-medium transition-colors"
+          <div>
+            <Label>Destination</Label>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {destOptions.map(opt => (
+                <Badge
+                  key={opt.value}
+                  tone={opt.tone}
+                  variant={destination === opt.value ? 'soft' : 'outline'}
+                  selected={destination === opt.value}
+                  onClick={() => setDestination(opt.value)}
+                  size="md"
+                >
+                  {opt.label}
+                </Badge>
+              ))}
+            </div>
+          </div>
+
+          {/* Client search */}
+          <div style={{ position: 'relative' }}>
+            <Label htmlFor="ci-org-search">Client</Label>
+            {selectedOrgName ? (
+              <div
                 style={{
-                  padding: '0.375rem 0.75rem',
-                  fontSize: '0.75rem',
-                  background: destination === opt.value ? `${opt.color}15` : 'var(--color-bg-tertiary)',
-                  color: destination === opt.value ? opt.color : 'var(--color-text-muted)',
-                  border: `1px solid ${destination === opt.value ? `${opt.color}40` : 'var(--color-border)'}`,
-                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: '0.875rem',
+                  border: '1px solid var(--color-brand)',
+                  background: 'var(--color-brand-50)',
+                  color: 'var(--color-brand-dark)',
                 }}
               >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', position: 'relative' }}>
-            <label htmlFor="ci-org-search" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
-              Client
-            </label>
-            {selectedOrgName ? (
-              <div className="flex items-center justify-between" style={{
-                padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
-                border: '1px solid var(--color-brand)', background: 'var(--color-brand-50)',
-                color: 'var(--color-brand)',
-              }}>
-                <span className="font-medium">{selectedOrgName}</span>
+                <span style={{ fontWeight: 500 }}>{selectedOrgName}</span>
                 <button
                   type="button"
                   onClick={() => { setOrgId(''); setSelectedOrgName(''); setOrgSearch('') }}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-brand)', fontSize: '1rem' }}
+                  aria-label="Clear client"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-brand-dark)', display: 'inline-flex' }}
                 >
-                  x
+                  <XIcon size={14} aria-hidden="true" />
                 </button>
               </div>
             ) : (
               <>
-                <input
+                <Input
                   id="ci-org-search"
                   type="text"
                   placeholder="Search clients..."
                   value={orgSearch}
                   onChange={e => { setOrgSearch(e.target.value); setShowOrgDropdown(true) }}
                   onFocus={() => setShowOrgDropdown(true)}
-                  style={{
-                    padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
-                    border: '1px solid var(--color-border)', outline: 'none',
-                    color: 'var(--color-text)', background: 'var(--color-bg)',
-                  }}
+                  inputSize="md"
                 />
                 {showOrgDropdown && (
-                  <div style={{
-                    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
-                    background: 'var(--color-bg)', border: '1px solid var(--color-border)',
-                    borderRadius: '0.5rem', maxHeight: '10rem', overflowY: 'auto',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)', marginTop: '0.25rem',
-                  }}>
-                    {orgOptions
-                      .filter(o => !orgSearch || o.name.toLowerCase().includes(orgSearch.toLowerCase()))
-                      .map(o => (
-                        <button
-                          key={o.id}
-                          type="button"
-                          onClick={() => { setOrgId(o.id); setSelectedOrgName(o.name); setShowOrgDropdown(false); setOrgSearch('') }}
-                          className="w-full text-left transition-colors"
-                          style={{ padding: '0.5rem 0.75rem', fontSize: '0.8125rem', color: 'var(--color-text)', background: 'none', border: 'none', cursor: 'pointer', display: 'block' }}
-                          onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-                          onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
-                        >
-                          {o.name}
-                        </button>
-                      ))}
-                    {orgOptions.filter(o => !orgSearch || o.name.toLowerCase().includes(orgSearch.toLowerCase())).length === 0 && (
-                      <p style={{ padding: '0.5rem 0.75rem', fontSize: '0.8125rem', color: 'var(--color-text-subtle)' }}>No clients found</p>
+                  <div
+                    style={{
+                      position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                      background: 'var(--color-bg)', border: '1px solid var(--color-border)',
+                      borderRadius: '0.5rem', maxHeight: '12rem', overflowY: 'auto',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)', marginTop: '0.25rem',
+                    }}
+                  >
+                    {filteredOrgOptions.map(o => (
+                      <button
+                        key={o.id}
+                        type="button"
+                        onClick={() => { setOrgId(o.id); setSelectedOrgName(o.name); setShowOrgDropdown(false); setOrgSearch('') }}
+                        style={{
+                          padding: '0.5rem 0.75rem',
+                          fontSize: '0.8125rem',
+                          color: 'var(--color-text)',
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          display: 'block',
+                          width: '100%',
+                          textAlign: 'left',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                      >
+                        {o.name}
+                      </button>
+                    ))}
+                    {filteredOrgOptions.length === 0 && (
+                      <p style={{ padding: '0.5rem 0.75rem', fontSize: '0.8125rem', color: 'var(--color-text-subtle)' }}>
+                        No clients found
+                      </p>
                     )}
                   </div>
                 )}
               </>
             )}
           </div>
-          {/* Line Items */}
+
+          {/* Line items */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>Line Items</span>
-              <select
+              <Label as="span" style={{ margin: 0 }}>Line items</Label>
+              <Select
                 value={currency}
                 onChange={e => setCurrency(e.target.value)}
-                style={{ padding: '0.25rem 0.5rem', borderRadius: '0.375rem', fontSize: '0.75rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
-              >
-                {SUPPORTED_CURRENCIES.map(cur => (
-                  <option key={cur} value={cur}>{cur}</option>
-                ))}
-              </select>
+                selectSize="sm"
+                options={SUPPORTED_CURRENCIES.map(cur => ({ value: cur, label: cur }))}
+              />
             </div>
             {lineItems.map((item, i) => (
-              <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
-                <input
-                  type="text"
-                  placeholder="Description"
-                  value={item.description}
-                  onChange={e => {
-                    const updated = [...lineItems]
-                    updated[i] = { ...updated[i], description: e.target.value }
-                    setLineItems(updated)
-                  }}
-                  style={{ flex: 3, padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', color: 'var(--color-text)', background: 'var(--color-bg)' }}
-                />
-                <input
-                  type="number"
-                  placeholder="Qty"
-                  min="0"
-                  step="0.01"
-                  value={item.quantity}
-                  onChange={e => {
-                    const updated = [...lineItems]
-                    updated[i] = { ...updated[i], quantity: e.target.value }
-                    setLineItems(updated)
-                  }}
-                  style={{ flex: 0.7, padding: '0.5rem', borderRadius: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', color: 'var(--color-text)', background: 'var(--color-bg)', minWidth: '3rem' }}
-                />
-                <input
-                  type="number"
-                  placeholder="Amount"
-                  min="0"
-                  step="0.01"
-                  value={item.unitAmount}
-                  onChange={e => {
-                    const updated = [...lineItems]
-                    updated[i] = { ...updated[i], unitAmount: e.target.value }
-                    setLineItems(updated)
-                  }}
-                  style={{ flex: 1, padding: '0.5rem', borderRadius: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', color: 'var(--color-text)', background: 'var(--color-bg)', minWidth: '4rem' }}
-                />
+              <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <div style={{ flex: 3 }}>
+                  <Input
+                    type="text"
+                    placeholder="Description"
+                    value={item.description}
+                    onChange={e => {
+                      const updated = [...lineItems]
+                      updated[i] = { ...updated[i], description: e.target.value }
+                      setLineItems(updated)
+                    }}
+                    inputSize="md"
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div style={{ flex: '0 0 4.5rem' }}>
+                  <Input
+                    type="number"
+                    placeholder="Qty"
+                    min="0"
+                    step="0.01"
+                    value={item.quantity}
+                    onChange={e => {
+                      const updated = [...lineItems]
+                      updated[i] = { ...updated[i], quantity: e.target.value }
+                      setLineItems(updated)
+                    }}
+                    inputSize="md"
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div style={{ flex: '0 0 7rem' }}>
+                  <Input
+                    type="number"
+                    placeholder="Amount"
+                    min="0"
+                    step="0.01"
+                    value={item.unitAmount}
+                    onChange={e => {
+                      const updated = [...lineItems]
+                      updated[i] = { ...updated[i], unitAmount: e.target.value }
+                      setLineItems(updated)
+                    }}
+                    inputSize="md"
+                    style={{ width: '100%' }}
+                  />
+                </div>
                 {lineItems.length > 1 && (
                   <button
                     type="button"
                     onClick={() => setLineItems(lineItems.filter((_, j) => j !== i))}
-                    style={{ padding: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-subtle)', fontSize: '1rem' }}
+                    aria-label="Remove line item"
+                    style={{
+                      padding: '0.375rem',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--color-text-subtle)',
+                      display: 'inline-flex',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-danger)' }}
+                    onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-subtle)' }}
                   >
-                    x
+                    <XIcon size={14} aria-hidden="true" />
                   </button>
                 )}
               </div>
@@ -441,72 +503,98 @@ function CreateInvoiceModal({
             <button
               type="button"
               onClick={() => setLineItems([...lineItems, { description: '', quantity: '1', unitAmount: '' }])}
-              style={{ fontSize: '0.75rem', color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left', fontWeight: 500 }}
-            >
-              + Add Line Item
-            </button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            <label htmlFor="ci-due-date" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
-              Due Date
-            </label>
-            <input
-              id="ci-due-date"
-              type="date"
-              value={dueDate}
-              onChange={e => setDueDate(e.target.value)}
               style={{
-                padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
-                border: '1px solid var(--color-border)', outline: 'none',
-                color: 'var(--color-text)', background: 'var(--color-bg)',
-              }}
-            />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            <label htmlFor="ci-notes" style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>
-              Notes
-            </label>
-            <textarea
-              id="ci-notes"
-              rows={3}
-              placeholder="Optional notes for the client..."
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
-              style={{
-                padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.875rem',
-                border: '1px solid var(--color-border)', outline: 'none',
-                color: 'var(--color-text)', background: 'var(--color-bg)',
-                resize: 'vertical',
-              }}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '0.25rem' }}>
-            <button
-              type="button"
-              onClick={onClose}
-              style={{
-                padding: '0.5rem 1rem', borderRadius: '0.5rem', fontSize: '0.875rem', fontWeight: 500,
-                border: '1px solid var(--color-border)', background: 'var(--color-bg)',
-                color: 'var(--color-text)', cursor: 'pointer', minHeight: '2.75rem',
+                fontSize: '0.75rem',
+                color: 'var(--color-brand)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 0,
+                textAlign: 'left',
+                fontWeight: 500,
               }}
             >
-              Cancel
+              + Add line item
             </button>
-            <button
-              type="submit"
-              disabled={saving}
-              style={{
-                padding: '0.5rem 1.25rem', borderRadius: '0.5rem', fontSize: '0.875rem', fontWeight: 600,
-                border: 'none', background: saving ? 'var(--color-text-subtle)' : 'var(--color-brand)',
-                color: 'white', cursor: saving ? 'not-allowed' : 'pointer', minHeight: '2.75rem',
-              }}
-            >
-              {saving ? 'Creating...' : destination === 'xero' ? 'Create Xero Draft' : destination === 'stripe' ? 'Create + Get Payment Link' : 'Create Invoice'}
-            </button>
+          </div>
+
+          {/* Two-col: due date + notes */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.75rem' }}>
+            <div>
+              <Label htmlFor="ci-due-date">Due date</Label>
+              <Input
+                id="ci-due-date"
+                type="date"
+                value={dueDate}
+                onChange={e => setDueDate(e.target.value)}
+                inputSize="md"
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div>
+              <Label htmlFor="ci-notes">Notes</Label>
+              <Textarea
+                id="ci-notes"
+                rows={3}
+                placeholder="Optional notes for the client..."
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+              />
+            </div>
           </div>
         </form>
-      </div>
-    </div>
+      </SlideOver.Body>
+      <SlideOver.Footer>
+        <TahiButton variant="secondary" size="sm" onClick={onClose}>
+          Cancel
+        </TahiButton>
+        <div style={{ flex: 1 }} />
+        <TahiButton
+          type="submit"
+          form="create-invoice-form"
+          size="sm"
+          disabled={saving}
+          iconLeft={saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+        >
+          {saving
+            ? 'Creating...'
+            : destination === 'xero' ? 'Create Xero draft'
+            : destination === 'stripe' ? 'Create + get payment link'
+            : 'Create invoice'}
+        </TahiButton>
+      </SlideOver.Footer>
+    </SlideOver>
+  )
+}
+
+// Small label primitive matching the docs slide-over form spacing.
+function Label({
+  children,
+  htmlFor,
+  as: Tag = 'label',
+  style,
+}: {
+  children: React.ReactNode
+  htmlFor?: string
+  as?: 'label' | 'span'
+  style?: React.CSSProperties
+}) {
+  return (
+    <Tag
+      htmlFor={htmlFor}
+      style={{
+        display: 'block',
+        fontSize: '0.625rem',
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        color: 'var(--color-text-subtle)',
+        marginBottom: '0.3125rem',
+        ...style,
+      }}
+    >
+      {children}
+    </Tag>
   )
 }
 
@@ -523,18 +611,42 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
   const router = useRouter()
+
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+  const [showCreate, setShowCreate] = useState(false)
+  const [importing, setImporting] = useState(false)
+
+  // Persisted active tab. Kept as a multiselect chip filter; the
+  // useUserPreference key still encodes a single value so existing
+  // prefs continue to work.
   const [activeTab, setActiveTab] = useUserPreference(
     'invoices.activeTab',
     'all',
     { validator: oneOf(['all', 'draft', 'sent', 'overdue', 'paid', 'written_off']) },
   )
-  const [sourceFilter, setSourceFilter] = useState('all')
-  const [showCreateModal, setShowCreateModal] = useState(false)
-  const [importing, setImporting] = useState(false)
+  const [sourceFilter, setSourceFilter] = useState<string>('all')
   const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
+  const [search, setSearch] = useState('')
+
+  // Active FilterBar entries — single multi-value chip per dimension.
+  // Empty values array on a multiselect chip means "no filter" so the
+  // chip stays visible without filtering anything down.
+  const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([
+    { id: 'status', values: activeTab && activeTab !== 'all' ? [activeTab] : [] },
+    { id: 'source', values: sourceFilter && sourceFilter !== 'all' ? [sourceFilter] : [] },
+  ])
+
+  // Push FilterBar changes back into the underlying state used by
+  // the filter + persistence (useUserPreference).
+  const onFiltersChange = useCallback((next: ActiveFilter[]) => {
+    setActiveFilters(next)
+    const status = next.find(f => f.id === 'status')?.values ?? []
+    const source = next.find(f => f.id === 'source')?.values ?? []
+    setActiveTab(status[0] ?? 'all')
+    setSourceFilter(source[0] ?? 'all')
+  }, [setActiveTab])
 
   // Fetch all invoices once, filter client-side for accurate overdue detection
   const fetchInvoices = useCallback(async () => {
@@ -556,19 +668,23 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
     }
   }, [isAdmin])
 
-  // Client-side filtering: status tab + source filter + date range
+  // Client-side filtering: status chip + source chip + date range + search
   const filteredInvoices = useMemo(() => {
+    const statusSet = new Set(activeFilters.find(f => f.id === 'status')?.values ?? [])
+    const sourceSet = new Set(activeFilters.find(f => f.id === 'source')?.values ?? [])
+    const q = search.trim().toLowerCase()
     return invoices.filter(inv => {
       // Compute effective status (overdue = sent + past due date)
-      const effective = isOverdue(inv.dueDate, inv.status) && inv.status === 'sent' ? 'overdue' : inv.status
+      const eff = effectiveStatus(inv)
 
-      // Status tab filter
-      if (activeTab !== 'all' && effective !== activeTab) return false
+      // Status chip: empty = all
+      if (statusSet.size > 0 && !statusSet.has(eff)) return false
 
-      // Source filter
-      if (sourceFilter !== 'all') {
+      // Source chip: empty = all. Map null -> 'manual' to match the
+      // option value.
+      if (sourceSet.size > 0) {
         const invSource = inv.source ?? 'manual'
-        if (invSource !== sourceFilter) return false
+        if (!sourceSet.has(invSource)) return false
       }
 
       // Date range filter
@@ -577,16 +693,24 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
         if (d < dateRange.from.getTime() || d > dateRange.to.getTime()) return false
       }
 
+      // Search across client name + invoice id (handy when a Stripe/Xero
+      // hosted URL paste lands the user back here).
+      if (q) {
+        const name = (inv.orgName ?? '').toLowerCase()
+        const id = inv.id.toLowerCase()
+        if (!name.includes(q) && !id.includes(q)) return false
+      }
+
       return true
     })
-  }, [invoices, activeTab, sourceFilter, dateRange])
+  }, [invoices, activeFilters, dateRange, search])
 
   useEffect(() => {
     fetchInvoices().catch(() => {})
   }, [fetchInvoices])
 
   const handleCreated = useCallback((invoiceId?: string) => {
-    setShowCreateModal(false)
+    setShowCreate(false)
     if (invoiceId) {
       router.push(`/invoices/${invoiceId}`)
     } else {
@@ -594,36 +718,165 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
     }
   }, [fetchInvoices, router])
 
+  // FilterBar definitions. Both chips are nonRemovable so they remain
+  // visible without the "+ Add filter" button. Tones map to the same
+  // Badge tones used in the row cells so the filter UI matches.
+  const filterDefs: FilterDef[] = useMemo(() => ([
+    {
+      id: 'status',
+      label: 'Status',
+      kind: 'multiselect',
+      nonRemovable: true,
+      options: [
+        { value: 'draft',       label: 'Draft',       tone: 'neutral'  },
+        { value: 'sent',        label: 'Sent',        tone: 'warning'  },
+        { value: 'viewed',      label: 'Viewed',      tone: 'info'     },
+        { value: 'overdue',     label: 'Overdue',     tone: 'danger'   },
+        { value: 'paid',        label: 'Paid',        tone: 'positive' },
+        { value: 'written_off', label: 'Written Off', tone: 'neutral'  },
+      ],
+    },
+    ...(isAdmin ? [{
+      id: 'source',
+      label: 'Source',
+      kind: 'multiselect' as const,
+      nonRemovable: true,
+      options: [
+        { value: 'manual', label: 'Manual', tone: 'neutral' as BadgeTone },
+        { value: 'xero',   label: 'Xero',   tone: 'teal' as BadgeTone    },
+        { value: 'stripe', label: 'Stripe', tone: 'purple' as BadgeTone  },
+      ],
+    }] : []),
+  ]), [isAdmin])
+
+  // Column defs for the DataTable. Sortable headers do their own
+  // sorting through DataTable's internal state.
+  const columns: DataTableColumn<Invoice>[] = useMemo(() => {
+    const cols: DataTableColumn<Invoice>[] = []
+
+    if (isAdmin) {
+      cols.push({
+        key: 'client',
+        header: 'Client',
+        sortable: true,
+        sortValue: r => (r.orgName ?? '').toLowerCase(),
+        minWidth: '14rem',
+        link: {
+          href: r => r.orgId ? `/clients/${r.orgId}` : null,
+        },
+        render: r => (
+          <span style={{
+            fontWeight: 500,
+            color: 'var(--color-text)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
+            {r.orgName ?? 'Unknown'}
+          </span>
+        ),
+      })
+    }
+
+    cols.push({
+      key: 'amount',
+      header: 'Amount',
+      sortable: true,
+      sortValue: r => r.totalAmount,
+      align: 'right',
+      width: '10rem',
+      render: r => (
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontWeight: 600, color: 'var(--color-text)' }}>
+            {formatInvoiceCurrency(r.totalAmount, r.currency)}
+          </div>
+          {r.currency && r.currency !== displayCurrency && (
+            <div style={{ fontSize: '0.7rem', fontWeight: 400, color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
+              {formatNativeWithDisplay(r.totalAmount, r.currency).split('≈ ')[1] ?? ''}
+            </div>
+          )}
+        </div>
+      ),
+    })
+
+    cols.push({
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      sortValue: r => effectiveStatus(r),
+      width: '8rem',
+      render: r => <StatusBadge status={r.status} dueDate={r.dueDate} />,
+    })
+
+    if (isAdmin) {
+      cols.push({
+        key: 'source',
+        header: 'Source',
+        sortable: true,
+        sortValue: r => r.source ?? 'manual',
+        width: '7rem',
+        render: r => <SourceBadge source={r.source} />,
+      })
+    }
+
+    cols.push({
+      key: 'dueDate',
+      header: 'Due',
+      sortable: true,
+      sortValue: r => r.dueDate ?? '',
+      width: '8rem',
+      render: r => (
+        <span style={{
+          fontSize: '0.8125rem',
+          color: isOverdue(r.dueDate, r.status) ? 'var(--color-danger)' : 'var(--color-text-muted)',
+        }}>
+          {formatDate(r.dueDate)}
+        </span>
+      ),
+    })
+
+    cols.push({
+      key: 'createdAt',
+      header: 'Created',
+      sortable: true,
+      sortValue: r => r.createdAt,
+      width: '8rem',
+      muted: true,
+      render: r => (
+        <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+          {formatDate(r.createdAt)}
+        </span>
+      ),
+    })
+
+    return cols
+  }, [isAdmin, displayCurrency, formatNativeWithDisplay])
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       <PageHeader
         title="Invoices"
         subtitle={isAdmin ? 'All invoices across every client.' : 'Your invoice history and outstanding payments.'}
       >
         {isAdmin && (
           <>
-            <button
+            <TahiButton
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 const link = document.createElement('a')
                 link.href = apiPath('/api/admin/export/invoices')
                 link.download = 'invoices.csv'
                 link.click()
               }}
-              className="flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2"
-              style={{
-                padding: '0.625rem 1.125rem',
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
-                borderRadius: '0.5rem',
-                cursor: 'pointer',
-                color: 'var(--color-text)',
-                minHeight: 44,
-              }}
+              iconLeft={<Download className="w-3.5 h-3.5" />}
             >
-              <Download style={{ width: 16, height: 16 }} aria-hidden="true" />
               Export CSV
-            </button>
-            <button
+            </TahiButton>
+            <TahiButton
+              variant="secondary"
+              size="sm"
+              disabled={importing}
               onClick={async () => {
                 if (importing) return
                 setImporting(true)
@@ -637,281 +890,158 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
                     showToast(json.message ?? json.error ?? 'Import failed')
                   }
                 } catch {
-                  showToast('Import failed — check connection')
+                  showToast('Import failed, check connection')
                 } finally {
                   setImporting(false)
                 }
               }}
-              disabled={importing}
-              className="flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
-              style={{
-                padding: '0.625rem 1.125rem',
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
-                borderRadius: '0 10px 0 10px',
-                cursor: importing ? 'wait' : 'pointer',
-                color: 'var(--color-text)',
-                minHeight: 44,
-              }}
+              iconLeft={<RefreshCw className={`w-3.5 h-3.5 ${importing ? 'animate-spin' : ''}`} />}
               title="Pull new invoices from Stripe into the dashboard"
             >
-              <RefreshCw style={{ width: 16, height: 16, opacity: 0.7 }} aria-hidden="true" />
               {importing ? 'Importing...' : 'Import from Stripe'}
-            </button>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2"
-              style={{
-                padding: '0.625rem 1.125rem',
-                background: 'var(--color-brand)',
-                border: 'none',
-                borderRadius: '0 10px 0 10px',
-                cursor: 'pointer',
-                color: 'white',
-                minHeight: 44,
-              }}
+            </TahiButton>
+            <TahiButton
+              size="sm"
+              onClick={() => setShowCreate(true)}
+              iconLeft={<Plus className="w-3.5 h-3.5" />}
             >
-              <Plus style={{ width: 16, height: 16 }} aria-hidden="true" />
-              Create Invoice
-            </button>
+              Create invoice
+            </TahiButton>
           </>
         )}
       </PageHeader>
 
-      {/* Filter Tabs */}
-      {isAdmin && (
-        <div style={{ display: 'flex', gap: '0.25rem', borderBottom: '1px solid var(--color-border)', paddingBottom: 0 }}>
-          {FILTER_TABS.map(tab => (
+      {/* Filter row — search + Status + Source multiselect chips.
+          Date range stays as a tight inline control on the right so
+          users can scope by due date without leaving the page. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: '14rem' }}>
+          <FilterBar
+            filters={filterDefs}
+            active={activeFilters}
+            onChange={onFiltersChange}
+            search={{
+              value: search,
+              onChange: setSearch,
+              placeholder: isAdmin ? 'Search client or invoice ID' : 'Search invoices',
+            }}
+            size="sm"
+          />
+        </div>
+        {/* Date range — kept inline because FilterBar doesn't support a
+            date kind yet. Same visual height as the chip row. */}
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', fontWeight: 500 }}>Due:</span>
+          <input
+            type="date"
+            value={dateRange.from ? dateRange.from.toISOString().split('T')[0] : ''}
+            onChange={e => setDateRange(prev => ({ ...prev, from: e.target.value ? new Date(e.target.value) : null }))}
+            style={{
+              padding: '0.25rem 0.5rem',
+              fontSize: '0.75rem',
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-bg)',
+              color: 'var(--color-text)',
+              borderRadius: 'var(--radius-md)',
+              height: '1.875rem',
+            }}
+          />
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>to</span>
+          <input
+            type="date"
+            value={dateRange.to ? dateRange.to.toISOString().split('T')[0] : ''}
+            onChange={e => setDateRange(prev => ({ ...prev, to: e.target.value ? new Date(e.target.value) : null }))}
+            style={{
+              padding: '0.25rem 0.5rem',
+              fontSize: '0.75rem',
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-bg)',
+              color: 'var(--color-text)',
+              borderRadius: 'var(--radius-md)',
+              height: '1.875rem',
+            }}
+          />
+          {(dateRange.from || dateRange.to) && (
             <button
-              key={tab.value}
-              onClick={() => setActiveTab(tab.value)}
+              onClick={() => setDateRange({ from: null, to: null })}
               style={{
-                padding: '0.5rem 1rem',
-                fontSize: '0.8125rem',
-                fontWeight: activeTab === tab.value ? 600 : 400,
-                color: activeTab === tab.value ? 'var(--color-brand)' : 'var(--color-text-muted)',
+                fontSize: '0.75rem',
+                color: 'var(--color-text-subtle)',
                 background: 'none',
                 border: 'none',
-                borderBottom: activeTab === tab.value ? '2px solid var(--color-brand)' : '2px solid transparent',
                 cursor: 'pointer',
-                marginBottom: -1,
-                minHeight: 44,
-                transition: 'color 0.15s',
+                textDecoration: 'underline',
               }}
             >
-              {tab.label}
+              Clear
             </button>
-          ))}
+          )}
         </div>
-      )}
-
-      {/* Source filter chips */}
-      {isAdmin && (
-        <div className="flex items-center gap-2" style={{ marginTop: '0.5rem' }}>
-          <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Source:</span>
-          {[
-            { value: 'all', label: 'All', color: 'var(--color-text-muted)' },
-            { value: 'manual', label: 'Manual', color: 'var(--color-text-muted)' },
-            { value: 'xero', label: 'Xero', color: '#13b5ea' },
-            { value: 'stripe', label: 'Stripe', color: '#635bff' },
-          ].map(opt => (
-            <button
-              key={opt.value}
-              onClick={() => setSourceFilter(opt.value)}
-              className="rounded-full font-medium transition-colors"
-              style={{
-                padding: '0.1875rem 0.5rem',
-                fontSize: '0.6875rem',
-                background: sourceFilter === opt.value ? `${opt.color}15` : 'transparent',
-                color: sourceFilter === opt.value ? opt.color : 'var(--color-text-subtle)',
-                border: `1px solid ${sourceFilter === opt.value ? `${opt.color}40` : 'transparent'}`,
-                cursor: 'pointer',
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Date filter */}
-      <div className="flex items-center gap-2" style={{ marginBottom: '0.75rem' }}>
-        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>Due date:</span>
-        <input
-          type="date"
-          value={dateRange.from ? dateRange.from.toISOString().split('T')[0] : ''}
-          onChange={e => setDateRange(prev => ({ ...prev, from: e.target.value ? new Date(e.target.value) : null }))}
-          className="rounded-md"
-          style={{ padding: '0.375rem 0.5rem', fontSize: '0.75rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
-        />
-        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>to</span>
-        <input
-          type="date"
-          value={dateRange.to ? dateRange.to.toISOString().split('T')[0] : ''}
-          onChange={e => setDateRange(prev => ({ ...prev, to: e.target.value ? new Date(e.target.value) : null }))}
-          className="rounded-md"
-          style={{ padding: '0.375rem 0.5rem', fontSize: '0.75rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
-        />
-        {(dateRange.from || dateRange.to) && (
-          <button
-            onClick={() => setDateRange({ from: null, to: null })}
-            style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-          >
-            Clear
-          </button>
-        )}
       </div>
 
       {/* Table */}
-      <div
-        style={{
-          background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-card)',
-          border: '1px solid var(--color-border)',
-          overflow: 'hidden',
-        }}
-      >
-        {loading ? (
-          <LoadingSkeleton rows={5} height={56} />
-        ) : error ? (
+      <Card padding="none">
+        {error && !loading ? (
           <div
-            style={{ padding: '3rem 1.5rem', textAlign: 'center', color: 'var(--color-text-muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}
+            style={{
+              padding: '3rem 1.5rem',
+              textAlign: 'center',
+              color: 'var(--color-text-muted)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '0.75rem',
+            }}
           >
-            <p className="text-sm">Failed to load invoices.</p>
-            <button
+            <p style={{ fontSize: '0.875rem' }}>Failed to load invoices.</p>
+            <TahiButton
+              size="sm"
+              variant="secondary"
+              iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
               onClick={() => fetchInvoices().catch(() => {})}
-              className="flex items-center gap-2 text-sm font-medium hover:opacity-80 transition-opacity"
-              style={{ color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer' }}
             >
-              <RefreshCw style={{ width: 14, height: 14 }} aria-hidden="true" />
               Retry
-            </button>
+            </TahiButton>
           </div>
-        ) : filteredInvoices.length === 0 ? (
-          <EmptyState
-            icon={<FileText style={{ width: 28, height: 28, color: 'white' }} aria-hidden="true" />}
-            title={isAdmin ? 'No invoices yet' : 'No invoices'}
-            description={isAdmin ? 'Create your first invoice to get started.' : 'Invoices from Tahi Studio will appear here.'}
-            ctaLabel={isAdmin ? 'Create Invoice' : undefined}
-            onCtaClick={isAdmin ? () => setShowCreateModal(true) : undefined}
-          />
         ) : (
-          <div className="h-scroll">
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 600 }}>
-              <thead>
-                <tr style={{ background: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
-                  {isAdmin && (
-                    <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      Client
-                    </th>
-                  )}
-                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    Amount
-                  </th>
-                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    Status
-                  </th>
-                  {isAdmin && (
-                    <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      Source
-                    </th>
-                  )}
-                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    Due Date
-                  </th>
-                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    Created
-                  </th>
-                  <th style={{ padding: '0.75rem 1rem', width: '5rem' }} />
-                </tr>
-              </thead>
-              <tbody>
-                {filteredInvoices.map((inv, i) => (
-                  <tr
-                    key={inv.id}
-                    style={{
-                      borderBottom: i < invoices.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
-                      transition: 'background 0.1s',
-                    }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLTableRowElement).style.background = 'var(--color-bg-secondary)' }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLTableRowElement).style.background = '' }}
-                  >
-                    {isAdmin && (
-                      <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', fontWeight: 500 }}>
-                        {inv.orgId ? (
-                          <Link
-                            href={`/clients/${inv.orgId}`}
-                            style={{ color: 'var(--color-brand)', textDecoration: 'none' }}
-                            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline' }}
-                            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none' }}
-                          >
-                            {inv.orgName ?? 'Unknown'}
-                          </Link>
-                        ) : (
-                          <span style={{ color: 'var(--color-text)' }}>{inv.orgName ?? 'Unknown'}</span>
-                        )}
-                      </td>
-                    )}
-                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
-                      <div>{formatInvoiceCurrency(inv.totalAmount, inv.currency)}</div>
-                      {inv.currency && inv.currency !== displayCurrency && (
-                        <div style={{ fontSize: '0.7rem', fontWeight: 400, color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
-                          {formatNativeWithDisplay(inv.totalAmount, inv.currency).split('\u2248 ')[1] ?? ''}
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ padding: '0.875rem 1rem' }}>
-                      <StatusBadge status={inv.status} dueDate={inv.dueDate} />
-                    </td>
-                    {isAdmin && (
-                      <td style={{ padding: '0.875rem 1rem' }}>
-                        <span
-                          className="inline-flex items-center rounded-full font-medium"
-                          style={{
-                            padding: '0.125rem 0.5rem',
-                            fontSize: '0.6875rem',
-                            background: inv.source === 'xero' ? '#13b5ea15' : inv.source === 'stripe' ? '#635bff15' : 'var(--color-bg-tertiary)',
-                            color: inv.source === 'xero' ? '#13b5ea' : inv.source === 'stripe' ? '#635bff' : 'var(--color-text-subtle)',
-                          }}
-                        >
-                          {inv.source === 'xero' ? 'Xero' : inv.source === 'stripe' ? 'Stripe' : 'Manual'}
-                        </span>
-                      </td>
-                    )}
-                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: isOverdue(inv.dueDate, inv.status) ? 'var(--color-danger)' : 'var(--color-text-muted)' }}>
-                      {formatDate(inv.dueDate)}
-                    </td>
-                    <td style={{ padding: '0.875rem 1rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-                      {formatDate(inv.createdAt)}
-                    </td>
-                    <td style={{ padding: '0.875rem 1rem', textAlign: 'right' }}>
-                      <Link
-                        href={`/invoices/${inv.id}`}
-                        style={{
-                          fontSize: '0.8125rem',
-                          fontWeight: 500,
-                          color: 'var(--color-brand)',
-                          textDecoration: 'none',
-                        }}
-                      >
-                        View
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable<Invoice>
+            ariaLabel="Invoices"
+            columns={columns}
+            rows={filteredInvoices}
+            getRowId={r => r.id}
+            defaultSort={{ key: 'createdAt', dir: 'desc' }}
+            loading={loading}
+            empty={
+              <EmptyState
+                icon={<FileText className="w-6 h-6" />}
+                title={invoices.length === 0
+                  ? (isAdmin ? 'No invoices yet' : 'No invoices')
+                  : 'No matches'}
+                description={invoices.length === 0
+                  ? (isAdmin
+                      ? 'Create your first invoice to get started.'
+                      : 'Invoices from Tahi Studio will appear here.')
+                  : 'Try clearing a filter or adjusting your search.'}
+                action={
+                  invoices.length === 0 && isAdmin ? (
+                    <TahiButton size="sm" onClick={() => setShowCreate(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+                      Create invoice
+                    </TahiButton>
+                  ) : undefined
+                }
+              />
+            }
+            onRowClick={(r) => router.push(`/invoices/${r.id}`)}
+          />
         )}
-      </div>
+      </Card>
 
-      {/* Create Invoice Modal */}
-      {showCreateModal && (
-        <CreateInvoiceModal
-          onClose={() => setShowCreateModal(false)}
-          onCreated={handleCreated}
-        />
-      )}
+      {/* Create Invoice Slide-over */}
+      <CreateInvoiceSlideOver
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreated={handleCreated}
+      />
     </div>
   )
 }
