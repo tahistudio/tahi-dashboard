@@ -19,6 +19,7 @@ import {
   Briefcase, TrendingUp, FileText, FileSignature, Calendar, BookOpen,
   Phone, ShoppingBag, Megaphone, Zap, UserCog,
 } from 'lucide-react'
+import { apiPath } from '@/lib/api'
 import type { SearchGroupType, SearchResultItem, SearchResponse } from '@/app/api/admin/search/route'
 
 interface SearchPaletteProps {
@@ -86,7 +87,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
     let abort = false
     const controller = new AbortController()
     setLoading(true)
-    fetch(`/api/admin/search?q=${encodeURIComponent(debounced)}`, {
+    fetch(apiPath(`/api/admin/search?q=${encodeURIComponent(debounced)}`), {
       signal: controller.signal,
     })
       .then(res => res.ok ? res.json() as Promise<SearchResponse> : null)
@@ -184,18 +185,18 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
           flexDirection: 'column',
         }}
       >
-        {/* Input row. Bigger height (3rem), borderless interior so the
-            search bar reads as a header rather than a form field. The
-            row gets its own focus state via the surrounding container
-            background tint. */}
+        {/* Input row. Tall (4rem) with generous side padding so the
+            search bar reads as a command-palette header. Borderless
+            interior; the row gets its own visual weight from the
+            surrounding container. */}
         <div
           className="flex items-center"
           style={{
-            padding: '0 var(--space-5)',
-            height: '3.5rem',
+            padding: '0 var(--space-6)',
+            height: '4rem',
             borderBottom: '1px solid var(--color-border-subtle)',
             background: 'var(--color-bg)',
-            gap: 'var(--space-3)',
+            gap: 'var(--space-4)',
           }}
         >
           <span style={{ display: 'inline-flex', flexShrink: 0 }}>

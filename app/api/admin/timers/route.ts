@@ -161,18 +161,31 @@ export async function POST(req: NextRequest) {
 
   const now = new Date().toISOString()
   const newId = crypto.randomUUID()
-  await drizzle.insert(schema.activeTimers).values({
-    id: newId,
-    userId,
-    requestId: body.requestId ?? null,
-    taskId: body.taskId ?? null,
-    orgId: body.orgId ?? null,
-    startedAt: now,
-    pausedAt: null,
-    pausedSeconds: 0,
-    lastPingAt: now,
-    notes: body.notes ?? null,
-  })
+  try {
+    await drizzle.insert(schema.activeTimers).values({
+      id: newId,
+      userId,
+      requestId: body.requestId ?? null,
+      taskId: body.taskId ?? null,
+      orgId: body.orgId ?? null,
+      startedAt: now,
+      pausedAt: null,
+      pausedSeconds: 0,
+      lastPingAt: now,
+      notes: body.notes ?? null,
+    })
+  } catch (err) {
+    // Surface the underlying SQL / Drizzle error so the client toast
+    // can show something useful instead of a bare "500". Common
+    // failure modes: schema drift in D1 (a column from the latest
+    // migration hasn't been applied), or an FK violation.
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[timers POST] insert failed:', message)
+    return NextResponse.json(
+      { error: `Could not start timer: ${message}` },
+      { status: 500 },
+    )
+  }
 
   return NextResponse.json({ id: newId, startedAt: now }, { status: 201 })
 }

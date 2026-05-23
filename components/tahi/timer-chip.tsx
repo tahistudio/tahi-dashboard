@@ -198,22 +198,25 @@ export function TimerChip() {
       })
       if (res.status === 409) {
         // If there's already a timer running, just tell the user to stop
-        // it first. Keeping this simple for the nav case — the per-request
+        // it first. Keeping this simple for the nav case; the per-request
         // page has the full "switch" flow.
         const j = await res.json().catch(() => ({})) as { currentTimer?: { requestId?: string } }
-        showToast(j.currentTimer?.requestId ? 'Stop the active timer first' : 'A timer is already running')
+        showToast(
+          j.currentTimer?.requestId ? 'Stop the active timer first' : 'A timer is already running',
+          'warning',
+        )
       } else if (res.ok) {
         await fetchTimer()
         notifyTimerChanged()
         setPickerOpen(false)
         setPickerQuery('')
-        showToast('Timer started')
+        showToast('Timer started', 'success')
       } else {
         const j = await res.json().catch(() => ({})) as { error?: string }
-        showToast(j.error ?? `Couldn't start timer (${res.status})`)
+        showToast(j.error ?? `Couldn't start timer (${res.status})`, 'error')
       }
     } catch {
-      showToast('Network error. Timer not started.')
+      showToast('Network error. Timer not started.', 'error')
     } finally {
       setActing(false)
     }
@@ -232,13 +235,13 @@ export function TimerChip() {
       if (res.ok) {
         await fetchTimer()
         notifyTimerChanged()
-        showToast(timer.isPaused ? 'Timer resumed' : 'Timer paused')
+        showToast(timer.isPaused ? 'Timer resumed' : 'Timer paused', 'success')
       } else {
         const j = await res.json().catch(() => ({})) as { error?: string }
-        showToast(j.error ?? 'Timer action failed')
+        showToast(j.error ?? 'Timer action failed', 'error')
       }
     } catch {
-      showToast('Network error. Try again.')
+      showToast('Network error. Try again.', 'error')
     } finally {
       setActing(false)
       setControlsOpen(false)
@@ -258,11 +261,11 @@ export function TimerChip() {
         setStaleTimer(null)
         notifyTimerChanged()
         if (action === 'log' && data.logged && typeof data.hours === 'number') {
-          showToast(`Timer stopped. ${prettyHoursShort(data.hours)} logged.`)
+          showToast(`Timer stopped. ${prettyHoursShort(data.hours)} logged.`, 'success')
         } else if (action === 'log' && data.reason) {
-          showToast(`Stopped. Not logged (${data.reason}).`)
+          showToast(`Stopped. Not logged (${data.reason}).`, 'warning')
         } else {
-          showToast(action === 'discard' ? 'Timer discarded' : 'Timer stopped')
+          showToast(action === 'discard' ? 'Timer discarded' : 'Timer stopped', 'success')
         }
       }
     } finally {
@@ -354,9 +357,9 @@ export function TimerChip() {
           anchorRef={triggerRef}
           open={pickerOpen}
           onClose={() => { setPickerOpen(false); setPickerQuery('') }}
-          width="20rem"
+          width="22rem"
           align="end"
-          maxHeight="26rem"
+          maxHeight="28rem"
         >
           <SourcePicker
             source={pickerSource}
@@ -586,76 +589,115 @@ function SourcePicker({
       .map(c => ({ id: c.id, label: c.name }))
   }
 
+  const SourceIcon = source === 'request' ? Inbox : source === 'task' ? CheckSquare : Users
+
   return (
     <>
-      {/* Source tabs */}
+      {/* Header. Tiny label + tight segmented control. The label gives
+          the popover a clear identity ("you're picking a target") and
+          the segmented control is the brand pattern used elsewhere. */}
       <div
-        role="tablist"
-        aria-label="Track time on"
         style={{
-          display: 'flex',
-          gap: '0.125rem',
-          padding: '0.375rem',
+          padding: '0.75rem 0.875rem 0.625rem',
           borderBottom: '1px solid var(--color-border-subtle)',
           background: 'var(--color-bg-secondary)',
         }}
       >
-        {(['request', 'task', 'client'] as const).map(s => (
-          <button
-            key={s}
-            type="button"
-            role="tab"
-            aria-selected={source === s}
-            onClick={() => setSource(s)}
-            style={{
-              flex: 1,
-              padding: '0.3125rem 0.5rem',
-              fontSize: '0.6875rem',
-              fontWeight: 500,
-              color: source === s ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-              background: source === s ? 'var(--color-bg)' : 'transparent',
-              border: 'none',
-              borderRadius: 'var(--radius-sm)',
-              cursor: 'pointer',
-              textTransform: 'capitalize',
-              boxShadow: source === s ? 'var(--shadow-xs)' : 'none',
-            }}
-          >
-            {s === 'request' ? 'Request' : s === 'task' ? 'Task' : 'Client'}
-          </button>
-        ))}
+        <p
+          style={{
+            fontSize: '0.625rem',
+            fontWeight: 600,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+            color: 'var(--color-text-subtle)',
+            margin: '0 0 0.4375rem',
+          }}
+        >
+          Track time on
+        </p>
+        <div
+          role="tablist"
+          aria-label="Track time source"
+          style={{
+            display: 'flex',
+            gap: '0.125rem',
+            padding: '0.1875rem',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-md)',
+          }}
+        >
+          {(['request', 'task', 'client'] as const).map(s => {
+            const Icon = s === 'request' ? Inbox : s === 'task' ? CheckSquare : Users
+            const active = source === s
+            return (
+              <button
+                key={s}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setSource(s)}
+                className="flex items-center justify-center"
+                style={{
+                  flex: 1,
+                  gap: '0.3125rem',
+                  padding: '0.3125rem 0.5rem',
+                  fontSize: '0.75rem',
+                  fontWeight: active ? 600 : 500,
+                  color: active ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                  background: active ? 'var(--color-brand-100)' : 'transparent',
+                  border: 'none',
+                  borderRadius: 'var(--radius-sm)',
+                  cursor: 'pointer',
+                  textTransform: 'capitalize',
+                  transition: 'background-color 150ms ease, color 150ms ease',
+                }}
+                onMouseEnter={e => {
+                  if (!active) e.currentTarget.style.background = 'var(--color-bg-secondary)'
+                }}
+                onMouseLeave={e => {
+                  if (!active) e.currentTarget.style.background = 'transparent'
+                }}
+              >
+                <Icon size={12} aria-hidden="true" />
+                {s === 'request' ? 'Requests' : s === 'task' ? 'Tasks' : 'Clients'}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* Search */}
       <div
         style={{
-          padding: '0.5rem',
+          padding: '0.625rem 0.875rem',
           borderBottom: '1px solid var(--color-border-subtle)',
           background: 'var(--color-bg)',
           flexShrink: 0,
         }}
       >
         <div
-          className="flex items-center"
+          className="tahi-input-group flex items-center"
           style={{
-            gap: '0.375rem',
-            padding: '0.375rem 0.5rem',
-            background: 'var(--color-bg-secondary)',
+            gap: '0.4375rem',
+            padding: '0 0.5rem',
+            height: '2rem',
+            background: 'var(--color-bg)',
             border: '1px solid var(--color-border-subtle)',
-            borderRadius: 'var(--radius-sm)',
+            borderRadius: 'var(--radius-md)',
           }}
         >
-          <Search size={12} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} aria-hidden="true" />
+          <Search size={13} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} aria-hidden="true" />
           <input
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder={source === 'request' ? 'Search requests…' : source === 'task' ? 'Search tasks…' : 'Search clients…'}
+            placeholder={source === 'request' ? 'Search requests' : source === 'task' ? 'Search tasks' : 'Search clients'}
             autoFocus
             style={{
               flex: 1, minWidth: 0,
               border: 'none', outline: 'none', background: 'transparent',
-              fontSize: '0.75rem',
+              fontSize: '0.8125rem',
               color: 'var(--color-text)',
             }}
           />
@@ -663,21 +705,28 @@ function SourcePicker({
       </div>
 
       {/* Items */}
-      <div role="list" style={{ overflowY: 'auto', flex: 1 }}>
+      <div role="list" style={{ overflowY: 'auto', flex: 1, padding: '0.25rem' }}>
         {loading ? (
-          <div style={{ padding: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: 'var(--color-text-subtle)', fontSize: '0.75rem' }}>
-            <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+          <div
+            style={{
+              padding: '1.5rem 0.75rem',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+              color: 'var(--color-text-subtle)',
+              fontSize: '0.75rem',
+            }}
+          >
+            <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-brand)' }} aria-hidden="true" />
             Loading
           </div>
         ) : items.length === 0 ? (
           <div style={{ padding: '0.5rem' }}>
             <EmptyState
               variant="inline"
-              icon={
-                source === 'request' ? <Inbox className="w-5 h-5" /> :
-                source === 'task' ? <CheckSquare className="w-5 h-5" /> :
-                <Users className="w-5 h-5" />
-              }
+              icon={<SourceIcon className="w-5 h-5" />}
               title={q
                 ? 'No matches'
                 : source === 'request' ? 'No open requests'
@@ -697,22 +746,54 @@ function SourcePicker({
               type="button"
               onClick={() => onPick(item.id)}
               disabled={acting}
-              className="flex items-center w-full transition-colors"
+              className="flex items-center w-full"
               style={{
                 gap: '0.5rem',
-                padding: '0.4375rem 0.625rem',
-                fontSize: '0.75rem',
+                padding: '0.4375rem 0.5rem',
+                fontSize: '0.8125rem',
                 background: 'transparent',
                 border: 'none',
-                borderBottom: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-md)',
                 cursor: acting ? 'not-allowed' : 'pointer',
                 textAlign: 'left',
                 color: 'var(--color-text)',
+                transition: 'background-color 150ms ease',
               }}
-              onMouseEnter={e => { if (!acting) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              onMouseEnter={e => {
+                if (acting) return
+                e.currentTarget.style.background = 'var(--color-bg-secondary)'
+                const tile = e.currentTarget.querySelector<HTMLElement>('[data-row-icon]')
+                if (tile) {
+                  tile.style.background = 'var(--color-brand-100)'
+                  tile.style.color = 'var(--color-brand-dark)'
+                }
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'transparent'
+                const tile = e.currentTarget.querySelector<HTMLElement>('[data-row-icon]')
+                if (tile) {
+                  tile.style.background = 'var(--color-bg-tertiary)'
+                  tile.style.color = 'var(--color-text-muted)'
+                }
+              }}
             >
-              <Play size={11} aria-hidden="true" style={{ color: 'var(--color-brand)', flexShrink: 0 }} />
+              <span
+                data-row-icon
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '1.5rem',
+                  height: '1.5rem',
+                  flexShrink: 0,
+                  background: 'var(--color-bg-tertiary)',
+                  color: 'var(--color-text-muted)',
+                  borderRadius: 'var(--radius-sm)',
+                  transition: 'background-color 150ms ease, color 150ms ease',
+                }}
+              >
+                <SourceIcon size={12} aria-hidden="true" />
+              </span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="truncate" style={{ fontWeight: 500 }}>
                   {item.mono && (
@@ -728,7 +809,7 @@ function SourcePicker({
                 {item.sub && (
                   <div
                     className="truncate"
-                    style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}
+                    style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginTop: '0.0625rem' }}
                   >
                     {item.sub}
                   </div>
