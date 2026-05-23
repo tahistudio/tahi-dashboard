@@ -19,6 +19,53 @@ A workflow is **`shipped`** only when every surface in its path is `design ✓ +
 
 ---
 
+## Build order (the lifecycle, in sequence)
+
+The lifecycle-driven roadmap. Each phase compounds on the data captured by the previous one, so order matters — building Proposals before Lead intake means proposals start with no upstream context.
+
+### Phase A · Sales CRM foundation (next up)
+
+1. **Lead intake + qualification** — `leads` table, manual + Webflow form intake, qualifying flow. Pre-pipeline.
+2. **Discovery call surface** — notes, signals, transcript upload (from Google Meet), next action. Outcome routes to: promote to deal OR archive.
+3. **Calls log** — upcoming + past calls with prep notes, transcripts, attendees.
+4. **Pipeline polish** — bring the existing pipeline page through the new design system. Pipeline becomes *post-discovery only* (qualified deals).
+
+### Phase B · CRM depth (right after foundation)
+
+5. **Gmail sync + email tracking** — Google OAuth, pull emails per contact, track opens / clicks on outgoing dashboard mail.
+6. **AI deal scoring** — score deals on probability + suggested next action using deal + activity + call signals.
+7. **Contact enrichment** — pull LinkedIn / company data when a lead is created (best-effort, via an enrichment API).
+
+### Phase C · Affiliate program (replace Rewardful before ManyRequests cutover)
+
+8. **Affiliates table** — 12 partners today; flat 10% per qualified lead that closes.
+9. **Referral codes + tracking links** — `/r/{code}` cookies the visitor for attribution on lead capture.
+10. **Attribution + payout tracking** — when a deal closes, credit the cookied affiliate. Manual mark-paid for v1; payment processor integration later (Liam may change Stripe).
+11. **Affiliate portal** — small surface where affiliates see their referrals + commissions owed.
+
+### Phase D · Marketing email CRM (Mailerlite replacement, deferred)
+
+Low urgency: 4 campaigns/year + 3.7k subscribers + Mailerlite still works.
+
+12. **Subscriber + list + segment tables** — natively in the dashboard. Sync OUT to Mailerlite (or send via Resend) so the dashboard is the source of truth.
+13. **Forms + signup endpoints** — Webflow-form-to-subscriber webhook + unsubscribe page.
+14. **Campaign composer + send** — pick a list/segment, write, schedule, send via Resend.
+15. **Analytics** — opens / clicks / unsubscribes per campaign, per subscriber.
+
+### Phase E · Productisation (existing surfaces, post-CRM)
+
+Pipeline → Proposal → Schedule → Contract → Onboard → Deliver → Invoice → Upsell. These are mostly built; each gets a design-system polish lap once the lead/discovery flow is feeding them.
+
+16. Proposals polish + AI draft from discovery
+17. Schedules polish
+18. Contracts polish
+19. Onboarding checklist polish
+20. Requests / Tasks / Messages / Time (the "Running a project" workflow)
+21. Invoicing polish + Stripe + Xero reconciliation
+22. Upsell prompts (retainer hours nearly out, etc.)
+
+---
+
 ## Workflows
 
 ### Maintaining the knowledge base (Docs Hub) — **shipped 2026-05-23 ✓**
@@ -45,29 +92,82 @@ A workflow is **`shipped`** only when every surface in its path is `design ✓ +
 
 ---
 
-### Discovery call
+### Lead intake & qualification (Phase A · 1-2)
+
+> A new lead arrives — Webflow form, email referral, affiliate link, manual entry. Liam needs to capture it, then decide whether to pursue.
+
+**Steps:**
+1. Lead lands as a row in the `leads` table (manual quick-add OR Webflow form webhook OR affiliate referral)
+2. Captures: name, email, company, source, brief, deal-size estimate, owner (default Liam)
+3. Auto-creates "Schedule discovery call" task with 48h SLA
+4. Liam reviews lead list, triages: pursue / nurture / archive
+5. On "pursue": schedules the discovery call
+
+**Surfaces:**
+- `/leads` index page (DataTable + FilterBar pattern from Docs Hub)
+- Lead detail (slide-over with capture form + activity)
+- `leads` schema (new)
+- Webflow form webhook receiver
+- Affiliate referral capture (Phase C)
+
+**Status:** (not started — first build for Phase A)
+
+**Open issues:**
+- Webflow form fields not mapped yet
+- Decide schema: separate `leads` table OR re-use `deals` with a pre-pipeline stage. Lean: separate table (clean conversion metrics, easy archive)
+
+---
+
+### Discovery call (Phase A · 2)
 
 > Liam jumps on a discovery call with a prospect. The dashboard should remind him what to ask, record what happened, and turn the call into a deal + next steps.
 
 **Steps:**
-1. Open the prospect's record (search or pipeline)
-2. Skim previous context (emails, notes, last touch)
-3. Conduct the call (probably outside the dashboard for now)
-4. Log call notes, decisions, next action
-5. Capture budget / timeline / fit signals
-6. Either: create a deal, schedule follow-up, or archive
+1. Open the lead's record (search or `/leads`)
+2. Review prep: brief, previous emails, source
+3. Conduct the call (Google Meet, recorded)
+4. Upload Google transcript afterwards (text paste OR file upload)
+5. Log signals: budget, timeline, fit, decision-maker, objections
+6. Pick outcome:
+   - **Promote to deal** → creates a deal in pipeline at "Verbal interest" stage, copies discovery context forward
+   - **Nurture** → schedule next-touch task
+   - **Archive** → mark lead as dead with reason
 
 **Surfaces:**
-- Search palette (find prospect quickly)
-- Client / contact detail page
-- Activity timeline
-- Call detail (`scheduled_calls`)
-- Deal create flow
-- Tasks (next action)
+- Lead detail slide-over
+- Calls log surface (new)
+- Discovery notes editor (Tiptap with prompts as placeholder text)
+- Transcript upload (file/text paste, stored in R2)
+- Pipeline (deals)
 
-**Status:** (todo)
+**Status:** (not started — Phase A · 2)
 
-**Open issues:** (todo)
+**Open issues:**
+- Transcript parsing: keep as raw text first, AI summary later (Phase B)
+
+---
+
+### Calls log + meeting prep (Phase A · 3)
+
+> Liam needs to see what calls are coming up today / this week, who they're with, what to prep, and after the call upload the transcript.
+
+**Steps:**
+1. Liam opens `/calls` (or sees today's calls on Overview)
+2. Each call shows: when, who, lead/deal context, prep notes, agenda
+3. After the call: upload transcript, capture outcome, fire follow-up tasks
+4. Past calls remain searchable, linked to the lead/deal
+
+**Surfaces:**
+- `/calls` index (DataTable, upcoming + past tabs)
+- Call detail slide-over (prep notes, attendees, transcript, outcome)
+- Existing `scheduled_calls` schema
+- Overview integration (today's calls widget)
+
+**Status:** (data partly built — `scheduled_calls` table exists; UI is stub)
+
+**Open issues:**
+- Decide: Google Calendar OAuth sync, or manual entry? Lean: manual for v1, calendar sync in Phase B
+- Transcript storage: R2 as file OR text in DB? Lean: text in DB for search, file in R2 if too long
 
 ---
 
@@ -217,6 +317,115 @@ A workflow is **`shipped`** only when every surface in its path is `design ✓ +
 **Status:** (todo)
 
 **Open issues:** (todo)
+
+---
+
+### Gmail sync + email tracking (Phase B · 5)
+
+> Liam wants every email to/from a contact visible on their record, plus tracking on emails sent from the dashboard.
+
+**Steps:**
+1. Connect Gmail via Google OAuth (per-user, stored in `integrations`)
+2. Background sync pulls recent inbox + sent items, matches by email address, attaches to contact
+3. New emails from contacts surface as activity events
+4. Emails sent FROM the dashboard (transactional via Resend) get open/click pixels and link wrapping
+5. Per-contact view shows full email thread history
+
+**Surfaces:**
+- Settings → Integrations (Google OAuth)
+- Contact / lead / deal detail pages (activity timeline)
+- New `email_messages` table linking to contacts/leads/deals
+- Resend webhook receiver for open/click events
+
+**Status:** (not started — Phase B · 5)
+
+**Open issues:**
+- OAuth scope: read-only inbox + sent? Or also send-on-behalf? Lean: read-only first
+- Privacy: this surfaces everyone's emails to anyone who can see the contact. Need access scoping
+- Volume: 3.7k contacts × ~10 emails each = manageable. Background sync runs nightly + on-demand
+
+---
+
+### AI deal scoring + contact enrichment (Phase B · 6-7)
+
+> Score deals on probability + suggested next action. Enrich new leads with company / role data.
+
+**Steps:**
+1. When a lead is created or updated, fire an AI scoring job using: source, signals from discovery, deal value, owner, time-in-stage, last activity recency
+2. Show score on lead/deal card (0-100) plus a one-line "next action" suggestion
+3. When a lead is created, enrich automatically: company size, industry, LinkedIn URL via an external API (Clearbit / Apollo / People Data Labs)
+4. Surface enriched fields on the contact record
+
+**Surfaces:**
+- Lead + deal detail pages (score badge, next-action callout)
+- Contact detail (enriched fields section)
+- New `lead_score` + `enrichment_data` columns OR separate tables
+- Settings → AI provider, enrichment provider
+
+**Status:** (not started — Phase B · 6-7)
+
+**Open issues:**
+- Which AI provider? Anthropic (already in stack via MCP) is the obvious lean
+- Enrichment cost: pick a provider that lets you pay per-lookup, not per-seat
+- Privacy + GDPR: enrichment pulls public data but check the provider's terms
+
+---
+
+### Affiliate program (Phase C · 8-11)
+
+> Replace Rewardful before ManyRequests cutover. Simple model: anyone who refers a lead that closes gets 10% of the first invoice. 12 affiliates today.
+
+**Steps:**
+1. Liam creates an affiliate record (name, email, referral code, commission rate, payment method)
+2. Affiliate gets a unique URL: `tahi.studio/r/{code}` that cookies the visitor
+3. When a lead lands (from a cookied visitor), the referral is attributed to the affiliate
+4. When the lead converts to a closed deal with paid first invoice, commission is owed
+5. Liam reviews owed commissions, marks paid (manual payout v1; payment-system integration later)
+6. Affiliate sees their referrals + commissions in a small portal surface
+
+**Surfaces:**
+- `/affiliates` admin index (DataTable + FilterBar)
+- Affiliate detail (referrals list, commission ledger)
+- New `affiliates` + `affiliate_referrals` + `affiliate_commissions` tables
+- `/r/{code}` redirect route that sets a cookie
+- Lead intake reads the cookie to attribute on capture
+- Affiliate portal (small, under `/p/affiliate/{token}`)
+
+**Status:** (existing `/affiliates` page reads from Rewardful; needs full replacement)
+
+**Open issues:**
+- Commission model: per-lead flat? Per first invoice? Per recurring monthly? Liam said "10% per lead that closes" — clarify: one-time on first invoice, or recurring on every payment? Lean: one-time on first invoice (Rewardful's "first payment" model)
+- Cookie window: 30 days standard
+- Payout method: hold off on integration; Liam may change Stripe. Manual PayPal / bank transfer notes for v1
+
+---
+
+### Marketing email CRM (Phase D · 12-15, deferred)
+
+> Eventually replace Mailerlite. Low urgency: 4 campaigns/year. Build the data layer first, keep Mailerlite as the send engine until usage proves the design.
+
+**Steps:**
+1. Subscribers + lists + segments live in the dashboard (source of truth)
+2. Sync OUT to Mailerlite (push new subs, push unsubscribes) OR send via Resend directly
+3. Webflow forms + portal signup add to subscriber list
+4. Unsubscribe link in every email points at a dashboard page that flips status
+5. Liam composes a campaign, picks list/segment, schedules + sends
+6. Analytics roll up opens / clicks / unsubscribes per campaign
+
+**Surfaces:**
+- `/subscribers` (DataTable + FilterBar)
+- `/lists` + `/segments`
+- `/campaigns` (compose, schedule, send)
+- New `subscribers`, `email_lists`, `email_list_members`, `email_campaigns`, `email_events` tables
+- Unsubscribe endpoint
+- Resend integration for sending OR Mailerlite sync-out
+
+**Status:** (not started — Phase D, deferred)
+
+**Open issues:**
+- Send infrastructure: Resend handles low-volume (Liam's 4 campaigns/year easily). For higher volume, may need a dedicated transactional/marketing sender
+- Deliverability: domain reputation, SPF/DKIM/DMARC already set up for transactional emails — broadcast may need extra checks
+- Campaign builder: rich-text via Tiptap is easy; visual block builder is a big lift. Lean: start with rich-text, defer block builder
 
 ---
 
