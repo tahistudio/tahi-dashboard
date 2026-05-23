@@ -191,7 +191,7 @@ export async function POST(req: NextRequest) {
       // Best-effort: pull the deal's primary contact for person info.
       let leadName = parseFirstPersonOutOfTitle(c.title) || c.orgName || c.title
       let leadEmail: string | null = null
-      let leadPhone: string | null = null
+      const leadPhone: string | null = null
 
       const dealContactRows = await database
         .select({
