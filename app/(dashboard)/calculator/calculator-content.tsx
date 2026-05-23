@@ -18,6 +18,8 @@ import { ArrowLeft, Calculator as CalcIcon, Check, FileSignature, FileText, Cale
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { TahiButton } from '@/components/tahi/tahi-button'
+import { FeatureCard } from '@/components/tahi/feature-card'
+import { DonutChart } from '@/components/tahi/chart'
 import type { CalculationInputs, CalculationOutputs, ProjectType, RetainerPlan, ClientRelationship, Currency, ScopeCategory, ScopeLine, DeliveryMode } from '@/lib/calculator/types'
 
 interface SavedCalculation {
@@ -520,8 +522,35 @@ function Recommendation({ outputs, fmt, savedId }: { outputs: CalculationOutputs
     : cap === 'tight'
       ? '#9a3412'
       : '#15803d'
+
+  // Cost vs margin split. The margin is target minus total cost,
+  // clamped at 0 in case a calc lands at break-even or below.
+  const marginValue = Math.max(0, outputs.recommendation.target - outputs.cost.total)
+  const showMarginBreakdown = outputs.cost.total > 0 && outputs.recommendation.target > 0
+
   return (
     <>
+      {/* Hero tile — the proposed quote target. Non-interactive (no href
+          or onClick) so the hover lift is off and it reads as a summary,
+          not a button. */}
+      <FeatureCard variant="forest" padding="md">
+        <FeatureCard.Eyebrow>Quote target</FeatureCard.Eyebrow>
+        <FeatureCard.Title
+          style={{
+            fontSize: '2.25rem',
+            fontWeight: 800,
+            letterSpacing: '-0.02em',
+            lineHeight: 1.05,
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {fmt.format(outputs.recommendation.target)}
+        </FeatureCard.Title>
+        <FeatureCard.Description>
+          {Math.round(outputs.recommendation.targetMarginPct * 100)}% margin · floor {fmt.format(outputs.recommendation.floor)} · stretch {fmt.format(outputs.recommendation.stretch)}
+        </FeatureCard.Description>
+      </FeatureCard>
+
       <Card title="Recommendation" emphasis>
         <div style={{ display: 'grid', gap: '0.625rem' }}>
           <div>
@@ -549,6 +578,21 @@ function Recommendation({ outputs, fmt, savedId }: { outputs: CalculationOutputs
         <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginTop: '0.5rem' }}>
           Internal rate: NZD {outputs.effectiveHourlyRate}/hr (effective).
         </div>
+        {showMarginBreakdown && (
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.75rem' }}>
+            <DonutChart
+              segments={[
+                { label: 'Internal cost', value: outputs.cost.internal },
+                { label: 'Direct cost', value: outputs.cost.direct },
+                { label: 'Margin', value: marginValue },
+              ]}
+              size={148}
+              centreLabel="Margin"
+              centreValue={`${Math.round(outputs.recommendation.targetMarginPct * 100)}%`}
+              ariaLabel="Cost versus margin breakdown"
+            />
+          </div>
+        )}
       </Card>
 
       <Card title="Capacity">

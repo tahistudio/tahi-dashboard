@@ -19,6 +19,8 @@ import { TahiButton } from '@/components/tahi/tahi-button'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
+import { FeatureCard } from '@/components/tahi/feature-card'
+import { BarChart, DonutChart, type BarDatum } from '@/components/tahi/chart'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 
@@ -783,6 +785,48 @@ export function TimeList() {
     link.click()
   }
 
+  // Hours-by-member bar chart data. Aggregates the filtered entry list
+  // so the chart tracks the active filters (date range, client etc).
+  // Capped at the top 8 contributors to keep the bars legible.
+  const hoursByMember: readonly BarDatum[] = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const e of filteredEntries) {
+      const name = e.teamMemberName ?? 'Unknown'
+      map.set(name, (map.get(name) ?? 0) + e.hours)
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([label, value]) => ({ label, value: Math.round(value * 10) / 10 }))
+  }, [filteredEntries])
+
+  // Billable vs non-billable split for the donut. Uses the filtered set
+  // so the donut updates when the user narrows the view.
+  const billableSplit = useMemo(() => {
+    let billable = 0
+    let nonBillable = 0
+    for (const e of filteredEntries) {
+      if (e.billable) billable += e.hours
+      else nonBillable += e.hours
+    }
+    return {
+      billable: Math.round(billable * 10) / 10,
+      nonBillable: Math.round(nonBillable * 10) / 10,
+      total: Math.round((billable + nonBillable) * 10) / 10,
+    }
+  }, [filteredEntries])
+
+  // "This week" tile: top contributor + billable percentage. Computed
+  // from the filtered set so it respects the active date range.
+  const summaryHero = useMemo(() => {
+    const topName = hoursByMember[0]?.label ?? null
+    const topHours = hoursByMember[0]?.value ?? 0
+    const billablePct = billableSplit.total > 0
+      ? Math.round((billableSplit.billable / billableSplit.total) * 100)
+      : 0
+    return { topName, topHours, billablePct }
+  }, [hoursByMember, billableSplit])
+
   return (
     <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       {/* Header */}
@@ -841,6 +885,77 @@ export function TimeList() {
           value={String(entryCount)}
         />
       </div>
+
+      {/* Insight row: hero tile + bar chart + donut. All driven by the
+          filtered entries so the user can scope by date or client and
+          see the visuals update in step. Skipped while the first fetch
+          is in flight to avoid empty-chart flash. */}
+      {!loading && !error && filteredEntries.length > 0 && (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr)',
+            gap: '0.875rem',
+          }}
+          className="time-insight-grid"
+        >
+          <style>{`
+            @media (max-width: 64rem) {
+              .time-insight-grid { grid-template-columns: 1fr !important; }
+            }
+          `}</style>
+
+          <FeatureCard variant="forest" padding="lg">
+            <FeatureCard.Eyebrow>This view</FeatureCard.Eyebrow>
+            <FeatureCard.Title>
+              {formatHours(billableSplit.total)} logged
+            </FeatureCard.Title>
+            <FeatureCard.Description>
+              {summaryHero.billablePct}% billable.
+              {summaryHero.topName
+                ? ` Top contributor is ${summaryHero.topName} with ${formatHours(summaryHero.topHours)}.`
+                : ''}
+            </FeatureCard.Description>
+          </FeatureCard>
+
+          <Card padding="lg">
+            <div style={{ fontSize: '0.625rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.75rem' }}>
+              Hours by team member
+            </div>
+            {hoursByMember.length > 0 ? (
+              <BarChart
+                data={hoursByMember}
+                variant="pill"
+                height={200}
+                formatValue={(v) => `${v}h`}
+                ariaLabel="Hours logged by team member"
+              />
+            ) : (
+              <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', margin: 0 }}>
+                No entries in the current view.
+              </p>
+            )}
+          </Card>
+
+          <Card padding="lg">
+            <div style={{ fontSize: '0.625rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.75rem' }}>
+              Billable mix
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <DonutChart
+                segments={[
+                  { label: 'Billable', value: billableSplit.billable },
+                  { label: 'Non-billable', value: billableSplit.nonBillable },
+                ]}
+                size={172}
+                centreLabel="Billable"
+                centreValue={`${summaryHero.billablePct}%`}
+                ariaLabel="Billable versus non-billable hours"
+              />
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* View tabs */}
       <div role="tablist" aria-label="Time view" style={{ display: 'flex', gap: '0.25rem' }}>

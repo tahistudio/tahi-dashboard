@@ -5,6 +5,7 @@ import { useUser } from '@clerk/nextjs'
 import {
   Plus, UserCog, Mail, Shield, RefreshCw, Clock, Trash2,
   Pencil, Link2, GitBranch, Eye, User, Briefcase, Save,
+  Users, Activity, Zap, Sparkles,
 } from 'lucide-react'
 import { OrgChart } from '@/components/tahi/org-chart'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -18,6 +19,9 @@ import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/
 import { Avatar } from '@/components/tahi/avatar'
 import { Badge } from '@/components/tahi/badge'
 import { Input } from '@/components/tahi/input'
+import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
+import { FeatureCard } from '@/components/tahi/feature-card'
+import { DonutChart } from '@/components/tahi/chart'
 import { apiPath } from '@/lib/api'
 import { setTeamMemberImpersonation, type TeamMemberAccessRule } from '@/components/tahi/impersonation-banner'
 import { useRouter } from 'next/navigation'
@@ -841,6 +845,34 @@ export function TeamContent() {
     fetchTeam()
   }, [fetchTeam])
 
+  // Computed stats for the KPI strip + Donut. All derived from the
+  // existing members payload — no extra API calls.
+  const teamStats = useMemo(() => {
+    const headcount = members.length
+    const totalCapacity = members.reduce((sum, m) => sum + (m.weeklyCapacityHours ?? 0), 0)
+    const withCapacity = members.filter(m => (m.weeklyCapacityHours ?? 0) > 0).length
+    const avgCapacity = withCapacity > 0 ? Math.round(totalCapacity / withCapacity) : 0
+    const contractorCount = members.filter(m => m.isContractor).length
+
+    // Derive a role-ish breakdown from job titles. Falls back to the
+    // role column for anyone without a recognisable title keyword.
+    // Keeps things stable when titles are missing.
+    const buckets = { Design: 0, Engineering: 0, Strategy: 0, Operations: 0, Other: 0 }
+    for (const m of members) {
+      const t = (m.title ?? '').toLowerCase()
+      if (/design|brand|ui|ux|creative/.test(t)) buckets.Design += 1
+      else if (/dev|engineer|code|tech|webflow|build/.test(t)) buckets.Engineering += 1
+      else if (/strateg|account|consult|content|founder/.test(t)) buckets.Strategy += 1
+      else if (/ops|operations|pm|project|product|manage/.test(t)) buckets.Operations += 1
+      else buckets.Other += 1
+    }
+    const segments = Object.entries(buckets)
+      .filter(([, v]) => v > 0)
+      .map(([label, value]) => ({ label, value }))
+
+    return { headcount, totalCapacity, avgCapacity, contractorCount, segments }
+  }, [members])
+
   // Selected role values from the FilterBar chip.
   const selectedRoles = useMemo(() => {
     const f = activeFilters.find(a => a.id === 'role')
@@ -1029,6 +1061,92 @@ export function TeamContent() {
         <OrgChart />
       ) : (
         <>
+          {/* KPI strip — derived from the members payload, no extra fetches. */}
+          {!loading && members.length > 0 && (
+            <KPIStrip>
+              <KPICell
+                icon={Users}
+                label="Headcount"
+                value={teamStats.headcount}
+                sub={teamStats.contractorCount > 0
+                  ? `${teamStats.headcount - teamStats.contractorCount} employees · ${teamStats.contractorCount} contractors`
+                  : 'All employees'}
+              />
+              <KPICell
+                icon={Clock}
+                label="Weekly capacity"
+                value={`${teamStats.totalCapacity}h`}
+                sub="Across all team members"
+                tone="info"
+              />
+              <KPICell
+                icon={Activity}
+                label="Avg per person"
+                value={`${teamStats.avgCapacity}h`}
+                sub="Per week"
+                tone="teal"
+              />
+              <KPICell
+                icon={Zap}
+                label="Contractors"
+                value={teamStats.contractorCount}
+                sub={teamStats.headcount > 0
+                  ? `${Math.round((teamStats.contractorCount / teamStats.headcount) * 100)}% of team`
+                  : '—'}
+                tone="warning"
+              />
+            </KPIStrip>
+          )}
+
+          {/* Donut + this-week tile. Side-by-side on desktop, stacks on mobile. */}
+          {!loading && members.length > 0 && teamStats.segments.length > 0 && (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.4fr)',
+                gap: '0.875rem',
+              }}
+              className="team-insight-grid"
+            >
+              <style>{`
+                @media (max-width: 56rem) {
+                  .team-insight-grid { grid-template-columns: 1fr !important; }
+                }
+              `}</style>
+              <Card padding="lg">
+                <div style={{ fontSize: '0.625rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.75rem' }}>
+                  Discipline mix
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <DonutChart
+                    segments={teamStats.segments}
+                    size={172}
+                    centreLabel="People"
+                    centreValue={teamStats.headcount}
+                    ariaLabel="Team discipline breakdown"
+                  />
+                </div>
+              </Card>
+              <FeatureCard variant="forest" padding="lg">
+                <FeatureCard.Eyebrow>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+                    <Sparkles size={11} aria-hidden="true" />
+                    Team this week
+                  </span>
+                </FeatureCard.Eyebrow>
+                <FeatureCard.Title>
+                  {teamStats.totalCapacity}h available across {teamStats.headcount} {teamStats.headcount === 1 ? 'person' : 'people'}
+                </FeatureCard.Title>
+                <FeatureCard.Description>
+                  {teamStats.contractorCount > 0
+                    ? `${teamStats.contractorCount} contractor${teamStats.contractorCount === 1 ? '' : 's'} on call. `
+                    : ''}
+                  Average week is {teamStats.avgCapacity}h per person. Adjust capacity per member to keep allocations honest.
+                </FeatureCard.Description>
+              </FeatureCard>
+            </div>
+          )}
+
           {/* Self-link banner */}
           {!loading && !currentUserLinked && (
             <div
