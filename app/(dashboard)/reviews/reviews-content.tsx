@@ -2,14 +2,21 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import {
-  Star, Search, ChevronDown, Loader2, Copy,
+  Star, Copy,
   Send, CheckCircle2, ExternalLink, Video, Globe,
   MessageSquare, ThumbsUp, Sparkles, FileText,
-  AlertCircle,
+  AlertCircle, ChevronDown,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { Card } from '@/components/tahi/card'
+import { Badge, type BadgeTone } from '@/components/tahi/badge'
+import { TahiButton } from '@/components/tahi/tahi-button'
+import { PageHeader } from '@/components/tahi/page-header'
+import { PageToolbar } from '@/components/tahi/page-toolbar'
+import { EmptyState } from '@/components/tahi/empty-state'
+import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 
-// ── Types ──────────────────────────────────────────────────────────────────
+// Types
 
 interface ReviewItem {
   orgId: string
@@ -34,25 +41,25 @@ interface ReviewItem {
   projectName: string | null
 }
 
-// ── Constants ──────────────────────────────────────────────────────────────
+// Constants
 
-const STATUS_CFG: Record<string, { label: string; bg: string; color: string; border: string }> = {
-  not_sent:    { label: 'Not Sent',    bg: 'var(--color-bg-tertiary)',  color: 'var(--color-text-muted)',  border: 'var(--color-border)' },
-  asked:       { label: 'Asked',       bg: 'var(--color-info-bg)',      color: 'var(--color-info)',        border: 'var(--color-info)' },
-  declined:    { label: 'Declined',    bg: 'var(--color-danger-bg)',    color: 'var(--color-danger)',      border: 'var(--color-danger)' },
-  deferred:    { label: 'Deferred',    bg: 'var(--color-warning-bg)',   color: 'var(--color-warning)',     border: 'var(--color-warning)' },
-  in_progress: { label: 'In Progress', bg: 'var(--color-brand-50)',     color: 'var(--color-brand)',       border: 'var(--color-brand)' },
-  completed:   { label: 'Completed',   bg: 'var(--color-success-bg)',   color: 'var(--color-success)',     border: 'var(--color-success)' },
+const STATUS_TONE: Record<string, { label: string; tone: BadgeTone }> = {
+  not_sent:    { label: 'Not sent',    tone: 'neutral'  },
+  asked:       { label: 'Asked',       tone: 'info'     },
+  declined:    { label: 'Declined',    tone: 'danger'   },
+  deferred:    { label: 'Deferred',    tone: 'warning'  },
+  in_progress: { label: 'In progress', tone: 'brand'    },
+  completed:   { label: 'Completed',   tone: 'positive' },
 }
 
-const FILTER_TABS = [
-  { label: 'All', value: 'all' },
-  { label: 'Not Sent', value: 'not_sent' },
-  { label: 'Asked', value: 'asked' },
-  { label: 'In Progress', value: 'in_progress' },
-  { label: 'Completed', value: 'completed' },
-  { label: 'Declined', value: 'declined' },
-  { label: 'Deferred', value: 'deferred' },
+const FILTER_TABS: Array<{ label: string; value: string }> = [
+  { label: 'All',         value: 'all' },
+  { label: 'Not sent',    value: 'not_sent' },
+  { label: 'Asked',       value: 'asked' },
+  { label: 'In progress', value: 'in_progress' },
+  { label: 'Completed',   value: 'completed' },
+  { label: 'Declined',    value: 'declined' },
+  { label: 'Deferred',    value: 'deferred' },
 ]
 
 const NPS_LABELS: Record<string, { label: string; color: string }> = {
@@ -63,7 +70,7 @@ const NPS_LABELS: Record<string, { label: string; color: string }> = {
 
 const CLUTCH_URL = 'https://clutch.co'
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// Helpers
 
 function formatDate(iso: string | null): string {
   if (!iso) return '--'
@@ -92,7 +99,7 @@ function isVideoUrl(url: string | null): boolean {
   return url.includes('loom.com') || url.includes('youtube.com') || url.includes('youtu.be') || url.includes('vimeo.com')
 }
 
-// ── Component ──────────────────────────────────────────────────────────────
+// Component
 
 export function ReviewsContent() {
   const [reviews, setReviews] = useState<ReviewItem[]>([])
@@ -190,66 +197,27 @@ export function ReviewsContent() {
     : null
 
   return (
-    <div>
-      {/* Header */}
-      <div className="flex items-center justify-between" style={{ marginBottom: '1.5rem' }}>
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">Reviews and Testimonials</h1>
-          <p className="text-sm text-[var(--color-text-muted)]" style={{ marginTop: '0.25rem' }}>
-            Manage client outreach, collect NPS scores, testimonials, and build case studies.
-          </p>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+      <PageHeader
+        title="Reviews and testimonials"
+        subtitle="Manage client outreach, collect NPS scores, testimonials, and build case studies."
+      />
+
+      {/* Stats strip */}
+      <div className="grid grid-cols-2 md:grid-cols-5" style={{ gap: 'var(--space-3)' }}>
+        <StatCard label="Total clients"         value={totalOrgs}                                                                                                  icon={<MessageSquare className="w-5 h-5" />} />
+        <StatCard label="Reviews completed"     value={completed}                                                                                                  icon={<CheckCircle2 className="w-5 h-5"  />} />
+        <StatCard label="NPS score"             value={npsNet !== null ? `${npsNet > 0 ? '+' : ''}${npsNet}` : '--'} subtitle={avgNps > 0 ? `Avg: ${avgNps.toFixed(1)}` : undefined} icon={<Star className="w-5 h-5"          />} />
+        <StatCard label="Marketing permission"  value={withPermission}                                                                                             icon={<ThumbsUp className="w-5 h-5"      />} />
+        <StatCard label="Video testimonials"    value={withVideo}                                                                                                  icon={<Video className="w-5 h-5"         />} />
       </div>
 
-      {/* Stats cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4" style={{ marginBottom: '1.5rem' }}>
-        <StatCard label="Total Clients" value={totalOrgs} icon={<MessageSquare className="w-5 h-5" />} />
-        <StatCard label="Reviews Completed" value={completed} icon={<CheckCircle2 className="w-5 h-5" />} />
-        <StatCard
-          label="NPS Score"
-          value={npsNet !== null ? `${npsNet > 0 ? '+' : ''}${npsNet}` : '--'}
-          icon={<Star className="w-5 h-5" />}
-          subtitle={avgNps > 0 ? `Avg: ${avgNps.toFixed(1)}` : undefined}
-        />
-        <StatCard label="Marketing Permission" value={withPermission} icon={<ThumbsUp className="w-5 h-5" />} />
-        <StatCard label="Video Testimonials" value={withVideo} icon={<Video className="w-5 h-5" />} />
-      </div>
-
-      {/* Main card */}
-      <div
-        style={{
-          background: 'var(--color-bg)',
-          border: '1px solid var(--color-border)',
-          borderRadius: '0.75rem',
-          boxShadow: 'var(--shadow-sm)',
-        }}
-      >
+      <Card padding="none">
         {/* Toolbar */}
-        <div
-          className="flex flex-wrap items-center gap-2"
-          style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--color-border-subtle)' }}
-        >
-          <div className="relative" style={{ width: '14rem' }}>
-            <Search
-              className="absolute top-1/2 pointer-events-none"
-              style={{ left: '0.625rem', transform: 'translateY(-50%)', width: '0.875rem', height: '0.875rem', color: 'var(--color-text-subtle)' }}
-            />
-            <input
-              type="text"
-              placeholder="Search clients..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
-              style={{
-                padding: '0.4375rem 0.75rem 0.4375rem 2rem',
-                fontSize: '0.875rem',
-                border: '1px solid var(--color-border)',
-                borderRadius: '0.5rem',
-                background: 'var(--color-bg-secondary)',
-                color: 'var(--color-text)',
-              }}
-            />
-          </div>
+        <div style={{ padding: 'var(--space-3) var(--space-4)', borderBottom: '1px solid var(--color-border-subtle)' }}>
+          <PageToolbar>
+            <PageToolbar.Search value={search} onChange={setSearch} placeholder="Search clients..." maxWidth="20rem" />
+          </PageToolbar>
         </div>
 
         {/* Filter tabs */}
@@ -257,42 +225,52 @@ export function ReviewsContent() {
           className="flex items-end overflow-x-auto"
           style={{ borderBottom: '1px solid var(--color-border)', paddingLeft: '0.25rem', paddingRight: '1rem' }}
         >
-          {FILTER_TABS.map(tab => (
-            <button
-              key={tab.value}
-              onClick={() => setFilterStatus(tab.value)}
-              className="font-medium whitespace-nowrap flex-shrink-0 transition-colors"
-              style={{
-                padding: '0.625rem 1rem',
-                fontSize: '0.875rem',
-                border: 0,
-                borderBottom: filterStatus === tab.value ? '2px solid var(--color-brand)' : '2px solid transparent',
-                marginBottom: '-1px',
-                color: filterStatus === tab.value ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-                background: 'transparent',
-                cursor: 'pointer',
-              }}
-            >
-              {tab.label}
-              {tab.value !== 'all' && (
-                <span className="ml-1.5 text-xs" style={{ color: 'var(--color-text-subtle)' }}>
-                  {reviews.filter(r => r.outreachStatus === tab.value).length}
+          {FILTER_TABS.map(tab => {
+            const isActive = filterStatus === tab.value
+            const count = tab.value === 'all'
+              ? reviews.length
+              : reviews.filter(r => r.outreachStatus === tab.value).length
+            return (
+              <button
+                key={tab.value}
+                onClick={() => setFilterStatus(tab.value)}
+                className="font-medium whitespace-nowrap flex-shrink-0"
+                style={{
+                  padding: '0.625rem 1rem',
+                  fontSize: 'var(--text-sm)',
+                  border: 0,
+                  borderBottom: isActive ? '2px solid var(--color-brand)' : '2px solid transparent',
+                  marginBottom: '-1px',
+                  color: isActive ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  transition: 'color 150ms ease, border-color 150ms ease',
+                }}
+              >
+                {tab.label}
+                <span style={{ marginLeft: '0.375rem', fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
+                  {count}
                 </span>
-              )}
-            </button>
-          ))}
+              </button>
+            )
+          })}
         </div>
 
         {/* Content */}
         {loading ? (
-          <LoadingSkeleton />
+          <LoadingSkeleton rows={5} />
         ) : filtered.length === 0 ? (
-          <EmptyState search={search} />
+          <EmptyState
+            variant="inline"
+            icon={<Star className="w-8 h-8" />}
+            title="No reviews found"
+            description={search ? 'Try a different search term.' : 'Start outreach to collect client reviews and testimonials.'}
+          />
         ) : (
           <div>
             {filtered.map((review, i) => {
               const isExpanded = expandedId === review.orgId
-              const statusCfg = STATUS_CFG[review.outreachStatus] ?? STATUS_CFG.not_sent
+              const cfg = STATUS_TONE[review.outreachStatus] ?? STATUS_TONE.not_sent
               const isUpdating = updatingId === review.orgId
               const isHovered = hoveredRow === review.orgId
               const npsCategory = getNpsCategory(review.npsScore)
@@ -352,96 +330,36 @@ export function ReviewsContent() {
 
                     {/* Content indicators */}
                     <div className="hidden md:flex items-center gap-1">
-                      {review.writtenTestimonial && (
-                        <span
-                          title="Has written testimonial"
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            width: '1.5rem',
-                            height: '1.5rem',
-                            borderRadius: '0.375rem',
-                            background: 'var(--color-bg-tertiary)',
-                            color: 'var(--color-brand)',
-                          }}
-                        >
-                          <FileText style={{ width: '0.75rem', height: '0.75rem' }} />
-                        </span>
-                      )}
-                      {review.videoUrl && (
-                        <span
-                          title="Has video testimonial"
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            width: '1.5rem',
-                            height: '1.5rem',
-                            borderRadius: '0.375rem',
-                            background: 'var(--color-bg-tertiary)',
-                            color: 'var(--color-brand)',
-                          }}
-                        >
-                          <Video style={{ width: '0.75rem', height: '0.75rem' }} />
-                        </span>
-                      )}
-                      {review.clutchReviewUrl && (
-                        <span
-                          title="Clutch review submitted"
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            width: '1.5rem',
-                            height: '1.5rem',
-                            borderRadius: '0.375rem',
-                            background: 'var(--color-bg-tertiary)',
-                            color: 'var(--color-brand)',
-                          }}
-                        >
-                          <Globe style={{ width: '0.75rem', height: '0.75rem' }} />
-                        </span>
-                      )}
+                      {review.writtenTestimonial && <ContentTag icon={<FileText style={{ width: '0.75rem', height: '0.75rem' }} />} title="Has written testimonial" />}
+                      {review.videoUrl && <ContentTag icon={<Video style={{ width: '0.75rem', height: '0.75rem' }} />} title="Has video testimonial" />}
+                      {review.clutchReviewUrl && <ContentTag icon={<Globe style={{ width: '0.75rem', height: '0.75rem' }} />} title="Clutch review submitted" />}
                     </div>
 
                     {/* Status badge */}
-                    <span
-                      className="inline-flex items-center rounded-full text-xs font-medium whitespace-nowrap"
-                      style={{
-                        padding: '0.125rem 0.625rem',
-                        background: statusCfg.bg,
-                        color: statusCfg.color,
-                        border: `1px solid ${statusCfg.border}`,
-                      }}
-                    >
-                      {statusCfg.label}
-                    </span>
+                    <Badge tone={cfg.tone} variant="soft" leader="dot">{cfg.label}</Badge>
 
                     {/* Quick actions */}
                     <div className="flex items-center gap-1 flex-shrink-0">
                       {review.outreachStatus === 'not_sent' && (
-                        <button
-                          onClick={e => { e.stopPropagation(); updateStatus(review.orgId, 'asked') }}
-                          disabled={isUpdating}
-                          className="p-1.5 rounded-lg hover:bg-[var(--color-bg-tertiary)] transition-colors"
-                          style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--color-brand)' }}
-                          title="Mark as asked"
-                        >
-                          {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                        </button>
+                        <TahiButton
+                          variant="ghost"
+                          size="sm"
+                          loading={isUpdating}
+                          onClick={(e) => { e.stopPropagation(); updateStatus(review.orgId, 'asked') }}
+                          iconLeft={<Send size={14} aria-hidden="true" />}
+                          aria-label="Mark as asked"
+                        />
                       )}
                       {review.submissionToken && (
-                        <button
-                          onClick={e => { e.stopPropagation(); copyReviewLink(review.submissionToken) }}
-                          className="p-1.5 rounded-lg hover:bg-[var(--color-bg-tertiary)] transition-colors"
-                          style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--color-text-muted)' }}
-                          title="Copy review link"
-                        >
-                          {copiedToken === review.submissionToken
-                            ? <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--color-success)' }} />
-                            : <Copy className="w-4 h-4" />}
-                        </button>
+                        <TahiButton
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => { e.stopPropagation(); copyReviewLink(review.submissionToken) }}
+                          iconLeft={copiedToken === review.submissionToken
+                            ? <CheckCircle2 size={14} aria-hidden="true" style={{ color: 'var(--color-success)' }} />
+                            : <Copy size={14} aria-hidden="true" />}
+                          aria-label="Copy review link"
+                        />
                       )}
                       <ChevronDown
                         className="w-4 h-4 transition-transform"
@@ -464,11 +382,9 @@ export function ReviewsContent() {
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4" style={{ paddingTop: '0.75rem' }}>
                         {/* Review details */}
                         <div>
-                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]" style={{ marginBottom: '0.5rem' }}>
-                            Review Details
-                          </h4>
+                          <SectionLabel>Review details</SectionLabel>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <DetailRow label="NPS Score" value={review.npsScore !== null ? String(review.npsScore) : 'Not submitted'} />
+                            <DetailRow label="NPS score" value={review.npsScore !== null ? String(review.npsScore) : 'Not submitted'} />
                             <DetailRow label="Submitted" value={formatDate(review.submittedAt)} />
                             {review.nextAskAt && (
                               <DetailRow label="Follow-up" value={formatDate(review.nextAskAt)} />
@@ -484,21 +400,17 @@ export function ReviewsContent() {
 
                         {/* Permissions */}
                         <div>
-                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]" style={{ marginBottom: '0.5rem' }}>
-                            Permissions Granted
-                          </h4>
+                          <SectionLabel>Permissions granted</SectionLabel>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
                             <PermissionRow label="Website use" granted={review.marketingPermission} />
-                            <PermissionRow label="Logo use" granted={review.logoPermission} />
-                            <PermissionRow label="Case study" granted={review.caseStudyPermission} />
+                            <PermissionRow label="Logo use"    granted={review.logoPermission} />
+                            <PermissionRow label="Case study"  granted={review.caseStudyPermission} />
                           </div>
                         </div>
 
                         {/* Feedback highlights */}
                         <div>
-                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]" style={{ marginBottom: '0.5rem' }}>
-                            Feedback
-                          </h4>
+                          <SectionLabel>Feedback</SectionLabel>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
                             {review.lovedMost && (
                               <div>
@@ -525,17 +437,14 @@ export function ReviewsContent() {
 
                       {/* Written testimonial */}
                       <div style={{ marginTop: '1rem' }}>
-                        <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]" style={{ marginBottom: '0.5rem' }}>
-                          Written Testimonial
-                        </h4>
+                        <SectionLabel>Written testimonial</SectionLabel>
                         {review.writtenTestimonial ? (
                           <div
                             style={{
                               padding: '0.75rem',
                               background: 'var(--color-bg)',
-                              borderRadius: '0.5rem',
+                              borderRadius: 'var(--radius-md)',
                               border: '1px solid var(--color-border)',
-                              borderLeft: '3px solid var(--color-brand)',
                             }}
                           >
                             <p className="text-sm text-[var(--color-text)] whitespace-pre-wrap" style={{ margin: 0 }}>
@@ -550,9 +459,7 @@ export function ReviewsContent() {
                       {/* Video testimonial */}
                       {review.videoUrl && (
                         <div style={{ marginTop: '1rem' }}>
-                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]" style={{ marginBottom: '0.5rem' }}>
-                            Video Testimonial
-                          </h4>
+                          <SectionLabel>Video testimonial</SectionLabel>
                           <a
                             href={review.videoUrl}
                             target="_blank"
@@ -562,7 +469,7 @@ export function ReviewsContent() {
                               padding: '0.5rem 0.75rem',
                               background: 'var(--color-bg)',
                               border: '1px solid var(--color-border)',
-                              borderRadius: '0.5rem',
+                              borderRadius: 'var(--radius-md)',
                               color: 'var(--color-brand)',
                               textDecoration: 'none',
                             }}
@@ -576,9 +483,7 @@ export function ReviewsContent() {
 
                       {/* Clutch review */}
                       <div style={{ marginTop: '1rem' }}>
-                        <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]" style={{ marginBottom: '0.5rem' }}>
-                          Clutch Review
-                        </h4>
+                        <SectionLabel>Clutch review</SectionLabel>
                         {review.clutchReviewUrl ? (
                           <a
                             href={review.clutchReviewUrl}
@@ -589,7 +494,7 @@ export function ReviewsContent() {
                               padding: '0.5rem 0.75rem',
                               background: 'var(--color-bg)',
                               border: '1px solid var(--color-border)',
-                              borderRadius: '0.5rem',
+                              borderRadius: 'var(--radius-md)',
                               color: 'var(--color-brand)',
                               textDecoration: 'none',
                             }}
@@ -617,27 +522,16 @@ export function ReviewsContent() {
                       {review.outreachStatus === 'completed' && review.submissionId && (
                         <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--color-border)' }}>
                           <div className="flex items-center justify-between" style={{ marginBottom: '0.5rem' }}>
-                            <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]">
-                              Case Study Draft
-                            </h4>
-                            <button
+                            <SectionLabel>Case study draft</SectionLabel>
+                            <TahiButton
+                              variant="primary"
+                              size="sm"
+                              loading={generatingDraft === review.submissionId}
                               onClick={() => generateDraft(review.submissionId as string)}
-                              disabled={generatingDraft === review.submissionId}
-                              className="flex items-center gap-1.5 text-xs font-medium transition-colors hover:opacity-80"
-                              style={{
-                                padding: '0.25rem 0.75rem',
-                                background: 'var(--color-brand)',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '0 0.5rem 0 0.5rem',
-                                cursor: generatingDraft === review.submissionId ? 'not-allowed' : 'pointer',
-                              }}
+                              iconLeft={<Sparkles size={13} aria-hidden="true" />}
                             >
-                              {generatingDraft === review.submissionId
-                                ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-                                : <Sparkles className="w-3 h-3" aria-hidden="true" />}
-                              {generatingDraft === review.submissionId ? 'Generating...' : 'Generate Draft'}
-                            </button>
+                              {generatingDraft === review.submissionId ? 'Generating...' : 'Generate draft'}
+                            </TahiButton>
                           </div>
                           {draftContent[review.submissionId as string] && (
                             <pre
@@ -645,7 +539,7 @@ export function ReviewsContent() {
                               style={{
                                 padding: '0.75rem',
                                 background: 'var(--color-bg)',
-                                borderRadius: '0.5rem',
+                                borderRadius: 'var(--radius-md)',
                                 border: '1px solid var(--color-border)',
                                 color: 'var(--color-text)',
                                 maxHeight: '20rem',
@@ -659,16 +553,22 @@ export function ReviewsContent() {
                       )}
 
                       {/* Status change buttons */}
-                      <div className="flex flex-wrap gap-2" style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--color-border)' }}>
-                        <span className="text-xs font-medium text-[var(--color-text-subtle)] mr-2 self-center">
+                      <div className="flex flex-wrap gap-2 items-center" style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--color-border)' }}>
+                        <span className="text-xs font-medium text-[var(--color-text-subtle)]" style={{ marginRight: '0.25rem' }}>
                           Change status:
                         </span>
                         {(['not_sent', 'asked', 'deferred', 'declined', 'in_progress', 'completed'] as const).map(s => {
-                          const cfg = STATUS_CFG[s]
+                          const stCfg = STATUS_TONE[s]
                           const isActive = review.outreachStatus === s
                           return (
-                            <button
+                            <Badge
                               key={s}
+                              tone={stCfg.tone}
+                              variant={isActive ? 'soft' : 'outline'}
+                              size="sm"
+                              leader={isActive ? 'dot' : false}
+                              selected={isActive}
+                              disabled={isActive || isUpdating}
                               onClick={() => {
                                 if (s === 'deferred') {
                                   const nextWeek = new Date()
@@ -678,19 +578,9 @@ export function ReviewsContent() {
                                   updateStatus(review.orgId, s)
                                 }
                               }}
-                              disabled={isActive || isUpdating}
-                              className="text-xs font-medium rounded-full transition-colors"
-                              style={{
-                                padding: '0.25rem 0.625rem',
-                                background: isActive ? cfg.bg : 'var(--color-bg)',
-                                color: isActive ? cfg.color : 'var(--color-text-muted)',
-                                border: `1px solid ${isActive ? cfg.border : 'var(--color-border)'}`,
-                                cursor: isActive ? 'default' : 'pointer',
-                                opacity: isActive ? 1 : 0.8,
-                              }}
                             >
-                              {cfg.label}
-                            </button>
+                              {stCfg.label}
+                            </Badge>
                           )
                         })}
                       </div>
@@ -701,24 +591,17 @@ export function ReviewsContent() {
             })}
           </div>
         )}
-      </div>
+      </Card>
     </div>
   )
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────
+// Sub-components
 
 function StatCard({ label, value, icon, subtitle }: { label: string; value: string | number; icon: React.ReactNode; subtitle?: string }) {
   return (
-    <div
-      style={{
-        padding: '1.25rem',
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-card)',
-      }}
-    >
-      <div className="flex items-center justify-between" style={{ marginBottom: '0.5rem' }}>
+    <Card padding="md">
+      <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-2)' }}>
         <span className="text-xs font-medium text-[var(--color-text-subtle)] uppercase tracking-wide">
           {label}
         </span>
@@ -730,7 +613,35 @@ function StatCard({ label, value, icon, subtitle }: { label: string; value: stri
           {subtitle}
         </span>
       )}
-    </div>
+    </Card>
+  )
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]" style={{ marginBottom: '0.5rem' }}>
+      {children}
+    </h4>
+  )
+}
+
+function ContentTag({ icon, title }: { icon: React.ReactNode; title: string }) {
+  return (
+    <span
+      title={title}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '1.5rem',
+        height: '1.5rem',
+        borderRadius: 'var(--radius-sm)',
+        background: 'var(--color-bg-tertiary)',
+        color: 'var(--color-brand)',
+      }}
+    >
+      {icon}
+    </span>
   )
 }
 
@@ -769,55 +680,6 @@ function PermissionRow({ label, granted }: { label: string; granted: boolean | n
       <span style={{ color: granted ? 'var(--color-text)' : 'var(--color-text-muted)' }}>
         {label}
       </span>
-    </div>
-  )
-}
-
-function LoadingSkeleton() {
-  return (
-    <div style={{ padding: '1rem' }}>
-      {[1, 2, 3, 4, 5].map(i => (
-        <div
-          key={i}
-          className="flex items-center gap-3"
-          style={{
-            padding: '0.75rem 0',
-            borderBottom: i < 5 ? '1px solid var(--color-border-subtle)' : 'none',
-          }}
-        >
-          <div className="flex-1 min-w-0">
-            <div className="animate-pulse" style={{ width: '10rem', height: '0.875rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem', marginBottom: '0.25rem' }} />
-            <div className="animate-pulse" style={{ width: '5rem', height: '0.75rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }} />
-          </div>
-          <div className="animate-pulse" style={{ width: '2.5rem', height: '0.875rem', background: 'var(--color-bg-tertiary)', borderRadius: '0.25rem' }} />
-          <div className="animate-pulse" style={{ width: '5rem', height: '1.25rem', background: 'var(--color-bg-tertiary)', borderRadius: '9999px' }} />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function EmptyState({ search }: { search: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center text-center" style={{ padding: '3rem 1rem' }}>
-      <div
-        className="flex items-center justify-center"
-        style={{
-          width: '3.5rem',
-          height: '3.5rem',
-          borderRadius: 'var(--radius-leaf)',
-          background: 'linear-gradient(135deg, var(--color-brand-light), var(--color-brand-dark))',
-          marginBottom: '0.75rem',
-        }}
-      >
-        <Star className="w-7 h-7 text-white" />
-      </div>
-      <h3 className="text-base font-semibold text-[var(--color-text)]" style={{ marginBottom: '0.25rem' }}>
-        No reviews found
-      </h3>
-      <p className="text-sm text-[var(--color-text-muted)]">
-        {search ? 'Try a different search term.' : 'Start outreach to collect client reviews and testimonials.'}
-      </p>
     </div>
   )
 }

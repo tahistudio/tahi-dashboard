@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * <CalculatorContent> — internal pricing helper UI.
+ * <CalculatorContent>. Internal pricing helper UI.
  *
  * Two-column layout:
  *   LEFT: input form (project type, scope, timeline, retainer, client)
@@ -17,6 +17,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft, Calculator as CalcIcon, Check, FileSignature, FileText, Calendar, Save } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
+import { TahiButton } from '@/components/tahi/tahi-button'
 import type { CalculationInputs, CalculationOutputs, ProjectType, RetainerPlan, ClientRelationship, Currency, ScopeCategory, ScopeLine, DeliveryMode } from '@/lib/calculator/types'
 
 interface SavedCalculation {
@@ -121,7 +122,7 @@ export function CalculatorContent({ dealId, orgId }: { dealId: string | null; or
 
   useEffect(() => { void fetchHistory() }, [fetchHistory])
 
-  // Compute on input blur — debounced 400ms so typing doesn't thrash
+  // Compute on input blur, debounced 400ms so typing doesn't thrash
   // the server.
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -344,7 +345,7 @@ export function CalculatorContent({ dealId, orgId }: { dealId: string | null; or
             </div>
           </Card>
 
-          {/* Timeline — duration ↔ launch date sync */}
+          {/* Timeline: duration <-> launch date sync */}
           <Card title="Timeline">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.625rem' }}>
               <Field label="Start date">
@@ -422,12 +423,12 @@ export function CalculatorContent({ dealId, orgId }: { dealId: string | null; or
                   onChange={e => patchClient({ complexityMultiplier: Number(e.target.value) })}
                   style={textInput}
                 >
-                  <option value="0.7">Simple — 0.7×</option>
-                  <option value="0.85">Light — 0.85×</option>
-                  <option value="1">Standard — 1.0×</option>
-                  <option value="1.15">Stretch — 1.15×</option>
-                  <option value="1.3">Complex — 1.3×</option>
-                  <option value="1.5">Very complex — 1.5×</option>
+                  <option value="0.7">Simple (0.7×)</option>
+                  <option value="0.85">Light (0.85×)</option>
+                  <option value="1">Standard (1.0×)</option>
+                  <option value="1.15">Stretch (1.15×)</option>
+                  <option value="1.3">Complex (1.3×)</option>
+                  <option value="1.5">Very complex (1.5×)</option>
                 </select>
               </Field>
               <Field label="Relationship">
@@ -616,26 +617,18 @@ function DraftActions({ calculationId }: { calculationId: string }) {
           { target: 'schedule' as const, label: 'Draft schedule', Icon: Calendar },
           { target: 'contract' as const, label: 'Draft contract', Icon: FileSignature },
         ]).map(({ target, label, Icon }) => (
-          <button
+          <TahiButton
             key={target}
+            variant="secondary"
+            size="sm"
+            loading={busy === target}
+            disabled={busy !== null && busy !== target}
             onClick={() => draft(target)}
-            disabled={busy !== null}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: '0.4375rem',
-              padding: '0.5rem 0.625rem',
-              fontSize: '0.8125rem', fontWeight: 600,
-              background: 'var(--color-bg-secondary)',
-              color: 'var(--color-text)',
-              border: '1px solid var(--color-border-subtle)',
-              borderRadius: 'var(--radius-sm)',
-              cursor: busy !== null ? 'wait' : 'pointer',
-              textAlign: 'left',
-              opacity: busy === target ? 0.6 : 1,
-            }}
+            iconLeft={<Icon size={13} aria-hidden="true" />}
+            style={{ justifyContent: 'flex-start', width: '100%' }}
           >
-            <Icon size={13} />
-            {busy === target ? `Drafting ${target}…` : label}
-          </button>
+            {busy === target ? `Drafting ${target}...` : label}
+          </TahiButton>
         ))}
       </div>
     </Card>
