@@ -12,6 +12,9 @@ import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { useToast } from '@/components/tahi/toast'
 import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
+import { Badge } from '@/components/tahi/badge'
+import { Card } from '@/components/tahi/card'
+import { Input } from '@/components/tahi/input'
 import { apiPath } from '@/lib/api'
 
 // -- Types --
@@ -257,25 +260,11 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
                               {integration.name}
                             </h3>
                             {isDisabled ? (
-                              <span
-                                className="text-xs px-2 py-0.5 rounded-full font-medium"
-                                style={{
-                                  background: 'var(--color-bg-tertiary)',
-                                  color: 'var(--color-text-subtle)',
-                                }}
-                              >
-                                Built-in
-                              </span>
+                              <Badge tone="neutral" size="sm">Built-in</Badge>
                             ) : (
-                              <span
-                                className="text-xs px-2 py-0.5 rounded-full font-medium"
-                                style={{
-                                  background: isConnected ? 'var(--color-success-bg)' : 'var(--color-bg-tertiary)',
-                                  color: isConnected ? 'var(--color-success)' : 'var(--color-text-muted)',
-                                }}
-                              >
+                              <Badge tone={isConnected ? 'positive' : 'neutral'} size="sm" dot>
                                 {isConnected ? 'Connected' : 'Not Connected'}
-                              </span>
+                              </Badge>
                             )}
                           </div>
                           <p className="text-xs mt-0.5" style={{ color: isDisabled ? 'var(--color-text-subtle)' : 'var(--color-text-muted)' }}>
@@ -392,7 +381,7 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
           {/* Task Templates (admin only) - T423 */}
           {isAdmin && <TaskTemplatesSection />}
 
-          {/* Pipeline Defaults (admin only) — default deal owner + nudge signature */}
+          {/* Pipeline Defaults (admin only): default deal owner + nudge signature */}
           {isAdmin && (
             <PipelineDefaultsSection
               settings={settings}
@@ -414,7 +403,7 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
                 <User className="w-5 h-5" aria-hidden="true" />
                 Team
               </h2>
-              <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+              <Card>
                 <p className="text-sm text-[var(--color-text)]">
                   Manage your team members and their access scoping rules.
                 </p>
@@ -425,7 +414,7 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
                 >
                   Go to Team Management
                 </a>
-              </div>
+              </Card>
             </section>
           )}
 
@@ -436,14 +425,14 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
                 <CreditCard className="w-5 h-5" aria-hidden="true" />
                 Billing
               </h2>
-              <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+              <Card>
                 <p className="text-sm text-[var(--color-text)] mb-1">
                   Manage your Stripe subscription and billing settings.
                 </p>
                 <p className="text-xs text-[var(--color-text-muted)]">
                   Connect Stripe in the Integrations section to enable subscription billing.
                 </p>
-              </div>
+              </Card>
             </section>
           )}
 
@@ -454,7 +443,7 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
                 <Building2 className="w-5 h-5" />
                 Account
               </h2>
-              <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+              <Card>
                 <div className="flex items-center gap-3">
                   <div
                     className="w-10 h-10 flex items-center justify-center text-white font-semibold text-sm"
@@ -470,7 +459,7 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
                     <p className="text-xs text-[var(--color-text-muted)]">Organisation workspace</p>
                   </div>
                 </div>
-              </div>
+              </Card>
             </section>
           )}
         </div>
@@ -1011,11 +1000,14 @@ const PRIORITY_OPTIONS = [
   { value: 'urgent', label: 'Urgent' },
 ]
 
-const PRIORITY_STYLES: Record<string, { bg: string; text: string }> = {
-  low:    { bg: 'var(--status-submitted-bg)', text: 'var(--status-submitted-text)' },
-  medium: { bg: 'var(--status-in-review-bg)', text: 'var(--status-in-review-text)' },
-  high:   { bg: 'var(--priority-high-bg)', text: 'var(--color-danger)' },
-  urgent: { bg: 'var(--priority-urgent-bg)', text: 'var(--priority-urgent-text)' },
+function priorityBadgeTone(p: string): 'info' | 'warning' | 'danger' | 'rose' | 'neutral' {
+  switch (p) {
+    case 'low':    return 'info'
+    case 'medium': return 'warning'
+    case 'high':   return 'danger'
+    case 'urgent': return 'rose'
+    default:       return 'neutral'
+  }
 }
 
 function TaskTemplatesSection() {
@@ -1125,24 +1117,13 @@ function TaskTemplatesSection() {
             Define reusable templates for tasks.
           </p>
           {!showForm && (
-            <button
+            <TahiButton
+              size="sm"
               onClick={() => { resetForm(); setShowForm(true) }}
-              className="inline-flex items-center gap-1.5 font-medium rounded-lg transition-colors"
-              style={{
-                padding: '0.375rem 0.75rem',
-                fontSize: '0.8125rem',
-                background: 'var(--color-brand)',
-                color: 'white',
-                border: 'none',
-                cursor: 'pointer',
-                minHeight: '2.25rem',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-dark)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-brand)' }}
+              iconLeft={<Plus className="w-3.5 h-3.5" />}
             >
-              <Plus className="w-3.5 h-3.5" />
               Add Template
-            </button>
+            </TahiButton>
           )}
         </div>
 
@@ -1256,39 +1237,12 @@ function TaskTemplatesSection() {
               />
             </div>
             <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={resetForm}
-                className="font-medium rounded-lg"
-                style={{
-                  padding: '0.375rem 0.75rem',
-                  fontSize: '0.8125rem',
-                  border: '1px solid var(--color-border)',
-                  background: 'var(--color-bg)',
-                  color: 'var(--color-text-muted)',
-                  cursor: 'pointer',
-                  minHeight: '2.25rem',
-                }}
-              >
+              <TahiButton type="button" variant="secondary" size="sm" onClick={resetForm}>
                 Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={saving || !formName.trim()}
-                className="font-medium rounded-lg"
-                style={{
-                  padding: '0.375rem 0.75rem',
-                  fontSize: '0.8125rem',
-                  background: 'var(--color-brand)',
-                  color: 'white',
-                  border: 'none',
-                  cursor: saving ? 'not-allowed' : 'pointer',
-                  opacity: saving || !formName.trim() ? 0.6 : 1,
-                  minHeight: '2.25rem',
-                }}
-              >
-                {saving ? 'Saving...' : editingId ? 'Update' : 'Create'}
-              </button>
+              </TahiButton>
+              <TahiButton type="submit" size="sm" disabled={saving || !formName.trim()} loading={saving}>
+                {editingId ? 'Update' : 'Create'}
+              </TahiButton>
             </div>
           </form>
         )}
@@ -1308,7 +1262,6 @@ function TaskTemplatesSection() {
           <div className="flex flex-col gap-2">
             {templates.map(t => {
               const typeLabel = TASK_TYPE_OPTIONS.find(o => o.value === t.type)?.label ?? t.type
-              const priStyle = PRIORITY_STYLES[t.defaultPriority ?? '']
               return (
                 <div
                   key={t.id}
@@ -1324,42 +1277,12 @@ function TaskTemplatesSection() {
                       <span className="font-medium truncate" style={{ fontSize: '0.875rem', color: 'var(--color-text)' }}>
                         {t.name}
                       </span>
-                      <span
-                        className="rounded-full font-medium"
-                        style={{
-                          padding: '0.0625rem 0.375rem',
-                          fontSize: '0.625rem',
-                          background: 'var(--color-bg-tertiary)',
-                          color: 'var(--color-text-subtle)',
-                        }}
-                      >
-                        {typeLabel}
-                      </span>
-                      {t.category && (
-                        <span
-                          className="rounded-full font-medium"
-                          style={{
-                            padding: '0.0625rem 0.375rem',
-                            fontSize: '0.625rem',
-                            background: 'var(--color-bg-tertiary)',
-                            color: 'var(--color-text-muted)',
-                          }}
-                        >
-                          {t.category}
-                        </span>
-                      )}
-                      {priStyle && (
-                        <span
-                          className="rounded-full font-medium"
-                          style={{
-                            padding: '0.0625rem 0.375rem',
-                            fontSize: '0.625rem',
-                            background: priStyle.bg,
-                            color: priStyle.text,
-                          }}
-                        >
+                      <Badge tone="neutral" size="sm">{typeLabel}</Badge>
+                      {t.category && <Badge tone="neutral" size="sm">{t.category}</Badge>}
+                      {t.defaultPriority && (
+                        <Badge tone={priorityBadgeTone(t.defaultPriority)} size="sm">
                           {t.defaultPriority}
-                        </span>
+                        </Badge>
                       )}
                     </div>
                     {t.description && (
@@ -1514,13 +1437,13 @@ function PipelineDefaultsSection({
           </label>
           <p className="text-xs text-[var(--color-text-muted)] mt-0.5 mb-3">
             Appended to every nudge email at send time. Format with the rich
-            text controls — links, lists, headings and emphasis all carry
-            through to the email.
+            text controls (links, lists, headings and emphasis all carry
+            through to the email).
           </p>
           <TiptapDocEditor
             content={signatureDraft}
             onChange={(html) => setSignatureDraft(html)}
-            placeholder="Liam Miller — Tahi Studio — tahi.studio"
+            placeholder="Liam Miller, Tahi Studio, tahi.studio"
           />
           <div className="flex items-center justify-end gap-2 mt-3">
             {signatureDirty && (
@@ -1542,7 +1465,7 @@ function PipelineDefaultsSection({
           </div>
         </div>
 
-        {/* Forecast horizon — drives "12-mo Total Pipeline" rollup, weighted
+        {/* Forecast horizon: drives "12-mo Total Pipeline" rollup, weighted
             forecast, and the recurring-portion contribution to deal value. */}
         <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
           <label htmlFor="forecast-horizon" className="block text-sm font-medium text-[var(--color-text)]">
@@ -2305,16 +2228,7 @@ function WebhooksSection() {
                   <p className="text-sm font-medium text-[var(--color-text)] truncate">{ep.url}</p>
                   <div className="flex flex-wrap gap-1 mt-2">
                     {ep.events.map(ev => (
-                      <span
-                        key={ev}
-                        className="text-xs px-2 py-0.5 rounded-full font-medium"
-                        style={{
-                          background: 'var(--color-bg-tertiary)',
-                          color: 'var(--color-text-muted)',
-                        }}
-                      >
-                        {ev}
-                      </span>
+                      <Badge key={ev} tone="neutral" size="sm">{ev}</Badge>
                     ))}
                   </div>
                   <p className="text-xs text-[var(--color-text-subtle)] mt-1">
@@ -2491,36 +2405,22 @@ function BrandingSection({
             Displayed in the client portal header.
           </p>
           <div className="flex items-center gap-2">
-            <input
+            <Input
               id="branding-name"
               type="text"
               value={portalName}
               onChange={e => setPortalName(e.target.value)}
               placeholder="Tahi Studio"
-              className="flex-1 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
-              style={{
-                padding: '0.5rem 0.75rem',
-                borderRadius: 'var(--radius-input)',
-                border: '1px solid var(--color-border)',
-                background: 'var(--color-bg)',
-                minHeight: '2.75rem',
-              }}
+              style={{ flex: 1 }}
             />
-            <button
+            <TahiButton
+              size="sm"
               onClick={() => onSave('portal_name', portalName)}
               disabled={savingKey === 'portal_name'}
-              className="px-3 py-2 text-sm font-medium text-white transition-colors"
-              style={{
-                background: 'var(--color-brand)',
-                borderRadius: 'var(--radius-button)',
-                border: 'none',
-                cursor: savingKey === 'portal_name' ? 'not-allowed' : 'pointer',
-                opacity: savingKey === 'portal_name' ? 0.7 : 1,
-                minHeight: '2.75rem',
-              }}
+              loading={savingKey === 'portal_name'}
             >
-              {savingKey === 'portal_name' ? 'Saving...' : 'Save'}
-            </button>
+              Save
+            </TahiButton>
           </div>
         </div>
 
@@ -2607,36 +2507,22 @@ function BrandingSection({
             Enter a URL to your logo image. Displayed in the portal header.
           </p>
           <div className="flex items-center gap-2">
-            <input
+            <Input
               id="branding-logo"
               type="url"
               value={logoUrl}
               onChange={e => setLogoUrl(e.target.value)}
               placeholder="https://example.com/logo.png"
-              className="flex-1 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
-              style={{
-                padding: '0.5rem 0.75rem',
-                borderRadius: 'var(--radius-input)',
-                border: '1px solid var(--color-border)',
-                background: 'var(--color-bg)',
-                minHeight: '2.75rem',
-              }}
+              style={{ flex: 1 }}
             />
-            <button
+            <TahiButton
+              size="sm"
               onClick={() => onSave('portal_logo_url', logoUrl)}
               disabled={savingKey === 'portal_logo_url'}
-              className="px-3 py-2 text-sm font-medium text-white transition-colors"
-              style={{
-                background: 'var(--color-brand)',
-                borderRadius: 'var(--radius-button)',
-                border: 'none',
-                cursor: savingKey === 'portal_logo_url' ? 'not-allowed' : 'pointer',
-                opacity: savingKey === 'portal_logo_url' ? 0.7 : 1,
-                minHeight: '2.75rem',
-              }}
+              loading={savingKey === 'portal_logo_url'}
             >
-              {savingKey === 'portal_logo_url' ? 'Saving...' : 'Save'}
-            </button>
+              Save
+            </TahiButton>
           </div>
           {logoUrl && (
             <div className="mt-3 flex items-center gap-3">
@@ -2661,36 +2547,22 @@ function BrandingSection({
             Favicon displayed when the user is in light mode.
           </p>
           <div className="flex items-center gap-2">
-            <input
+            <Input
               id="branding-favicon-light"
               type="url"
               value={faviconLightUrl}
               onChange={e => setFaviconLightUrl(e.target.value)}
               placeholder="/dashboard/favicon.png"
-              className="flex-1 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
-              style={{
-                padding: '0.5rem 0.75rem',
-                borderRadius: 'var(--radius-input)',
-                border: '1px solid var(--color-border)',
-                background: 'var(--color-bg)',
-                minHeight: '2.75rem',
-              }}
+              style={{ flex: 1 }}
             />
-            <button
+            <TahiButton
+              size="sm"
               onClick={() => onSave('favicon_light_url', faviconLightUrl)}
               disabled={savingKey === 'favicon_light_url'}
-              className="px-3 py-2 text-sm font-medium text-white transition-colors"
-              style={{
-                background: 'var(--color-brand)',
-                borderRadius: 'var(--radius-button)',
-                border: 'none',
-                cursor: savingKey === 'favicon_light_url' ? 'not-allowed' : 'pointer',
-                opacity: savingKey === 'favicon_light_url' ? 0.7 : 1,
-                minHeight: '2.75rem',
-              }}
+              loading={savingKey === 'favicon_light_url'}
             >
-              {savingKey === 'favicon_light_url' ? 'Saving...' : 'Save'}
-            </button>
+              Save
+            </TahiButton>
           </div>
           {faviconLightUrl && (
             <div className="mt-3 flex items-center gap-3">
@@ -2715,36 +2587,22 @@ function BrandingSection({
             Favicon displayed when the user is in dark mode.
           </p>
           <div className="flex items-center gap-2">
-            <input
+            <Input
               id="branding-favicon-dark"
               type="url"
               value={faviconDarkUrl}
               onChange={e => setFaviconDarkUrl(e.target.value)}
               placeholder="/dashboard/favicon.png"
-              className="flex-1 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
-              style={{
-                padding: '0.5rem 0.75rem',
-                borderRadius: 'var(--radius-input)',
-                border: '1px solid var(--color-border)',
-                background: 'var(--color-bg)',
-                minHeight: '2.75rem',
-              }}
+              style={{ flex: 1 }}
             />
-            <button
+            <TahiButton
+              size="sm"
               onClick={() => onSave('favicon_dark_url', faviconDarkUrl)}
               disabled={savingKey === 'favicon_dark_url'}
-              className="px-3 py-2 text-sm font-medium text-white transition-colors"
-              style={{
-                background: 'var(--color-brand)',
-                borderRadius: 'var(--radius-button)',
-                border: 'none',
-                cursor: savingKey === 'favicon_dark_url' ? 'not-allowed' : 'pointer',
-                opacity: savingKey === 'favicon_dark_url' ? 0.7 : 1,
-                minHeight: '2.75rem',
-              }}
+              loading={savingKey === 'favicon_dark_url'}
             >
-              {savingKey === 'favicon_dark_url' ? 'Saving...' : 'Save'}
-            </button>
+              Save
+            </TahiButton>
           </div>
           {faviconDarkUrl && (
             <div className="mt-3 flex items-center gap-3">

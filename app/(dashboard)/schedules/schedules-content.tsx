@@ -401,7 +401,7 @@ export function SchedulesContent() {
         </div>
       </PageHeader>
 
-      {/* Filter row — same FilterBar primitive used across Docs and the
+      {/* Filter row: same FilterBar primitive used across Docs and the
           DataTable showcase. Status is a permanent multiselect chip; the
           built-in search handles title / org / deal / preparedFor. */}
       <FilterBar
