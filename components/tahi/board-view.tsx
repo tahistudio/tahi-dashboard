@@ -804,6 +804,49 @@ function BoardTimeline({
     .filter((x): x is TimelineDatum => !!x)
     .sort((a, b) => (a.startTs ?? a.endTs) - (b.startTs ?? b.endTs))
 
+  // Domain. Always extend 30 days into the past and 60 into the
+  // future so the user can scroll to "what's coming" and "what just
+  // happened" even when the active dataset only spans a week.
+  const dayMs = 86_400_000
+  const tsValues = data.flatMap(d => d.startTs ? [d.startTs, d.endTs] : [d.endTs])
+  const dataMin = tsValues.length ? Math.min(...tsValues) : now
+  const dataMax = tsValues.length ? Math.max(...tsValues) : now
+  const start = Math.min(dataMin, now - 30 * dayMs)
+  const end = Math.max(dataMax, now + 60 * dayMs)
+  const span = Math.max(dayMs, end - start)
+  const days = Math.ceil(span / dayMs)
+  const pct = (ts: number) => ((ts - start) / span) * 100
+  const todayPct = pct(now)
+
+  // 30 px per day. Capped to a sensible minimum so a very short
+  // dataset still fills the container instead of squashing into a
+  // sliver. Anything wider scrolls horizontally.
+  const labelWidthPx = 192   // 12rem
+  const pxPerDay = 30
+  const chartWidth = Math.max(720, days * pxPerDay)
+
+  // One tick roughly every 120 px so we never crowd or thin out.
+  const tickCount = Math.max(6, Math.round(chartWidth / 120))
+  const ticks = Array.from({ length: tickCount }, (_, i) => {
+    const t = start + (span * i) / (tickCount - 1)
+    return { ratio: i / (tickCount - 1), label: formatTickDate(new Date(t)) }
+  })
+
+  const rowHeight = 36
+
+  // Auto-scroll to "today" on mount so the present sits ~30% from
+  // the left of the visible area. Hooks live above the empty-state
+  // early return to respect React's rules-of-hooks ordering.
+  const scrollRef = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const todayPx = labelWidthPx + (todayPct / 100) * chartWidth
+    el.scrollLeft = Math.max(0, todayPx - el.clientWidth * 0.3)
+    // Only on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   if (data.length === 0) {
     return (
       <div
@@ -822,27 +865,13 @@ function BoardTimeline({
     )
   }
 
-  // Domain spans the earliest start (or dueDate) → latest dueDate,
-  // padded so the bars don't kiss the axis edges and today fits in.
-  const tsValues = data.flatMap(d => d.startTs ? [d.startTs, d.endTs] : [d.endTs])
-  const minTs = Math.min(...tsValues, now)
-  const maxTs = Math.max(...tsValues, now)
-  const padMs = Math.max(5 * 86_400_000, (maxTs - minTs) * 0.06)
-  const start = minTs - padMs
-  const end = maxTs + padMs
-  const span = Math.max(1, end - start)
-  const pct = (ts: number) => ((ts - start) / span) * 100
-  const todayPct = pct(now)
-
-  // Six evenly spaced ticks across the range.
-  const tickCount = 6
-  const ticks = Array.from({ length: tickCount }, (_, i) => {
-    const t = start + (span * i) / (tickCount - 1)
-    return { ratio: i / (tickCount - 1), label: formatTickDate(new Date(t)) }
-  })
-
-  const labelWidth = '12rem'
-  const rowHeight = 36
+  // Quick jump back to today after the user scrolls away.
+  const scrollToToday = () => {
+    const el = scrollRef.current
+    if (!el) return
+    const todayPx = labelWidthPx + (todayPct / 100) * chartWidth
+    el.scrollTo({ left: Math.max(0, todayPx - el.clientWidth * 0.3), behavior: 'smooth' })
+  }
 
   return (
     <div
@@ -851,12 +880,11 @@ function BoardTimeline({
         border: '1px solid var(--color-border-subtle)',
         borderRadius: 'var(--radius-md)',
         padding: '0.875rem',
-        overflowX: 'auto',
+        position: 'relative',
       }}
     >
-      {/* Legend. Shows every column with its own colour (same dots
-          you see at the top of each kanban column) plus an Overdue
-          swatch for items the timeline has flagged red. */}
+      {/* Legend + Today jump. Legend lists every column with its dot
+          colour (matching the kanban) plus Overdue red. */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -875,52 +903,96 @@ function BoardTimeline({
           />
         ))}
         <LegendSwatch color={OVERDUE_COLOR} label="Overdue" />
+        <div style={{ flex: 1 }} />
+        <button
+          type="button"
+          onClick={scrollToToday}
+          className="tahi-focus-ring"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.25rem',
+            padding: '0.1875rem 0.5rem',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.6875rem',
+            fontWeight: 600,
+            color: 'var(--color-text)',
+            cursor: 'pointer',
+            transition: 'background-color 120ms ease',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
+        >
+          <Calendar size={11} aria-hidden="true" />
+          Today
+        </button>
       </div>
 
-      {/* Header: axis ticks aligned with the bar track */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: `${labelWidth} 1fr`,
-        gap: '0.625rem',
-        alignItems: 'center',
-        marginBottom: '0.4375rem',
-      }}>
-        <div />
-        <div style={{ position: 'relative', height: '1rem' }}>
-          {ticks.map((tk, i) => (
-            <span
-              key={i}
-              style={{
-                position: 'absolute',
-                left: `${tk.ratio * 100}%`,
-                transform: 'translateX(-50%)',
-                fontSize: '0.625rem',
-                fontWeight: 600,
-                color: 'var(--color-text-subtle)',
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase',
-              }}
-            >
-              {tk.label}
-            </span>
-          ))}
+      {/* Horizontally scrollable chart. Labels are sticky-left so the
+          row context stays visible while the date axis scrolls. */}
+      <div
+        ref={scrollRef}
+        style={{
+          overflowX: 'auto',
+          overflowY: 'hidden',
+        }}
+      >
+        <div style={{ width: labelWidthPx + chartWidth, position: 'relative' }}>
+          {/* Axis row */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            height: '1.25rem',
+            marginBottom: '0.4375rem',
+          }}>
+            <div style={{
+              width: labelWidthPx,
+              position: 'sticky',
+              left: 0,
+              zIndex: 2,
+              background: 'var(--color-bg)',
+              height: '100%',
+            }} />
+            <div style={{ position: 'relative', flex: 1, height: '100%' }}>
+              {ticks.map((tk, i) => (
+                <span
+                  key={i}
+                  style={{
+                    position: 'absolute',
+                    left: `${tk.ratio * 100}%`,
+                    transform: 'translateX(-50%)',
+                    fontSize: '0.625rem',
+                    fontWeight: 600,
+                    color: 'var(--color-text-subtle)',
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {tk.label}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Rows */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            {data.map(d => (
+              <TimelineRow
+                key={d.item.id}
+                datum={d}
+                pct={pct}
+                todayPct={todayPct}
+                labelWidthPx={labelWidthPx}
+                rowHeight={rowHeight}
+                ticks={ticks}
+                onClick={onItemClick}
+              />
+            ))}
+          </div>
         </div>
-      </div>
-
-      {/* Rows */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-        {data.map(d => (
-          <TimelineRow
-            key={d.item.id}
-            datum={d}
-            pct={pct}
-            todayPct={todayPct}
-            labelWidth={labelWidth}
-            rowHeight={rowHeight}
-            ticks={ticks}
-            onClick={onItemClick}
-          />
-        ))}
       </div>
     </div>
   )
@@ -930,7 +1002,7 @@ function TimelineRow({
   datum,
   pct,
   todayPct,
-  labelWidth,
+  labelWidthPx,
   rowHeight,
   ticks,
   onClick,
@@ -938,7 +1010,7 @@ function TimelineRow({
   datum: TimelineDatum
   pct: (ts: number) => number
   todayPct: number
-  labelWidth: string
+  labelWidthPx: number
   rowHeight: number
   ticks: Array<{ ratio: number; label: string }>
   onClick?: (item: BoardItem) => void
@@ -973,25 +1045,34 @@ function TimelineRow({
         }
       }}
       style={{
-        display: 'grid',
-        gridTemplateColumns: `${labelWidth} 1fr`,
-        gap: '0.625rem',
+        display: 'flex',
         alignItems: 'center',
         height: rowHeight,
         cursor: onClick ? 'pointer' : 'default',
-        borderRadius: 'var(--radius-sm)',
         transition: 'background-color 120ms ease',
       }}
-      onMouseEnter={e => { if (onClick) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
     >
-      {/* Label */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.3125rem',
-        minWidth: 0,
-      }}>
+      {/* Label — sticky to the left edge of the scroll viewport so
+          users always see what row they're looking at while
+          scrolling the date axis. */}
+      <div
+        style={{
+          width: labelWidthPx,
+          flexShrink: 0,
+          position: 'sticky',
+          left: 0,
+          zIndex: 1,
+          background: 'var(--color-bg)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.3125rem',
+          minWidth: 0,
+          height: '100%',
+          paddingRight: '0.625rem',
+          borderTopLeftRadius: 'var(--radius-sm)',
+          borderBottomLeftRadius: 'var(--radius-sm)',
+        }}
+      >
         <span
           aria-hidden="true"
           style={{
@@ -1017,6 +1098,7 @@ function TimelineRow({
       {/* Track */}
       <div style={{
         position: 'relative',
+        flex: 1,
         height: '100%',
       }}>
         {/* Tick guide lines */}
