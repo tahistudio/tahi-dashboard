@@ -570,7 +570,9 @@ function LeadForm({
         />
       </Field>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: '0.75rem' }}>
+      {/* All 2-col rows stack on mobile (<640px) and use proportions
+          on desktop. Tailwind sm: breakpoint = 640px. */}
+      <div className="grid gap-3 grid-cols-1 sm:[grid-template-columns:minmax(0,1.5fr)_minmax(0,1fr)]">
         <Field label="Email">
           <Input
             value={draft.email ?? ''}
@@ -591,7 +593,7 @@ function LeadForm({
         </Field>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: '0.75rem' }}>
+      <div className="grid gap-3 grid-cols-1 sm:[grid-template-columns:minmax(0,1.5fr)_minmax(0,1fr)]">
         <Field label="Company">
           <Input
             value={draft.company ?? ''}
@@ -621,7 +623,7 @@ function LeadForm({
         />
       </Field>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.4fr)', gap: '0.75rem' }}>
+      <div className="grid gap-3 grid-cols-1 sm:[grid-template-columns:minmax(0,1fr)_minmax(0,1.4fr)]">
         <Field label="Source">
           <select
             value={draft.source ?? 'manual'}
@@ -641,7 +643,7 @@ function LeadForm({
         </Field>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) 6.5rem', gap: '0.75rem' }}>
+      <div className="grid gap-3 grid-cols-1 sm:[grid-template-columns:minmax(0,2fr)_6.5rem]">
         <Field label="Estimated value">
           <Input
             type="number"
