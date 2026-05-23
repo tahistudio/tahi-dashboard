@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   UserPlus, Plus, Clock, RefreshCw, Save, Trash2, ArrowUpRight,
   Mail, Phone, Building2, Globe, Tag, User, Edit3,
-  Sparkles, ExternalLink, MessageCircleQuestion,
+  Sparkles, ExternalLink, ChevronDown,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { EmptyState } from '@/components/tahi/empty-state'
@@ -1090,11 +1090,7 @@ function AiSection({
         </p>
       )}
 
-      {lead.aiSummary && (
-        <div style={{ fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-          {lead.aiSummary}
-        </div>
-      )}
+      {lead.aiSummary && <BriefingSummary raw={lead.aiSummary} />}
 
       {Object.keys(aiSignals).length > 0 && (
         <div>
@@ -1132,64 +1128,31 @@ function AiSection({
         </div>
       )}
 
-      {aiSources.length > 0 && (
-        <div>
-          <SectionLabel>Sources</SectionLabel>
-          <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            {aiSources.map((src, i) => (
-              <li key={i}>
-                <a
-                  href={src}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.3125rem',
-                    color: 'var(--color-text-active)',
-                    fontSize: '0.75rem',
-                    textDecoration: 'underline',
-                    textDecorationStyle: 'dotted',
-                    textDecorationColor: 'var(--color-brand-100)',
-                    textUnderlineOffset: '0.1875rem',
-                    wordBreak: 'break-all',
-                  }}
-                >
-                  <ExternalLink size={11} aria-hidden="true" />
-                  {src}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {aiSources.length > 0 && <SourcesToggle sources={aiSources} />}
 
-      {(discoveryTemplate.length > 0 || aiQuestions.length > 0) && (
+      {discoveryTemplate.length > 0 && (
         <div>
-          <SectionLabel>Discovery call</SectionLabel>
-          <ol style={{ margin: 0, paddingLeft: '1.125rem', display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+          <SectionLabel>Always ask</SectionLabel>
+          <ol style={{ margin: 0, paddingLeft: '1.125rem', display: 'flex', flexDirection: 'column', gap: '0.4375rem' }}>
             {discoveryTemplate.map((q, i) => (
               <li key={`t-${i}`} style={{ fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.5 }}>
                 {q}
-                <span style={{
-                  marginLeft: '0.4375rem',
-                  fontSize: '0.625rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  color: 'var(--color-text-subtle)',
-                  fontWeight: 600,
-                }}>
-                  Always
-                </span>
               </li>
             ))}
+          </ol>
+        </div>
+      )}
+
+      {aiQuestions.length > 0 && (
+        <div>
+          <SectionLabel>For this lead</SectionLabel>
+          <ol style={{ margin: 0, paddingLeft: '1.125rem', display: 'flex', flexDirection: 'column', gap: '0.4375rem' }}>
             {aiQuestions.map((q, i) => (
               <li key={`q-${i}`} style={{
                 fontSize: '0.8125rem',
                 color: 'var(--color-text)',
                 lineHeight: 1.5,
               }}>
-                <MessageCircleQuestion size={12} aria-hidden="true" style={{ display: 'inline', marginRight: '0.25rem', verticalAlign: '-2px', color: 'var(--color-brand)' }} />
                 {q}
               </li>
             ))}
@@ -1244,6 +1207,126 @@ function safeJsonObject<T extends object>(raw: string | null | undefined): T {
   } catch {
     return {} as T
   }
+}
+
+/** Renders the structured 3-section briefing (snapshot / fit / watch-outs).
+ *  Falls back to plain text if the stored value is a legacy summary
+ *  blob rather than the JSON shape. */
+function BriefingSummary({ raw }: { raw: string }) {
+  let parsed: { snapshot?: string; fit?: string; watchOuts?: string } | null = null
+  try {
+    const obj = JSON.parse(raw)
+    if (obj && typeof obj === 'object' && (obj.snapshot || obj.fit || obj.watchOuts)) {
+      parsed = obj
+    }
+  } catch {
+    // not JSON — legacy plain summary
+  }
+
+  if (!parsed) {
+    return (
+      <div style={{ fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+        {raw}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+      {parsed.snapshot && <BriefingBlock label="Snapshot" body={parsed.snapshot} />}
+      {parsed.fit && <BriefingBlock label="Why they might fit" body={parsed.fit} />}
+      {parsed.watchOuts && <BriefingBlock label="Watch-outs" body={parsed.watchOuts} />}
+    </div>
+  )
+}
+
+function BriefingBlock({ label, body }: { label: string; body: string }) {
+  return (
+    <div>
+      <div style={{
+        fontSize: '0.625rem',
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        color: 'var(--color-text-subtle)',
+        marginBottom: '0.25rem',
+      }}>{label}</div>
+      <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.55 }}>{body}</p>
+    </div>
+  )
+}
+
+/** Sources collapsed by default. Click the header to expand the URL list.
+ *  Mirrors a native <details>/<summary> but styled to match the rest of
+ *  the AI card. */
+function SourcesToggle({ sources }: { sources: string[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.375rem',
+          padding: '0.25rem 0.4375rem',
+          margin: '-0.25rem -0.4375rem',
+          background: 'transparent',
+          border: 'none',
+          borderRadius: 'var(--radius-sm)',
+          cursor: 'pointer',
+          fontSize: '0.625rem',
+          fontWeight: 600,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          color: 'var(--color-text-subtle)',
+          transition: 'background-color 120ms ease',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+      >
+        Sources ({sources.length})
+        <ChevronDown
+          size={11}
+          aria-hidden="true"
+          style={{
+            transition: 'transform 200ms ease',
+            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+          }}
+        />
+      </button>
+      {open && (
+        <ul style={{ margin: '0.375rem 0 0', padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          {sources.map((src, i) => (
+            <li key={i}>
+              <a
+                href={src}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.3125rem',
+                  color: 'var(--color-text-active)',
+                  fontSize: '0.75rem',
+                  textDecoration: 'underline',
+                  textDecorationStyle: 'dotted',
+                  textDecorationColor: 'var(--color-brand-100)',
+                  textUnderlineOffset: '0.1875rem',
+                  wordBreak: 'break-all',
+                }}
+              >
+                <ExternalLink size={11} aria-hidden="true" />
+                {src}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 function SignalRow({ label, value, source }: { label: string; value: string; source?: string }) {

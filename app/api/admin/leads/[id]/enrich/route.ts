@@ -52,9 +52,15 @@ OUTPUT FORMAT (strict — the response is parsed by regex):
 
 <score>0-100</score>
 <score_reason>One concise line (under 20 words) explaining the score. Mention urgency signals, fit, or risk.</score_reason>
-<summary>
-A 2-3 paragraph plain-English briefing covering: what the company does, who they sell to, recent signals (funding, hires, launches, news), how Tahi's services could plausibly fit. Write like a colleague briefing another colleague before a call. Conversational, specific, no filler.
-</summary>
+<snapshot>
+2-3 SHORT sentences. Who they are, what they do, who they sell to. Scannable in 10 seconds. No filler.
+</snapshot>
+<fit>
+2-3 SHORT sentences. Why this lead might need Tahi specifically. Reference real signals (recent hires, tech stack gaps, scaling moments, etc). If fit is weak, say so plainly.
+</fit>
+<watch_outs>
+1-2 SHORT sentences. Risks, urgency mismatches, geography or fit concerns, budget question marks. If nothing concerning, write "None obvious."
+</watch_outs>
 <signals>
 Structured deal-sizing signals. Every populated field MUST have a matching <field>_source URL or be omitted. If you cannot verify a field, OMIT it — do not guess. Use plain text content inside each tag (no formatting).
 
@@ -162,6 +168,7 @@ interface AiSignals {
 interface ParsedFull {
   score: number | null
   scoreReason: string | null
+  /** Compiled into a single JSON string for aiSummary storage: { snapshot, fit, watchOuts }. */
   summary: string | null
   sources: string[]
   questions: string[]
@@ -171,7 +178,15 @@ interface ParsedFull {
 function parseFullResponse(text: string): ParsedFull {
   const score = matchInt(text, /<score>\s*(\d{1,3})\s*<\/score>/i)
   const scoreReason = matchText(text, /<score_reason>([\s\S]*?)<\/score_reason>/i)
-  const summary = matchText(text, /<summary>([\s\S]*?)<\/summary>/i)
+  const snapshot = matchText(text, /<snapshot>([\s\S]*?)<\/snapshot>/i)?.trim() ?? null
+  const fit = matchText(text, /<fit>([\s\S]*?)<\/fit>/i)?.trim() ?? null
+  const watchOuts = matchText(text, /<watch_outs>([\s\S]*?)<\/watch_outs>/i)?.trim() ?? null
+  // Stored as JSON so the UI can render each section separately. We
+  // also keep backwards compatibility: if a legacy <summary> block is
+  // present, fall through to it.
+  const summary = (snapshot || fit || watchOuts)
+    ? JSON.stringify({ snapshot, fit, watchOuts })
+    : (matchText(text, /<summary>([\s\S]*?)<\/summary>/i)?.trim() ?? null)
 
   const sourcesBlock = matchText(text, /<sources>([\s\S]*?)<\/sources>/i) ?? ''
   const sources = Array.from(sourcesBlock.matchAll(/<url>\s*([^<\s][^<]*?)\s*<\/url>/gi))
