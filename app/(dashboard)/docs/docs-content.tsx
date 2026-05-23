@@ -7,11 +7,12 @@ import {
   Trash2, History, RefreshCw, FileText, Edit3,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
-import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { Input } from '@/components/tahi/input'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
+import { Badge, type BadgeTone } from '@/components/tahi/badge'
+import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
 import dynamic from 'next/dynamic'
 const TiptapDocEditor = dynamic(
   () => import('@/components/tahi/tiptap-doc-editor').then(m => ({ default: m.TiptapDocEditor })),
@@ -25,7 +26,7 @@ import { formatDistanceToNow } from 'date-fns'
 interface DocPage {
   id: string
   parentId: string | null
-  category: string
+  category: string  // comma-separated list of category values
   title: string
   slug: string
   contentTiptap: string | null
@@ -46,22 +47,39 @@ interface DocVersion {
 interface DocCategory {
   value: string
   label: string
-  color: string  // dot colour for the chip
+  tone: BadgeTone
 }
 
 const CATEGORIES: DocCategory[] = [
-  { value: 'brand',      label: 'Brand',      color: '#5A824E' },
-  { value: 'services',   label: 'Services',   color: '#06b6d4' },
-  { value: 'sales',      label: 'Sales',      color: '#f59e0b' },
-  { value: 'operations', label: 'Operations', color: '#7c3aed' },
-  { value: 'team',       label: 'Team',       color: '#0f766e' },
-  { value: 'product',    label: 'Product',    color: '#d97706' },
+  { value: 'brand',      label: 'Brand',      tone: 'brand'    },
+  { value: 'services',   label: 'Services',   tone: 'teal'     },
+  { value: 'sales',      label: 'Sales',      tone: 'warning'  },
+  { value: 'operations', label: 'Operations', tone: 'purple'   },
+  { value: 'team',       label: 'Team',       tone: 'info'     },
+  { value: 'product',    label: 'Product',    tone: 'rose'     },
 ]
 
 const CATEGORY_BY_VALUE = new Map(CATEGORIES.map(c => [c.value, c]))
 
-// Lightweight markdown to HTML for legacy doc rendering. Same parser
-// as before; just kept inline so the rest of the file stays focused.
+// Categories are stored in the existing single text column as a
+// comma-separated list ("brand,sales"). Legacy single-value rows
+// ("brand") stay valid — splitting still returns one item. Empty
+// or whitespace-only strings yield an empty array.
+function parseCats(s: string | null | undefined): string[] {
+  if (!s) return []
+  return s.split(',').map(t => t.trim()).filter(Boolean)
+}
+function joinCats(cats: string[]): string {
+  return cats.join(',')
+}
+
+// Decide whether a given content string is HTML or markdown. Tiptap
+// saves HTML; older imports stored markdown. Render and edit paths
+// branch on this so legacy docs don't show raw markdown source.
+function looksLikeHtml(s: string): boolean {
+  return /^\s*<[a-z]/i.test(s)
+}
+
 function renderMarkdown(md: string): string {
   const escaped = md
     .replace(/&/g, '&amp;')
@@ -146,17 +164,15 @@ export function DocsContent() {
   const [pages, setPages] = useState<DocPage[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  // Multi-select category filter. Empty set = all categories visible.
+  // Multi-select category filter. Empty = no filter.
   const [activeCategories, setActiveCategories] = useState<Set<string>>(new Set())
 
-  // Slide-over state. selectedPage drives view mode; editing toggles
-  // the inline editor inside the same slide-over.
   const [selectedPage, setSelectedPage] = useState<DocPage | null>(null)
   const [versions, setVersions] = useState<DocVersion[]>([])
   const [editing, setEditing] = useState(false)
   const [editTitle, setEditTitle] = useState('')
   const [editContent, setEditContent] = useState('')
-  const [editCategory, setEditCategory] = useState('operations')
+  const [editCategories, setEditCategories] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [showNewForm, setShowNewForm] = useState(false)
   const [showVersions, setShowVersions] = useState(false)
@@ -210,14 +226,19 @@ export function DocsContent() {
       return next
     })
   }
-  const clearCategories = () => setActiveCategories(new Set())
+  const clearFilters = () => {
+    setActiveCategories(new Set())
+    setSearch('')
+  }
 
-  // Client-side filter so multi-cat + search both work without
-  // round-tripping. Searches title AND content text.
   const filteredPages = useMemo(() => {
     const q = search.trim().toLowerCase()
     return pages.filter(p => {
-      if (activeCategories.size > 0 && !activeCategories.has(p.category)) return false
+      const cats = parseCats(p.category)
+      if (activeCategories.size > 0) {
+        // Item must carry AT LEAST ONE of the active categories.
+        if (!cats.some(c => activeCategories.has(c))) return false
+      }
       if (q) {
         const inTitle = p.title.toLowerCase().includes(q)
         const inBody = (p.contentText ?? '').toLowerCase().includes(q)
@@ -230,11 +251,13 @@ export function DocsContent() {
   const startEdit = (page: DocPage) => {
     setSelectedPage(page)
     setEditTitle(page.title)
-    // BUG FIX: contentTiptap is always null (the API stores everything
-    // in contentText as HTML emitted by TiptapDocEditor). Previously
-    // we only read contentTiptap, so clicking Edit blanked the doc.
-    setEditContent(page.contentText ?? page.contentTiptap ?? '')
-    setEditCategory(page.category)
+    // contentTiptap is always null (the API stores HTML in contentText).
+    // For legacy markdown docs, convert to HTML so Tiptap renders the
+    // formatting rather than raw markdown source.
+    const raw = page.contentText ?? page.contentTiptap ?? ''
+    const html = !raw ? '' : looksLikeHtml(raw) ? raw : renderMarkdown(raw)
+    setEditContent(html)
+    setEditCategories(parseCats(page.category))
     setEditing(true)
     if (!selectedPage || selectedPage.id !== page.id) void loadPage(page.id)
   }
@@ -243,7 +266,7 @@ export function DocsContent() {
     setSelectedPage(null)
     setEditTitle('')
     setEditContent('')
-    setEditCategory('operations')
+    setEditCategories([])
     setShowNewForm(true)
   }
 
@@ -256,7 +279,7 @@ export function DocsContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: editTitle.trim(),
-          category: editCategory,
+          category: joinCats(editCategories) || 'operations',
           contentMd: editContent,
         }),
       })
@@ -265,6 +288,7 @@ export function DocsContent() {
       setShowNewForm(false)
       setEditTitle('')
       setEditContent('')
+      setEditCategories([])
       await fetchPages()
       await loadPage(data.id)
     } finally {
@@ -282,7 +306,7 @@ export function DocsContent() {
         body: JSON.stringify({
           title: editTitle.trim() || undefined,
           contentMd: editContent,
-          category: editCategory,
+          category: joinCats(editCategories) || 'operations',
         }),
       })
       await loadPage(selectedPage.id)
@@ -306,6 +330,80 @@ export function DocsContent() {
   }
 
   const filtersActive = activeCategories.size > 0 || search.trim().length > 0
+
+  // Column defs for the DataTable. Sortable headers do their own
+  // sorting through DataTable's internal state.
+  const columns: DataTableColumn<DocPage>[] = [
+    {
+      key: 'title',
+      header: 'Title',
+      sortable: true,
+      sortValue: r => r.title.toLowerCase(),
+      minWidth: '20rem',
+      render: r => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+          <FileText size={14} aria-hidden="true" style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
+          <span style={{
+            fontWeight: 600,
+            color: 'var(--color-text)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>{r.title}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'categories',
+      header: 'Categories',
+      sortable: true,
+      sortValue: r => parseCats(r.category).join(','),
+      minWidth: '14rem',
+      render: r => {
+        const cats = parseCats(r.category)
+        if (cats.length === 0) {
+          return <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.6875rem' }}>—</span>
+        }
+        return (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+            {cats.map(c => {
+              const def = CATEGORY_BY_VALUE.get(c)
+              return (
+                <Badge
+                  key={c}
+                  tone={def?.tone ?? 'neutral'}
+                  variant="soft"
+                  size="sm"
+                  dot={false}
+                >
+                  {def?.label ?? c}
+                </Badge>
+              )
+            })}
+          </div>
+        )
+      },
+    },
+    {
+      key: 'updatedAt',
+      header: 'Updated',
+      sortable: true,
+      sortValue: r => r.updatedAt,
+      width: '11rem',
+      render: r => (
+        <span style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.3125rem',
+          fontSize: '0.75rem',
+          color: 'var(--color-text-muted)',
+        }}>
+          <Clock size={11} aria-hidden="true" />
+          {formatDistanceToNow(new Date(r.updatedAt), { addSuffix: true })}
+        </span>
+      ),
+    },
+  ]
 
   return (
     <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
@@ -337,123 +435,101 @@ export function DocsContent() {
         </TahiButton>
       </div>
 
-      {/* Filter row: search + category chips */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search title or content..."
-            inputSize="sm"
-            leadingIcon={<Search size={13} aria-hidden="true" />}
-            style={{ flex: '0 1 22rem', minWidth: '14rem' }}
-          />
-          {filtersActive && (
-            <button
-              type="button"
-              onClick={() => { clearCategories(); setSearch('') }}
-              className="tahi-focus-ring"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                padding: '0.25rem 0.5rem',
-                fontSize: '0.6875rem',
-                fontWeight: 600,
-                color: 'var(--color-text-muted)',
-                cursor: 'pointer',
-                borderRadius: 'var(--radius-sm)',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text)' }}
-              onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+      {/* Filter row */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem' }}>
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search title or content..."
+          inputSize="sm"
+          leadingIcon={<Search size={13} aria-hidden="true" />}
+          style={{ flex: '0 1 22rem', minWidth: '14rem' }}
+        />
+        <span style={{
+          fontSize: '0.625rem',
+          fontWeight: 600,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          color: 'var(--color-text-subtle)',
+          marginLeft: '0.25rem',
+        }}>Categories</span>
+        {CATEGORIES.map(cat => {
+          const active = activeCategories.has(cat.value)
+          return (
+            <Badge
+              key={cat.value}
+              tone={cat.tone}
+              variant={active ? 'solid' : 'outline'}
+              size="sm"
+              dot={false}
+              onClick={() => toggleCategory(cat.value)}
             >
-              Clear filters
-            </button>
-          )}
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3125rem', alignItems: 'center' }}>
-          <span style={{
-            fontSize: '0.625rem',
-            fontWeight: 600,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            color: 'var(--color-text-subtle)',
-            marginRight: '0.1875rem',
-          }}>Categories</span>
-          {CATEGORIES.map(cat => {
-            const active = activeCategories.has(cat.value)
-            return (
-              <button
-                key={cat.value}
-                type="button"
-                onClick={() => toggleCategory(cat.value)}
-                aria-pressed={active}
-                className="tahi-focus-ring"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.3125rem',
-                  padding: '0.1875rem 0.5rem',
-                  background: active ? 'var(--color-brand-50)' : 'var(--color-bg)',
-                  border: `1px solid ${active ? 'var(--color-brand)' : 'var(--color-border)'}`,
-                  borderRadius: 999,
-                  fontSize: '0.6875rem',
-                  fontWeight: 600,
-                  color: active ? 'var(--color-text-active)' : 'var(--color-text-muted)',
-                  cursor: 'pointer',
-                  transition: 'background-color 120ms ease, border-color 120ms ease',
-                }}
-              >
-                <span
-                  aria-hidden="true"
-                  style={{
-                    width: '0.375rem',
-                    height: '0.375rem',
-                    borderRadius: 999,
-                    background: cat.color,
-                  }}
-                />
-                {cat.label}
-              </button>
-            )
-          })}
-        </div>
+              {cat.label}
+            </Badge>
+          )
+        })}
+        {filtersActive && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="tahi-focus-ring"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              padding: '0.25rem 0.5rem',
+              fontSize: '0.6875rem',
+              fontWeight: 600,
+              color: 'var(--color-text-muted)',
+              cursor: 'pointer',
+              borderRadius: 'var(--radius-sm)',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
       {/* Table */}
-      {loading ? (
-        <DocsTableSkeleton />
-      ) : filteredPages.length === 0 ? (
-        <EmptyState
-          icon={<BookOpen className="w-6 h-6" />}
-          title={pages.length === 0 ? 'No docs yet' : 'No matches'}
-          description={pages.length === 0
-            ? 'Create your first page to start building the team knowledge base.'
-            : 'Try clearing a filter or adjusting your search.'}
-          action={
-            pages.length === 0 ? (
-              <TahiButton size="sm" onClick={handleNew} iconLeft={<Plus className="w-3.5 h-3.5" />}>
-                New page
-              </TahiButton>
-            ) : undefined
-          }
-        />
-      ) : (
-        <DocsTable
-          pages={filteredPages}
-          onRowClick={(p) => loadPage(p.id)}
-          onEdit={(p) => startEdit(p)}
-          onDelete={(p) => setPendingDelete(p)}
-        />
-      )}
+      <DataTable<DocPage>
+        ariaLabel="Docs"
+        columns={columns}
+        rows={filteredPages}
+        getRowId={r => r.id}
+        defaultSort={{ key: 'updatedAt', dir: 'desc' }}
+        loading={loading}
+        empty={
+          <EmptyState
+            icon={<BookOpen className="w-6 h-6" />}
+            title={pages.length === 0 ? 'No docs yet' : 'No matches'}
+            description={pages.length === 0
+              ? 'Create your first page to start building the team knowledge base.'
+              : 'Try clearing a filter or adjusting your search.'}
+            action={
+              pages.length === 0 ? (
+                <TahiButton size="sm" onClick={handleNew} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+                  New page
+                </TahiButton>
+              ) : undefined
+            }
+          />
+        }
+        onRowPreview={(r) => loadPage(r.id)}
+        rowActions={(r) => [
+          { label: 'Edit', icon: <Edit3 size={14} />, onClick: () => startEdit(r) },
+          { label: 'Delete', icon: <Trash2 size={14} />, tone: 'danger', onClick: () => setPendingDelete(r) },
+        ]}
+      />
 
-      {/* Slide-over: view + edit modes */}
+      {/* View / inline-edit slide-over */}
       <SlideOver
         open={!!selectedPage && !showNewForm}
         onClose={() => { setSelectedPage(null); setEditing(false) }}
         icon={<FileText size={15} />}
         title={editing ? (editTitle || 'Untitled') : (selectedPage?.title ?? '')}
         subtitle={selectedPage && !editing
-          ? `${CATEGORY_BY_VALUE.get(selectedPage.category)?.label ?? selectedPage.category} · Updated ${formatDistanceToNow(new Date(selectedPage.updatedAt), { addSuffix: true })}`
+          ? `Updated ${formatDistanceToNow(new Date(selectedPage.updatedAt), { addSuffix: true })}`
           : undefined}
         maxWidth="40rem"
       >
@@ -461,27 +537,32 @@ export function DocsContent() {
           <>
             <SlideOver.Body>
               {editing ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  <Input
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    placeholder="Page title"
-                    inputSize="md"
-                  />
-                  <CategoryPicker
-                    value={editCategory}
-                    onChange={setEditCategory}
-                  />
-                  <TiptapDocEditor
-                    content={editContent}
-                    onChange={setEditContent}
-                    placeholder="Write your doc content..."
-                  />
-                </div>
+                <EditForm
+                  title={editTitle}
+                  onTitleChange={setEditTitle}
+                  categories={editCategories}
+                  onCategoriesChange={setEditCategories}
+                  content={editContent}
+                  onContentChange={setEditContent}
+                />
               ) : showVersions ? (
                 <VersionList versions={versions} />
               ) : (
-                <DocBody page={selectedPage} />
+                <>
+                  {parseCats(selectedPage.category).length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginBottom: '0.75rem' }}>
+                      {parseCats(selectedPage.category).map(c => {
+                        const def = CATEGORY_BY_VALUE.get(c)
+                        return (
+                          <Badge key={c} tone={def?.tone ?? 'neutral'} variant="soft" size="sm" dot={false}>
+                            {def?.label ?? c}
+                          </Badge>
+                        )
+                      })}
+                    </div>
+                  )}
+                  <DocBody page={selectedPage} />
+                </>
               )}
             </SlideOver.Body>
             <SlideOver.Footer>
@@ -542,23 +623,14 @@ export function DocsContent() {
         maxWidth="40rem"
       >
         <SlideOver.Body>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <Input
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              placeholder="Page title"
-              inputSize="md"
-            />
-            <CategoryPicker
-              value={editCategory}
-              onChange={setEditCategory}
-            />
-            <TiptapDocEditor
-              content={editContent}
-              onChange={setEditContent}
-              placeholder="Write your doc content..."
-            />
-          </div>
+          <EditForm
+            title={editTitle}
+            onTitleChange={setEditTitle}
+            categories={editCategories}
+            onCategoriesChange={setEditCategories}
+            content={editContent}
+            onContentChange={setEditContent}
+          />
         </SlideOver.Body>
         <SlideOver.Footer>
           <TahiButton variant="secondary" size="sm" onClick={() => setShowNewForm(false)}>
@@ -589,195 +661,73 @@ export function DocsContent() {
   )
 }
 
-// -- Table --
+// -- Edit form (shared between create + edit modes) --
 
-function DocsTable({
-  pages,
-  onRowClick,
-  onEdit,
-  onDelete,
+function EditForm({
+  title,
+  onTitleChange,
+  categories,
+  onCategoriesChange,
+  content,
+  onContentChange,
 }: {
-  pages: DocPage[]
-  onRowClick: (p: DocPage) => void
-  onEdit: (p: DocPage) => void
-  onDelete: (p: DocPage) => void
+  title: string
+  onTitleChange: (v: string) => void
+  categories: string[]
+  onCategoriesChange: (v: string[]) => void
+  content: string
+  onContentChange: (v: string) => void
 }) {
+  const toggleCat = (value: string) => {
+    if (categories.includes(value)) {
+      onCategoriesChange(categories.filter(c => c !== value))
+    } else {
+      onCategoriesChange([...categories, value])
+    }
+  }
   return (
-    <div
-      style={{
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-md)',
-        overflow: 'hidden',
-        overflowX: 'auto',
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(20rem, 2fr) 9rem 9rem 6.5rem',
-          padding: '0.5rem 0.875rem',
-          background: 'var(--color-bg-secondary)',
-          borderBottom: '1px solid var(--color-border-subtle)',
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <Input
+        value={title}
+        onChange={(e) => onTitleChange(e.target.value)}
+        placeholder="Page title"
+        inputSize="md"
+      />
+      <div>
+        <label style={{
+          display: 'block',
           fontSize: '0.625rem',
           fontWeight: 600,
           letterSpacing: '0.06em',
           textTransform: 'uppercase',
           color: 'var(--color-text-subtle)',
-          minWidth: '48rem',
-        }}
-      >
-        <span>Title</span>
-        <span>Category</span>
-        <span>Updated</span>
-        <span style={{ textAlign: 'right' }}>Actions</span>
+          marginBottom: '0.3125rem',
+        }}>
+          Categories <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400, color: 'var(--color-text-subtle)' }}>· pick none, one or many</span>
+        </label>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+          {CATEGORIES.map(cat => {
+            const active = categories.includes(cat.value)
+            return (
+              <Badge
+                key={cat.value}
+                tone={cat.tone}
+                variant={active ? 'solid' : 'outline'}
+                size="sm"
+                dot={false}
+                onClick={() => toggleCat(cat.value)}
+              >
+                {cat.label}
+              </Badge>
+            )
+          })}
+        </div>
       </div>
-      {pages.map((p, i) => {
-        const cat = CATEGORY_BY_VALUE.get(p.category)
-        return (
-          <div
-            key={p.id}
-            className="tahi-focus-ring"
-            role="button"
-            tabIndex={0}
-            aria-label={`Open ${p.title}`}
-            onClick={() => onRowClick(p)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault()
-                onRowClick(p)
-              }
-            }}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(20rem, 2fr) 9rem 9rem 6.5rem',
-              alignItems: 'center',
-              padding: '0.625rem 0.875rem',
-              borderBottom: i < pages.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
-              cursor: 'pointer',
-              transition: 'background-color 120ms ease',
-              minWidth: '48rem',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
-              <FileText size={14} aria-hidden="true" style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
-              <span style={{
-                fontSize: 'var(--text-sm)',
-                fontWeight: 600,
-                color: 'var(--color-text)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}>
-                {p.title}
-              </span>
-            </div>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.3125rem',
-              padding: '0.0625rem 0.4375rem',
-              background: 'var(--color-bg-secondary)',
-              border: '1px solid var(--color-border-subtle)',
-              borderRadius: 'var(--radius-sm)',
-              fontSize: '0.6875rem',
-              fontWeight: 600,
-              color: 'var(--color-text)',
-              width: 'fit-content',
-            }}>
-              <span
-                aria-hidden="true"
-                style={{
-                  width: '0.3125rem',
-                  height: '0.3125rem',
-                  borderRadius: 999,
-                  background: cat?.color ?? 'var(--color-text-muted)',
-                }}
-              />
-              {cat?.label ?? p.category}
-            </span>
-            <span style={{
-              fontSize: '0.75rem',
-              color: 'var(--color-text-muted)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.3125rem',
-            }}>
-              <Clock size={11} aria-hidden="true" />
-              {formatDistanceToNow(new Date(p.updatedAt), { addSuffix: true })}
-            </span>
-            <div
-              onClick={(e) => e.stopPropagation()}
-              style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.1875rem' }}
-            >
-              <button
-                type="button"
-                onClick={() => onEdit(p)}
-                aria-label={`Edit ${p.title}`}
-                className="tahi-focus-ring"
-                style={iconButtonStyle}
-                onMouseEnter={e => {
-                  e.currentTarget.style.background = 'var(--color-bg-tertiary)'
-                  e.currentTarget.style.color = 'var(--color-text)'
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.background = 'transparent'
-                  e.currentTarget.style.color = 'var(--color-text-subtle)'
-                }}
-              >
-                <Edit3 size={13} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                onClick={() => onDelete(p)}
-                aria-label={`Delete ${p.title}`}
-                className="tahi-focus-ring"
-                style={iconButtonStyle}
-                onMouseEnter={e => {
-                  e.currentTarget.style.background = 'var(--color-danger-bg, rgba(220, 38, 38, 0.10))'
-                  e.currentTarget.style.color = 'var(--color-danger)'
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.background = 'transparent'
-                  e.currentTarget.style.color = 'var(--color-text-subtle)'
-                }}
-              >
-                <Trash2 size={13} aria-hidden="true" />
-              </button>
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-const iconButtonStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: '1.625rem',
-  height: '1.625rem',
-  background: 'transparent',
-  border: 'none',
-  borderRadius: 'var(--radius-sm)',
-  color: 'var(--color-text-subtle)',
-  cursor: 'pointer',
-  transition: 'background-color 120ms ease, color 120ms ease',
-}
-
-function DocsTableSkeleton() {
-  return (
-    <div style={{
-      background: 'var(--color-bg)',
-      border: '1px solid var(--color-border-subtle)',
-      borderRadius: 'var(--radius-md)',
-      overflow: 'hidden',
-    }}>
-      <LoadingSkeleton rows={5} height={42} />
+      <TiptapDocEditor
+        content={content}
+        onChange={onContentChange}
+        placeholder="Write your doc content..."
+      />
     </div>
   )
 }
@@ -785,36 +735,31 @@ function DocsTableSkeleton() {
 // -- Slide-over body parts --
 
 function DocBody({ page }: { page: DocPage }) {
-  if (page.contentTiptap) {
+  const html = useMemo(() => {
+    if (page.contentTiptap) return page.contentTiptap
+    if (page.contentText) {
+      return looksLikeHtml(page.contentText) ? page.contentText : renderMarkdown(page.contentText)
+    }
+    return ''
+  }, [page.contentTiptap, page.contentText])
+
+  if (!html) {
     return (
-      <div
-        className="tahi-doc-prose"
-        dangerouslySetInnerHTML={{ __html: page.contentTiptap }}
-      />
-    )
-  }
-  if (page.contentText) {
-    // contentText might be HTML (new Tiptap-saved docs) or markdown
-    // (legacy imports). Detect: if the first non-blank chars look
-    // like a tag, render as HTML; otherwise parse as markdown.
-    const looksLikeHtml = /^\s*<[a-z]/i.test(page.contentText)
-    const html = looksLikeHtml ? page.contentText : renderMarkdown(page.contentText)
-    return (
-      <div
-        className="tahi-doc-prose"
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      <p style={{
+        fontSize: '0.875rem',
+        color: 'var(--color-text-subtle)',
+        fontStyle: 'italic',
+        margin: 0,
+      }}>
+        No content yet. Click Edit to add content.
+      </p>
     )
   }
   return (
-    <p style={{
-      fontSize: '0.875rem',
-      color: 'var(--color-text-subtle)',
-      fontStyle: 'italic',
-      margin: 0,
-    }}>
-      No content yet. Click Edit to add content.
-    </p>
+    <div
+      className="tahi-doc-prose"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   )
 }
 
@@ -862,67 +807,6 @@ function VersionList({ versions }: { versions: DocVersion[] }) {
           )}
         </div>
       ))}
-    </div>
-  )
-}
-
-function CategoryPicker({
-  value,
-  onChange,
-}: {
-  value: string
-  onChange: (v: string) => void
-}) {
-  return (
-    <div>
-      <label style={{
-        display: 'block',
-        fontSize: '0.625rem',
-        fontWeight: 600,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        color: 'var(--color-text-subtle)',
-        marginBottom: '0.3125rem',
-      }}>
-        Category
-      </label>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
-        {CATEGORIES.map(cat => {
-          const active = value === cat.value
-          return (
-            <button
-              key={cat.value}
-              type="button"
-              onClick={() => onChange(cat.value)}
-              className="tahi-focus-ring"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.3125rem',
-                padding: '0.25rem 0.5rem',
-                background: active ? 'var(--color-brand-50)' : 'var(--color-bg)',
-                border: `1px solid ${active ? 'var(--color-brand)' : 'var(--color-border)'}`,
-                borderRadius: 999,
-                fontSize: '0.6875rem',
-                fontWeight: 600,
-                color: active ? 'var(--color-text-active)' : 'var(--color-text)',
-                cursor: 'pointer',
-              }}
-            >
-              <span
-                aria-hidden="true"
-                style={{
-                  width: '0.375rem',
-                  height: '0.375rem',
-                  borderRadius: 999,
-                  background: cat.color,
-                }}
-              />
-              {cat.label}
-            </button>
-          )
-        })}
-      </div>
     </div>
   )
 }
