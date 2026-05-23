@@ -51,6 +51,11 @@ export interface FilterDef {
    *  multiselect = any subset of options, rendered as comma-joined labels */
   kind: 'select' | 'multiselect'
   options: FilterOption[]
+  /** When true, the chip can't be removed (no X). Use when a filter
+   *  is a permanent part of the bar — e.g. a top-level category
+   *  selector that should always be visible. The chip still toggles
+   *  open to edit its value(s). */
+  nonRemovable?: boolean
 }
 
 export interface ActiveFilter {
@@ -326,7 +331,7 @@ function FilterChip({
           gap: '0.375rem',
           height: chipHeight,
           paddingLeft: '0.625rem',
-          paddingRight: '0.25rem',
+          paddingRight: def.nonRemovable ? '0.625rem' : '0.25rem',
           background: 'var(--color-bg)',
           border: '1px solid var(--color-border)',
           borderRadius: 'var(--radius-md)',
@@ -353,40 +358,42 @@ function FilterChip({
         ) : (
           <span style={{ color: 'var(--color-text-subtle)' }}>Any</span>
         )}
-        <span
-          role="button"
-          tabIndex={0}
-          onClick={(e) => { e.stopPropagation(); onRemove() }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              e.stopPropagation()
-              onRemove()
-            }
-          }}
-          aria-label={`Remove ${def.label} filter`}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '1.25rem',
-            height: '1.25rem',
-            borderRadius: 'var(--radius-sm)',
-            color: 'var(--color-text-subtle)',
-            transition: 'background-color 120ms ease, color 120ms ease',
-            cursor: 'pointer',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.background = 'var(--color-bg-tertiary)'
-            e.currentTarget.style.color = 'var(--color-text)'
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = 'var(--color-text-subtle)'
-          }}
-        >
-          <X size={12} aria-hidden="true" />
-        </span>
+        {!def.nonRemovable && (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { e.stopPropagation(); onRemove() }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                e.stopPropagation()
+                onRemove()
+              }
+            }}
+            aria-label={`Remove ${def.label} filter`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '1.25rem',
+              height: '1.25rem',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--color-text-subtle)',
+              transition: 'background-color 120ms ease, color 120ms ease',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'var(--color-bg-tertiary)'
+              e.currentTarget.style.color = 'var(--color-text)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = 'var(--color-text-subtle)'
+            }}
+          >
+            <X size={12} aria-hidden="true" />
+          </span>
+        )}
       </button>
       <Popover
         anchorRef={ref}
@@ -505,7 +512,7 @@ function MultiSelectChip({
           gap: '0.375rem',
           height: chipHeight,
           paddingLeft: '0.625rem',
-          paddingRight: '0.25rem',
+          paddingRight: def.nonRemovable ? '0.625rem' : '0.25rem',
           background: 'var(--color-bg)',
           border: '1px solid var(--color-border)',
           borderRadius: 'var(--radius-md)',
@@ -522,40 +529,42 @@ function MultiSelectChip({
       >
         <span style={{ color: 'var(--color-text-muted)' }}>{def.label}</span>
         {displayLabel}
-        <span
-          role="button"
-          tabIndex={0}
-          onClick={(e) => { e.stopPropagation(); onRemove() }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              e.stopPropagation()
-              onRemove()
-            }
-          }}
-          aria-label={`Remove ${def.label} filter`}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '1.25rem',
-            height: '1.25rem',
-            borderRadius: 'var(--radius-sm)',
-            color: 'var(--color-text-subtle)',
-            transition: 'background-color 120ms ease, color 120ms ease',
-            cursor: 'pointer',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.background = 'var(--color-bg-tertiary)'
-            e.currentTarget.style.color = 'var(--color-text)'
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = 'var(--color-text-subtle)'
-          }}
-        >
-          <X size={12} aria-hidden="true" />
-        </span>
+        {!def.nonRemovable && (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { e.stopPropagation(); onRemove() }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                e.stopPropagation()
+                onRemove()
+              }
+            }}
+            aria-label={`Remove ${def.label} filter`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '1.25rem',
+              height: '1.25rem',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--color-text-subtle)',
+              transition: 'background-color 120ms ease, color 120ms ease',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'var(--color-bg-tertiary)'
+              e.currentTarget.style.color = 'var(--color-text)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = 'var(--color-text-subtle)'
+            }}
+          >
+            <X size={12} aria-hidden="true" />
+          </span>
+        )}
       </button>
       <Popover
         anchorRef={ref}

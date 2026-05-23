@@ -12,6 +12,7 @@ import { SlideOver } from '@/components/tahi/slide-over'
 import { Input } from '@/components/tahi/input'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
+import { Card } from '@/components/tahi/card'
 import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
 import dynamic from 'next/dynamic'
@@ -165,9 +166,13 @@ export function DocsContent() {
   const [pages, setPages] = useState<DocPage[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  // FilterBar-style: active filters held as an array of ActiveFilter
-  // (single shape, supports the multiselect kind for categories).
-  const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([])
+  // FilterBar-style: active filters held as an array of ActiveFilter.
+  // We seed it with the Categories chip already present so it can't be
+  // removed (nonRemovable on the def) and the "+ Add filter" button
+  // never appears — categories is the only filter we want here.
+  const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([
+    { id: 'categories', values: [] },
+  ])
   // Read the selected categories out of the categories filter chip,
   // if it's active. Empty = no filter.
   const selectedCategories = useMemo(() => {
@@ -248,12 +253,14 @@ export function DocsContent() {
   }, [pages, search, selectedCategories])
 
   // Filter definitions for FilterBar. Categories is multiselect so a
-  // single chip can hold any subset of the available categories.
+  // single chip can hold any subset. nonRemovable hides the X and
+  // makes it the only chip on the bar — no "+ Add filter" button.
   const filterDefs: FilterDef[] = useMemo(() => ([
     {
       id: 'categories',
       label: 'Categories',
       kind: 'multiselect',
+      nonRemovable: true,
       options: CATEGORIES.map(c => ({ value: c.value, label: c.label, tone: c.tone })),
     },
   ]), [])
@@ -469,36 +476,39 @@ export function DocsContent() {
         size="sm"
       />
 
-      {/* Table */}
-      <DataTable<DocPage>
-        ariaLabel="Docs"
-        columns={columns}
-        rows={filteredPages}
-        getRowId={r => r.id}
-        defaultSort={{ key: 'updatedAt', dir: 'desc' }}
-        loading={loading}
-        empty={
-          <EmptyState
-            icon={<BookOpen className="w-6 h-6" />}
-            title={pages.length === 0 ? 'No docs yet' : 'No matches'}
-            description={pages.length === 0
-              ? 'Create your first page to start building the team knowledge base.'
-              : 'Try clearing a filter or adjusting your search.'}
-            action={
-              pages.length === 0 ? (
-                <TahiButton size="sm" onClick={handleNew} iconLeft={<Plus className="w-3.5 h-3.5" />}>
-                  New page
-                </TahiButton>
-              ) : undefined
-            }
-          />
-        }
-        onRowPreview={(r) => loadPage(r.id)}
-        rowActions={(r) => [
-          { label: 'Edit', icon: <Edit3 size={14} />, onClick: () => startEdit(r) },
-          { label: 'Delete', icon: <Trash2 size={14} />, tone: 'danger', onClick: () => setPendingDelete(r) },
-        ]}
-      />
+      {/* Table — wrapped in a Card so rows sit on a real white surface
+          with rounded corners, matching the DataTable showcase. */}
+      <Card padding="none">
+        <DataTable<DocPage>
+          ariaLabel="Docs"
+          columns={columns}
+          rows={filteredPages}
+          getRowId={r => r.id}
+          defaultSort={{ key: 'updatedAt', dir: 'desc' }}
+          loading={loading}
+          empty={
+            <EmptyState
+              icon={<BookOpen className="w-6 h-6" />}
+              title={pages.length === 0 ? 'No docs yet' : 'No matches'}
+              description={pages.length === 0
+                ? 'Create your first page to start building the team knowledge base.'
+                : 'Try clearing a filter or adjusting your search.'}
+              action={
+                pages.length === 0 ? (
+                  <TahiButton size="sm" onClick={handleNew} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+                    New page
+                  </TahiButton>
+                ) : undefined
+              }
+            />
+          }
+          onRowPreview={(r) => loadPage(r.id)}
+          rowActions={(r) => [
+            { label: 'Edit', icon: <Edit3 size={14} />, onClick: () => startEdit(r) },
+            { label: 'Delete', icon: <Trash2 size={14} />, tone: 'danger', onClick: () => setPendingDelete(r) },
+          ]}
+        />
+      </Card>
 
       {/* View / inline-edit slide-over. Wider (56rem) so the doc is
           easier to read, especially with markdown content + tables. */}
