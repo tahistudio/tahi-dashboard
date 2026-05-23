@@ -1,7 +1,7 @@
 # Tahi Dashboard — Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-05-23** by Liam
+> Last updated: **2026-05-24** by Claude (Phase A foundations)
 
 ---
 
@@ -68,6 +68,13 @@ Lifecycle-order build is in progress. Docs Hub was the first list-page lap; the 
 Full plan: `C:\Users\Work\.claude\plans\i-d-like-you-to-gentle-neumann.md`
 
 ---
+
+## Recent activity (2026-05-23 → 2026-05-24)
+
+- **Lead intake foundation** — `leads` table + `people` canonical identity (one human, many roles via `person_id` on leads/contacts/team_members) + `/leads` page using DataTable + FilterBar + SlideOver + LeadForm. Lead MCP tools live on the worker.
+- **Granular permissions model shipped (#119)** — RBAC + ABAC schema (roles, permissions, role_permissions with scope filters, team_member_roles, field_restrictions) via migration 0039. Seed migration 0041 populated 5 system roles (super_admin / admin / project_manager / task_handler / viewer) + ~126 permissions (27 resources × 4 base actions + 18 resource-specific verbs) + role_permission defaults. Enforcement is a per-feature runtime layer that rolls out gradually.
+- **Pipeline triage (#123)** — migration 0040 moved every Lead-stage deal and every Stalled-no-engagement deal into the new `leads` table, preserving the deal's primary contact via `person_id`, stamping `lead_demoted` activities, and deleting the deal. 23 deals remain across Closed Lost / Closed Won / Discovery / Negotiation / Proposal.
+- **Design-system enrichment pass** — ~22 surfaces lapped through the v3 primitives (FeatureCard, charts, kanban, BoardView, Avatar tooltips). FilterBar now supports `daterange` kind with 5 presets + custom from/to.
 
 ## Last shipped (last 10 commits, user-visible)
 
