@@ -25,19 +25,30 @@
 import * as React from 'react'
 import {
   LayoutGrid, Rows, CalendarRange, Plus, Filter,
-  Calendar,
+  Calendar, X,
 } from 'lucide-react'
 import { Input } from '@/components/tahi/input'
 import { Avatar } from '@/components/tahi/avatar'
+import { Tooltip } from '@/components/tahi/tooltip'
 import {
   KanbanBoard,
   type BoardItem,
   type BoardColumn,
   type ColumnAction,
+  type BoardAssignee,
+  type BoardTag,
+  type BoardPriority,
 } from '@/components/tahi/kanban-board'
 
 // Re-export so consumers only need to import board-view.
-export type { BoardItem, BoardColumn, ColumnAction } from '@/components/tahi/kanban-board'
+export type {
+  BoardItem,
+  BoardColumn,
+  ColumnAction,
+  BoardAssignee,
+  BoardTag,
+  BoardPriority,
+} from '@/components/tahi/kanban-board'
 
 export type BoardViewKey = 'kanban' | 'table' | 'timeline'
 
@@ -65,8 +76,17 @@ interface BoardViewProps {
   onMove?: (itemId: string, toStatus: string, position: number) => void
   onNest?: (childId: string, parentId: string) => void
   onAdd?: (status: string) => void
-  onToggleSubtask?: (itemId: string, subtaskId: string) => void
+  onToggleChecklist?: (itemId: string, checklistItemId: string) => void
   onItemClick?: (item: BoardItem) => void
+  /** Click an assignee avatar → caller routes to their profile. */
+  onAssigneeClick?: (assignee: BoardAssignee) => void
+  /** Click a tag chip. By default the shell toggles the tag in its
+   *  active filter set (so clicking "Marketing" on a card narrows
+   *  the visible list to just Marketing items). Pass your own handler
+   *  to override (e.g. navigate to a global filter page). */
+  onTagClick?: (tag: BoardTag) => void
+  /** Click the priority chip. Defaults to filtering by that priority. */
+  onPriorityClick?: (priority: BoardPriority) => void
   columnActions?: ReadonlyArray<ColumnAction>
   readOnly?: boolean
   className?: string
@@ -94,8 +114,11 @@ export function BoardView({
   onMove,
   onNest,
   onAdd,
-  onToggleSubtask,
+  onToggleChecklist,
   onItemClick,
+  onAssigneeClick,
+  onTagClick,
+  onPriorityClick,
   columnActions,
   readOnly,
   className,
@@ -108,15 +131,66 @@ export function BoardView({
   }
 
   const [query, setQuery] = React.useState('')
+
+  // Active filter state. When a tag chip on a card is clicked the
+  // shell toggles it here; matching items then survive the filter.
+  // Same for priority.
+  const [activeTagIds, setActiveTagIds] = React.useState<Set<string>>(new Set())
+  const [activePriorities, setActivePriorities] = React.useState<Set<BoardPriority>>(new Set())
+  const [filterPanelOpen, setFilterPanelOpen] = React.useState(false)
+  const filterButtonRef = React.useRef<HTMLButtonElement | null>(null)
+
+  // Tag label lookup so the active-filter chips below the controls
+  // show the human label even if items use shared ids.
+  const tagLabelById = React.useMemo(() => {
+    const m = new Map<string, BoardTag>()
+    for (const it of items) for (const t of it.tags ?? []) if (!m.has(t.id)) m.set(t.id, t)
+    return m
+  }, [items])
+
+  const toggleTag = (tag: BoardTag) => {
+    if (onTagClick) { onTagClick(tag); return }
+    setActiveTagIds(prev => {
+      const next = new Set(prev)
+      if (next.has(tag.id)) next.delete(tag.id); else next.add(tag.id)
+      return next
+    })
+  }
+  const togglePriority = (p: BoardPriority) => {
+    if (onPriorityClick) { onPriorityClick(p); return }
+    setActivePriorities(prev => {
+      const next = new Set(prev)
+      if (next.has(p)) next.delete(p); else next.add(p)
+      return next
+    })
+  }
+  const clearFilters = () => {
+    setActiveTagIds(new Set())
+    setActivePriorities(new Set())
+  }
+
   const filteredItems = React.useMemo(() => {
-    if (!query.trim()) return items
     const q = query.trim().toLowerCase()
-    return items.filter(it =>
-      it.title.toLowerCase().includes(q) ||
-      (it.description ?? '').toLowerCase().includes(q) ||
-      (it.tags ?? []).some(t => t.label.toLowerCase().includes(q))
-    )
-  }, [items, query])
+    return items.filter(it => {
+      if (q) {
+        const matches =
+          it.title.toLowerCase().includes(q) ||
+          (it.description ?? '').toLowerCase().includes(q) ||
+          (it.tags ?? []).some(t => t.label.toLowerCase().includes(q))
+        if (!matches) return false
+      }
+      if (activeTagIds.size > 0) {
+        const ids = (it.tags ?? []).map(t => t.id)
+        if (!ids.some(id => activeTagIds.has(id))) return false
+      }
+      if (activePriorities.size > 0) {
+        if (!it.priority || !activePriorities.has(it.priority)) return false
+      }
+      return true
+    })
+  }, [items, query, activeTagIds, activePriorities])
+
+  const filterCount = activeTagIds.size + activePriorities.size
 
   return (
     <div className={className} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -213,52 +287,85 @@ export function BoardView({
         </div>
       </div>
 
-      {/* Controls row. Everything sits on a single 1.875rem baseline
-          so search / filter / +New visually line up regardless of
-          which combination is active. */}
+      {/* Controls row. Search + filter sit as one visual group on the
+          left; +New is the only right-side affordance. Everything
+          shares a 1.875rem height baseline. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.4375rem', flexWrap: 'wrap' }}>
-        <div style={{ flex: '1 1 18rem', minWidth: '12rem', maxWidth: '28rem' }}>
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={searchPlaceholder}
-            inputSize="sm"
-          />
-        </div>
-        {onFilterClick && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.4375rem',
+          flex: '1 1 22rem',
+          minWidth: '14rem',
+          maxWidth: '32rem',
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={searchPlaceholder}
+              inputSize="sm"
+            />
+          </div>
           <button
+            ref={filterButtonRef}
             type="button"
-            onClick={onFilterClick}
+            onClick={() => {
+              if (onFilterClick) onFilterClick()
+              else setFilterPanelOpen(o => !o)
+            }}
+            aria-pressed={filterCount > 0 || filterPanelOpen}
+            aria-expanded={filterPanelOpen}
+            className="tahi-focus-ring"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: '0.3125rem',
               height: '1.875rem',
-              padding: '0 0.75rem',
-              background: 'var(--color-bg)',
-              border: '1px solid var(--color-border)',
+              padding: '0 0.625rem',
+              background: filterCount > 0 ? 'var(--color-brand-50)' : 'var(--color-bg)',
+              border: `1px solid ${filterCount > 0 ? 'var(--color-brand)' : 'var(--color-border)'}`,
               borderRadius: 'var(--radius-sm)',
               fontSize: '0.75rem',
               fontWeight: 500,
-              color: 'var(--color-text)',
+              color: filterCount > 0 ? 'var(--color-text-active)' : 'var(--color-text)',
               cursor: 'pointer',
               transition: 'background-color 120ms ease, border-color 120ms ease',
+              flexShrink: 0,
             }}
-            onMouseEnter={e => {
-              e.currentTarget.style.background = 'var(--color-bg-secondary)'
-              e.currentTarget.style.borderColor = 'var(--color-border)'
-            }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
+            onMouseEnter={e => { if (filterCount === 0) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+            onMouseLeave={e => { if (filterCount === 0) e.currentTarget.style.background = 'var(--color-bg)' }}
           >
             <Filter size={12} aria-hidden="true" />
             Filter
+            {filterCount > 0 && (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: '1.125rem',
+                  height: '1.125rem',
+                  padding: '0 0.3125rem',
+                  background: 'var(--color-brand)',
+                  borderRadius: 999,
+                  color: '#ffffff',
+                  fontSize: '0.625rem',
+                  fontWeight: 700,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {filterCount}
+              </span>
+            )}
           </button>
-        )}
+        </div>
         <div style={{ flex: 1 }} />
         {onNew && (
           <button
             type="button"
             onClick={onNew}
+            className="tahi-focus-ring"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -289,6 +396,62 @@ export function BoardView({
         )}
       </div>
 
+      {/* Active filter chips. Render only when filters are present. */}
+      {filterCount > 0 && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '0.3125rem',
+        }}>
+          <span style={{
+            fontSize: '0.625rem',
+            fontWeight: 600,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+            color: 'var(--color-text-subtle)',
+          }}>Filters</span>
+          {Array.from(activeTagIds).map(id => {
+            const tag = tagLabelById.get(id)
+            const label = tag?.label ?? id
+            return (
+              <FilterChip
+                key={`tag-${id}`}
+                label={label}
+                color={tag?.color}
+                onRemove={() => toggleTag(tag ?? { id, label })}
+              />
+            )
+          })}
+          {Array.from(activePriorities).map(p => (
+            <FilterChip
+              key={`prio-${p}`}
+              label={`Priority: ${p}`}
+              onRemove={() => togglePriority(p)}
+            />
+          ))}
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="tahi-focus-ring"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              padding: '0.125rem 0.3125rem',
+              fontSize: '0.6875rem',
+              fontWeight: 600,
+              color: 'var(--color-text-muted)',
+              cursor: 'pointer',
+              borderRadius: 'var(--radius-sm)',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+          >
+            Clear all
+          </button>
+        </div>
+      )}
+
       {/* Active view. Wrapped in role="tabpanel" so the active panel
           is announced as the disclosed region for the selected tab. */}
       <div
@@ -304,8 +467,11 @@ export function BoardView({
             onMove={onMove}
             onNest={onNest}
             onAdd={onAdd}
-            onToggleSubtask={onToggleSubtask}
+            onToggleChecklist={onToggleChecklist}
             onItemClick={onItemClick}
+            onAssigneeClick={onAssigneeClick}
+            onTagClick={toggleTag}
+            onPriorityClick={togglePriority}
             columnActions={columnActions}
             readOnly={readOnly}
           />
@@ -315,6 +481,8 @@ export function BoardView({
             columns={columns}
             items={filteredItems}
             onItemClick={onItemClick}
+            onAssigneeClick={onAssigneeClick}
+            onTagClick={toggleTag}
           />
         )}
         {activeView === 'timeline' && (
@@ -335,10 +503,14 @@ function BoardTable({
   columns,
   items,
   onItemClick,
+  onAssigneeClick,
+  onTagClick,
 }: {
   columns: ReadonlyArray<BoardColumn>
   items: ReadonlyArray<BoardItem>
   onItemClick?: (item: BoardItem) => void
+  onAssigneeClick?: (assignee: BoardAssignee) => void
+  onTagClick?: (tag: BoardTag) => void
 }) {
   const colByStatus = React.useMemo(() => {
     const m = new Map<string, BoardColumn>()
@@ -383,13 +555,14 @@ function BoardTable({
         border: '1px solid var(--color-border-subtle)',
         borderRadius: 'var(--radius-md)',
         overflow: 'hidden',
+        overflowX: 'auto',
       }}
     >
       {/* Header row */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(14rem, 2fr) 7rem 9rem 6rem 7rem',
+          gridTemplateColumns: 'minmax(18rem, 2fr) 8rem 10rem 7rem 8rem',
           padding: '0.5rem 0.875rem',
           background: 'var(--color-bg-secondary)',
           borderBottom: '1px solid var(--color-border-subtle)',
@@ -398,6 +571,7 @@ function BoardTable({
           letterSpacing: '0.06em',
           textTransform: 'uppercase',
           color: 'var(--color-text-subtle)',
+          minWidth: '54rem',
         }}
       >
         <span>Title</span>
@@ -429,12 +603,13 @@ function BoardTable({
             }}
             style={{
               display: 'grid',
-              gridTemplateColumns: 'minmax(14rem, 2fr) 7rem 9rem 6rem 7rem',
+              gridTemplateColumns: 'minmax(18rem, 2fr) 8rem 10rem 7rem 8rem',
               alignItems: 'center',
               padding: '0.5rem 0.875rem',
               borderBottom: i < rows.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
               cursor: onItemClick ? 'pointer' : 'default',
               transition: 'background-color 120ms ease',
+              minWidth: '54rem',
             }}
             onMouseEnter={e => { if (onItemClick) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
@@ -471,18 +646,11 @@ function BoardTable({
                 {it.tags && it.tags.length > 0 && (
                   <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.125rem', flexWrap: 'wrap' }}>
                     {it.tags.slice(0, 3).map(t => (
-                      <span
+                      <TableTagChip
                         key={t.id}
-                        style={{
-                          fontSize: '0.625rem',
-                          fontWeight: 600,
-                          color: t.color ?? 'var(--color-text-muted)',
-                          padding: '0.0625rem 0.3125rem',
-                          background: 'var(--color-bg-secondary)',
-                          border: '1px solid var(--color-border-subtle)',
-                          borderRadius: 'var(--radius-sm)',
-                        }}
-                      >{t.label}</span>
+                        tag={t}
+                        onClick={onTagClick ? () => onTagClick(t) : undefined}
+                      />
                     ))}
                   </div>
                 )}
@@ -560,7 +728,7 @@ function BoardTable({
               {it.assignees && it.assignees.length > 0 ? (
                 <Avatar.Stack spacing="tight">
                   {it.assignees.slice(0, 3).map(a => (
-                    <Avatar key={a.id} name={a.name} src={a.avatarUrl} size="xs" />
+                    <TableAssigneeAvatar key={a.id} assignee={a} onClick={onAssigneeClick} />
                   ))}
                   {it.assignees.length > 3 && <Avatar.Overflow count={it.assignees.length - 3} size="xs" />}
                 </Avatar.Stack>
@@ -971,4 +1139,140 @@ function parseDate(d?: string): number | null {
 
 function formatTickDate(d: Date): string {
   return d.toLocaleDateString('en', { month: 'short', day: 'numeric' })
+}
+
+// ── Shared sub-components ───────────────────────────────────────────
+
+function FilterChip({
+  label,
+  color,
+  onRemove,
+}: {
+  label: string
+  color?: string
+  onRemove: () => void
+}) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.25rem',
+        padding: '0.125rem 0.3125rem 0.125rem 0.4375rem',
+        background: 'var(--color-brand-50)',
+        border: '1px solid var(--color-brand-100)',
+        borderRadius: 999,
+        fontSize: '0.6875rem',
+        fontWeight: 600,
+        color: color ?? 'var(--color-text-active)',
+      }}
+    >
+      {label}
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove ${label} filter`}
+        className="tahi-focus-ring"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '0.875rem',
+          height: '0.875rem',
+          background: 'transparent',
+          border: 'none',
+          borderRadius: 999,
+          color: 'var(--color-text-muted)',
+          cursor: 'pointer',
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.background = 'var(--color-brand-100)'
+          e.currentTarget.style.color = 'var(--color-text)'
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.background = 'transparent'
+          e.currentTarget.style.color = 'var(--color-text-muted)'
+        }}
+      >
+        <X size={9} aria-hidden="true" />
+      </button>
+    </span>
+  )
+}
+
+function TableTagChip({
+  tag,
+  onClick,
+}: {
+  tag: BoardTag
+  onClick?: () => void
+}) {
+  const baseStyle: React.CSSProperties = {
+    fontSize: '0.625rem',
+    fontWeight: 600,
+    color: tag.color ?? 'var(--color-text-muted)',
+    padding: '0.0625rem 0.3125rem',
+    background: 'var(--color-bg-secondary)',
+    border: '1px solid var(--color-border-subtle)',
+    borderRadius: 'var(--radius-sm)',
+    cursor: onClick ? 'pointer' : 'default',
+    transition: 'background-color 120ms ease, border-color 120ms ease',
+  }
+  if (!onClick) return <span style={baseStyle}>{tag.label}</span>
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick() }}
+      aria-label={`Filter by ${tag.label}`}
+      className="tahi-focus-ring"
+      style={baseStyle}
+      onMouseEnter={e => {
+        e.currentTarget.style.background = 'var(--color-bg)'
+        e.currentTarget.style.borderColor = 'var(--color-border)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.background = 'var(--color-bg-secondary)'
+        e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
+      }}
+    >
+      {tag.label}
+    </button>
+  )
+}
+
+function TableAssigneeAvatar({
+  assignee,
+  onClick,
+}: {
+  assignee: BoardAssignee
+  onClick?: (assignee: BoardAssignee) => void
+}) {
+  const node = <Avatar name={assignee.name} src={assignee.avatarUrl} size="xs" />
+  if (!onClick) {
+    return (
+      <Tooltip label={assignee.name} side="top">
+        <span style={{ display: 'inline-flex' }}>{node}</span>
+      </Tooltip>
+    )
+  }
+  return (
+    <Tooltip label={assignee.name} side="top">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onClick(assignee) }}
+        aria-label={`Open ${assignee.name}'s profile`}
+        className="tahi-focus-ring"
+        style={{
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          borderRadius: '50%',
+          cursor: 'pointer',
+          display: 'inline-flex',
+        }}
+      >
+        {node}
+      </button>
+    </Tooltip>
+  )
 }

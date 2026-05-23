@@ -39,6 +39,7 @@ import {
 } from 'lucide-react'
 import { Avatar } from '@/components/tahi/avatar'
 import { Popover } from '@/components/tahi/popover'
+import { Tooltip } from '@/components/tahi/tooltip'
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ export interface BoardTag {
   color?: string
 }
 
-export interface BoardSubtask {
+export interface BoardChecklistItem {
   id: string
   label: string
   done: boolean
@@ -72,9 +73,6 @@ export interface BoardItem {
   /** Optional plain-text description, shown muted under the title. */
   description?: string
 
-  /** Optional band of colour at the top of the card. Hex string. */
-  coverColor?: string
-
   /** Priority chip. Maps to a fixed colour. */
   priority?: BoardPriority
 
@@ -84,11 +82,11 @@ export interface BoardItem {
   /** Progress bar. */
   progress?: { current: number; total: number }
 
-  /** Checklist of subtasks. The card shows the running count and a
-   *  compact collapsible list of items. */
-  subtasks?: ReadonlyArray<BoardSubtask>
+  /** Checklist of toggleable items inside the card. Distinct from
+   *  sub-tasks: this is "things to tick off", not nested cards. */
+  checklist?: ReadonlyArray<BoardChecklistItem>
 
-  /** Nested children, rendered as smaller cards inside the parent. */
+  /** Nested sub-tasks, rendered as compact cards inside the parent. */
   children?: ReadonlyArray<BoardItem>
 
   /** Meta footer. */
@@ -131,10 +129,16 @@ interface KanbanBoardProps {
   onNest?: (childId: string, parentId: string) => void
   /** "+ Add card" button at the bottom of each column. */
   onAdd?: (status: string) => void
-  /** Click a subtask checkbox. */
-  onToggleSubtask?: (itemId: string, subtaskId: string) => void
+  /** Click a checklist checkbox. */
+  onToggleChecklist?: (itemId: string, checklistItemId: string) => void
   /** Click a card body (not the chips / checkboxes). */
   onItemClick?: (item: BoardItem) => void
+  /** Click an assignee avatar. Caller routes to their profile. */
+  onAssigneeClick?: (assignee: BoardAssignee) => void
+  /** Click a tag chip. Caller typically opens a filtered list. */
+  onTagClick?: (tag: BoardTag) => void
+  /** Click the priority chip. Caller opens a filtered list. */
+  onPriorityClick?: (priority: BoardPriority) => void
   /** Per-column ⋯ menu items. */
   columnActions?: ReadonlyArray<ColumnAction>
   /** Disable drag interactions (e.g. read-only viewers). */
@@ -150,8 +154,11 @@ export function KanbanBoard({
   onMove,
   onNest,
   onAdd,
-  onToggleSubtask,
+  onToggleChecklist,
   onItemClick,
+  onAssigneeClick,
+  onTagClick,
+  onPriorityClick,
   columnActions,
   readOnly = false,
   className,
@@ -215,10 +222,12 @@ export function KanbanBoard({
     <div
       className={className}
       style={{
-        display: 'grid',
-        gridTemplateColumns: `repeat(${columns.length}, minmax(15rem, 1fr))`,
+        display: 'flex',
         gap: '0.75rem',
-        alignItems: 'start',
+        alignItems: 'flex-start',
+        overflowX: 'auto',
+        paddingBottom: '0.25rem',  // room for the scrollbar
+        scrollSnapType: 'x proximity',
       }}
     >
       {columns.map(col => {
@@ -267,7 +276,10 @@ export function KanbanBoard({
                     }
                     onCardDragEnd()
                   }}
-                  onToggleSubtask={onToggleSubtask}
+                  onToggleChecklist={onToggleChecklist}
+                  onAssigneeClick={onAssigneeClick}
+                  onTagClick={onTagClick}
+                  onPriorityClick={onPriorityClick}
                   onClick={onItemClick}
                 />
               ))
@@ -307,6 +319,7 @@ function Column({
   return (
     <div
       style={{
+        flex: '0 0 17rem',
         display: 'flex',
         flexDirection: 'column',
         gap: '0.4375rem',
@@ -316,6 +329,7 @@ function Column({
         borderRadius: 'var(--radius-md)',
         transition: 'border-color 150ms ease, background 150ms ease',
         minHeight: '12rem',
+        scrollSnapAlign: 'start',
       }}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -570,8 +584,11 @@ function BoardCard({
   onCardDragOver,
   onCardDragLeave,
   onCardDrop,
-  onToggleSubtask,
+  onToggleChecklist,
   onClick,
+  onAssigneeClick,
+  onTagClick,
+  onPriorityClick,
   compact = false,
 }: {
   item: BoardItem
@@ -584,13 +601,16 @@ function BoardCard({
   onCardDragOver?: (e: React.DragEvent) => void
   onCardDragLeave?: (e: React.DragEvent) => void
   onCardDrop?: (e: React.DragEvent) => void
-  onToggleSubtask?: (itemId: string, subtaskId: string) => void
+  onToggleChecklist?: (itemId: string, checklistItemId: string) => void
   onClick?: (item: BoardItem) => void
+  onAssigneeClick?: (assignee: BoardAssignee) => void
+  onTagClick?: (tag: BoardTag) => void
+  onPriorityClick?: (priority: BoardPriority) => void
   compact?: boolean
 }) {
-  const [subtasksOpen, setSubtasksOpen] = React.useState(false)
-  const subtasks = item.subtasks ?? []
-  const doneCount = subtasks.filter(s => s.done).length
+  const [checklistOpen, setChecklistOpen] = React.useState(false)
+  const checklist = item.checklist ?? []
+  const doneCount = checklist.filter(s => s.done).length
   const hasProgress = !!item.progress && item.progress.total > 0
   const progressRatio = item.progress
     ? Math.min(1, Math.max(0, item.progress.current / Math.max(1, item.progress.total)))
@@ -646,28 +666,30 @@ function BoardCard({
         e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
       }}
     >
-      {/* Optional cover band */}
-      {item.coverColor && (
-        <div
-          aria-hidden="true"
-          style={{
-            height: compact ? '0.25rem' : '0.4375rem',
-            background: item.coverColor,
-          }}
-        />
-      )}
-
       <div style={{
         padding: compact ? '0.5rem 0.625rem' : '0.625rem 0.75rem',
         display: 'flex',
         flexDirection: 'column',
         gap: compact ? '0.3125rem' : '0.4375rem',
       }}>
-        {/* Tag row: priority + custom tags */}
+        {/* Tag row: priority + custom tags. Each chip is clickable
+            when a handler is provided — caller routes to a filtered
+            list (e.g. "all high-priority tasks", "all Marketing"). */}
         {(item.priority || (item.tags && item.tags.length > 0)) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', alignItems: 'center' }}>
-            {item.priority && <PriorityChip priority={item.priority} />}
-            {item.tags?.map(tag => <TagChip key={tag.id} tag={tag} />)}
+            {item.priority && (
+              <PriorityChip
+                priority={item.priority}
+                onClick={onPriorityClick ? () => onPriorityClick(item.priority!) : undefined}
+              />
+            )}
+            {item.tags?.map(tag => (
+              <TagChip
+                key={tag.id}
+                tag={tag}
+                onClick={onTagClick ? () => onTagClick(tag) : undefined}
+              />
+            ))}
           </div>
         )}
 
@@ -731,14 +753,14 @@ function BoardCard({
           </div>
         )}
 
-        {/* Subtask checklist */}
-        {subtasks.length > 0 && (
+        {/* Checklist: tickable items. Distinct from sub-tasks below. */}
+        {checklist.length > 0 && (
           <div>
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); setSubtasksOpen(o => !o) }}
-              aria-expanded={subtasksOpen}
-              aria-controls={`subtasks-${item.id}`}
+              onClick={(e) => { e.stopPropagation(); setChecklistOpen(o => !o) }}
+              aria-expanded={checklistOpen}
+              aria-controls={`checklist-${item.id}`}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -754,18 +776,18 @@ function BoardCard({
                 letterSpacing: '0.02em',
               }}
             >
-              {subtasksOpen
+              {checklistOpen
                 ? <ChevronDown size={11} aria-hidden="true" />
                 : <ChevronRight size={11} aria-hidden="true" />}
-              {doneCount}/{subtasks.length} subtasks
+              Checklist · {doneCount}/{checklist.length}
             </button>
-            {subtasksOpen && (
-              <div id={`subtasks-${item.id}`} style={{ display: 'flex', flexDirection: 'column', gap: '0.1875rem', paddingLeft: '0.0625rem' }}>
-                {subtasks.map(st => (
-                  <SubtaskRow
+            {checklistOpen && (
+              <div id={`checklist-${item.id}`} style={{ display: 'flex', flexDirection: 'column', gap: '0.1875rem', paddingLeft: '0.0625rem' }}>
+                {checklist.map(st => (
+                  <ChecklistRow
                     key={st.id}
-                    subtask={st}
-                    onToggle={() => onToggleSubtask?.(item.id, st.id)}
+                    item={st}
+                    onToggle={() => onToggleChecklist?.(item.id, st.id)}
                   />
                 ))}
               </div>
@@ -773,9 +795,7 @@ function BoardCard({
           </div>
         )}
 
-        {/* Nested children. Subtle "Sub-tasks" label + indented stack —
-            no side border (reads tacky and breaks our "borders are
-            all-sides or absent" rule). */}
+        {/* Nested sub-tasks (child cards). Indented; no side border. */}
         {nestedChildren && nestedChildren.length > 0 && (
           <div style={{ marginTop: '0.0625rem' }}>
             <div style={{
@@ -786,7 +806,7 @@ function BoardCard({
               color: 'var(--color-text-subtle)',
               marginBottom: '0.25rem',
             }}>
-              {nestedChildren.length} sub-{nestedChildren.length === 1 ? 'task' : 'tasks'}
+              Sub-tasks · {nestedChildren.length}
             </div>
             <div style={{
               paddingLeft: '0.625rem',
@@ -800,8 +820,11 @@ function BoardCard({
                   item={child}
                   readOnly
                   compact
-                  onToggleSubtask={onToggleSubtask}
+                  onToggleChecklist={onToggleChecklist}
                   onClick={onClick}
+                  onAssigneeClick={onAssigneeClick}
+                  onTagClick={onTagClick}
+                  onPriorityClick={onPriorityClick}
                 />
               ))}
             </div>
@@ -814,7 +837,7 @@ function BoardCard({
             display: 'flex',
             alignItems: 'center',
             gap: '0.625rem',
-            paddingTop: hasProgress || subtasks.length > 0 || (nestedChildren && nestedChildren.length > 0) ? '0.1875rem' : 0,
+            paddingTop: hasProgress || checklist.length > 0 || (nestedChildren && nestedChildren.length > 0) ? '0.1875rem' : 0,
             color: 'var(--color-text-subtle)',
             fontSize: '0.6875rem',
             fontWeight: 500,
@@ -846,7 +869,7 @@ function BoardCard({
             {item.assignees && item.assignees.length > 0 && (
               <Avatar.Stack spacing="tight">
                 {item.assignees.slice(0, 3).map(a => (
-                  <Avatar key={a.id} name={a.name} src={a.avatarUrl} size="xs" />
+                  <AssigneeAvatar key={a.id} assignee={a} onClick={onAssigneeClick} />
                 ))}
                 {item.assignees.length > 3 && <Avatar.Overflow count={item.assignees.length - 3} size="xs" />}
               </Avatar.Stack>
@@ -879,24 +902,32 @@ function BoardCard({
 
 // ── Chips ────────────────────────────────────────────────────────────
 
-function PriorityChip({ priority }: { priority: BoardPriority }) {
+function PriorityChip({
+  priority,
+  onClick,
+}: {
+  priority: BoardPriority
+  onClick?: () => void
+}) {
   const tone = PRIORITY_TONE[priority]
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '0.25rem',
-        padding: '0.0625rem 0.4375rem 0.0625rem 0.375rem',
-        background: tone.bg,
-        borderRadius: 999,
-        color: tone.text,
-        fontSize: '0.625rem',
-        fontWeight: 600,
-        letterSpacing: '0.01em',
-        textTransform: 'capitalize',
-      }}
-    >
+  const baseStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.25rem',
+    padding: '0.0625rem 0.4375rem 0.0625rem 0.375rem',
+    background: tone.bg,
+    border: 'none',
+    borderRadius: 999,
+    color: tone.text,
+    fontSize: '0.625rem',
+    fontWeight: 600,
+    letterSpacing: '0.01em',
+    textTransform: 'capitalize',
+    cursor: onClick ? 'pointer' : 'default',
+    transition: 'filter 120ms ease',
+  }
+  const inner = (
+    <>
       <span
         aria-hidden="true"
         style={{
@@ -908,39 +939,120 @@ function PriorityChip({ priority }: { priority: BoardPriority }) {
         }}
       />
       {priority}
-    </span>
+    </>
+  )
+  if (!onClick) return <span style={baseStyle}>{inner}</span>
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick() }}
+      aria-label={`Filter by ${priority} priority`}
+      className="tahi-focus-ring"
+      style={baseStyle}
+      onMouseEnter={e => { e.currentTarget.style.filter = 'brightness(0.95)' }}
+      onMouseLeave={e => { e.currentTarget.style.filter = 'none' }}
+    >
+      {inner}
+    </button>
   )
 }
 
-function TagChip({ tag }: { tag: BoardTag }) {
+function TagChip({
+  tag,
+  onClick,
+}: {
+  tag: BoardTag
+  onClick?: () => void
+}) {
   const color = tag.color ?? 'var(--color-text-muted)'
+  const baseStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '0.0625rem 0.4375rem',
+    background: 'var(--color-bg-secondary)',
+    border: '1px solid var(--color-border-subtle)',
+    borderRadius: 'var(--radius-sm)',
+    color,
+    fontSize: '0.625rem',
+    fontWeight: 600,
+    letterSpacing: '0.01em',
+    cursor: onClick ? 'pointer' : 'default',
+    transition: 'background-color 120ms ease, border-color 120ms ease',
+  }
+  if (!onClick) return <span style={baseStyle}>{tag.label}</span>
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        padding: '0.0625rem 0.4375rem',
-        background: 'var(--color-bg-secondary)',
-        border: `1px solid var(--color-border-subtle)`,
-        borderRadius: 'var(--radius-sm)',
-        color,
-        fontSize: '0.625rem',
-        fontWeight: 600,
-        letterSpacing: '0.01em',
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick() }}
+      aria-label={`Filter by ${tag.label}`}
+      className="tahi-focus-ring"
+      style={baseStyle}
+      onMouseEnter={e => {
+        e.currentTarget.style.background = 'var(--color-bg)'
+        e.currentTarget.style.borderColor = 'var(--color-border)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.background = 'var(--color-bg-secondary)'
+        e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
       }}
     >
       {tag.label}
-    </span>
+    </button>
   )
 }
 
-// ── Subtask row ─────────────────────────────────────────────────────
+// ── Assignee avatar (tooltip + click) ────────────────────────────────
 
-function SubtaskRow({
-  subtask,
+function AssigneeAvatar({
+  assignee,
+  onClick,
+}: {
+  assignee: BoardAssignee
+  onClick?: (assignee: BoardAssignee) => void
+}) {
+  const node = (
+    <Avatar
+      name={assignee.name}
+      src={assignee.avatarUrl}
+      size="xs"
+    />
+  )
+  if (!onClick) {
+    return (
+      <Tooltip label={assignee.name} side="top">
+        <span style={{ display: 'inline-flex' }}>{node}</span>
+      </Tooltip>
+    )
+  }
+  return (
+    <Tooltip label={assignee.name} side="top">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onClick(assignee) }}
+        aria-label={`Open ${assignee.name}'s profile`}
+        className="tahi-focus-ring"
+        style={{
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          borderRadius: '50%',
+          cursor: 'pointer',
+          display: 'inline-flex',
+        }}
+      >
+        {node}
+      </button>
+    </Tooltip>
+  )
+}
+
+// ── Checklist row ─────────────────────────────────────────────────────
+
+function ChecklistRow({
+  item,
   onToggle,
 }: {
-  subtask: BoardSubtask
+  item: BoardChecklistItem
   onToggle: () => void
 }) {
   return (
@@ -952,13 +1064,13 @@ function SubtaskRow({
         gap: '0.3125rem',
         cursor: 'pointer',
         fontSize: '0.75rem',
-        color: subtask.done ? 'var(--color-text-subtle)' : 'var(--color-text)',
-        textDecoration: subtask.done ? 'line-through' : 'none',
+        color: item.done ? 'var(--color-text-subtle)' : 'var(--color-text)',
+        textDecoration: item.done ? 'line-through' : 'none',
       }}
     >
       <input
         type="checkbox"
-        checked={subtask.done}
+        checked={item.done}
         onChange={onToggle}
         style={{
           width: '0.875rem',
@@ -967,7 +1079,7 @@ function SubtaskRow({
           cursor: 'pointer',
         }}
       />
-      <span style={{ flex: 1, lineHeight: 1.35 }}>{subtask.label}</span>
+      <span style={{ flex: 1, lineHeight: 1.35 }}>{item.label}</span>
     </label>
   )
 }

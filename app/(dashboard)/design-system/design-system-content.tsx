@@ -2175,7 +2175,7 @@ const INITIAL_BOARD_ITEMS: BoardItem[] = [
     priority: 'medium',
     tags: [{ id: 't-onb', label: 'Onboarding', color: '#5A824E' }],
     progress: { current: 1, total: 3 },
-    subtasks: [
+    checklist: [
       { id: 'st-1a', label: 'Reorder slides', done: true },
       { id: 'st-1b', label: 'Re-record voiceover', done: false },
       { id: 'st-1c', label: 'Update screenshots', done: false },
@@ -2207,7 +2207,7 @@ const INITIAL_BOARD_ITEMS: BoardItem[] = [
       { id: 't-data', label: 'Data', color: '#7c3aed' },
     ],
     progress: { current: 1, total: 3 },
-    subtasks: [
+    checklist: [
       { id: 'st-3a', label: 'Map events',     done: true },
       { id: 'st-3b', label: 'Wire e-commerce', done: false },
       { id: 'st-3c', label: 'QA dashboards',   done: false },
@@ -2236,7 +2236,6 @@ const INITIAL_BOARD_ITEMS: BoardItem[] = [
     description: 'Last pass on the customer-facing Q2 report before sending the PDF to retainers.',
     priority: 'medium',
     tags: [{ id: 't-rep', label: 'Reporting', color: '#0f766e' }],
-    coverColor: '#a78bfa',
     startDate: _isoDate(-2),
     dueDate: _isoDate(6),
     commentCount: 5,
@@ -2265,7 +2264,6 @@ const INITIAL_BOARD_ITEMS: BoardItem[] = [
       { id: 't-brand', label: 'Brand', color: '#5A824E' },
       { id: 't-mkt', label: 'Marketing', color: '#c2410c' },
     ],
-    coverColor: '#4ade80',
     progress: { current: 8, total: 8 },
     startDate: _isoDate(-18),
     dueDate: _isoDate(-12),
@@ -2286,15 +2284,15 @@ function KanbanBoardShowcase() {
     setItems(prev => prev.map(it => it.id === id ? { ...it, status: toStatus } : it))
   }
 
-  const toggleSubtask = (id: string, subId: string) => {
+  const toggleChecklist = (id: string, subId: string) => {
     setItems(prev => prev.map(it => {
       if (it.id !== id) return it
-      const subtasks = (it.subtasks ?? []).map(st => st.id === subId ? { ...st, done: !st.done } : st)
-      const done = subtasks.filter(s => s.done).length
+      const checklist = (it.checklist ?? []).map(st => st.id === subId ? { ...st, done: !st.done } : st)
+      const done = checklist.filter(s => s.done).length
       return {
         ...it,
-        subtasks,
-        progress: it.progress ? { current: done, total: subtasks.length } : it.progress,
+        checklist,
+        progress: it.progress ? { current: done, total: checklist.length } : it.progress,
       }
     }))
   }
@@ -2313,8 +2311,11 @@ function KanbanBoardShowcase() {
           onMove={moveItem}
           onAdd={(status) => alert(`Add card in ${status}`)}
           onNest={(child, parent) => alert(`Nest ${child} under ${parent}?`)}
-          onToggleSubtask={toggleSubtask}
+          onToggleChecklist={toggleChecklist}
           onItemClick={(it) => alert(`Open ${it.title}`)}
+          onAssigneeClick={(a) => alert(`Open ${a.name}'s profile`)}
+          onTagClick={(t) => alert(`Filter by tag: ${t.label}`)}
+          onPriorityClick={(p) => alert(`Filter by priority: ${p}`)}
           columnActions={[
             { label: 'Rename column',  icon: <Pencil size={13} />, onClick: () => {} },
             { label: 'Clear column',   icon: <Trash2 size={13} />, tone: 'danger', onClick: () => {} },
@@ -2331,15 +2332,15 @@ function BoardViewShowcase() {
   const moveItem = (id: string, toStatus: string) => {
     setItems(prev => prev.map(it => it.id === id ? { ...it, status: toStatus } : it))
   }
-  const toggleSubtask = (id: string, subId: string) => {
+  const toggleChecklist = (id: string, subId: string) => {
     setItems(prev => prev.map(it => {
       if (it.id !== id) return it
-      const subtasks = (it.subtasks ?? []).map(st => st.id === subId ? { ...st, done: !st.done } : st)
-      const done = subtasks.filter(s => s.done).length
+      const checklist = (it.checklist ?? []).map(st => st.id === subId ? { ...st, done: !st.done } : st)
+      const done = checklist.filter(s => s.done).length
       return {
         ...it,
-        subtasks,
-        progress: it.progress ? { current: done, total: subtasks.length } : it.progress,
+        checklist,
+        progress: it.progress ? { current: done, total: checklist.length } : it.progress,
       }
     }))
   }
@@ -2354,17 +2355,17 @@ function BoardViewShowcase() {
       <CardPrim>
         <BoardView
           title="Tahi · Tasks"
-          intro="Pick a view to see the same data three ways."
+          intro="Pick a view to see the same data three ways. Click a tag on any card to filter."
           columns={DEMO_BOARD_COLUMNS}
           items={items}
           onMove={moveItem}
           onNest={(child, parent) => alert(`Nest ${child} under ${parent}?`)}
           onAdd={(status) => alert(`Add in ${status}`)}
-          onToggleSubtask={toggleSubtask}
+          onToggleChecklist={toggleChecklist}
           onItemClick={(it) => alert(`Open ${it.title}`)}
+          onAssigneeClick={(a) => alert(`Open ${a.name}'s profile`)}
           onNew={() => alert('New task')}
           newLabel="New task"
-          onFilterClick={() => alert('Open filter')}
         />
       </CardPrim>
     </PrimitiveShell>
