@@ -139,8 +139,11 @@ export async function POST(req: NextRequest) {
 
   const database = await db()
 
-  // Resolve owner. Defaults to caller's team-member row when one
-  // exists; otherwise stays null (rare — admin without a row).
+  // Resolve owner. Order of fallback:
+  //   1. Explicit body.ownerId
+  //   2. Caller's own team-member row (UI-created leads)
+  //   3. leads.defaultLeadOwnerId setting (Webflow webhooks etc with
+  //      no real caller team-member)
   let ownerId = body.ownerId ?? null
   if (!ownerId) {
     const tm = await database
@@ -149,6 +152,22 @@ export async function POST(req: NextRequest) {
       .where(eq(schema.teamMembers.clerkUserId, userId))
       .limit(1)
     if (tm.length > 0) ownerId = tm[0].id
+  }
+  if (!ownerId) {
+    const [setting] = await database
+      .select({ value: schema.settings.value })
+      .from(schema.settings)
+      .where(eq(schema.settings.key, 'leads.defaultLeadOwnerId'))
+      .limit(1)
+    const candidate = setting?.value ?? null
+    if (candidate) {
+      const [member] = await database
+        .select({ id: schema.teamMembers.id })
+        .from(schema.teamMembers)
+        .where(eq(schema.teamMembers.id, candidate))
+        .limit(1)
+      if (member) ownerId = member.id
+    }
   }
 
   // Canonical person via lookup-or-create.

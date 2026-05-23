@@ -1476,8 +1476,28 @@ export const leads = sqliteTable('leads', {
   // walk the full lead → deal → invoice graph.
   promotedDealId: text('promoted_deal_id').references(() => deals.id, { onDelete: 'set null' }),
   promotedAt: text('promoted_at'),
-  // AI score placeholder (0-100). Wired in Phase B · 6.
+  // ── AI enrichment columns (Phase B · 6) ──
+  // Score is 0-100 with a one-line reason captured separately.
   aiScore: integer('ai_score'),
+  aiScoreReason: text('ai_score_reason'),
+  // Free-text 2-3 paragraph synthesis from web research.
+  aiSummary: text('ai_summary'),
+  // JSON array of URL strings cited by the enrichment run. Required
+  // backing for any factual claim in aiSummary.
+  aiSources: text('ai_sources').default('[]'),
+  // JSON array of 3 lead-specific discovery questions. The 3 always-
+  // ask questions live in settings.discoveryQuestionsTemplate.
+  aiQuestions: text('ai_questions').default('[]'),
+  // Timestamps gating cron runs + UI signalling.
+  enrichedAt: text('enriched_at'),
+  lastAiRunAt: text('last_ai_run_at'),
+  // Cost gate. Sum of input+output tokens across all AI runs on
+  // this lead. Surface in UI if a single lead burns >25k tokens.
+  aiTokensSpent: integer('ai_tokens_spent').notNull().default(0),
+  // When Liam clicks "don't ask again" on the re-enrich confirm
+  // dialog, this stays true and the prompt never fires on this
+  // lead again (until re-enrichment runs manually).
+  enrichRepromptSuppressed: integer('enrich_reprompt_suppressed', { mode: 'boolean' }).notNull().default(false),
   ...timestamps,
 }, (table) => [
   index('idx_leads_status').on(table.status),
@@ -1485,6 +1505,7 @@ export const leads = sqliteTable('leads', {
   index('idx_leads_email').on(table.email),
   index('idx_leads_source').on(table.source),
   index('idx_leads_person').on(table.personId),
+  index('idx_leads_ai_run').on(table.lastAiRunAt),
 ])
 
 // ============================================================

@@ -748,6 +748,38 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0042',
+    description: 'Phase B · 6 lead AI columns: ai_score_reason, ai_summary, ai_sources (JSON), ai_questions (JSON), enriched_at, last_ai_run_at, ai_tokens_spent, enrich_reprompt_suppressed. Plus settings seeds: leads.defaultLeadOwnerId (best-effort lookup for "Liam Miller") and leads.discoveryQuestionsTemplate (3 always-ask questions covering brand discovery + project goals + current solution).',
+    statements: [
+      `ALTER TABLE leads ADD COLUMN ai_score_reason TEXT`,
+      `ALTER TABLE leads ADD COLUMN ai_summary TEXT`,
+      `ALTER TABLE leads ADD COLUMN ai_sources TEXT DEFAULT '[]'`,
+      `ALTER TABLE leads ADD COLUMN ai_questions TEXT DEFAULT '[]'`,
+      `ALTER TABLE leads ADD COLUMN enriched_at TEXT`,
+      `ALTER TABLE leads ADD COLUMN last_ai_run_at TEXT`,
+      `ALTER TABLE leads ADD COLUMN ai_tokens_spent INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE leads ADD COLUMN enrich_reprompt_suppressed INTEGER NOT NULL DEFAULT 0`,
+      `CREATE INDEX IF NOT EXISTS idx_leads_ai_run ON leads(last_ai_run_at)`,
+      // Seed default lead owner — best-effort match on "Liam Miller". If
+      // no team-member row matches, the setting stays absent and the
+      // POST /api/admin/leads route just falls through to the caller-
+      // team-member fallback (which is fine for UI-created leads).
+      `INSERT OR IGNORE INTO settings (key, value, updated_at)
+        SELECT 'leads.defaultLeadOwnerId', id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        FROM team_members
+        WHERE lower(name) = 'liam miller' OR lower(name) LIKE 'liam %'
+        LIMIT 1`,
+      // Seed the 3 always-ask discovery questions. Covers brand
+      // discovery (why us), competitive context (what isn't working
+      // now) and project goals (success in 6 months). JSON array of
+      // strings so the UI can render + edit.
+      `INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES
+        ('leads.discoveryQuestionsTemplate',
+         '["What made you reach out to Tahi specifically?","How are you currently solving this, and what isn''t working?","What does success look like for this project in 6 months?"]',
+         strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`,
+    ],
+  },
+  {
     name: '0041',
     description: 'Permissions seed: 5 system roles + permission catalogue (resource × action) + role_permission defaults with sensible scope filters. Idempotent via INSERT OR IGNORE.',
     statements: [
