@@ -778,15 +778,6 @@ textarea,
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* DataTable click-mode hint. Faint at rest, brightens on row hover so
-   the trailing icon hints at what clicking the row will do (navigate
-   / preview / expand) without competing visually with the cell
-   content. */
-.tahi-row-clickable:hover .tahi-row-click-hint {
-  opacity: 1;
-  color: var(--color-brand);
-}
-
 /* MessageBubble hover actions. Always discoverable at low opacity
    so the user knows reply / react / more are there; brightens on
    row hover or focus. */

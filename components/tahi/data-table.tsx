@@ -39,7 +39,6 @@
 import * as React from 'react'
 import {
   ChevronDown, ChevronUp, Loader2, MoreHorizontal, Check,
-  ArrowUpRight, PanelRightOpen,
 } from 'lucide-react'
 import { Popover } from '@/components/tahi/popover'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
@@ -106,6 +105,11 @@ export interface DataTableColumn<Row> {
    *  popover with options; selecting calls onChange. Does NOT trigger
    *  the row's onRowClick / preview. */
   edit?: ChipColumnConfig<Row>
+  /** Allow cell contents to wrap onto multiple lines. By default every
+   *  cell is `white-space: nowrap` so narrow tables scroll
+   *  horizontally instead of wrapping mid-content. Set true on long-
+   *  text columns where wrapping is genuinely wanted. */
+  wrap?: boolean
 }
 
 export interface DataTableAction {
@@ -269,7 +273,7 @@ export function DataTable<Row>({
   }
 
   const anyClickable = !!onRowClick || !!onRowPreview || !!renderExpand
-  const colCount = columns.length + (selectable ? 1 : 0) + (rowActions ? 1 : 0) + (anyClickable ? 1 : 0)
+  const colCount = columns.length + (selectable ? 1 : 0) + (rowActions ? 1 : 0)
 
   return (
     <div
@@ -366,15 +370,6 @@ export function DataTable<Row>({
                   style={{
                     ...thStyle(stickyOffset),
                     width: '3rem',
-                  }}
-                />
-              )}
-              {anyClickable && (
-                <th
-                  aria-hidden="true"
-                  style={{
-                    ...thStyle(stickyOffset),
-                    width: '1.75rem',
                   }}
                 />
               )}
@@ -582,7 +577,7 @@ function DataRow<Row>({
             />
           </td>
         )}
-        {columns.map((col, colIndex) => {
+        {columns.map((col) => {
           const align = col.align ?? 'left'
           const isInteractive = col.link || col.edit
           return (
@@ -595,7 +590,7 @@ function DataRow<Row>({
                 borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
                 color: col.muted ? 'var(--color-text-muted)' : 'var(--color-text)',
                 verticalAlign: 'middle',
-                whiteSpace: colIndex === 0 ? 'nowrap' : undefined,
+                whiteSpace: col.wrap ? 'normal' : 'nowrap',
               }}
             >
               {col.link
@@ -667,28 +662,11 @@ function DataRow<Row>({
             </Popover>
           </td>
         )}
-        {clickable && (
-          <td
-            aria-hidden="true"
-            style={{
-              padding: `${paddingY} 0.5rem ${paddingY} 0`,
-              borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
-              verticalAlign: 'middle',
-              width: '1.75rem',
-              textAlign: 'right',
-            }}
-          >
-            <ClickModeIndicator
-              mode={isExpandable ? 'expand' : (onRowPreview ? 'preview' : 'navigate')}
-              isExpanded={isExpanded}
-            />
-          </td>
-        )}
       </tr>
       {isExpanded && expandContent && (
         <tr>
           <td
-            colSpan={columns.length + extraColumnCount + (clickable ? 1 : 0)}
+            colSpan={columns.length + extraColumnCount}
             style={{
               padding: 0,
               borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
@@ -702,42 +680,6 @@ function DataRow<Row>({
         </tr>
       )}
     </>
-  )
-}
-
-// ── Click-mode indicator ────────────────────────────────────────────────────
-//
-// Tiny trailing icon on each clickable row. Hints at what the click
-// will do. Brightens with the row's hover state via the .tahi-row-clickable
-// parent class (see globals.css).
-
-function ClickModeIndicator({
-  mode,
-  isExpanded,
-}: {
-  mode: 'navigate' | 'preview' | 'expand'
-  isExpanded: boolean
-}) {
-  const Icon = mode === 'preview'
-    ? PanelRightOpen
-    : mode === 'expand'
-      ? ChevronDown
-      : ArrowUpRight
-  return (
-    <span
-      className="tahi-row-click-hint"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: 'var(--color-text-subtle)',
-        opacity: 0.5,
-        transition: 'opacity 150ms ease, transform 220ms ease',
-        transform: mode === 'expand' && isExpanded ? 'rotate(180deg)' : undefined,
-      }}
-    >
-      <Icon size={14} aria-hidden="true" />
-    </span>
   )
 }
 
