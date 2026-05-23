@@ -1149,3 +1149,61 @@ The `AiRequestWizard` React component now takes optional `wizardEndpoint` + `sub
 - New animated icons go through Lucide Animated, not bespoke Motion implementations.
 
 ---
+
+## #055 - Use `--color-text-active` for Text on Brand-Tinted Surfaces (Mode-Aware)
+
+**Date:** 2026-05-23
+
+**Decision:** Anywhere we paint text or icons on a `--color-brand-50` / `--color-brand-100` / `--color-brand-200` background (active nav item, segmented tab active state, hover-tinted list rows, sidebar active state, etc.) the text colour is `--color-text-active`, NOT `--color-brand-dark`.
+
+**Rationale:** In dark mode the brand-100 surface is a translucent green tint sitting over the deep forest page background, which renders as a mid-tone green. Painting `--color-brand-dark` (#425F39) text on top produces too little luminance separation to read. `--color-text-active` is mode-aware (#1E3019 in light mode, #DCE8D9 in dark mode) so the same component reads cleanly in both. Found while fixing dark-mode contrast on the timer picker tabs, source-picker row hover, and search-palette active row.
+
+**Implications:**
+- `var(--color-brand-dark)` is reserved for borders and accent strokes where its specific hue matters, not text where contrast matters.
+- New segmented controls / list hover states use `--color-text-active` for the highlighted text.
+
+---
+
+## #056 - Global Command Palette (`SearchPalette`) is the Top-Nav Search
+
+**Date:** 2026-05-23
+
+**Decision:** Top-nav search is a global command palette (`components/tahi/search-palette.tsx`) backed by `GET /api/admin/search?q=...`. The endpoint runs parallel LIKE queries across 16 dynamic-entity tables (requests, tasks, organisations, brands, contacts, deals, invoices, contracts, proposals, project schedules, doc pages, scheduled calls, services, announcements, automation rules, team members), caps each group at 6, and returns grouped JSON plus a top-of-list suggestions row.
+
+**Rationale:** Replacing the old "press Enter, jumps to /requests?q=..." search with a real palette unlocks fast cross-area navigation, which is the dominant search use case in a many-page dashboard. Grouped results + visible category labels keep the user oriented while typing. The suggestions row gives one match per non-empty group up front so the user sees the breadth of results before scrolling.
+
+**Implications:**
+- Results render as `<Badge tone={statusTone(item.badge)} variant="soft" size="sm">` so status chips inherit the dashboard's status palette (paid = green, overdue = red, churned = neutral, in_progress = teal, etc.).
+- New entity types need to be added in the API route (groups, mapper) AND get a Lucide icon entry in the SearchPalette's `TYPE_ICON` map. Detail-page routing is per-entity; entities without detail routes link to their list page or a `?<param>=<id>` deep link.
+- Docs use `/docs?doc=<id>`; the docs page reads the param and auto-opens the doc.
+- The palette is centred (not pinned to top). Backdrop blur + bigger shadow for premium feel. Cmd/Ctrl-K opens it from anywhere in the admin app.
+
+---
+
+## #057 - Running-Timer Chip is a Brand-Filled "Standout" Pill
+
+**Date:** 2026-05-23
+
+**Decision:** When the timer is actively running, the chip in the top nav is a brand-filled pill: `background: var(--color-brand)`, `color: #ffffff`, subtle `box-shadow` lift, white pulsing dot. Paused state stays muted (`bg-secondary` + `text-muted`). Rest state ("Track time" button) keeps the transparent + border-subtle treatment with brand-50 hover.
+
+**Rationale:** The active timer is a piece of in-flight state the user needs to notice at a glance. A pale brand-50 chip blended into the white nav and was hard to spot. The brand-filled pill is the only fully-saturated brand surface in the nav, so it reads as "something is happening right now" without being noisy. Paired with the white pulsing dot inside.
+
+**Implications:**
+- The brand-filled treatment is reserved for THIS chip and primary CTAs. Don't apply it to inactive nav elements.
+- The shape is the leading example of "important live state" chip styling. Future patterns that need the same urgency (e.g. recording, screen-sharing) should reuse it.
+
+---
+
+## #058 - Popover-Family Surfaces Share Shadow + Radius + Border Tokens
+
+**Date:** 2026-05-23
+
+**Decision:** Every popover-style surface in the dashboard (notification panel, currency switcher dropdown, search palette modal, timer picker, `Popover` primitive's children, `Menu`) uses the same three tokens: `border: 1px solid var(--color-border)`, `border-radius: var(--radius-card)`, `box-shadow: var(--shadow-lg)`. Local boxShadow hex literals are gone.
+
+**Rationale:** The notification panel and currency dropdown were each rolling their own shadow + radius treatment, which made the dashboard feel like three different apps stitched together. Aligning on the Popover primitive's tokens means a single edit changes the look of every floating surface at once.
+
+**Implications:**
+- New popovers should compose the `<Popover>` primitive (which already has these tokens). Only when that primitive can't be used (e.g. inline-positioned panels, fixed-position notification panel) do we reach for the raw tokens, and we must use the same trio.
+- The search palette modal uses a custom double-layer drop shadow for the extra "lifted off the page" feel, but the inner sections still respect the family.
+
+---

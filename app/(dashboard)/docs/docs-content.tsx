@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
 import {
   BookOpen, Plus, Search, ChevronRight, Clock, Save,
   Trash2, ArrowLeft, History, X, RefreshCw, FileText,
@@ -211,6 +212,21 @@ export function DocsContent() {
   }, [activeCategory, search])
 
   useEffect(() => { fetchPages() }, [fetchPages])
+
+  // Auto-open a doc when the URL carries ?doc=<id>. Used by the global
+  // search palette so clicking a doc result lands the user on that
+  // specific doc, not just the docs index. Tracked with a ref so it
+  // only fires once per param value.
+  const searchParams = useSearchParams()
+  const docParam = searchParams?.get('doc') ?? null
+  const lastDocParamRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!docParam) return
+    if (lastDocParamRef.current === docParam) return
+    lastDocParamRef.current = docParam
+    void loadPage(docParam)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docParam])
 
   const loadPage = useCallback(async (id: string) => {
     try {

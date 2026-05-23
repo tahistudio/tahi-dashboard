@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Bell, CheckCheck } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { AnimatedBell } from '@/components/tahi/animated-icons'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -188,7 +189,7 @@ export function NotificationBell() {
         className="relative p-2 rounded-lg text-[var(--color-text-subtle)] hover:bg-[var(--color-bg-secondary)] hover:text-[var(--color-text)] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
         style={{ minHeight: 44, minWidth: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       >
-        <Bell style={{ width: 16, height: 16 }} aria-hidden="true" />
+        <AnimatedBell size={16} aria-label="" />
         {unreadCount > 0 && (
           <span
             style={{
@@ -225,9 +226,9 @@ export function NotificationBell() {
             top: '3.5rem',
             maxWidth: 'calc(100vw - 1rem)',
             background: 'var(--color-bg)',
-            borderRadius: 'var(--radius-card, 0.75rem)',
+            borderRadius: 'var(--radius-card)',
             border: '1px solid var(--color-border)',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+            boxShadow: 'var(--shadow-lg)',
             zIndex: 100,
             overflow: 'hidden',
           }}

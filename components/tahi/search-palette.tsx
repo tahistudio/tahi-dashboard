@@ -20,6 +20,7 @@ import {
   Phone, ShoppingBag, Megaphone, Zap, UserCog,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { Badge, statusTone } from '@/components/tahi/badge'
 import type { SearchGroupType, SearchResultItem, SearchResponse } from '@/app/api/admin/search/route'
 
 interface SearchPaletteProps {
@@ -467,7 +468,7 @@ function ResultRow({
           height: '1.75rem',
           flexShrink: 0,
           background: active ? 'var(--color-brand-100)' : 'var(--color-bg-tertiary)',
-          color: active ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+          color: active ? 'var(--color-text-active)' : 'var(--color-text-muted)',
           borderRadius: 'var(--radius-sm)',
           transition: 'background-color 150ms ease, color 150ms ease',
         }}
@@ -503,21 +504,15 @@ function ResultRow({
         )}
       </div>
       {item.badge && (
-        <span
-          style={{
-            flexShrink: 0,
-            fontSize: '0.625rem',
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            letterSpacing: '0.04em',
-            color: 'var(--color-text-subtle)',
-            background: 'var(--color-bg-secondary)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 'var(--radius-sm)',
-            padding: '0.0625rem 0.4375rem',
-          }}
-        >
-          {item.badge}
+        <span style={{ flexShrink: 0 }}>
+          <Badge
+            tone={statusTone(item.badge)}
+            variant="soft"
+            size="sm"
+            leader={false}
+          >
+            {item.badge.replace(/_/g, ' ')}
+          </Badge>
         </span>
       )}
     </button>

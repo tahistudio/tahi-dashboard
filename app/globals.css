@@ -646,6 +646,15 @@ button:disabled,
   border-radius: 0;
 }
 
+/* The search palette is its own focus indicator (modal is open, the
+   cursor is in the input). Don't paint a per-input ring on top - the
+   global :focus-visible rule otherwise drew a tight rounded outline
+   that sat right up against the search text. */
+.search-palette-input:focus-visible {
+  box-shadow: none;
+  border-radius: 0;
+}
+
 /* Smooth transitions on interactive properties */
 button,
 a,

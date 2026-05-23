@@ -382,7 +382,7 @@ export async function GET(req: NextRequest) {
       type: 'doc',
       id: r.id,
       title: r.title,
-      href: r.slug ? `/docs?doc=${encodeURIComponent(r.slug)}` : '/docs',
+      href: `/docs?doc=${encodeURIComponent(r.id)}`,
     })),
     call: fromResult(callsRes, r => ({
       type: 'call',

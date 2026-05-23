@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * <TimerChip> — always-present timer control in the admin top-nav.
+ * <TimerChip>. Always-present timer control in the admin top-nav.
  *
  * Two states in one button:
  *
@@ -17,7 +17,7 @@
  * (catches pauses from another tab, stop from the request page, etc.).
  *
  * On first load, if the active timer's lastPingAt is > 2 minutes old
- * we prompt the user to log or discard — covers laptop-sleep gaps.
+ * we prompt the user to log or discard. Covers laptop-sleep gaps.
  *
  * Admin-only. Clients never see this.
  */
@@ -117,7 +117,7 @@ export function TimerChip() {
       }
       setTimer(data.timer)
     } catch {
-      // silent — offline / transient
+      // silent: offline / transient
     } finally {
       setLoaded(true)
     }
@@ -151,23 +151,33 @@ export function TimerChip() {
   }, [timer])
 
   // Lazy-load each source list the first time its tab is activated.
+  // Track which lists we've already tried to load so an empty server
+  // response doesn't cause an infinite re-fetch loop (the previous
+  // version re-fired the effect every render because the "fetch me"
+  // condition (length === 0 && !loading) stayed true after an empty
+  // result).
+  const fetchedRef = useRef({ request: false, task: false, client: false })
+
   useEffect(() => {
     if (!pickerOpen) return
-    if (pickerSource === 'request' && requests.length === 0 && !requestsLoading) {
+    if (pickerSource === 'request' && !fetchedRef.current.request && !requestsLoading) {
+      fetchedRef.current.request = true
       setRequestsLoading(true)
       fetch(apiPath('/api/admin/requests?status=active'))
         .then(r => r.json() as Promise<{ requests: RequestOption[] }>)
         .then(d => setRequests(d.requests ?? []))
         .catch(() => setRequests([]))
         .finally(() => setRequestsLoading(false))
-    } else if (pickerSource === 'task' && tasks.length === 0 && !tasksLoading) {
+    } else if (pickerSource === 'task' && !fetchedRef.current.task && !tasksLoading) {
+      fetchedRef.current.task = true
       setTasksLoading(true)
       fetch(apiPath('/api/admin/tasks?status=all'))
         .then(r => r.json() as Promise<{ items: TaskOption[] }>)
         .then(d => setTasks(d.items ?? []))
         .catch(() => setTasks([]))
         .finally(() => setTasksLoading(false))
-    } else if (pickerSource === 'client' && clients.length === 0 && !clientsLoading) {
+    } else if (pickerSource === 'client' && !fetchedRef.current.client && !clientsLoading) {
+      fetchedRef.current.client = true
       setClientsLoading(true)
       fetch(apiPath('/api/admin/clients?status=active'))
         .then(r => r.json() as Promise<{ organisations: Array<{ id: string; name: string }> }>)
@@ -175,7 +185,7 @@ export function TimerChip() {
         .catch(() => setClients([]))
         .finally(() => setClientsLoading(false))
     }
-  }, [pickerOpen, pickerSource, requests.length, tasks.length, clients.length, requestsLoading, tasksLoading, clientsLoading])
+  }, [pickerOpen, pickerSource, requestsLoading, tasksLoading, clientsLoading])
 
   // Close either popover if the other opens, so we don't get stacked.
   useEffect(() => { if (pickerOpen) setControlsOpen(false) }, [pickerOpen])
@@ -337,7 +347,7 @@ export function TimerChip() {
           }}
           onMouseEnter={e => {
             e.currentTarget.style.background = 'var(--color-brand-50)'
-            e.currentTarget.style.color = 'var(--color-brand-dark)'
+            e.currentTarget.style.color = 'var(--color-text-active)'
             e.currentTarget.style.borderColor = 'var(--color-brand-100)'
           }}
           onMouseLeave={e => {
@@ -392,13 +402,17 @@ export function TimerChip() {
           gap: '0.375rem',
           padding: '0.3125rem 0.625rem',
           borderRadius: 'var(--radius-button)',
-          background: isPaused ? 'var(--color-bg-secondary)' : 'var(--color-brand-50)',
-          border: `1px solid ${isPaused ? 'var(--color-border)' : 'var(--color-brand-100)'}`,
-          color: isPaused ? 'var(--color-text-muted)' : 'var(--color-brand-dark)',
+          // Active = brand-filled chip so the running timer stands
+          // out from the rest of the nav. Paused = muted, clearly
+          // "not currently counting".
+          background: isPaused ? 'var(--color-bg-secondary)' : 'var(--color-brand)',
+          border: `1px solid ${isPaused ? 'var(--color-border)' : 'var(--color-brand)'}`,
+          color: isPaused ? 'var(--color-text-muted)' : '#ffffff',
           fontSize: '0.75rem',
           fontWeight: 600,
           cursor: 'pointer',
           minHeight: '2rem',
+          boxShadow: isPaused ? 'none' : '0 1px 0 rgba(15, 20, 16, 0.16)',
         }}
         aria-expanded={controlsOpen}
         aria-label={`Active timer ${formatElapsed(seconds)} ${isPaused ? 'paused' : 'running'}`}
@@ -409,8 +423,9 @@ export function TimerChip() {
               aria-hidden="true"
               className="animate-pulse"
               style={{
-                width: '0.5rem', height: '0.5rem', borderRadius: '50%',
-                background: 'var(--color-brand)',
+                width: '0.4375rem', height: '0.4375rem', borderRadius: '50%',
+                background: '#ffffff',
+                boxShadow: '0 0 0 2px rgba(255, 255, 255, 0.32)',
               }}
             />}
         <span className="hidden sm:inline font-mono tabular-nums">{formatElapsed(seconds)}</span>
@@ -518,7 +533,7 @@ export function TimerChip() {
         <ConfirmDialog
           open
           title="Was your timer still running?"
-          description={`Your timer on "${staleTimer.targetTitle ?? 'this item'}" hasn't heartbeated for a while — your laptop may have slept or the tab was closed. Log the time up to when it went stale, or keep it running from now.`}
+          description={`Your timer on "${staleTimer.targetTitle ?? 'this item'}" hasn't heartbeated for a while. Your laptop may have slept or the tab was closed. Log the time up to when it went stale, or keep it running from now.`}
           confirmLabel="Log & stop"
           cancelLabel="Keep running"
           variant="warning"
@@ -644,7 +659,7 @@ function SourcePicker({
                   padding: '0.3125rem 0.5rem',
                   fontSize: '0.75rem',
                   fontWeight: active ? 600 : 500,
-                  color: active ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                  color: active ? 'var(--color-text-active)' : 'var(--color-text-muted)',
                   background: active ? 'var(--color-brand-100)' : 'transparent',
                   border: 'none',
                   borderRadius: 'var(--radius-sm)',
@@ -765,7 +780,7 @@ function SourcePicker({
                 const tile = e.currentTarget.querySelector<HTMLElement>('[data-row-icon]')
                 if (tile) {
                   tile.style.background = 'var(--color-brand-100)'
-                  tile.style.color = 'var(--color-brand-dark)'
+                  tile.style.color = 'var(--color-text-active)'
                 }
               }}
               onMouseLeave={e => {

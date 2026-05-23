@@ -294,6 +294,27 @@ Don't use a Tooltip when:
 - The information is essential to using the control (move it into the UI itself).
 - The trigger is on mobile-only and likely tapped, not hovered.
 
+### Text-on-brand-tint rule (see Decision #055)
+Anywhere text or icons sit on a `--color-brand-50` / `--color-brand-100` / `--color-brand-200` background, the text colour is `--color-text-active` (mode-aware: #1E3019 light, #DCE8D9 dark), NOT `--color-brand-dark`. Reason: in dark mode the brand tint is translucent over forest, and `--color-brand-dark` text doesn't carry enough luminance contrast. `--color-brand-dark` stays valid for borders and accent strokes; not for text.
+
+### Popover-family surfaces (see Decision #058)
+Every floating surface (notification panel, currency dropdown, search palette modal, timer picker, `Popover` children, `Menu`) uses one trio of tokens:
+- `border: 1px solid var(--color-border)`
+- `border-radius: var(--radius-card)`
+- `box-shadow: var(--shadow-lg)`
+
+If you can't compose `<Popover>` directly, copy the trio. No bespoke shadow hexes.
+
+### Running-state chips (see Decision #057)
+Live in-flight state in the top nav (running timer is the canonical case) renders as a **brand-filled pill**: `background: var(--color-brand)`, `color: #ffffff`, white pulsing dot inside, subtle box-shadow lift. Paused or idle state of the same chip stays muted (`bg-secondary` + `text-muted`). Reserve the brand-filled treatment for genuinely live state; don't sprinkle it across regular nav items.
+
+### Global command palette (see Decision #056)
+Top-nav search is a global palette (`SearchPalette`) backed by `/api/admin/search`. To add a new entity type to search:
+1. In `app/api/admin/search/route.ts` add a new parallel query, push it through `fromResult`, and add it to the GROUP_ORDER + GROUP_LABEL maps.
+2. In `components/tahi/search-palette.tsx` add a Lucide icon to the `TYPE_ICON` map for the new `SearchGroupType`.
+3. Wire the result `href` to the entity's detail page. Entities without a detail page deep-link to the list with a `?<param>=<id>` query (mirror the `docs` pattern: `/docs?doc=<id>` is read by the page on mount).
+4. Status chips render via `<Badge tone={statusTone(item.badge)} variant="soft" size="sm">` so colours match the dashboard's status palette.
+
 ---
 
 ## Current Focus
