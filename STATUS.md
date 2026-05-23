@@ -1,7 +1,7 @@
 # Tahi Dashboard — Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-05-21** by Liam
+> Last updated: **2026-05-23** by Liam
 
 ---
 
@@ -11,6 +11,7 @@ Features the user actively runs their workday on. Regressions here are P0.
 
 - **Sales pipeline** — deals, kanban, list, nudges, activity timeline, default owner
 - **Finance reports** — P&L, cash flow forecast, bank balances, invoice aging, retainer health, MRR forecast, expense dashboard
+- **Docs Hub** — shipped + locked 2026-05-23. Reference list-page pattern (FilterBar + DataTable + SlideOver). Notion-grade editor with bubble menu, slash commands, task lists, image, and a 56rem slide-over with clickable version history.
 - **Proposals / contracts / schedules / calculator** — built and premium, but not yet in the user's daily routine (closest to crossing the line)
 
 ## Built but not daily-trusted
@@ -52,10 +53,17 @@ Verified 2026-05-21 against current code. Pipeline polish backlog (5 items) all 
 
 1. ✅ Doc cleanup pass — STATUS.md, CLAUDE.md Definition of Done, roadmap memory rewrite, QA audit re-verification, pipeline polish memory archived
 2. ✅ Pipeline polish backlog — all 5 items already shipped (verified 2026-05-21)
-3. Live Chrome verification of pipeline polish items + voice note bug + R2 uploads (awaiting deployed URL)
-4. Voice note player fix (P1 — swap fake player for `<audio>` element)
-5. Phase 11 quick wins T660–T667 — 8 items
-6. Schema migration S23–S25 (notificationPreferences + commentsLocked + xero_category_overrides + teamMembers.salaryAnnual). Note: `editedAt`/`deletedAt` on messages already exist.
+3. ✅ Design-system v3 primitives shipped — KanbanBoard, BoardView (Kanban/Table/Timeline tabs, infinite-scroll timeline), FilterBar multi-select, Avatar tooltip-by-default, Notion-grade TiptapDocEditor (bubble menu + slash commands + task lists + image)
+4. ✅ Docs Hub shipped + locked 2026-05-23 — first list-page lapped through the new design system
+5. ⏳ **NEXT: lead intake + discovery call workflow** — see "Next workflow" below
+6. Live Chrome verification of pipeline polish items + voice note bug + R2 uploads (awaiting deployed URL)
+7. Voice note player fix (P1 — swap fake player for `<audio>` element)
+8. Phase 11 quick wins T660–T667 — 8 items
+9. Schema migration S23–S25 (notificationPreferences + commentsLocked + xero_category_overrides + teamMembers.salaryAnnual). Note: `editedAt`/`deletedAt` on messages already exist.
+
+## Next workflow
+
+Lifecycle-order build is in progress. Docs Hub was the first list-page lap; the next surface to build is the **earliest stage of the sales lifecycle**: lead intake → discovery call → first deal. See "Discovery call" entry in `WORKFLOWS.md`. Pipeline (already daily-trusted) sits downstream of this and gets a design-system polish pass once the upstream lead/discovery flow lands.
 
 Full plan: `C:\Users\Work\.claude\plans\i-d-like-you-to-gentle-neumann.md`
 
