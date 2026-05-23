@@ -29,6 +29,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { sniffTechStack, type DetectedTech } from '@/lib/tech-stack-sniffer'
 
 export const dynamic = 'force-dynamic'
 
@@ -256,6 +257,36 @@ function matchText(text: string, re: RegExp): string | null {
   return m ? m[1] : null
 }
 
+/** Turn the sniffer's structured detections into a human-readable
+ *  string for ai_signals.siteTechStack. Groups by category so the
+ *  UI line reads naturally:
+ *    "CMS: WordPress · Commerce: WooCommerce · Analytics: Google
+ *     Analytics, Hotjar · Email: Mailchimp · Chat: Intercom"
+ */
+function formatSniffedTech(tech: DetectedTech[]): string {
+  const labels: Record<DetectedTech['category'], string> = {
+    cms: 'CMS',
+    commerce: 'Commerce',
+    analytics: 'Analytics',
+    email: 'Email',
+    chat: 'Chat',
+    payment: 'Payments',
+    hosting: 'Hosting',
+    framework: 'Framework',
+  }
+  const order: DetectedTech['category'][] = ['cms', 'commerce', 'framework', 'analytics', 'email', 'chat', 'payment', 'hosting']
+  const byCategory = new Map<DetectedTech['category'], string[]>()
+  for (const t of tech) {
+    const list = byCategory.get(t.category) ?? []
+    if (!list.includes(t.name)) list.push(t.name)
+    byCategory.set(t.category, list)
+  }
+  return order
+    .filter(cat => byCategory.has(cat))
+    .map(cat => `${labels[cat]}: ${byCategory.get(cat)!.join(', ')}`)
+    .join(' · ')
+}
+
 // ── Anthropic call ──────────────────────────────────────────────────────────
 
 interface AnthropicCallResult {
@@ -382,14 +413,32 @@ export async function POST(
       })
     }
 
-    // Full enrichment
-    const { text, inputTokens, outputTokens } = await callAnthropic(
-      MODEL_FULL,
-      SYSTEM_PROMPT_FULL,
-      userMessage,
-      true,
-    )
+    // Full enrichment. Run Sonnet + in-house tech stack sniffer in
+    // parallel — sniffer is one HTTP request, completes well before
+    // Sonnet finishes, and gives us concrete CMS / analytics / etc.
+    // signals to merge into ai_signals.
+    const sniffPromise: Promise<{ tech: DetectedTech[]; fetchedUrl: string; error?: string }> =
+      promptInput.website
+        ? sniffTechStack(promptInput.website).catch(err => ({
+            tech: [], fetchedUrl: '', error: err instanceof Error ? err.message : String(err),
+          }))
+        : Promise.resolve({ tech: [], fetchedUrl: '' })
+
+    const [{ text, inputTokens, outputTokens }, sniffResult] = await Promise.all([
+      callAnthropic(MODEL_FULL, SYSTEM_PROMPT_FULL, userMessage, true),
+      sniffPromise,
+    ])
     const parsed = parseFullResponse(text)
+
+    // Merge sniffer findings into signals. Sniffer is more reliable
+    // than Sonnet's job-post-based guesses, so it wins on tech stack.
+    // Sonnet's siteTechStack guess is only kept if the sniffer
+    // returned nothing (e.g. fetch failed).
+    if (sniffResult.tech.length > 0) {
+      const formatted = formatSniffedTech(sniffResult.tech)
+      parsed.signals.siteTechStack = formatted
+      parsed.signals.siteTechSource = sniffResult.fetchedUrl
+    }
 
     // If the model failed to produce a summary or sources, treat as
     // a soft failure: don't overwrite existing enrichment data, but
