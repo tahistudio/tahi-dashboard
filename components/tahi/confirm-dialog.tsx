@@ -9,9 +9,16 @@ interface ConfirmDialogProps {
   description: string
   confirmLabel?: string
   cancelLabel?: string
-  variant?: 'danger' | 'warning'
+  variant?: 'danger' | 'warning' | 'primary'
   onConfirm: () => Promise<void> | void
   onCancel: () => void
+  /** Optional third button between Cancel and Confirm. Renders in a
+   *  muted style so it doesn't compete with the primary action.
+   *  Common use: "Don't ask again", "Skip and remember", etc. */
+  secondaryAction?: {
+    label: string
+    onClick: () => Promise<void> | void
+  }
 }
 
 export function ConfirmDialog({
@@ -23,6 +30,7 @@ export function ConfirmDialog({
   variant = 'danger',
   onConfirm,
   onCancel,
+  secondaryAction,
 }: ConfirmDialogProps) {
   const [loading, setLoading] = useState(false)
 
@@ -37,7 +45,28 @@ export function ConfirmDialog({
     }
   }
 
-  const confirmBg = variant === 'danger' ? 'var(--color-danger)' : 'var(--color-warning)'
+  async function handleSecondary() {
+    if (!secondaryAction) return
+    setLoading(true)
+    try {
+      await secondaryAction.onClick()
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const confirmBg =
+    variant === 'danger'  ? 'var(--color-danger)'
+    : variant === 'primary' ? 'var(--color-brand)'
+    : 'var(--color-warning)'
+  const iconBg =
+    variant === 'danger'  ? 'var(--color-danger-bg)'
+    : variant === 'primary' ? 'var(--color-brand-50)'
+    : 'var(--color-warning-bg)'
+  const iconColor =
+    variant === 'danger'  ? 'var(--color-danger)'
+    : variant === 'primary' ? 'var(--color-brand)'
+    : 'var(--color-warning)'
 
   return (
     <div
@@ -77,14 +106,14 @@ export function ConfirmDialog({
               alignItems: 'center',
               justifyContent: 'center',
               flexShrink: 0,
-              background: variant === 'danger' ? 'var(--color-danger-bg)' : 'var(--color-warning-bg)',
+              background: iconBg,
             }}
           >
             <AlertTriangle
               style={{
                 width: '1.25rem',
                 height: '1.25rem',
-                color: variant === 'danger' ? 'var(--color-danger)' : 'var(--color-warning)',
+                color: iconColor,
               }}
             />
           </div>
@@ -155,6 +184,27 @@ export function ConfirmDialog({
           >
             {cancelLabel}
           </button>
+          {secondaryAction && (
+            <button
+              type="button"
+              onClick={() => void handleSecondary()}
+              disabled={loading}
+              style={{
+                padding: '0.5rem 1rem',
+                borderRadius: '0.5rem',
+                fontSize: '0.875rem',
+                fontWeight: 500,
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg-secondary)',
+                color: 'var(--color-text-muted)',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                opacity: loading ? 0.5 : 1,
+                minHeight: '2.75rem',
+              }}
+            >
+              {secondaryAction.label}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void handleConfirm()}

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   UserPlus, Plus, Clock, RefreshCw, Save, Trash2, ArrowUpRight,
   Mail, Phone, Building2, Globe, Tag, User, Edit3,
+  Sparkles, ExternalLink, MessageCircleQuestion,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { EmptyState } from '@/components/tahi/empty-state'
@@ -42,7 +43,18 @@ interface Lead {
   ownerAvatarUrl: string | null
   promotedDealId: string | null
   promotedAt: string | null
+  // AI enrichment (populated by /api/admin/leads/[id]/enrich)
   aiScore: number | null
+  aiScoreReason: string | null
+  aiSummary: string | null
+  /** JSON-stringified array of URL strings backing aiSummary claims. */
+  aiSources: string | null
+  /** JSON-stringified array of 3 lead-specific discovery questions. */
+  aiQuestions: string | null
+  enrichedAt: string | null
+  lastAiRunAt: string | null
+  aiTokensSpent: number | null
+  enrichRepromptSuppressed: boolean | null
   createdAt: string
   updatedAt: string
 }
@@ -92,13 +104,23 @@ export function LeadsContent() {
   ])
 
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
+  const [discoveryTemplate, setDiscoveryTemplate] = useState<string[]>([])
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Partial<Lead> | null>(null)
+  const [editSnapshot, setEditSnapshot] = useState<{ website: string | null; company: string | null } | null>(null)
   const [saving, setSaving] = useState(false)
   const [showNewForm, setShowNewForm] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Lead | null>(null)
   const [pendingPromote, setPendingPromote] = useState<Lead | null>(null)
   const [promoting, setPromoting] = useState(false)
+
+  // AI state
+  const [enriching, setEnriching] = useState(false)
+  const [enrichError, setEnrichError] = useState<string | null>(null)
+  /** Set after a save when website/company changed and the lead has
+   *  prior enrichment data + reprompt isn't suppressed. Drives a
+   *  ConfirmDialog asking whether to re-run enrichment. */
+  const [pendingReenrich, setPendingReenrich] = useState<Lead | null>(null)
 
   const fetchLeads = useCallback(async () => {
     setLoading(true)
@@ -158,10 +180,12 @@ export function LeadsContent() {
     try {
       const res = await fetch(apiPath(`/api/admin/leads/${id}`))
       if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { lead: Lead }
+      const data = await res.json() as { lead: Lead; discoveryQuestionsTemplate?: string[] }
       setSelectedLead(data.lead)
+      setDiscoveryTemplate(data.discoveryQuestionsTemplate ?? [])
       setEditing(false)
       setDraft(null)
+      setEnrichError(null)
     } catch {
       // ignore
     }
@@ -180,6 +204,7 @@ export function LeadsContent() {
   const startEdit = (lead: Lead) => {
     setSelectedLead(lead)
     setDraft({ ...lead })
+    setEditSnapshot({ website: lead.website, company: lead.company })
     setEditing(true)
   }
 
@@ -216,6 +241,21 @@ export function LeadsContent() {
       await fetchLeads()
       setEditing(false)
       setDraft(null)
+
+      // Re-enrich confirm logic. Trigger only when:
+      //   1. The lead already has prior enrichment data (no point
+      //      prompting on first edit before any AI has run)
+      //   2. Liam hasn't suppressed the prompt for this lead
+      //   3. Website OR company actually changed during this edit
+      const normalisedSnap = (v: string | null | undefined) => (v ?? '').trim() || null
+      const websiteChanged = normalisedSnap(draft.website) !== normalisedSnap(editSnapshot?.website)
+      const companyChanged = normalisedSnap(draft.company) !== normalisedSnap(editSnapshot?.company)
+      const fieldsChanged = websiteChanged || companyChanged
+      const eligible = selectedLead.enrichedAt && !selectedLead.enrichRepromptSuppressed
+      if (fieldsChanged && eligible) {
+        setPendingReenrich(selectedLead)
+      }
+      setEditSnapshot(null)
     } finally {
       setSaving(false)
     }
@@ -230,6 +270,40 @@ export function LeadsContent() {
       await fetchLeads()
     } catch {
       // ignore
+    }
+  }
+
+  async function runEnrich(leadId: string) {
+    setEnriching(true)
+    setEnrichError(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/leads/${leadId}/enrich`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({ error: 'Enrichment failed' })) as { detail?: string; error?: string }
+        throw new Error(errJson.detail ?? errJson.error ?? 'Enrichment failed')
+      }
+      await openLead(leadId)
+      await fetchLeads()
+    } catch (err) {
+      setEnrichError(err instanceof Error ? err.message : 'Enrichment failed')
+    } finally {
+      setEnriching(false)
+    }
+  }
+
+  async function suppressReenrichPrompt(leadId: string) {
+    try {
+      await fetch(apiPath(`/api/admin/leads/${leadId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enrichRepromptSuppressed: true }),
+      })
+      await openLead(leadId)
+    } catch {
+      // best-effort
     }
   }
 
@@ -441,7 +515,13 @@ export function LeadsContent() {
               {editing && draft ? (
                 <LeadForm draft={draft} onChange={setDraft} />
               ) : (
-                <LeadDetail lead={selectedLead} />
+                <LeadDetail
+                  lead={selectedLead}
+                  discoveryTemplate={discoveryTemplate}
+                  enriching={enriching}
+                  enrichError={enrichError}
+                  onRunEnrich={() => runEnrich(selectedLead.id)}
+                />
               )}
             </SlideOver.Body>
             <SlideOver.Footer>
@@ -468,6 +548,17 @@ export function LeadsContent() {
                     iconLeft={<Trash2 className="w-3.5 h-3.5" />}
                   >
                     Delete
+                  </TahiButton>
+                  <TahiButton
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => runEnrich(selectedLead.id)}
+                    disabled={enriching}
+                    iconLeft={enriching
+                      ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      : <Sparkles className="w-3.5 h-3.5" />}
+                  >
+                    {enriching ? 'Researching...' : (selectedLead.enrichedAt ? 'Re-run AI' : 'Run AI')}
                   </TahiButton>
                   <div style={{ flex: 1 }} />
                   <TahiButton
@@ -543,6 +634,32 @@ export function LeadsContent() {
         confirmLabel={promoting ? 'Promoting...' : 'Promote to deal'}
         onConfirm={confirmPromote}
         onCancel={() => setPendingPromote(null)}
+      />
+
+      {/* Re-enrich confirm. Fires after a save when website or company
+          changed AND the lead has prior enrichment data AND Liam hasn't
+          suppressed the prompt for this lead. */}
+      <ConfirmDialog
+        open={!!pendingReenrich}
+        title="Re-run enrichment?"
+        description="The website or company changed. Would you like the AI to refresh its research and discovery questions based on the new info?"
+        confirmLabel="Re-run now"
+        cancelLabel="Skip"
+        variant="primary"
+        onConfirm={async () => {
+          const lead = pendingReenrich
+          setPendingReenrich(null)
+          if (lead) await runEnrich(lead.id)
+        }}
+        onCancel={() => setPendingReenrich(null)}
+        secondaryAction={pendingReenrich ? {
+          label: "Don't ask again",
+          onClick: async () => {
+            const lead = pendingReenrich
+            setPendingReenrich(null)
+            if (lead) await suppressReenrichPrompt(lead.id)
+          },
+        } : undefined}
       />
     </div>
   )
@@ -687,8 +804,22 @@ function LeadForm({
 
 // -- Lead detail (view mode) --
 
-function LeadDetail({ lead }: { lead: Lead }) {
+function LeadDetail({
+  lead,
+  discoveryTemplate,
+  enriching,
+  enrichError,
+  onRunEnrich,
+}: {
+  lead: Lead
+  discoveryTemplate: string[]
+  enriching: boolean
+  enrichError: string | null
+  onRunEnrich: () => void
+}) {
   const status = STATUS_BY_VALUE.get(lead.status)
+  const aiSources = safeJsonArray<string>(lead.aiSources)
+  const aiQuestions = safeJsonArray<string>(lead.aiQuestions)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem', alignItems: 'center' }}>
@@ -718,6 +849,16 @@ function LeadDetail({ lead }: { lead: Lead }) {
         {lead.sourceDetail && <DetailRow icon={<Tag size={12} />} label="Source detail" value={lead.sourceDetail} />}
         {lead.ownerName && <DetailRow icon={<User size={12} />} label="Owner" value={lead.ownerName} />}
       </DetailGrid>
+
+      <AiSection
+        lead={lead}
+        aiSources={aiSources}
+        aiQuestions={aiQuestions}
+        discoveryTemplate={discoveryTemplate}
+        enriching={enriching}
+        enrichError={enrichError}
+        onRunEnrich={onRunEnrich}
+      />
 
       {lead.brief && (
         <div>
@@ -832,6 +973,194 @@ function leadSubtitle(lead: Lead): string {
   if (lead.email) parts.push(lead.email)
   parts.push(`Updated ${formatDistanceToNow(new Date(lead.updatedAt), { addSuffix: true })}`)
   return parts.join(' · ')
+}
+
+// -- AI section (shown inside LeadDetail when AI data is available) --
+
+function AiSection({
+  lead,
+  aiSources,
+  aiQuestions,
+  discoveryTemplate,
+  enriching,
+  enrichError,
+  onRunEnrich,
+}: {
+  lead: Lead
+  aiSources: string[]
+  aiQuestions: string[]
+  discoveryTemplate: string[]
+  enriching: boolean
+  enrichError: string | null
+  onRunEnrich: () => void
+}) {
+  const hasEnrichment = !!lead.enrichedAt
+  const scoreTone: BadgeTone =
+    lead.aiScore == null ? 'neutral'
+    : lead.aiScore >= 80 ? 'positive'
+    : lead.aiScore >= 60 ? 'brand'
+    : lead.aiScore >= 40 ? 'warning'
+    : 'neutral'
+
+  return (
+    <section
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.75rem',
+        padding: '0.875rem 1rem',
+        background: 'var(--color-bg-secondary)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-card)',
+      }}
+    >
+      <header style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', color: 'var(--color-brand-dark)', fontWeight: 600, fontSize: '0.8125rem' }}>
+          <Sparkles size={13} aria-hidden="true" />
+          AI briefing
+        </div>
+        {lead.aiScore != null && (
+          <Badge tone={scoreTone} variant="soft" size="sm" dot={false}>
+            Score {lead.aiScore}
+          </Badge>
+        )}
+        {lead.enrichedAt && (
+          <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+            Enriched {formatDistanceToNow(new Date(lead.enrichedAt), { addSuffix: true })}
+          </span>
+        )}
+      </header>
+
+      {!hasEnrichment && (
+        <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', lineHeight: 1.55 }}>
+          Sonnet 4.6 will research this lead on the web, draft a short briefing with sources, and suggest 3 discovery questions tailored to them. Run it now or wait for the daily cron to scoop it up.
+          <div style={{ marginTop: '0.625rem' }}>
+            <TahiButton
+              size="sm"
+              onClick={onRunEnrich}
+              disabled={enriching}
+              iconLeft={enriching
+                ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                : <Sparkles className="w-3.5 h-3.5" />}
+            >
+              {enriching ? 'Researching...' : 'Run AI now'}
+            </TahiButton>
+          </div>
+        </div>
+      )}
+
+      {lead.aiScoreReason && (
+        <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+          {lead.aiScoreReason}
+        </p>
+      )}
+
+      {lead.aiSummary && (
+        <div style={{ fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+          {lead.aiSummary}
+        </div>
+      )}
+
+      {aiSources.length > 0 && (
+        <div>
+          <SectionLabel>Sources</SectionLabel>
+          <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            {aiSources.map((src, i) => (
+              <li key={i}>
+                <a
+                  href={src}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.3125rem',
+                    color: 'var(--color-text-active)',
+                    fontSize: '0.75rem',
+                    textDecoration: 'underline',
+                    textDecorationStyle: 'dotted',
+                    textDecorationColor: 'var(--color-brand-100)',
+                    textUnderlineOffset: '0.1875rem',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  <ExternalLink size={11} aria-hidden="true" />
+                  {src}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {(discoveryTemplate.length > 0 || aiQuestions.length > 0) && (
+        <div>
+          <SectionLabel>Discovery call</SectionLabel>
+          <ol style={{ margin: 0, paddingLeft: '1.125rem', display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+            {discoveryTemplate.map((q, i) => (
+              <li key={`t-${i}`} style={{ fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.5 }}>
+                {q}
+                <span style={{
+                  marginLeft: '0.4375rem',
+                  fontSize: '0.625rem',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  color: 'var(--color-text-subtle)',
+                  fontWeight: 600,
+                }}>
+                  Always
+                </span>
+              </li>
+            ))}
+            {aiQuestions.map((q, i) => (
+              <li key={`q-${i}`} style={{
+                fontSize: '0.8125rem',
+                color: 'var(--color-text)',
+                lineHeight: 1.5,
+              }}>
+                <MessageCircleQuestion size={12} aria-hidden="true" style={{ display: 'inline', marginRight: '0.25rem', verticalAlign: '-2px', color: 'var(--color-brand)' }} />
+                {q}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      {enrichError && (
+        <div style={{
+          padding: '0.5rem 0.625rem',
+          background: 'var(--color-danger-bg)',
+          border: '1px solid var(--color-danger)',
+          borderRadius: 'var(--radius-sm)',
+          fontSize: '0.75rem',
+          color: 'var(--color-danger)',
+        }}>
+          {enrichError}
+        </div>
+      )}
+
+      {lead.aiTokensSpent != null && lead.aiTokensSpent > 0 && (
+        <p style={{
+          margin: 0,
+          fontSize: '0.625rem',
+          color: 'var(--color-text-subtle)',
+          textAlign: 'right',
+        }}>
+          {lead.aiTokensSpent.toLocaleString()} tokens spent on this lead
+        </p>
+      )}
+    </section>
+  )
+}
+
+function safeJsonArray<T>(raw: string | null | undefined): T[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed as T[] : []
+  } catch {
+    return []
+  }
 }
 
 function formatMoney(amount: number, currency: string): string {

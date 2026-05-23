@@ -47,9 +47,29 @@ export async function GET(req: NextRequest, { params }: Params) {
     .from(schema.activities)
     .where(eq(schema.activities.leadId, id))
 
+  // Pull the always-ask discovery questions template (3 strings) so
+  // the UI can render them next to the AI-generated ones in one shot.
+  const [templateRow] = await database
+    .select({ value: schema.settings.value })
+    .from(schema.settings)
+    .where(eq(schema.settings.key, 'leads.discoveryQuestionsTemplate'))
+    .limit(1)
+  let discoveryQuestionsTemplate: string[] = []
+  if (templateRow?.value) {
+    try {
+      const parsed = JSON.parse(templateRow.value)
+      if (Array.isArray(parsed)) {
+        discoveryQuestionsTemplate = parsed.filter((q: unknown): q is string => typeof q === 'string')
+      }
+    } catch {
+      // fall through — template stays empty
+    }
+  }
+
   return NextResponse.json({
     lead: { ...lead, ownerName, ownerAvatarUrl },
     activities: activities.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')),
+    discoveryQuestionsTemplate,
   })
 }
 
@@ -87,7 +107,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
   const existing = existingRows[0]
 
-  const updates: Record<string, string | number | null> = {}
+  const updates: Record<string, string | number | boolean | null> = {}
   const stringFields = [
     'name', 'email', 'phone', 'company', 'jobTitle', 'website',
     'source', 'sourceDetail', 'affiliateCode', 'brief', 'currency',
@@ -102,6 +122,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if ('estimatedValue' in body) {
     const v = body.estimatedValue
     updates.estimatedValue = typeof v === 'number' ? v : (v === null ? null : null)
+  }
+  // "Don't ask again" for the re-enrichment prompt. Client toggles this
+  // when Liam dismisses the confirm dialog with the don't-ask option.
+  if ('enrichRepromptSuppressed' in body) {
+    updates.enrichRepromptSuppressed = !!body.enrichRepromptSuppressed
   }
 
   // If status flips to 'archived' we record the time so reports can
