@@ -68,6 +68,11 @@ export const organisations = sqliteTable('organisations', {
 export const contacts = sqliteTable('contacts', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   orgId: text('org_id').notNull().references(() => organisations.id, { onDelete: 'cascade' }),
+  // personId bridges contact to the canonical person identity (added
+  // in migration 0018). Nullable for existing rows — new contacts
+  // MUST populate via lookup-or-create on email. Backfill of existing
+  // rows happens via an email-match script.
+  personId: text('person_id'),
   name: text('name').notNull(),
   email: text('email').notNull(),
   role: text('role'),
@@ -78,6 +83,7 @@ export const contacts = sqliteTable('contacts', {
 }, (table) => [
   index('idx_contacts_org').on(table.orgId),
   index('idx_contacts_clerk').on(table.clerkUserId),
+  index('idx_contacts_person').on(table.personId),
 ])
 
 // ============================================================
@@ -1278,6 +1284,36 @@ export const activities = sqliteTable('activities', {
 ])
 
 // ============================================================
+// CRM: PEOPLE (Canonical person identity)
+//
+// A person is a real human, identified by email. Every role they
+// hold — lead, contact at an org, affiliate, email subscriber — is
+// a separate row in another table that points back here via
+// person_id. One human, many roles, full history preserved as they
+// move between companies and lists.
+//
+// Matching key: email. On insert, the API does lookup-or-create:
+// if a person with this email already exists, attach to them;
+// otherwise create a new row.
+// ============================================================
+
+export const people = sqliteTable('people', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  fullName: text('full_name').notNull(),
+  email: text('email'),
+  phone: text('phone'),
+  avatarUrl: text('avatar_url'),
+  linkedinUrl: text('linkedin_url'),
+  // Enrichment payload (Phase B · 7) lives here as JSON. Job title,
+  // company size, industry, etc. when populated by an external API.
+  enrichmentData: text('enrichment_data'),
+  notes: text('notes'),
+  ...timestamps,
+}, (table) => [
+  index('idx_people_email').on(table.email),
+])
+
+// ============================================================
 // CRM: LEADS (Pre-qualification stage, separate from deals)
 //
 // A lead is a prospect we haven't qualified yet. Once a discovery
@@ -1292,7 +1328,13 @@ export const activities = sqliteTable('activities', {
 
 export const leads = sqliteTable('leads', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  // Person fields
+  // Canonical person identity. Nullable for back-compat with rows
+  // inserted before the people-model bridge; new lead inserts MUST
+  // populate this via lookup-or-create on email.
+  personId: text('person_id').references(() => people.id, { onDelete: 'set null' }),
+  // Person fields are denormalised onto the lead row for table
+  // rendering speed. Source of truth lives on `people` for any
+  // editing / cross-role queries.
   name: text('name').notNull(),
   email: text('email'),
   phone: text('phone'),
@@ -1334,6 +1376,7 @@ export const leads = sqliteTable('leads', {
   index('idx_leads_owner').on(table.ownerId),
   index('idx_leads_email').on(table.email),
   index('idx_leads_source').on(table.source),
+  index('idx_leads_person').on(table.personId),
 ])
 
 // ============================================================
