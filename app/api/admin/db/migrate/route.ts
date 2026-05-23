@@ -762,22 +762,29 @@ const MIGRATIONS: Migration[] = [
       // 2. Base resource × action permissions (108 rows).
       //    id format = "resource.action" so role_permissions can
       //    reference them stably across re-runs.
-      `INSERT OR IGNORE INTO permissions (id, resource, action, description, created_at)
-        SELECT
-          r.resource || '.' || a.action,
-          r.resource,
-          a.action,
-          a.action || ' ' || r.resource,
-          strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-        FROM (VALUES
-          ('leads'), ('deals'), ('contacts'), ('people'), ('organisations'),
-          ('requests'), ('tasks'), ('messages'), ('files'), ('time_entries'),
-          ('invoices'), ('contracts'), ('proposals'), ('schedules'), ('calls'),
-          ('activities'), ('docs'), ('subscribers'), ('campaigns'), ('affiliates'),
-          ('reports'), ('sales_analytics'), ('settings'), ('team'), ('integrations'),
-          ('calculator'), ('announcements')
-        ) AS r(resource)
-        CROSS JOIN (VALUES ('view'), ('create'), ('edit'), ('delete')) AS a(action)`,
+      //    SQLite doesn't support `(VALUES ...) AS t(col)` column
+      //    aliasing — use CTEs instead.
+      `WITH
+        resources(name) AS (
+          VALUES ('leads'), ('deals'), ('contacts'), ('people'), ('organisations'),
+                 ('requests'), ('tasks'), ('messages'), ('files'), ('time_entries'),
+                 ('invoices'), ('contracts'), ('proposals'), ('schedules'), ('calls'),
+                 ('activities'), ('docs'), ('subscribers'), ('campaigns'), ('affiliates'),
+                 ('reports'), ('sales_analytics'), ('settings'), ('team'), ('integrations'),
+                 ('calculator'), ('announcements')
+        ),
+        actions(name) AS (
+          VALUES ('view'), ('create'), ('edit'), ('delete')
+        )
+      INSERT OR IGNORE INTO permissions (id, resource, action, description, created_at)
+      SELECT
+        r.name || '.' || a.name,
+        r.name,
+        a.name,
+        a.name || ' ' || r.name,
+        strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+      FROM resources r
+      CROSS JOIN actions a`,
 
       // 3. Extra action permissions (resource-specific verbs).
       `INSERT OR IGNORE INTO permissions (id, resource, action, description, created_at) VALUES
