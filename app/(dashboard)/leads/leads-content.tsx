@@ -393,14 +393,83 @@ export function LeadsContent() {
       sortable: true,
       sortValue: r => r.status,
       width: '8.5rem',
+      edit: {
+        value: r => r.status,
+        options: STATUSES.map(s => ({ value: s.value, label: s.label, tone: s.tone })),
+        onChange: async (r, next) => {
+          // Optimistic local update so the chip changes instantly,
+          // then PATCH. Refetch on completion to pick up any side
+          // effects (e.g. archive activity row).
+          setLeads(prev => prev.map(l => l.id === r.id ? { ...l, status: next } : l))
+          try {
+            await fetch(apiPath(`/api/admin/leads/${r.id}`), {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: next }),
+            })
+          } finally {
+            fetchLeads()
+          }
+        },
+      },
+    },
+    {
+      key: 'aiScore',
+      header: 'AI score',
+      sortable: true,
+      sortValue: r => r.aiScore ?? -1,
+      width: '7rem',
       render: r => {
-        const s = STATUS_BY_VALUE.get(r.status)
+        if (r.aiScore == null) {
+          return <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.6875rem' }}>—</span>
+        }
+        const tone: BadgeTone =
+          r.aiScore >= 80 ? 'positive'
+          : r.aiScore >= 60 ? 'brand'
+          : r.aiScore >= 40 ? 'warning'
+          : 'neutral'
         return (
-          <Badge tone={s?.tone ?? 'neutral'} variant="soft" size="sm" dot={false}>
-            {s?.label ?? r.status}
+          <Badge tone={tone} variant="soft" size="sm" dot={false}>
+            {r.aiScore}
           </Badge>
         )
       },
+    },
+    {
+      key: 'website',
+      header: 'Site',
+      width: '3rem',
+      align: 'center',
+      render: r => r.website ? (
+        <a
+          href={normaliseUrl(r.website)}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          aria-label={`Open ${r.website}`}
+          title={r.website}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '1.5rem',
+            height: '1.5rem',
+            borderRadius: 'var(--radius-sm)',
+            color: 'var(--color-text-muted)',
+            transition: 'background 120ms ease, color 120ms ease',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'var(--color-bg-tertiary)'
+            e.currentTarget.style.color = 'var(--color-brand-dark)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'var(--color-text-muted)'
+          }}
+        >
+          <ExternalLink size={12} aria-hidden="true" />
+        </a>
+      ) : <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.6875rem' }}>—</span>,
     },
     {
       key: 'source',
@@ -1358,6 +1427,12 @@ function SignalRow({ label, value, source }: { label: string; value: string; sou
       </span>
     </div>
   )
+}
+
+function normaliseUrl(input: string): string {
+  const trimmed = input.trim()
+  if (!trimmed) return '#'
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
 }
 
 function formatMoney(amount: number, currency: string): string {
