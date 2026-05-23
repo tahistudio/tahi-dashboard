@@ -23,6 +23,9 @@ import { FeatureCard } from '@/components/tahi/feature-card'
 import { KPICard } from '@/components/tahi/kpi-card'
 import { Menu } from '@/components/tahi/menu'
 import { useToast } from '@/components/tahi/toast'
+import { BarChart, LineChart, Sparkline, Gauge } from '@/components/tahi/chart'
+import { DataTable } from '@/components/tahi/data-table'
+import { statusTone } from '@/components/tahi/badge'
 
 /**
  * /design-system. The canonical token + primitive reference.
@@ -959,13 +962,14 @@ const COMPONENTS_NAV = [
   { id: 'comp-tooltip',      label: 'Tooltip',      ready: true },
   { id: 'comp-menu',         label: 'Menu',         ready: true },
   { id: 'comp-toast',        label: 'Toast',        ready: true },
+  { id: 'comp-chart',        label: 'Charts',       ready: true  },
+  { id: 'comp-table',        label: 'Data table',   ready: true  },
   { id: 'comp-chip',         label: 'Chip',         ready: false },
   { id: 'comp-empty',        label: 'Empty state',  ready: false },
   { id: 'comp-callout',      label: 'Callout',      ready: false },
   { id: 'comp-pagination',   label: 'Pagination',   ready: false },
   { id: 'comp-stepper',      label: 'Stepper',      ready: false },
   { id: 'comp-progress',     label: 'Progress',     ready: false },
-  { id: 'comp-table',        label: 'Data table',   ready: false },
 ]
 
 function ComponentsSubNav() {
@@ -1658,8 +1662,255 @@ function ComponentsSection() {
         <TooltipShowcase />
         <MenuShowcase />
         <ToastShowcase />
+        <ChartShowcase />
+        <DataTableShowcase />
       </div>
     </SectionShell>
+  )
+}
+
+// ── Chart showcase ─────────────────────────────────────────────────────
+
+const BAR_DATA = [
+  { label: 'Mon', value: 8.5 },
+  { label: 'Tue', value: 12.0 },
+  { label: 'Wed', value: 6.4 },
+  { label: 'Thu', value: 14.2 },
+  { label: 'Fri', value: 9.8 },
+  { label: 'Sat', value: 4.6, striped: true },
+  { label: 'Sun', value: 3.2, striped: true },
+]
+
+const LINE_DATA = [
+  { label: 'Jan', value: 42 },
+  { label: 'Feb', value: 48 },
+  { label: 'Mar', value: 46 },
+  { label: 'Apr', value: 55 },
+  { label: 'May', value: 62 },
+  { label: 'Jun', value: 71 },
+  { label: 'Jul', value: 68 },
+]
+
+function ChartShowcase() {
+  return (
+    <PrimitiveShell
+      id="comp-chart"
+      title="Charts"
+      source="components/tahi/chart.tsx"
+      intro="Recharts wrappers that pull from the shared CHART palette and apply consistent grid, axis, tooltip, and motion defaults. BarChart has standard / pill / striped variants. LineChart can fill below the line as an area. Sparkline is inline. Gauge is a circular progress ring."
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <CardPrim>
+          <GroupHeading>BarChart &middot; standard</GroupHeading>
+          <BarChart
+            data={BAR_DATA}
+            height={200}
+            formatValue={v => `${v}h`}
+            ariaLabel="Hours tracked this week"
+          />
+        </CardPrim>
+
+        <CardPrim>
+          <GroupHeading>BarChart &middot; pill + value callout</GroupHeading>
+          <BarChart
+            data={BAR_DATA}
+            height={200}
+            variant="pill"
+            valueCallout
+            formatValue={v => `${v}h`}
+            ariaLabel="Hours tracked this week, pill variant"
+          />
+        </CardPrim>
+
+        <CardPrim>
+          <GroupHeading>LineChart &middot; area</GroupHeading>
+          <LineChart
+            data={LINE_DATA}
+            height={200}
+            area
+            formatValue={v => `${v}k`}
+            ariaLabel="Monthly revenue"
+          />
+        </CardPrim>
+
+        <CardPrim>
+          <GroupHeading>Gauge</GroupHeading>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0.5rem 0', minHeight: 200 }}>
+            <Gauge value={68} label="Capacity used" sub="32% headroom" />
+          </div>
+        </CardPrim>
+      </div>
+
+      <CardPrim>
+        <GroupHeading>Sparkline &middot; inline</GroupHeading>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap', padding: '0.25rem 0' }}>
+          <SparkRow label="MRR" tone="positive" data={[12, 14, 13, 16, 18, 17, 21]} value="$11,921" />
+          <SparkRow label="Outstanding" tone="negative" data={[8, 9, 7, 6, 7, 5, 4]} value="$11,678" />
+          <SparkRow label="Weighted pipeline" tone="neutral" data={[40, 44, 42, 50, 55, 53, 58]} value="$114,803" />
+        </div>
+      </CardPrim>
+
+      <CardPrim>
+        <GroupHeading>How to use it</GroupHeading>
+        <ul style={{ fontSize: '0.8125rem', lineHeight: 1.7 }} className="space-y-1">
+          <li>Every chart picks colours from the shared <Mono>CHART</Mono> palette so the same metric stays the same colour across the dashboard.</li>
+          <li>Use <Mono>variant=&quot;pill&quot;</Mono> when bars should feel like data pills (e.g. capacity, time tracked). Combine with <Mono>valueCallout</Mono> to highlight the peak.</li>
+          <li>Use <Mono>striped</Mono> per-bar (or <Mono>variant=&quot;striped&quot;</Mono>) for inactive / projected periods. The pattern is auto-generated from the active tone.</li>
+          <li><Mono>Sparkline</Mono> stays inline (default 100&times;28). Wrap it next to a value + label.</li>
+          <li><Mono>Gauge</Mono> takes a 0-100 value, optional <Mono>label</Mono> + <Mono>sub</Mono> for the centre.</li>
+        </ul>
+      </CardPrim>
+    </PrimitiveShell>
+  )
+}
+
+function SparkRow({
+  label,
+  value,
+  tone,
+  data,
+}: {
+  label: string
+  value: string
+  tone: 'positive' | 'negative' | 'neutral'
+  data: number[]
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+      <div>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{label}</div>
+        <div style={{ fontSize: 'var(--text-md)', fontWeight: 600, color: 'var(--color-text)' }}>{value}</div>
+      </div>
+      <Sparkline data={data} tone={tone} ariaLabel={`${label} sparkline`} />
+    </div>
+  )
+}
+
+// ── DataTable showcase ─────────────────────────────────────────────────
+
+interface InvoiceDemo {
+  id: string
+  number: string
+  client: string
+  amount: number
+  status: 'paid' | 'sent' | 'overdue' | 'draft'
+  due: string
+}
+
+const INVOICE_ROWS: InvoiceDemo[] = [
+  { id: '1', number: 'INV-1041', client: 'Physitrack',  amount:  8400, status: 'paid',    due: '2026-04-12' },
+  { id: '2', number: 'INV-1040', client: 'Glasswall',   amount:  3200, status: 'overdue', due: '2026-04-02' },
+  { id: '3', number: 'INV-1039', client: 'Beta Labs',   amount:  6750, status: 'sent',    due: '2026-04-21' },
+  { id: '4', number: 'INV-1038', client: 'Acme Corp',   amount: 12480, status: 'paid',    due: '2026-03-30' },
+  { id: '5', number: 'INV-1037', client: 'Tahi Studio', amount:  1500, status: 'draft',   due: '—' },
+]
+
+function DataTableShowcase() {
+  return (
+    <PrimitiveShell
+      id="comp-table"
+      title="Data table"
+      source="components/tahi/data-table.tsx"
+      intro="The shared list-page table. Real <table> for semantics, sticky thead, h-scroll on mobile so cells never wrap mid-word, sortable headers with a chevron indicator, optional row click. Pair with Pagination + EmptyState + LoadingSkeleton."
+    >
+      <Card padded={false}>
+        <DataTable<InvoiceDemo>
+          ariaLabel="Demo invoices"
+          getRowId={r => r.id}
+          defaultSort={{ key: 'number', dir: 'desc' }}
+          onRowClick={() => { /* would navigate to /invoices/<id> */ }}
+          columns={[
+            { key: 'number', header: 'Invoice', sortable: true,
+              accessor: r => r.number,
+              sortValue: r => r.number,
+              minWidth: '7rem' },
+            { key: 'client', header: 'Client', sortable: true,
+              accessor: r => r.client,
+              sortValue: r => r.client,
+              minWidth: '10rem' },
+            { key: 'amount', header: 'Amount', sortable: true, align: 'right',
+              render: r => `$${r.amount.toLocaleString()}`,
+              sortValue: r => r.amount,
+              minWidth: '6rem' },
+            { key: 'status', header: 'Status',
+              render: r => <Badge tone={statusTone(r.status)} variant="soft" size="sm" leader={false}>{r.status}</Badge>,
+              minWidth: '6rem' },
+            { key: 'due', header: 'Due', sortable: true,
+              accessor: r => r.due,
+              sortValue: r => r.due,
+              muted: true,
+              minWidth: '7rem' },
+          ]}
+          rows={INVOICE_ROWS}
+        />
+      </Card>
+
+      <CardPrim>
+        <GroupHeading>States</GroupHeading>
+        <StateRow label="Loading">
+          <Card padded={false}>
+            <DataTable<InvoiceDemo>
+              loading
+              getRowId={r => r.id}
+              columns={[
+                { key: 'number', header: 'Invoice', minWidth: '7rem' },
+                { key: 'client', header: 'Client', minWidth: '10rem' },
+                { key: 'amount', header: 'Amount', align: 'right', minWidth: '6rem' },
+              ]}
+              rows={[]}
+            />
+          </Card>
+        </StateRow>
+        <StateRow label="Empty">
+          <Card padded={false}>
+            <DataTable<InvoiceDemo>
+              getRowId={r => r.id}
+              columns={[
+                { key: 'number', header: 'Invoice', minWidth: '7rem' },
+                { key: 'client', header: 'Client', minWidth: '10rem' },
+                { key: 'amount', header: 'Amount', align: 'right', minWidth: '6rem' },
+              ]}
+              rows={[]}
+              empty={
+                <div style={{ textAlign: 'center', padding: '1.5rem 0' }}>
+                  <p style={{ fontWeight: 600, color: 'var(--color-text)', fontSize: 'var(--text-sm)' }}>No invoices yet</p>
+                  <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)', marginTop: '0.25rem' }}>
+                    Create one to start billing this client.
+                  </p>
+                </div>
+              }
+            />
+          </Card>
+        </StateRow>
+        <StateRow label="Compact">
+          <Card padded={false}>
+            <DataTable<InvoiceDemo>
+              density="compact"
+              getRowId={r => r.id}
+              columns={[
+                { key: 'number', header: 'Invoice', accessor: r => r.number, minWidth: '7rem' },
+                { key: 'client', header: 'Client', accessor: r => r.client, minWidth: '10rem' },
+                { key: 'amount', header: 'Amount', align: 'right',
+                  render: r => `$${r.amount.toLocaleString()}`, minWidth: '6rem' },
+              ]}
+              rows={INVOICE_ROWS.slice(0, 3)}
+            />
+          </Card>
+        </StateRow>
+      </CardPrim>
+
+      <CardPrim>
+        <GroupHeading>How to use it</GroupHeading>
+        <ul style={{ fontSize: '0.8125rem', lineHeight: 1.7 }} className="space-y-1">
+          <li>Define <Mono>columns</Mono> once. Each has a <Mono>key</Mono>, header, and either <Mono>accessor</Mono> (simple value) or <Mono>render</Mono> (full custom cell).</li>
+          <li>Set <Mono>sortable: true</Mono> per column to enable header toggle. Pass <Mono>sort</Mono> + <Mono>onSortChange</Mono> for controlled mode, otherwise sort is internal.</li>
+          <li><Mono>onRowClick</Mono> wires the entire row to a navigation target. Hover applies the brand-tinted background + pointer cursor.</li>
+          <li>Pass a custom <Mono>empty</Mono> prop or fall back to the default &quot;No items&quot; line.</li>
+          <li><Mono>density=&quot;compact&quot;</Mono> tightens row padding for dense lists.</li>
+          <li>The outer wrapper has <Mono>.h-scroll</Mono> so wide tables scroll on mobile instead of wrapping cells.</li>
+        </ul>
+      </CardPrim>
+    </PrimitiveShell>
   )
 }
 

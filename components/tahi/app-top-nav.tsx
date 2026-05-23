@@ -9,6 +9,7 @@ import { CurrencySwitcher } from './currency-switcher'
 import { TimerChip } from './timer-chip'
 import { Tooltip } from './tooltip'
 import { SearchPalette } from './search-palette'
+import { AnimatedSearch } from './animated-icons'
 
 interface AppTopNavProps {
   isAdmin: boolean
@@ -101,11 +102,9 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
               }}
               aria-label="Open search"
             >
-              <Search
-                size={15}
-                aria-hidden="true"
-                style={{ flexShrink: 0, color: 'var(--color-text-subtle)' }}
-              />
+              <span style={{ flexShrink: 0, display: 'inline-flex', color: 'var(--color-text-subtle)' }}>
+                <AnimatedSearch size={15} />
+              </span>
               <span
                 className="flex-1 text-left truncate"
                 style={{
