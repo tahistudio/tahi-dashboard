@@ -120,6 +120,109 @@ export const teamMembers = sqliteTable('team_members', {
 })
 
 // ============================================================
+// PERMISSIONS (Granular RBAC + ABAC)
+//
+// Standard RBAC + ABAC hybrid: roles bundle permissions, members
+// hold one or more roles, and each grant inside a role can carry a
+// SCOPE filter (own / team / specific_orgs / plan_type / track_type
+// / status) so a single permission can mean "view all leads" for
+// one role and "view leads I own at Glasswall" for another.
+//
+// Enforcement is a runtime layer applied at the API + UI gate. The
+// schema declares everything possible — what's allowed at the API
+// is whatever the active roles' permissions cover, intersected with
+// their scope filters.
+//
+// Seeding happens via a one-shot setup endpoint that populates the
+// system roles (super_admin / admin / project_manager / task_handler
+// / viewer) + the full permission catalogue. Custom roles can be
+// added on top.
+// ============================================================
+
+export const roles = sqliteTable('roles', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // 'super_admin', 'admin', 'project_manager', 'task_handler',
+  // 'viewer', or any custom name. Unique across the workspace.
+  name: text('name').notNull().unique(),
+  description: text('description'),
+  // System roles can't be deleted or renamed. Custom roles can.
+  isSystem: integer('is_system', { mode: 'boolean' }).notNull().default(false),
+  ...timestamps,
+})
+
+export const permissions = sqliteTable('permissions', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // Resource name: leads | deals | contacts | people | organisations
+  // | requests | tasks | invoices | contracts | proposals | schedules
+  // | calls | activities | docs | time_entries | subscribers
+  // | campaigns | affiliates | reports | settings | team
+  // | integrations | calculator | sales_analytics
+  resource: text('resource').notNull(),
+  // Action verb: view | create | edit | delete | export | share
+  // | assign | promote | archive | comment | send | sign | publish
+  action: text('action').notNull(),
+  description: text('description'),
+  createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_permissions_resource').on(table.resource),
+])
+
+export const rolePermissions = sqliteTable('role_permissions', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  roleId: text('role_id').notNull().references(() => roles.id, { onDelete: 'cascade' }),
+  permissionId: text('permission_id').notNull().references(() => permissions.id, { onDelete: 'cascade' }),
+  // Scope narrows the grant to a subset of resource rows:
+  //   all            — every row of the resource (default)
+  //   own            — rows where ownerId / createdById matches the caller
+  //   team           — rows owned by anyone in the caller's team / department
+  //   specific_orgs  — scopeValue is a JSON array of organisation ids
+  //   plan_type      — scopeValue is e.g. "retainer" / "project"
+  //   track_type     — scopeValue is "small" / "large"
+  //   status         — scopeValue is a JSON array of allowed status values
+  //                    e.g. ["new","qualifying"] on leads
+  scopeType: text('scope_type').notNull().default('all'),
+  scopeValue: text('scope_value'),
+  createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_role_permissions_role').on(table.roleId),
+  index('idx_role_permissions_perm').on(table.permissionId),
+])
+
+export const teamMemberRoles = sqliteTable('team_member_roles', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamMemberId: text('team_member_id').notNull().references(() => teamMembers.id, { onDelete: 'cascade' }),
+  roleId: text('role_id').notNull().references(() => roles.id, { onDelete: 'cascade' }),
+  // Date range — a role can be temporary (covering a project, or
+  // while someone fills in for a colleague). endedAt null = active.
+  startedAt: text('started_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+  endedAt: text('ended_at'),
+  createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_team_member_roles_member').on(table.teamMemberId),
+  index('idx_team_member_roles_role').on(table.roleId),
+  index('idx_team_member_roles_active').on(table.endedAt),
+])
+
+// Per-field denial layer: hide salary on team_members for non-admins,
+// hide cost_amount on time_entries for task_handlers, etc. Resource
+// + field + action combo means "this role CANNOT see/edit this
+// field" — additive denials, applied on top of role_permissions
+// grants. If no row exists, the field is shown normally.
+export const fieldRestrictions = sqliteTable('field_restrictions', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  roleId: text('role_id').notNull().references(() => roles.id, { onDelete: 'cascade' }),
+  resource: text('resource').notNull(),
+  field: text('field').notNull(),
+  // view = field hidden from response | edit = field returned but
+  // rejected by PATCH for this role
+  action: text('action').notNull().default('view'),
+  createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_field_restrictions_role').on(table.roleId),
+  index('idx_field_restrictions_resource').on(table.resource),
+])
+
+// ============================================================
 // PROJECTS (One-off engagements)
 // ============================================================
 

@@ -747,6 +747,62 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_team_members_person ON team_members(person_id)`,
     ],
   },
+  {
+    name: '0039',
+    description: 'Phase A · 0: granular permissions foundation (RBAC + ABAC). roles + permissions + role_permissions (with scope filters) + team_member_roles + field_restrictions. Strictly additive — no existing tables touched. Enforcement is a runtime layer that rolls out per feature.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS roles (
+        id text PRIMARY KEY NOT NULL,
+        name text NOT NULL UNIQUE,
+        description text,
+        is_system integer NOT NULL DEFAULT 0,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE TABLE IF NOT EXISTS permissions (
+        id text PRIMARY KEY NOT NULL,
+        resource text NOT NULL,
+        action text NOT NULL,
+        description text,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        UNIQUE(resource, action)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_permissions_resource ON permissions(resource)`,
+      `CREATE TABLE IF NOT EXISTS role_permissions (
+        id text PRIMARY KEY NOT NULL,
+        role_id text NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+        permission_id text NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+        scope_type text NOT NULL DEFAULT 'all',
+        scope_value text,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        UNIQUE(role_id, permission_id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_role_permissions_role ON role_permissions(role_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_role_permissions_perm ON role_permissions(permission_id)`,
+      `CREATE TABLE IF NOT EXISTS team_member_roles (
+        id text PRIMARY KEY NOT NULL,
+        team_member_id text NOT NULL REFERENCES team_members(id) ON DELETE CASCADE,
+        role_id text NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+        started_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ended_at text,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_team_member_roles_member ON team_member_roles(team_member_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_team_member_roles_role ON team_member_roles(role_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_team_member_roles_active ON team_member_roles(ended_at)`,
+      `CREATE TABLE IF NOT EXISTS field_restrictions (
+        id text PRIMARY KEY NOT NULL,
+        role_id text NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+        resource text NOT NULL,
+        field text NOT NULL,
+        action text NOT NULL DEFAULT 'view',
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        UNIQUE(role_id, resource, field, action)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_field_restrictions_role ON field_restrictions(role_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_field_restrictions_resource ON field_restrictions(resource)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
