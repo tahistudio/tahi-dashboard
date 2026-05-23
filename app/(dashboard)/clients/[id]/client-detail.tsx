@@ -53,6 +53,11 @@ import { TrackMeter } from '@/components/tahi/track-meter'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { RequestCard } from '@/components/tahi/request-card'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
+import { FeatureCard } from '@/components/tahi/feature-card'
+import { DonutChart, type DonutSegment } from '@/components/tahi/chart'
+import { BoardView, type BoardItem, type BoardColumn, type BoardPriority } from '@/components/tahi/board-view'
+import { ViewToggle } from '@/components/tahi/view-toggle'
+import { List as ListIcon, Columns as ColumnsIcon } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
 import { TrackQueueView } from '@/components/tahi/track-queue-view'
 import type { TrackWithQueue, TrackActiveRequest } from '@/components/tahi/track-queue-view'
@@ -427,23 +432,182 @@ function OverviewTab({
   onUpdated: () => void
 }) {
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* Left column (wide) */}
-      <div className="lg:col-span-2 flex flex-col gap-6">
-        <OrgDetailsCard org={org} onUpdated={onUpdated} />
-        <RecentRequestsCard requests={recentRequests} orgId={org.id} />
-      </div>
+    <div className="flex flex-col gap-6">
+      <ClientSignalTiles
+        org={org}
+        contacts={contacts}
+        subscription={subscription}
+        recentRequests={recentRequests}
+      />
 
-      {/* Right column (narrow) */}
-      <div className="flex flex-col gap-6">
-        <ContactsCard contacts={contacts} />
-        {subscription && (
-          <SubscriptionCard subscription={subscription} tracks={tracks} orgId={org.id} onUpdated={onUpdated} />
-        )}
-        {!subscription && <NoSubscriptionCard planType={org.planType} />}
-        {org.healthNote && <HealthNoteCard note={org.healthNote} health={org.healthStatus} />}
-        <BrandsCard org={org} onUpdated={onUpdated} />
-        <InternalNotesCard org={org} onUpdated={onUpdated} />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left column (wide) */}
+        <div className="lg:col-span-2 flex flex-col gap-6">
+          <OrgDetailsCard org={org} onUpdated={onUpdated} />
+          <RecentRequestsCard requests={recentRequests} orgId={org.id} />
+        </div>
+
+        {/* Right column (narrow) */}
+        <div className="flex flex-col gap-6">
+          {recentRequests.length > 0 && (
+            <RequestMixCard requests={recentRequests} />
+          )}
+          <ContactsCard contacts={contacts} />
+          {subscription && (
+            <SubscriptionCard subscription={subscription} tracks={tracks} orgId={org.id} onUpdated={onUpdated} />
+          )}
+          {!subscription && <NoSubscriptionCard planType={org.planType} />}
+          {org.healthNote && <HealthNoteCard note={org.healthNote} health={org.healthStatus} />}
+          <BrandsCard org={org} onUpdated={onUpdated} />
+          <InternalNotesCard org={org} onUpdated={onUpdated} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Client-level signal tiles (Overview hero strip) ────────────────────────────
+
+/** Map a request status into a stable bucket for the donut + summary tiles. */
+function bucketRequestStatus(status: string): 'open' | 'review' | 'done' | 'other' {
+  const s = status.toLowerCase()
+  if (s === 'delivered' || s === 'completed' || s === 'closed' || s === 'cancelled') return 'done'
+  if (s === 'client_review' || s === 'client review' || s === 'in_review' || s === 'review') return 'review'
+  if (s === 'submitted' || s === 'in_progress' || s === 'in progress' || s === 'on_hold' || s === 'on hold') return 'open'
+  return 'other'
+}
+
+const HEALTH_TILE: Record<string, { label: string; description: string; dot: string; tone: 'positive' | 'warning' | 'danger' | 'neutral' }> = {
+  green:  { label: 'Healthy',     description: 'Engagement is on track. No red flags surfaced.',                     dot: '#22C55E', tone: 'positive' },
+  amber:  { label: 'Watch',       description: 'Mixed signals. Worth a quick check-in with the client this week.',  dot: '#F59E0B', tone: 'warning'  },
+  red:    { label: 'At risk',     description: 'Action needed soon — surface to the lead and agree a next step.',    dot: '#EF4444', tone: 'danger'   },
+}
+
+function ClientSignalTiles({
+  org,
+  contacts,
+  subscription,
+  recentRequests,
+}: {
+  org: Organisation
+  contacts: Contact[]
+  subscription: Subscription | null
+  recentRequests: Request[]
+}) {
+  const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()
+  const openRequests = recentRequests.filter(r => bucketRequestStatus(r.status) !== 'done').length
+  const reviewRequests = recentRequests.filter(r => bucketRequestStatus(r.status) === 'review').length
+
+  const healthKey = (org.healthStatus ?? '').toLowerCase()
+  const health = HEALTH_TILE[healthKey] ?? { label: 'Unset', description: 'No health signal recorded yet for this client.', dot: '#9CA3AF', tone: 'neutral' as const }
+
+  const primaryContact = contacts.find(c => c.isPrimary) ?? contacts[0] ?? null
+
+  const mrrCurrency = org.preferredCurrency ?? displayCurrency ?? 'NZD'
+  const mrrDisplay = org.customMrr != null
+    ? formatNativeWithDisplay(org.customMrr, mrrCurrency)
+    : null
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Health tile (cream + signal dot) */}
+      <FeatureCard variant="cream" padding="md">
+        <FeatureCard.Eyebrow>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4375rem' }}>
+            <span
+              aria-hidden="true"
+              style={{
+                width: '0.5rem',
+                height: '0.5rem',
+                borderRadius: '9999px',
+                background: health.dot,
+                display: 'inline-block',
+              }}
+            />
+            Client health
+          </span>
+        </FeatureCard.Eyebrow>
+        <FeatureCard.Title style={{ fontSize: '1.375rem' }}>{health.label}</FeatureCard.Title>
+        <FeatureCard.Description>{health.description}</FeatureCard.Description>
+      </FeatureCard>
+
+      {/* Open requests tile (forest, eye-catching when there's load) */}
+      <FeatureCard variant={openRequests > 0 ? 'forest' : 'cream'} padding="md">
+        <FeatureCard.Eyebrow>Open requests</FeatureCard.Eyebrow>
+        <FeatureCard.Title style={{ fontSize: '2rem', letterSpacing: '-0.02em' }}>
+          {openRequests}
+        </FeatureCard.Title>
+        <FeatureCard.Description>
+          {openRequests === 0
+            ? 'No active requests on the board right now.'
+            : reviewRequests > 0
+              ? `${reviewRequests} waiting on client review.`
+              : 'All active work is in flight with the team.'}
+        </FeatureCard.Description>
+      </FeatureCard>
+
+      {/* MRR / billing tile */}
+      <FeatureCard variant="cream" padding="md">
+        <FeatureCard.Eyebrow>Monthly recurring</FeatureCard.Eyebrow>
+        <FeatureCard.Title style={{ fontSize: '1.625rem' }}>
+          {mrrDisplay ?? (subscription ? 'On retainer' : 'Not set')}
+        </FeatureCard.Title>
+        <FeatureCard.Description>
+          {subscription
+            ? `${subscription.planType.charAt(0).toUpperCase()}${subscription.planType.slice(1)} plan · ${subscription.status}`
+            : primaryContact
+              ? `Primary contact: ${primaryContact.name}`
+              : 'No active subscription on record.'}
+        </FeatureCard.Description>
+      </FeatureCard>
+    </div>
+  )
+}
+
+// ── Request mix donut (sidebar slot on Overview) ───────────────────────────────
+
+function RequestMixCard({ requests }: { requests: Request[] }) {
+  // Count by raw status so the legend mirrors the actual board labels the
+  // user sees on /requests. Use stable category colours.
+  const counts = new Map<string, number>()
+  for (const r of requests) {
+    counts.set(r.status, (counts.get(r.status) ?? 0) + 1)
+  }
+
+  const STATUS_COLOUR: Record<string, string> = {
+    submitted:     '#3B82F6',
+    in_review:     '#8B5CF6',
+    in_progress:   '#5A824E',
+    client_review: '#EC4899',
+    on_hold:       '#F59E0B',
+    delivered:     '#22C55E',
+    completed:     '#22C55E',
+    cancelled:     '#9CA3AF',
+  }
+
+  const segments: DonutSegment[] = Array.from(counts.entries()).map(([status, value]) => ({
+    label: status.replace(/_/g, ' '),
+    value,
+    colour: STATUS_COLOUR[status] ?? '#9CA3AF',
+  }))
+
+  return (
+    <div
+      className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)]"
+      style={{ padding: '1.25rem' }}
+    >
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold text-sm text-[var(--color-text)]">Request mix</h3>
+        <span className="text-xs text-[var(--color-text-muted)]">{requests.length} recent</span>
+      </div>
+      <div className="flex items-center justify-center">
+        <DonutChart
+          segments={segments}
+          size={160}
+          centreLabel="Requests"
+          centreValue={String(requests.length)}
+          ariaLabel="Request status distribution"
+        />
       </div>
     </div>
   )
@@ -1674,10 +1838,39 @@ function RecentRequestsCard({ requests, orgId }: { requests: Request[]; orgId: s
 
 // ── Requests tab (full list) ───────────────────────────────────────────────────
 
+const REQUESTS_BOARD_COLUMNS: BoardColumn[] = [
+  { id: 'submitted',     label: 'Submitted',     statusValue: 'submitted',     color: '#3B82F6' },
+  { id: 'in_review',     label: 'In review',     statusValue: 'in_review',     color: '#8B5CF6' },
+  { id: 'in_progress',   label: 'In progress',   statusValue: 'in_progress',   color: '#5A824E' },
+  { id: 'client_review', label: 'Client review', statusValue: 'client_review', color: '#EC4899' },
+  { id: 'on_hold',       label: 'On hold',       statusValue: 'on_hold',       color: '#F59E0B' },
+  { id: 'delivered',     label: 'Delivered',     statusValue: 'delivered',     color: '#22C55E' },
+  { id: 'cancelled',     label: 'Cancelled',     statusValue: 'cancelled',     color: '#9CA3AF' },
+]
+
+function priorityToBoardPriority(p: string): BoardPriority | undefined {
+  const v = p.toLowerCase()
+  if (v === 'low' || v === 'medium' || v === 'high' || v === 'urgent') return v
+  return undefined
+}
+
+function requestsToBoardItems(requests: Request[]): BoardItem[] {
+  return requests.map<BoardItem>(r => ({
+    id: r.id,
+    title: r.title,
+    status: r.status,
+    priority: priorityToBoardPriority(r.priority),
+    tags: r.type ? [{ id: `type:${r.type}`, label: r.type }] : [],
+    dueDate: r.updatedAt ? formatDate(r.updatedAt) : undefined,
+  }))
+}
+
 function RequestsTab({ clientId }: { clientId: string }) {
+  const router = useRouter()
   const [requests, setRequests] = useState<Request[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [view, setView] = useState<'list' | 'board'>('list')
 
   const load = async () => {
     setLoading(true)
@@ -1694,6 +1887,8 @@ function RequestsTab({ clientId }: { clientId: string }) {
 
   if (loading) return <SkeletonList rows={3} />
 
+  const boardItems = requestsToBoardItems(requests)
+
   return (
     <>
     <NewRequestDialog
@@ -1703,12 +1898,23 @@ function RequestsTab({ clientId }: { clientId: string }) {
       defaultOrgId={clientId}
     />
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <h2 className="font-semibold text-[var(--color-text)]">All requests</h2>
-        <TahiButton variant="primary" size="sm" onClick={() => setDialogOpen(true)}>
-          <Plus className="w-3.5 h-3.5 mr-1.5" />
-          New request
-        </TahiButton>
+        <div className="flex items-center gap-2">
+          <ViewToggle
+            value={view}
+            onChange={setView}
+            size="sm"
+            options={[
+              { value: 'list',  icon: ListIcon,    label: 'List view'  },
+              { value: 'board', icon: ColumnsIcon, label: 'Board view' },
+            ]}
+          />
+          <TahiButton variant="primary" size="sm" onClick={() => setDialogOpen(true)}>
+            <Plus className="w-3.5 h-3.5 mr-1.5" />
+            New request
+          </TahiButton>
+        </div>
       </div>
 
       {requests.length === 0 ? (
@@ -1716,6 +1922,18 @@ function RequestsTab({ clientId }: { clientId: string }) {
           variant="inline"
           icon={<FileText className="w-8 h-8" />}
           title="No requests for this client yet"
+        />
+      ) : view === 'board' ? (
+        <BoardView
+          columns={REQUESTS_BOARD_COLUMNS}
+          items={boardItems}
+          views={['kanban']}
+          defaultView="kanban"
+          searchPlaceholder="Search requests…"
+          newLabel="New request"
+          onNew={() => setDialogOpen(true)}
+          onItemClick={(item) => router.push(`/requests/${item.id}`)}
+          readOnly
         />
       ) : (
         <div className="flex flex-col gap-2">

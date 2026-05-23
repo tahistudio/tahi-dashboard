@@ -14,6 +14,7 @@ import { OnboardingChecklist, type OnboardingState } from '@/components/tahi/onb
 import { BookingWidget } from '@/components/tahi/booking-widget'
 import { AIDailyBriefing } from '@/components/tahi/ai-briefing-card'
 import { KPIStrip as SharedKPIStrip, KPICell } from '@/components/tahi/kpi-strip'
+import { FeatureCard } from '@/components/tahi/feature-card'
 import { apiPath } from '@/lib/api'
 import { calculatePipelineTotals } from '@/lib/pipeline-math'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
@@ -155,7 +156,10 @@ export function AdminOverview({ userName }: { userName: string }) {
         </div>
       </div>
 
-      {/* 2. AI Daily Briefing */}
+      {/* 2. Today's focus strip (next call + closing deal) */}
+      <TodayFocusStrip />
+
+      {/* 3. AI Daily Briefing */}
       <AIDailyBriefing />
 
       {/* 3. KPI strip */}
@@ -1637,6 +1641,113 @@ function ReviewOutreachBanner() {
           No thanks
         </button>
       </div>
+    </div>
+  )
+}
+
+// ─── Today's Focus Strip (admin) ──────────────────────────────────────────────
+//
+// Two non-clickable FeatureCard tiles sitting just under the greeting.
+// Left = next scheduled call (today / soon). Right = highest-value deal
+// closing this month. Reuses existing /api/admin/calls and /api/admin/deals
+// endpoints; no new APIs.
+
+interface FocusCall {
+  id: string
+  orgName: string | null
+  title: string
+  scheduledAt: string
+  durationMinutes: number
+}
+
+interface FocusDeal {
+  id: string
+  title: string
+  valueNzd: number | null
+  value: number | null
+  expectedCloseDate: string | null
+  orgName: string | null
+  stageName: string | null
+  stageIsClosedWon: number | null
+  stageIsClosedLost: number | null
+}
+
+function TodayFocusStrip() {
+  const { format } = useDisplayCurrency()
+  const [call, setCall] = useState<FocusCall | null>(null)
+  const [deal, setDeal] = useState<FocusDeal | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    Promise.all([
+      fetch(apiPath('/api/admin/calls?status=scheduled&limit=1'))
+        .then(r => (r.ok ? r.json() as Promise<{ calls: FocusCall[] }> : { calls: [] }))
+        .catch(() => ({ calls: [] as FocusCall[] })),
+      fetch(apiPath('/api/admin/deals?limit=100'))
+        .then(r => (r.ok ? r.json() as Promise<{ items: FocusDeal[] }> : { items: [] }))
+        .catch(() => ({ items: [] as FocusDeal[] })),
+    ])
+      .then(([callsData, dealsData]) => {
+        setCall(callsData.calls?.[0] ?? null)
+
+        // Highest-value open deal closing this month
+        const now = new Date()
+        const month = now.getMonth()
+        const year = now.getFullYear()
+        const closingThisMonth = (dealsData.items ?? []).filter(d => {
+          if (d.stageIsClosedWon || d.stageIsClosedLost) return false
+          if (!d.expectedCloseDate) return false
+          const close = new Date(d.expectedCloseDate)
+          return close.getMonth() === month && close.getFullYear() === year
+        })
+        closingThisMonth.sort(
+          (a, b) => (b.valueNzd ?? b.value ?? 0) - (a.valueNzd ?? a.value ?? 0),
+        )
+        setDeal(closingThisMonth[0] ?? null)
+      })
+      .finally(() => setLoading(false))
+  }, [])
+
+  // Nothing to show? Hide the entire strip rather than render placeholders.
+  if (!loading && !call && !deal) return null
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: 'var(--space-4)' }}>
+      <FeatureCard variant="forest" padding="lg">
+        <FeatureCard.Eyebrow>Next call</FeatureCard.Eyebrow>
+        <FeatureCard.Title>
+          {loading
+            ? 'Loading...'
+            : call
+              ? call.title
+              : 'No calls scheduled'}
+        </FeatureCard.Title>
+        <FeatureCard.Description>
+          {loading
+            ? ' '
+            : call
+              ? `${call.orgName ? `${call.orgName} · ` : ''}${new Date(call.scheduledAt).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })} at ${new Date(call.scheduledAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })} (${call.durationMinutes}min)`
+              : 'Schedule a call from the calls page when one comes up.'}
+        </FeatureCard.Description>
+      </FeatureCard>
+
+      <FeatureCard variant="lime" padding="lg">
+        <FeatureCard.Eyebrow>Closing this month</FeatureCard.Eyebrow>
+        <FeatureCard.Title>
+          {loading
+            ? 'Loading...'
+            : deal
+              ? format(deal.valueNzd ?? deal.value ?? 0)
+              : 'Nothing closing yet'}
+        </FeatureCard.Title>
+        <FeatureCard.Description>
+          {loading
+            ? ' '
+            : deal
+              ? `${deal.title}${deal.orgName ? ` · ${deal.orgName}` : ''}${deal.stageName ? ` · ${deal.stageName}` : ''}`
+              : 'Set an expected close date on a deal to surface it here.'}
+        </FeatureCard.Description>
+      </FeatureCard>
     </div>
   )
 }
