@@ -23,12 +23,16 @@ import { FeatureCard } from '@/components/tahi/feature-card'
 import { KPICard } from '@/components/tahi/kpi-card'
 import { Menu } from '@/components/tahi/menu'
 import { useToast } from '@/components/tahi/toast'
-import { BarChart, LineChart, Sparkline, Gauge, DonutChart, GanttChart, FunnelChart, MultiBarChart, Heatmap } from '@/components/tahi/chart'
+import { BarChart, LineChart, Sparkline, Gauge, DonutChart, GanttChart, FunnelChart, MultiBarChart, Heatmap, CalendarHeatmap } from '@/components/tahi/chart'
 import { DataTable } from '@/components/tahi/data-table'
 import { statusTone } from '@/components/tahi/badge'
 import { Trash2, ExternalLink, Copy } from 'lucide-react'
 import { FilterBar, type ActiveFilter, type FilterDef } from '@/components/tahi/filter-bar'
 import { SlideOver } from '@/components/tahi/slide-over'
+import { Stepper } from '@/components/tahi/stepper'
+import { ProgressBar } from '@/components/tahi/progress-bar'
+import { Callout } from '@/components/tahi/callout'
+import { Chip } from '@/components/tahi/chip'
 
 /**
  * /design-system. The canonical token + primitive reference.
@@ -967,12 +971,12 @@ const COMPONENTS_NAV = [
   { id: 'comp-toast',        label: 'Toast',        ready: true },
   { id: 'comp-chart',        label: 'Charts',       ready: true  },
   { id: 'comp-table',        label: 'Data table',   ready: true  },
-  { id: 'comp-chip',         label: 'Chip',         ready: false },
+  { id: 'comp-chip',         label: 'Chip',         ready: true  },
+  { id: 'comp-callout',      label: 'Callout',      ready: true  },
+  { id: 'comp-stepper',      label: 'Stepper',      ready: true  },
+  { id: 'comp-progress',     label: 'Progress',     ready: true  },
   { id: 'comp-empty',        label: 'Empty state',  ready: false },
-  { id: 'comp-callout',      label: 'Callout',      ready: false },
   { id: 'comp-pagination',   label: 'Pagination',   ready: false },
-  { id: 'comp-stepper',      label: 'Stepper',      ready: false },
-  { id: 'comp-progress',     label: 'Progress',     ready: false },
 ]
 
 function ComponentsSubNav() {
@@ -1659,16 +1663,290 @@ function ComponentsSection() {
         <ButtonShowcase />
         <AvatarShowcase />
         <BadgeShowcase />
+        <ChipShowcase />
         <CardShowcase />
         <FeatureCardShowcase />
         <KPICardShowcase />
+        <CalloutShowcase />
         <TooltipShowcase />
         <MenuShowcase />
         <ToastShowcase />
+        <ProgressShowcase />
+        <StepperShowcase />
         <ChartShowcase />
         <DataTableShowcase />
       </div>
     </SectionShell>
+  )
+}
+
+// ── Chip showcase ──────────────────────────────────────────────────────
+function ChipShowcase() {
+  const [tags, setTags] = useState<string[]>(['Strategy', 'Design', 'Build', 'QA'])
+  const [selectedRoles, setSelectedRoles] = useState<Set<string>>(new Set(['design']))
+  const toggleRole = (id: string) => {
+    setSelectedRoles(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  return (
+    <PrimitiveShell
+      id="comp-chip"
+      title="Chip"
+      source="components/tahi/chip.tsx"
+      intro="Interactive sibling of Badge. Use for tags, multi-select values, contact pills, request participants. Click handlers, remove X, leading + trailing slots, selected state."
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <CardPrim>
+          <GroupHeading>Tones</GroupHeading>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4375rem' }}>
+            <Chip tone="brand">Brand</Chip>
+            <Chip tone="positive">Delivered</Chip>
+            <Chip tone="warning">In review</Chip>
+            <Chip tone="danger">Overdue</Chip>
+            <Chip tone="info">Submitted</Chip>
+            <Chip tone="teal">In progress</Chip>
+            <Chip tone="purple">Client review</Chip>
+            <Chip tone="rose">Urgent</Chip>
+            <Chip tone="neutral">Draft</Chip>
+          </div>
+        </CardPrim>
+
+        <CardPrim>
+          <GroupHeading>Variants</GroupHeading>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4375rem', alignItems: 'center' }}>
+            <Chip variant="subtle" tone="positive">Subtle</Chip>
+            <Chip variant="solid" tone="positive">Solid</Chip>
+            <Chip variant="outline" tone="positive">Outline</Chip>
+            <Chip dot tone="warning">With status dot</Chip>
+          </div>
+        </CardPrim>
+
+        <CardPrim>
+          <GroupHeading>Removable &middot; tag list</GroupHeading>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4375rem' }}>
+            {tags.map(t => (
+              <Chip
+                key={t}
+                tone="neutral"
+                variant="outline"
+                onRemove={() => setTags(prev => prev.filter(x => x !== t))}
+              >
+                {t}
+              </Chip>
+            ))}
+            {tags.length === 0 && (
+              <Chip tone="neutral" onClick={() => setTags(['Strategy', 'Design', 'Build', 'QA'])}>
+                Reset
+              </Chip>
+            )}
+          </div>
+        </CardPrim>
+
+        <CardPrim>
+          <GroupHeading>Selectable &middot; multi-pick</GroupHeading>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4375rem' }}>
+            {[
+              { id: 'discovery', label: 'Discovery' },
+              { id: 'strategy',  label: 'Strategy' },
+              { id: 'design',    label: 'Design' },
+              { id: 'build',     label: 'Build' },
+              { id: 'launch',    label: 'Launch' },
+            ].map(r => {
+              const selected = selectedRoles.has(r.id)
+              return (
+                <Chip
+                  key={r.id}
+                  tone={selected ? 'brand' : 'neutral'}
+                  variant={selected ? 'subtle' : 'outline'}
+                  selected={selected}
+                  onClick={() => toggleRole(r.id)}
+                >
+                  {r.label}
+                </Chip>
+              )
+            })}
+          </div>
+        </CardPrim>
+      </div>
+    </PrimitiveShell>
+  )
+}
+
+// ── Callout showcase ───────────────────────────────────────────────────
+function CalloutShowcase() {
+  const [showInfo, setShowInfo] = useState(true)
+  return (
+    <PrimitiveShell
+      id="comp-callout"
+      title="Callout"
+      source="components/tahi/callout.tsx"
+      intro="Inline banner for contextual messages. Five tones, subtle + solid variants, optional action button, optional dismiss X. Static (not transient); use Toast for confirmations."
+    >
+      <div className="space-y-3">
+        {showInfo && (
+          <Callout
+            tone="info"
+            title="New schedule template"
+            action={{ label: 'Browse templates' }}
+            dismissible
+            onDismiss={() => setShowInfo(false)}
+          >
+            Start a project from one of the saved templates instead of building the Gantt from scratch.
+          </Callout>
+        )}
+        <Callout tone="success" title="Proposal accepted">
+          Physitrack accepted the Q3 retainer. The deal moved to Closed won automatically.
+        </Callout>
+        <Callout
+          tone="warning"
+          title="Retainer hours nearly out"
+          action={{ label: 'Review usage' }}
+        >
+          Physitrack has used 38 of 40 retainer hours this month. Three open requests will exceed the cap if delivered this week.
+        </Callout>
+        <Callout
+          tone="danger"
+          title="Invoice INV-1040 overdue"
+          action={{ label: 'Send reminder' }}
+        >
+          $3,200 owed by Glasswall is 12 days past due.
+        </Callout>
+        <Callout tone="tip" title="Tip">
+          Right-click any row in the requests table to see actions without opening the menu.
+        </Callout>
+        <Callout
+          variant="solid"
+          tone="info"
+          title="Solid variant"
+          action={{ label: 'Open' }}
+          dismissible
+        >
+          Use sparingly for system-level announcements (planned maintenance, release notes).
+        </Callout>
+      </div>
+    </PrimitiveShell>
+  )
+}
+
+// ── ProgressBar showcase ───────────────────────────────────────────────
+function ProgressShowcase() {
+  return (
+    <PrimitiveShell
+      id="comp-progress"
+      title="Progress"
+      source="components/tahi/progress-bar.tsx"
+      intro="Linear sibling of Gauge. Auto-tone driven by threshold (brand &lt; 75% &lt; warning &lt; 100% &lt; danger), or override per call. Optional label + trailing value + segmented values."
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <CardPrim>
+          <GroupHeading>Auto-tone thresholds</GroupHeading>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <ProgressBar value={42} max={100} label="Capacity used" trailing="42%" />
+            <ProgressBar value={84} max={100} label="Retainer hours" trailing="34 / 40" />
+            <ProgressBar value={108} max={100} label="Over budget" trailing="$10.8k / $10k" />
+          </div>
+        </CardPrim>
+
+        <CardPrim>
+          <GroupHeading>Explicit tones</GroupHeading>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <ProgressBar value={60} max={100} tone="positive" label="Tasks done" trailing="18 / 30" />
+            <ProgressBar value={45} max={100} tone="warning" label="Review queue" trailing="9 open" />
+            <ProgressBar value={30} max={100} tone="neutral" label="Sync to Xero" trailing="In progress" />
+          </div>
+        </CardPrim>
+
+        <CardPrim className="md:col-span-2">
+          <GroupHeading>Segmented &middot; one bar, three slices</GroupHeading>
+          <ProgressBar
+            max={32}
+            segments={[
+              { value: 18, tone: 'positive', label: 'Done' },
+              { value:  6, tone: 'warning',  label: 'In progress' },
+              { value:  2, tone: 'danger',   label: 'Blocked' },
+            ]}
+            label="Sprint progress"
+            trailing="26 / 32"
+          />
+        </CardPrim>
+      </div>
+    </PrimitiveShell>
+  )
+}
+
+// ── Stepper showcase ───────────────────────────────────────────────────
+function StepperShowcase() {
+  const steps = [
+    { id: 'discovery', label: 'Discovery' },
+    { id: 'design',    label: 'Design',     sub: 'Tahi' },
+    { id: 'build',     label: 'Build',      sub: 'Tahi parallel' },
+    { id: 'launch',    label: 'Launch' },
+  ]
+  const [current, setCurrent] = useState('design')
+  return (
+    <PrimitiveShell
+      id="comp-stepper"
+      title="Stepper"
+      source="components/tahi/stepper.tsx"
+      intro="Multi-step indicator. Past steps are filled brand circles with a tick; current step has a brand ring; upcoming steps are muted. Pass onStepClick to enable back-nav."
+    >
+      <CardPrim>
+        <GroupHeading>Horizontal &middot; clickable past steps</GroupHeading>
+        <Stepper steps={steps} current={current} onStepClick={setCurrent} />
+        <div style={{ display: 'flex', gap: '0.5rem', marginTop: 'var(--space-4)' }}>
+          {steps.map((s, i) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setCurrent(s.id)}
+              style={{
+                padding: '0.3125rem 0.625rem',
+                fontSize: 'var(--text-xs)',
+                background: current === s.id ? 'var(--color-brand-100)' : 'var(--color-bg-secondary)',
+                color: 'var(--color-text)',
+                border: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-sm)',
+                cursor: 'pointer',
+              }}
+            >
+              Step {i + 1}
+            </button>
+          ))}
+        </div>
+      </CardPrim>
+
+      <CardPrim>
+        <GroupHeading>Vertical &middot; for onboarding sidebars</GroupHeading>
+        <Stepper
+          vertical
+          steps={[
+            { id: 'invite',  label: 'Invite the team',     sub: 'Add team members + assign roles' },
+            { id: 'connect', label: 'Connect integrations', sub: 'Stripe, Xero, Slack' },
+            { id: 'brand',   label: 'Set brand defaults',   sub: 'Logo, colours, templates' },
+            { id: 'launch',  label: 'Launch the portal' },
+          ]}
+          current="brand"
+        />
+      </CardPrim>
+
+      <CardPrim>
+        <GroupHeading>States</GroupHeading>
+        <Stepper
+          steps={[
+            { id: 'a', label: 'Done' },
+            { id: 'b', label: 'Done' },
+            { id: 'c', label: 'Current', sub: 'Active' },
+            { id: 'd', label: 'Error', error: true, sub: 'Action required' },
+            { id: 'e', label: 'Upcoming' },
+          ]}
+          current="c"
+        />
+      </CardPrim>
+    </PrimitiveShell>
   )
 }
 
@@ -1846,24 +2124,34 @@ function ChartShowcase() {
           />
         </CardPrim>
 
-        <CardPrim>
-          <GroupHeading>Heatmap &middot; hours x days</GroupHeading>
-          <div style={{ display: 'flex', justifyContent: 'center', padding: '0.5rem 0' }}>
-            <Heatmap
-              tone="positive"
-              columns={['9', '10', '11', '12', '13', '14', '15', '16', '17']}
-              rows={[
-                { label: 'Mon', cells: [{ key: '9', value: 1 }, { key: '10', value: 3 }, { key: '11', value: 5 }, { key: '12', value: 2 }, { key: '13', value: 4 }, { key: '14', value: 6 }, { key: '15', value: 4 }, { key: '16', value: 2 }, { key: '17', value: 1 }] },
-                { label: 'Tue', cells: [{ key: '9', value: 2 }, { key: '10', value: 4 }, { key: '11', value: 6 }, { key: '12', value: 3 }, { key: '13', value: 7 }, { key: '14', value: 8 }, { key: '15', value: 5 }, { key: '16', value: 3 }, { key: '17', value: 0 }] },
-                { label: 'Wed', cells: [{ key: '9', value: 0 }, { key: '10', value: 2 }, { key: '11', value: 3 }, { key: '12', value: 1 }, { key: '13', value: 5 }, { key: '14', value: 4 }, { key: '15', value: 3 }, { key: '16', value: 1 }, { key: '17', value: 0 }] },
-                { label: 'Thu', cells: [{ key: '9', value: 3 }, { key: '10', value: 5 }, { key: '11', value: 7 }, { key: '12', value: 4 }, { key: '13', value: 6 }, { key: '14', value: 9 }, { key: '15', value: 6 }, { key: '16', value: 4 }, { key: '17', value: 2 }] },
-                { label: 'Fri', cells: [{ key: '9', value: 2 }, { key: '10', value: 3 }, { key: '11', value: 4 }, { key: '12', value: 2 }, { key: '13', value: 3 }, { key: '14', value: 5 }, { key: '15', value: 3 }, { key: '16', value: 2 }, { key: '17', value: 1 }] },
-              ]}
-              formatValue={v => `${v} requests`}
-            />
-          </div>
-        </CardPrim>
       </div>
+
+      <CardPrim>
+        <GroupHeading>Heatmap &middot; hours x days, full width</GroupHeading>
+        <Heatmap
+          tone="positive"
+          columns={['9', '10', '11', '12', '13', '14', '15', '16', '17']}
+          rows={[
+            { label: 'Mon', cells: [{ key: '9', value: 1 }, { key: '10', value: 3 }, { key: '11', value: 5 }, { key: '12', value: 2 }, { key: '13', value: 4 }, { key: '14', value: 6 }, { key: '15', value: 4 }, { key: '16', value: 2 }, { key: '17', value: 1 }] },
+            { label: 'Tue', cells: [{ key: '9', value: 2 }, { key: '10', value: 4 }, { key: '11', value: 6 }, { key: '12', value: 3 }, { key: '13', value: 7 }, { key: '14', value: 8 }, { key: '15', value: 5 }, { key: '16', value: 3 }, { key: '17', value: 0 }] },
+            { label: 'Wed', cells: [{ key: '9', value: 0 }, { key: '10', value: 2 }, { key: '11', value: 3 }, { key: '12', value: 1 }, { key: '13', value: 5 }, { key: '14', value: 4 }, { key: '15', value: 3 }, { key: '16', value: 1 }, { key: '17', value: 0 }] },
+            { label: 'Thu', cells: [{ key: '9', value: 3 }, { key: '10', value: 5 }, { key: '11', value: 7 }, { key: '12', value: 4 }, { key: '13', value: 6 }, { key: '14', value: 9 }, { key: '15', value: 6 }, { key: '16', value: 4 }, { key: '17', value: 2 }] },
+            { label: 'Fri', cells: [{ key: '9', value: 2 }, { key: '10', value: 3 }, { key: '11', value: 4 }, { key: '12', value: 2 }, { key: '13', value: 3 }, { key: '14', value: 5 }, { key: '15', value: 3 }, { key: '16', value: 2 }, { key: '17', value: 1 }] },
+          ]}
+          formatValue={v => `${v} requests`}
+        />
+      </CardPrim>
+
+      <CardPrim>
+        <GroupHeading>CalendarHeatmap &middot; GitHub-style contributions</GroupHeading>
+        <CalendarHeatmap
+          tone="positive"
+          rangeStart={new Date('2026-01-01')}
+          rangeEnd={new Date('2026-12-31')}
+          values={generateCalendarDemoValues()}
+          formatValue={v => `${v} ${v === 1 ? 'commit' : 'commits'}`}
+        />
+      </CardPrim>
 
       <CardPrim>
         <GroupHeading>How to use it</GroupHeading>
@@ -1904,6 +2192,41 @@ function SparkRow({
       <Sparkline data={data} tone={tone} ariaLabel={`${label} sparkline`} />
     </div>
   )
+}
+
+// Deterministic per-day "commits" for the CalendarHeatmap demo.
+// Seeded so the showcase is stable across reloads.
+function generateCalendarDemoValues(): Record<string, number> {
+  const out: Record<string, number> = {}
+  const start = new Date('2026-01-01')
+  const end = new Date('2026-12-31')
+  let seed = 1337
+  const rand = () => {
+    seed = (seed * 9301 + 49297) % 233280
+    return seed / 233280
+  }
+  const cursor = new Date(start)
+  while (cursor <= end) {
+    const dow = cursor.getDay() // 0 Sun, 6 Sat
+    const isWeekend = dow === 0 || dow === 6
+    const noise = rand()
+    let value = 0
+    if (isWeekend) {
+      value = noise < 0.7 ? 0 : Math.floor(noise * 3)
+    } else {
+      value = Math.floor(noise * 8)
+      // Sprinkle a few hot days.
+      if (noise > 0.92) value = 9 + Math.floor(noise * 5)
+    }
+    if (value > 0) {
+      const y = cursor.getFullYear()
+      const m = String(cursor.getMonth() + 1).padStart(2, '0')
+      const d = String(cursor.getDate()).padStart(2, '0')
+      out[`${y}-${m}-${d}`] = value
+    }
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return out
 }
 
 // ── DataTable showcase ─────────────────────────────────────────────────

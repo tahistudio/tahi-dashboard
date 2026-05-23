@@ -1649,7 +1649,10 @@ interface HeatmapProps {
   tone?: Tone
   /** Optional explicit max for the colour scale. Otherwise auto. */
   max?: number
-  /** Cell size in px. Default 18. */
+  /** Fill the container width. Cells become 1fr columns + square via
+   *  aspect-ratio. Overrides cellSize. Default true. */
+  fluid?: boolean
+  /** Cell size in px when not fluid. Default 18. */
   cellSize?: number
   /** Show row labels on the left. Default true. */
   showRowLabels?: boolean
@@ -1665,6 +1668,7 @@ export function Heatmap({
   columns,
   tone = 'positive',
   max,
+  fluid = true,
   cellSize = 18,
   showRowLabels = true,
   showColumnLabels = true,
@@ -1691,24 +1695,33 @@ export function Heatmap({
     return `${base}${Math.round(alpha * 255).toString(16).padStart(2, '0')}`
   }
 
+  const colTemplate = fluid
+    ? `${showRowLabels ? '3rem' : ''} ${'1fr '.repeat(columns.length).trim()}`
+    : `${showRowLabels ? '3rem' : '0'} repeat(${columns.length}, ${cellSize}px)`
+
   return (
     <div
       ref={ref}
       role="img"
       aria-label={ariaLabel ?? 'Heatmap'}
-      style={{ display: 'inline-flex', flexDirection: 'column', gap: '0.375rem' }}
+      style={{
+        display: fluid ? 'flex' : 'inline-flex',
+        flexDirection: 'column',
+        gap: '0.375rem',
+        width: fluid ? '100%' : undefined,
+      }}
     >
       {showColumnLabels && (
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: `${showRowLabels ? '3rem' : '0'} repeat(${columns.length}, ${cellSize}px)`,
+            gridTemplateColumns: colTemplate,
             gap: 2,
             fontSize: '0.625rem',
             color: 'var(--color-text-subtle)',
           }}
         >
-          <span />
+          {showRowLabels && <span />}
           {columns.map((c) => (
             <span
               key={c}
@@ -1727,18 +1740,18 @@ export function Heatmap({
           key={row.label}
           style={{
             display: 'grid',
-            gridTemplateColumns: `${showRowLabels ? '3rem' : '0'} repeat(${columns.length}, ${cellSize}px)`,
+            gridTemplateColumns: colTemplate,
             gap: 2,
             alignItems: 'center',
           }}
         >
           {showRowLabels && (
             <span style={{
-              fontSize: '0.625rem',
+              fontSize: '0.6875rem',
               color: 'var(--color-text-muted)',
               fontWeight: 500,
               textAlign: 'right',
-              paddingRight: '0.375rem',
+              paddingRight: '0.5rem',
             }}>
               {row.label}
             </span>
@@ -1765,9 +1778,10 @@ export function Heatmap({
                 }}
                 onMouseLeave={() => setHover(null)}
                 style={{
-                  width: cellSize,
-                  height: cellSize,
-                  borderRadius: 3,
+                  width: fluid ? '100%' : cellSize,
+                  height: fluid ? undefined : cellSize,
+                  aspectRatio: fluid ? '1 / 1' : undefined,
+                  borderRadius: fluid ? 'var(--radius-sm)' : 3,
                   background: colourFor(value),
                   transition: 'background 320ms ease',
                   cursor: cell ? 'default' : undefined,
@@ -1802,6 +1816,252 @@ export function Heatmap({
             {formatValue ? formatValue(hover.value) : hover.value}
           </div>
           {hover.meta && <div style={{ opacity: 0.7, marginTop: '0.125rem' }}>{hover.meta}</div>}
+        </div>,
+        document.body,
+      )}
+    </div>
+  )
+}
+
+// ── CalendarHeatmap ───────────────────────────────────────────────────
+//
+// GitHub-contributions-style calendar. 7 rows (days of week) × N
+// columns (weeks). Month labels along the top. One value per ISO
+// date string. Cells scale to fluid widths so the chart fills its
+// container.
+//
+//   <CalendarHeatmap
+//     rangeStart={new Date('2026-01-01')}
+//     rangeEnd={new Date('2026-12-31')}
+//     values={{ '2026-03-14': 4, '2026-03-15': 2, ... }}
+//     tone="positive"
+//   />
+
+interface CalendarHeatmapProps {
+  rangeStart: Date
+  rangeEnd: Date
+  /** Map of ISO date (YYYY-MM-DD) -> value. Missing dates render as 0. */
+  values: Record<string, number>
+  /** Tone for the colour ramp. Default 'positive'. */
+  tone?: Tone
+  /** Explicit max for the colour scale. Otherwise auto. */
+  max?: number
+  /** Optional value formatter for the tooltip. */
+  formatValue?: (v: number) => string
+  ariaLabel?: string
+}
+
+function toIsoDate(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+export function CalendarHeatmap({
+  rangeStart,
+  rangeEnd,
+  values,
+  tone = 'positive',
+  max,
+  formatValue,
+  ariaLabel,
+}: CalendarHeatmapProps) {
+  const { ref, visible } = useEnteredViewport<HTMLDivElement>()
+
+  // Build the week columns. Each column has 7 day slots (Sun-Sat).
+  // Start from the Sunday on or before rangeStart so the first column
+  // is a complete week.
+  const start = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate())
+  start.setDate(start.getDate() - start.getDay())
+  const end = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate())
+
+  type Cell = { date: Date; value: number; inRange: boolean }
+  const weeks: Cell[][] = []
+  const cursor = new Date(start)
+  while (cursor <= end) {
+    const week: Cell[] = []
+    for (let i = 0; i < 7; i += 1) {
+      const day = new Date(cursor)
+      const inRange = day >= rangeStart && day <= rangeEnd
+      const value = inRange ? (values[toIsoDate(day)] ?? 0) : 0
+      week.push({ date: day, value, inRange })
+      cursor.setDate(cursor.getDate() + 1)
+    }
+    weeks.push(week)
+  }
+
+  // Month labels along the top. Position each label above the first
+  // week that starts in that month.
+  const monthMarkers: { weekIndex: number; label: string }[] = []
+  for (let i = 0; i < weeks.length; i += 1) {
+    const firstDayOfWeek = weeks[i][0].date
+    if (firstDayOfWeek.getDate() <= 7) {
+      monthMarkers.push({
+        weekIndex: i,
+        label: firstDayOfWeek.toLocaleString('en', { month: 'short' }),
+      })
+    }
+  }
+
+  const allValues = Object.values(values)
+  const effectiveMax = max ?? Math.max(1, ...allValues, 0)
+  const base = TONE_COLOUR[tone]
+  const colourFor = (value: number, inRange: boolean) => {
+    if (!inRange) return 'transparent'
+    if (value <= 0) return 'var(--color-bg-tertiary)'
+    const t = Math.min(1, value / effectiveMax)
+    const alpha = 0.16 + t * 0.74
+    return `${base}${Math.round(alpha * 255).toString(16).padStart(2, '0')}`
+  }
+
+  const [hover, setHover] = React.useState<
+    null | { x: number; y: number; date: Date; value: number }
+  >(null)
+
+  const dayLabels = ['', 'Mon', '', 'Wed', '', 'Fri', '']
+
+  return (
+    <div
+      ref={ref}
+      role="img"
+      aria-label={ariaLabel ?? 'Calendar heatmap'}
+      style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', width: '100%' }}
+    >
+      {/* Month labels */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `2rem repeat(${weeks.length}, 1fr)`,
+          gap: 2,
+          fontSize: '0.6875rem',
+          color: 'var(--color-text-subtle)',
+          fontWeight: 500,
+        }}
+      >
+        <span />
+        {weeks.map((_, wi) => {
+          const marker = monthMarkers.find(m => m.weekIndex === wi)
+          return (
+            <span key={wi} style={{ textAlign: 'left' }}>{marker?.label ?? ''}</span>
+          )
+        })}
+      </div>
+
+      {/* Day rows */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {Array.from({ length: 7 }).map((_, dayIndex) => (
+          <div
+            key={dayIndex}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `2rem repeat(${weeks.length}, 1fr)`,
+              gap: 2,
+              alignItems: 'center',
+            }}
+          >
+            <span
+              style={{
+                fontSize: '0.625rem',
+                color: 'var(--color-text-subtle)',
+                textAlign: 'right',
+                paddingRight: '0.5rem',
+                fontWeight: 500,
+              }}
+            >
+              {dayLabels[dayIndex]}
+            </span>
+            {weeks.map((week, wi) => {
+              const cell = week[dayIndex]
+              const value = visible ? cell.value : 0
+              return (
+                <div
+                  key={wi}
+                  role="gridcell"
+                  tabIndex={cell.inRange ? 0 : -1}
+                  aria-label={cell.inRange ? `${toIsoDate(cell.date)}: ${cell.value}` : 'Out of range'}
+                  onMouseEnter={(e) => {
+                    if (!cell.inRange) return
+                    const r = e.currentTarget.getBoundingClientRect()
+                    setHover({
+                      x: r.left + r.width / 2,
+                      y: r.top,
+                      date: cell.date,
+                      value: cell.value,
+                    })
+                  }}
+                  onMouseLeave={() => setHover(null)}
+                  style={{
+                    width: '100%',
+                    aspectRatio: '1 / 1',
+                    borderRadius: 'var(--radius-sm)',
+                    background: colourFor(value, cell.inRange),
+                    transition: 'background 320ms ease',
+                    border: cell.inRange ? '1px solid var(--color-border-subtle)' : 'none',
+                  }}
+                />
+              )
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* Legend ramp */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.375rem',
+          fontSize: '0.625rem',
+          color: 'var(--color-text-subtle)',
+          alignSelf: 'flex-end',
+          marginTop: '0.25rem',
+        }}
+      >
+        <span>Less</span>
+        {[0, 0.25, 0.5, 0.75, 1].map((t, i) => (
+          <span
+            key={i}
+            aria-hidden="true"
+            style={{
+              width: 11,
+              height: 11,
+              borderRadius: 3,
+              background: t === 0
+                ? 'var(--color-bg-tertiary)'
+                : `${base}${Math.round((0.16 + t * 0.74) * 255).toString(16).padStart(2, '0')}`,
+            }}
+          />
+        ))}
+        <span>More</span>
+      </div>
+
+      {hover && typeof document !== 'undefined' && createPortal(
+        <div
+          role="tooltip"
+          style={{
+            position: 'fixed',
+            top: hover.y - 10,
+            left: hover.x,
+            transform: 'translate(-50%, -100%)',
+            background: '#1E2A1B',
+            color: '#F0F2EF',
+            padding: '0.4375rem 0.5625rem',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.75rem',
+            lineHeight: 1.4,
+            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.18)',
+            pointerEvents: 'none',
+            zIndex: 100,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <strong style={{ fontWeight: 600 }}>
+            {hover.date.toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short' })}
+          </strong>
+          <div style={{ opacity: 0.85, marginTop: '0.125rem' }}>
+            {formatValue ? formatValue(hover.value) : hover.value}
+          </div>
         </div>,
         document.body,
       )}
