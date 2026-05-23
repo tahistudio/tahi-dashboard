@@ -1285,7 +1285,13 @@ function createMentionSuggestionRender() {
           selectedIndex = parseInt(el.getAttribute('data-index') ?? '0')
           rerender()
         })
-        el.addEventListener('click', () => {
+        // Use mousedown (not click) so the mention is inserted before
+        // Tiptap's suggestion plugin can fire onExit and unmount the
+        // popup. Some browsers dispatch click on the new DOM element
+        // that replaces the one we mousedowned on (due to the rerender
+        // on hover), so click handlers fire on a stale target.
+        const fire = (e: Event) => {
+          e.preventDefault()
           const idx = parseInt(el.getAttribute('data-index') ?? '0')
           if (commandFn && items[idx]) {
             commandFn({
@@ -1295,7 +1301,8 @@ function createMentionSuggestionRender() {
               internalOnly: items[idx].internalOnly ?? false,
             })
           }
-        })
+        }
+        el.addEventListener('mousedown', fire)
       })
     }
 

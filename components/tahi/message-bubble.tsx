@@ -425,8 +425,14 @@ export function MessageBubble({
             />
           ) : body}
 
-          {/* Voice note */}
-          {voiceNote && <VoiceNoteInline voiceNote={voiceNote} />}
+          {/* Voice note. Flush at the top when there's no body / reply
+              quote above it, otherwise nudged down a touch. */}
+          {voiceNote && (
+            <VoiceNoteInline
+              voiceNote={voiceNote}
+              flush={!replyTo && !hasInlineBody(bodyHtml, body)}
+            />
+          )}
 
           {/* Attachments inside the bubble for context. Compact list. */}
           {attachments && attachments.length > 0 && (
@@ -736,6 +742,14 @@ function isProbablyImage(a: FileAttachment): boolean {
   return (a.mime ?? '').startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'].includes(ext)
 }
 
+function hasInlineBody(bodyHtml?: string, body?: React.ReactNode): boolean {
+  if (body !== undefined && body !== null && body !== '') return true
+  if (!bodyHtml) return false
+  // Tiptap emits an empty paragraph (`<p></p>`) when the editor is
+  // cleared but the message had nothing typed. Treat that as empty.
+  return bodyHtml.replace(/<[^>]*>/g, '').trim().length > 0
+}
+
 function firstNameOf(fullName: string): string {
   // "Liam Miller" -> "Liam". Falls back to the whole string for
   // single-word names or unusual inputs.
@@ -770,7 +784,7 @@ function formatTimestamp(ts: string): string {
 // Simple voice note player. Play/pause button on the left, a clean
 // progress bar with a draggable scrubber in the middle, current
 // time + duration on the right. No music note.
-function VoiceNoteInline({ voiceNote }: { voiceNote: MessageVoiceNote }) {
+function VoiceNoteInline({ voiceNote, flush = false }: { voiceNote: MessageVoiceNote; flush?: boolean }) {
   const audioRef = React.useRef<HTMLAudioElement | null>(null)
   const trackRef = React.useRef<HTMLDivElement | null>(null)
   const [playing, setPlaying] = React.useState(false)
@@ -814,7 +828,7 @@ function VoiceNoteInline({ voiceNote }: { voiceNote: MessageVoiceNote }) {
   return (
     <div
       style={{
-        marginTop: '0.375rem',
+        marginTop: flush ? 0 : '0.375rem',
         display: 'flex',
         flexDirection: 'column',
         gap: '0.3125rem',
