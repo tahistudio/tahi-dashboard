@@ -287,79 +287,71 @@ export function BoardView({
         </div>
       </div>
 
-      {/* Controls row. Search + filter sit as one visual group on the
-          left; +New is the only right-side affordance. Everything
-          shares a 1.875rem height baseline. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4375rem', flexWrap: 'wrap' }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.4375rem',
-          flex: '1 1 22rem',
-          minWidth: '14rem',
-          maxWidth: '32rem',
-        }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={searchPlaceholder}
-              inputSize="sm"
-            />
-          </div>
-          <button
-            ref={filterButtonRef}
-            type="button"
-            onClick={() => {
-              if (onFilterClick) onFilterClick()
-              else setFilterPanelOpen(o => !o)
-            }}
-            aria-pressed={filterCount > 0 || filterPanelOpen}
-            aria-expanded={filterPanelOpen}
-            className="tahi-focus-ring"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.3125rem',
-              height: '1.875rem',
-              padding: '0 0.625rem',
-              background: filterCount > 0 ? 'var(--color-brand-50)' : 'var(--color-bg)',
-              border: `1px solid ${filterCount > 0 ? 'var(--color-brand)' : 'var(--color-border)'}`,
-              borderRadius: 'var(--radius-sm)',
-              fontSize: '0.75rem',
-              fontWeight: 500,
-              color: filterCount > 0 ? 'var(--color-text-active)' : 'var(--color-text)',
-              cursor: 'pointer',
-              transition: 'background-color 120ms ease, border-color 120ms ease',
-              flexShrink: 0,
-            }}
-            onMouseEnter={e => { if (filterCount === 0) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-            onMouseLeave={e => { if (filterCount === 0) e.currentTarget.style.background = 'var(--color-bg)' }}
-          >
-            <Filter size={12} aria-hidden="true" />
-            Filter
-            {filterCount > 0 && (
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: '1.125rem',
-                  height: '1.125rem',
-                  padding: '0 0.3125rem',
-                  background: 'var(--color-brand)',
-                  borderRadius: 999,
-                  color: '#ffffff',
-                  fontSize: '0.625rem',
-                  fontWeight: 700,
-                  fontVariantNumeric: 'tabular-nums',
-                }}
-              >
-                {filterCount}
-              </span>
-            )}
-          </button>
+      {/* Controls row. Search input and the filter pill are direct
+          siblings (no nested wrapper) so the filter sits glued to the
+          right edge of the search with a single 6px gap. +New sits at
+          the far right of the row, pushed by a flex spacer. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap' }}>
+        <div style={{ flex: '0 1 22rem', minWidth: '12rem' }}>
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={searchPlaceholder}
+            inputSize="sm"
+          />
         </div>
+        <button
+          ref={filterButtonRef}
+          type="button"
+          onClick={() => {
+            if (onFilterClick) onFilterClick()
+            else setFilterPanelOpen(o => !o)
+          }}
+          aria-pressed={filterCount > 0 || filterPanelOpen}
+          aria-expanded={filterPanelOpen}
+          className="tahi-focus-ring"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.3125rem',
+            height: '1.875rem',
+            padding: '0 0.625rem',
+            background: filterCount > 0 ? 'var(--color-brand-50)' : 'var(--color-bg)',
+            border: `1px solid ${filterCount > 0 ? 'var(--color-brand)' : 'var(--color-border)'}`,
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.75rem',
+            fontWeight: 500,
+            color: filterCount > 0 ? 'var(--color-text-active)' : 'var(--color-text)',
+            cursor: 'pointer',
+            transition: 'background-color 120ms ease, border-color 120ms ease',
+            flexShrink: 0,
+          }}
+          onMouseEnter={e => { if (filterCount === 0) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+          onMouseLeave={e => { if (filterCount === 0) e.currentTarget.style.background = 'var(--color-bg)' }}
+        >
+          <Filter size={12} aria-hidden="true" />
+          Filter
+          {filterCount > 0 && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minWidth: '1.125rem',
+                height: '1.125rem',
+                padding: '0 0.3125rem',
+                background: 'var(--color-brand)',
+                borderRadius: 999,
+                color: '#ffffff',
+                fontSize: '0.625rem',
+                fontWeight: 700,
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {filterCount}
+            </span>
+          )}
+        </button>
         <div style={{ flex: 1 }} />
         {onNew && (
           <button
@@ -728,7 +720,13 @@ function BoardTable({
               {it.assignees && it.assignees.length > 0 ? (
                 <Avatar.Stack spacing="tight">
                   {it.assignees.slice(0, 3).map(a => (
-                    <TableAssigneeAvatar key={a.id} assignee={a} onClick={onAssigneeClick} />
+                    <Avatar
+                      key={a.id}
+                      name={a.name}
+                      src={a.avatarUrl}
+                      size="xs"
+                      onClick={onAssigneeClick ? () => onAssigneeClick(a) : undefined}
+                    />
                   ))}
                   {it.assignees.length > 3 && <Avatar.Overflow count={it.assignees.length - 3} size="xs" />}
                 </Avatar.Stack>
@@ -843,8 +841,8 @@ function BoardTimeline({
     return { ratio: i / (tickCount - 1), label: formatTickDate(new Date(t)) }
   })
 
-  const labelWidth = '11rem'
-  const rowHeight = 28
+  const labelWidth = '12rem'
+  const rowHeight = 36
 
   return (
     <div
@@ -1048,53 +1046,59 @@ function TimelineRow({
           />
         )}
 
-        {/* Bar or milestone */}
+        {/* Bar (date range) or milestone (single date). Hover shows
+            the dates in a tooltip — the bar itself stays clean. */}
         {rangeMode ? (
-          <div
-            style={{
-              position: 'absolute',
-              top: '50%',
-              left: `${leftPct}%`,
-              transform: 'translateY(-50%)',
-              width: `${widthPct}%`,
-              minWidth: '0.875rem',
-              height: '0.875rem',
-              background: tone.bar,
-              border: `1px solid ${tone.ring}`,
-              borderRadius: '0.25rem',
-              display: 'flex',
-              alignItems: 'center',
-              paddingLeft: '0.3125rem',
-              fontSize: '0.625rem',
-              fontWeight: 600,
-              color: tone.text,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-            }}
-            title={`${datum.item.title} · ${datum.item.dueDate ?? ''}`}
+          <Tooltip
+            label={`${formatTooltipDate(datum.startTs!)} → ${formatTooltipDate(datum.endTs)}`}
+            side="top"
           >
-            {widthPct > 8 && datum.item.dueDate}
-          </div>
+            <div
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: `${leftPct}%`,
+                transform: 'translateY(-50%)',
+                width: `${widthPct}%`,
+                minWidth: '1.25rem',
+                height: '1.5rem',
+                background: tone.bar,
+                border: `1px solid ${tone.ring}`,
+                borderRadius: '0.3125rem',
+                boxShadow: '0 1px 2px rgba(15, 20, 16, 0.08)',
+                cursor: 'pointer',
+              }}
+            />
+          </Tooltip>
         ) : (
-          <span
-            aria-hidden="true"
-            title={`${datum.item.title} · ${datum.item.dueDate ?? ''}`}
-            style={{
-              position: 'absolute',
-              top: '50%',
-              left: `${rightPct}%`,
-              transform: 'translate(-50%, -50%) rotate(45deg)',
-              width: '0.625rem',
-              height: '0.625rem',
-              background: tone.bar,
-              border: `1.5px solid ${tone.ring}`,
-              boxShadow: '0 1px 2px rgba(15, 20, 16, 0.10)',
-            }}
-          />
+          <Tooltip
+            label={`Due ${formatTooltipDate(datum.endTs)}`}
+            side="top"
+          >
+            <span
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: `${rightPct}%`,
+                transform: 'translate(-50%, -50%) rotate(45deg)',
+                width: '0.875rem',
+                height: '0.875rem',
+                background: tone.bar,
+                border: `1.5px solid ${tone.ring}`,
+                boxShadow: '0 1px 2px rgba(15, 20, 16, 0.10)',
+                cursor: 'pointer',
+              }}
+            />
+          </Tooltip>
         )}
       </div>
     </div>
   )
+}
+
+function formatTooltipDate(ts: number): string {
+  const d = new Date(ts)
+  return d.toLocaleDateString('en', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 function LegendSwatch({ color, label }: { color: string; label: string }) {
@@ -1240,39 +1244,3 @@ function TableTagChip({
   )
 }
 
-function TableAssigneeAvatar({
-  assignee,
-  onClick,
-}: {
-  assignee: BoardAssignee
-  onClick?: (assignee: BoardAssignee) => void
-}) {
-  const node = <Avatar name={assignee.name} src={assignee.avatarUrl} size="xs" />
-  if (!onClick) {
-    return (
-      <Tooltip label={assignee.name} side="top">
-        <span style={{ display: 'inline-flex' }}>{node}</span>
-      </Tooltip>
-    )
-  }
-  return (
-    <Tooltip label={assignee.name} side="top">
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); onClick(assignee) }}
-        aria-label={`Open ${assignee.name}'s profile`}
-        className="tahi-focus-ring"
-        style={{
-          background: 'transparent',
-          border: 'none',
-          padding: 0,
-          borderRadius: '50%',
-          cursor: 'pointer',
-          display: 'inline-flex',
-        }}
-      >
-        {node}
-      </button>
-    </Tooltip>
-  )
-}

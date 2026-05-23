@@ -21,6 +21,7 @@
  */
 
 import * as React from 'react'
+import { Tooltip } from '@/components/tahi/tooltip'
 
 type Size = 'xs' | 'sm' | 'md' | 'lg' | 'xl'
 type StatusDot = 'online' | 'away' | 'offline' | null | undefined
@@ -52,6 +53,10 @@ interface AvatarProps {
   onClick?: () => void
   /** When `true`, removes the white outer ring used by overlapping stacks. */
   noRing?: boolean
+  /** Hover tooltip behaviour. Defaults to the name. Pass `false` to
+   *  suppress (e.g. when the avatar already sits inside a labelled
+   *  control), or a string to override the displayed text. */
+  tooltip?: boolean | string
   style?: React.CSSProperties
 }
 
@@ -75,6 +80,7 @@ function AvatarRoot({
   className,
   onClick,
   noRing,
+  tooltip = true,
   style,
 }: AvatarProps) {
   const [errored, setErrored] = React.useState(false)
@@ -85,11 +91,10 @@ function AvatarRoot({
 
   const Tag = onClick ? 'button' : 'div'
 
-  return (
+  const node = (
     <Tag
       type={onClick ? 'button' : undefined}
       onClick={onClick}
-      title={name}
       aria-label={name}
       className={className}
       style={{
@@ -144,6 +149,14 @@ function AvatarRoot({
       )}
     </Tag>
   )
+
+  // Hover tooltip is on by default — every avatar in the dashboard
+  // should reveal the person's name on hover without the consumer
+  // wiring it up. Suppress with tooltip={false} when the avatar is
+  // already inside a labelled control.
+  if (tooltip === false || !name) return node
+  const label = typeof tooltip === 'string' ? tooltip : name
+  return <Tooltip label={label} side="top">{node}</Tooltip>
 }
 
 // ── Overlapping stack. Avatar.Stack ────────────────────────────────────

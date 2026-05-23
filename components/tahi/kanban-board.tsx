@@ -39,7 +39,6 @@ import {
 } from 'lucide-react'
 import { Avatar } from '@/components/tahi/avatar'
 import { Popover } from '@/components/tahi/popover'
-import { Tooltip } from '@/components/tahi/tooltip'
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -869,7 +868,13 @@ function BoardCard({
             {item.assignees && item.assignees.length > 0 && (
               <Avatar.Stack spacing="tight">
                 {item.assignees.slice(0, 3).map(a => (
-                  <AssigneeAvatar key={a.id} assignee={a} onClick={onAssigneeClick} />
+                  <Avatar
+                    key={a.id}
+                    name={a.name}
+                    src={a.avatarUrl}
+                    size="xs"
+                    onClick={onAssigneeClick ? () => onAssigneeClick(a) : undefined}
+                  />
                 ))}
                 {item.assignees.length > 3 && <Avatar.Overflow count={item.assignees.length - 3} size="xs" />}
               </Avatar.Stack>
@@ -998,51 +1003,6 @@ function TagChip({
     >
       {tag.label}
     </button>
-  )
-}
-
-// ── Assignee avatar (tooltip + click) ────────────────────────────────
-
-function AssigneeAvatar({
-  assignee,
-  onClick,
-}: {
-  assignee: BoardAssignee
-  onClick?: (assignee: BoardAssignee) => void
-}) {
-  const node = (
-    <Avatar
-      name={assignee.name}
-      src={assignee.avatarUrl}
-      size="xs"
-    />
-  )
-  if (!onClick) {
-    return (
-      <Tooltip label={assignee.name} side="top">
-        <span style={{ display: 'inline-flex' }}>{node}</span>
-      </Tooltip>
-    )
-  }
-  return (
-    <Tooltip label={assignee.name} side="top">
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); onClick(assignee) }}
-        aria-label={`Open ${assignee.name}'s profile`}
-        className="tahi-focus-ring"
-        style={{
-          background: 'transparent',
-          border: 'none',
-          padding: 0,
-          borderRadius: '50%',
-          cursor: 'pointer',
-          display: 'inline-flex',
-        }}
-      >
-        {node}
-      </button>
-    </Tooltip>
   )
 }
 
