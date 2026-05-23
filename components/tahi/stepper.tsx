@@ -62,8 +62,8 @@ export function Stepper({
   ariaLabel,
 }: StepperProps) {
   const currentIndex = steps.findIndex(s => s.id === current)
-  const circleSize = size === 'sm' ? '1.5rem' : '1.75rem'
-  const numberFontSize = size === 'sm' ? '0.6875rem' : '0.75rem'
+  const circleSize = size === 'sm' ? '1.25rem' : '1.5rem'
+  const numberFontSize = size === 'sm' ? '0.625rem' : '0.6875rem'
   const labelFontSize = size === 'sm' ? 'var(--text-xs)' : 'var(--text-sm)'
 
   if (vertical) {
@@ -108,14 +108,14 @@ export function Stepper({
                   <div
                     aria-hidden="true"
                     style={{
-                      width: 2,
+                      width: 1.5,
                       flex: 1,
-                      minHeight: '1.25rem',
+                      minHeight: '1.5rem',
                       background: state === 'done'
                         ? 'var(--color-brand)'
-                        : 'var(--color-border-subtle)',
-                      transition: 'background-color 320ms ease',
-                      borderRadius: 1,
+                        : 'var(--color-border)',
+                      opacity: state === 'done' ? 1 : 0.6,
+                      transition: 'background-color 320ms ease, opacity 320ms ease',
                     }}
                   />
                 )}
@@ -190,15 +190,15 @@ export function Stepper({
                 aria-hidden="true"
                 style={{
                   flex: 1,
-                  height: 2,
+                  height: 1.5,
                   marginTop: `calc(${circleSize} / 2 - 1px)`,
-                  marginLeft: '0.5rem',
-                  marginRight: '0.5rem',
+                  marginLeft: '0.625rem',
+                  marginRight: '0.625rem',
                   background: state === 'done'
                     ? 'var(--color-brand)'
-                    : 'var(--color-border-subtle)',
-                  transition: 'background-color 320ms ease',
-                  borderRadius: 1,
+                    : 'var(--color-border)',
+                  opacity: state === 'done' ? 1 : 0.6,
+                  transition: 'background-color 320ms ease, opacity 320ms ease',
                 }}
               />
             )}
@@ -244,32 +244,50 @@ function StepCircle({
   const isCurrent = state === 'current'
   const isError = state === 'error'
 
-  let bg = 'var(--color-bg)'
+  // Three clean states, no halo. Done = filled brand circle with a
+  // check inside. Current = filled brand circle with a small white
+  // INNER dot so it reads as "active, not yet complete". Upcoming =
+  // neutral outline with the step number. Error = outlined danger.
+  let bg = 'transparent'
   let border = '1.5px solid var(--color-border)'
-  let textColour = 'var(--color-text-muted)'
-  let ring: string | undefined
+  let textColour = 'var(--color-text-subtle)'
 
   if (isDone) {
     bg = 'var(--color-brand)'
     border = '1.5px solid var(--color-brand)'
     textColour = '#ffffff'
   } else if (isCurrent) {
-    bg = 'var(--color-bg)'
+    bg = 'var(--color-brand)'
     border = '1.5px solid var(--color-brand)'
-    textColour = 'var(--color-brand-dark)'
-    ring = '0 0 0 3px var(--color-brand-100)'
+    textColour = '#ffffff'
   } else if (isError) {
-    bg = 'var(--color-bg)'
+    bg = 'transparent'
     border = '1.5px solid var(--color-danger)'
     textColour = 'var(--color-danger)'
-    ring = '0 0 0 3px var(--color-danger-bg, rgba(220, 38, 38, 0.12))'
   }
 
-  const content = isDone
-    ? <Check size={13} strokeWidth={3} aria-hidden="true" />
-    : icon
-      ? icon
-      : <span>{index + 1}</span>
+  // Content. Current shows the inner dot, done shows the check,
+  // upcoming + error show the index number (or a caller-supplied icon).
+  let content: React.ReactNode
+  if (isDone) {
+    content = <Check size={11} strokeWidth={3} aria-hidden="true" />
+  } else if (isCurrent) {
+    content = (
+      <span
+        aria-hidden="true"
+        style={{
+          width: '0.375rem',
+          height: '0.375rem',
+          borderRadius: '50%',
+          background: '#ffffff',
+        }}
+      />
+    )
+  } else if (icon) {
+    content = icon
+  } else {
+    content = <span>{index + 1}</span>
+  }
 
   const inner = (
     <span
@@ -282,11 +300,10 @@ function StepCircle({
         borderRadius: '50%',
         background: bg,
         border,
-        boxShadow: ring,
         color: textColour,
         fontSize: numberFontSize,
         fontWeight: 600,
-        transition: 'background-color 220ms ease, border-color 220ms ease, box-shadow 220ms ease',
+        transition: 'background-color 220ms ease, border-color 220ms ease',
         flexShrink: 0,
       }}
     >
@@ -306,7 +323,13 @@ function StepCircle({
         padding: 0,
         cursor: 'pointer',
         display: 'inline-flex',
+        borderRadius: '50%',
+        transition: 'box-shadow 150ms ease',
       }}
+      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 0 0 3px var(--color-brand-100)' }}
+      onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none' }}
+      onFocus={e => { e.currentTarget.style.boxShadow = '0 0 0 3px var(--color-brand-100)' }}
+      onBlur={e => { e.currentTarget.style.boxShadow = 'none' }}
     >
       {inner}
     </button>

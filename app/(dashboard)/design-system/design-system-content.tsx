@@ -32,7 +32,6 @@ import { SlideOver } from '@/components/tahi/slide-over'
 import { Stepper } from '@/components/tahi/stepper'
 import { ProgressBar } from '@/components/tahi/progress-bar'
 import { Callout } from '@/components/tahi/callout'
-import { Chip } from '@/components/tahi/chip'
 
 /**
  * /design-system. The canonical token + primitive reference.
@@ -971,7 +970,6 @@ const COMPONENTS_NAV = [
   { id: 'comp-toast',        label: 'Toast',        ready: true },
   { id: 'comp-chart',        label: 'Charts',       ready: true  },
   { id: 'comp-table',        label: 'Data table',   ready: true  },
-  { id: 'comp-chip',         label: 'Chip',         ready: true  },
   { id: 'comp-callout',      label: 'Callout',      ready: true  },
   { id: 'comp-stepper',      label: 'Stepper',      ready: true  },
   { id: 'comp-progress',     label: 'Progress',     ready: true  },
@@ -1216,6 +1214,18 @@ function AvatarShowcase() {
 
 function BadgeShowcase() {
   const tones: BadgeTonePick[] = ['brand', 'positive', 'warning', 'danger', 'info', 'teal', 'purple', 'rose', 'neutral']
+  // Interactive demo state: removable tag list + selectable role picker.
+  // Renders Badges with the new onClick / onRemove / selected props.
+  const [tags, setTags] = React.useState<string[]>(['Strategy', 'Design', 'Build', 'QA'])
+  const [pickedRoles, setPickedRoles] = React.useState<Set<string>>(new Set(['design']))
+  const togglePicked = (id: string) => {
+    setPickedRoles(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
   // Compact inline Lucide icons for the icon-leader demo.
   const i = (paths: React.ReactNode) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" width="100%" height="100%">{paths}</svg>
@@ -1266,6 +1276,44 @@ function BadgeShowcase() {
             <Badge tone="info" size="md">Medium</Badge>
             <Badge tone="info" leader="dot" size="sm">Small dot</Badge>
             <Badge tone="info" leader="dot" size="md">Medium dot</Badge>
+          </StateRow>
+          <StateRow label="Removable tags">
+            {tags.length > 0 ? tags.map(t => (
+              <Badge
+                key={t}
+                tone="neutral"
+                variant="outline"
+                onRemove={() => setTags(prev => prev.filter(x => x !== t))}
+              >
+                {t}
+              </Badge>
+            )) : (
+              <Badge tone="neutral" onClick={() => setTags(['Strategy', 'Design', 'Build', 'QA'])}>
+                Reset
+              </Badge>
+            )}
+          </StateRow>
+          <StateRow label="Selectable (multi-pick)">
+            {[
+              { id: 'discovery', label: 'Discovery' },
+              { id: 'strategy',  label: 'Strategy' },
+              { id: 'design',    label: 'Design' },
+              { id: 'build',     label: 'Build' },
+              { id: 'launch',    label: 'Launch' },
+            ].map(r => {
+              const picked = pickedRoles.has(r.id)
+              return (
+                <Badge
+                  key={r.id}
+                  tone={picked ? 'brand' : 'neutral'}
+                  variant={picked ? 'soft' : 'outline'}
+                  selected={picked}
+                  onClick={() => togglePicked(r.id)}
+                >
+                  {r.label}
+                </Badge>
+              )
+            })}
           </StateRow>
         </div>
       </Card>
@@ -1663,7 +1711,6 @@ function ComponentsSection() {
         <ButtonShowcase />
         <AvatarShowcase />
         <BadgeShowcase />
-        <ChipShowcase />
         <CardShowcase />
         <FeatureCardShowcase />
         <KPICardShowcase />
@@ -1680,101 +1727,6 @@ function ComponentsSection() {
   )
 }
 
-// ── Chip showcase ──────────────────────────────────────────────────────
-function ChipShowcase() {
-  const [tags, setTags] = useState<string[]>(['Strategy', 'Design', 'Build', 'QA'])
-  const [selectedRoles, setSelectedRoles] = useState<Set<string>>(new Set(['design']))
-  const toggleRole = (id: string) => {
-    setSelectedRoles(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-  return (
-    <PrimitiveShell
-      id="comp-chip"
-      title="Chip"
-      source="components/tahi/chip.tsx"
-      intro="Interactive sibling of Badge. Use for tags, multi-select values, contact pills, request participants. Click handlers, remove X, leading + trailing slots, selected state."
-    >
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <CardPrim>
-          <GroupHeading>Tones</GroupHeading>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4375rem' }}>
-            <Chip tone="brand">Brand</Chip>
-            <Chip tone="positive">Delivered</Chip>
-            <Chip tone="warning">In review</Chip>
-            <Chip tone="danger">Overdue</Chip>
-            <Chip tone="info">Submitted</Chip>
-            <Chip tone="teal">In progress</Chip>
-            <Chip tone="purple">Client review</Chip>
-            <Chip tone="rose">Urgent</Chip>
-            <Chip tone="neutral">Draft</Chip>
-          </div>
-        </CardPrim>
-
-        <CardPrim>
-          <GroupHeading>Variants</GroupHeading>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4375rem', alignItems: 'center' }}>
-            <Chip variant="subtle" tone="positive">Subtle</Chip>
-            <Chip variant="solid" tone="positive">Solid</Chip>
-            <Chip variant="outline" tone="positive">Outline</Chip>
-            <Chip dot tone="warning">With status dot</Chip>
-          </div>
-        </CardPrim>
-
-        <CardPrim>
-          <GroupHeading>Removable &middot; tag list</GroupHeading>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4375rem' }}>
-            {tags.map(t => (
-              <Chip
-                key={t}
-                tone="neutral"
-                variant="outline"
-                onRemove={() => setTags(prev => prev.filter(x => x !== t))}
-              >
-                {t}
-              </Chip>
-            ))}
-            {tags.length === 0 && (
-              <Chip tone="neutral" onClick={() => setTags(['Strategy', 'Design', 'Build', 'QA'])}>
-                Reset
-              </Chip>
-            )}
-          </div>
-        </CardPrim>
-
-        <CardPrim>
-          <GroupHeading>Selectable &middot; multi-pick</GroupHeading>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4375rem' }}>
-            {[
-              { id: 'discovery', label: 'Discovery' },
-              { id: 'strategy',  label: 'Strategy' },
-              { id: 'design',    label: 'Design' },
-              { id: 'build',     label: 'Build' },
-              { id: 'launch',    label: 'Launch' },
-            ].map(r => {
-              const selected = selectedRoles.has(r.id)
-              return (
-                <Chip
-                  key={r.id}
-                  tone={selected ? 'brand' : 'neutral'}
-                  variant={selected ? 'subtle' : 'outline'}
-                  selected={selected}
-                  onClick={() => toggleRole(r.id)}
-                >
-                  {r.label}
-                </Chip>
-              )
-            })}
-          </div>
-        </CardPrim>
-      </div>
-    </PrimitiveShell>
-  )
-}
 
 // ── Callout showcase ───────────────────────────────────────────────────
 function CalloutShowcase() {
@@ -1784,7 +1736,7 @@ function CalloutShowcase() {
       id="comp-callout"
       title="Callout"
       source="components/tahi/callout.tsx"
-      intro="Inline banner for contextual messages. Five tones, subtle + solid variants, optional action button, optional dismiss X. Static (not transient); use Toast for confirmations."
+      intro="Quiet inline banner for contextual page-level info. Use for messages that live INSIDE a page section (retainer almost out on a client page, integration disconnected on settings, a one-off tip). Use Toast for transient action confirmations; use AnnouncementBanner for admin-configured full-width announcements; use EmptyState when a list has no data."
     >
       <div className="space-y-3">
         {showInfo && (
@@ -2126,8 +2078,10 @@ function ChartShowcase() {
 
       </div>
 
-      <CardPrim>
-        <GroupHeading>Heatmap &middot; hours x days, full width</GroupHeading>
+      <Card padded={false}>
+        <div style={{ padding: '1.25rem 1.25rem 0.5rem' }}>
+          <GroupHeading>Heatmap &middot; hours x days</GroupHeading>
+        </div>
         <Heatmap
           tone="positive"
           columns={['9', '10', '11', '12', '13', '14', '15', '16', '17']}
@@ -2140,10 +2094,12 @@ function ChartShowcase() {
           ]}
           formatValue={v => `${v} requests`}
         />
-      </CardPrim>
+      </Card>
 
-      <CardPrim>
-        <GroupHeading>CalendarHeatmap &middot; GitHub-style contributions</GroupHeading>
+      <Card padded={false}>
+        <div style={{ padding: '1.25rem 1.25rem 0.5rem' }}>
+          <GroupHeading>CalendarHeatmap &middot; GitHub-style contributions</GroupHeading>
+        </div>
         <CalendarHeatmap
           tone="positive"
           rangeStart={new Date('2026-01-01')}
@@ -2151,7 +2107,7 @@ function ChartShowcase() {
           values={generateCalendarDemoValues()}
           formatValue={v => `${v} ${v === 1 ? 'commit' : 'commits'}`}
         />
-      </CardPrim>
+      </Card>
 
       <CardPrim>
         <GroupHeading>How to use it</GroupHeading>

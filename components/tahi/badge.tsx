@@ -38,6 +38,7 @@
  */
 
 import React from 'react'
+import { X } from 'lucide-react'
 import { stageColour, sourceColour } from '@/lib/chart-colors'
 import { LeafIcon } from '@/components/tahi/tahi-glyphs'
 
@@ -57,7 +58,7 @@ export type BadgeTone =
 export type BadgeVariant = 'soft' | 'solid' | 'outline' | 'count'
 export type BadgeSize = 'sm' | 'md'
 
-interface BadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'children'> {
+interface BadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'children' | 'onClick'> {
   /** Semantic tone. One of the tokens above. Ignored if `stage` or `source` is set. */
   tone?: BadgeTone
   /** Stage name for categorical colour (runs through stageColour() from chart-colors). */
@@ -84,6 +85,18 @@ interface BadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'childr
    * @deprecated
    */
   dot?: boolean
+  /** Click handler. When set, the badge renders as a button and gains
+   *  a hover state. Use for selectable / pickable badges (tags, role
+   *  pickers, filter values). */
+  onClick?: () => void
+  /** Remove handler. When set, renders a trailing X. Clicking the X
+   *  fires this and never propagates to `onClick`. Use for removable
+   *  tags, contact pills, applied filters. */
+  onRemove?: () => void
+  /** Selected state for multi-pick lists. Adds a brand-100 ring. */
+  selected?: boolean
+  /** Disabled. Lowers opacity and prevents clicks. */
+  disabled?: boolean
   children: React.ReactNode
 }
 
@@ -127,6 +140,10 @@ export function Badge({
   leader,
   icon,
   dot = false,
+  onClick,
+  onRemove,
+  selected = false,
+  disabled = false,
   children,
   className,
   style,
@@ -196,26 +213,33 @@ export function Badge({
       break
   }
 
-  return (
-    <span
-      {...rest}
-      className={className}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: s.gap,
-        padding: s.padding,
-        fontSize: s.fontSize,
-        fontWeight: 500,
-        lineHeight: 1.2,
-        whiteSpace: 'nowrap',
-        borderRadius,
-        background: finalBg,
-        color: finalText,
-        border: finalBorder ? `1px solid ${finalBorder}` : undefined,
-        ...style,
-      }}
-    >
+  // Interactive when onClick or onRemove is set. We render as a
+  // button in that case so the badge is keyboard-focusable and reads
+  // as an interactive element to assistive tech.
+  const isInteractive = (!!onClick || !!onRemove) && !disabled
+  const isButton = !!onClick && !disabled
+  const containerStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: s.gap,
+    padding: s.padding,
+    fontSize: s.fontSize,
+    fontWeight: 500,
+    lineHeight: 1.2,
+    whiteSpace: 'nowrap',
+    borderRadius,
+    background: finalBg,
+    color: finalText,
+    border: finalBorder ? `1px solid ${finalBorder}` : undefined,
+    boxShadow: selected ? '0 0 0 2px var(--color-brand-100)' : undefined,
+    opacity: disabled ? 0.55 : 1,
+    cursor: isInteractive ? 'pointer' : undefined,
+    transition: 'box-shadow 150ms ease, background-color 150ms ease, opacity 150ms ease',
+    ...style,
+  }
+
+  const inner = (
+    <>
       {resolvedLeader === 'leaf' && variant !== 'count' && (
         <span
           aria-hidden="true"
@@ -256,6 +280,90 @@ export function Badge({
         />
       )}
       {children}
+      {onRemove && (
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label="Remove"
+          onClick={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            if (!disabled) onRemove()
+          }}
+          onKeyDown={(e) => {
+            if ((e.key === 'Enter' || e.key === ' ') && !disabled) {
+              e.preventDefault()
+              e.stopPropagation()
+              onRemove()
+            }
+          }}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: size === 'sm' ? '0.875rem' : '1rem',
+            height: size === 'sm' ? '0.875rem' : '1rem',
+            marginLeft: '0.0625rem',
+            marginRight: '-0.1875rem',
+            borderRadius: 'var(--radius-sm)',
+            color: 'currentColor',
+            opacity: 0.6,
+            cursor: disabled ? 'not-allowed' : 'pointer',
+            transition: 'background-color 120ms ease, opacity 120ms ease',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => {
+            if (disabled) return
+            e.currentTarget.style.opacity = '1'
+            e.currentTarget.style.background = variant === 'solid'
+              ? 'rgba(255, 255, 255, 0.22)'
+              : 'rgba(0, 0, 0, 0.06)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.opacity = '0.6'
+            e.currentTarget.style.background = 'transparent'
+          }}
+        >
+          <X size={size === 'sm' ? 10 : 11} aria-hidden="true" />
+        </span>
+      )}
+    </>
+  )
+
+  if (isButton) {
+    const buttonHover = (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.currentTarget.style.boxShadow = selected
+        ? '0 0 0 2px var(--color-brand)'
+        : '0 0 0 2px var(--color-brand-100)'
+    }
+    const buttonLeave = (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.currentTarget.style.boxShadow = selected
+        ? '0 0 0 2px var(--color-brand-100)'
+        : ''
+    }
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onClick?.() }}
+        aria-pressed={selected || undefined}
+        disabled={disabled}
+        className={className}
+        style={{ ...containerStyle, font: 'inherit' }}
+        onMouseEnter={buttonHover}
+        onMouseLeave={buttonLeave}
+      >
+        {inner}
+      </button>
+    )
+  }
+
+  return (
+    <span
+      {...rest}
+      className={className}
+      style={containerStyle}
+    >
+      {inner}
     </span>
   )
 }

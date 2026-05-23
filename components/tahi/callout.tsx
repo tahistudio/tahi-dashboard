@@ -1,38 +1,36 @@
 'use client'
 
 /**
- * <Callout>. Static banner used inline on a page to surface a piece
- * of contextual information (a "heads up", a tip, a warning) without
- * blocking interaction. Different from a toast, which is transient.
+ * <Callout>. Quiet inline banner for contextual page-level info.
  *
- *   <Callout tone="info" title="New schedule template">
- *     Pick from the templates library to start a project faster.
+ * When to use which surface:
+ *   <Toast>             transient confirmation after a user action
+ *                       ("Saved", "Couldn't start timer").
+ *   <Callout>           static info that lives inside a page section
+ *                       ("This client's retainer is almost out",
+ *                        "Stripe is disconnected", a one-off tip).
+ *   <AnnouncementBanner> admin-configured, full-width, persisted
+ *                       dismissal. Top-of-app announcements only.
+ *   <EmptyState>        when a list / section is empty.
+ *
+ * Example:
+ *
+ *   <Callout tone="warning" title="Retainer hours nearly out"
+ *            action={{ label: 'Review usage', onClick }}>
+ *     Physitrack has used 38 of 40 hours this month.
  *   </Callout>
  *
- *   <Callout
- *     tone="warning"
- *     title="Retainer hours nearly out"
- *     action={{ label: 'Review usage', onClick: () => router.push('/billing') }}
- *     dismissible
- *     onDismiss={() => setOpen(false)}
- *   >
- *     Physitrack has used 38 of 40 retainer hours this month.
- *   </Callout>
- *
- * Tones:
- *   info     soft blue, sparkles icon
- *   success  soft green, check icon
- *   warning  soft amber, alert-triangle icon
- *   danger   soft red, alert-octagon icon
- *   neutral  bg-secondary, info icon
- *
- * Variants:
- *   subtle  (default) - tinted bg + tone-tinted left edge accent
- *   solid             - filled tone bg, white text
+ * Look:
+ *   - Borderless. The faint tone-tinted background carries the
+ *     semantic colour without shouting.
+ *   - 14px icon in the tone colour, no tile wrapper. Conversational.
+ *   - Title in 13px medium; body in 12px muted. Same paragraph.
+ *   - Action is a text link (with arrow) by default, or a chip button
+ *     when emphasis is needed via variant="solid".
  */
 
 import * as React from 'react'
-import { Info, CheckCircle2, AlertTriangle, AlertOctagon, X, Sparkles } from 'lucide-react'
+import { Info, CheckCircle2, AlertTriangle, AlertOctagon, X, Sparkles, ArrowRight } from 'lucide-react'
 
 export type CalloutTone = 'info' | 'success' | 'warning' | 'danger' | 'neutral' | 'tip'
 
@@ -46,13 +44,9 @@ interface CalloutProps {
   tone?: CalloutTone
   title?: React.ReactNode
   children?: React.ReactNode
-  /** Trailing action button. */
   action?: CalloutAction
-  /** Hide the leading icon. Default false. */
   hideIcon?: boolean
-  /** Override the default icon for the tone. */
   icon?: React.ReactNode
-  /** Show an X close button. */
   dismissible?: boolean
   onDismiss?: () => void
   /** Visual variant. Default 'subtle'. */
@@ -62,68 +56,72 @@ interface CalloutProps {
 
 interface ToneDef {
   bg: string
-  border: string
   textTitle: string
   textBody: string
   icon: React.ComponentType<{ size?: number; strokeWidth?: number; 'aria-hidden'?: boolean }>
   iconColour: string
+  actionColour: string
   /** Solid-variant overrides. */
   solid: { bg: string; text: string }
 }
 
+// Backgrounds are very subtle (alpha 0.06-0.08) so the callout sits
+// quietly on the page. Icon colour carries the tone signal.
 const TONES: Record<CalloutTone, ToneDef> = {
   info: {
-    bg: 'rgba(96, 165, 250, 0.10)',
-    border: 'rgba(96, 165, 250, 0.30)',
+    bg: 'rgba(96, 165, 250, 0.07)',
     textTitle: 'var(--color-text)',
     textBody: 'var(--color-text-muted)',
     icon: Info,
     iconColour: '#3b82f6',
+    actionColour: '#1d4ed8',
     solid: { bg: '#3b82f6', text: '#ffffff' },
   },
   tip: {
-    bg: 'rgba(167, 139, 250, 0.10)',
-    border: 'rgba(167, 139, 250, 0.30)',
+    // Brand-warm tip. Uses the brand palette directly instead of a
+    // separate purple tone, so tips feel like a Tahi-flavoured note.
+    bg: 'var(--color-brand-50, rgba(90, 130, 78, 0.07))',
     textTitle: 'var(--color-text)',
     textBody: 'var(--color-text-muted)',
     icon: Sparkles,
-    iconColour: '#7c3aed',
-    solid: { bg: '#7c3aed', text: '#ffffff' },
+    iconColour: 'var(--color-brand)',
+    actionColour: 'var(--color-brand-dark)',
+    solid: { bg: 'var(--color-brand)', text: '#ffffff' },
   },
   success: {
-    bg: 'var(--color-success-bg, rgba(34, 197, 94, 0.10))',
-    border: 'rgba(34, 197, 94, 0.30)',
+    bg: 'var(--color-brand-50, rgba(34, 197, 94, 0.07))',
     textTitle: 'var(--color-text)',
     textBody: 'var(--color-text-muted)',
     icon: CheckCircle2,
     iconColour: 'var(--color-brand)',
+    actionColour: 'var(--color-brand-dark)',
     solid: { bg: 'var(--color-brand)', text: '#ffffff' },
   },
   warning: {
-    bg: 'rgba(245, 158, 11, 0.10)',
-    border: 'rgba(245, 158, 11, 0.30)',
+    bg: 'rgba(245, 158, 11, 0.08)',
     textTitle: 'var(--color-text)',
     textBody: 'var(--color-text-muted)',
     icon: AlertTriangle,
     iconColour: '#d97706',
+    actionColour: '#92400e',
     solid: { bg: '#d97706', text: '#ffffff' },
   },
   danger: {
-    bg: 'rgba(220, 38, 38, 0.10)',
-    border: 'rgba(220, 38, 38, 0.30)',
+    bg: 'rgba(220, 38, 38, 0.07)',
     textTitle: 'var(--color-text)',
     textBody: 'var(--color-text-muted)',
     icon: AlertOctagon,
     iconColour: 'var(--color-danger)',
+    actionColour: 'var(--color-danger)',
     solid: { bg: 'var(--color-danger)', text: '#ffffff' },
   },
   neutral: {
     bg: 'var(--color-bg-secondary)',
-    border: 'var(--color-border-subtle)',
     textTitle: 'var(--color-text)',
     textBody: 'var(--color-text-muted)',
     icon: Info,
     iconColour: 'var(--color-text-muted)',
+    actionColour: 'var(--color-text)',
     solid: { bg: 'var(--color-text)', text: '#ffffff' },
   },
 }
@@ -142,13 +140,12 @@ export function Callout({
 }: CalloutProps) {
   const t = TONES[tone]
   const Icon = t.icon
-
   const isSolid = variant === 'solid'
   const bg = isSolid ? t.solid.bg : t.bg
   const titleColour = isSolid ? t.solid.text : t.textTitle
-  const bodyColour = isSolid ? 'rgba(255, 255, 255, 0.88)' : t.textBody
+  const bodyColour = isSolid ? 'rgba(255, 255, 255, 0.85)' : t.textBody
   const iconColour = isSolid ? '#ffffff' : t.iconColour
-  const borderColour = isSolid ? t.solid.bg : t.border
+  const actionColour = isSolid ? '#ffffff' : t.actionColour
 
   return (
     <div
@@ -156,10 +153,9 @@ export function Callout({
       className={className}
       style={{
         display: 'flex',
-        gap: '0.75rem',
-        padding: '0.875rem 1rem',
+        gap: '0.625rem',
+        padding: '0.625rem 0.875rem',
         background: bg,
-        border: `1px solid ${borderColour}`,
         borderRadius: 'var(--radius-md)',
         alignItems: 'flex-start',
       }}
@@ -171,133 +167,164 @@ export function Callout({
             display: 'inline-flex',
             color: iconColour,
             flexShrink: 0,
-            paddingTop: title ? '0.0625rem' : 0,
+            paddingTop: '0.0625rem',
           }}
         >
-          {icon ?? <Icon size={16} strokeWidth={2} aria-hidden={true} />}
+          {icon ?? <Icon size={14} strokeWidth={2} aria-hidden={true} />}
         </span>
       )}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.125rem',
+          fontSize: 'var(--text-sm)',
+          lineHeight: 1.45,
+        }}
+      >
         {title && (
-          <div
+          <span
             style={{
-              fontSize: 'var(--text-sm)',
               fontWeight: 600,
               color: titleColour,
-              lineHeight: 1.4,
             }}
           >
             {title}
-          </div>
+          </span>
         )}
         {children && (
-          <div
-            style={{
-              fontSize: title ? 'var(--text-xs)' : 'var(--text-sm)',
-              color: bodyColour,
-              lineHeight: 1.5,
-            }}
-          >
+          <span style={{ color: bodyColour }}>
             {children}
-          </div>
+          </span>
+        )}
+        {action && !isSolid && (
+          <CalloutTextLink
+            action={action}
+            colour={actionColour}
+          />
         )}
       </div>
-      {(action || dismissible) && (
-        <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0, alignItems: 'center' }}>
-          {action && (
-            action.href
-              ? (
-                <a
-                  href={action.href}
-                  onClick={action.onClick}
-                  style={calloutActionStyle(isSolid)}
-                  onMouseEnter={onCalloutActionEnter(isSolid)}
-                  onMouseLeave={onCalloutActionLeave(isSolid)}
-                >
-                  {action.label}
-                </a>
-              )
-              : (
-                <button
-                  type="button"
-                  onClick={action.onClick}
-                  style={calloutActionStyle(isSolid)}
-                  onMouseEnter={onCalloutActionEnter(isSolid)}
-                  onMouseLeave={onCalloutActionLeave(isSolid)}
-                >
-                  {action.label}
-                </button>
-              )
-          )}
-          {dismissible && (
-            <button
-              type="button"
-              onClick={onDismiss}
-              aria-label="Dismiss"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                padding: '0.25rem',
-                cursor: 'pointer',
-                color: isSolid ? 'rgba(255,255,255,0.7)' : 'var(--color-text-subtle)',
-                borderRadius: 'var(--radius-sm)',
-                transition: 'background-color 150ms ease, color 150ms ease',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.background = isSolid
-                  ? 'rgba(255,255,255,0.15)'
-                  : 'var(--color-bg-tertiary)'
-                e.currentTarget.style.color = isSolid ? '#ffffff' : 'var(--color-text)'
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.background = 'transparent'
-                e.currentTarget.style.color = isSolid
-                  ? 'rgba(255,255,255,0.7)'
-                  : 'var(--color-text-subtle)'
-              }}
-            >
-              <X size={14} aria-hidden="true" />
-            </button>
-          )}
+      {(action && isSolid) && (
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+          <CalloutSolidAction action={action} />
         </div>
+      )}
+      {dismissible && (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            padding: '0.1875rem',
+            cursor: 'pointer',
+            color: isSolid ? 'rgba(255,255,255,0.7)' : 'var(--color-text-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            marginTop: '-0.0625rem',
+            transition: 'background-color 120ms ease, color 120ms ease',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = isSolid
+              ? 'rgba(255,255,255,0.15)'
+              : 'rgba(0, 0, 0, 0.04)'
+            e.currentTarget.style.color = isSolid ? '#ffffff' : 'var(--color-text)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = isSolid
+              ? 'rgba(255,255,255,0.7)'
+              : 'var(--color-text-subtle)'
+          }}
+        >
+          <X size={13} aria-hidden="true" />
+        </button>
       )}
     </div>
   )
 }
 
-function calloutActionStyle(isSolid: boolean): React.CSSProperties {
-  return {
+function CalloutTextLink({ action, colour }: { action: CalloutAction; colour: string }) {
+  const baseStyle: React.CSSProperties = {
+    alignSelf: 'flex-start',
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '0.3125rem',
-    padding: '0.3125rem 0.625rem',
-    borderRadius: 'var(--radius-sm)',
+    gap: '0.1875rem',
+    marginTop: '0.1875rem',
+    padding: 0,
+    background: 'transparent',
+    border: 'none',
+    color: colour,
     fontSize: 'var(--text-xs)',
     fontWeight: 600,
     cursor: 'pointer',
-    background: isSolid ? 'rgba(255, 255, 255, 0.16)' : 'var(--color-bg)',
-    border: isSolid ? '1px solid rgba(255, 255, 255, 0.32)' : '1px solid var(--color-border-subtle)',
-    color: isSolid ? '#ffffff' : 'var(--color-text)',
     textDecoration: 'none',
-    transition: 'background-color 150ms ease, border-color 150ms ease',
-    whiteSpace: 'nowrap',
+    letterSpacing: '0.01em',
   }
+  const content = (
+    <>
+      {action.label}
+      <ArrowRight size={11} aria-hidden="true" style={{ transition: 'transform 150ms ease' }} />
+    </>
+  )
+  const onEnter = (e: React.MouseEvent<HTMLElement>) => {
+    const arrow = e.currentTarget.querySelector('svg')
+    if (arrow) (arrow as SVGElement).style.transform = 'translateX(2px)'
+  }
+  const onLeave = (e: React.MouseEvent<HTMLElement>) => {
+    const arrow = e.currentTarget.querySelector('svg')
+    if (arrow) (arrow as SVGElement).style.transform = 'translateX(0)'
+  }
+  if (action.href) {
+    return (
+      <a href={action.href} style={baseStyle} onClick={action.onClick} onMouseEnter={onEnter} onMouseLeave={onLeave}>
+        {content}
+      </a>
+    )
+  }
+  return (
+    <button type="button" style={baseStyle} onClick={action.onClick} onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      {content}
+    </button>
+  )
 }
 
-function onCalloutActionEnter(isSolid: boolean) {
-  return (e: React.MouseEvent<HTMLElement>) => {
-    e.currentTarget.style.background = isSolid
-      ? 'rgba(255, 255, 255, 0.26)'
-      : 'var(--color-bg-secondary)'
+function CalloutSolidAction({ action }: { action: CalloutAction }) {
+  const baseStyle: React.CSSProperties = {
+    padding: '0.25rem 0.625rem',
+    background: 'rgba(255, 255, 255, 0.18)',
+    border: '1px solid rgba(255, 255, 255, 0.3)',
+    borderRadius: 'var(--radius-sm)',
+    color: '#ffffff',
+    fontSize: 'var(--text-xs)',
+    fontWeight: 600,
+    cursor: 'pointer',
+    textDecoration: 'none',
+    whiteSpace: 'nowrap',
+    transition: 'background-color 150ms ease',
   }
-}
-function onCalloutActionLeave(isSolid: boolean) {
-  return (e: React.MouseEvent<HTMLElement>) => {
-    e.currentTarget.style.background = isSolid
-      ? 'rgba(255, 255, 255, 0.16)'
-      : 'var(--color-bg)'
+  const onEnter = (e: React.MouseEvent<HTMLElement>) => {
+    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.28)'
   }
+  const onLeave = (e: React.MouseEvent<HTMLElement>) => {
+    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)'
+  }
+  if (action.href) {
+    return (
+      <a href={action.href} style={baseStyle} onClick={action.onClick} onMouseEnter={onEnter} onMouseLeave={onLeave}>
+        {action.label}
+      </a>
+    )
+  }
+  return (
+    <button type="button" style={baseStyle} onClick={action.onClick} onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      {action.label}
+    </button>
+  )
 }
