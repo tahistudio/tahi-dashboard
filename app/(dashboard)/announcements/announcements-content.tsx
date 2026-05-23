@@ -1,13 +1,17 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
-  Plus, Megaphone, RefreshCw, X, ChevronDown, ChevronUp,
-  Calendar, Target,
+  Plus, Megaphone, RefreshCw, Calendar, Target,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
-import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
+import { SlideOver } from '@/components/tahi/slide-over'
+import { Input, Select, Textarea } from '@/components/tahi/input'
+import { Badge, type BadgeTone } from '@/components/tahi/badge'
+import { Card } from '@/components/tahi/card'
+import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
+import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
 import { apiPath } from '@/lib/api'
 
 // -- Types --
@@ -25,6 +29,8 @@ interface Announcement {
   createdAt: string
 }
 
+type Status = 'draft' | 'active' | 'expired'
+
 // -- Helpers --
 
 function formatDate(dateStr: string | null): string {
@@ -40,25 +46,393 @@ function formatDate(dateStr: string | null): string {
   }
 }
 
-const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
-  info: { bg: 'var(--color-info-bg)', text: 'var(--color-info)' },
-  warning: { bg: 'var(--color-warning-bg)', text: 'var(--color-warning)' },
-  success: { bg: 'var(--color-success-bg)', text: 'var(--color-success)' },
-  maintenance: { bg: 'var(--status-draft-bg)', text: 'var(--status-draft-text)' },
+const TYPE_TONE: Record<string, BadgeTone> = {
+  info: 'info',
+  warning: 'warning',
+  success: 'positive',
+  maintenance: 'neutral',
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  info: 'Info',
+  warning: 'Warning',
+  success: 'Success',
+  maintenance: 'Maintenance',
 }
 
 const TARGET_LABELS: Record<string, string> = {
-  all: 'All Clients',
-  plan_type: 'By Plan',
-  org: 'Specific Clients',
+  all: 'All clients',
+  plan_type: 'By plan',
+  org: 'Specific clients',
 }
 
-// -- Create Announcement Modal --
+const STATUS_TONE: Record<Status, BadgeTone> = {
+  draft: 'neutral',
+  active: 'positive',
+  expired: 'warning',
+}
 
-function CreateAnnouncementModal({
+const STATUS_LABEL: Record<Status, string> = {
+  draft: 'Draft',
+  active: 'Active',
+  expired: 'Expired',
+}
+
+function getStatus(a: Announcement): Status {
+  const now = new Date().toISOString()
+  if (!a.publishedAt) return 'draft'
+  if (a.expiresAt && a.expiresAt < now) return 'expired'
+  return 'active'
+}
+
+// -- Main Component --
+
+export function AnnouncementsContent() {
+  const [announcements, setAnnouncements] = useState<Announcement[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showCreate, setShowCreate] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([])
+
+  const fetchAnnouncements = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/announcements'))
+      if (!res.ok) throw new Error('Failed to fetch')
+      const data = await res.json() as { announcements: Announcement[] }
+      setAnnouncements(data.announcements ?? [])
+    } catch {
+      setAnnouncements([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchAnnouncements()
+  }, [fetchAnnouncements])
+
+  const selected = useMemo(
+    () => announcements.find(a => a.id === selectedId) ?? null,
+    [announcements, selectedId],
+  )
+
+  // Filter defs — Status, Type, Target. All multiselect so the user
+  // can hold multiple values in one chip without re-adding it.
+  const filterDefs: FilterDef[] = useMemo(() => ([
+    {
+      id: 'status',
+      label: 'Status',
+      kind: 'multiselect',
+      options: [
+        { value: 'draft',   label: 'Draft',   tone: 'neutral' },
+        { value: 'active',  label: 'Active',  tone: 'positive' },
+        { value: 'expired', label: 'Expired', tone: 'warning' },
+      ],
+    },
+    {
+      id: 'type',
+      label: 'Type',
+      kind: 'multiselect',
+      options: [
+        { value: 'info',        label: 'Info',        tone: 'info' },
+        { value: 'warning',     label: 'Warning',     tone: 'warning' },
+        { value: 'success',     label: 'Success',     tone: 'positive' },
+        { value: 'maintenance', label: 'Maintenance', tone: 'neutral' },
+      ],
+    },
+    {
+      id: 'target',
+      label: 'Audience',
+      kind: 'multiselect',
+      options: [
+        { value: 'all',       label: 'All clients',      tone: 'brand' },
+        { value: 'plan_type', label: 'By plan',          tone: 'teal' },
+        { value: 'org',       label: 'Specific clients', tone: 'purple' },
+      ],
+    },
+  ]), [])
+
+  const selectedStatuses = useMemo(() => {
+    return new Set(activeFilters.find(a => a.id === 'status')?.values ?? [])
+  }, [activeFilters])
+  const selectedTypes = useMemo(() => {
+    return new Set(activeFilters.find(a => a.id === 'type')?.values ?? [])
+  }, [activeFilters])
+  const selectedTargets = useMemo(() => {
+    return new Set(activeFilters.find(a => a.id === 'target')?.values ?? [])
+  }, [activeFilters])
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return announcements.filter(a => {
+      if (selectedStatuses.size > 0 && !selectedStatuses.has(getStatus(a))) return false
+      if (selectedTypes.size > 0 && !selectedTypes.has(a.type)) return false
+      if (selectedTargets.size > 0 && !selectedTargets.has(a.targetType)) return false
+      if (q) {
+        const inTitle = a.title.toLowerCase().includes(q)
+        const inBody = a.body.toLowerCase().includes(q)
+        if (!inTitle && !inBody) return false
+      }
+      return true
+    })
+  }, [announcements, search, selectedStatuses, selectedTypes, selectedTargets])
+
+  // Column defs for the DataTable. Sort by created date by default.
+  const columns: DataTableColumn<Announcement>[] = [
+    {
+      key: 'title',
+      header: 'Title',
+      sortable: true,
+      sortValue: r => r.title.toLowerCase(),
+      minWidth: '18rem',
+      render: r => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+          <Megaphone size={14} aria-hidden="true" style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
+          <span style={{
+            fontWeight: 600,
+            color: 'var(--color-text)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>{r.title}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'type',
+      header: 'Type',
+      sortable: true,
+      sortValue: r => r.type,
+      width: '8rem',
+      render: r => (
+        <Badge tone={TYPE_TONE[r.type] ?? 'neutral'} variant="soft" size="sm">
+          {TYPE_LABEL[r.type] ?? r.type}
+        </Badge>
+      ),
+    },
+    {
+      key: 'target',
+      header: 'Audience',
+      sortable: true,
+      sortValue: r => r.targetType,
+      width: '11rem',
+      render: r => (
+        <span style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.3125rem',
+          fontSize: '0.75rem',
+          color: 'var(--color-text-muted)',
+        }}>
+          <Target size={11} aria-hidden="true" />
+          {TARGET_LABELS[r.targetType] ?? r.targetType}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      sortValue: r => getStatus(r),
+      width: '7rem',
+      render: r => {
+        const s = getStatus(r)
+        return (
+          <Badge tone={STATUS_TONE[s]} variant="soft" size="sm" dot>
+            {STATUS_LABEL[s]}
+          </Badge>
+        )
+      },
+    },
+    {
+      key: 'createdAt',
+      header: 'Created',
+      sortable: true,
+      sortValue: r => r.createdAt,
+      width: '9rem',
+      render: r => (
+        <span style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.3125rem',
+          fontSize: '0.75rem',
+          color: 'var(--color-text-muted)',
+        }}>
+          <Calendar size={11} aria-hidden="true" />
+          {formatDate(r.createdAt)}
+        </span>
+      ),
+    },
+  ]
+
+  return (
+    <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: '14rem' }}>
+          <h1 style={{
+            margin: 0,
+            fontSize: '1.5rem',
+            fontWeight: 700,
+            color: 'var(--color-text)',
+            letterSpacing: '-0.015em',
+          }}>Announcements</h1>
+          <p style={{
+            margin: '0.25rem 0 0',
+            fontSize: '0.875rem',
+            color: 'var(--color-text-muted)',
+            lineHeight: 1.5,
+          }}>
+            Create and manage announcements for the client portal.
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <TahiButton
+            variant="secondary"
+            size="sm"
+            onClick={fetchAnnouncements}
+            iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
+          >
+            Refresh
+          </TahiButton>
+          <TahiButton
+            size="sm"
+            onClick={() => setShowCreate(true)}
+            iconLeft={<Plus className="w-3.5 h-3.5" />}
+          >
+            New announcement
+          </TahiButton>
+        </div>
+      </div>
+
+      {/* Filter row */}
+      <FilterBar
+        filters={filterDefs}
+        active={activeFilters}
+        onChange={setActiveFilters}
+        search={{
+          value: search,
+          onChange: setSearch,
+          placeholder: 'Search title or content',
+        }}
+        size="sm"
+      />
+
+      {/* Table */}
+      <Card padding="none">
+        <DataTable<Announcement>
+          ariaLabel="Announcements"
+          columns={columns}
+          rows={filtered}
+          getRowId={r => r.id}
+          defaultSort={{ key: 'createdAt', dir: 'desc' }}
+          loading={loading}
+          empty={
+            <EmptyState
+              icon={<Megaphone className="w-6 h-6" />}
+              title={announcements.length === 0 ? 'No announcements yet' : 'No matches'}
+              description={announcements.length === 0
+                ? 'Create your first announcement to notify clients.'
+                : 'Try clearing a filter or adjusting your search.'}
+              action={
+                announcements.length === 0 ? (
+                  <TahiButton size="sm" onClick={() => setShowCreate(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+                    New announcement
+                  </TahiButton>
+                ) : undefined
+              }
+            />
+          }
+          onRowPreview={(r) => setSelectedId(r.id)}
+        />
+      </Card>
+
+      {/* View slide-over */}
+      <SlideOver
+        open={!!selected}
+        onClose={() => setSelectedId(null)}
+        icon={<Megaphone size={15} />}
+        title={selected?.title ?? ''}
+        subtitle={selected ? `Created ${formatDate(selected.createdAt)}` : undefined}
+        maxWidth="48rem"
+      >
+        {selected && (
+          <>
+            <SlideOver.Body>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem', marginBottom: '0.875rem' }}>
+                <Badge tone={TYPE_TONE[selected.type] ?? 'neutral'} variant="soft" size="sm">
+                  {TYPE_LABEL[selected.type] ?? selected.type}
+                </Badge>
+                <Badge tone={STATUS_TONE[getStatus(selected)]} variant="soft" size="sm" dot>
+                  {STATUS_LABEL[getStatus(selected)]}
+                </Badge>
+                <Badge tone="neutral" variant="soft" size="sm">
+                  {TARGET_LABELS[selected.targetType] ?? selected.targetType}
+                </Badge>
+                {selected.targetValue && (
+                  <Badge tone="teal" variant="soft" size="sm">
+                    {selected.targetValue}
+                  </Badge>
+                )}
+              </div>
+              <div style={{
+                background: 'var(--color-bg-secondary)',
+                border: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                padding: '0.875rem 1rem',
+                fontSize: '0.875rem',
+                color: 'var(--color-text)',
+                whiteSpace: 'pre-wrap',
+                lineHeight: 1.55,
+              }}>
+                {selected.body}
+              </div>
+              <div style={{
+                marginTop: '0.875rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.375rem',
+                fontSize: '0.75rem',
+                color: 'var(--color-text-muted)',
+              }}>
+                {selected.publishedAt && (
+                  <span>Published: {formatDate(selected.publishedAt)}</span>
+                )}
+                {selected.expiresAt && (
+                  <span>Expires: {formatDate(selected.expiresAt)}</span>
+                )}
+              </div>
+            </SlideOver.Body>
+            <SlideOver.Footer>
+              <TahiButton variant="secondary" size="sm" onClick={() => setSelectedId(null)}>
+                Close
+              </TahiButton>
+            </SlideOver.Footer>
+          </>
+        )}
+      </SlideOver>
+
+      {/* Create slide-over */}
+      <CreateAnnouncementSlideOver
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreated={fetchAnnouncements}
+      />
+
+    </div>
+  )
+}
+
+// -- Create slide-over --
+
+function CreateAnnouncementSlideOver({
+  open,
   onClose,
   onCreated,
 }: {
+  open: boolean
   onClose: () => void
   onCreated: () => void
 }) {
@@ -72,8 +446,20 @@ function CreateAnnouncementModal({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  // Reset form whenever the slide-over re-opens.
+  useEffect(() => {
+    if (!open) return
+    setTitle('')
+    setContent('')
+    setType('info')
+    setTargetType('all')
+    setTargetValue('')
+    setExpiresAt('')
+    setPublish(false)
+    setError('')
+  }, [open])
+
+  async function handleSubmit() {
     if (!title.trim() || !content.trim()) {
       setError('Title and content are required')
       return
@@ -111,304 +497,163 @@ function CreateAnnouncementModal({
     }
   }
 
+  const labelStyle: React.CSSProperties = {
+    display: 'block',
+    fontSize: '0.625rem',
+    fontWeight: 600,
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase',
+    color: 'var(--color-text-subtle)',
+    marginBottom: '0.3125rem',
+  }
+
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
-      <div
-        className="bg-[var(--color-bg)] rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-y-auto"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="create-announcement-title"
-      >
-        <div className="flex items-center justify-between px-6 pt-6 pb-2">
-          <h2 id="create-announcement-title" className="text-lg font-bold text-[var(--color-text)]">
-            Create Announcement
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-md hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)]"
-            aria-label="Close"
+    <SlideOver
+      open={open}
+      onClose={onClose}
+      icon={<Plus size={15} />}
+      title="New announcement"
+      subtitle="Notify the client portal."
+      maxWidth="48rem"
+    >
+      <SlideOver.Body>
+        {error && (
+          <div
+            role="alert"
+            aria-live="polite"
+            style={{
+              marginBottom: '0.75rem',
+              padding: '0.5rem 0.75rem',
+              borderRadius: 'var(--radius-md)',
+              background: 'var(--color-danger-bg)',
+              color: 'var(--color-danger)',
+              fontSize: '0.8125rem',
+            }}
           >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+            {error}
+          </div>
+        )}
 
-        <form onSubmit={handleSubmit} className="px-6 pb-6 space-y-4">
-          {error && (
-            <div className="text-sm px-3 py-2 rounded-lg" role="alert" aria-live="polite" style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}>
-              {error}
-            </div>
-          )}
-
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           <div>
-            <label htmlFor="ann-title" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-              Title
-            </label>
-            <input
+            <label htmlFor="ann-title" style={labelStyle}>Title</label>
+            <Input
               id="ann-title"
-              type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
               placeholder="Announcement title"
+              inputSize="md"
+              style={{ width: '100%' }}
             />
           </div>
 
           <div>
-            <label htmlFor="ann-content" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-              Content
-            </label>
-            <textarea
+            <label htmlFor="ann-content" style={labelStyle}>Content</label>
+            <Textarea
               id="ann-content"
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              rows={4}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] resize-none"
+              rows={5}
               placeholder="Write the announcement content..."
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
             <div>
-              <label htmlFor="ann-type" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-                Type
-              </label>
-              <select
+              <label htmlFor="ann-type" style={labelStyle}>Type</label>
+              <Select
                 id="ann-type"
                 value={type}
                 onChange={(e) => setType(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
-              >
-                <option value="info">Info</option>
-                <option value="warning">Warning</option>
-                <option value="success">Success</option>
-                <option value="maintenance">Maintenance</option>
-              </select>
+                style={{ width: '100%' }}
+                options={[
+                  { value: 'info',        label: 'Info' },
+                  { value: 'warning',     label: 'Warning' },
+                  { value: 'success',     label: 'Success' },
+                  { value: 'maintenance', label: 'Maintenance' },
+                ]}
+              />
             </div>
-
             <div>
-              <label htmlFor="ann-target" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-                Target
-              </label>
-              <select
+              <label htmlFor="ann-target" style={labelStyle}>Audience</label>
+              <Select
                 id="ann-target"
                 value={targetType}
                 onChange={(e) => setTargetType(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
-              >
-                <option value="all">All Clients</option>
-                <option value="plan_type">By Plan Type</option>
-                <option value="org">Specific Clients</option>
-              </select>
+                style={{ width: '100%' }}
+                options={[
+                  { value: 'all',       label: 'All clients' },
+                  { value: 'plan_type', label: 'By plan type' },
+                  { value: 'org',       label: 'Specific clients' },
+                ]}
+              />
             </div>
           </div>
 
           {targetType === 'plan_type' && (
             <div>
-              <label htmlFor="ann-plan" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-                Plan Type
-              </label>
-              <select
+              <label htmlFor="ann-plan" style={labelStyle}>Plan</label>
+              <Select
                 id="ann-plan"
                 value={targetValue}
                 onChange={(e) => setTargetValue(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
-              >
-                <option value="">Select plan</option>
-                <option value="maintain">Maintain</option>
-                <option value="scale">Scale</option>
-                <option value="tune">Tune</option>
-                <option value="launch">Launch</option>
-              </select>
+                style={{ width: '100%' }}
+                options={[
+                  { value: '',         label: 'Select plan' },
+                  { value: 'maintain', label: 'Maintain' },
+                  { value: 'scale',    label: 'Scale' },
+                  { value: 'tune',     label: 'Tune' },
+                  { value: 'launch',   label: 'Launch' },
+                ]}
+              />
             </div>
           )}
 
           <div>
-            <label htmlFor="ann-expires" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-              Expiry Date (optional)
-            </label>
-            <input
+            <label htmlFor="ann-expires" style={labelStyle}>Expiry date (optional)</label>
+            <Input
               id="ann-expires"
               type="date"
               value={expiresAt}
               onChange={(e) => setExpiresAt(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              inputSize="md"
+              style={{ width: '100%' }}
             />
           </div>
 
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            cursor: 'pointer',
+            fontSize: '0.8125rem',
+            color: 'var(--color-text)',
+          }}>
             <input
               type="checkbox"
               checked={publish}
               onChange={(e) => setPublish(e.target.checked)}
-              className="rounded border-[var(--color-border)] text-[var(--color-brand)] focus:ring-[var(--color-brand)]"
+              style={{ accentColor: 'var(--color-brand)' }}
             />
-            <span className="text-sm text-[var(--color-text)]">Publish immediately</span>
+            Publish immediately
           </label>
-
-          <div className="flex justify-end gap-2 pt-2">
-            <TahiButton variant="secondary" type="button" onClick={onClose}>
-              Cancel
-            </TahiButton>
-            <TahiButton type="submit" loading={saving}>
-              Create
-            </TahiButton>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-// -- Main Component --
-
-export function AnnouncementsContent() {
-  const [announcements, setAnnouncements] = useState<Announcement[]>([])
-  const [loading, setLoading] = useState(true)
-  const [showCreate, setShowCreate] = useState(false)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-
-  const fetchAnnouncements = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/announcements'))
-      if (!res.ok) throw new Error('Failed to fetch')
-      const data = await res.json() as { announcements: Announcement[] }
-      setAnnouncements(data.announcements ?? [])
-    } catch {
-      setAnnouncements([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchAnnouncements()
-  }, [fetchAnnouncements])
-
-  function getStatus(a: Announcement): { label: string; color: string; bg: string } {
-    const now = new Date().toISOString()
-    if (!a.publishedAt) {
-      return { label: 'Draft', color: 'var(--status-draft-text)', bg: 'var(--status-draft-bg)' }
-    }
-    if (a.expiresAt && a.expiresAt < now) {
-      return { label: 'Expired', color: 'var(--status-archived-text)', bg: 'var(--status-archived-bg)' }
-    }
-    return { label: 'Active', color: 'var(--color-success)', bg: 'var(--color-success-bg)' }
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">Announcements</h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">
-            Create and manage announcements for the client portal.
-          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <TahiButton variant="secondary" size="sm" onClick={fetchAnnouncements} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
-            Refresh
-          </TahiButton>
-          <TahiButton size="sm" onClick={() => setShowCreate(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
-            Create Announcement
-          </TahiButton>
-        </div>
-      </div>
+      </SlideOver.Body>
 
-      {/* Content */}
-      {loading ? (
-        <LoadingSkeleton rows={5} />
-      ) : announcements.length === 0 ? (
-        <EmptyState
-          icon={<Megaphone className="w-8 h-8 text-white" />}
-          title="No announcements yet"
-          description="Create your first announcement to notify clients."
-          ctaLabel="Create Announcement"
-          onCtaClick={() => setShowCreate(true)}
-        />
-      ) : (
-        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-hidden">
-          {announcements.map((a, i) => {
-            const status = getStatus(a)
-            const typeColors = TYPE_COLORS[a.type] ?? TYPE_COLORS.info
-            const isExpanded = expandedId === a.id
-
-            return (
-              <div
-                key={a.id}
-                className={i < announcements.length - 1 ? 'border-b border-[var(--color-border-subtle)]' : ''}
-              >
-                {/* Row */}
-                <button
-                  onClick={() => setExpandedId(isExpanded ? null : a.id)}
-                  className="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-[var(--color-bg-secondary)] transition-colors"
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-[var(--color-text)] truncate">
-                      {a.title}
-                    </p>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-[var(--color-text-muted)]">
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3" aria-hidden="true" />
-                        {formatDate(a.createdAt)}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Target className="w-3 h-3" aria-hidden="true" />
-                        {TARGET_LABELS[a.targetType] ?? a.targetType}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Type badge */}
-                  <span
-                    className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0"
-                    style={{ background: typeColors.bg, color: typeColors.text }}
-                  >
-                    {a.type}
-                  </span>
-
-                  {/* Status badge */}
-                  <span
-                    className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0"
-                    style={{ background: status.bg, color: status.color }}
-                  >
-                    {status.label}
-                  </span>
-
-                  {isExpanded ? (
-                    <ChevronUp className="w-4 h-4 text-[var(--color-text-muted)] flex-shrink-0" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4 text-[var(--color-text-muted)] flex-shrink-0" />
-                  )}
-                </button>
-
-                {/* Expanded content */}
-                {isExpanded && (
-                  <div className="px-5 pb-4">
-                    <div className="bg-[var(--color-bg-secondary)] rounded-lg p-4 text-sm text-[var(--color-text)] whitespace-pre-wrap">
-                      {a.body}
-                    </div>
-                    {a.expiresAt && (
-                      <p className="text-xs text-[var(--color-text-muted)] mt-2">
-                        Expires: {formatDate(a.expiresAt)}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Create modal */}
-      {showCreate && (
-        <CreateAnnouncementModal
-          onClose={() => setShowCreate(false)}
-          onCreated={fetchAnnouncements}
-        />
-      )}
-    </div>
+      <SlideOver.Footer>
+        <TahiButton variant="secondary" size="sm" onClick={onClose}>
+          Cancel
+        </TahiButton>
+        <div style={{ flex: 1 }} />
+        <TahiButton
+          size="sm"
+          onClick={handleSubmit}
+          disabled={saving || !title.trim() || !content.trim()}
+          iconLeft={saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : undefined}
+        >
+          {saving ? 'Creating...' : 'Create'}
+        </TahiButton>
+      </SlideOver.Footer>
+    </SlideOver>
   )
 }
