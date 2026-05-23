@@ -395,6 +395,8 @@ function Column({
               type="button"
               onClick={() => setMenuOpen(o => !o)}
               aria-label={`${column.label} actions`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -596,7 +598,11 @@ function BoardCard({
 
   return (
     <div
+      className="tahi-focus-ring"
       draggable={!readOnly && !!onDragStart}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-label={onClick ? `Open ${item.title}` : undefined}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={onCardDragOver}
@@ -606,9 +612,17 @@ function BoardCard({
         // Only fire if the click was on the card body itself, not on
         // an interactive child (checkbox, button).
         const t = e.target as HTMLElement
-        if (t.closest('button, input, a, [role="button"]')) return
+        if (t.closest('button, input, a, [role="button"]:not([data-card-root])')) return
         onClick?.(item)
       }}
+      onKeyDown={(e) => {
+        if (!onClick) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick(item)
+        }
+      }}
+      data-card-root
       style={{
         position: 'relative',
         background: 'var(--color-bg)',
@@ -723,6 +737,8 @@ function BoardCard({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); setSubtasksOpen(o => !o) }}
+              aria-expanded={subtasksOpen}
+              aria-controls={`subtasks-${item.id}`}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -737,7 +753,6 @@ function BoardCard({
                 cursor: 'pointer',
                 letterSpacing: '0.02em',
               }}
-              aria-expanded={subtasksOpen}
             >
               {subtasksOpen
                 ? <ChevronDown size={11} aria-hidden="true" />
@@ -745,7 +760,7 @@ function BoardCard({
               {doneCount}/{subtasks.length} subtasks
             </button>
             {subtasksOpen && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1875rem', paddingLeft: '0.0625rem' }}>
+              <div id={`subtasks-${item.id}`} style={{ display: 'flex', flexDirection: 'column', gap: '0.1875rem', paddingLeft: '0.0625rem' }}>
                 {subtasks.map(st => (
                   <SubtaskRow
                     key={st.id}

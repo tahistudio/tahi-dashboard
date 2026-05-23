@@ -918,6 +918,17 @@ textarea,
   30%           { transform: translateY(-2px); opacity: 1; }
 }
 
+/* Shared focus ring for clickable divs that act as buttons. Buttons
+   get the browser default; this utility brings the same affordance to
+   role="button" divs (board cards, table rows, timeline rows). */
+.tahi-focus-ring:focus {
+  outline: none;
+}
+.tahi-focus-ring:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
 /* Hide scrollbar utility */
 .scrollbar-hide {
   -ms-overflow-style: none;

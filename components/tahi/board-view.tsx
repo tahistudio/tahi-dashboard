@@ -145,7 +145,9 @@ export function BoardView({
         )}
         {!title && !intro && <div style={{ flex: 1 }} />}
 
-        {/* View tabs */}
+        {/* View tabs. Full WAI-ARIA tab pattern: roving tabindex,
+            arrow-key cycling, id/aria-controls matchup so the panel
+            below is wired back to the active tab. */}
         <div
           role="tablist"
           aria-label="View"
@@ -158,17 +160,35 @@ export function BoardView({
             gap: '0.0625rem',
           }}
         >
-          {views.map(key => {
+          {views.map((key, i) => {
             const meta = VIEW_META[key]
             const active = activeView === key
             const Icon = meta.Icon
+            const onTabKeyDown = (e: React.KeyboardEvent) => {
+              if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                e.preventDefault()
+                const dir = e.key === 'ArrowRight' ? 1 : -1
+                const next = views[(i + dir + views.length) % views.length]
+                setView(next)
+              } else if (e.key === 'Home') {
+                e.preventDefault()
+                setView(views[0])
+              } else if (e.key === 'End') {
+                e.preventDefault()
+                setView(views[views.length - 1])
+              }
+            }
             return (
               <button
                 key={key}
                 type="button"
                 role="tab"
+                id={`view-tab-${key}`}
                 aria-selected={active}
+                aria-controls={`view-panel-${key}`}
+                tabIndex={active ? 0 : -1}
                 onClick={() => setView(key)}
+                onKeyDown={onTabKeyDown}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -269,34 +289,42 @@ export function BoardView({
         )}
       </div>
 
-      {/* Active view */}
-      {activeView === 'kanban' && (
-        <KanbanBoard
-          columns={columns}
-          items={filteredItems}
-          onMove={onMove}
-          onNest={onNest}
-          onAdd={onAdd}
-          onToggleSubtask={onToggleSubtask}
-          onItemClick={onItemClick}
-          columnActions={columnActions}
-          readOnly={readOnly}
-        />
-      )}
-      {activeView === 'table' && (
-        <BoardTable
-          columns={columns}
-          items={filteredItems}
-          onItemClick={onItemClick}
-        />
-      )}
-      {activeView === 'timeline' && (
-        <BoardTimeline
-          columns={columns}
-          items={filteredItems}
-          onItemClick={onItemClick}
-        />
-      )}
+      {/* Active view. Wrapped in role="tabpanel" so the active panel
+          is announced as the disclosed region for the selected tab. */}
+      <div
+        role="tabpanel"
+        id={`view-panel-${activeView}`}
+        aria-labelledby={`view-tab-${activeView}`}
+        tabIndex={0}
+      >
+        {activeView === 'kanban' && (
+          <KanbanBoard
+            columns={columns}
+            items={filteredItems}
+            onMove={onMove}
+            onNest={onNest}
+            onAdd={onAdd}
+            onToggleSubtask={onToggleSubtask}
+            onItemClick={onItemClick}
+            columnActions={columnActions}
+            readOnly={readOnly}
+          />
+        )}
+        {activeView === 'table' && (
+          <BoardTable
+            columns={columns}
+            items={filteredItems}
+            onItemClick={onItemClick}
+          />
+        )}
+        {activeView === 'timeline' && (
+          <BoardTimeline
+            columns={columns}
+            items={filteredItems}
+            onItemClick={onItemClick}
+          />
+        )}
+      </div>
     </div>
   )
 }
@@ -387,7 +415,18 @@ function BoardTable({
         return (
           <div
             key={it.id}
+            className="tahi-focus-ring"
+            role={onItemClick ? 'button' : undefined}
+            tabIndex={onItemClick ? 0 : undefined}
+            aria-label={onItemClick ? `Open ${it.title}` : undefined}
             onClick={() => onItemClick?.(it)}
+            onKeyDown={(e) => {
+              if (!onItemClick) return
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onItemClick(it)
+              }
+            }}
             style={{
               display: 'grid',
               gridTemplateColumns: 'minmax(14rem, 2fr) 7rem 9rem 6rem 7rem',
@@ -714,11 +753,14 @@ function BoardTimeline({
   )
 }
 
+// Bars carry inline 10px labels, so foreground/background must clear
+// AA 4.5:1. Active + overdue fills are the darkened variants so the
+// white text passes (brand → brand-dark, #ef4444 → #b91c1c).
 const STATE_COLOR: Record<TimelineDatum['state'], { bar: string; ring: string; text: string }> = {
-  upcoming: { bar: 'var(--color-text-subtle)',  ring: 'var(--color-border)',  text: 'var(--color-text)' },
-  active:   { bar: 'var(--color-brand)',        ring: 'var(--color-brand-dark)', text: '#ffffff' },
-  overdue:  { bar: '#ef4444',                   ring: '#b91c1c',              text: '#ffffff' },
-  done:     { bar: '#4ade80',                   ring: '#16a34a',              text: '#052e16' },
+  upcoming: { bar: '#5a6657',              ring: 'var(--color-border)',  text: '#ffffff' },
+  active:   { bar: 'var(--color-brand-dark)', ring: '#2e4427',           text: '#ffffff' },
+  overdue:  { bar: '#b91c1c',              ring: '#7f1d1d',              text: '#ffffff' },
+  done:     { bar: '#4ade80',              ring: '#16a34a',              text: '#052e16' },
 }
 
 function TimelineRow({
@@ -746,7 +788,18 @@ function TimelineRow({
 
   return (
     <div
+      className="tahi-focus-ring"
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-label={onClick ? `Open ${datum.item.title}` : undefined}
       onClick={() => onClick?.(datum.item)}
+      onKeyDown={(e) => {
+        if (!onClick) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick(datum.item)
+        }
+      }}
       style={{
         display: 'grid',
         gridTemplateColumns: `${labelWidth} 1fr`,
