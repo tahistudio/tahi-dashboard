@@ -37,7 +37,10 @@
  */
 
 import * as React from 'react'
-import { ChevronDown, ChevronUp, Loader2, MoreHorizontal, Check } from 'lucide-react'
+import {
+  ChevronDown, ChevronUp, Loader2, MoreHorizontal, Check,
+  ArrowUpRight, PanelRightOpen,
+} from 'lucide-react'
 import { Popover } from '@/components/tahi/popover'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 
@@ -265,7 +268,8 @@ export function DataTable<Row>({
     setSelection(next)
   }
 
-  const colCount = columns.length + (selectable ? 1 : 0) + (rowActions ? 1 : 0)
+  const anyClickable = !!onRowClick || !!onRowPreview || !!renderExpand
+  const colCount = columns.length + (selectable ? 1 : 0) + (rowActions ? 1 : 0) + (anyClickable ? 1 : 0)
 
   return (
     <div
@@ -362,6 +366,15 @@ export function DataTable<Row>({
                   style={{
                     ...thStyle(stickyOffset),
                     width: '3rem',
+                  }}
+                />
+              )}
+              {anyClickable && (
+                <th
+                  aria-hidden="true"
+                  style={{
+                    ...thStyle(stickyOffset),
+                    width: '1.75rem',
                   }}
                 />
               )}
@@ -533,6 +546,7 @@ function DataRow<Row>({
   return (
     <>
       <tr
+        className={clickable ? 'tahi-row-clickable' : undefined}
         onClick={clickable ? handleRowClick : undefined}
         onContextMenu={rowActions ? handleContextMenu : undefined}
         style={{
@@ -653,11 +667,28 @@ function DataRow<Row>({
             </Popover>
           </td>
         )}
+        {clickable && (
+          <td
+            aria-hidden="true"
+            style={{
+              padding: `${paddingY} 0.5rem ${paddingY} 0`,
+              borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
+              verticalAlign: 'middle',
+              width: '1.75rem',
+              textAlign: 'right',
+            }}
+          >
+            <ClickModeIndicator
+              mode={isExpandable ? 'expand' : (onRowPreview ? 'preview' : 'navigate')}
+              isExpanded={isExpanded}
+            />
+          </td>
+        )}
       </tr>
       {isExpanded && expandContent && (
         <tr>
           <td
-            colSpan={columns.length + extraColumnCount}
+            colSpan={columns.length + extraColumnCount + (clickable ? 1 : 0)}
             style={{
               padding: 0,
               borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
@@ -671,6 +702,42 @@ function DataRow<Row>({
         </tr>
       )}
     </>
+  )
+}
+
+// ── Click-mode indicator ────────────────────────────────────────────────────
+//
+// Tiny trailing icon on each clickable row. Hints at what the click
+// will do. Brightens with the row's hover state via the .tahi-row-clickable
+// parent class (see globals.css).
+
+function ClickModeIndicator({
+  mode,
+  isExpanded,
+}: {
+  mode: 'navigate' | 'preview' | 'expand'
+  isExpanded: boolean
+}) {
+  const Icon = mode === 'preview'
+    ? PanelRightOpen
+    : mode === 'expand'
+      ? ChevronDown
+      : ArrowUpRight
+  return (
+    <span
+      className="tahi-row-click-hint"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'var(--color-text-subtle)',
+        opacity: 0.5,
+        transition: 'opacity 150ms ease, transform 220ms ease',
+        transform: mode === 'expand' && isExpanded ? 'rotate(180deg)' : undefined,
+      }}
+    >
+      <Icon size={14} aria-hidden="true" />
+    </span>
   )
 }
 
@@ -745,20 +812,27 @@ function LinkCell<Row>({
       link.onClick(row)
     }
   }
+  // At rest: brand-coloured text with a faint dotted underline so the
+  // link is recognisably clickable without shouting. Hover: solid
+  // underline + slight colour shift.
   const linkStyle: React.CSSProperties = {
-    color: 'var(--color-text)',
-    textDecoration: 'none',
-    borderBottom: '1px solid transparent',
-    transition: 'color 150ms ease, border-color 150ms ease',
+    color: 'var(--color-text-active)',
+    textDecoration: 'underline',
+    textDecorationStyle: 'dotted',
+    textDecorationColor: 'var(--color-brand-100)',
+    textUnderlineOffset: '0.1875rem',
+    transition: 'color 150ms ease, text-decoration-color 150ms ease, text-decoration-style 150ms ease',
     cursor: 'pointer',
   }
   const onEnter = (e: React.MouseEvent<HTMLElement>) => {
     e.currentTarget.style.color = 'var(--color-brand-dark)'
-    e.currentTarget.style.borderBottomColor = 'var(--color-brand)'
+    e.currentTarget.style.textDecorationStyle = 'solid'
+    e.currentTarget.style.textDecorationColor = 'var(--color-brand)'
   }
   const onLeave = (e: React.MouseEvent<HTMLElement>) => {
-    e.currentTarget.style.color = 'var(--color-text)'
-    e.currentTarget.style.borderBottomColor = 'transparent'
+    e.currentTarget.style.color = 'var(--color-text-active)'
+    e.currentTarget.style.textDecorationStyle = 'dotted'
+    e.currentTarget.style.textDecorationColor = 'var(--color-brand-100)'
   }
   if (href) {
     return (
@@ -808,14 +882,18 @@ function ChipCell<Row>({
         onClick={(e) => { e.stopPropagation(); setOpen(o => !o) }}
         aria-haspopup="listbox"
         aria-expanded={open}
+        className="inline-flex items-center group/chip"
         style={{
           background: 'transparent',
           border: 'none',
-          padding: 0,
+          padding: '0.125rem 0.25rem',
+          gap: '0.25rem',
           cursor: 'pointer',
-          display: 'inline-flex',
-          alignItems: 'center',
+          borderRadius: 'var(--radius-sm)',
+          transition: 'background-color 120ms ease',
         }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
       >
         {selected ? (
           <Badge
@@ -831,6 +909,11 @@ function ChipCell<Row>({
             Set value
           </Badge>
         )}
+        <ChevronDown
+          size={11}
+          aria-hidden="true"
+          style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }}
+        />
       </button>
       <Popover
         anchorRef={ref}

@@ -776,8 +776,8 @@ export function GanttChart({
   rangeStart,
   rangeEnd,
   today,
-  labelColumnWidth = '11rem',
-  rowHeight = 30,
+  labelColumnWidth = '14rem',
+  rowHeight = 36,
   showMonths = true,
   showLegend = false,
   ariaLabel,
@@ -805,6 +805,22 @@ export function GanttChart({
     }
   }
 
+  // Fine vertical week ticks so the eye can count days inside a
+  // month band. Skip if the range is so long that ticks would crowd.
+  const weekTicks: number[] = []
+  if (showMonths) {
+    // Find the first Monday on or after rangeStart.
+    const tickCursor = new Date(rangeStart)
+    const offsetToMonday = (8 - tickCursor.getDay()) % 7
+    tickCursor.setDate(tickCursor.getDate() + offsetToMonday)
+    while (tickCursor <= rangeEnd) {
+      weekTicks.push(pct(tickCursor))
+      tickCursor.setDate(tickCursor.getDate() + 7)
+    }
+    // Bail if the chart would have more than 1 tick per ~12px.
+    if (weekTicks.length > 60) weekTicks.length = 0
+  }
+
   const todayPct = today && today >= rangeStart && today <= rangeEnd ? pct(today) : null
 
   const gridTemplate = `${typeof labelColumnWidth === 'number' ? `${labelColumnWidth}px` : labelColumnWidth} 1fr`
@@ -824,29 +840,30 @@ export function GanttChart({
         aria-label={ariaLabel ?? 'Gantt timeline'}
         style={{ width: '100%', display: 'flex', flexDirection: 'column' }}
       >
-        {/* Header scale */}
+        {/* Header scale: month labels + faint week ticks below them. */}
         {showMonths && (
           <div
             style={{
               display: 'grid',
               gridTemplateColumns: gridTemplate,
               alignItems: 'end',
-              paddingBottom: '0.375rem',
+              paddingBottom: '0.5rem',
               borderBottom: '1px solid var(--color-border-subtle)',
-              marginBottom: '0.375rem',
+              marginBottom: '0.5rem',
             }}
           >
             <div />
-            <div style={{ position: 'relative', height: '1.25rem' }}>
+            <div style={{ position: 'relative', height: '1.75rem' }}>
               {months.map((m, i) => (
                 <span
-                  key={i}
+                  key={`m-${i}`}
                   style={{
                     position: 'absolute',
+                    top: 0,
                     left: `${m.left}%`,
                     transform: 'translateX(-50%)',
                     color: 'var(--color-text-subtle)',
-                    fontSize: '0.625rem',
+                    fontSize: '0.6875rem',
                     fontWeight: 600,
                     letterSpacing: '0.04em',
                     textTransform: 'uppercase',
@@ -856,22 +873,68 @@ export function GanttChart({
                   {m.label}
                 </span>
               ))}
+              {weekTicks.map((left, i) => (
+                <span
+                  key={`w-${i}`}
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: `${left}%`,
+                    width: 1,
+                    height: '0.5rem',
+                    background: 'var(--color-border-subtle)',
+                  }}
+                />
+              ))}
             </div>
           </div>
         )}
-        {/* Rows */}
-        {rows.map((row, i) => (
-          <GanttRowItem
-            key={row.id}
-            row={row}
-            index={i}
-            visible={visible}
-            pct={pct}
-            todayPct={todayPct}
-            rowHeight={rowHeight}
-            gridTemplate={gridTemplate}
-          />
-        ))}
+        {/* Rows. Wrap in a relative container so we can paint week
+            tick guides spanning all rows behind them. */}
+        <div style={{ position: 'relative' }}>
+          {/* Week tick guides. Painted in the timeline area (after the
+              label column) at low opacity so they hint at week
+              boundaries without competing with the bars. */}
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              top: 0,
+              bottom: 0,
+              left: typeof labelColumnWidth === 'number' ? `calc(${labelColumnWidth}px + 0.75rem)` : `calc(${labelColumnWidth} + 0.75rem)`,
+              right: 0,
+              pointerEvents: 'none',
+            }}
+          >
+            {weekTicks.map((left, i) => (
+              <span
+                key={`wg-${i}`}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  left: `${left}%`,
+                  width: 1,
+                  background: 'var(--color-border-subtle)',
+                  opacity: 0.35,
+                }}
+              />
+            ))}
+          </div>
+          {rows.map((row, i) => (
+            <GanttRowItem
+              key={row.id}
+              row={row}
+              index={i}
+              visible={visible}
+              pct={pct}
+              todayPct={todayPct}
+              rowHeight={rowHeight}
+              gridTemplate={gridTemplate}
+            />
+          ))}
+        </div>
       </div>
       {showLegend && <GanttLegendInline />}
     </div>
@@ -1299,5 +1362,449 @@ function LegendDivider() {
         opacity: 0.4,
       }}
     />
+  )
+}
+
+// ── FunnelChart ───────────────────────────────────────────────────────
+//
+// Vertical pipeline-style funnel. Each stage's width is proportional
+// to its value; visible label + value + percent-of-top per stage.
+// Animates on scroll into view.
+//
+//   <FunnelChart
+//     stages={[
+//       { label: 'Leads',        value: 320 },
+//       { label: 'Qualified',    value: 184 },
+//       { label: 'Proposal',     value:  96 },
+//       { label: 'Closed won',   value:  31 },
+//     ]}
+//   />
+
+export interface FunnelStage {
+  label: string
+  value: number
+  colour?: string
+}
+
+interface FunnelChartProps {
+  stages: readonly FunnelStage[]
+  /** Height of each stage row. Default 56. */
+  stageHeight?: number
+  /** Show percent-of-top per stage. Default true. */
+  showPercent?: boolean
+  formatValue?: (v: number) => string
+  ariaLabel?: string
+}
+
+export function FunnelChart({
+  stages,
+  stageHeight = 56,
+  showPercent = true,
+  formatValue,
+  ariaLabel,
+}: FunnelChartProps) {
+  const { ref, visible } = useEnteredViewport<HTMLDivElement>()
+  const top = stages.length > 0 ? stages[0].value : 0
+  return (
+    <div
+      ref={ref}
+      role="img"
+      aria-label={ariaLabel ?? 'Funnel chart'}
+      style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '0.375rem' }}
+    >
+      {stages.map((stage, i) => {
+        const fraction = top > 0 ? stage.value / top : 0
+        const targetPct = Math.max(8, fraction * 100)
+        const renderPct = visible ? targetPct : 0
+        const colour = stage.colour
+          ?? CHART.categorical[i % CHART.categorical.length]
+        const valueLabel = formatValue ? formatValue(stage.value) : stage.value.toLocaleString()
+        return (
+          <div
+            key={i}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', height: stageHeight }}
+          >
+            <div style={{ width: '8rem', flexShrink: 0 }}>
+              <div style={{
+                fontSize: 'var(--text-sm)',
+                fontWeight: 500,
+                color: 'var(--color-text)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {stage.label}
+              </div>
+              {showPercent && (
+                <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+                  {Math.round(fraction * 100)}% of top
+                </div>
+              )}
+            </div>
+            <div style={{ flex: 1, position: 'relative', height: stageHeight }}>
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  width: `${renderPct}%`,
+                  height: stageHeight,
+                  background: colour,
+                  borderRadius: 'var(--radius-md)',
+                  transition: 'width 700ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  transitionDelay: `${i * 80}ms`,
+                  boxShadow: '0 1px 2px rgba(15, 20, 16, 0.08)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  fontSize: 'var(--text-sm)',
+                  letterSpacing: '-0.01em',
+                  overflow: 'hidden',
+                  whiteSpace: 'nowrap',
+                }}
+                aria-label={`${stage.label}: ${valueLabel}`}
+              >
+                {valueLabel}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── MultiBarChart ─────────────────────────────────────────────────────
+//
+// Grouped or stacked multi-series bar chart. Each series gets a
+// colour from CHART.categorical (or an explicit override). Animates
+// on scroll into view.
+//
+//   <MultiBarChart
+//     data={[
+//       { label: 'Jan', Revenue: 42, Costs: 18 },
+//       { label: 'Feb', Revenue: 48, Costs: 22 },
+//     ]}
+//     series={[
+//       { key: 'Revenue', label: 'Revenue', tone: 'positive' },
+//       { key: 'Costs',   label: 'Costs',   tone: 'negative' },
+//     ]}
+//     stacked
+//   />
+
+export interface MultiBarSeries {
+  key: string
+  label: string
+  tone?: Tone
+  colour?: string
+}
+
+interface MultiBarChartProps {
+  data: ReadonlyArray<Record<string, string | number>>
+  /** dataKey on each row for the X-axis label. Default 'label'. */
+  categoryKey?: string
+  series: readonly MultiBarSeries[]
+  /** Stack the series instead of grouping side-by-side. Default false. */
+  stacked?: boolean
+  height?: number
+  /** Round top corners for the top-most stack / each bar. Default true. */
+  roundTop?: boolean
+  formatValue?: (v: number) => string
+  showYAxis?: boolean
+  showGrid?: boolean
+  showLegend?: boolean
+  ariaLabel?: string
+}
+
+export function MultiBarChart({
+  data,
+  categoryKey = 'label',
+  series,
+  stacked = false,
+  height = 240,
+  roundTop = true,
+  formatValue,
+  showYAxis = true,
+  showGrid = true,
+  showLegend = true,
+  ariaLabel,
+}: MultiBarChartProps) {
+  const { ref, visible } = useEnteredViewport<HTMLDivElement>()
+  // Compute colour per series.
+  const colourFor = (s: MultiBarSeries, i: number) =>
+    s.colour
+      ?? (s.tone ? TONE_COLOUR[s.tone] : CHART.categorical[i % CHART.categorical.length])
+
+  return (
+    <div
+      ref={ref}
+      role="img"
+      aria-label={ariaLabel}
+      style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}
+    >
+      <div style={{ width: '100%', height }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <RechartsBarChart
+            data={data as Array<Record<string, string | number>>}
+            margin={{ top: 8, right: 8, left: showYAxis ? 0 : 8, bottom: 0 }}
+          >
+            {showGrid && <CartesianGrid {...GRID_PROPS} />}
+            <XAxis dataKey={categoryKey} {...AXIS_PROPS} />
+            {showYAxis && <YAxis {...AXIS_PROPS} tickFormatter={formatValue} width={48} />}
+            <RechartsTooltip
+              cursor={{ fill: 'rgba(90, 130, 78, 0.06)' }}
+              contentStyle={{
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+                boxShadow: 'var(--shadow-md)',
+                fontSize: '0.75rem',
+                padding: '0.375rem 0.625rem',
+              }}
+              labelStyle={{ color: 'var(--color-text-muted)', fontWeight: 500, marginBottom: 2 }}
+              itemStyle={{ color: 'var(--color-text)' }}
+              formatter={formatValue ? (v: number) => formatValue(v) : undefined}
+            />
+            {series.map((s, i) => {
+              const isTop = i === series.length - 1
+              const radius: [number, number, number, number] = roundTop && (!stacked || isTop)
+                ? [4, 4, 0, 0]
+                : [0, 0, 0, 0]
+              return (
+                <Bar
+                  key={s.key}
+                  dataKey={s.key}
+                  name={s.label}
+                  fill={colourFor(s, i)}
+                  stackId={stacked ? 'stack' : undefined}
+                  radius={radius}
+                  maxBarSize={48}
+                  isAnimationActive={visible}
+                  animationDuration={650}
+                  animationEasing="ease-out"
+                />
+              )
+            })}
+          </RechartsBarChart>
+        </ResponsiveContainer>
+      </div>
+      {showLegend && (
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '0.5rem 1rem',
+            fontSize: 'var(--text-xs)',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          {series.map((s, i) => (
+            <span key={s.key} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: colourFor(s, i) }} />
+              {s.label}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Heatmap ───────────────────────────────────────────────────────────
+//
+// Grid of cells coloured by value intensity. GitHub-contributions
+// style; useful for per-day activity, hour-of-day patterns, etc.
+// Hover tooltip per cell (portal'd).
+//
+//   <Heatmap
+//     rows={[
+//       { label: 'Mon', cells: [{ key: '00', value: 0 }, ...] },
+//       { label: 'Tue', cells: [...] },
+//     ]}
+//     columns={['00', '01', ..., '23']}
+//   />
+
+export interface HeatmapCell {
+  /** Column key. */
+  key: string
+  /** 0+ value. Higher = stronger colour. */
+  value: number
+  /** Optional secondary text for the tooltip. */
+  meta?: string
+}
+
+export interface HeatmapRow {
+  label: string
+  cells: ReadonlyArray<HeatmapCell>
+}
+
+interface HeatmapProps {
+  rows: ReadonlyArray<HeatmapRow>
+  /** Column labels (one per cell index). */
+  columns: ReadonlyArray<string>
+  /** Tone for the colour ramp. Default 'positive' (brand green). */
+  tone?: Tone
+  /** Optional explicit max for the colour scale. Otherwise auto. */
+  max?: number
+  /** Cell size in px. Default 18. */
+  cellSize?: number
+  /** Show row labels on the left. Default true. */
+  showRowLabels?: boolean
+  /** Show column labels along the top. Default true. */
+  showColumnLabels?: boolean
+  /** Optional value formatter for the tooltip. */
+  formatValue?: (v: number) => string
+  ariaLabel?: string
+}
+
+export function Heatmap({
+  rows,
+  columns,
+  tone = 'positive',
+  max,
+  cellSize = 18,
+  showRowLabels = true,
+  showColumnLabels = true,
+  formatValue,
+  ariaLabel,
+}: HeatmapProps) {
+  const { ref, visible } = useEnteredViewport<HTMLDivElement>()
+  const effectiveMax = max ?? Math.max(
+    1,
+    ...rows.flatMap(r => r.cells.map(c => c.value)),
+  )
+  const base = TONE_COLOUR[tone]
+  // Hover tooltip state
+  const [hover, setHover] = React.useState<
+    null | { x: number; y: number; row: string; col: string; value: number; meta?: string }
+  >(null)
+
+  // Colour ramp: 0 → bg-tertiary, 1 → full tone. Linear interpolation.
+  const colourFor = (value: number) => {
+    if (value <= 0) return 'var(--color-bg-tertiary)'
+    const t = Math.min(1, value / effectiveMax)
+    // Render as rgba over a tinted base. Easiest: tone hex + alpha t.
+    const alpha = 0.12 + t * 0.78
+    return `${base}${Math.round(alpha * 255).toString(16).padStart(2, '0')}`
+  }
+
+  return (
+    <div
+      ref={ref}
+      role="img"
+      aria-label={ariaLabel ?? 'Heatmap'}
+      style={{ display: 'inline-flex', flexDirection: 'column', gap: '0.375rem' }}
+    >
+      {showColumnLabels && (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `${showRowLabels ? '3rem' : '0'} repeat(${columns.length}, ${cellSize}px)`,
+            gap: 2,
+            fontSize: '0.625rem',
+            color: 'var(--color-text-subtle)',
+          }}
+        >
+          <span />
+          {columns.map((c) => (
+            <span
+              key={c}
+              style={{
+                textAlign: 'center',
+                fontWeight: 500,
+              }}
+            >
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
+      {rows.map((row) => (
+        <div
+          key={row.label}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `${showRowLabels ? '3rem' : '0'} repeat(${columns.length}, ${cellSize}px)`,
+            gap: 2,
+            alignItems: 'center',
+          }}
+        >
+          {showRowLabels && (
+            <span style={{
+              fontSize: '0.625rem',
+              color: 'var(--color-text-muted)',
+              fontWeight: 500,
+              textAlign: 'right',
+              paddingRight: '0.375rem',
+            }}>
+              {row.label}
+            </span>
+          )}
+          {columns.map((col) => {
+            const cell = row.cells.find(c => c.key === col)
+            const value = visible ? (cell?.value ?? 0) : 0
+            return (
+              <div
+                key={col}
+                role="gridcell"
+                tabIndex={0}
+                aria-label={`${row.label} ${col}: ${cell?.value ?? 0}`}
+                onMouseEnter={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect()
+                  setHover({
+                    x: r.left + r.width / 2,
+                    y: r.top,
+                    row: row.label,
+                    col,
+                    value: cell?.value ?? 0,
+                    meta: cell?.meta,
+                  })
+                }}
+                onMouseLeave={() => setHover(null)}
+                style={{
+                  width: cellSize,
+                  height: cellSize,
+                  borderRadius: 3,
+                  background: colourFor(value),
+                  transition: 'background 320ms ease',
+                  cursor: cell ? 'default' : undefined,
+                }}
+              />
+            )
+          })}
+        </div>
+      ))}
+      {hover && typeof document !== 'undefined' && createPortal(
+        <div
+          role="tooltip"
+          style={{
+            position: 'fixed',
+            top: hover.y - 10,
+            left: hover.x,
+            transform: 'translate(-50%, -100%)',
+            background: '#1E2A1B',
+            color: '#F0F2EF',
+            padding: '0.4375rem 0.5625rem',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.75rem',
+            lineHeight: 1.4,
+            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.18)',
+            pointerEvents: 'none',
+            zIndex: 100,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <strong style={{ fontWeight: 600 }}>{hover.row} · {hover.col}</strong>
+          <div style={{ opacity: 0.85, marginTop: '0.125rem' }}>
+            {formatValue ? formatValue(hover.value) : hover.value}
+          </div>
+          {hover.meta && <div style={{ opacity: 0.7, marginTop: '0.125rem' }}>{hover.meta}</div>}
+        </div>,
+        document.body,
+      )}
+    </div>
   )
 }

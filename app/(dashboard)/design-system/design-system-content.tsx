@@ -23,7 +23,7 @@ import { FeatureCard } from '@/components/tahi/feature-card'
 import { KPICard } from '@/components/tahi/kpi-card'
 import { Menu } from '@/components/tahi/menu'
 import { useToast } from '@/components/tahi/toast'
-import { BarChart, LineChart, Sparkline, Gauge, DonutChart, GanttChart } from '@/components/tahi/chart'
+import { BarChart, LineChart, Sparkline, Gauge, DonutChart, GanttChart, FunnelChart, MultiBarChart, Heatmap } from '@/components/tahi/chart'
 import { DataTable } from '@/components/tahi/data-table'
 import { statusTone } from '@/components/tahi/badge'
 import { Trash2, ExternalLink, Copy } from 'lucide-react'
@@ -1792,6 +1792,79 @@ function ChartShowcase() {
         </div>
       </CardPrim>
 
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <CardPrim>
+          <GroupHeading>FunnelChart</GroupHeading>
+          <FunnelChart
+            stages={[
+              { label: 'Leads',       value: 320 },
+              { label: 'Qualified',   value: 184 },
+              { label: 'Proposal',    value:  96 },
+              { label: 'Negotiation', value:  52 },
+              { label: 'Closed won',  value:  31 },
+            ]}
+          />
+        </CardPrim>
+
+        <CardPrim>
+          <GroupHeading>MultiBarChart &middot; grouped</GroupHeading>
+          <MultiBarChart
+            height={220}
+            data={[
+              { label: 'Jan', Revenue: 42, Costs: 18 },
+              { label: 'Feb', Revenue: 48, Costs: 22 },
+              { label: 'Mar', Revenue: 46, Costs: 21 },
+              { label: 'Apr', Revenue: 55, Costs: 24 },
+              { label: 'May', Revenue: 62, Costs: 28 },
+              { label: 'Jun', Revenue: 71, Costs: 26 },
+            ]}
+            series={[
+              { key: 'Revenue', label: 'Revenue', tone: 'positive' },
+              { key: 'Costs',   label: 'Costs',   tone: 'negative' },
+            ]}
+            formatValue={v => `$${v}k`}
+          />
+        </CardPrim>
+
+        <CardPrim>
+          <GroupHeading>MultiBarChart &middot; stacked</GroupHeading>
+          <MultiBarChart
+            height={220}
+            stacked
+            data={[
+              { label: 'Q1', Maintain: 28, Scale: 14, Launch:  6 },
+              { label: 'Q2', Maintain: 32, Scale: 18, Launch:  9 },
+              { label: 'Q3', Maintain: 35, Scale: 21, Launch: 12 },
+              { label: 'Q4', Maintain: 40, Scale: 24, Launch: 14 },
+            ]}
+            series={[
+              { key: 'Maintain', label: 'Maintain' },
+              { key: 'Scale',    label: 'Scale' },
+              { key: 'Launch',   label: 'Launch' },
+            ]}
+            formatValue={v => `$${v}k`}
+          />
+        </CardPrim>
+
+        <CardPrim>
+          <GroupHeading>Heatmap &middot; hours x days</GroupHeading>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '0.5rem 0' }}>
+            <Heatmap
+              tone="positive"
+              columns={['9', '10', '11', '12', '13', '14', '15', '16', '17']}
+              rows={[
+                { label: 'Mon', cells: [{ key: '9', value: 1 }, { key: '10', value: 3 }, { key: '11', value: 5 }, { key: '12', value: 2 }, { key: '13', value: 4 }, { key: '14', value: 6 }, { key: '15', value: 4 }, { key: '16', value: 2 }, { key: '17', value: 1 }] },
+                { label: 'Tue', cells: [{ key: '9', value: 2 }, { key: '10', value: 4 }, { key: '11', value: 6 }, { key: '12', value: 3 }, { key: '13', value: 7 }, { key: '14', value: 8 }, { key: '15', value: 5 }, { key: '16', value: 3 }, { key: '17', value: 0 }] },
+                { label: 'Wed', cells: [{ key: '9', value: 0 }, { key: '10', value: 2 }, { key: '11', value: 3 }, { key: '12', value: 1 }, { key: '13', value: 5 }, { key: '14', value: 4 }, { key: '15', value: 3 }, { key: '16', value: 1 }, { key: '17', value: 0 }] },
+                { label: 'Thu', cells: [{ key: '9', value: 3 }, { key: '10', value: 5 }, { key: '11', value: 7 }, { key: '12', value: 4 }, { key: '13', value: 6 }, { key: '14', value: 9 }, { key: '15', value: 6 }, { key: '16', value: 4 }, { key: '17', value: 2 }] },
+                { label: 'Fri', cells: [{ key: '9', value: 2 }, { key: '10', value: 3 }, { key: '11', value: 4 }, { key: '12', value: 2 }, { key: '13', value: 3 }, { key: '14', value: 5 }, { key: '15', value: 3 }, { key: '16', value: 2 }, { key: '17', value: 1 }] },
+              ]}
+              formatValue={v => `${v} requests`}
+            />
+          </div>
+        </CardPrim>
+      </div>
+
       <CardPrim>
         <GroupHeading>How to use it</GroupHeading>
         <ul style={{ fontSize: '0.8125rem', lineHeight: 1.7 }} className="space-y-1">
@@ -1799,9 +1872,11 @@ function ChartShowcase() {
           <li>Use <Mono>variant=&quot;pill&quot;</Mono> when bars should feel like data pills (capacity, time tracked). Combine with <Mono>valueCallout</Mono> to highlight the peak. Pill rounds the top corners only so bars sit flat on the axis.</li>
           <li>Use <Mono>striped</Mono> per-bar (or <Mono>variant=&quot;striped&quot;</Mono>) for inactive / projected periods.</li>
           <li><Mono>DonutChart</Mono> takes any number of segments; centre label + value sit inside the ring. Legend below shows percentages.</li>
-          <li><Mono>GanttChart</Mono> renders horizontal bars across a date range. Pass <Mono>today</Mono> for the brand-coloured guide. <Mono>colourIndex</Mono> picks from the categorical rotation; <Mono>tone</Mono> picks a semantic colour. <Mono>milestones</Mono> render as diamonds on the bar.</li>
-          <li><Mono>Sparkline</Mono> stays inline (default 100&times;28). Wrap next to a value + label.</li>
-          <li><Mono>Gauge</Mono> takes a 0-100 value, optional <Mono>label</Mono> + <Mono>sub</Mono> for the centre.</li>
+          <li><Mono>GanttChart</Mono> renders horizontal bars across a date range. Pass <Mono>today</Mono> for the brand-coloured guide. <Mono>owner</Mono> picks the schedules palette (Tahi / Client / Joint / Tahi parallel); <Mono>rowType=&quot;gate&quot;</Mono> renders a sign-off diamond at <Mono>gateDate</Mono>; <Mono>rowType=&quot;critical_gate&quot;</Mono> for a filled red gate; <Mono>riskFlag</Mono> adds the at-risk hatching. Pass <Mono>showLegend</Mono> for the built-in legend.</li>
+          <li><Mono>FunnelChart</Mono> takes a list of stages with values. Widths are proportional to the top stage. Default colours from <Mono>CHART.categorical</Mono>.</li>
+          <li><Mono>MultiBarChart</Mono> takes one row per X-axis tick and any number of series. Pass <Mono>stacked</Mono> to stack instead of group. Series can declare <Mono>tone</Mono> (positive / negative / neutral) or an explicit <Mono>colour</Mono>.</li>
+          <li><Mono>Heatmap</Mono> is a grid of cells; colour scales 0..max within the active tone. Hover any cell for a portal&apos;d tooltip with row, column, value, and optional meta.</li>
+          <li><Mono>Sparkline</Mono> stays inline (default 100&times;28). <Mono>Gauge</Mono> takes a 0-100 value.</li>
           <li>Every chart animates when it scrolls into view, not on initial mount. <Mono>prefers-reduced-motion</Mono> disables animation.</li>
         </ul>
       </CardPrim>
@@ -2003,22 +2078,60 @@ function DataTableShowcase() {
         </p>
       </div>
 
-      {/* Slide-over preview wired to onRowPreview */}
+      {/* Slide-over preview wired to onRowPreview. Fields are editable
+          inline so the preview doubles as the compact-record editor.
+          Mutations flow back into row state so the table and the
+          slide-over stay in sync. */}
       <SlideOver
         open={!!previewRow}
         onClose={() => setPreviewRow(null)}
-        title={previewRow?.number ?? ''}
-        maxWidth="24rem"
+        title={previewRow ? (rows.find(r => r.id === previewRow.id)?.number ?? previewRow.number) : ''}
+        maxWidth="26rem"
       >
         <SlideOver.Body>
-          {previewRow && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-              <ExpandField label="Client" value={previewRow.client} />
-              <ExpandField label="Status" value={<Badge tone={statusTone(previewRow.status)} variant="soft" size="sm" leader={false}>{previewRow.status}</Badge>} />
-              <ExpandField label="Amount" value={`$${previewRow.amount.toLocaleString()}`} />
-              <ExpandField label="Due" value={previewRow.due} />
-            </div>
-          )}
+          {previewRow && (() => {
+            const current = rows.find(r => r.id === previewRow.id) ?? previewRow
+            const update = (patch: Partial<InvoiceDemo>) => {
+              setRows(prev => prev.map(r => r.id === current.id ? { ...r, ...patch } : r))
+            }
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+                <EditableField label="Client">
+                  <input
+                    type="text"
+                    value={current.client}
+                    onChange={e => update({ client: e.target.value })}
+                    style={editableInputStyle}
+                  />
+                </EditableField>
+                <EditableField label="Status">
+                  <InlineStatusChip
+                    value={current.status}
+                    onChange={(next) => update({ status: next })}
+                  />
+                </EditableField>
+                <EditableField label="Amount">
+                  <input
+                    type="number"
+                    value={current.amount}
+                    onChange={e => update({ amount: Number(e.target.value) || 0 })}
+                    style={editableInputStyle}
+                  />
+                </EditableField>
+                <EditableField label="Due">
+                  <input
+                    type="text"
+                    value={current.due}
+                    onChange={e => update({ due: e.target.value })}
+                    style={editableInputStyle}
+                  />
+                </EditableField>
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', margin: 0 }}>
+                  Edits save inline. Use the row action menu for the full record page.
+                </p>
+              </div>
+            )
+          })()}
         </SlideOver.Body>
       </SlideOver>
 
@@ -2145,6 +2258,123 @@ function ExpandField({ label, value }: { label: string; value: React.ReactNode }
         {value}
       </div>
     </div>
+  )
+}
+
+// EditableField: same uppercase label as ExpandField but the value
+// slot holds an editable control. Used in the slide-over preview to
+// turn the panel into an inline editor.
+function EditableField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3125rem' }}>
+      <div style={{
+        fontSize: '0.625rem',
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        color: 'var(--color-text-subtle)',
+      }}>
+        {label}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+const editableInputStyle: React.CSSProperties = {
+  width: '100%',
+  height: '2.25rem',
+  padding: '0 var(--space-3)',
+  background: 'var(--color-bg)',
+  border: '1px solid var(--color-border-subtle)',
+  borderRadius: 'var(--radius-md)',
+  fontSize: 'var(--text-sm)',
+  color: 'var(--color-text)',
+  outline: 'none',
+}
+
+// Tiny inline status chip with a popover editor. Used in the
+// slide-over so the same Notion-style edit pattern works inside a
+// record drawer, not only in a table cell.
+function InlineStatusChip({
+  value,
+  onChange,
+}: {
+  value: 'paid' | 'sent' | 'overdue' | 'draft'
+  onChange: (next: 'paid' | 'sent' | 'overdue' | 'draft') => void
+}) {
+  const ref = React.useRef<HTMLButtonElement | null>(null)
+  const [open, setOpen] = useState(false)
+  const options: Array<{ value: typeof value; label: string; tone: BadgeTonePick }> = [
+    { value: 'paid',    label: 'Paid',    tone: 'positive' },
+    { value: 'sent',    label: 'Sent',    tone: 'warning' },
+    { value: 'overdue', label: 'Overdue', tone: 'danger' },
+    { value: 'draft',   label: 'Draft',   tone: 'neutral' },
+  ]
+  const selected = options.find(o => o.value === value)
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="inline-flex items-center"
+        style={{
+          alignSelf: 'flex-start',
+          gap: '0.375rem',
+          padding: '0.25rem 0.5rem',
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border-subtle)',
+          borderRadius: 'var(--radius-md)',
+          cursor: 'pointer',
+        }}
+      >
+        {selected && (
+          <Badge tone={selected.tone} variant="soft" size="sm" leader={false}>{selected.label}</Badge>
+        )}
+        <ArrowGlyph size={11} />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          style={{
+            position: 'absolute',
+            zIndex: 60,
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-card)',
+            boxShadow: 'var(--shadow-lg)',
+            padding: '0.25rem',
+            marginTop: '0.25rem',
+            minWidth: '10rem',
+          }}
+        >
+          {options.map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              role="option"
+              aria-selected={opt.value === value}
+              onClick={() => { onChange(opt.value); setOpen(false) }}
+              className="w-full inline-flex items-center"
+              style={{
+                padding: '0.4375rem 0.625rem',
+                background: opt.value === value ? 'var(--color-bg-secondary)' : 'transparent',
+                border: 'none',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: 'var(--text-sm)',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = opt.value === value ? 'var(--color-bg-secondary)' : 'transparent' }}
+            >
+              <Badge tone={opt.tone} variant="soft" size="sm" leader={false}>{opt.label}</Badge>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
   )
 }
 
