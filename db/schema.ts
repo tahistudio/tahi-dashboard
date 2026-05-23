@@ -1258,6 +1258,10 @@ export const activities = sqliteTable('activities', {
   title: text('title').notNull(),
   description: text('description'),
   dealId: text('deal_id').references(() => deals.id, { onDelete: 'cascade' }),
+  // leadId added in migration 0017 so leads share the same activity
+  // stream as deals/orgs/contacts. Set on promote so the deal can
+  // see the full pre-qualification history.
+  leadId: text('lead_id'),
   orgId: text('org_id').references(() => organisations.id, { onDelete: 'cascade' }),
   contactId: text('contact_id').references(() => contacts.id, { onDelete: 'set null' }),
   createdById: text('created_by_id').notNull(),
@@ -1270,6 +1274,66 @@ export const activities = sqliteTable('activities', {
   index('idx_activities_deal').on(table.dealId),
   index('idx_activities_org').on(table.orgId),
   index('idx_activities_contact').on(table.contactId),
+  index('idx_activities_lead').on(table.leadId),
+])
+
+// ============================================================
+// CRM: LEADS (Pre-qualification stage, separate from deals)
+//
+// A lead is a prospect we haven't qualified yet. Once a discovery
+// call lands and we decide to pursue, the lead promotes to a deal
+// (lead.promotedDealId set, status = 'promoted'). Keeping leads
+// separate from deals lets us:
+//   - Archive dead prospects without polluting pipeline metrics
+//   - Compute clean conversion rates (lead → deal → close)
+//   - Run different fields on each (leads have a `brief`, deals
+//     have engagement type, MRR split, etc.)
+// ============================================================
+
+export const leads = sqliteTable('leads', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // Person fields
+  name: text('name').notNull(),
+  email: text('email'),
+  phone: text('phone'),
+  // Company fields (may not match an existing org yet)
+  company: text('company'),
+  jobTitle: text('job_title'),
+  website: text('website'),
+  // Source: webflow | website | email | referral | affiliate | event | cold_outreach | manual | other
+  source: text('source').notNull().default('manual'),
+  sourceDetail: text('source_detail'),
+  // Affiliate attribution — populated when the lead arrived via
+  // /r/{code}. Affiliates table doesn't exist yet (Phase C); kept as
+  // a free-text id for now so the column is ready when the table is.
+  affiliateCode: text('affiliate_code'),
+  // Free-text brief — what they want, what we know so far
+  brief: text('brief'),
+  // Heuristic deal-size estimate. Currency is stored alongside.
+  estimatedValue: integer('estimated_value'),
+  currency: text('currency').notNull().default('NZD'),
+  // Lifecycle:
+  //   new           — just landed, untriaged
+  //   qualifying    — actively working on it (call scheduled, replies in-flight)
+  //   nurturing     — not now, follow up later
+  //   promoted      — became a deal (see promotedDealId)
+  //   archived      — dead. archiveReason captures why.
+  status: text('status').notNull().default('new'),
+  archiveReason: text('archive_reason'),
+  // Owner — defaults to the creating user via API.
+  ownerId: text('owner_id').references(() => teamMembers.id),
+  // If/when promoted, this points to the resulting deal so we can
+  // walk the full lead → deal → invoice graph.
+  promotedDealId: text('promoted_deal_id').references(() => deals.id, { onDelete: 'set null' }),
+  promotedAt: text('promoted_at'),
+  // AI score placeholder (0-100). Wired in Phase B · 6.
+  aiScore: integer('ai_score'),
+  ...timestamps,
+}, (table) => [
+  index('idx_leads_status').on(table.status),
+  index('idx_leads_owner').on(table.ownerId),
+  index('idx_leads_email').on(table.email),
+  index('idx_leads_source').on(table.source),
 ])
 
 // ============================================================
