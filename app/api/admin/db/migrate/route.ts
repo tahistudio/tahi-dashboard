@@ -748,8 +748,44 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0043',
+    description: 'Phase B · 7 discovery_calls table. Pre-call prep + Google Meet linkage + Gemini transcript + outcome tagging + scope/budget/timeline capture. Linked via lead_id (always) and optionally deal_id (after promotion) so a single call row tracks the conversation from "qualifying" through "won".',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS discovery_calls (
+        id TEXT PRIMARY KEY NOT NULL,
+        lead_id TEXT REFERENCES leads(id) ON DELETE SET NULL,
+        deal_id TEXT REFERENCES deals(id) ON DELETE SET NULL,
+        google_calendar_event_id TEXT,
+        google_meet_url TEXT,
+        title TEXT NOT NULL,
+        scheduled_at TEXT NOT NULL,
+        duration_minutes INTEGER NOT NULL DEFAULT 30,
+        attendees TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'scheduled',
+        transcript TEXT,
+        transcript_source TEXT,
+        summary TEXT,
+        outcome TEXT,
+        outcome_notes TEXT,
+        scope_notes TEXT,
+        budget_min INTEGER,
+        budget_max INTEGER,
+        budget_currency TEXT,
+        timeline TEXT,
+        created_by_id TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_discovery_calls_lead ON discovery_calls(lead_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_discovery_calls_deal ON discovery_calls(deal_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_discovery_calls_scheduled ON discovery_calls(scheduled_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_discovery_calls_status ON discovery_calls(status)`,
+      `CREATE INDEX IF NOT EXISTS idx_discovery_calls_gcal ON discovery_calls(google_calendar_event_id)`,
+    ],
+  },
+  {
     name: '0042',
-    description: 'Phase B · 6 lead AI columns: ai_score_reason, ai_summary, ai_sources (JSON), ai_questions (JSON), enriched_at, last_ai_run_at, ai_tokens_spent, enrich_reprompt_suppressed. Plus settings seeds: leads.defaultLeadOwnerId (best-effort lookup for "Liam Miller") and leads.discoveryQuestionsTemplate (3 always-ask questions covering brand discovery + project goals + current solution).',
+    description: 'Phase B · 6 lead AI columns: ai_score_reason, ai_summary, ai_sources (JSON), ai_questions (JSON), ai_signals (JSON object — structured deal-sizing signals), enriched_at, last_ai_run_at, ai_tokens_spent, enrich_reprompt_suppressed. Plus settings seeds: leads.defaultLeadOwnerId (best-effort lookup for "Liam Miller") and leads.discoveryQuestionsTemplate (3 always-ask questions covering brand discovery + project goals + current solution).',
     statements: [
       `ALTER TABLE leads ADD COLUMN ai_score_reason TEXT`,
       `ALTER TABLE leads ADD COLUMN ai_summary TEXT`,
@@ -759,6 +795,7 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE leads ADD COLUMN last_ai_run_at TEXT`,
       `ALTER TABLE leads ADD COLUMN ai_tokens_spent INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE leads ADD COLUMN enrich_reprompt_suppressed INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE leads ADD COLUMN ai_signals TEXT`,
       `CREATE INDEX IF NOT EXISTS idx_leads_ai_run ON leads(last_ai_run_at)`,
       // Seed default lead owner — best-effort match on "Liam Miller". If
       // no team-member row matches, the setting stays absent and the

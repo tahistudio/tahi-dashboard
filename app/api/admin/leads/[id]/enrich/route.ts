@@ -55,6 +55,31 @@ OUTPUT FORMAT (strict — the response is parsed by regex):
 <summary>
 A 2-3 paragraph plain-English briefing covering: what the company does, who they sell to, recent signals (funding, hires, launches, news), how Tahi's services could plausibly fit. Write like a colleague briefing another colleague before a call. Conversational, specific, no filler.
 </summary>
+<signals>
+Structured deal-sizing signals. Every populated field MUST have a matching <field>_source URL or be omitted. If you cannot verify a field, OMIT it — do not guess. Use plain text content inside each tag (no formatting).
+
+<employee_count>e.g. "45" or "approx 100-250"</employee_count>
+<employee_count_source>https://...</employee_count_source>
+
+<funding_raised>e.g. "USD 8M Series A"</funding_raised>
+<funding_stage>e.g. "Series A" or "bootstrapped"</funding_stage>
+<funding_source>https://...</funding_source>
+
+<revenue_estimate>e.g. "USD 2M-5M ARR" — only if explicitly disclosed publicly, not guessed</revenue_estimate>
+<revenue_source>https://...</revenue_source>
+
+<pricing_visible>e.g. "Tiered: $29 / $99 / Enterprise"</pricing_visible>
+<pricing_source>https://...</pricing_source>
+
+<customer_count>e.g. "Trusted by 500+ teams (homepage claim)"</customer_count>
+<customer_source>https://...</customer_source>
+
+<site_tech_stack>Comma-separated stack guess from publicly visible signals (job posts, careers page). e.g. "WordPress, React, Stripe"</site_tech_stack>
+<site_tech_source>https://...</site_tech_source>
+
+<decision_maker>Most likely person Tahi should talk to (role, not personal name unless it's the actual lead). e.g. "Likely Head of Marketing or Founder" or "Lead person Anna Walker (in our system) appears to be the decision-maker"</decision_maker>
+<decision_maker_confidence>low | medium | high</decision_maker_confidence>
+</signals>
 <sources>
 <url>https://...</url>
 <url>https://...</url>
@@ -116,12 +141,31 @@ function buildUserMessage(lead: LeadForPrompt): string {
 
 // ── Parsing ─────────────────────────────────────────────────────────────────
 
+interface AiSignals {
+  employeeCount?: string
+  employeeCountSource?: string
+  fundingRaised?: string
+  fundingStage?: string
+  fundingSource?: string
+  revenueEstimate?: string
+  revenueSource?: string
+  pricingVisible?: string
+  pricingSource?: string
+  customerCount?: string
+  customerSource?: string
+  siteTechStack?: string
+  siteTechSource?: string
+  decisionMaker?: string
+  decisionMakerConfidence?: 'low' | 'medium' | 'high'
+}
+
 interface ParsedFull {
   score: number | null
   scoreReason: string | null
   summary: string | null
   sources: string[]
   questions: string[]
+  signals: AiSignals
 }
 
 function parseFullResponse(text: string): ParsedFull {
@@ -140,12 +184,48 @@ function parseFullResponse(text: string): ParsedFull {
     .filter(q => q.length > 0)
     .slice(0, 3)
 
+  // Signals block. Each field is optional. A field is only included
+  // when (a) the value tag was present AND (b) the matching _source
+  // tag is also present (enforces the cite-or-omit rule). Exception:
+  // decision_maker is allowed without a source because it's
+  // inference + the confidence tag carries its own honesty signal.
+  const signalsBlock = matchText(text, /<signals>([\s\S]*?)<\/signals>/i) ?? ''
+  const sig = (name: string) => matchText(signalsBlock, new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, 'i'))?.trim() ?? null
+  const signals: AiSignals = {}
+  const pairs: Array<[keyof AiSignals, string, keyof AiSignals, string]> = [
+    ['employeeCount', 'employee_count', 'employeeCountSource', 'employee_count_source'],
+    ['fundingRaised', 'funding_raised', 'fundingSource', 'funding_source'],
+    ['revenueEstimate', 'revenue_estimate', 'revenueSource', 'revenue_source'],
+    ['pricingVisible', 'pricing_visible', 'pricingSource', 'pricing_source'],
+    ['customerCount', 'customer_count', 'customerSource', 'customer_source'],
+    ['siteTechStack', 'site_tech_stack', 'siteTechSource', 'site_tech_source'],
+  ]
+  for (const [jsKey, xmlKey, srcJsKey, srcXmlKey] of pairs) {
+    const value = sig(xmlKey)
+    const source = sig(srcXmlKey)
+    if (value && source && /^https?:\/\//i.test(source)) {
+      ;(signals[jsKey] as string) = value
+      ;(signals[srcJsKey] as string) = source
+    }
+  }
+  // funding_stage is allowed alongside fundingRaised even if it has
+  // no own source — it's a categorical not a fact.
+  const fundingStage = sig('funding_stage')
+  if (fundingStage && signals.fundingRaised) signals.fundingStage = fundingStage
+  const decisionMaker = sig('decision_maker')
+  const confidence = sig('decision_maker_confidence')?.toLowerCase()
+  if (decisionMaker) signals.decisionMaker = decisionMaker
+  if (confidence === 'low' || confidence === 'medium' || confidence === 'high') {
+    signals.decisionMakerConfidence = confidence
+  }
+
   return {
     score: score != null ? Math.max(0, Math.min(100, score)) : null,
     scoreReason: scoreReason?.trim() ?? null,
     summary: summary?.trim() ?? null,
     sources,
     questions,
+    signals,
   }
 }
 
@@ -320,6 +400,10 @@ export async function POST(
       })
     }
 
+    const signalsJson = Object.keys(parsed.signals).length > 0
+      ? JSON.stringify(parsed.signals)
+      : null
+
     await database
       .update(schema.leads)
       .set({
@@ -328,6 +412,7 @@ export async function POST(
         aiSummary: parsed.summary,
         aiSources: JSON.stringify(parsed.sources),
         aiQuestions: JSON.stringify(parsed.questions),
+        aiSignals: signalsJson,
         aiTokensSpent: (lead.aiTokensSpent ?? 0) + inputTokens + outputTokens,
         enrichedAt: now,
         lastAiRunAt: now,
@@ -345,6 +430,7 @@ export async function POST(
       summary: parsed.summary,
       sources: parsed.sources,
       questions: parsed.questions,
+      signals: parsed.signals,
       tokensThisRun: inputTokens + outputTokens,
     })
   } catch (err) {

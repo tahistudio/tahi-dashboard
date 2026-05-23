@@ -1233,6 +1233,71 @@ export const contracts = sqliteTable('contracts', {
 // SCHEDULED CALLS
 // ============================================================
 
+// ============================================================
+// DISCOVERY CALLS (Lead-stage + post-deal calls with transcript +
+// outcome + scope capture)
+// ============================================================
+//
+// Distinct from scheduledCalls (which is org-bound NOT NULL and used
+// for ongoing client engagement). This table covers the lead → deal
+// transition: pre-call prep, the call itself (Google Meet + Gemini
+// transcript), outcome tagging, and the scope notes that feed into
+// the eventual proposal.
+//
+// Linked via leadId (always) and optionally dealId (after promotion)
+// so the same row tracks the conversation from "qualifying" through
+// "won".
+
+export const discoveryCalls = sqliteTable('discovery_calls', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  leadId: text('lead_id').references(() => leads.id, { onDelete: 'set null' }),
+  dealId: text('deal_id').references(() => deals.id, { onDelete: 'set null' }),
+  // Google Calendar linkage. When set, we can sync the event details
+  // (attendees, scheduledAt, meetingUrl) back from Calendar on each
+  // poll. event_id is the unique Calendar event id.
+  googleCalendarEventId: text('google_calendar_event_id'),
+  googleMeetUrl: text('google_meet_url'),
+  // Display
+  title: text('title').notNull(),
+  scheduledAt: text('scheduled_at').notNull(),
+  durationMinutes: integer('duration_minutes').notNull().default(30),
+  // JSON: [{ name, email, role: 'host'|'lead'|'guest' }]
+  attendees: text('attendees').notNull().default('[]'),
+  // scheduled | completed | cancelled | no_show | rescheduled
+  status: text('status').notNull().default('scheduled'),
+  // ── Post-call fields ──
+  // Raw transcript. Length capped at ~50k chars at the API layer.
+  transcript: text('transcript'),
+  // gemini_meet | manual_paste | whisper_api
+  transcriptSource: text('transcript_source'),
+  // AI-generated or human-written call summary.
+  summary: text('summary'),
+  // good_call | promote | nurture | archive | no_show
+  // 'promote' means this call should drive a lead → deal promotion
+  // (Liam still does it manually; this just tags intent).
+  outcome: text('outcome'),
+  outcomeNotes: text('outcome_notes'),
+  // ── Scope capture (drives proposal building) ──
+  // Free-text notes on what they want built. Pages, design needs,
+  // integrations, etc.
+  scopeNotes: text('scope_notes'),
+  // Budget signal captured on the call. May be a range or one number;
+  // null if not discussed.
+  budgetMin: integer('budget_min'),
+  budgetMax: integer('budget_max'),
+  budgetCurrency: text('budget_currency'),
+  // urgent | this_quarter | this_year | no_rush
+  timeline: text('timeline'),
+  createdById: text('created_by_id').notNull(),
+  ...timestamps,
+}, (table) => [
+  index('idx_discovery_calls_lead').on(table.leadId),
+  index('idx_discovery_calls_deal').on(table.dealId),
+  index('idx_discovery_calls_scheduled').on(table.scheduledAt),
+  index('idx_discovery_calls_status').on(table.status),
+  index('idx_discovery_calls_gcal').on(table.googleCalendarEventId),
+])
+
 export const scheduledCalls = sqliteTable('scheduled_calls', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   orgId: text('org_id').notNull().references(() => organisations.id, { onDelete: 'cascade' }),
@@ -1488,6 +1553,12 @@ export const leads = sqliteTable('leads', {
   // JSON array of 3 lead-specific discovery questions. The 3 always-
   // ask questions live in settings.discoveryQuestionsTemplate.
   aiQuestions: text('ai_questions').default('[]'),
+  // JSON object: structured company signals from enrichment. Shape:
+  //   { employeeCount, employeeCountSource, fundingRaised, fundingSource,
+  //     fundingStage, pricingVisible, customerCount, decisionMaker,
+  //     decisionMakerConfidence, siteTechStack, revenueEstimate }
+  // Every populated field has a sibling *Source URL or is omitted.
+  aiSignals: text('ai_signals'),
   // Timestamps gating cron runs + UI signalling.
   enrichedAt: text('enriched_at'),
   lastAiRunAt: text('last_ai_run_at'),

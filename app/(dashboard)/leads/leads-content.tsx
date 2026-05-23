@@ -61,12 +61,32 @@ interface Lead {
   aiSources: string | null
   /** JSON-stringified array of 3 lead-specific discovery questions. */
   aiQuestions: string | null
+  /** JSON-stringified AiSignals object — structured deal-sizing fields. */
+  aiSignals: string | null
   enrichedAt: string | null
   lastAiRunAt: string | null
   aiTokensSpent: number | null
   enrichRepromptSuppressed: boolean | null
   createdAt: string
   updatedAt: string
+}
+
+interface AiSignals {
+  employeeCount?: string
+  employeeCountSource?: string
+  fundingRaised?: string
+  fundingStage?: string
+  fundingSource?: string
+  revenueEstimate?: string
+  revenueSource?: string
+  pricingVisible?: string
+  pricingSource?: string
+  customerCount?: string
+  customerSource?: string
+  siteTechStack?: string
+  siteTechSource?: string
+  decisionMaker?: string
+  decisionMakerConfidence?: 'low' | 'medium' | 'high'
 }
 
 interface StatusDef {
@@ -830,6 +850,7 @@ function LeadDetail({
   const status = STATUS_BY_VALUE.get(lead.status)
   const aiSources = safeJsonArray<string>(lead.aiSources)
   const aiQuestions = safeJsonArray<string>(lead.aiQuestions)
+  const aiSignals = safeJsonObject<AiSignals>(lead.aiSignals)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem', alignItems: 'center' }}>
@@ -864,6 +885,7 @@ function LeadDetail({
         lead={lead}
         aiSources={aiSources}
         aiQuestions={aiQuestions}
+        aiSignals={aiSignals}
         discoveryTemplate={discoveryTemplate}
         enriching={enriching}
         enrichError={enrichError}
@@ -992,6 +1014,7 @@ function AiSection({
   lead,
   aiSources,
   aiQuestions,
+  aiSignals,
   discoveryTemplate,
   enriching,
   enrichError,
@@ -1000,6 +1023,7 @@ function AiSection({
   lead: Lead
   aiSources: string[]
   aiQuestions: string[]
+  aiSignals: AiSignals
   discoveryTemplate: string[]
   enriching: boolean
   enrichError: string | null
@@ -1069,6 +1093,42 @@ function AiSection({
       {lead.aiSummary && (
         <div style={{ fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
           {lead.aiSummary}
+        </div>
+      )}
+
+      {Object.keys(aiSignals).length > 0 && (
+        <div>
+          <SectionLabel>Company signals</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3125rem' }}>
+            {aiSignals.employeeCount && (
+              <SignalRow label="Team" value={aiSignals.employeeCount} source={aiSignals.employeeCountSource} />
+            )}
+            {aiSignals.fundingRaised && (
+              <SignalRow
+                label="Funding"
+                value={`${aiSignals.fundingRaised}${aiSignals.fundingStage ? ` (${aiSignals.fundingStage})` : ''}`}
+                source={aiSignals.fundingSource}
+              />
+            )}
+            {aiSignals.revenueEstimate && (
+              <SignalRow label="Revenue" value={aiSignals.revenueEstimate} source={aiSignals.revenueSource} />
+            )}
+            {aiSignals.pricingVisible && (
+              <SignalRow label="Pricing" value={aiSignals.pricingVisible} source={aiSignals.pricingSource} />
+            )}
+            {aiSignals.customerCount && (
+              <SignalRow label="Customers" value={aiSignals.customerCount} source={aiSignals.customerSource} />
+            )}
+            {aiSignals.siteTechStack && (
+              <SignalRow label="Tech" value={aiSignals.siteTechStack} source={aiSignals.siteTechSource} />
+            )}
+            {aiSignals.decisionMaker && (
+              <SignalRow
+                label="Decision-maker"
+                value={`${aiSignals.decisionMaker}${aiSignals.decisionMakerConfidence ? ` · ${aiSignals.decisionMakerConfidence} confidence` : ''}`}
+              />
+            )}
+          </div>
         </div>
       )}
 
@@ -1172,6 +1232,49 @@ function safeJsonArray<T>(raw: string | null | undefined): T[] {
   } catch {
     return []
   }
+}
+
+function safeJsonObject<T extends object>(raw: string | null | undefined): T {
+  if (!raw) return {} as T
+  try {
+    const parsed = JSON.parse(raw)
+    return (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+      ? parsed as T
+      : {} as T
+  } catch {
+    return {} as T
+  }
+}
+
+function SignalRow({ label, value, source }: { label: string; value: string; source?: string }) {
+  return (
+    <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.75rem', lineHeight: 1.5, alignItems: 'flex-start' }}>
+      <span style={{ width: '6rem', flexShrink: 0, color: 'var(--color-text-muted)', fontWeight: 500 }}>{label}</span>
+      <span style={{ flex: 1, color: 'var(--color-text)' }}>
+        {value}
+        {source && (
+          <>
+            {' '}
+            <a
+              href={source}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Source for ${label}`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                color: 'var(--color-text-subtle)',
+                verticalAlign: 'baseline',
+                marginLeft: '0.125rem',
+              }}
+            >
+              <ExternalLink size={10} aria-hidden="true" />
+            </a>
+          </>
+        )}
+      </span>
+    </div>
+  )
 }
 
 function formatMoney(amount: number, currency: string): string {
