@@ -64,6 +64,19 @@ Pipeline → Proposal → Schedule → Contract → Onboard → Deliver → Invo
 21. Invoicing polish + Stripe + Xero reconciliation
 22. Upsell prompts (retainer hours nearly out, etc.)
 
+### Phase F · Messaging & social (much later — only after daily-trusted CRM)
+
+Not a priority. Slated for after the dashboard becomes the daily driver for sales + delivery. Listed here so the architecture decisions land in writing.
+
+23. **Buffer integration for social posts + scheduling** — use Buffer (Essentials tier or Free if 3k requests/month is enough) via their API. Dashboard surfaces a "social pipeline" view: scheduled posts, published posts, engagement rollup. Don't build a scheduler ourselves.
+24. **Beeper API + MCP for unified DM inbox** — LinkedIn / WhatsApp / Slack / SMS in one place via Beeper. Three-defence privacy model so personal threads stay private:
+    - **Per-account whitelist** in Settings → Inbox. Tick only work Beeper accounts.
+    - **CRM-match filter as default** — threads only surface when the counterparty matches a lead / contact / org in the CRM. Friend texting "want a coffee?" never appears.
+    - **Explicit opt-in** before any DM gets logged as an activity on a lead/deal. Auto-link suggests; Liam confirms.
+    Actual chatting still happens in Beeper Desktop / native apps; the dashboard just tracks threads tied to records.
+25. **LinkedIn outreach tracking (manual send, automated tracking)** — at low volume (Liam's scale: 3-10 leads/month), no need for a tool like Heyreach or Expandi. Use LinkedIn Premium directly to send connection requests + InMail, log each as an activity on the lead. Dashboard surfaces "follow up in 4 days" tasks. Auto-send is off the table (LinkedIn rate-limits or bans).
+26. **Low-volume cold email outreach** — also manual send. Dashboard tracks sent / replied / no-response per lead so Liam doesn't double-touch. Volume stays under 20 emails / week / domain so the email reputation isn't burned.
+
 ---
 
 ## Workflows
