@@ -748,6 +748,144 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0041',
+    description: 'Permissions seed: 5 system roles + permission catalogue (resource × action) + role_permission defaults with sensible scope filters. Idempotent via INSERT OR IGNORE.',
+    statements: [
+      // 1. System roles
+      `INSERT OR IGNORE INTO roles (id, name, description, is_system, created_at, updated_at) VALUES
+        ('role-super-admin', 'super_admin', 'Full access across every resource. Reserved for org owners.', 1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('role-admin', 'admin', 'Most actions on most resources. Cannot delete team members, settings or integrations.', 1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('role-project-manager', 'project_manager', 'Runs accounts and projects. View/create/edit across CRM + read on billing artefacts.', 1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('role-task-handler', 'task_handler', 'Executes assigned work. Own tasks, comment on requests, log time.', 1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('role-viewer', 'viewer', 'Read-only across the dashboard.', 1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`,
+
+      // 2. Base resource × action permissions (108 rows).
+      //    id format = "resource.action" so role_permissions can
+      //    reference them stably across re-runs.
+      `INSERT OR IGNORE INTO permissions (id, resource, action, description, created_at)
+        SELECT
+          r.resource || '.' || a.action,
+          r.resource,
+          a.action,
+          a.action || ' ' || r.resource,
+          strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        FROM (VALUES
+          ('leads'), ('deals'), ('contacts'), ('people'), ('organisations'),
+          ('requests'), ('tasks'), ('messages'), ('files'), ('time_entries'),
+          ('invoices'), ('contracts'), ('proposals'), ('schedules'), ('calls'),
+          ('activities'), ('docs'), ('subscribers'), ('campaigns'), ('affiliates'),
+          ('reports'), ('sales_analytics'), ('settings'), ('team'), ('integrations'),
+          ('calculator'), ('announcements')
+        ) AS r(resource)
+        CROSS JOIN (VALUES ('view'), ('create'), ('edit'), ('delete')) AS a(action)`,
+
+      // 3. Extra action permissions (resource-specific verbs).
+      `INSERT OR IGNORE INTO permissions (id, resource, action, description, created_at) VALUES
+        ('leads.promote', 'leads', 'promote', 'Promote a lead to a deal', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('leads.archive', 'leads', 'archive', 'Archive a lead', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('deals.assign', 'deals', 'assign', 'Assign owner to a deal', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('deals.archive', 'deals', 'archive', 'Archive a deal', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('requests.assign', 'requests', 'assign', 'Assign team member to a request', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('requests.comment', 'requests', 'comment', 'Comment on a request thread', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('tasks.assign', 'tasks', 'assign', 'Assign team member to a task', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('tasks.comment', 'tasks', 'comment', 'Comment on a task', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('proposals.share', 'proposals', 'share', 'Share a proposal via public token', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('proposals.publish', 'proposals', 'publish', 'Publish a proposal snapshot', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('contracts.share', 'contracts', 'share', 'Share a contract for signature', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('contracts.sign', 'contracts', 'sign', 'Counter-sign a contract', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('contracts.send', 'contracts', 'send', 'Email a contract to a signer', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('invoices.send', 'invoices', 'send', 'Email an invoice to the client', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('invoices.export', 'invoices', 'export', 'Export invoices to CSV / Xero', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('campaigns.send', 'campaigns', 'send', 'Send a marketing campaign', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('reports.export', 'reports', 'export', 'Export report data', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('affiliates.payout', 'affiliates', 'payout', 'Record an affiliate commission payout', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`,
+
+      // 4. super_admin: every permission, scope='all'.
+      `INSERT OR IGNORE INTO role_permissions (id, role_id, permission_id, scope_type, created_at)
+        SELECT
+          'role-super-admin:' || p.id,
+          'role-super-admin',
+          p.id,
+          'all',
+          strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        FROM permissions p`,
+
+      // 5. admin: every permission EXCEPT team.delete, settings.delete,
+      //    integrations.delete. Scope='all'.
+      `INSERT OR IGNORE INTO role_permissions (id, role_id, permission_id, scope_type, created_at)
+        SELECT
+          'role-admin:' || p.id,
+          'role-admin',
+          p.id,
+          'all',
+          strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        FROM permissions p
+        WHERE NOT (p.resource = 'team' AND p.action = 'delete')
+          AND NOT (p.resource = 'settings' AND p.action = 'delete')
+          AND NOT (p.resource = 'integrations' AND p.action = 'delete')`,
+
+      // 6. project_manager: CRM operations + read on billing artefacts.
+      `INSERT OR IGNORE INTO role_permissions (id, role_id, permission_id, scope_type, created_at)
+        SELECT
+          'role-project-manager:' || p.id,
+          'role-project-manager',
+          p.id,
+          'all',
+          strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        FROM permissions p
+        WHERE
+          (p.resource = 'leads' AND p.action IN ('view', 'create', 'edit', 'promote', 'archive'))
+          OR (p.resource = 'deals' AND p.action IN ('view', 'create', 'edit', 'assign', 'archive'))
+          OR (p.resource = 'requests' AND p.action IN ('view', 'create', 'edit', 'assign', 'comment'))
+          OR (p.resource = 'tasks' AND p.action IN ('view', 'create', 'edit', 'assign', 'comment'))
+          OR (p.resource = 'calls' AND p.action IN ('view', 'create', 'edit'))
+          OR (p.resource = 'contacts' AND p.action IN ('view', 'create', 'edit'))
+          OR (p.resource = 'organisations' AND p.action IN ('view', 'create', 'edit'))
+          OR (p.resource = 'people' AND p.action IN ('view', 'edit'))
+          OR (p.resource = 'activities' AND p.action IN ('view', 'create'))
+          OR (p.resource = 'messages' AND p.action IN ('view', 'create'))
+          OR (p.resource = 'docs' AND p.action IN ('view', 'create', 'edit'))
+          OR (p.resource = 'time_entries' AND p.action IN ('view', 'create', 'edit'))
+          OR (p.resource = 'invoices' AND p.action = 'view')
+          OR (p.resource = 'contracts' AND p.action = 'view')
+          OR (p.resource = 'proposals' AND p.action IN ('view', 'create', 'edit'))
+          OR (p.resource = 'schedules' AND p.action IN ('view', 'create', 'edit'))
+          OR (p.resource = 'reports' AND p.action = 'view')
+          OR (p.resource = 'sales_analytics' AND p.action = 'view')
+          OR (p.resource = 'team' AND p.action = 'view')
+          OR (p.resource = 'calculator' AND p.action IN ('view', 'create', 'edit'))`,
+
+      // 7. task_handler: own tasks + comment on requests + log time.
+      //    scope='own' on tasks.view/edit. Everything else scope='all'.
+      `INSERT OR IGNORE INTO role_permissions (id, role_id, permission_id, scope_type, created_at)
+        SELECT
+          'role-task-handler:' || p.id,
+          'role-task-handler',
+          p.id,
+          CASE WHEN p.resource = 'tasks' AND p.action IN ('view', 'edit') THEN 'own' ELSE 'all' END,
+          strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        FROM permissions p
+        WHERE
+          (p.resource = 'tasks' AND p.action IN ('view', 'edit', 'comment'))
+          OR (p.resource = 'requests' AND p.action IN ('view', 'comment'))
+          OR (p.resource = 'time_entries' AND p.action IN ('view', 'create'))
+          OR (p.resource = 'messages' AND p.action IN ('view', 'create'))
+          OR (p.resource = 'docs' AND p.action = 'view')
+          OR (p.resource = 'activities' AND p.action = 'view')`,
+
+      // 8. viewer: view-only across everything.
+      `INSERT OR IGNORE INTO role_permissions (id, role_id, permission_id, scope_type, created_at)
+        SELECT
+          'role-viewer:' || p.id,
+          'role-viewer',
+          p.id,
+          'all',
+          strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        FROM permissions p
+        WHERE p.action = 'view'`,
+    ],
+  },
+  {
     name: '0040',
     description: 'Pipeline triage (SQL-based equivalent of /api/admin/leads/triage-pipeline). Moves Lead-stage deals + Stalled-no-engagement deals into the leads table. Idempotent — re-running finds no candidates because matching deals were deleted on the first run, and source_detail is keyed on deal id as a belt-and-braces.',
     statements: [
