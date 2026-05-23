@@ -18,6 +18,9 @@ import { useToast } from '@/components/tahi/toast'
 import { PageHeader } from '@/components/tahi/page-header'
 import { ViewToggle } from '@/components/tahi/view-toggle'
 import { Input, Select } from '@/components/tahi/input'
+import { TahiButton } from '@/components/tahi/tahi-button'
+import { Badge, type BadgeTone } from '@/components/tahi/badge'
+import { Avatar } from '@/components/tahi/avatar'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -92,11 +95,22 @@ interface TaskTemplate {
 
 // ── Status config ────────────────────────────────────────────────────────────
 
+// Kept for legacy code paths that still reference dot/bg/text/border
+// inline (kanban column header dots, etc.). New chip rendering goes
+// through <Badge tone={...}>.
 const TASK_STATUS_CONFIG: Record<string, { label: string; dot: string; bg: string; text: string; border: string }> = {
   todo:        { label: 'To Do',       dot: 'var(--status-submitted-dot)',    bg: 'var(--status-submitted-bg)',    text: 'var(--status-submitted-text)',    border: 'var(--status-submitted-border)'    },
   in_progress: { label: 'In Progress', dot: 'var(--status-in-progress-dot)', bg: 'var(--status-in-progress-bg)', text: 'var(--status-in-progress-text)', border: 'var(--status-in-progress-border)' },
   blocked:     { label: 'Blocked',     dot: 'var(--status-in-review-dot)',    bg: 'var(--status-in-review-bg)',    text: 'var(--status-in-review-text)',    border: 'var(--status-in-review-border)'    },
   done:        { label: 'Done',        dot: 'var(--status-delivered-dot)',    bg: 'var(--status-delivered-bg)',    text: 'var(--status-delivered-text)',    border: 'var(--status-delivered-border)'    },
+}
+
+// Badge tone mapping for the locked design system. Used by StatusPill.
+const TASK_STATUS_TONE: Record<string, { label: string; tone: BadgeTone }> = {
+  todo:        { label: 'To Do',       tone: 'info'     },
+  in_progress: { label: 'In Progress', tone: 'teal'     },
+  blocked:     { label: 'Blocked',     tone: 'danger'   },
+  done:        { label: 'Done',        tone: 'positive' },
 }
 
 // Decision #046 (2026-04-21): tasks are always Tahi-internal. Clients
@@ -169,18 +183,11 @@ function getInitials(name: string): string {
 // ── Sub-components ───────────────────────────────────────────────────────────
 
 function StatusPill({ status }: { status: string }) {
-  const c = TASK_STATUS_CONFIG[status] ?? TASK_STATUS_CONFIG.todo
+  const c = TASK_STATUS_TONE[status] ?? TASK_STATUS_TONE.todo
   return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-full whitespace-nowrap font-medium"
-      style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: c.bg, color: c.text, border: `1px solid ${c.border}` }}
-    >
-      <span
-        className="rounded-full flex-shrink-0"
-        style={{ width: '0.375rem', height: '0.375rem', background: c.dot, display: 'inline-block' }}
-      />
+    <Badge tone={c.tone} variant="soft" size="sm" leader="dot">
       {c.label}
-    </span>
+    </Badge>
   )
 }
 
@@ -190,23 +197,22 @@ function PriorityBadge({ priority }: { priority: string }) {
   }
   if (priority === 'urgent') {
     return (
-      <span
-        className="inline-flex items-center gap-1 rounded-full font-medium"
-        style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: 'var(--priority-urgent-bg)', color: 'var(--priority-urgent-text)', border: '1px solid var(--priority-urgent-border)' }}
-      >
-        <Zap className="w-2.5 h-2.5" />
+      <Badge tone="danger" variant="soft" size="sm" leader="icon" icon={<Zap />}>
         Urgent
-      </span>
+      </Badge>
+    )
+  }
+  if (priority === 'low') {
+    return (
+      <Badge tone="neutral" variant="soft" size="sm">
+        Low
+      </Badge>
     )
   }
   return (
-    <span
-      className="inline-flex items-center gap-1 rounded-full font-medium"
-      style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: 'var(--priority-high-bg)', color: 'var(--priority-high-text)', border: '1px solid var(--priority-high-border)' }}
-    >
-      <Zap className="w-2.5 h-2.5" />
+    <Badge tone="warning" variant="soft" size="sm" leader="icon" icon={<Zap />}>
       High
-    </span>
+    </Badge>
   )
 }
 
@@ -243,33 +249,16 @@ function DueDateChip({ dueDate, status }: { dueDate: string | null; status: stri
 }
 
 function OrgAvatar({ name }: { name: string }) {
-  return (
-    <div
-      className="rounded-full flex items-center justify-center font-semibold flex-shrink-0"
-      style={{ width: '1.375rem', height: '1.375rem', fontSize: '0.5625rem', background: 'var(--color-brand)', color: 'white' }}
-    >
-      {getInitials(name)}
-    </div>
-  )
+  // Shared <Avatar> primitive. xs = 20px, matches the original 1.375rem
+  // org dot. Tooltip suppressed because the org name already sits next
+  // to the avatar in the row layouts that use it.
+  return <Avatar name={name} size="xs" tooltip={false} />
 }
 
 function AssigneeAvatar({ name }: { name: string }) {
-  return (
-    <div
-      className="flex items-center justify-center font-semibold flex-shrink-0"
-      style={{
-        width: '1.5rem',
-        height: '1.5rem',
-        fontSize: '0.5625rem',
-        background: 'var(--color-brand-50)',
-        color: 'var(--color-brand-dark)',
-        borderRadius: 'var(--radius-leaf-sm)',
-        border: '1px solid var(--color-brand-100)',
-      }}
-    >
-      {getInitials(name)}
-    </div>
-  )
+  // sm = 24px, matching the original 1.5rem assignee chip. Tooltip on
+  // by default — Avatar handles it.
+  return <Avatar name={name} size="sm" />
 }
 
 function SubtaskProgress({ done, total }: { done: number; total: number }) {
@@ -448,27 +437,24 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
         >
           {isAdmin && (
             <>
-              <button
+              <TahiButton
+                variant="secondary"
+                size="sm"
                 onClick={() => setWizardOpen(true)}
-                className="flex items-center gap-2 font-medium transition-colors hover:opacity-90"
-                style={{
-                  padding: '0.5rem 0.875rem', fontSize: '0.875rem', height: '2.25rem',
-                  background: 'var(--color-bg-tertiary)', color: 'var(--color-brand)',
-                  borderRadius: 'var(--radius-md)', border: '1px solid var(--color-brand-light)', cursor: 'pointer',
-                }}
+                iconLeft={<Sparkles className="w-3.5 h-3.5" />}
               >
-                <Sparkles className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">AI Help</span>
-              </button>
-              <button
+                <span className="sm:hidden">AI</span>
+              </TahiButton>
+              <TahiButton
+                variant="primary"
+                size="sm"
                 onClick={() => setDialogOpen(true)}
-                className="flex items-center gap-2 font-semibold text-white transition-opacity hover:opacity-90"
-                style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', height: '2.25rem', background: 'var(--color-brand)', borderRadius: 'var(--radius-leaf-sm)', border: 'none', cursor: 'pointer' }}
+                iconLeft={<Plus className="w-4 h-4" />}
               >
-                <Plus className="w-4 h-4" />
                 <span className="hidden sm:inline">Create Task</span>
                 <span className="sm:hidden">New</span>
-              </button>
+              </TahiButton>
             </>
           )}
         </PageHeader>
