@@ -1,16 +1,22 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
-  BookOpen, Plus, Search, ChevronRight, Clock, Save,
-  Trash2, ArrowLeft, History, X, RefreshCw, FileText,
+  BookOpen, Plus, Search, Clock, Save,
+  Trash2, History, RefreshCw, FileText, Edit3,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
+import { SlideOver } from '@/components/tahi/slide-over'
+import { Input } from '@/components/tahi/input'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import dynamic from 'next/dynamic'
-const TiptapDocEditor = dynamic(() => import('@/components/tahi/tiptap-doc-editor').then(m => ({ default: m.TiptapDocEditor })), { ssr: false })
+const TiptapDocEditor = dynamic(
+  () => import('@/components/tahi/tiptap-doc-editor').then(m => ({ default: m.TiptapDocEditor })),
+  { ssr: false },
+)
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -37,48 +43,36 @@ interface DocVersion {
   savedAt: string
 }
 
-/**
- * Lightweight markdown to HTML for doc content display.
- *
- * Stateful line walker so we can group consecutive structures into
- * proper block elements (lists wrapped in <ul>/<ol>, GFM tables,
- * etc.). The previous version emitted orphan <li> tags with no <ul>
- * wrapper, which caused browsers to render them with their default
- * ::marker and the docs CSS to render a second bullet on top — the
- * "two sets of bullets" symptom. It also had no table support, so
- * GFM tables fell through to the paragraph case and rendered as
- * literal pipes.
- *
- * Supported syntax:
- *   - Headings #, ##, ###, ####
- *   - Horizontal rule ---
- *   - Unordered list (-, *) with consecutive items grouped in <ul>
- *   - Ordered list (1.) with consecutive items grouped in <ol>
- *   - GFM table: header row, |---|---|---| separator, body rows
- *   - Paragraphs, blank lines = paragraph breaks
- *   - Inline: bold, italic, bold+italic, code, links
- *
- * Not supported (out of scope for the docs surface today):
- *   - Code blocks (```), blockquotes (>), images, nested lists,
- *     task lists, footnotes, definition lists.
- */
+interface DocCategory {
+  value: string
+  label: string
+  color: string  // dot colour for the chip
+}
+
+const CATEGORIES: DocCategory[] = [
+  { value: 'brand',      label: 'Brand',      color: '#5A824E' },
+  { value: 'services',   label: 'Services',   color: '#06b6d4' },
+  { value: 'sales',      label: 'Sales',      color: '#f59e0b' },
+  { value: 'operations', label: 'Operations', color: '#7c3aed' },
+  { value: 'team',       label: 'Team',       color: '#0f766e' },
+  { value: 'product',    label: 'Product',    color: '#d97706' },
+]
+
+const CATEGORY_BY_VALUE = new Map(CATEGORIES.map(c => [c.value, c]))
+
+// Lightweight markdown to HTML for legacy doc rendering. Same parser
+// as before; just kept inline so the rest of the file stays focused.
 function renderMarkdown(md: string): string {
   const escaped = md
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-
   const lines = escaped.split('\n')
   const out: string[] = []
   let i = 0
-
   while (i < lines.length) {
     const line = lines[i]
     const trimmed = line.trim()
-
-    // GFM table: a `|...|` row followed by a `|---|---|` separator.
-    // We detect the header + separator together; if the second row
-    // isn't a separator it's not a table, just rows of pipes.
     if (trimmed.startsWith('|') && trimmed.endsWith('|') && i + 1 < lines.length) {
       const next = lines[i + 1].trim()
       const isSeparator = /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?$/.test(next)
@@ -97,85 +91,54 @@ function renderMarkdown(md: string): string {
         continue
       }
     }
-
-    // Unordered list block — collect all consecutive `-` or `*` items.
-    if (/^[-*] /.test(trimmed)) {
+    if (!trimmed) { out.push(''); i++; continue }
+    const headingMatch = trimmed.match(/^(#{1,4})\s+(.*)$/)
+    if (headingMatch) {
+      const level = headingMatch[1].length
+      out.push(`<h${level}>${inlineMarkdown(headingMatch[2])}</h${level}>`)
+      i++
+      continue
+    }
+    if (/^[-*]\s+/.test(trimmed)) {
       const items: string[] = []
-      while (i < lines.length && /^[-*] /.test(lines[i].trim())) {
-        const content = lines[i].replace(/^\s*[-*] /, '')
-        items.push(`<li>${inlineFormat(content)}</li>`)
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        items.push(`<li>${inlineMarkdown(lines[i].replace(/^\s*[-*]\s+/, ''))}</li>`)
         i++
       }
       out.push(`<ul>${items.join('')}</ul>`)
       continue
     }
-
-    // Ordered list block — collect all consecutive `1.`, `2.` items.
-    if (/^\d+\.\s/.test(trimmed)) {
+    if (/^\d+\.\s+/.test(trimmed)) {
       const items: string[] = []
-      while (i < lines.length && /^\d+\.\s/.test(lines[i].trim())) {
-        const content = lines[i].replace(/^\s*\d+\.\s/, '')
-        items.push(`<li>${inlineFormat(content)}</li>`)
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        items.push(`<li>${inlineMarkdown(lines[i].replace(/^\s*\d+\.\s+/, ''))}</li>`)
         i++
       }
       out.push(`<ol>${items.join('')}</ol>`)
       continue
     }
-
-    if (line.startsWith('# '))    { out.push(`<h1>${inlineFormat(line.slice(2))}</h1>`);   i++; continue }
-    if (line.startsWith('## '))   { out.push(`<h2>${inlineFormat(line.slice(3))}</h2>`);   i++; continue }
-    if (line.startsWith('### '))  { out.push(`<h3>${inlineFormat(line.slice(4))}</h3>`);   i++; continue }
-    if (line.startsWith('#### ')) { out.push(`<h4>${inlineFormat(line.slice(5))}</h4>`);   i++; continue }
-
     if (/^---+$/.test(trimmed)) { out.push('<hr />'); i++; continue }
-
-    if (trimmed === '') { out.push(''); i++; continue }
-
-    // Default: paragraph.
-    out.push(`<p>${inlineFormat(line)}</p>`)
+    out.push(`<p>${inlineMarkdown(trimmed)}</p>`)
     i++
   }
-
-  return out.join('\n')
+  return out.filter(Boolean).join('\n')
 }
-
-/** Split a `| a | b | c |` row into its cells, trimming each. */
 function splitTableRow(row: string): string[] {
-  // Strip leading/trailing pipe, split on |, trim each cell.
-  return row.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim())
+  return row.replace(/^\||\|$/g, '').split('|').map(c => c.trim())
 }
-
-/** Build a GFM table with headers + body rows. Inline-formats cells. */
-function renderTable(header: string[], body: string[][]): string {
-  const head = header.map(c => `<th>${inlineFormat(c)}</th>`).join('')
-  const rows = body
-    .map(row => `<tr>${row.map(c => `<td>${inlineFormat(c)}</td>`).join('')}</tr>`)
-    .join('')
-  return `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`
+function renderTable(headers: string[], rows: string[][]): string {
+  const thead = `<thead><tr>${headers.map(h => `<th>${inlineMarkdown(h)}</th>`).join('')}</tr></thead>`
+  const tbody = `<tbody>${rows.map(r => `<tr>${r.map(c => `<td>${inlineMarkdown(c)}</td>`).join('')}</tr>`).join('')}</tbody>`
+  return `<table>${thead}${tbody}</table>`
 }
-
-function inlineFormat(text: string): string {
-  return text
-    // Bold + italic
+function inlineMarkdown(s: string): string {
+  return s
     .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
-    // Bold
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    // Italic
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    // Inline code
     .replace(/`(.*?)`/g, '<code>$1</code>')
-    // Links
     .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
 }
-
-const CATEGORIES = [
-  { value: 'brand', label: 'Brand' },
-  { value: 'services', label: 'Services' },
-  { value: 'sales', label: 'Sales' },
-  { value: 'operations', label: 'Operations' },
-  { value: 'team', label: 'Team' },
-  { value: 'product', label: 'Product' },
-] as const
 
 // -- Main Component --
 
@@ -183,7 +146,11 @@ export function DocsContent() {
   const [pages, setPages] = useState<DocPage[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [activeCategory, setActiveCategory] = useState<string | null>(null)
+  // Multi-select category filter. Empty set = all categories visible.
+  const [activeCategories, setActiveCategories] = useState<Set<string>>(new Set())
+
+  // Slide-over state. selectedPage drives view mode; editing toggles
+  // the inline editor inside the same slide-over.
   const [selectedPage, setSelectedPage] = useState<DocPage | null>(null)
   const [versions, setVersions] = useState<DocVersion[]>([])
   const [editing, setEditing] = useState(false)
@@ -193,14 +160,12 @@ export function DocsContent() {
   const [saving, setSaving] = useState(false)
   const [showNewForm, setShowNewForm] = useState(false)
   const [showVersions, setShowVersions] = useState(false)
-  const [viewingVersion, setViewingVersion] = useState<DocVersion | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<DocPage | null>(null)
+
   const fetchPages = useCallback(async () => {
     setLoading(true)
     try {
-      const params = new URLSearchParams()
-      if (activeCategory) params.set('category', activeCategory)
-      if (search.trim()) params.set('search', search.trim())
-      const res = await fetch(apiPath(`/api/admin/docs?${params}`))
+      const res = await fetch(apiPath('/api/admin/docs'))
       if (!res.ok) throw new Error('Failed to fetch')
       const data = await res.json() as { pages: DocPage[] }
       setPages(data.pages ?? [])
@@ -209,24 +174,9 @@ export function DocsContent() {
     } finally {
       setLoading(false)
     }
-  }, [activeCategory, search])
+  }, [])
 
   useEffect(() => { fetchPages() }, [fetchPages])
-
-  // Auto-open a doc when the URL carries ?doc=<id>. Used by the global
-  // search palette so clicking a doc result lands the user on that
-  // specific doc, not just the docs index. Tracked with a ref so it
-  // only fires once per param value.
-  const searchParams = useSearchParams()
-  const docParam = searchParams?.get('doc') ?? null
-  const lastDocParamRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (!docParam) return
-    if (lastDocParamRef.current === docParam) return
-    lastDocParamRef.current = docParam
-    void loadPage(docParam)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docParam])
 
   const loadPage = useCallback(async (id: string) => {
     try {
@@ -237,11 +187,65 @@ export function DocsContent() {
       setVersions(data.versions)
       setEditing(false)
       setShowVersions(false)
-      setViewingVersion(null)
     } catch {
-      // Page load failed
+      // ignore
     }
   }, [])
+
+  // Auto-open from ?doc=<id>
+  const searchParams = useSearchParams()
+  const docParam = searchParams?.get('doc') ?? null
+  const lastDocParamRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!docParam) return
+    if (lastDocParamRef.current === docParam) return
+    lastDocParamRef.current = docParam
+    void loadPage(docParam)
+  }, [docParam, loadPage])
+
+  const toggleCategory = (value: string) => {
+    setActiveCategories(prev => {
+      const next = new Set(prev)
+      if (next.has(value)) next.delete(value); else next.add(value)
+      return next
+    })
+  }
+  const clearCategories = () => setActiveCategories(new Set())
+
+  // Client-side filter so multi-cat + search both work without
+  // round-tripping. Searches title AND content text.
+  const filteredPages = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return pages.filter(p => {
+      if (activeCategories.size > 0 && !activeCategories.has(p.category)) return false
+      if (q) {
+        const inTitle = p.title.toLowerCase().includes(q)
+        const inBody = (p.contentText ?? '').toLowerCase().includes(q)
+        if (!inTitle && !inBody) return false
+      }
+      return true
+    })
+  }, [pages, search, activeCategories])
+
+  const startEdit = (page: DocPage) => {
+    setSelectedPage(page)
+    setEditTitle(page.title)
+    // BUG FIX: contentTiptap is always null (the API stores everything
+    // in contentText as HTML emitted by TiptapDocEditor). Previously
+    // we only read contentTiptap, so clicking Edit blanked the doc.
+    setEditContent(page.contentText ?? page.contentTiptap ?? '')
+    setEditCategory(page.category)
+    setEditing(true)
+    if (!selectedPage || selectedPage.id !== page.id) void loadPage(page.id)
+  }
+
+  const handleNew = () => {
+    setSelectedPage(null)
+    setEditTitle('')
+    setEditContent('')
+    setEditCategory('operations')
+    setShowNewForm(true)
+  }
 
   async function handleCreate() {
     if (!editTitle.trim()) return
@@ -263,8 +267,6 @@ export function DocsContent() {
       setEditContent('')
       await fetchPages()
       await loadPage(data.id)
-    } catch {
-      // Create failed
     } finally {
       setSaving(false)
     }
@@ -286,558 +288,641 @@ export function DocsContent() {
       await loadPage(selectedPage.id)
       await fetchPages()
       setEditing(false)
-    } catch {
-      // Save failed
     } finally {
       setSaving(false)
     }
   }
 
-  async function handleDelete(id: string) {
+  async function confirmDelete() {
+    if (!pendingDelete) return
     try {
-      await fetch(apiPath(`/api/admin/docs/${id}`), { method: 'DELETE' })
+      await fetch(apiPath(`/api/admin/docs/${pendingDelete.id}`), { method: 'DELETE' })
       setSelectedPage(null)
+      setPendingDelete(null)
       await fetchPages()
     } catch {
-      // Delete failed
+      // ignore
     }
   }
 
-  function startEdit() {
-    if (!selectedPage) return
-    setEditTitle(selectedPage.title)
-    setEditContent(selectedPage.contentTiptap ?? '')
-    setEditCategory(selectedPage.category)
-    setEditing(true)
-  }
-
-  // Group pages: parent pages as folder headers with children nested underneath
-  // Standalone pages (no parent) that aren't parents themselves appear as top-level items
-  const parentPages = pages.filter(p => !p.parentId)
-  const childPages = pages.filter(p => p.parentId)
-  const parentIds = new Set(childPages.map(c => c.parentId).filter(Boolean))
-
-  // Parents that have children = folders. Parents with no children = standalone pages.
-  const folders = parentPages
-    .filter(p => parentIds.has(p.id))
-    .map(parent => ({
-      ...parent,
-      children: childPages.filter(c => c.parentId === parent.id),
-    }))
-
-  const standalonPages = parentPages.filter(p => !parentIds.has(p.id))
+  const filtersActive = activeCategories.size > 0 || search.trim().length > 0
 
   return (
-    <div className="flex gap-0 h-[calc(100vh-7rem)]">
-      {/* Left sidebar - category tree */}
-      <div
-        className="w-72 flex-shrink-0 border-r border-[var(--color-border)] bg-[var(--color-bg)] overflow-y-auto flex flex-col"
-      >
-        {/* Search */}
-        <div className="p-3 border-b border-[var(--color-border-subtle)]">
-          <div className="relative">
-            <Search
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-subtle)]"
-              style={{ width: '0.875rem', height: '0.875rem' }}
-            />
-            <input
-              type="text"
-              placeholder="Search docs..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] pl-8 pr-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
-            />
-          </div>
+    <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: '14rem' }}>
+          <h1 style={{
+            margin: 0,
+            fontSize: '1.5rem',
+            fontWeight: 700,
+            color: 'var(--color-text)',
+            letterSpacing: '-0.015em',
+          }}>Docs hub</h1>
+          <p style={{
+            margin: '0.25rem 0 0',
+            fontSize: '0.875rem',
+            color: 'var(--color-text-muted)',
+            lineHeight: 1.5,
+          }}>
+            Every operating doc, brand note and process in one searchable place.
+          </p>
         </div>
+        <TahiButton
+          size="sm"
+          onClick={handleNew}
+          iconLeft={<Plus className="w-3.5 h-3.5" />}
+        >
+          New page
+        </TahiButton>
+      </div>
 
-        {/* Category filter tabs */}
-        <div className="p-3 border-b border-[var(--color-border-subtle)] flex flex-wrap gap-1">
-          <button
-            onClick={() => setActiveCategory(null)}
-            className="text-xs px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer"
-            style={{
-              background: !activeCategory ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
-              color: !activeCategory ? 'white' : 'var(--color-text-muted)',
-            }}
-          >
-            All
-          </button>
-          {CATEGORIES.map(cat => (
+      {/* Filter row: search + category chips */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search title or content..."
+            inputSize="sm"
+            leadingIcon={<Search size={13} aria-hidden="true" />}
+            style={{ flex: '0 1 22rem', minWidth: '14rem' }}
+          />
+          {filtersActive && (
             <button
-              key={cat.value}
-              onClick={() => setActiveCategory(activeCategory === cat.value ? null : cat.value)}
-              className="text-xs px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer"
+              type="button"
+              onClick={() => { clearCategories(); setSearch('') }}
+              className="tahi-focus-ring"
               style={{
-                background: activeCategory === cat.value ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
-                color: activeCategory === cat.value ? 'white' : 'var(--color-text-muted)',
+                background: 'transparent',
+                border: 'none',
+                padding: '0.25rem 0.5rem',
+                fontSize: '0.6875rem',
+                fontWeight: 600,
+                color: 'var(--color-text-muted)',
+                cursor: 'pointer',
+                borderRadius: 'var(--radius-sm)',
               }}
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text)' }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
             >
-              {cat.label}
+              Clear filters
             </button>
-          ))}
-        </div>
-
-        {/* New Page button */}
-        <div className="p-3 border-b border-[var(--color-border-subtle)]">
-          <TahiButton
-            size="sm"
-            onClick={() => {
-              setShowNewForm(true)
-              setSelectedPage(null)
-              setEditTitle('')
-              setEditContent('')
-              setEditCategory('operations')
-            }}
-            iconLeft={<Plus className="w-3.5 h-3.5" />}
-            className="w-full"
-          >
-            New Page
-          </TahiButton>
-          {pages.length === 0 && !loading && (
-            <TahiButton
-              size="sm"
-              variant="secondary"
-              onClick={async () => {
-                try {
-                  const payloadRes = await fetch(apiPath('/seed-docs.json'))
-                  if (!payloadRes.ok) return
-                  const payload = await payloadRes.json()
-                  const res = await fetch(apiPath('/api/admin/docs/import'), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
-                  })
-                  if (res.ok) fetchPages()
-                } catch { /* silently fail */ }
-              }}
-              className="w-full mt-2"
-            >
-              Import Tahi Docs
-            </TahiButton>
           )}
         </div>
-
-        {/* Page tree */}
-        <div className="flex-1 overflow-y-auto p-2">
-          {loading ? (
-            <LoadingSkeleton rows={5} />
-          ) : pages.length === 0 ? (
-            <div className="p-4 text-center">
-              <div
-                className="w-10 h-10 brand-gradient flex items-center justify-center mx-auto mb-2"
-                style={{ borderRadius: 'var(--radius-leaf-sm)' }}
-              >
-                <BookOpen className="w-5 h-5 text-white" />
-              </div>
-              <p className="text-sm font-medium text-[var(--color-text)] mb-1">No docs yet</p>
-              <p className="text-xs text-[var(--color-text-muted)] mb-3">Create your first doc page to build your knowledge hub.</p>
-              <TahiButton
-                size="sm"
-                onClick={() => {
-                  setShowNewForm(true)
-                  setSelectedPage(null)
-                  setEditTitle('')
-                  setEditContent('')
-                  setEditCategory('operations')
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3125rem', alignItems: 'center' }}>
+          <span style={{
+            fontSize: '0.625rem',
+            fontWeight: 600,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+            color: 'var(--color-text-subtle)',
+            marginRight: '0.1875rem',
+          }}>Categories</span>
+          {CATEGORIES.map(cat => {
+            const active = activeCategories.has(cat.value)
+            return (
+              <button
+                key={cat.value}
+                type="button"
+                onClick={() => toggleCategory(cat.value)}
+                aria-pressed={active}
+                className="tahi-focus-ring"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.3125rem',
+                  padding: '0.1875rem 0.5rem',
+                  background: active ? 'var(--color-brand-50)' : 'var(--color-bg)',
+                  border: `1px solid ${active ? 'var(--color-brand)' : 'var(--color-border)'}`,
+                  borderRadius: 999,
+                  fontSize: '0.6875rem',
+                  fontWeight: 600,
+                  color: active ? 'var(--color-text-active)' : 'var(--color-text-muted)',
+                  cursor: 'pointer',
+                  transition: 'background-color 120ms ease, border-color 120ms ease',
                 }}
-                iconLeft={<Plus className="w-3 h-3" />}
-                className="w-full"
               >
-                Create first page
-              </TahiButton>
-            </div>
-          ) : (
-            <>
-              {/* Folders (parent pages with children) */}
-              {folders.map(folder => (
-                <div key={folder.id} className="mb-3">
-                  <p className="text-xs font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider px-2 mb-1">
-                    {folder.title}
-                  </p>
-                  {folder.children.map(child => (
-                    <button
-                      key={child.id}
-                      onClick={() => loadPage(child.id)}
-                      className="w-full text-left px-2 py-1.5 rounded-md text-sm transition-colors flex items-center gap-2 cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
-                      style={{
-                        background: selectedPage?.id === child.id ? 'var(--color-bg-tertiary)' : 'transparent',
-                        color: selectedPage?.id === child.id ? 'var(--color-text)' : 'var(--color-text-muted)',
-                      }}
-                    >
-                      <FileText style={{ width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
-                      <span className="truncate">{child.title}</span>
-                    </button>
-                  ))}
-                </div>
-              ))}
-              {/* Standalone pages (no children) */}
-              {standalonPages.length > 0 && (
-                <div className="mb-3">
-                  {folders.length > 0 && (
-                    <p className="text-xs font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider px-2 mb-1">
-                      Other
-                    </p>
-                  )}
-                  {standalonPages.map(page => (
-                    <button
-                      key={page.id}
-                      onClick={() => loadPage(page.id)}
-                      className="w-full text-left px-2 py-1.5 rounded-md text-sm transition-colors flex items-center gap-2 cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
-                      style={{
-                        background: selectedPage?.id === page.id ? 'var(--color-bg-tertiary)' : 'transparent',
-                        color: selectedPage?.id === page.id ? 'var(--color-text)' : 'var(--color-text-muted)',
-                      }}
-                    >
-                      <FileText style={{ width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
-                      <span className="truncate">{page.title}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: '0.375rem',
+                    height: '0.375rem',
+                    borderRadius: 999,
+                    background: cat.color,
+                  }}
+                />
+                {cat.label}
+              </button>
+            )
+          })}
         </div>
       </div>
 
-      {/* Main content area */}
-      <div className="flex-1 overflow-y-auto bg-[var(--color-bg-secondary)]">
-        {showNewForm ? (
-          <NewPageForm
-            title={editTitle}
-            content={editContent}
-            category={editCategory}
-            saving={saving}
-            onTitleChange={setEditTitle}
-            onContentChange={setEditContent}
-            onCategoryChange={setEditCategory}
-            onSave={handleCreate}
-            onCancel={() => setShowNewForm(false)}
-          />
-        ) : selectedPage ? (
-          <PageView
-            page={selectedPage}
-            versions={versions}
-            editing={editing}
-            editTitle={editTitle}
-            editContent={editContent}
-            editCategory={editCategory}
-            saving={saving}
-            showVersions={showVersions}
-            viewingVersion={viewingVersion}
-            onEdit={startEdit}
-            onSave={handleSave}
-            onCancelEdit={() => setEditing(false)}
-            onDelete={() => handleDelete(selectedPage.id)}
-            onTitleChange={setEditTitle}
-            onContentChange={setEditContent}
-            onCategoryChange={setEditCategory}
-            onToggleVersions={() => setShowVersions(!showVersions)}
-            onViewVersion={setViewingVersion}
-          />
-        ) : (
-          <div className="flex items-center justify-center h-full">
-            <EmptyState
-              icon={<BookOpen className="w-8 h-8 text-white" />}
-              title="Select a doc or create a new page"
-              description="Choose a page from the sidebar or click New Page to get started."
+      {/* Table */}
+      {loading ? (
+        <DocsTableSkeleton />
+      ) : filteredPages.length === 0 ? (
+        <EmptyState
+          icon={<BookOpen className="w-6 h-6" />}
+          title={pages.length === 0 ? 'No docs yet' : 'No matches'}
+          description={pages.length === 0
+            ? 'Create your first page to start building the team knowledge base.'
+            : 'Try clearing a filter or adjusting your search.'}
+          action={
+            pages.length === 0 ? (
+              <TahiButton size="sm" onClick={handleNew} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+                New page
+              </TahiButton>
+            ) : undefined
+          }
+        />
+      ) : (
+        <DocsTable
+          pages={filteredPages}
+          onRowClick={(p) => loadPage(p.id)}
+          onEdit={(p) => startEdit(p)}
+          onDelete={(p) => setPendingDelete(p)}
+        />
+      )}
+
+      {/* Slide-over: view + edit modes */}
+      <SlideOver
+        open={!!selectedPage && !showNewForm}
+        onClose={() => { setSelectedPage(null); setEditing(false) }}
+        icon={<FileText size={15} />}
+        title={editing ? (editTitle || 'Untitled') : (selectedPage?.title ?? '')}
+        subtitle={selectedPage && !editing
+          ? `${CATEGORY_BY_VALUE.get(selectedPage.category)?.label ?? selectedPage.category} · Updated ${formatDistanceToNow(new Date(selectedPage.updatedAt), { addSuffix: true })}`
+          : undefined}
+        maxWidth="40rem"
+      >
+        {selectedPage && (
+          <>
+            <SlideOver.Body>
+              {editing ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <Input
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    placeholder="Page title"
+                    inputSize="md"
+                  />
+                  <CategoryPicker
+                    value={editCategory}
+                    onChange={setEditCategory}
+                  />
+                  <TiptapDocEditor
+                    content={editContent}
+                    onChange={setEditContent}
+                    placeholder="Write your doc content..."
+                  />
+                </div>
+              ) : showVersions ? (
+                <VersionList versions={versions} />
+              ) : (
+                <DocBody page={selectedPage} />
+              )}
+            </SlideOver.Body>
+            <SlideOver.Footer>
+              {editing ? (
+                <>
+                  <TahiButton variant="secondary" size="sm" onClick={() => setEditing(false)}>
+                    Cancel
+                  </TahiButton>
+                  <TahiButton
+                    size="sm"
+                    onClick={handleSave}
+                    disabled={saving}
+                    iconLeft={saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  >
+                    {saving ? 'Saving...' : 'Save'}
+                  </TahiButton>
+                </>
+              ) : (
+                <>
+                  <TahiButton
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setShowVersions(v => !v)}
+                    iconLeft={<History className="w-3.5 h-3.5" />}
+                  >
+                    {showVersions ? 'Hide history' : 'History'}
+                  </TahiButton>
+                  <div style={{ flex: 1 }} />
+                  <TahiButton
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setPendingDelete(selectedPage)}
+                    iconLeft={<Trash2 className="w-3.5 h-3.5" />}
+                  >
+                    Delete
+                  </TahiButton>
+                  <TahiButton
+                    size="sm"
+                    onClick={() => startEdit(selectedPage)}
+                    iconLeft={<Edit3 className="w-3.5 h-3.5" />}
+                  >
+                    Edit
+                  </TahiButton>
+                </>
+              )}
+            </SlideOver.Footer>
+          </>
+        )}
+      </SlideOver>
+
+      {/* New-page slide-over */}
+      <SlideOver
+        open={showNewForm}
+        onClose={() => setShowNewForm(false)}
+        icon={<Plus size={15} />}
+        title="New page"
+        subtitle="Add a doc to the team knowledge base."
+        maxWidth="40rem"
+      >
+        <SlideOver.Body>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <Input
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              placeholder="Page title"
+              inputSize="md"
+            />
+            <CategoryPicker
+              value={editCategory}
+              onChange={setEditCategory}
+            />
+            <TiptapDocEditor
+              content={editContent}
+              onChange={setEditContent}
+              placeholder="Write your doc content..."
             />
           </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// -- New Page Form --
-
-function NewPageForm({
-  title, content, category, saving,
-  onTitleChange, onContentChange, onCategoryChange, onSave, onCancel,
-}: {
-  title: string
-  content: string
-  category: string
-  saving: boolean
-  onTitleChange: (v: string) => void
-  onContentChange: (v: string) => void
-  onCategoryChange: (v: string) => void
-  onSave: () => void
-  onCancel: () => void
-}) {
-  return (
-    <div className="max-w-3xl mx-auto p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-lg font-semibold text-[var(--color-text)]">New Page</h2>
-        <div className="flex items-center gap-2">
-          <TahiButton variant="secondary" size="sm" onClick={onCancel}>
+        </SlideOver.Body>
+        <SlideOver.Footer>
+          <TahiButton variant="secondary" size="sm" onClick={() => setShowNewForm(false)}>
             Cancel
           </TahiButton>
           <TahiButton
             size="sm"
-            onClick={onSave}
-            disabled={saving || !title.trim()}
+            onClick={handleCreate}
+            disabled={saving || !editTitle.trim()}
             iconLeft={saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
           >
-            {saving ? 'Creating...' : 'Create'}
+            {saving ? 'Saving...' : 'Create page'}
           </TahiButton>
-        </div>
-      </div>
+        </SlideOver.Footer>
+      </SlideOver>
 
-      <div className="space-y-4">
-        <div>
-          <label htmlFor="new-page-title" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-            Title
-          </label>
-          <input
-            id="new-page-title"
-            type="text"
-            value={title}
-            onChange={e => onTitleChange(e.target.value)}
-            placeholder="Page title"
-            className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="new-page-category" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-            Category
-          </label>
-          <select
-            id="new-page-category"
-            value={category}
-            onChange={e => onCategoryChange(e.target.value)}
-            className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
-          >
-            {CATEGORIES.map(cat => (
-              <option key={cat.value} value={cat.value}>{cat.label}</option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-[var(--color-text)] mb-1">
-            Content
-          </label>
-          <TiptapDocEditor
-            content={content}
-            onChange={onContentChange}
-            placeholder="Write your doc content here..."
-          />
-        </div>
-      </div>
+      {/* Delete confirm */}
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title={`Delete "${pendingDelete?.title ?? ''}"?`}
+        description="This removes the doc and its version history. You can't undo this."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   )
 }
 
-// -- Page View --
+// -- Table --
 
-function PageView({
-  page, versions, editing, editTitle, editContent, editCategory, saving,
-  showVersions, viewingVersion,
-  onEdit, onSave, onCancelEdit, onDelete,
-  onTitleChange, onContentChange, onCategoryChange,
-  onToggleVersions, onViewVersion,
+function DocsTable({
+  pages,
+  onRowClick,
+  onEdit,
+  onDelete,
 }: {
-  page: DocPage
-  versions: DocVersion[]
-  editing: boolean
-  editTitle: string
-  editContent: string
-  editCategory: string
-  saving: boolean
-  showVersions: boolean
-  viewingVersion: DocVersion | null
-  onEdit: () => void
-  onSave: () => void
-  onCancelEdit: () => void
-  onDelete: () => void
-  onTitleChange: (v: string) => void
-  onContentChange: (v: string) => void
-  onCategoryChange: (v: string) => void
-  onToggleVersions: () => void
-  onViewVersion: (v: DocVersion | null) => void
+  pages: DocPage[]
+  onRowClick: (p: DocPage) => void
+  onEdit: (p: DocPage) => void
+  onDelete: (p: DocPage) => void
 }) {
   return (
-    <div className="max-w-3xl mx-auto p-6">
-      {/* Page header */}
-      <div className="flex items-start justify-between mb-6">
-        <div className="flex-1 min-w-0">
-          {editing ? (
-            <div className="space-y-3">
-              <input
-                type="text"
-                value={editTitle}
-                onChange={e => onTitleChange(e.target.value)}
-                className="w-full text-xl font-bold rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
-              />
-              <select
-                value={editCategory}
-                onChange={e => onCategoryChange(e.target.value)}
-                className="text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
-              >
-                {CATEGORIES.map(cat => (
-                  <option key={cat.value} value={cat.value}>{cat.label}</option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <>
-              <h1 className="text-xl font-bold text-[var(--color-text)] mb-1">{page.title}</h1>
-              <div className="flex items-center gap-3 text-xs text-[var(--color-text-subtle)]">
-                <span
-                  className="px-2 py-0.5 rounded-md font-medium"
-                  style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text-muted)' }}
-                >
-                  {page.category}
-                </span>
-                <span className="flex items-center gap-1">
-                  <Clock style={{ width: '0.75rem', height: '0.75rem' }} />
-                  Updated {formatDistanceToNow(new Date(page.updatedAt), { addSuffix: true })}
-                </span>
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-          {editing ? (
-            <>
-              <TahiButton variant="secondary" size="sm" onClick={onCancelEdit}>
-                Cancel
-              </TahiButton>
-              <TahiButton
-                size="sm"
-                onClick={onSave}
-                disabled={saving}
-                iconLeft={saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-              >
-                {saving ? 'Saving...' : 'Save'}
-              </TahiButton>
-            </>
-          ) : (
-            <>
-              <TahiButton
-                variant="secondary"
-                size="sm"
-                onClick={onToggleVersions}
-                iconLeft={<History className="w-3.5 h-3.5" />}
-              >
-                History
-              </TahiButton>
-              <TahiButton size="sm" onClick={onEdit}>
-                Edit
-              </TahiButton>
-              <button
-                onClick={onDelete}
-                className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-bg-tertiary)] transition-colors cursor-pointer"
-                aria-label="Delete page"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </>
-          )}
-        </div>
+    <div
+      style={{
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-md)',
+        overflow: 'hidden',
+        overflowX: 'auto',
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(20rem, 2fr) 9rem 9rem 6.5rem',
+          padding: '0.5rem 0.875rem',
+          background: 'var(--color-bg-secondary)',
+          borderBottom: '1px solid var(--color-border-subtle)',
+          fontSize: '0.625rem',
+          fontWeight: 600,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          color: 'var(--color-text-subtle)',
+          minWidth: '48rem',
+        }}
+      >
+        <span>Title</span>
+        <span>Category</span>
+        <span>Updated</span>
+        <span style={{ textAlign: 'right' }}>Actions</span>
       </div>
-
-      {/* Version history panel */}
-      {showVersions && (
-        <div className="mb-6 border border-[var(--color-border)] rounded-xl bg-[var(--color-bg)] overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border-subtle)]">
-            <h3 className="text-sm font-semibold text-[var(--color-text)]">Version History</h3>
-            <button
-              onClick={onToggleVersions}
-              className="p-1 rounded hover:bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          {versions.length === 0 ? (
-            <p className="p-4 text-sm text-[var(--color-text-muted)]">No versions yet.</p>
-          ) : (
-            <div className="max-h-48 overflow-y-auto">
-              {versions.map((v, i) => (
-                <button
-                  key={v.id}
-                  onClick={() => onViewVersion(viewingVersion?.id === v.id ? null : v)}
-                  className="w-full text-left px-4 py-2.5 flex items-center justify-between text-sm transition-colors hover:bg-[var(--color-bg-secondary)]"
-                  style={{
-                    borderBottom: i < versions.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
-                    background: viewingVersion?.id === v.id ? 'var(--color-bg-tertiary)' : 'transparent',
-                  }}
-                >
-                  <div className="flex items-center gap-2">
-                    <Clock style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)' }} />
-                    <span className="text-[var(--color-text)]">
-                      {formatDistanceToNow(new Date(v.savedAt), { addSuffix: true })}
-                    </span>
-                    {i === 0 && (
-                      <span
-                        className="text-xs px-1.5 py-0.5 rounded font-medium"
-                        style={{ background: 'var(--color-brand-50)', color: 'var(--color-brand)' }}
-                      >
-                        Current
-                      </span>
-                    )}
-                  </div>
-                  <ChevronRight
-                    style={{
-                      width: '0.75rem', height: '0.75rem',
-                      color: 'var(--color-text-subtle)',
-                      transform: viewingVersion?.id === v.id ? 'rotate(90deg)' : 'none',
-                      transition: 'transform 150ms',
-                    }}
-                  />
-                </button>
-              ))}
+      {pages.map((p, i) => {
+        const cat = CATEGORY_BY_VALUE.get(p.category)
+        return (
+          <div
+            key={p.id}
+            className="tahi-focus-ring"
+            role="button"
+            tabIndex={0}
+            aria-label={`Open ${p.title}`}
+            onClick={() => onRowClick(p)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onRowClick(p)
+              }
+            }}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(20rem, 2fr) 9rem 9rem 6.5rem',
+              alignItems: 'center',
+              padding: '0.625rem 0.875rem',
+              borderBottom: i < pages.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
+              cursor: 'pointer',
+              transition: 'background-color 120ms ease',
+              minWidth: '48rem',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+              <FileText size={14} aria-hidden="true" style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
+              <span style={{
+                fontSize: 'var(--text-sm)',
+                fontWeight: 600,
+                color: 'var(--color-text)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {p.title}
+              </span>
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Content area */}
-      {editing ? (
-        <TiptapDocEditor
-          content={editContent}
-          onChange={onContentChange}
-          placeholder="Write your doc content..."
-        />
-      ) : viewingVersion ? (
-        <div className="border border-[var(--color-border)] rounded-xl bg-[var(--color-bg)] p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <button
-              onClick={() => onViewVersion(null)}
-              className="flex items-center gap-1 text-xs font-medium text-[var(--color-brand)] hover:underline"
-            >
-              <ArrowLeft style={{ width: '0.75rem', height: '0.75rem' }} />
-              Back to current
-            </button>
-            <span className="text-xs text-[var(--color-text-subtle)]">
-              Viewing version from {formatDistanceToNow(new Date(viewingVersion.savedAt), { addSuffix: true })}
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.3125rem',
+              padding: '0.0625rem 0.4375rem',
+              background: 'var(--color-bg-secondary)',
+              border: '1px solid var(--color-border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '0.6875rem',
+              fontWeight: 600,
+              color: 'var(--color-text)',
+              width: 'fit-content',
+            }}>
+              <span
+                aria-hidden="true"
+                style={{
+                  width: '0.3125rem',
+                  height: '0.3125rem',
+                  borderRadius: 999,
+                  background: cat?.color ?? 'var(--color-text-muted)',
+                }}
+              />
+              {cat?.label ?? p.category}
             </span>
-          </div>
-          <div className="text-sm text-[var(--color-text)] whitespace-pre-wrap leading-relaxed font-mono">
-            {viewingVersion.contentTiptap || '(empty)'}
-          </div>
-        </div>
-      ) : (
-        <div className="border border-[var(--color-border)] rounded-xl bg-[var(--color-bg)] p-6">
-          {page.contentTiptap ? (
+            <span style={{
+              fontSize: '0.75rem',
+              color: 'var(--color-text-muted)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.3125rem',
+            }}>
+              <Clock size={11} aria-hidden="true" />
+              {formatDistanceToNow(new Date(p.updatedAt), { addSuffix: true })}
+            </span>
             <div
-              className="prose prose-sm max-w-none text-sm text-[var(--color-text)] leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: page.contentTiptap }}
-            />
-          ) : page.contentText ? (
-            <div
-              className="tahi-doc-prose"
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(page.contentText) }}
-            />
-          ) : (
-            <div className="text-sm text-[var(--color-text)] whitespace-pre-wrap leading-relaxed">
-              <span className="text-[var(--color-text-subtle)] italic">No content yet. Click Edit to add content.</span>
+              onClick={(e) => e.stopPropagation()}
+              style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.1875rem' }}
+            >
+              <button
+                type="button"
+                onClick={() => onEdit(p)}
+                aria-label={`Edit ${p.title}`}
+                className="tahi-focus-ring"
+                style={iconButtonStyle}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = 'var(--color-bg-tertiary)'
+                  e.currentTarget.style.color = 'var(--color-text)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'transparent'
+                  e.currentTarget.style.color = 'var(--color-text-subtle)'
+                }}
+              >
+                <Edit3 size={13} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onDelete(p)}
+                aria-label={`Delete ${p.title}`}
+                className="tahi-focus-ring"
+                style={iconButtonStyle}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = 'var(--color-danger-bg, rgba(220, 38, 38, 0.10))'
+                  e.currentTarget.style.color = 'var(--color-danger)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'transparent'
+                  e.currentTarget.style.color = 'var(--color-text-subtle)'
+                }}
+              >
+                <Trash2 size={13} aria-hidden="true" />
+              </button>
             </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+const iconButtonStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '1.625rem',
+  height: '1.625rem',
+  background: 'transparent',
+  border: 'none',
+  borderRadius: 'var(--radius-sm)',
+  color: 'var(--color-text-subtle)',
+  cursor: 'pointer',
+  transition: 'background-color 120ms ease, color 120ms ease',
+}
+
+function DocsTableSkeleton() {
+  return (
+    <div style={{
+      background: 'var(--color-bg)',
+      border: '1px solid var(--color-border-subtle)',
+      borderRadius: 'var(--radius-md)',
+      overflow: 'hidden',
+    }}>
+      <LoadingSkeleton rows={5} height={42} />
+    </div>
+  )
+}
+
+// -- Slide-over body parts --
+
+function DocBody({ page }: { page: DocPage }) {
+  if (page.contentTiptap) {
+    return (
+      <div
+        className="tahi-doc-prose"
+        dangerouslySetInnerHTML={{ __html: page.contentTiptap }}
+      />
+    )
+  }
+  if (page.contentText) {
+    // contentText might be HTML (new Tiptap-saved docs) or markdown
+    // (legacy imports). Detect: if the first non-blank chars look
+    // like a tag, render as HTML; otherwise parse as markdown.
+    const looksLikeHtml = /^\s*<[a-z]/i.test(page.contentText)
+    const html = looksLikeHtml ? page.contentText : renderMarkdown(page.contentText)
+    return (
+      <div
+        className="tahi-doc-prose"
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    )
+  }
+  return (
+    <p style={{
+      fontSize: '0.875rem',
+      color: 'var(--color-text-subtle)',
+      fontStyle: 'italic',
+      margin: 0,
+    }}>
+      No content yet. Click Edit to add content.
+    </p>
+  )
+}
+
+function VersionList({ versions }: { versions: DocVersion[] }) {
+  if (versions.length === 0) {
+    return (
+      <p style={{
+        fontSize: '0.875rem',
+        color: 'var(--color-text-muted)',
+        margin: 0,
+      }}>
+        No saved versions yet.
+      </p>
+    )
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+      {versions.map((v, i) => (
+        <div
+          key={v.id}
+          style={{
+            padding: '0.5rem 0.625rem',
+            background: 'var(--color-bg-secondary)',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            fontSize: '0.75rem',
+          }}
+        >
+          <Clock size={11} aria-hidden="true" style={{ color: 'var(--color-text-subtle)' }} />
+          <span style={{ color: 'var(--color-text)' }}>
+            {formatDistanceToNow(new Date(v.savedAt), { addSuffix: true })}
+          </span>
+          {i === 0 && (
+            <span style={{
+              fontSize: '0.625rem',
+              padding: '0.0625rem 0.3125rem',
+              background: 'var(--color-brand-50)',
+              color: 'var(--color-text-active)',
+              borderRadius: 'var(--radius-sm)',
+              fontWeight: 600,
+            }}>Current</span>
           )}
         </div>
-      )}
+      ))}
+    </div>
+  )
+}
+
+function CategoryPicker({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <div>
+      <label style={{
+        display: 'block',
+        fontSize: '0.625rem',
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        color: 'var(--color-text-subtle)',
+        marginBottom: '0.3125rem',
+      }}>
+        Category
+      </label>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+        {CATEGORIES.map(cat => {
+          const active = value === cat.value
+          return (
+            <button
+              key={cat.value}
+              type="button"
+              onClick={() => onChange(cat.value)}
+              className="tahi-focus-ring"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.3125rem',
+                padding: '0.25rem 0.5rem',
+                background: active ? 'var(--color-brand-50)' : 'var(--color-bg)',
+                border: `1px solid ${active ? 'var(--color-brand)' : 'var(--color-border)'}`,
+                borderRadius: 999,
+                fontSize: '0.6875rem',
+                fontWeight: 600,
+                color: active ? 'var(--color-text-active)' : 'var(--color-text)',
+                cursor: 'pointer',
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: '0.375rem',
+                  height: '0.375rem',
+                  borderRadius: 999,
+                  background: cat.color,
+                }}
+              />
+              {cat.label}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
