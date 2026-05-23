@@ -93,6 +93,10 @@ export interface BoardItem {
 
   /** Meta footer. */
   dueDate?: string  // ISO or display string
+  /** Optional start date. When set alongside dueDate the timeline
+   *  view renders a bar spanning the range; otherwise the timeline
+   *  drops a milestone marker at dueDate. */
+  startDate?: string
   /** Surfaces an overdue tone when set. */
   isOverdue?: boolean
   commentCount?: number
@@ -754,28 +758,38 @@ function BoardCard({
           </div>
         )}
 
-        {/* Nested children */}
+        {/* Nested children. Subtle "Sub-tasks" label + indented stack —
+            no side border (reads tacky and breaks our "borders are
+            all-sides or absent" rule). */}
         {nestedChildren && nestedChildren.length > 0 && (
-          <div
-            style={{
-              marginTop: '0.0625rem',
-              paddingLeft: '0.5rem',
-              borderLeft: '2px solid var(--color-brand-100)',
+          <div style={{ marginTop: '0.0625rem' }}>
+            <div style={{
+              fontSize: '0.625rem',
+              fontWeight: 600,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              color: 'var(--color-text-subtle)',
+              marginBottom: '0.25rem',
+            }}>
+              {nestedChildren.length} sub-{nestedChildren.length === 1 ? 'task' : 'tasks'}
+            </div>
+            <div style={{
+              paddingLeft: '0.625rem',
               display: 'flex',
               flexDirection: 'column',
               gap: '0.3125rem',
-            }}
-          >
-            {nestedChildren.map(child => (
-              <BoardCard
-                key={child.id}
-                item={child}
-                readOnly
-                compact
-                onToggleSubtask={onToggleSubtask}
-                onClick={onClick}
-              />
-            ))}
+            }}>
+              {nestedChildren.map(child => (
+                <BoardCard
+                  key={child.id}
+                  item={child}
+                  readOnly
+                  compact
+                  onToggleSubtask={onToggleSubtask}
+                  onClick={onClick}
+                />
+              ))}
+            </div>
           </div>
         )}
 

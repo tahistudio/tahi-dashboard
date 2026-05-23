@@ -2157,6 +2157,15 @@ const DEMO_BOARD_PEOPLE = {
   james: { id: 'james', name: 'James Park' },
 } as const
 
+// Dates are spread relative to "today" so the timeline always
+// shows a useful mix of overdue / active / upcoming / done bars.
+const _today = new Date()
+const _isoDate = (offsetDays: number) => {
+  const d = new Date(_today)
+  d.setDate(d.getDate() + offsetDays)
+  return d.toISOString().slice(0, 10)
+}
+
 const INITIAL_BOARD_ITEMS: BoardItem[] = [
   {
     id: 'item-1',
@@ -2171,7 +2180,8 @@ const INITIAL_BOARD_ITEMS: BoardItem[] = [
       { id: 'st-1b', label: 'Re-record voiceover', done: false },
       { id: 'st-1c', label: 'Update screenshots', done: false },
     ],
-    dueDate: 'Apr 26',
+    startDate: _isoDate(2),
+    dueDate: _isoDate(8),
     commentCount: 3,
     attachmentCount: 1,
     assignees: [DEMO_BOARD_PEOPLE.staci],
@@ -2182,7 +2192,7 @@ const INITIAL_BOARD_ITEMS: BoardItem[] = [
     title: 'Reorder pricing chips',
     priority: 'low',
     tags: [{ id: 't-mkt', label: 'Marketing', color: '#c2410c' }],
-    dueDate: 'Apr 30',
+    dueDate: _isoDate(12),
     commentCount: 1,
     assignees: [DEMO_BOARD_PEOPLE.james, DEMO_BOARD_PEOPLE.liam],
   },
@@ -2202,8 +2212,8 @@ const INITIAL_BOARD_ITEMS: BoardItem[] = [
       { id: 'st-3b', label: 'Wire e-commerce', done: false },
       { id: 'st-3c', label: 'QA dashboards',   done: false },
     ],
-    dueDate: 'Today',
-    isOverdue: false,
+    startDate: _isoDate(-5),
+    dueDate: _isoDate(4),
     commentCount: 8,
     attachmentCount: 4,
     assignees: [DEMO_BOARD_PEOPLE.liam, DEMO_BOARD_PEOPLE.james],
@@ -2214,7 +2224,7 @@ const INITIAL_BOARD_ITEMS: BoardItem[] = [
         title: 'Spike: GA4 event taxonomy',
         priority: 'medium',
         progress: { current: 2, total: 2 },
-        dueDate: 'May 1',
+        dueDate: _isoDate(1),
         assignees: [DEMO_BOARD_PEOPLE.liam],
       },
     ],
@@ -2227,7 +2237,8 @@ const INITIAL_BOARD_ITEMS: BoardItem[] = [
     priority: 'medium',
     tags: [{ id: 't-rep', label: 'Reporting', color: '#0f766e' }],
     coverColor: '#a78bfa',
-    dueDate: 'May 2',
+    startDate: _isoDate(-2),
+    dueDate: _isoDate(6),
     commentCount: 5,
     assignees: [DEMO_BOARD_PEOPLE.staci],
   },
@@ -2238,7 +2249,9 @@ const INITIAL_BOARD_ITEMS: BoardItem[] = [
     priority: 'low',
     tags: [{ id: 't-a11y', label: 'Accessibility', color: '#1f4189' }],
     progress: { current: 4, total: 6 },
-    dueDate: 'May 5',
+    startDate: _isoDate(-9),
+    dueDate: _isoDate(-3),    // past due, not done → renders red overdue
+    isOverdue: true,
     commentCount: 2,
     attachmentCount: 1,
     assignees: [DEMO_BOARD_PEOPLE.james],
@@ -2254,7 +2267,8 @@ const INITIAL_BOARD_ITEMS: BoardItem[] = [
     ],
     coverColor: '#4ade80',
     progress: { current: 8, total: 8 },
-    dueDate: 'Apr 18',
+    startDate: _isoDate(-18),
+    dueDate: _isoDate(-12),
     commentCount: 12,
     attachmentCount: 3,
     assignees: [

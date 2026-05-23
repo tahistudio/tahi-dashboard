@@ -25,7 +25,7 @@
 import * as React from 'react'
 import {
   LayoutGrid, Rows, CalendarRange, Plus, Filter,
-  Calendar, MessageCircle, Paperclip,
+  Calendar,
 } from 'lucide-react'
 import { Input } from '@/components/tahi/input'
 import { Avatar } from '@/components/tahi/avatar'
@@ -193,9 +193,11 @@ export function BoardView({
         </div>
       </div>
 
-      {/* Controls row */}
+      {/* Controls row. Everything sits on a single 1.875rem baseline
+          so search / filter / +New visually line up regardless of
+          which combination is active. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.4375rem', flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: '12rem', maxWidth: '20rem' }}>
+        <div style={{ flex: '1 1 18rem', minWidth: '12rem', maxWidth: '28rem' }}>
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -211,7 +213,8 @@ export function BoardView({
               display: 'inline-flex',
               alignItems: 'center',
               gap: '0.3125rem',
-              padding: '0.3125rem 0.625rem',
+              height: '1.875rem',
+              padding: '0 0.75rem',
               background: 'var(--color-bg)',
               border: '1px solid var(--color-border)',
               borderRadius: 'var(--radius-sm)',
@@ -219,8 +222,12 @@ export function BoardView({
               fontWeight: 500,
               color: 'var(--color-text)',
               cursor: 'pointer',
+              transition: 'background-color 120ms ease, border-color 120ms ease',
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'var(--color-bg-secondary)'
+              e.currentTarget.style.borderColor = 'var(--color-border)'
+            }}
             onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
           >
             <Filter size={12} aria-hidden="true" />
@@ -236,9 +243,10 @@ export function BoardView({
               display: 'inline-flex',
               alignItems: 'center',
               gap: '0.3125rem',
-              padding: '0.3125rem 0.75rem',
+              height: '1.875rem',
+              padding: '0 0.875rem',
               background: 'var(--color-brand)',
-              border: 'none',
+              border: '1px solid var(--color-brand)',
               borderRadius: 'var(--radius-sm)',
               fontSize: '0.75rem',
               fontWeight: 600,
@@ -246,8 +254,14 @@ export function BoardView({
               cursor: 'pointer',
               transition: 'background-color 120ms ease',
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-dark)' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-brand)' }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'var(--color-brand-dark)'
+              e.currentTarget.style.borderColor = 'var(--color-brand-dark)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'var(--color-brand)'
+              e.currentTarget.style.borderColor = 'var(--color-brand)'
+            }}
           >
             <Plus size={12} aria-hidden="true" />
             {newLabel}
@@ -520,11 +534,21 @@ function BoardTable({
   )
 }
 
-// ── Timeline view ────────────────────────────────────────────────────
+// ── Timeline view (Gantt-style) ──────────────────────────────────────
 //
-// Lightweight horizontal date axis with one row per item. Items with
-// dueDate render as dots; items with a date range render as bars.
-// Group by status column.
+// Higher-level view: one row per item, horizontal bars colored by
+// status. Status tells the story — explicit "to do / in progress /
+// done" labels aren't needed because the color encodes them. Past +
+// not done = red (overdue). Past + done = silent. Future = brand.
+// Today line marker. If an item has startDate we draw a bar across
+// the range; otherwise a milestone diamond at dueDate.
+
+interface TimelineDatum {
+  item: BoardItem
+  startTs: number | null
+  endTs: number
+  state: 'done' | 'overdue' | 'active' | 'upcoming'
+}
 
 function BoardTimeline({
   columns,
@@ -535,15 +559,47 @@ function BoardTimeline({
   items: ReadonlyArray<BoardItem>
   onItemClick?: (item: BoardItem) => void
 }) {
-  // Parse dueDate into a ms timestamp; skip items with no date.
-  const dated = items
-    .map(it => {
-      const ts = parseDate(it.dueDate)
-      return ts ? { item: it, ts } : null
-    })
-    .filter((x): x is { item: BoardItem; ts: number } => !!x)
+  const now = Date.now()
+  const doneStatuses = React.useMemo(() => {
+    // The last column in the chronological flow is treated as "done".
+    // Callers can override by naming a column whose statusValue
+    // contains 'done' or 'complete'.
+    const explicit = columns
+      .filter(c => /done|complete|deliver|ship/i.test(c.statusValue) || /done|complete|deliver|ship/i.test(c.label))
+      .map(c => c.statusValue)
+    if (explicit.length) return new Set(explicit)
+    return new Set(columns.length ? [columns[columns.length - 1].statusValue] : [])
+  }, [columns])
 
-  if (dated.length === 0) {
+  const activeStatuses = React.useMemo(() => {
+    return new Set(
+      columns
+        .filter(c => /progress|review|active|wip|doing/i.test(c.statusValue) || /progress|review|active|wip|doing/i.test(c.label))
+        .map(c => c.statusValue),
+    )
+  }, [columns])
+
+  const data: TimelineDatum[] = items
+    .map((item): TimelineDatum | null => {
+      const endTs = parseDate(item.dueDate)
+      if (!endTs) return null
+      const startTs = parseDate(item.startDate)
+      const isDone = doneStatuses.has(item.status)
+      const isActive = activeStatuses.has(item.status)
+      const state: TimelineDatum['state'] = isDone
+        ? 'done'
+        : endTs < now
+          ? 'overdue'
+          : isActive
+            ? 'active'
+            : 'upcoming'
+      return { item, startTs, endTs, state }
+    })
+    .filter((x): x is TimelineDatum => !!x)
+    // Earliest first.
+    .sort((a, b) => (a.startTs ?? a.endTs) - (b.startTs ?? b.endTs))
+
+  if (data.length === 0) {
     return (
       <div
         style={{
@@ -561,28 +617,27 @@ function BoardTimeline({
     )
   }
 
-  const minTs = Math.min(...dated.map(d => d.ts))
-  const maxTs = Math.max(...dated.map(d => d.ts))
-  // Pad the range slightly so the first and last marker don't sit on the edges.
-  const padMs = Math.max(7 * 86_400_000, (maxTs - minTs) * 0.08)
+  // Domain spans the earliest start (or dueDate) → latest dueDate,
+  // padded so the bars don't kiss the axis edges and today fits in.
+  const tsValues = data.flatMap(d => d.startTs ? [d.startTs, d.endTs] : [d.endTs])
+  const minTs = Math.min(...tsValues, now)
+  const maxTs = Math.max(...tsValues, now)
+  const padMs = Math.max(5 * 86_400_000, (maxTs - minTs) * 0.06)
   const start = minTs - padMs
   const end = maxTs + padMs
   const span = Math.max(1, end - start)
-  const ratio = (ts: number) => Math.min(1, Math.max(0, (ts - start) / span))
+  const pct = (ts: number) => ((ts - start) / span) * 100
+  const todayPct = pct(now)
 
-  // Generate tick labels (5 ticks across the range).
-  const ticks = Array.from({ length: 5 }, (_, i) => {
-    const t = start + (span * i) / 4
-    return { ratio: i / 4, label: formatTickDate(new Date(t)) }
+  // Six evenly spaced ticks across the range.
+  const tickCount = 6
+  const ticks = Array.from({ length: tickCount }, (_, i) => {
+    const t = start + (span * i) / (tickCount - 1)
+    return { ratio: i / (tickCount - 1), label: formatTickDate(new Date(t)) }
   })
 
-  // Group by status column.
-  const byStatus = new Map<string, Array<{ item: BoardItem; ts: number }>>()
-  dated.forEach(d => {
-    const list = byStatus.get(d.item.status) ?? []
-    list.push(d)
-    byStatus.set(d.item.status, list)
-  })
+  const labelWidth = '11rem'
+  const rowHeight = 28
 
   return (
     <div
@@ -594,131 +649,247 @@ function BoardTimeline({
         overflowX: 'auto',
       }}
     >
-      {/* Axis ticks */}
-      <div style={{ position: 'relative', height: '1.25rem', marginBottom: '0.625rem' }}>
-        {ticks.map((tk, i) => (
-          <div
-            key={i}
-            style={{
-              position: 'absolute',
-              left: `${tk.ratio * 100}%`,
-              transform: 'translateX(-50%)',
-              fontSize: '0.625rem',
-              fontWeight: 600,
-              color: 'var(--color-text-subtle)',
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-            }}
-          >
-            {tk.label}
-          </div>
-        ))}
+      {/* Legend */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.75rem',
+        marginBottom: '0.75rem',
+        fontSize: '0.6875rem',
+        color: 'var(--color-text-muted)',
+        fontWeight: 500,
+      }}>
+        <LegendSwatch color={STATE_COLOR.upcoming.bar} label="Upcoming" />
+        <LegendSwatch color={STATE_COLOR.active.bar} label="In flight" />
+        <LegendSwatch color={STATE_COLOR.overdue.bar} label="Overdue" />
+        <LegendSwatch color={STATE_COLOR.done.bar} label="Done" />
       </div>
-      {/* Rows */}
-      {columns
-        .filter(col => (byStatus.get(col.statusValue) ?? []).length > 0)
-        .map(col => {
-          const rows = byStatus.get(col.statusValue) ?? []
-          return (
-            <div key={col.id} style={{ marginBottom: '0.875rem' }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.3125rem',
-                marginBottom: '0.4375rem',
-                fontSize: '0.6875rem',
+
+      {/* Header: axis ticks aligned with the bar track */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: `${labelWidth} 1fr`,
+        gap: '0.625rem',
+        alignItems: 'center',
+        marginBottom: '0.4375rem',
+      }}>
+        <div />
+        <div style={{ position: 'relative', height: '1rem' }}>
+          {ticks.map((tk, i) => (
+            <span
+              key={i}
+              style={{
+                position: 'absolute',
+                left: `${tk.ratio * 100}%`,
+                transform: 'translateX(-50%)',
+                fontSize: '0.625rem',
                 fontWeight: 600,
+                color: 'var(--color-text-subtle)',
                 letterSpacing: '0.04em',
                 textTransform: 'uppercase',
-                color: 'var(--color-text-muted)',
-              }}>
-                <span
-                  aria-hidden="true"
-                  style={{
-                    width: '0.375rem',
-                    height: '0.375rem',
-                    borderRadius: 999,
-                    background: col.color ?? 'var(--color-text-muted)',
-                  }}
-                />
-                {col.label}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-                {rows.map(({ item, ts }) => {
-                  const r = ratio(ts)
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => onItemClick?.(item)}
-                      style={{
-                        position: 'relative',
-                        height: '1.5rem',
-                        background: 'var(--color-bg-secondary)',
-                        borderRadius: 'var(--radius-sm)',
-                        cursor: onItemClick ? 'pointer' : 'default',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {/* Marker */}
-                      <div
-                        style={{
-                          position: 'absolute',
-                          top: 0,
-                          bottom: 0,
-                          left: `${r * 100}%`,
-                          transform: 'translateX(-50%)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.3125rem',
-                          paddingLeft: '0.4375rem',
-                          paddingRight: '0.4375rem',
-                          background: 'var(--color-brand-50)',
-                          border: '1px solid var(--color-brand-100)',
-                          borderRadius: 'var(--radius-sm)',
-                        }}
-                      >
-                        <span
-                          aria-hidden="true"
-                          style={{
-                            width: '0.375rem',
-                            height: '0.375rem',
-                            borderRadius: 999,
-                            background: 'var(--color-brand)',
-                            flexShrink: 0,
-                          }}
-                        />
-                        <span style={{
-                          fontSize: '0.6875rem',
-                          fontWeight: 600,
-                          color: 'var(--color-text)',
-                          whiteSpace: 'nowrap',
-                          maxWidth: '12rem',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                        }}>
-                          {item.title}
-                        </span>
-                        {(item.commentCount || item.attachmentCount) && (
-                          <span style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.1875rem',
-                            color: 'var(--color-text-muted)',
-                            fontSize: '0.625rem',
-                          }}>
-                            {!!item.commentCount && <><MessageCircle size={9} aria-hidden="true" />{item.commentCount}</>}
-                            {!!item.attachmentCount && <><Paperclip size={9} aria-hidden="true" />{item.attachmentCount}</>}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )
-        })}
+              }}
+            >
+              {tk.label}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Rows */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+        {data.map(d => (
+          <TimelineRow
+            key={d.item.id}
+            datum={d}
+            pct={pct}
+            todayPct={todayPct}
+            labelWidth={labelWidth}
+            rowHeight={rowHeight}
+            ticks={ticks}
+            onClick={onItemClick}
+          />
+        ))}
+      </div>
     </div>
+  )
+}
+
+const STATE_COLOR: Record<TimelineDatum['state'], { bar: string; ring: string; text: string }> = {
+  upcoming: { bar: 'var(--color-text-subtle)',  ring: 'var(--color-border)',  text: 'var(--color-text)' },
+  active:   { bar: 'var(--color-brand)',        ring: 'var(--color-brand-dark)', text: '#ffffff' },
+  overdue:  { bar: '#ef4444',                   ring: '#b91c1c',              text: '#ffffff' },
+  done:     { bar: '#4ade80',                   ring: '#16a34a',              text: '#052e16' },
+}
+
+function TimelineRow({
+  datum,
+  pct,
+  todayPct,
+  labelWidth,
+  rowHeight,
+  ticks,
+  onClick,
+}: {
+  datum: TimelineDatum
+  pct: (ts: number) => number
+  todayPct: number
+  labelWidth: string
+  rowHeight: number
+  ticks: Array<{ ratio: number; label: string }>
+  onClick?: (item: BoardItem) => void
+}) {
+  const tone = STATE_COLOR[datum.state]
+  const rangeMode = datum.startTs != null
+  const leftPct = rangeMode ? pct(datum.startTs!) : pct(datum.endTs)
+  const rightPct = pct(datum.endTs)
+  const widthPct = rangeMode ? Math.max(1.5, rightPct - leftPct) : 0
+
+  return (
+    <div
+      onClick={() => onClick?.(datum.item)}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: `${labelWidth} 1fr`,
+        gap: '0.625rem',
+        alignItems: 'center',
+        height: rowHeight,
+        cursor: onClick ? 'pointer' : 'default',
+        borderRadius: 'var(--radius-sm)',
+        transition: 'background-color 120ms ease',
+      }}
+      onMouseEnter={e => { if (onClick) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+    >
+      {/* Label */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.3125rem',
+        minWidth: 0,
+      }}>
+        <span
+          aria-hidden="true"
+          style={{
+            width: '0.4375rem',
+            height: '0.4375rem',
+            borderRadius: 999,
+            background: tone.bar,
+            flexShrink: 0,
+          }}
+        />
+        <span style={{
+          fontSize: '0.75rem',
+          fontWeight: 500,
+          color: 'var(--color-text)',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}>
+          {datum.item.title}
+        </span>
+      </div>
+
+      {/* Track */}
+      <div style={{
+        position: 'relative',
+        height: '100%',
+      }}>
+        {/* Tick guide lines */}
+        {ticks.map((tk, i) => (
+          <span
+            key={i}
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              top: 0,
+              bottom: 0,
+              left: `${tk.ratio * 100}%`,
+              width: 1,
+              background: 'var(--color-border-subtle)',
+              opacity: 0.6,
+            }}
+          />
+        ))}
+
+        {/* Today line */}
+        {todayPct >= 0 && todayPct <= 100 && (
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              top: 0,
+              bottom: 0,
+              left: `${todayPct}%`,
+              width: 1.5,
+              background: 'var(--color-brand)',
+              opacity: 0.55,
+            }}
+          />
+        )}
+
+        {/* Bar or milestone */}
+        {rangeMode ? (
+          <div
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: `${leftPct}%`,
+              transform: 'translateY(-50%)',
+              width: `${widthPct}%`,
+              minWidth: '0.875rem',
+              height: '0.875rem',
+              background: tone.bar,
+              border: `1px solid ${tone.ring}`,
+              borderRadius: '0.25rem',
+              display: 'flex',
+              alignItems: 'center',
+              paddingLeft: '0.3125rem',
+              fontSize: '0.625rem',
+              fontWeight: 600,
+              color: tone.text,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+            }}
+            title={`${datum.item.title} · ${datum.item.dueDate ?? ''}`}
+          >
+            {widthPct > 8 && datum.item.dueDate}
+          </div>
+        ) : (
+          <span
+            aria-hidden="true"
+            title={`${datum.item.title} · ${datum.item.dueDate ?? ''}`}
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: `${rightPct}%`,
+              transform: 'translate(-50%, -50%) rotate(45deg)',
+              width: '0.625rem',
+              height: '0.625rem',
+              background: tone.bar,
+              border: `1.5px solid ${tone.ring}`,
+              boxShadow: '0 1px 2px rgba(15, 20, 16, 0.10)',
+            }}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function LegendSwatch({ color, label }: { color: string; label: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3125rem' }}>
+      <span
+        aria-hidden="true"
+        style={{
+          width: '0.625rem',
+          height: '0.625rem',
+          background: color,
+          borderRadius: '0.1875rem',
+        }}
+      />
+      {label}
+    </span>
   )
 }
 
