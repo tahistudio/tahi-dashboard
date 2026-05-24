@@ -459,6 +459,52 @@ const TOOLS: ToolDef[] = [
   }, ['leadId']),
   tool('run_lead_ai_cron', 'Manually fire the daily lead-AI cron. Scores active leads where lastAiRunAt is stale; sends transition notifications (high-intent, idle qualifying); applies auto-status flips if enabled in settings. Idempotent — safe to call any time.', {}),
 
+  // ── Discovery calls (lead-stage calls with transcript + outcome) ─────
+  tool('list_lead_calls', 'List discovery calls scheduled or completed for a lead. Returns upcoming + past in newest-first order.', {
+    leadId: prop('string', 'Lead ID'),
+  }, ['leadId']),
+  tool('schedule_lead_call', 'Schedule a discovery call against a lead. Writes a discovery_calls row + a lead_call_scheduled activity. Title + scheduledAt (ISO 8601) are required.', {
+    leadId: prop('string', 'Lead ID'),
+    title: prop('string', 'Call title, e.g. "Discovery call with Anna Walker"'),
+    scheduledAt: prop('string', 'ISO 8601 datetime, e.g. "2026-06-04T10:00:00Z"'),
+    durationMinutes: prop('number', 'Defaults to 30'),
+    googleMeetUrl: prop('string', 'Optional — paste the Google Meet link from Calendar'),
+    googleCalendarEventId: prop('string', 'Optional — set when wired via Calendar sync (Phase 2)'),
+  }, ['leadId', 'title', 'scheduledAt']),
+  tool('update_lead_call', 'Update a discovery call. Accepts any subset of pre-call fields (title, scheduledAt, durationMinutes, googleMeetUrl, status) and post-call fields (transcript, summary, outcome, outcomeNotes, scopeNotes, budgetMin/Max/Currency, timeline). When status flips to "completed" OR outcome is set for the first time, a lead_call_completed activity is written.', {
+    callId: prop('string', 'Discovery call ID'),
+    title: prop('string', 'Call title'),
+    scheduledAt: prop('string', 'ISO 8601 datetime'),
+    durationMinutes: prop('number', 'Length in minutes'),
+    status: prop('string', 'scheduled | completed | cancelled | no_show | rescheduled'),
+    googleMeetUrl: prop('string', 'Meet link'),
+    transcript: prop('string', 'Paste the Gemini / Whisper transcript. Capped at 50k chars at the API layer.'),
+    transcriptSource: prop('string', 'gemini_meet | manual_paste | whisper_api'),
+    summary: prop('string', '2-3 line headline of the call'),
+    outcome: prop('string', 'good_call | promote | nurture | archive | no_show'),
+    outcomeNotes: prop('string', 'What is the concrete next step?'),
+    scopeNotes: prop('string', 'Pages, design, integrations, etc — feeds the proposal'),
+    budgetMin: prop('number', 'Low end of budget signal'),
+    budgetMax: prop('number', 'High end of budget signal'),
+    budgetCurrency: prop('string', 'e.g. NZD, USD'),
+    timeline: prop('string', 'urgent | this_quarter | this_year | no_rush'),
+  }, ['callId']),
+  tool('record_call_outcome', 'Convenience wrapper: log a call outcome + summary + scope in one go after a discovery call. Equivalent to update_lead_call with the same fields, plus auto-flipping status to "completed". Use this when ingesting a Gemini transcript via Claude.', {
+    callId: prop('string', 'Discovery call ID'),
+    outcome: prop('string', 'good_call | promote | nurture | archive | no_show'),
+    summary: prop('string', '2-3 line headline of the call'),
+    scopeNotes: prop('string', 'Pages, design, integrations, etc'),
+    transcript: prop('string', 'Full transcript (capped at 50k chars)'),
+    budgetMin: prop('number', 'Low end of budget signal'),
+    budgetMax: prop('number', 'High end of budget signal'),
+    budgetCurrency: prop('string', 'Currency code'),
+    timeline: prop('string', 'urgent | this_quarter | this_year | no_rush'),
+    outcomeNotes: prop('string', 'Next step / follow-up'),
+  }, ['callId', 'outcome']),
+  tool('delete_lead_call', 'Hard-delete a discovery call.', {
+    callId: prop('string', 'Discovery call ID'),
+  }, ['callId']),
+
   // ── Deals / Pipeline ──────────────────────────────────────────────────
   tool('list_deals', 'List all sales pipeline deals with stage, value, owner, company'),
   tool('get_pipeline_stages', 'Get all pipeline stages'),
@@ -1337,6 +1383,28 @@ async function executeTool(
     case 'run_lead_ai_cron': {
       return json(await apiWrite('/api/admin/cron/leads-ai', token, 'POST'))
     }
+
+    // ── Discovery calls ──────────────────────────────────────────────
+    case 'list_lead_calls':
+      return json(await apiGet(`/api/admin/leads/${s('leadId')}/calls`, token))
+    case 'schedule_lead_call': {
+      const { leadId: lcLeadId, ...body } = args
+      return json(await apiWrite(`/api/admin/leads/${lcLeadId}/calls`, token, 'POST', body))
+    }
+    case 'update_lead_call': {
+      const { callId, ...body } = args
+      return json(await apiWrite(`/api/admin/discovery-calls/${callId}`, token, 'PATCH', body))
+    }
+    case 'record_call_outcome': {
+      const { callId, ...body } = args
+      // Force status=completed when an outcome is being recorded.
+      return json(await apiWrite(`/api/admin/discovery-calls/${callId}`, token, 'PATCH', {
+        ...body,
+        status: 'completed',
+      }))
+    }
+    case 'delete_lead_call':
+      return json(await apiWrite(`/api/admin/discovery-calls/${s('callId')}`, token, 'DELETE'))
 
     case 'list_deals':
       return json(await apiGet('/api/admin/deals', token))

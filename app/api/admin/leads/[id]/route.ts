@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { eq, desc } from 'drizzle-orm'
 import { lookupOrCreatePerson } from '@/lib/people'
 
 type Params = { params: Promise<{ id: string }> }
@@ -77,10 +77,18 @@ export async function GET(req: NextRequest, { params }: Params) {
     }
   }
 
+  // Discovery calls (pre-call + post-call). Newest first.
+  const calls = await database
+    .select()
+    .from(schema.discoveryCalls)
+    .where(eq(schema.discoveryCalls.leadId, id))
+    .orderBy(desc(schema.discoveryCalls.scheduledAt))
+
   return NextResponse.json({
     lead: { ...lead, ownerName, ownerAvatarUrl },
     activities: activities.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')),
     discoveryQuestionsTemplate,
+    calls,
   })
 }
 
