@@ -402,6 +402,9 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
             />
           )}
 
+          {/* Google Workspace (Calendar + Drive) */}
+          {isAdmin && <GoogleIntegrationSection />}
+
           {/* Google Calendar Booking (admin only) - T87 */}
           {isAdmin && <BookingLinkSection settings={settings} onSave={saveSetting} savingKey={savingKey} />}
 
@@ -1942,6 +1945,200 @@ function ToggleRow({
         }} />
       </button>
     </div>
+  )
+}
+
+// -- Google Workspace integration section --
+// Connect via OAuth, sync Calendar events into discovery_calls,
+// disconnect when needed.
+
+interface GoogleStatus {
+  connected: boolean
+  status?: string
+  email: string | null
+  scopes: string[]
+  expiresAt: string | null
+  lastSyncedAt: string | null
+  errorMessage: string | null
+  configured: boolean
+}
+
+function GoogleIntegrationSection() {
+  const [status, setStatus] = useState<GoogleStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [connecting, setConnecting] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [lastSyncSummary, setLastSyncSummary] = useState<{
+    fetched: number; matched: number; created: number; updated: number; skipped: number
+  } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const { showToast } = useToast()
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/integrations/google/status'))
+      if (!res.ok) throw new Error('Failed to load Google status')
+      const data = await res.json() as GoogleStatus
+      setStatus(data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load status')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+    // Pick up ?connected=1 or ?error=X from the OAuth callback redirect
+    if (typeof window !== 'undefined' && window.location.hash.includes('google')) {
+      if (window.location.hash.includes('connected=1')) {
+        showToast('Google connected', 'success')
+      } else if (window.location.hash.includes('error=')) {
+        const m = window.location.hash.match(/error=([^&]+)/)
+        if (m) setError(decodeURIComponent(m[1]))
+      }
+    }
+  }, [load, showToast])
+
+  async function startConnect() {
+    setConnecting(true)
+    setError(null)
+    try {
+      const res = await fetch(apiPath('/api/admin/integrations/google/start'))
+      const data = await res.json() as { url?: string; error?: string }
+      if (!res.ok || !data.url) {
+        throw new Error(data.error ?? 'Could not start OAuth')
+      }
+      window.location.href = data.url
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Connect failed')
+      setConnecting(false)
+    }
+  }
+
+  async function disconnect() {
+    if (!window.confirm('Disconnect Google? Existing Calendar-synced calls stay; future syncs stop.')) return
+    try {
+      await fetch(apiPath('/api/admin/integrations/google/status'), { method: 'DELETE' })
+      await load()
+      showToast('Google disconnected', 'success')
+    } catch {
+      setError('Disconnect failed')
+    }
+  }
+
+  async function syncCalendar() {
+    setSyncing(true)
+    setError(null)
+    try {
+      const res = await fetch(apiPath('/api/admin/integrations/google/sync-calendar'), { method: 'POST' })
+      const data = await res.json() as {
+        fetched?: number; matched?: number; created?: number; updated?: number; skipped?: number
+        error?: string
+      }
+      if (!res.ok) throw new Error(data.error ?? 'Sync failed')
+      setLastSyncSummary({
+        fetched: data.fetched ?? 0,
+        matched: data.matched ?? 0,
+        created: data.created ?? 0,
+        updated: data.updated ?? 0,
+        skipped: data.skipped ?? 0,
+      })
+      await load()
+      showToast(`Synced: ${data.created ?? 0} new + ${data.updated ?? 0} updated`, 'success')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sync failed')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  return (
+    <section id="google">
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <Link2 className="w-5 h-5" />
+        Google Workspace
+      </h2>
+
+      <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 space-y-4">
+        <p className="text-xs text-[var(--color-text-muted)]">
+          Connect a Google account to auto-pull Calendar meetings into the dashboard. The sync matches attendee emails against leads, contacts, and active deals, then creates a discovery call on the right record. Drive integration (for &quot;Notes by Gemini&quot; transcripts) layers on after this is wired.
+        </p>
+
+        {loading && <LoadingSkeleton rows={1} />}
+
+        {!loading && status && !status.configured && (
+          <div className="text-sm text-[var(--color-warning)] bg-[var(--color-warning-bg)] border border-[var(--color-warning)] rounded-lg p-3">
+            GOOGLE_CLIENT_ID is not configured on this environment. Add GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET to the Webflow Cloud secrets, then refresh.
+          </div>
+        )}
+
+        {!loading && status && status.configured && (
+          <>
+            {status.connected ? (
+              <div className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <Badge tone="positive" variant="soft" size="sm">Connected</Badge>
+                  <div className="text-sm text-[var(--color-text)]">
+                    {status.email ?? 'Connected (email unknown)'}
+                  </div>
+                </div>
+                {status.lastSyncedAt && (
+                  <div className="text-xs text-[var(--color-text-muted)]">
+                    Last synced: {new Date(status.lastSyncedAt).toLocaleString()}
+                  </div>
+                )}
+                {status.errorMessage && (
+                  <div className="text-sm text-[var(--color-danger)] bg-[var(--color-danger-bg)] border border-[var(--color-danger)] rounded-lg p-3">
+                    {status.errorMessage}
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <TahiButton
+                    size="sm"
+                    onClick={() => { void syncCalendar() }}
+                    disabled={syncing}
+                    iconLeft={syncing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  >
+                    {syncing ? 'Syncing...' : 'Sync calendar now'}
+                  </TahiButton>
+                  <TahiButton variant="secondary" size="sm" onClick={disconnect}>
+                    Disconnect
+                  </TahiButton>
+                </div>
+                {lastSyncSummary && (
+                  <div className="text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-secondary)] border border-[var(--color-border-subtle)] rounded-lg p-3">
+                    Last run: <strong>{lastSyncSummary.fetched}</strong> events fetched ·
+                    <strong> {lastSyncSummary.matched}</strong> matched ·
+                    <strong> {lastSyncSummary.created}</strong> created ·
+                    <strong> {lastSyncSummary.updated}</strong> updated ·
+                    <strong> {lastSyncSummary.skipped}</strong> skipped (no CRM match)
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div>
+                <TahiButton
+                  size="sm"
+                  onClick={() => { void startConnect() }}
+                  disabled={connecting}
+                  iconLeft={<Link2 className="w-3.5 h-3.5" />}
+                >
+                  {connecting ? 'Redirecting...' : 'Connect Google'}
+                </TahiButton>
+              </div>
+            )}
+          </>
+        )}
+
+        {error && (
+          <div className="text-sm text-[var(--color-danger)] bg-[var(--color-danger-bg)] border border-[var(--color-danger)] rounded-lg p-3">
+            {error}
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 
