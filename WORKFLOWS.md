@@ -77,6 +77,25 @@ Not a priority. Slated for after the dashboard becomes the daily driver for sale
 25. **LinkedIn outreach tracking (manual send, automated tracking)** — at low volume (Liam's scale: 3-10 leads/month), no need for a tool like Heyreach or Expandi. Use LinkedIn Premium directly to send connection requests + InMail, log each as an activity on the lead. Dashboard surfaces "follow up in 4 days" tasks. Auto-send is off the table (LinkedIn rate-limits or bans).
 26. **Low-volume cold email outreach** — also manual send. Dashboard tracks sent / replied / no-response per lead so Liam doesn't double-touch. Volume stays under 20 emails / week / domain so the email reputation isn't burned.
 
+### Phase G · Sales conversion levers (2026-05-24, after Phase B)
+
+Decided 2026-05-24 after a "what would actually help" review. Inbound is THIN (Webflow Partner leads dried up when minimum moved from $2.5k → $5k USD; Tahi's own website doesn't generate leads because it needs redesign + SEO). So the lever is NOT volume automation — it's making every inbound count.
+
+27. **AI-drafted first reply on new inbound** — when a lead lands, Sonnet drafts a personalised reply in Liam's voice using the existing enrichment (snapshot + signals + scope). Lands on his phone via push / Resend; he taps Send or Edit. Cuts speed-to-response from hours to ~30 seconds. Industry stat: 9× conversion lift when replying within 5 min vs 1 hour.
+28. **Pre-call digest** — 30 min before each Calendar-synced call, the AI briefing + 6 questions + last activity items lands in Liam's inbox / SMS. Never have to remember to open the dashboard for prep. Trivial to build once Calendar OAuth is live.
+29. **Discovery → Proposal → Contract → Tasks pipeline** — the big one. After a discovery call, the dashboard generates:
+    a. **AI-draft proposal** from transcript + scope notes + enrichment + Tahi's pricing logic + existing proposal templates. Liam edits, then sends within an hour of the call ending.
+    b. **Capacity check baked in** — uses live capacity data to propose a realistic timeline ("you're at 65% this month, propose 6-week not 3").
+    c. **Accept → auto-generate contract** from the proposal sections + Tahi's template library + the agreed scope. Liam reviews + sends for signature.
+    d. **Sign → auto-create tasks + requests** with scope items as the work breakdown. Project kicks off without manual setup.
+    Path to "1 hour from discovery to proposal sent, 1 day from accept to project kicked off." Multi-day build in slices.
+30. **Affiliate reactivation prompts** — 12 affiliates on the books, most likely 2 active. Monthly cron: "[Affiliate name] hasn't sent a lead in 90 days, draft a check-in email?" with an AI-drafted message. Cheap, real revenue lever (1-2 reactivations a year = thousands in commission flow).
+31. **Lead reactivation (DEFERRED)** — re-score archived leads weekly. Deprioritised because thin inbound volume = small archived pool. Revisit when archived > 50 leads.
+
+### Content + presence (low priority but written down)
+
+Liam's stated goal (2026-05-24): 1 newsletter / month + 1 LinkedIn post / day. Real value, not noise. Dashboard can help by surfacing patterns from the lead/customer data (common pain points, tech-stack distribution, etc.) as content prompts. Build as a "Content Studio" surface once the sales loop is locked.
+
 ---
 
 ## Workflows
