@@ -1544,6 +1544,32 @@ export const leads = sqliteTable('leads', {
   // Heuristic deal-size estimate. Currency is stored alongside.
   estimatedValue: integer('estimated_value'),
   currency: text('currency').notNull().default('NZD'),
+  // ── Firmographics + tech profile (promoted out of `brief` blob in 0047) ──
+  // These match the CSV columns the WordPress lead exports dump into
+  // `brief` as a `Field: value · Field: value · ...` string. Promoting
+  // to first-class columns so they're filterable, editable, and used
+  // by the AI scoring rubric instead of buried in prose.
+  industry: text('industry'),
+  employeeCount: integer('employee_count'),
+  /** Banded string e.g. "$10M - $50M". Bands aren't numeric so keep as text. */
+  revenueBand: text('revenue_band'),
+  /** Approx monthly web traffic (page views). Often null. */
+  monthlyVisits: integer('monthly_visits'),
+  /** Free-text for now: "Prospect", "Customer", "Partner", "Past client" etc. */
+  leadType: text('lead_type'),
+  /** Company LinkedIn. */
+  linkedinUrl: text('linkedin_url'),
+  /** Personal LinkedIn of the actual lead person (preferred for outreach). */
+  linkedinPersonalUrl: text('linkedin_personal_url'),
+  /** JSON array of tech names from the sniffer, e.g. ["Webflow","HubSpot","GA"]. */
+  techStack: text('tech_stack'),
+  /** Website CMS / builder — Webflow, WordPress, Framer, Shopify, Squarespace, Wix, Ghost.
+   *  Promoted out of techStack because for an agency replacing/competing with these
+   *  platforms, the CMS is the single highest-value qualifying signal. */
+  cms: text('cms'),
+  /** ISO 3166-1 alpha-2 (NZ, AU, US) or free-text country name. */
+  country: text('country'),
+  yearFounded: integer('year_founded'),
   // Lifecycle:
   //   new           — just landed, untriaged
   //   qualifying    — actively working on it (call scheduled, replies in-flight)
@@ -1594,6 +1620,43 @@ export const leads = sqliteTable('leads', {
   index('idx_leads_source').on(table.source),
   index('idx_leads_person').on(table.personId),
   index('idx_leads_ai_run').on(table.lastAiRunAt),
+])
+
+// ============================================================
+// AI REPLY DRAFTS (first-reply on new inbound + tone learning)
+// ============================================================
+//
+// Captures both the AI's first attempt at a reply AND what Liam
+// actually sent. The diff = a tone-training example fed back into
+// future drafts as few-shot. By draft ~20, Sonnet should sound like
+// Liam.
+//
+// Lifecycle:
+//   pending  → AI drafted, not yet reviewed
+//   sent     → Liam clicked Send (with or without edits)
+//   dismissed → Liam said "don't send" — still kept as a tone hint
+//               (Liam's rejection is information too)
+
+export const aiReplyDrafts = sqliteTable('ai_reply_drafts', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  leadId: text('lead_id').references(() => leads.id, { onDelete: 'cascade' }),
+  // Original Sonnet output (frozen at draft time)
+  aiDraftSubject: text('ai_draft_subject'),
+  aiDraftBody: text('ai_draft_body').notNull(),
+  // What Liam actually sent (may equal aiDraft if untouched)
+  finalSubject: text('final_subject'),
+  finalBody: text('final_body'),
+  // pending | sent | dismissed
+  status: text('status').notNull().default('pending'),
+  sentAt: text('sent_at'),
+  // Resend response id, for delivery tracking later
+  resendMessageId: text('resend_message_id'),
+  // Token cost gate visibility
+  tokensSpent: integer('tokens_spent').default(0),
+  ...timestamps,
+}, (table) => [
+  index('idx_ai_reply_drafts_lead').on(table.leadId),
+  index('idx_ai_reply_drafts_status').on(table.status),
 ])
 
 // ============================================================

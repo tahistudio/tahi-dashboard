@@ -4,14 +4,16 @@ import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  ArrowLeft, Mail, Phone, Building2, Globe, User, Tag, ExternalLink,
-  Sparkles, RefreshCw, ArrowUpRight, Trash2, Edit3,
+  Mail, Phone, Building2, Globe, User, Tag, ExternalLink,
+  Sparkles, RefreshCw, ArrowUpRight, Trash2, Edit3, Save, X,
+  Linkedin, Users, DollarSign, Eye, MapPin, Calendar,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
+import { Input } from '@/components/tahi/input'
 import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 
@@ -35,6 +37,19 @@ interface Lead {
   ownerName?: string | null
   promotedDealId: string | null
   promotedAt: string | null
+  // 0047 firmographics
+  industry: string | null
+  employeeCount: number | null
+  revenueBand: string | null
+  monthlyVisits: number | null
+  leadType: string | null
+  linkedinUrl: string | null
+  linkedinPersonalUrl: string | null
+  techStack: string | null
+  cms: string | null
+  country: string | null
+  yearFounded: number | null
+  // AI columns
   aiScore: number | null
   aiScoreReason: string | null
   aiSummary: string | null
@@ -55,6 +70,28 @@ interface LeadActivity {
   description: string | null
   createdAt: string
   authorName: string | null
+}
+
+/** Draft mirrors Lead but numeric fields are strings (form inputs). */
+interface LeadDraft {
+  name: string
+  email: string
+  phone: string
+  jobTitle: string
+  linkedinPersonalUrl: string
+  company: string
+  website: string
+  industry: string
+  employeeCount: string
+  revenueBand: string
+  monthlyVisits: string
+  leadType: string
+  linkedinUrl: string
+  country: string
+  yearFounded: string
+  techStack: string
+  cms: string
+  brief: string
 }
 
 const STATUS_TONES: Record<string, BadgeTone> = {
@@ -84,6 +121,29 @@ function normaliseUrl(input: string | null | undefined): string {
   return /^https?:\/\//i.test(t) ? t : `https://${t}`
 }
 
+function toDraft(lead: Lead): LeadDraft {
+  return {
+    name: lead.name ?? '',
+    email: lead.email ?? '',
+    phone: lead.phone ?? '',
+    jobTitle: lead.jobTitle ?? '',
+    linkedinPersonalUrl: lead.linkedinPersonalUrl ?? '',
+    company: lead.company ?? '',
+    website: lead.website ?? '',
+    industry: lead.industry ?? '',
+    employeeCount: lead.employeeCount != null ? String(lead.employeeCount) : '',
+    revenueBand: lead.revenueBand ?? '',
+    monthlyVisits: lead.monthlyVisits != null ? String(lead.monthlyVisits) : '',
+    leadType: lead.leadType ?? '',
+    linkedinUrl: lead.linkedinUrl ?? '',
+    country: lead.country ?? '',
+    yearFounded: lead.yearFounded != null ? String(lead.yearFounded) : '',
+    techStack: safeJsonArray<string>(lead.techStack).join(', '),
+    cms: lead.cms ?? '',
+    brief: lead.brief ?? '',
+  }
+}
+
 // ── Main page content ─────────────────────────────────────────────────────
 
 export function LeadPageContent({ leadId }: { leadId: string }) {
@@ -97,6 +157,11 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
   const [pendingDelete, setPendingDelete] = useState(false)
   const [pendingPromote, setPendingPromote] = useState(false)
   const [promoting, setPromoting] = useState(false)
+  // Edit-in-place state
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState<LeadDraft | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -119,6 +184,73 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
   }, [leadId])
 
   useEffect(() => { void load() }, [load])
+
+  function startEdit() {
+    if (!lead) return
+    setDraft(toDraft(lead))
+    setEditing(true)
+    setSaveError(null)
+  }
+
+  function cancelEdit() {
+    setEditing(false)
+    setDraft(null)
+    setSaveError(null)
+  }
+
+  async function saveEdit() {
+    if (!lead || !draft) return
+    setSaving(true)
+    setSaveError(null)
+    try {
+      // Build PATCH body. Empty strings become null; numeric strings
+      // get parsed; techStack splits on commas.
+      const techArr = draft.techStack
+        .split(',').map(s => s.trim()).filter(Boolean)
+      const body: Record<string, unknown> = {
+        name: draft.name.trim(),
+        email: draft.email.trim() || null,
+        phone: draft.phone.trim() || null,
+        jobTitle: draft.jobTitle.trim() || null,
+        linkedinPersonalUrl: draft.linkedinPersonalUrl.trim() || null,
+        company: draft.company.trim() || null,
+        website: draft.website.trim() || null,
+        industry: draft.industry.trim() || null,
+        employeeCount: draft.employeeCount.trim()
+          ? parseInt(draft.employeeCount.replace(/[^0-9]/g, ''), 10) || null
+          : null,
+        revenueBand: draft.revenueBand.trim() || null,
+        monthlyVisits: draft.monthlyVisits.trim()
+          ? parseInt(draft.monthlyVisits.replace(/[^0-9]/g, ''), 10) || null
+          : null,
+        leadType: draft.leadType.trim() || null,
+        linkedinUrl: draft.linkedinUrl.trim() || null,
+        country: draft.country.trim() || null,
+        yearFounded: draft.yearFounded.trim()
+          ? parseInt(draft.yearFounded.replace(/[^0-9]/g, ''), 10) || null
+          : null,
+        techStack: techArr,
+        cms: draft.cms.trim() || null,
+        brief: draft.brief.trim() || null,
+      }
+      const res = await fetch(apiPath(`/api/admin/leads/${lead.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string }
+        throw new Error(err.error ?? 'Save failed')
+      }
+      await load()
+      setEditing(false)
+      setDraft(null)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   async function runEnrich() {
     if (!lead) return
@@ -191,6 +323,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
   const aiSources = safeJsonArray<string>(lead.aiSources)
   const aiQuestions = safeJsonArray<{ text: string; rationale?: string } | string>(lead.aiQuestions)
     .map(q => typeof q === 'string' ? { text: q } : q)
+  const techStack = safeJsonArray<string>(lead.techStack)
   let aiSignals: Record<string, string | undefined> = {}
   if (lead.aiSignals) {
     try {
@@ -247,44 +380,81 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
         </div>
 
         <div style={{ display: 'flex', gap: '0.4375rem', flexWrap: 'wrap' }}>
-          <TahiButton
-            variant="secondary"
-            size="sm"
-            onClick={() => router.push(`/leads?lead=${lead.id}`)}
-            iconLeft={<Edit3 className="w-3.5 h-3.5" />}
-          >
-            Edit
-          </TahiButton>
-          <TahiButton
-            variant="secondary"
-            size="sm"
-            onClick={() => { void runEnrich() }}
-            disabled={enriching}
-            iconLeft={enriching
-              ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              : <Sparkles className="w-3.5 h-3.5" />}
-          >
-            {enriching ? 'Researching...' : (lead.enrichedAt ? 'Re-run AI' : 'Run AI')}
-          </TahiButton>
-          {lead.status !== 'promoted' && (
-            <TahiButton
-              size="sm"
-              onClick={() => setPendingPromote(true)}
-              iconLeft={<ArrowUpRight className="w-3.5 h-3.5" />}
-            >
-              Promote to deal
-            </TahiButton>
+          {editing ? (
+            <>
+              <TahiButton
+                size="sm"
+                onClick={() => { void saveEdit() }}
+                disabled={saving}
+                iconLeft={saving
+                  ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  : <Save className="w-3.5 h-3.5" />}
+              >
+                {saving ? 'Saving...' : 'Save'}
+              </TahiButton>
+              <TahiButton
+                variant="secondary"
+                size="sm"
+                onClick={cancelEdit}
+                disabled={saving}
+                iconLeft={<X className="w-3.5 h-3.5" />}
+              >
+                Cancel
+              </TahiButton>
+            </>
+          ) : (
+            <>
+              <TahiButton
+                variant="secondary"
+                size="sm"
+                onClick={startEdit}
+                iconLeft={<Edit3 className="w-3.5 h-3.5" />}
+              >
+                Edit
+              </TahiButton>
+              <TahiButton
+                variant="secondary"
+                size="sm"
+                onClick={() => { void runEnrich() }}
+                disabled={enriching}
+                iconLeft={enriching
+                  ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  : <Sparkles className="w-3.5 h-3.5" />}
+              >
+                {enriching ? 'Researching...' : (lead.enrichedAt ? 'Re-run AI' : 'Run AI')}
+              </TahiButton>
+              {lead.status !== 'promoted' && (
+                <TahiButton
+                  size="sm"
+                  onClick={() => setPendingPromote(true)}
+                  iconLeft={<ArrowUpRight className="w-3.5 h-3.5" />}
+                >
+                  Promote to deal
+                </TahiButton>
+              )}
+              <TahiButton
+                variant="secondary"
+                size="sm"
+                onClick={() => setPendingDelete(true)}
+                iconLeft={<Trash2 className="w-3.5 h-3.5" />}
+              >
+                Delete
+              </TahiButton>
+            </>
           )}
-          <TahiButton
-            variant="secondary"
-            size="sm"
-            onClick={() => setPendingDelete(true)}
-            iconLeft={<Trash2 className="w-3.5 h-3.5" />}
-          >
-            Delete
-          </TahiButton>
         </div>
       </header>
+
+      {saveError && (
+        <div style={{
+          padding: '0.5rem 0.75rem',
+          background: 'var(--color-danger-bg)',
+          border: '1px solid var(--color-danger)',
+          borderRadius: 'var(--radius-md)',
+          fontSize: '0.75rem',
+          color: 'var(--color-danger)',
+        }}>{saveError}</div>
+      )}
 
       {enrichError && (
         <div style={{
@@ -302,7 +472,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
         {/* MAIN COLUMN */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           {/* AI briefing — only when enriched */}
-          {lead.enrichedAt && (
+          {!editing && lead.enrichedAt && (
             <PageCard title="AI briefing">
               {lead.aiScoreReason && (
                 <p style={{
@@ -349,9 +519,8 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
             </PageCard>
           )}
 
-          {/* Discovery questions — show whenever the always-ask
-              template exists (universal, not AI-dependent) */}
-          {(discoveryTemplate.length > 0 || aiQuestions.length > 0) && (
+          {/* Discovery questions */}
+          {!editing && (discoveryTemplate.length > 0 || aiQuestions.length > 0) && (
             <PageCard title="Discovery call">
               {discoveryTemplate.length > 0 && (
                 <div>
@@ -371,20 +540,22 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
             </PageCard>
           )}
 
-          {/* Calls — full polymorphic component */}
-          <DiscoveryCallsCard
-            parentType="lead"
-            parentId={lead.id}
-            parentAlreadyPromoted={!!lead.promotedDealId}
-            onChanged={load}
-          />
+          {/* Calls */}
+          {!editing && (
+            <DiscoveryCallsCard
+              parentType="lead"
+              parentId={lead.id}
+              parentAlreadyPromoted={!!lead.promotedDealId}
+              onChanged={load}
+            />
+          )}
 
           {/* Activity timeline */}
-          {activities.length > 0 && (
+          {!editing && activities.length > 0 && (
             <PageCard title="Activity">
               <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
                 {[...activities].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')).map(a => {
-                  const isSystem = a.type === 'lead_enriched' || a.type === 'lead_status_changed' && !a.authorName
+                  const isSystem = a.type === 'lead_enriched' || (a.type === 'lead_status_changed' && !a.authorName)
                   return (
                     <li key={a.id} style={{ display: 'flex', gap: '0.5625rem', alignItems: 'flex-start' }}>
                       <span style={{
@@ -417,40 +588,146 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
 
         {/* SIDEBAR */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <PageCard title="Contact">
-            <DetailGrid>
-              {lead.email && <DetailRow icon={<Mail size={12} />} label="Email" value={
-                <a href={`mailto:${lead.email}`} style={{ color: 'var(--color-text-active)', textDecoration: 'underline' }}>{lead.email}</a>
-              } />}
-              {lead.phone && <DetailRow icon={<Phone size={12} />} label="Phone" value={lead.phone} />}
-              {lead.jobTitle && <DetailRow icon={<User size={12} />} label="Role" value={lead.jobTitle} />}
-              {lead.company && <DetailRow icon={<Building2 size={12} />} label="Company" value={lead.company} />}
-              {lead.website && (
-                <DetailRow icon={<Globe size={12} />} label="Website" value={
-                  <a href={normaliseUrl(lead.website)} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-text-active)', textDecoration: 'underline', wordBreak: 'break-all' }}>{lead.website}</a>
-                } />
-              )}
-              {lead.ownerName && <DetailRow icon={<User size={12} />} label="Owner" value={lead.ownerName} />}
-              <DetailRow icon={<Tag size={12} />} label="Source" value={`${lead.source}${lead.sourceDetail ? ` · ${lead.sourceDetail}` : ''}`} />
-              {lead.estimatedValue != null && (
-                <DetailRow icon={<Tag size={12} />} label="Estimate" value={`${lead.estimatedValue.toLocaleString()} ${lead.currency}`} />
-              )}
-            </DetailGrid>
+          {/* Person card */}
+          <PageCard title="Person">
+            {editing && draft ? (
+              <EditGrid>
+                <EditRow label="Name" value={draft.name} onChange={v => setDraft({ ...draft, name: v })} />
+                <EditRow label="Email" value={draft.email} onChange={v => setDraft({ ...draft, email: v })} type="email" />
+                <EditRow label="Phone" value={draft.phone} onChange={v => setDraft({ ...draft, phone: v })} type="tel" />
+                <EditRow label="Role" value={draft.jobTitle} onChange={v => setDraft({ ...draft, jobTitle: v })} />
+                <EditRow label="Personal LinkedIn" value={draft.linkedinPersonalUrl} onChange={v => setDraft({ ...draft, linkedinPersonalUrl: v })} placeholder="https://linkedin.com/in/..." />
+              </EditGrid>
+            ) : (
+              <DetailGrid>
+                {lead.email && <DetailRow icon={<Mail size={12} />} label="Email" value={
+                  <a href={`mailto:${lead.email}`} style={{ color: 'var(--color-text-active)', textDecoration: 'underline' }}>{lead.email}</a>
+                } />}
+                {lead.phone && <DetailRow icon={<Phone size={12} />} label="Phone" value={lead.phone} />}
+                {lead.jobTitle && <DetailRow icon={<User size={12} />} label="Role" value={lead.jobTitle} />}
+                {lead.linkedinPersonalUrl && (
+                  <DetailRow icon={<Linkedin size={12} />} label="LinkedIn" value={
+                    <a href={normaliseUrl(lead.linkedinPersonalUrl)} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-text-active)', textDecoration: 'underline', wordBreak: 'break-all' }}>
+                      Profile <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'baseline' }} />
+                    </a>
+                  } />
+                )}
+                {lead.ownerName && <DetailRow icon={<User size={12} />} label="Owner" value={lead.ownerName} />}
+              </DetailGrid>
+            )}
           </PageCard>
 
-          {lead.brief && (
-            <PageCard title="Brief">
-              <p style={{
-                margin: 0,
-                fontSize: '0.8125rem',
-                color: 'var(--color-text)',
-                lineHeight: 1.55,
-                whiteSpace: 'pre-wrap',
-              }}>{lead.brief}</p>
+          {/* Company card */}
+          <PageCard title="Company">
+            {editing && draft ? (
+              <EditGrid>
+                <EditRow label="Company" value={draft.company} onChange={v => setDraft({ ...draft, company: v })} />
+                <EditRow label="Website" value={draft.website} onChange={v => setDraft({ ...draft, website: v })} placeholder="https://" />
+                <EditRow label="CMS / builder" value={draft.cms} onChange={v => setDraft({ ...draft, cms: v })} placeholder="Webflow, WordPress, Framer..." />
+                <EditRow label="Company LinkedIn" value={draft.linkedinUrl} onChange={v => setDraft({ ...draft, linkedinUrl: v })} placeholder="https://linkedin.com/company/..." />
+                <EditRow label="Industry" value={draft.industry} onChange={v => setDraft({ ...draft, industry: v })} />
+                <EditRow label="Country" value={draft.country} onChange={v => setDraft({ ...draft, country: v })} />
+                <EditRow label="Type" value={draft.leadType} onChange={v => setDraft({ ...draft, leadType: v })} placeholder="Prospect" />
+                <EditRow label="Employees" value={draft.employeeCount} onChange={v => setDraft({ ...draft, employeeCount: v })} type="number" />
+                <EditRow label="Revenue" value={draft.revenueBand} onChange={v => setDraft({ ...draft, revenueBand: v })} placeholder="$10M - $50M" />
+                <EditRow label="Year founded" value={draft.yearFounded} onChange={v => setDraft({ ...draft, yearFounded: v })} type="number" />
+                <EditRow label="Page views/mo" value={draft.monthlyVisits} onChange={v => setDraft({ ...draft, monthlyVisits: v })} type="number" />
+                <EditRow label="Tech stack" value={draft.techStack} onChange={v => setDraft({ ...draft, techStack: v })} placeholder="Webflow, HubSpot, GA" />
+              </EditGrid>
+            ) : (
+              <DetailGrid>
+                {lead.company && <DetailRow icon={<Building2 size={12} />} label="Name" value={lead.company} />}
+                {lead.website && (
+                  <DetailRow icon={<Globe size={12} />} label="Website" value={
+                    <a href={normaliseUrl(lead.website)} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-text-active)', textDecoration: 'underline', wordBreak: 'break-all' }}>{lead.website}</a>
+                  } />
+                )}
+                {lead.linkedinUrl && (
+                  <DetailRow icon={<Linkedin size={12} />} label="LinkedIn" value={
+                    <a href={normaliseUrl(lead.linkedinUrl)} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-text-active)', textDecoration: 'underline', wordBreak: 'break-all' }}>
+                      Profile <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'baseline' }} />
+                    </a>
+                  } />
+                )}
+                {lead.cms && (
+                  <DetailRow icon={<Globe size={12} />} label="CMS" value={
+                    <Badge tone="brand" variant="soft" size="sm" dot={false}>{lead.cms}</Badge>
+                  } />
+                )}
+                {lead.industry && <DetailRow icon={<Tag size={12} />} label="Industry" value={lead.industry} />}
+                {lead.country && <DetailRow icon={<MapPin size={12} />} label="Country" value={lead.country} />}
+                {lead.leadType && <DetailRow icon={<Tag size={12} />} label="Type" value={lead.leadType} />}
+                {lead.employeeCount != null && <DetailRow icon={<Users size={12} />} label="Employees" value={lead.employeeCount.toLocaleString()} />}
+                {lead.revenueBand && <DetailRow icon={<DollarSign size={12} />} label="Revenue" value={lead.revenueBand} />}
+                {lead.yearFounded != null && <DetailRow icon={<Calendar size={12} />} label="Founded" value={String(lead.yearFounded)} />}
+                {lead.monthlyVisits != null && <DetailRow icon={<Eye size={12} />} label="Page views" value={`${lead.monthlyVisits.toLocaleString()}/mo`} />}
+                {techStack.length > 0 && (
+                  <DetailRow icon={<Tag size={12} />} label="Tech" value={
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                      {techStack.map(t => (
+                        <Badge key={t} tone="brand" variant="soft" size="sm" dot={false}>{t}</Badge>
+                      ))}
+                    </div>
+                  } />
+                )}
+                {!lead.company && !lead.website && !lead.industry && !lead.cms && !lead.country && !lead.employeeCount && techStack.length === 0 && (
+                  <DetailRow icon={<Building2 size={12} />} label="" value={
+                    <span style={{ color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>No company details yet. Run AI to enrich.</span>
+                  } />
+                )}
+              </DetailGrid>
+            )}
+          </PageCard>
+
+          {/* Source */}
+          {!editing && (
+            <PageCard title="Source">
+              <DetailGrid>
+                <DetailRow icon={<Tag size={12} />} label="Source" value={`${lead.source}${lead.sourceDetail ? ` · ${lead.sourceDetail}` : ''}`} />
+                {lead.estimatedValue != null && (
+                  <DetailRow icon={<DollarSign size={12} />} label="Estimate" value={`${lead.estimatedValue.toLocaleString()} ${lead.currency}`} />
+                )}
+              </DetailGrid>
             </PageCard>
           )}
 
-          {lead.promotedDealId && (
+          {/* Brief — full-width textarea in edit mode, prose in view mode */}
+          {editing && draft ? (
+            <PageCard title="Brief / notes">
+              <textarea
+                value={draft.brief}
+                onChange={e => setDraft({ ...draft, brief: e.target.value })}
+                rows={6}
+                placeholder="Anything we know about this lead beyond the structured fields above."
+                style={{
+                  width: '100%',
+                  fontSize: '0.8125rem',
+                  fontFamily: 'inherit',
+                  color: 'var(--color-text)',
+                  background: 'var(--color-bg)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '0.5rem 0.625rem',
+                  lineHeight: 1.55,
+                  resize: 'vertical',
+                }}
+              />
+            </PageCard>
+          ) : (
+            lead.brief && (
+              <PageCard title="Brief">
+                <p style={{
+                  margin: 0,
+                  fontSize: '0.8125rem',
+                  color: 'var(--color-text)',
+                  lineHeight: 1.55,
+                  whiteSpace: 'pre-wrap',
+                }}>{lead.brief}</p>
+              </PageCard>
+            )
+          )}
+
+          {!editing && lead.promotedDealId && (
             <div style={{
               padding: '0.625rem 0.75rem',
               background: 'var(--color-brand-50)',
@@ -459,14 +736,14 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
               fontSize: '0.75rem',
               color: 'var(--color-text)',
             }}>
-              ✓ Promoted to deal{relTime(lead.promotedAt) ? ` ${relTime(lead.promotedAt)}` : ''}.{' '}
+              Promoted to deal{relTime(lead.promotedAt) ? ` ${relTime(lead.promotedAt)}` : ''}.{' '}
               <Link href={`/deals?deal=${lead.promotedDealId}`} style={{ fontWeight: 600, color: 'var(--color-brand-dark)', textDecoration: 'underline' }}>
                 Open deal
               </Link>
             </div>
           )}
 
-          {lead.aiTokensSpent != null && lead.aiTokensSpent > 0 && (
+          {!editing && lead.aiTokensSpent != null && lead.aiTokensSpent > 0 && (
             <p style={{ margin: 0, fontSize: '0.625rem', color: 'var(--color-text-subtle)', textAlign: 'right' }}>
               {lead.aiTokensSpent.toLocaleString()} tokens spent on AI
             </p>
@@ -560,6 +837,42 @@ function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: strin
       </dt>
       <dd style={{ margin: 0, color: 'var(--color-text)', fontSize: '0.8125rem', wordBreak: 'break-word' }}>{value}</dd>
     </>
+  )
+}
+
+function EditGrid({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      {children}
+    </div>
+  )
+}
+
+function EditRow({
+  label, value, onChange, type = 'text', placeholder,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  type?: 'text' | 'email' | 'tel' | 'number' | 'url'
+  placeholder?: string
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+      <label style={{
+        fontSize: '0.625rem',
+        fontWeight: 600,
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+        color: 'var(--color-text-subtle)',
+      }}>{label}</label>
+      <Input
+        type={type}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+    </div>
   )
 }
 

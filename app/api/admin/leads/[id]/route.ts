@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, and } from 'drizzle-orm'
 import { lookupOrCreatePerson } from '@/lib/people'
 
 type Params = { params: Promise<{ id: string }> }
@@ -84,11 +84,23 @@ export async function GET(req: NextRequest, { params }: Params) {
     .where(eq(schema.discoveryCalls.leadId, id))
     .orderBy(desc(schema.discoveryCalls.scheduledAt))
 
+  // Latest pending AI reply draft (if any). Single row per lead via the
+  // dismiss-pending-on-new-draft invariant in the draft route.
+  const [pendingDraft] = await database
+    .select()
+    .from(schema.aiReplyDrafts)
+    .where(and(
+      eq(schema.aiReplyDrafts.leadId, id),
+      eq(schema.aiReplyDrafts.status, 'pending'),
+    ))
+    .limit(1)
+
   return NextResponse.json({
     lead: { ...lead, ownerName, ownerAvatarUrl },
     activities: activities.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')),
     discoveryQuestionsTemplate,
     calls,
+    pendingReplyDraft: pendingDraft ?? null,
   })
 }
 
@@ -131,6 +143,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     'name', 'email', 'phone', 'company', 'jobTitle', 'website',
     'source', 'sourceDetail', 'affiliateCode', 'brief', 'currency',
     'status', 'archiveReason', 'ownerId',
+    // 0047 firmographics
+    'industry', 'revenueBand', 'leadType', 'linkedinUrl',
+    'linkedinPersonalUrl', 'country', 'cms',
   ] as const
   for (const f of stringFields) {
     if (f in body) {
@@ -138,9 +153,44 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       updates[f] = typeof v === 'string' ? (v.trim() || null) : (v === null ? null : (updates[f] ?? null))
     }
   }
-  if ('estimatedValue' in body) {
-    const v = body.estimatedValue
-    updates.estimatedValue = typeof v === 'number' ? v : (v === null ? null : null)
+  const intFields = ['estimatedValue', 'employeeCount', 'monthlyVisits', 'yearFounded'] as const
+  for (const f of intFields) {
+    if (f in body) {
+      const v = body[f]
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        updates[f] = Math.round(v)
+      } else if (typeof v === 'string') {
+        const cleaned = v.replace(/[^0-9-]/g, '')
+        const n = cleaned ? parseInt(cleaned, 10) : NaN
+        updates[f] = Number.isFinite(n) ? n : null
+      } else {
+        updates[f] = null
+      }
+    }
+  }
+  // techStack accepts either a string[] or a JSON string. Normalises
+  // to JSON for storage. null/empty clears the column.
+  if ('techStack' in body) {
+    const v = body.techStack
+    if (Array.isArray(v)) {
+      const cleaned = v.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).map(s => s.trim())
+      updates.techStack = cleaned.length > 0 ? JSON.stringify(cleaned) : null
+    } else if (typeof v === 'string' && v.trim()) {
+      try {
+        const parsed = JSON.parse(v) as unknown
+        if (Array.isArray(parsed)) {
+          updates.techStack = JSON.stringify(parsed.filter(s => typeof s === 'string' && s.trim()).map(s => (s as string).trim()))
+        } else {
+          updates.techStack = null
+        }
+      } catch {
+        // Comma-separated fallback for hand-typed input
+        const items = v.split(',').map(s => s.trim()).filter(Boolean)
+        updates.techStack = items.length > 0 ? JSON.stringify(items) : null
+      }
+    } else {
+      updates.techStack = null
+    }
   }
   // "Don't ask again" for the re-enrichment prompt. Client toggles this
   // when Liam dismisses the confirm dialog with the don't-ask option.

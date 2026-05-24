@@ -579,6 +579,33 @@ export async function POST(
       ? JSON.stringify(parsed.signals)
       : null
 
+    // Promote enrichment + sniffer outputs to first-class columns
+    // (0047 firmographics). Sniffer wins on tech_stack since it's an
+    // actual HTTP fetch with deterministic pattern matching. The
+    // structured columns only get written when we don't already have
+    // a value — don't clobber a Liam-edited field with an AI guess.
+    const firmographicUpdates: Record<string, string | number | null> = {}
+    if (sniffResult.tech.length > 0 && !lead.techStack) {
+      firmographicUpdates.techStack = JSON.stringify(
+        sniffResult.tech.map(t => t.name)
+      )
+    }
+    // CMS column gets the first CMS-category hit, which is the single
+    // most-valuable qualifying signal for an agency. Falls back to a
+    // commerce hit (Shopify users are CMS-shaped for our purposes).
+    if (!lead.cms) {
+      const cmsHit = sniffResult.tech.find(t => t.category === 'cms')
+        ?? sniffResult.tech.find(t => t.category === 'commerce')
+      if (cmsHit) firmographicUpdates.cms = cmsHit.name
+    }
+    if (!lead.employeeCount && parsed.signals.employeeCount) {
+      const n = parseInt(parsed.signals.employeeCount.replace(/[^0-9]/g, ''), 10)
+      if (Number.isFinite(n) && n > 0) firmographicUpdates.employeeCount = n
+    }
+    if (!lead.revenueBand && parsed.signals.revenueEstimate) {
+      firmographicUpdates.revenueBand = parsed.signals.revenueEstimate
+    }
+
     await database
       .update(schema.leads)
       .set({
@@ -588,6 +615,7 @@ export async function POST(
         aiSources: JSON.stringify(parsed.sources),
         aiQuestions: JSON.stringify(parsed.questions),
         aiSignals: signalsJson,
+        ...firmographicUpdates,
         aiTokensSpent: (lead.aiTokensSpent ?? 0) + inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
         enrichedAt: now,
         lastAiRunAt: now,

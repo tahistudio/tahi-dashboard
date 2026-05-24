@@ -58,6 +58,17 @@ type LeadField =
   | 'brief'
   | 'sourceDetail'
   | 'estimatedValue'
+  // 0047 firmographics — map CSV columns directly to first-class
+  // fields instead of stuffing into the brief blob.
+  | 'industry'
+  | 'employeeCount'
+  | 'revenueBand'
+  | 'monthlyVisits'
+  | 'leadType'
+  | 'linkedinUrl'
+  | 'linkedinPersonalUrl'
+  | 'country'
+  | 'yearFounded'
 
 interface BulkImportBody {
   csv?: string
@@ -194,6 +205,15 @@ export async function POST(req: NextRequest) {
     brief: string | null
     sourceDetail: string | null
     estimatedValue: number | null
+    industry: string | null
+    employeeCount: number | null
+    revenueBand: string | null
+    monthlyVisits: number | null
+    leadType: string | null
+    linkedinUrl: string | null
+    linkedinPersonalUrl: string | null
+    country: string | null
+    yearFounded: number | null
   }
 
   const prepared: PreparedLead[] = []
@@ -226,6 +246,22 @@ export async function POST(req: NextRequest) {
     const evRaw = valueFor(row, fieldIndex.estimatedValue)?.trim()
     const estimatedValue = evRaw ? parseInt(evRaw.replace(/[^0-9-]/g, ''), 10) : null
 
+    // 0047 firmographics
+    const industry = valueFor(row, fieldIndex.industry)?.trim() || null
+    const ecRaw = valueFor(row, fieldIndex.employeeCount)?.trim()
+    const employeeCount = ecRaw ? parseInt(ecRaw.replace(/[^0-9]/g, ''), 10) : null
+    const revenueBand = valueFor(row, fieldIndex.revenueBand)?.trim() || null
+    const mvRaw = valueFor(row, fieldIndex.monthlyVisits)?.trim()
+    const monthlyVisits = mvRaw ? parseInt(mvRaw.replace(/[^0-9]/g, ''), 10) : null
+    const leadType = valueFor(row, fieldIndex.leadType)?.trim() || null
+    const linkedinUrl = valueFor(row, fieldIndex.linkedinUrl)?.trim() || null
+    const linkedinPersonalUrl = valueFor(row, fieldIndex.linkedinPersonalUrl)?.trim() || null
+    const country = valueFor(row, fieldIndex.country)?.trim() || null
+    const yfRaw = valueFor(row, fieldIndex.yearFounded)?.trim()
+    const yearFoundedParsed = yfRaw ? parseInt(yfRaw.replace(/[^0-9]/g, ''), 10) : null
+    const yearFounded = Number.isFinite(yearFoundedParsed ?? NaN) && yearFoundedParsed && yearFoundedParsed > 1800 && yearFoundedParsed < 2100
+      ? yearFoundedParsed : null
+
     prepared.push({
       rowIndex: i + 2,
       name,
@@ -237,6 +273,15 @@ export async function POST(req: NextRequest) {
       brief,
       sourceDetail,
       estimatedValue: Number.isFinite(estimatedValue ?? NaN) ? estimatedValue : null,
+      industry,
+      employeeCount: Number.isFinite(employeeCount ?? NaN) ? employeeCount : null,
+      revenueBand,
+      monthlyVisits: Number.isFinite(monthlyVisits ?? NaN) ? monthlyVisits : null,
+      leadType,
+      linkedinUrl,
+      linkedinPersonalUrl,
+      country,
+      yearFounded,
     })
   })
 
@@ -288,6 +333,15 @@ export async function POST(req: NextRequest) {
         currency: defaultCurrency,
         status: defaultStatus,
         ownerId: resolvedOwnerId,
+        industry: p.industry,
+        employeeCount: p.employeeCount,
+        revenueBand: p.revenueBand,
+        monthlyVisits: p.monthlyVisits,
+        leadType: p.leadType,
+        linkedinUrl: p.linkedinUrl,
+        linkedinPersonalUrl: p.linkedinPersonalUrl,
+        country: p.country,
+        yearFounded: p.yearFounded,
         createdAt: now,
         updatedAt: now,
       })
