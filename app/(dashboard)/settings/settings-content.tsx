@@ -6,7 +6,7 @@ import {
   CreditCard, Link2, Bell, Building2,
   FileText, Plus, Trash2, GripVertical, ChevronDown, ChevronUp,
   Webhook, Loader2, User, Palette, ToggleLeft,
-  Target, ClipboardList, Pencil, Sparkles,
+  Target, ClipboardList, Pencil, Sparkles, Share2, Heart, MessageCircle,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -404,6 +404,9 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
 
           {/* Google Workspace (Calendar + Drive) */}
           {isAdmin && <GoogleIntegrationSection />}
+
+          {/* Buffer (Liam's personal social) */}
+          {isAdmin && <BufferIntegrationSection />}
 
           {/* Google Calendar Booking (admin only) - T87 */}
           {isAdmin && <BookingLinkSection settings={settings} onSave={saveSetting} savingKey={savingKey} />}
@@ -3359,6 +3362,260 @@ function ModulesSection({
       <p className="text-xs text-[var(--color-text-subtle)] mt-2">
         Disabled modules will be hidden from the sidebar navigation.
       </p>
+    </section>
+  )
+}
+
+// ── Buffer integration (Liam's personal social) ─────────────────────────
+// Read-only surface. Connected profiles + recent posts + engagement
+// totals from BUFFER_API_KEY env var. Intentionally scoped to Liam's
+// personal Buffer account — not the Tahi company page.
+
+interface BufferProfileLite {
+  id: string
+  service: string
+  serviceUsername: string | null
+  formattedUsername: string | null
+  formattedService: string | null
+  avatarUrl: string | null
+}
+
+interface BufferPostLite {
+  id: string
+  profileService: string
+  text: string
+  sentAt: string | null
+  serviceLink: string | null
+  statistics: Record<string, number>
+}
+
+interface BufferStatusResponse {
+  configured: boolean
+  connected: boolean
+  profiles: BufferProfileLite[]
+  errorMessage: string | null
+}
+
+interface BufferPostsResponse {
+  posts: BufferPostLite[]
+  totals: {
+    posts: number
+    byService: Record<string, number>
+    engagement: Record<string, number>
+  }
+}
+
+function BufferIntegrationSection() {
+  const [status, setStatus] = useState<BufferStatusResponse | null>(null)
+  const [posts, setPosts] = useState<BufferPostLite[] | null>(null)
+  const [postsTotals, setPostsTotals] = useState<BufferPostsResponse['totals'] | null>(null)
+  const [loadingStatus, setLoadingStatus] = useState(true)
+  const [loadingPosts, setLoadingPosts] = useState(false)
+  const [postsError, setPostsError] = useState<string | null>(null)
+
+  const fetchStatus = useCallback(async () => {
+    setLoadingStatus(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/integrations/buffer/status'))
+      if (!res.ok) throw new Error()
+      const data = await res.json() as BufferStatusResponse
+      setStatus(data)
+    } catch {
+      setStatus({ configured: false, connected: false, profiles: [], errorMessage: 'Status check failed' })
+    } finally {
+      setLoadingStatus(false)
+    }
+  }, [])
+
+  const fetchPosts = useCallback(async () => {
+    setLoadingPosts(true)
+    setPostsError(null)
+    try {
+      const res = await fetch(apiPath('/api/admin/integrations/buffer/posts?count=10'))
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string }
+        throw new Error(err.error ?? 'Posts fetch failed')
+      }
+      const data = await res.json() as BufferPostsResponse
+      setPosts(data.posts)
+      setPostsTotals(data.totals)
+    } catch (err) {
+      setPostsError(err instanceof Error ? err.message : 'Posts fetch failed')
+    } finally {
+      setLoadingPosts(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchStatus() }, [fetchStatus])
+  useEffect(() => {
+    if (status?.connected) void fetchPosts()
+  }, [status?.connected, fetchPosts])
+
+  return (
+    <section id="buffer">
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <Share2 className="w-5 h-5" />
+        Buffer (personal social)
+      </h2>
+
+      <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 space-y-4">
+        <p className="text-xs text-[var(--color-text-muted)]">
+          Pulls Liam&apos;s personal social posts (LinkedIn, Twitter, etc.) from Buffer for analytics + the AI to reference when drafting content. This is the personal account, not the Tahi Studio company page.
+        </p>
+
+        {loadingStatus && <LoadingSkeleton rows={1} />}
+
+        {!loadingStatus && status && !status.configured && (
+          <div className="text-sm text-[var(--color-warning)] bg-[var(--color-warning-bg)] border border-[var(--color-warning)] rounded-lg p-3">
+            BUFFER_API_KEY is not configured. Add a Personal Access Token from <a href="https://publish.buffer.com/account/apps" target="_blank" rel="noopener noreferrer" className="underline">publish.buffer.com/account/apps</a> as BUFFER_API_KEY in Webflow Cloud env vars.
+          </div>
+        )}
+
+        {!loadingStatus && status && status.configured && !status.connected && (
+          <div className="text-sm text-[var(--color-danger)] bg-[var(--color-danger-bg)] border border-[var(--color-danger)] rounded-lg p-3">
+            {status.errorMessage ?? 'Buffer API returned no profiles. Check the token has access and you have connected social accounts.'}
+          </div>
+        )}
+
+        {status?.connected && (
+          <>
+            <div className="flex items-start gap-3 flex-wrap">
+              <Badge tone="positive" variant="soft" size="sm">Connected</Badge>
+              <div className="text-sm text-[var(--color-text)]">
+                {status.profiles.length} profile{status.profiles.length === 1 ? '' : 's'} linked
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {status.profiles.map(p => (
+                <div
+                  key={p.id}
+                  className="flex items-center gap-2 px-2.5 py-1 rounded-full"
+                  style={{
+                    background: 'var(--color-bg-secondary)',
+                    border: '1px solid var(--color-border-subtle)',
+                  }}
+                >
+                  <span className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">
+                    {p.formattedService ?? p.service}
+                  </span>
+                  <span className="text-xs text-[var(--color-text)]">
+                    {p.formattedUsername ?? p.serviceUsername ?? p.id.slice(0, 8)}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* Engagement summary across last 10 posts per profile */}
+            {postsTotals && Object.keys(postsTotals.engagement).length > 0 && (
+              <div
+                className="text-xs text-[var(--color-text-muted)] p-3 rounded-lg"
+                style={{
+                  background: 'var(--color-bg-secondary)',
+                  border: '1px solid var(--color-border-subtle)',
+                }}
+              >
+                <div className="font-medium text-[var(--color-text)] mb-1">Last {postsTotals.posts} posts</div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {Object.entries(postsTotals.engagement).map(([k, v]) => (
+                    <span key={k}>
+                      <strong>{v.toLocaleString()}</strong> {k}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Recent posts list */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-[var(--color-text)]">Recent posts</h3>
+                <TahiButton
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => { void fetchPosts() }}
+                  disabled={loadingPosts}
+                  iconLeft={loadingPosts ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                >
+                  {loadingPosts ? 'Loading...' : 'Refresh'}
+                </TahiButton>
+              </div>
+
+              {postsError && (
+                <div className="text-sm text-[var(--color-danger)] bg-[var(--color-danger-bg)] border border-[var(--color-danger)] rounded-lg p-3 mb-2">
+                  {postsError}
+                </div>
+              )}
+
+              {!postsError && posts && posts.length === 0 && (
+                <p className="text-xs text-[var(--color-text-subtle)] italic">No sent posts yet.</p>
+              )}
+
+              {!postsError && posts && posts.length > 0 && (
+                <ul className="space-y-2">
+                  {posts.slice(0, 8).map(post => (
+                    <li
+                      key={post.id}
+                      className="p-3 rounded-lg"
+                      style={{
+                        background: 'var(--color-bg-secondary)',
+                        border: '1px solid var(--color-border-subtle)',
+                      }}
+                    >
+                      <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
+                        <span className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">
+                          {post.profileService}
+                        </span>
+                        <span className="text-xs text-[var(--color-text-subtle)]">
+                          {post.sentAt ? new Date(post.sentAt).toLocaleDateString() : ''}
+                        </span>
+                      </div>
+                      <p className="text-sm text-[var(--color-text)] leading-relaxed whitespace-pre-wrap" style={{
+                        display: '-webkit-box',
+                        WebkitLineClamp: 3,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                      }}>
+                        {post.text}
+                      </p>
+                      <div className="flex items-center gap-3 mt-2 text-xs text-[var(--color-text-muted)] flex-wrap">
+                        {(post.statistics.likes != null || post.statistics.favorites != null) && (
+                          <span className="inline-flex items-center gap-1">
+                            <Heart className="w-3 h-3" aria-hidden="true" />
+                            {(post.statistics.likes ?? post.statistics.favorites ?? 0).toLocaleString()}
+                          </span>
+                        )}
+                        {post.statistics.comments != null && (
+                          <span className="inline-flex items-center gap-1">
+                            <MessageCircle className="w-3 h-3" aria-hidden="true" />
+                            {post.statistics.comments.toLocaleString()}
+                          </span>
+                        )}
+                        {(post.statistics.shares != null || post.statistics.retweets != null) && (
+                          <span className="inline-flex items-center gap-1">
+                            <Share2 className="w-3 h-3" aria-hidden="true" />
+                            {(post.statistics.shares ?? post.statistics.retweets ?? 0).toLocaleString()}
+                          </span>
+                        )}
+                        {post.serviceLink && (
+                          <a
+                            href={post.serviceLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline text-[var(--color-text-active)]"
+                          >
+                            View
+                          </a>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </section>
   )
 }

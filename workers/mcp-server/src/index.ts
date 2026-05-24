@@ -623,6 +623,18 @@ const TOOLS: ToolDef[] = [
     dealId: prop('string', 'Deal ID'),
   }, ['dealId']),
 
+  // ── Social (Liam's personal Buffer) ──────────────────────────────────
+  // Pulls from Liam Miller's personal Buffer account (BUFFER_API_KEY env
+  // var on the dashboard). Scoped to personal social profiles, NOT the
+  // Tahi Studio company page.
+  tool('buffer_get_status', 'Get Buffer integration status: configured / connected / list of linked social profiles (LinkedIn, Twitter, Instagram, etc.) for Liam Miller personally. Returns { configured, connected, profiles: [{id, service, formattedUsername}] }.'),
+  tool('buffer_list_posts', 'List recent SENT posts from Liam\'s personal Buffer across all connected profiles, newest-first. Each post includes per-service engagement statistics (likes, comments, shares, retweets — varies by service). Use this to summarise recent social activity, identify high-engagement posts, or generate similar content. Personal account — NOT Tahi company page.', {
+    profileId: prop('string', 'Optional: limit to one Buffer profile id (get from buffer_get_status)'),
+    service: prop('string', 'Optional service filter: twitter | linkedin | instagram | facebook'),
+    count: prop('number', 'Per-profile fetch cap (default 20, max 50)'),
+    status: prop('string', 'sent (default) or pending (queued posts)'),
+  }),
+
   // ── Calls ─────────────────────────────────────────────────────────────
   tool('list_calls', 'List all scheduled calls'),
   tool('create_call', 'Schedule a new call with a client', {
@@ -1529,6 +1541,19 @@ async function executeTool(
     }
     case 'list_deal_nudges':
       return json(await apiGet(`/api/admin/deals/${s('dealId')}/nudges`, token))
+
+    // ── Social (Buffer) ───────────────────────────────────────────────
+    case 'buffer_get_status':
+      return json(await apiGet('/api/admin/integrations/buffer/status', token))
+    case 'buffer_list_posts': {
+      const params = new URLSearchParams()
+      if (typeof args.profileId === 'string') params.set('profileId', args.profileId)
+      if (typeof args.service === 'string') params.set('service', args.service)
+      if (typeof args.count === 'number') params.set('count', String(args.count))
+      if (typeof args.status === 'string') params.set('status', args.status)
+      const qs = params.toString()
+      return json(await apiGet(`/api/admin/integrations/buffer/posts${qs ? `?${qs}` : ''}`, token))
+    }
 
     // ── Calls ─────────────────────────────────────────────────────────
     case 'list_calls':
