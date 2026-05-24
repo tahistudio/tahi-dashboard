@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useSearchParams } from 'next/navigation'
 import {
   UserPlus, Plus, Clock, RefreshCw, Save, Trash2, ArrowUpRight,
   Mail, Phone, Building2, Globe, Tag, User, Edit3,
@@ -75,6 +76,21 @@ interface Lead {
 interface AiQuestion {
   text: string
   rationale?: string
+}
+
+interface ReplyDraft {
+  id: string
+  leadId: string | null
+  aiDraftSubject: string | null
+  aiDraftBody: string
+  finalSubject: string | null
+  finalBody: string | null
+  status: 'pending' | 'sent' | 'dismissed'
+  sentAt: string | null
+  resendMessageId: string | null
+  tokensSpent: number | null
+  createdAt: string
+  updatedAt: string
 }
 
 interface LeadActivity {
@@ -159,6 +175,7 @@ export function LeadsContent() {
 
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [selectedActivities, setSelectedActivities] = useState<LeadActivity[]>([])
+  const [selectedReplyDraft, setSelectedReplyDraft] = useState<ReplyDraft | null>(null)
   const [discoveryTemplate, setDiscoveryTemplate] = useState<string[]>([])
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Partial<Lead> | null>(null)
@@ -192,6 +209,30 @@ export function LeadsContent() {
     }
   }, [])
   useEffect(() => { fetchLeads() }, [fetchLeads])
+
+  // Auto-open the slide-over from a ?lead=ID URL param. Lets the
+  // full-page detail's Edit button (which routes here with ?lead=ID)
+  // land in edit mode immediately instead of just showing the list.
+  // Also handy for share-a-lead links.
+  const searchParams = useSearchParams()
+  const leadIdFromUrl = searchParams?.get('lead')
+  useEffect(() => {
+    if (!leadIdFromUrl) return
+    void (async () => {
+      try {
+        const res = await fetch(apiPath(`/api/admin/leads/${leadIdFromUrl}`))
+        if (!res.ok) return
+        const data = await res.json() as { lead: Lead; activities?: LeadActivity[]; discoveryQuestionsTemplate?: string[] }
+        setSelectedLead(data.lead)
+        setSelectedActivities(data.activities ?? [])
+        setDiscoveryTemplate(data.discoveryQuestionsTemplate ?? [])
+        setDraft({ ...data.lead })
+        setEditSnapshot({ website: data.lead.website, company: data.lead.company })
+        setEditing(true)
+      } catch { /* ignore */ }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadIdFromUrl])
 
   const selectedStatuses = useMemo(() => {
     const f = activeFilters.find(a => a.id === 'status')
