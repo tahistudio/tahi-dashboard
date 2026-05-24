@@ -434,6 +434,13 @@ const TOOLS: ToolDef[] = [
   tool('triage_pipeline_to_leads', 'Find deals that should have been leads (Lead stage, or Stalled with no proposal+contract) and move them to leads. Set dryRun=true (default) to preview the candidate list; dryRun=false executes the move.', {
     dryRun: prop('boolean', 'When true (default), return the candidate list without moving. When false, perform the move.'),
   }),
+  tool('bulk_import_leads', 'Bulk-create leads from a CSV payload. Mapping declares which CSV header maps to which lead field (name is required). Pass dryRun=true to preview without writing — returns the parsed count + duplicate count + per-row errors + first 10 prepared rows. dryRun=false actually writes them. skipDuplicates (default true) skips rows whose email matches an existing lead.', {
+    csv: prop('string', 'Raw CSV content with a header row'),
+    mapping: prop('object', 'Header-name map, e.g. {"name":"Full Name","email":"Email","company":"Company"}. Required keys: name. Optional: email, phone, company, jobTitle, website, brief, sourceDetail, estimatedValue.'),
+    defaults: prop('object', 'Optional defaults applied to every row, e.g. {"source":"cold_outreach","currency":"NZD","status":"new","ownerId":"<team_member_id>"}. source defaults to "cold_outreach" if not set.'),
+    skipDuplicates: prop('boolean', 'When true (default), rows whose email matches an existing lead are skipped silently.'),
+    dryRun: prop('boolean', 'When true, parse + validate + return preview but write nothing. Default false.'),
+  }, ['csv', 'mapping']),
   tool('promote_lead', 'Promote a qualified lead to a deal. Spins up org (if needed) + contact (sharing person_id) + deal landing in the first open pipeline stage. Lead status flips to "promoted".', {
     leadId: prop('string', 'Lead ID'),
     orgId: prop('string', 'Existing org ID to attach to. Omit to create a new org from the lead\'s company.'),
@@ -1337,6 +1344,8 @@ async function executeTool(
       const { leadId, ...body } = args
       return json(await apiWrite(`/api/admin/leads/${leadId}/promote`, token, 'POST', body))
     }
+    case 'bulk_import_leads':
+      return json(await apiWrite('/api/admin/leads/bulk-import', token, 'POST', args as Record<string, unknown>))
     case 'triage_pipeline_to_leads': {
       const dryRun = args.dryRun !== false  // default true
       const p: Record<string, string> = { dryRun: String(dryRun) }

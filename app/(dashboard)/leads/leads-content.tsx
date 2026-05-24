@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   UserPlus, Plus, Clock, RefreshCw, Save, Trash2, ArrowUpRight,
   Mail, Phone, Building2, Globe, Tag, User, Edit3,
-  Sparkles, ExternalLink, ChevronDown,
+  Sparkles, ExternalLink, ChevronDown, Upload,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { EmptyState } from '@/components/tahi/empty-state'
@@ -165,6 +165,7 @@ export function LeadsContent() {
   const [editSnapshot, setEditSnapshot] = useState<{ website: string | null; company: string | null } | null>(null)
   const [saving, setSaving] = useState(false)
   const [showNewForm, setShowNewForm] = useState(false)
+  const [showBulkImport, setShowBulkImport] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Lead | null>(null)
   const [pendingPromote, setPendingPromote] = useState<Lead | null>(null)
   const [promoting, setPromoting] = useState(false)
@@ -635,13 +636,23 @@ export function LeadsContent() {
             Pre-qualification inbox. New prospects land here, get a discovery call, then promote to a deal in the pipeline.
           </p>
         </div>
-        <TahiButton
-          size="sm"
-          onClick={handleNew}
-          iconLeft={<Plus className="w-3.5 h-3.5" />}
-        >
-          New lead
-        </TahiButton>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <TahiButton
+            size="sm"
+            variant="secondary"
+            onClick={() => setShowBulkImport(true)}
+            iconLeft={<Upload className="w-3.5 h-3.5" />}
+          >
+            Bulk import
+          </TahiButton>
+          <TahiButton
+            size="sm"
+            onClick={handleNew}
+            iconLeft={<Plus className="w-3.5 h-3.5" />}
+          >
+            New lead
+          </TahiButton>
+        </div>
       </div>
 
       {/* Filter row */}
@@ -796,6 +807,22 @@ export function LeadsContent() {
             </SlideOver.Footer>
           </>
         )}
+      </SlideOver>
+
+      {/* Bulk import slide-over */}
+      <SlideOver
+        open={showBulkImport}
+        onClose={() => setShowBulkImport(false)}
+        title="Bulk import leads"
+        subtitle="Paste a CSV. We'll preview before writing anything."
+        maxWidth="52rem"
+      >
+        <BulkImportPanel
+          onDone={async () => {
+            setShowBulkImport(false)
+            await fetchLeads()
+          }}
+        />
       </SlideOver>
 
       {/* Delete confirm */}
@@ -1737,6 +1764,339 @@ function SignalRow({ label, value, source }: { label: string; value: string; sou
       </span>
     </div>
   )
+}
+
+// ── BulkImportPanel ────────────────────────────────────────────────────────
+//
+// Paste-CSV importer. Two phases: paste-and-map, then dry-run preview,
+// then actually write. Column mapping auto-detects sensible header
+// names (Name, Email, Company, Website, Phone, Job title, Brief, Source
+// detail, Estimated value) and lets you override.
+
+function BulkImportPanel({ onDone }: { onDone: () => Promise<void> }) {
+  const [csv, setCsv] = useState('')
+  const [headers, setHeaders] = useState<string[]>([])
+  const [mapping, setMapping] = useState<Record<string, string>>({})
+  const [defaultSource, setDefaultSource] = useState('cold_outreach')
+  const [skipDuplicates, setSkipDuplicates] = useState(true)
+  const [preview, setPreview] = useState<Record<string, unknown>[] | null>(null)
+  const [summary, setSummary] = useState<{ parsed: number; created: number; skipped: number; errors: Array<{ row: number; error: string }> } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const LEAD_FIELDS: Array<{ key: string; label: string }> = [
+    { key: 'name', label: 'Name *' },
+    { key: 'email', label: 'Email' },
+    { key: 'phone', label: 'Phone' },
+    { key: 'company', label: 'Company' },
+    { key: 'jobTitle', label: 'Job title' },
+    { key: 'website', label: 'Website' },
+    { key: 'brief', label: 'Brief / notes' },
+    { key: 'sourceDetail', label: 'Source detail' },
+    { key: 'estimatedValue', label: 'Estimated value' },
+  ]
+
+  function parseHeadersFromCsv(raw: string) {
+    const firstLine = raw.split(/\r?\n/)[0] ?? ''
+    if (!firstLine.trim()) { setHeaders([]); return }
+    // Same simple CSV parse as the backend (good enough for the header row).
+    const cols: string[] = []
+    let field = ''
+    let inQuotes = false
+    for (let i = 0; i < firstLine.length; i++) {
+      const ch = firstLine[i]
+      if (inQuotes) {
+        if (ch === '"' && firstLine[i + 1] !== '"') inQuotes = false
+        else if (ch === '"') { field += '"'; i++ }
+        else field += ch
+      } else {
+        if (ch === '"') inQuotes = true
+        else if (ch === ',') { cols.push(field); field = '' }
+        else field += ch
+      }
+    }
+    cols.push(field)
+    const trimmed = cols.map(c => c.trim())
+    setHeaders(trimmed)
+
+    // Auto-detect mappings on header-name match (case-insensitive).
+    const next: Record<string, string> = {}
+    for (const f of LEAD_FIELDS) {
+      const match = trimmed.find(h => h.toLowerCase().replace(/[\s_]/g, '') === f.key.toLowerCase().replace(/[\s_]/g, ''))
+        ?? trimmed.find(h => h.toLowerCase() === f.label.toLowerCase().replace(' *', ''))
+        ?? trimmed.find(h => f.key === 'name' && /^(name|full ?name|contact|lead)$/i.test(h))
+        ?? trimmed.find(h => f.key === 'company' && /^(company|organisation|organization|business)$/i.test(h))
+        ?? trimmed.find(h => f.key === 'website' && /^(website|url|domain|site)$/i.test(h))
+        ?? trimmed.find(h => f.key === 'email' && /^(email|e-?mail)$/i.test(h))
+        ?? trimmed.find(h => f.key === 'phone' && /^(phone|mobile|tel)$/i.test(h))
+        ?? trimmed.find(h => f.key === 'jobTitle' && /^(title|job ?title|role|position)$/i.test(h))
+      if (match) next[f.key] = match
+    }
+    setMapping(next)
+  }
+
+  async function runDryRun() {
+    setError(null)
+    setBusy(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/leads/bulk-import'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          csv,
+          mapping,
+          defaults: { source: defaultSource },
+          skipDuplicates,
+          dryRun: true,
+        }),
+      })
+      const data = await res.json() as {
+        parsed?: number; created?: number; skipped?: number
+        errors?: Array<{ row: number; error: string }>
+        preview?: Record<string, unknown>[]
+        error?: string
+      }
+      if (!res.ok) throw new Error(data.error ?? 'Dry-run failed')
+      setSummary({
+        parsed: data.parsed ?? 0,
+        created: 0,
+        skipped: data.skipped ?? 0,
+        errors: data.errors ?? [],
+      })
+      setPreview(data.preview ?? [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Dry-run failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function runImport() {
+    setError(null)
+    setBusy(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/leads/bulk-import'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          csv,
+          mapping,
+          defaults: { source: defaultSource },
+          skipDuplicates,
+          dryRun: false,
+        }),
+      })
+      const data = await res.json() as {
+        parsed?: number; created?: number; skipped?: number
+        errors?: Array<{ row: number; error: string }>
+        error?: string
+      }
+      if (!res.ok) throw new Error(data.error ?? 'Import failed')
+      setSummary({
+        parsed: data.parsed ?? 0,
+        created: data.created ?? 0,
+        skipped: data.skipped ?? 0,
+        errors: data.errors ?? [],
+      })
+      setPreview(null)
+      // If everything imported cleanly, close + refresh after a beat.
+      if ((data.errors?.length ?? 0) === 0) {
+        setTimeout(() => { void onDone() }, 1200)
+      } else {
+        await onDone()  // refresh in background; keep panel open so Liam sees errors
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <SlideOver.Body>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          {/* CSV paste */}
+          <Field label="CSV (paste from Google Sheets, Excel, etc — include header row)">
+            <textarea
+              value={csv}
+              onChange={(e) => {
+                setCsv(e.target.value)
+                parseHeadersFromCsv(e.target.value)
+                setPreview(null)
+                setSummary(null)
+              }}
+              rows={10}
+              placeholder="Name, Email, Company, Website&#10;Anna Walker, anna@glasswall.com, Glasswall, glasswall.com&#10;..."
+              className="tahi-textarea"
+              style={{ ...textareaStyle, fontFamily: 'monospace', fontSize: '0.75rem' }}
+            />
+          </Field>
+
+          {headers.length > 0 && (
+            <div>
+              <SectionLabel>Map columns</SectionLabel>
+              <div className="grid gap-2 grid-cols-1 sm:grid-cols-2">
+                {LEAD_FIELDS.map(f => (
+                  <Field key={f.key} label={f.label}>
+                    <select
+                      value={mapping[f.key] ?? ''}
+                      onChange={(e) => setMapping(m => ({ ...m, [f.key]: e.target.value }))}
+                      className="tahi-select"
+                      style={selectStyle}
+                    >
+                      <option value="">— ignore —</option>
+                      {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                  </Field>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {headers.length > 0 && (
+            <div className="grid gap-2 grid-cols-1 sm:grid-cols-2">
+              <Field label="Default source for all rows">
+                <select
+                  value={defaultSource}
+                  onChange={(e) => setDefaultSource(e.target.value)}
+                  className="tahi-select"
+                  style={selectStyle}
+                >
+                  {SOURCES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </Field>
+              <Field label="Duplicate handling">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: 'var(--text-sm)' }}>
+                  <input
+                    type="checkbox"
+                    checked={skipDuplicates}
+                    onChange={(e) => setSkipDuplicates(e.target.checked)}
+                  />
+                  Skip rows whose email already exists
+                </label>
+              </Field>
+            </div>
+          )}
+
+          {error && (
+            <div style={{
+              padding: '0.5rem 0.625rem',
+              background: 'var(--color-danger-bg)',
+              border: '1px solid var(--color-danger)',
+              borderRadius: 'var(--radius-md)',
+              fontSize: '0.75rem',
+              color: 'var(--color-danger)',
+            }}>{error}</div>
+          )}
+
+          {summary && (
+            <div style={{
+              padding: '0.75rem 0.875rem',
+              background: summary.created > 0 ? 'var(--color-brand-50)' : 'var(--color-bg-secondary)',
+              border: `1px solid ${summary.created > 0 ? 'var(--color-brand-100)' : 'var(--color-border-subtle)'}`,
+              borderRadius: 'var(--radius-card)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.375rem',
+              fontSize: '0.8125rem',
+            }}>
+              <div>
+                <strong>{summary.parsed}</strong> rows parsed ·
+                {summary.created > 0 && <> <strong>{summary.created}</strong> created ·</>}
+                {summary.skipped > 0 && <> <strong>{summary.skipped}</strong> skipped ·</>}
+                {summary.errors.length > 0 && <> <strong style={{ color: 'var(--color-danger)' }}>{summary.errors.length}</strong> errors</>}
+              </div>
+              {summary.errors.length > 0 && (
+                <ul style={{ margin: 0, paddingLeft: '1.125rem', fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
+                  {summary.errors.slice(0, 20).map((e, i) => (
+                    <li key={i}>Row {e.row}: {e.error}</li>
+                  ))}
+                  {summary.errors.length > 20 && <li>...and {summary.errors.length - 20} more</li>}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {preview && preview.length > 0 && (
+            <div>
+              <SectionLabel>Preview (first {preview.length})</SectionLabel>
+              <div style={{
+                border: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                overflow: 'auto',
+                maxHeight: '16rem',
+              }}>
+                <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--color-bg-secondary)' }}>
+                      <th style={previewTh}>#</th>
+                      <th style={previewTh}>Name</th>
+                      <th style={previewTh}>Email</th>
+                      <th style={previewTh}>Company</th>
+                      <th style={previewTh}>Website</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.map((p, i) => (
+                      <tr key={i} style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
+                        <td style={previewTd}>{String((p as { rowIndex?: number }).rowIndex ?? i + 2)}</td>
+                        <td style={previewTd}>{String((p as { name?: string }).name ?? '')}</td>
+                        <td style={previewTd}>{String((p as { email?: string | null }).email ?? '')}</td>
+                        <td style={previewTd}>{String((p as { company?: string | null }).company ?? '')}</td>
+                        <td style={previewTd}>{String((p as { website?: string | null }).website ?? '')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </SlideOver.Body>
+      <SlideOver.Footer>
+        <TahiButton variant="secondary" size="sm" onClick={() => { void onDone() }} disabled={busy}>
+          Cancel
+        </TahiButton>
+        <div style={{ flex: 1 }} />
+        <TahiButton
+          variant="secondary"
+          size="sm"
+          onClick={runDryRun}
+          disabled={busy || !csv.trim() || !mapping.name}
+        >
+          {busy && !summary?.created ? 'Checking...' : 'Preview'}
+        </TahiButton>
+        <TahiButton
+          size="sm"
+          onClick={runImport}
+          disabled={busy || !csv.trim() || !mapping.name || !preview}
+          iconLeft={<Upload className="w-3.5 h-3.5" />}
+        >
+          {busy && summary != null ? 'Importing...' : 'Import leads'}
+        </TahiButton>
+      </SlideOver.Footer>
+    </>
+  )
+}
+
+const previewTh: React.CSSProperties = {
+  padding: '0.4375rem 0.625rem',
+  textAlign: 'left',
+  fontSize: '0.625rem',
+  fontWeight: 600,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  color: 'var(--color-text-subtle)',
+  whiteSpace: 'nowrap',
+}
+const previewTd: React.CSSProperties = {
+  padding: '0.375rem 0.625rem',
+  color: 'var(--color-text)',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  maxWidth: '12rem',
 }
 
 function fieldLabel(field: keyof Lead): string {
