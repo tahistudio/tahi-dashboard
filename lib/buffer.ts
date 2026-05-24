@@ -76,8 +76,9 @@ interface RawPost {
   text?: string
   status?: string
   createdAt?: string | null
-  sentAt?: string | null
-  scheduledAt?: string | null
+  /** Buffer calls the publish/scheduled time `dueAt`. For sent posts
+   *  this is when it went out; for scheduled it's when it will go. */
+  dueAt?: string | null
 }
 
 interface GqlResponse<T> {
@@ -204,8 +205,7 @@ const QUERY_POSTS = `
           text
           status
           createdAt
-          sentAt
-          scheduledAt
+          dueAt
           channelId
         }
       }
@@ -247,15 +247,18 @@ export async function listPosts(
   const all: BufferPost[] = wrapper.edges
     .map(e => e.node)
     .filter((n): n is RawPost & { id: string } => !!n?.id)
-    .map(n => ({
-      id: n.id,
-      channelId: n.channelId ?? '',
-      text: n.text ?? '',
-      status: n.status ?? 'unknown',
-      createdAt: n.createdAt ?? null,
-      sentAt: n.sentAt ?? null,
-      scheduledAt: n.scheduledAt ?? null,
-    }))
+    .map(n => {
+      const isSent = (n.status || '').toLowerCase() === 'sent' || (n.status || '').toLowerCase() === 'published'
+      return {
+        id: n.id,
+        channelId: n.channelId ?? '',
+        text: n.text ?? '',
+        status: n.status ?? 'unknown',
+        createdAt: n.createdAt ?? null,
+        sentAt: isSent ? (n.dueAt ?? null) : null,
+        scheduledAt: !isSent ? (n.dueAt ?? null) : null,
+      }
+    })
   // Client-side status filter. Treat 'sent' and 'published' as
   // synonyms — Buffer has used both spellings depending on era.
   let posts = all
