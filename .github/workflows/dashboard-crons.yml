@@ -1,0 +1,118 @@
+name: Dashboard cron triggers
+
+# Schedules every recurring dashboard cron endpoint via GitHub Actions.
+# Each cron endpoint is idempotent and short-circuits when there's
+# nothing to do, so over-firing is safe + cheap.
+#
+# Why GitHub Actions and not Cloudflare cron triggers: Webflow Cloud's
+# builder overwrites wrangler.json on every deploy (see Decision #039
+# in DECISIONS.md), so cron triggers added there would be clobbered.
+# GH Actions is external and reliable.
+#
+# Required GitHub repo settings:
+#   - Variable: TAHI_DASHBOARD_URL = https://tahi-test-dashboard.webflow.io
+#   - Secret:   TAHI_CRON_SECRET   = the same string set as TAHI_CRON_SECRET
+#                                     env var on Webflow Cloud
+#
+# Note: GitHub Actions cron has up to 5-10 min delay during peak load.
+# All our crons are designed with windows that tolerate that drift —
+# pre-call-digest uses a 10-min slot (25-35 min before call), the
+# others are once-per-day or once-per-week so a few minutes' delay is
+# invisible.
+
+on:
+  schedule:
+    # Pre-call digest — every 10 min. Fires the email 25-35 min before
+    # each scheduled discovery call. Idempotent (dedup by call id).
+    - cron: '*/10 * * * *'
+    # Auto-promote completed calls — every 15 min. Scans calls with
+    # outcome='promote' and auto-creates a deal if not already promoted.
+    - cron: '5,20,35,50 * * * *'
+    # Lead AI scoring + transitions — every 30 min. Picks up new leads
+    # and re-scores stale ones using the ICP-aware rubric.
+    - cron: '0,30 * * * *'
+    # Daily summary — fires at 19:00 UTC + 20:00 UTC (7-9am NZ across
+    # DST). Dedup window inside the endpoint prevents double-push.
+    - cron: '0 19 * * *'
+    - cron: '0 20 * * *'
+    # Weekly affiliate reactivation — Monday 19:00 UTC = Mon 7am NZST
+    # / 8am NZDT. Same dedup pattern.
+    - cron: '0 19 * * MON'
+  # Manual trigger via the Actions UI — pick which cron to fire.
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Cron to trigger'
+        type: choice
+        required: true
+        default: pre-call-digest
+        options:
+          - pre-call-digest
+          - auto-promote-calls
+          - leads-ai
+          - daily-summary
+          - affiliate-reactivation
+
+jobs:
+  fire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Pick endpoint(s) based on schedule
+        id: pick
+        env:
+          MANUAL_TARGET: ${{ github.event.inputs.target }}
+        run: |
+          # Map the firing cron schedule (or manual selection) to the
+          # endpoint paths that should run. Multiple endpoints may fire
+          # on the same minute (e.g. midnight UTC) — we run them all.
+          targets=""
+          if [ -n "$MANUAL_TARGET" ]; then
+            targets="$MANUAL_TARGET"
+          else
+            schedule="${{ github.event.schedule }}"
+            case "$schedule" in
+              "*/10 * * * *")                    targets="pre-call-digest" ;;
+              "5,20,35,50 * * * *")              targets="auto-promote-calls" ;;
+              "0,30 * * * *")                    targets="leads-ai" ;;
+              "0 19 * * *"|"0 20 * * *")         targets="daily-summary" ;;
+              "0 19 * * MON")                    targets="affiliate-reactivation" ;;
+              *)                                 echo "::warning::Unknown schedule '$schedule'" ;;
+            esac
+          fi
+          echo "Firing targets: $targets"
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+
+      - name: Call the dashboard cron endpoint(s)
+        env:
+          DASHBOARD_URL: ${{ vars.TAHI_DASHBOARD_URL }}
+          CRON_SECRET: ${{ secrets.TAHI_CRON_SECRET }}
+          TARGETS: ${{ steps.pick.outputs.targets }}
+        run: |
+          set -e
+          if [ -z "$DASHBOARD_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::Missing TAHI_DASHBOARD_URL or TAHI_CRON_SECRET"
+            exit 1
+          fi
+          # Auto-append /dashboard basePath if not in URL.
+          base="${DASHBOARD_URL%/}"
+          case "$base" in
+            */dashboard) prefix="$base/api/admin/cron" ;;
+            *)           prefix="$base/dashboard/api/admin/cron" ;;
+          esac
+          for target in $TARGETS; do
+            url="$prefix/$target"
+            echo "POST $url"
+            response=$(curl -sS -w "\n%{http_code}" -X POST \
+              "$url" \
+              -H "x-cron-secret: ${CRON_SECRET}" \
+              -H "Content-Type: application/json")
+            body=$(echo "$response" | sed '$d')
+            code=$(echo "$response" | tail -n1)
+            echo "  HTTP $code"
+            echo "$body" | head -c 800
+            echo ""
+            if [ "$code" != "200" ]; then
+              echo "::warning::$target returned $code (continuing)"
+            fi
+          done
