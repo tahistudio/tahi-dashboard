@@ -19,6 +19,7 @@ import { sourceBadge } from '@/lib/chart-colors'
 import { REQUEST_STATUS_CONFIG } from '@/lib/status-config'
 import { SidebarSection, SidebarCard as SharedSidebarCard } from '@/components/tahi/sidebar-card'
 import { DealSalesKit } from '@/components/tahi/deal-sales-kit'
+import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
 import { SkeletonCard, SkeletonList } from '@/components/tahi/skeletons'
 
 // ---- Types ---------------------------------------------------------------
@@ -390,6 +391,15 @@ export function DealDetail({ dealId }: { dealId: string }) {
             {/* Stage progress indicator */}
             <StageProgress stages={stages} currentStageId={deal.stageId} />
           </div>
+
+          {/* Discovery / kickoff / scope calls. Polymorphic shared
+              component — fetches its own data, handles its own CRUD,
+              fires onChanged so the activity timeline refreshes. */}
+          <DiscoveryCallsCard
+            parentType="deal"
+            parentId={deal.id}
+            onChanged={fetchDeal}
+          />
 
           {/* Activity Timeline */}
           <div
