@@ -748,6 +748,14 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0045',
+    description: 'Files: add message_id (nullable) + idx_files_message so composer attachments are tied to a specific message, not just the request. Lets POST /api/admin/requests/[id]/messages accept attachmentFileIds[] and tie those files to the new message id.',
+    statements: [
+      `ALTER TABLE files ADD COLUMN message_id TEXT`,
+      `CREATE INDEX IF NOT EXISTS idx_files_message ON files(message_id)`,
+    ],
+  },
+  {
     name: '0044',
     description: 'Polymorphic discovery_calls: add request_id, task_id, org_id (nullable) so a call can attach to any parent (lead / deal / request / task / org). Unblocks "multiple meetings per deal", "kickoff calls per request", "client check-in calls" etc — same UI component renders on every parent page.',
     statements: [

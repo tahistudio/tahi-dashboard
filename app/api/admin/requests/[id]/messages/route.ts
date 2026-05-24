@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, asc } from 'drizzle-orm'
+import { eq, and, asc, inArray } from 'drizzle-orm'
 import { createNotifications, notifyMentionedPerson } from '@/lib/notifications'
 import { parseMentions } from '@/lib/parse-mentions'
 
@@ -44,7 +44,30 @@ export async function GET(req: NextRequest, { params }: Params) {
     .where(eq(schema.messages.requestId, id))
     .orderBy(asc(schema.messages.createdAt))
 
-  return NextResponse.json({ items: msgs, page: 1, limit: msgs.length })
+  // Attached files (files.message_id in the message ids we just loaded).
+  // One query, then bucket per message_id.
+  const msgIds = msgs.map(m => m.id)
+  const fileRows = msgIds.length > 0 ? await drizzle
+    .select({
+      id: schema.files.id,
+      messageId: schema.files.messageId,
+      filename: schema.files.filename,
+      mimeType: schema.files.mimeType,
+      sizeBytes: schema.files.sizeBytes,
+      storageKey: schema.files.storageKey,
+    })
+    .from(schema.files)
+    .where(inArray(schema.files.messageId, msgIds)) : []
+  const filesByMessage = new Map<string, typeof fileRows>()
+  for (const f of fileRows) {
+    if (!f.messageId) continue
+    const arr = filesByMessage.get(f.messageId) ?? []
+    arr.push(f)
+    filesByMessage.set(f.messageId, arr)
+  }
+  const items = msgs.map(m => ({ ...m, files: filesByMessage.get(m.id) ?? [] }))
+
+  return NextResponse.json({ items, page: 1, limit: items.length })
 }
 
 // ── POST /api/admin/requests/[id]/messages ───────────────────────────────────
@@ -57,15 +80,25 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const { id } = await params
 
-    let body: { body?: string; isInternal?: boolean; conversationId?: string }
+    let body: {
+      body?: string
+      isInternal?: boolean
+      conversationId?: string
+      /** R2-uploaded file ids that should be tied to this message.
+       *  These rows already exist (created by /api/uploads/confirm);
+       *  we just stamp their message_id so they appear inline. */
+      attachmentFileIds?: string[]
+    }
     try {
-      body = await req.json() as { body?: string; isInternal?: boolean; conversationId?: string }
+      body = await req.json() as typeof body
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
     }
 
-    if (!body.body?.trim()) {
-      return NextResponse.json({ error: 'Message body is required' }, { status: 400 })
+    const hasBody = !!body.body?.trim()
+    const hasAttachments = (body.attachmentFileIds?.length ?? 0) > 0
+    if (!hasBody && !hasAttachments) {
+      return NextResponse.json({ error: 'Message body or at least one attachment is required' }, { status: 400 })
     }
 
     const database = await db()
@@ -97,9 +130,27 @@ export async function POST(req: NextRequest, { params }: Params) {
       orgId: request.orgId,
       authorId: member?.id ?? userId ?? 'unknown',
       authorType: 'team_member',
-      body: body.body.trim(),
+      body: (body.body ?? '').trim(),
       isInternal: body.isInternal ?? false,
     })
+
+    // Link any pre-uploaded files to this message. The files were
+    // already inserted by /api/uploads/confirm with requestId set;
+    // we stamp message_id so the GET join groups them under this row.
+    // Scoped to files in the same orgId so a client can't smuggle
+    // someone else's file id into their own message.
+    if (hasAttachments && body.attachmentFileIds) {
+      const ids = body.attachmentFileIds.filter(Boolean)
+      if (ids.length > 0) {
+        await drizzle
+          .update(schema.files)
+          .set({ messageId: msgId })
+          .where(and(
+            inArray(schema.files.id, ids),
+            eq(schema.files.orgId, request.orgId),
+          ))
+      }
+    }
 
     // Update request updatedAt
     const msgNow = new Date().toISOString()
@@ -109,7 +160,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       .where(eq(schema.requests.id, id))
 
     // Process @mentions and create mention rows + notifications
-    const mentionedPeople = parseMentions(body.body.trim())
+    const mentionedPeople = parseMentions((body.body ?? '').trim())
     if (mentionedPeople.length > 0) {
       const mentionRows = mentionedPeople.map(m => ({
         id: crypto.randomUUID(),
@@ -132,7 +183,7 @@ export async function POST(req: NextRequest, { params }: Params) {
           mentionedId: m.id,
           senderTeamMemberId: authorId,
           title: 'You were mentioned in a request message',
-          body: body.body.trim().slice(0, 200),
+          body: (body.body ?? '').trim().slice(0, 200),
           entityType: 'request',
           entityId: id,
         })
@@ -156,7 +207,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         await createNotifications(drizzle, recipients, {
           type: 'new_message',
           title: 'New message on your request',
-          body: body.body.trim().slice(0, 200),
+          body: (body.body ?? '').trim().slice(0, 200),
           entityType: 'request',
           entityId: id,
         })
@@ -174,7 +225,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       await createNotifications(drizzle, [{ userId: reqInfo.assigneeId, userType: 'team_member' }], {
         type: 'new_message',
         title: `New message on "${reqInfo.title}"`,
-        body: body.body.trim().slice(0, 200),
+        body: (body.body ?? '').trim().slice(0, 200),
         entityType: 'request',
         entityId: id,
       })

@@ -575,6 +575,12 @@ export const messageReactions = sqliteTable('message_reactions', {
 export const files = sqliteTable('files', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   requestId: text('request_id').references(() => requests.id, { onDelete: 'set null' }),
+  // When attached to a specific message inline (composer attachment),
+  // messageId links the file. Files at the request level (general
+  // upload, no associated message) leave this null. Set on POST
+  // /api/admin/requests/[id]/messages when attachmentFileIds is in
+  // the body.
+  messageId: text('message_id'),
   orgId: text('org_id').notNull().references(() => organisations.id, { onDelete: 'cascade' }),
   uploadedById: text('uploaded_by_id').notNull(),
   // team_member | contact
@@ -588,6 +594,7 @@ export const files = sqliteTable('files', {
 }, (table) => [
   index('idx_files_org').on(table.orgId),
   index('idx_files_request').on(table.requestId),
+  index('idx_files_message').on(table.messageId),
 ])
 
 // ============================================================
