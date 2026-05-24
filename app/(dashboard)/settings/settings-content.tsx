@@ -417,6 +417,9 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
           {/* Buffer (Liam's personal social) */}
           {isAdmin && <BufferIntegrationSection />}
 
+          {/* AI cost dashboard */}
+          {isAdmin && <AiCostSection />}
+
           {/* Google Calendar Booking (admin only) - T87 */}
           {isAdmin && <BookingLinkSection settings={settings} onSave={saveSetting} savingKey={savingKey} />}
 
@@ -3372,6 +3375,138 @@ function ModulesSection({
         Disabled modules will be hidden from the sidebar navigation.
       </p>
     </section>
+  )
+}
+
+// ── AI cost dashboard ───────────────────────────────────────────────────
+// Pulls from /api/admin/reports/ai-cost. Shows total + last-30-day
+// token spend across all AI surfaces, plus top 10 leads by spend.
+// Tokens not dollars — Anthropic pricing changes too fast to bake in.
+
+interface AiCostResponse {
+  totals: {
+    allTime: { tokens: number; leadTokens: number; draftTokens: number; leads: number; drafts: number }
+    last30Days: { tokens: number; leadTokens: number; draftTokens: number; leads: number; drafts: number }
+  }
+  topLeads: Array<{ id: string; name: string; company: string | null; tokens: number; score: number | null; enriched: boolean }>
+  enrichmentSurface: { enrichedLeads: number; estimatedTokens: number }
+  pricingNote: string
+}
+
+function AiCostSection() {
+  const [data, setData] = useState<AiCostResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/reports/ai-cost'))
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setData(d as AiCostResponse | null))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const fmtTokens = (n: number) => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
+    return n.toLocaleString()
+  }
+  // Rough USD estimate: weighted average of Haiku (cheap) + Sonnet
+  // (pricier). Most tokens are Haiku scoring, so $1.50 / 1M is a
+  // safe-ish all-in number for display.
+  const estimateUsd = (n: number) => (n / 1_000_000) * 1.5
+
+  return (
+    <section id="ai-cost">
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <Sparkles className="w-5 h-5" />
+        AI cost
+      </h2>
+
+      <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 space-y-4">
+        {loading && <LoadingSkeleton rows={2} />}
+        {!loading && !data && (
+          <p className="text-sm text-[var(--color-text-muted)]">
+            Cost data unavailable.
+          </p>
+        )}
+        {!loading && data && (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <CostTile
+                label="Last 30 days"
+                value={fmtTokens(data.totals.last30Days.tokens)}
+                sub={`${data.totals.last30Days.leads} leads · ${data.totals.last30Days.drafts} drafts · ~$${estimateUsd(data.totals.last30Days.tokens).toFixed(2)} USD`}
+              />
+              <CostTile
+                label="All time"
+                value={fmtTokens(data.totals.allTime.tokens)}
+                sub={`${data.totals.allTime.leads} leads · ${data.totals.allTime.drafts} drafts · ~$${estimateUsd(data.totals.allTime.tokens).toFixed(2)} USD`}
+              />
+            </div>
+
+            {data.topLeads.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-subtle)] mb-2">
+                  Top spend by lead
+                </p>
+                <ul className="space-y-1.5">
+                  {data.topLeads.slice(0, 5).map(l => (
+                    <li
+                      key={l.id}
+                      className="flex items-center justify-between gap-2 px-3 py-2 rounded-md"
+                      style={{
+                        background: 'var(--color-bg-secondary)',
+                        border: '1px solid var(--color-border-subtle)',
+                      }}
+                    >
+                      <a
+                        href={`/dashboard/leads/${l.id}`}
+                        className="text-sm text-[var(--color-text)] truncate hover:underline"
+                      >
+                        {l.name}
+                        {l.company && (
+                          <span className="text-[var(--color-text-subtle)]"> · {l.company}</span>
+                        )}
+                      </a>
+                      <span className="text-xs text-[var(--color-text-muted)] flex-shrink-0 font-mono">
+                        {fmtTokens(l.tokens)}
+                        {l.score != null && (
+                          <span className="text-[var(--color-text-subtle)]"> · score {l.score}</span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <p className="text-xs text-[var(--color-text-subtle)] italic leading-relaxed">
+              {data.pricingNote}
+            </p>
+          </>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function CostTile({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div
+      className="rounded-lg p-3"
+      style={{
+        background: 'var(--color-bg-secondary)',
+        border: '1px solid var(--color-border-subtle)',
+      }}
+    >
+      <p className="text-xs uppercase tracking-wider text-[var(--color-text-subtle)] font-semibold">
+        {label}
+      </p>
+      <p className="text-2xl font-bold text-[var(--color-text)] mt-1 tabular-nums">
+        {value} <span className="text-sm font-normal text-[var(--color-text-muted)]">tokens</span>
+      </p>
+      <p className="text-xs text-[var(--color-text-subtle)] mt-1">{sub}</p>
+    </div>
   )
 }
 
