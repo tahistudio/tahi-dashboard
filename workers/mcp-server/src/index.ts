@@ -623,6 +623,13 @@ const TOOLS: ToolDef[] = [
     dealId: prop('string', 'Deal ID'),
   }, ['dealId']),
 
+  // ── Google Drive: Gemini transcript autopull ─────────────────────────
+  tool('drive_sync_gemini_transcripts', 'Scan Google Drive for "Notes by Gemini" docs modified in the last N hours, parse the summary + transcript + next steps, and write them to matching discovery_calls. Matches by parsed meeting time (±2h) + attendee name in the call title or attendees JSON. Idempotent — already-synced calls are skipped.', {
+    sinceHours: prop('number', 'Only consider docs modified in the last N hours (default 72)'),
+    limit: prop('number', 'Cap docs processed per call (default 20, max 50)'),
+    dryRun: prop('boolean', 'Parse + report matches without writing (default false)'),
+  }),
+
   // ── Lead rescore (batched, ICP-aware) ────────────────────────────────
   tool('leads_rescore_batch', 'Force-rescore a batch of leads with Haiku using the current ICP-aware rubric. Loop until scored=0 to drain the backlog. Any lead scoring >= enrichThreshold (default 60) gets queued for Sonnet full enrichment on the next cron tick. Use after the ICP doc is updated or the scoring prompt changes.', {
     limit: prop('number', 'Max leads to process this call (default 20, max 25)'),
@@ -1548,6 +1555,16 @@ async function executeTool(
     }
     case 'list_deal_nudges':
       return json(await apiGet(`/api/admin/deals/${s('dealId')}/nudges`, token))
+
+    // ── Drive transcript autopull ─────────────────────────────────────
+    case 'drive_sync_gemini_transcripts': {
+      const params = new URLSearchParams()
+      if (typeof args.sinceHours === 'number') params.set('sinceHours', String(args.sinceHours))
+      if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+      if (args.dryRun === true) params.set('dryRun', '1')
+      const qs = params.toString()
+      return json(await apiWrite(`/api/admin/integrations/google/sync-drive-transcripts${qs ? `?${qs}` : ''}`, token, 'POST', {}))
+    }
 
     // ── Lead rescore ──────────────────────────────────────────────────
     case 'leads_rescore_batch': {
