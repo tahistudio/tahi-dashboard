@@ -165,7 +165,21 @@ function buildUserMessage(lead: LeadForPrompt): string {
   if (lead.brief) lines.push(`Brief from the lead: ${lead.brief}`)
   lines.push(`Source: ${lead.source}${lead.sourceDetail ? ` (${lead.sourceDetail})` : ''}`)
   if (lead.estimatedValue) lines.push(`Estimated value: ${lead.estimatedValue} ${lead.currency}`)
+
+  // Cold-outreach signal: no contact info means this is a company-
+  // only prospect (e.g. from a Webflow partner list, cold list, etc).
+  // Bias the research toward finding decision-maker handles for
+  // outreach, since that's what Liam needs to actually reach out.
+  const isColdOutreach = !lead.email && !lead.phone && (lead.source === 'cold_outreach' || lead.source === 'other')
   lines.push('')
+  if (isColdOutreach) {
+    lines.push('NOTE: this is a cold-outreach prospect with no contact details. Prioritise identifying:')
+    lines.push('  - The likely decision-maker for a web project (role + name if publicly findable)')
+    lines.push('  - Their LinkedIn URL if you can find it')
+    lines.push('  - The company\'s standard email format (e.g. firstname@company.com) if visible on the site')
+    lines.push('Liam will use these for personalised cold outreach via LinkedIn / email. Do NOT scrape personal emails — only note the format if it is publicly stated.')
+    lines.push('')
+  }
   lines.push('Please research this lead and produce the briefing.')
   return lines.join('\n')
 }

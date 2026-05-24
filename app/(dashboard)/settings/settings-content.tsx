@@ -1765,6 +1765,64 @@ function LeadAutomationsSection({
           </div>
         </div>
 
+        {/* Smart-enrich gate (auto-spend control) */}
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+          <label htmlFor="auto-enrich-threshold" className="block text-sm font-medium text-[var(--color-text)]">
+            Auto-enrich score threshold
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5 mb-3">
+            When the cron scores an unenriched lead above this number, full Sonnet enrichment auto-runs (~$0.30/lead). Set to 0 to disable and only enrich manually. 60 is the sensible default: only spend research budget on leads that look promising.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              id="auto-enrich-threshold"
+              type="number"
+              min={0}
+              max={100}
+              defaultValue={settings['leads.autoEnrichScoreThreshold'] ?? '60'}
+              onBlur={(e) => {
+                const v = e.currentTarget.value.trim()
+                const n = parseInt(v, 10)
+                const next = Number.isFinite(n) && n >= 0 ? String(Math.min(100, Math.max(0, n))) : '60'
+                if (next !== (settings['leads.autoEnrichScoreThreshold'] ?? '60')) void onSave('leads.autoEnrichScoreThreshold', next)
+              }}
+              disabled={savingKey === 'leads.autoEnrichScoreThreshold'}
+              className="text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              style={{ width: '6rem', minHeight: '2.5rem' }}
+            />
+            <span className="text-sm text-[var(--color-text-muted)]">/ 100 (0 = manual only)</span>
+          </div>
+        </div>
+
+        {/* Daily enrichment hard cap (cost ceiling) */}
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+          <label htmlFor="max-auto-enrich" className="block text-sm font-medium text-[var(--color-text)]">
+            Max auto-enrichments per day
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5 mb-3">
+            Hard cap on how many leads the cron can auto-enrich in a single day. At ~$0.30/enrich, 10 = $3/day max. Stops a flood of high-scoring leads (e.g. a bulk import) from spending too much in one go. Manual &quot;Run AI&quot; clicks are not counted.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              id="max-auto-enrich"
+              type="number"
+              min={0}
+              max={100}
+              defaultValue={settings['leads.maxAutoEnrichmentsPerDay'] ?? '10'}
+              onBlur={(e) => {
+                const v = e.currentTarget.value.trim()
+                const n = parseInt(v, 10)
+                const next = Number.isFinite(n) && n >= 0 ? String(Math.min(100, Math.max(0, n))) : '10'
+                if (next !== (settings['leads.maxAutoEnrichmentsPerDay'] ?? '10')) void onSave('leads.maxAutoEnrichmentsPerDay', next)
+              }}
+              disabled={savingKey === 'leads.maxAutoEnrichmentsPerDay'}
+              className="text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              style={{ width: '6rem', minHeight: '2.5rem' }}
+            />
+            <span className="text-sm text-[var(--color-text-muted)]">per day</span>
+          </div>
+        </div>
+
         {/* Auto-status transition (opt-in) */}
         <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
           <label htmlFor="auto-nurturing" className="block text-sm font-medium text-[var(--color-text)]">

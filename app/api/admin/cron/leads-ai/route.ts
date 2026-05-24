@@ -120,18 +120,38 @@ export async function POST(req: NextRequest) {
     ))
     .limit(MAX_LEADS_PER_RUN)
 
+  // Daily auto-enrichment cap: count how many full enrichments have
+  // already run today (via the lead_enriched activity rows) so we
+  // bound spend even when many leads score above the threshold.
+  let autoEnrichmentsToday = 0
+  if (settings.autoEnrichScoreThreshold > 0 && settings.maxAutoEnrichmentsPerDay > 0) {
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+    const cutoff = todayStart.toISOString()
+    const todayEnrichments = await database
+      .select({ id: schema.activities.id })
+      .from(schema.activities)
+      .where(and(
+        eq(schema.activities.type, 'lead_enriched'),
+        sql`${schema.activities.createdAt} >= ${cutoff}`,
+      ))
+    autoEnrichmentsToday = todayEnrichments.length
+  }
+  const enrichmentBudget = Math.max(0, settings.maxAutoEnrichmentsPerDay - autoEnrichmentsToday)
+
   const results: Array<{
     leadId: string
     scored: boolean
     prevScore: number | null
     newScore: number | null
+    autoEnriched: boolean
     transitions: string[]
     error?: string
   }> = []
 
   for (const lead of candidates) {
     if (Date.now() - startedAt > RUN_TIME_BUDGET_MS) {
-      results.push({ leadId: lead.id, scored: false, prevScore: lead.aiScore ?? null, newScore: null, transitions: [], error: 'budget exhausted' })
+      results.push({ leadId: lead.id, scored: false, prevScore: lead.aiScore ?? null, newScore: null, autoEnriched: false, transitions: [], error: 'budget exhausted' })
       continue
     }
 
@@ -151,8 +171,40 @@ export async function POST(req: NextRequest) {
         })
         .where(eq(schema.leads.id, lead.id))
 
+      // Smart-enrich gate: auto-trigger full Sonnet enrichment when
+      // (a) the score crossed the threshold, (b) the lead hasn't been
+      // enriched yet, and (c) we still have budget today.
+      let autoEnriched = false
+      const crossedAutoEnrich =
+        settings.autoEnrichScoreThreshold > 0
+        && score != null
+        && score >= settings.autoEnrichScoreThreshold
+        && !lead.enrichedAt
+        && enrichmentBudget - results.filter(r => r.autoEnriched).length > 0
+      if (crossedAutoEnrich) {
+        try {
+          // Call the existing enrich route in full mode. Internal call
+          // — uses the same admin auth bypass path as the cron itself.
+          const enrichRes = await fetch(
+            new URL(`/api/admin/leads/${lead.id}/enrich`, req.url).toString(),
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(cronSecret ? { Authorization: `Bearer ${cronSecret}` } : {}),
+                Cookie: req.headers.get('cookie') ?? '',
+              },
+            },
+          )
+          if (enrichRes.ok) autoEnriched = true
+        } catch {
+          // best-effort — failure here doesn't fail the whole cron
+        }
+      }
+
       // Transitions + notifications.
       const transitions: string[] = []
+      if (autoEnriched) transitions.push('auto_enriched')
       const notifyTarget = lead.ownerId ?? settings.defaultLeadOwnerId
       const highIntent = score != null && score >= settings.highIntentThreshold
       const wasNotHighIntent = prevScore == null || prevScore < settings.highIntentThreshold
@@ -223,13 +275,14 @@ export async function POST(req: NextRequest) {
         transitions.push('auto_nurturing')
       }
 
-      results.push({ leadId: lead.id, scored: true, prevScore, newScore: score, transitions })
+      results.push({ leadId: lead.id, scored: true, prevScore, newScore: score, autoEnriched, transitions })
     } catch (err) {
       results.push({
         leadId: lead.id,
         scored: false,
         prevScore: lead.aiScore ?? null,
         newScore: null,
+        autoEnriched: false,
         transitions: [],
         error: err instanceof Error ? err.message : String(err),
       })
@@ -239,6 +292,8 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     candidates: candidates.length,
     scored: results.filter(r => r.scored).length,
+    autoEnriched: results.filter(r => r.autoEnriched).length,
+    enrichmentBudgetRemaining: Math.max(0, enrichmentBudget - results.filter(r => r.autoEnriched).length),
     errors: results.filter(r => r.error).length,
     transitions: results.flatMap(r => r.transitions),
     durationMs: Date.now() - startedAt,
@@ -257,6 +312,14 @@ interface LeadSettings {
   idleQualifyingDays: number
   autoNurturingAfterDays: number
   defaultLeadOwnerId: string | null
+  /** Auto-trigger full Sonnet enrichment when an unenriched lead's
+   *  Haiku score crosses this number. 0 = never auto-enrich.
+   *  Default 60 — only spend Sonnet money on leads that look promising. */
+  autoEnrichScoreThreshold: number
+  /** Hard daily cap on auto-enrichments across all leads. Stops the
+   *  cron from spending more than ~N × $0.30 per day even if many
+   *  leads score above the threshold simultaneously. Default 10. */
+  maxAutoEnrichmentsPerDay: number
 }
 
 async function readLeadSettings(database: Awaited<ReturnType<typeof db>>): Promise<LeadSettings> {
@@ -296,6 +359,8 @@ async function readLeadSettings(database: Awaited<ReturnType<typeof db>>): Promi
     idleQualifyingDays: num('leads.idleQualifyingDays', 7),
     autoNurturingAfterDays: num('leads.autoNurturingAfterDays', 0),
     defaultLeadOwnerId: get('leads.defaultLeadOwnerId'),
+    autoEnrichScoreThreshold: num('leads.autoEnrichScoreThreshold', 60),
+    maxAutoEnrichmentsPerDay: num('leads.maxAutoEnrichmentsPerDay', 10),
   }
 }
 
