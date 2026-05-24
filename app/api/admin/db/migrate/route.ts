@@ -748,6 +748,48 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0048',
+    description: 'AI context: seed settings that point at Docs Hub pages used as canonical Tahi context for all AI surfaces (scoring, enrichment, reply drafting). Seeds ai.icpDocId (Ideal Client Profile), ai.brandDnaDocId, ai.toneDocId, ai.liamVoiceDocId, ai.servicesDocId by matching docs.slug to known seeded slugs. Uses INSERT OR IGNORE so re-running is safe and existing operator-picked values are preserved.',
+    statements: [
+      // ICP — drives scoring rubric, enrichment fit assessment
+      `INSERT OR IGNORE INTO settings (key, value, updated_at)
+        SELECT 'ai.icpDocId', id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        FROM doc_pages
+        WHERE slug = 'ideal-client-profile'
+        LIMIT 1`,
+      // Brand DNA — drives reply tone, value-prop framing
+      `INSERT OR IGNORE INTO settings (key, value, updated_at)
+        SELECT 'ai.brandDnaDocId', id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        FROM doc_pages
+        WHERE slug = 'brand-dna'
+        LIMIT 1`,
+      // Tone of Voice
+      `INSERT OR IGNORE INTO settings (key, value, updated_at)
+        SELECT 'ai.toneDocId', id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        FROM doc_pages
+        WHERE slug = 'tone-of-voice'
+        LIMIT 1`,
+      // Liam's personal voice — used for first-reply drafting (personal outreach)
+      `INSERT OR IGNORE INTO settings (key, value, updated_at)
+        SELECT 'ai.liamVoiceDocId', id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        FROM doc_pages
+        WHERE slug = 'liam-personal-voice'
+        LIMIT 1`,
+      // Services + pricing — so the AI knows what we sell
+      `INSERT OR IGNORE INTO settings (key, value, updated_at)
+        SELECT 'ai.servicesDocId', id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        FROM doc_pages
+        WHERE slug = 'services-and-pricing'
+        LIMIT 1`,
+      // AI Writing Tells — anti-patterns to AVOID in AI-generated copy
+      `INSERT OR IGNORE INTO settings (key, value, updated_at)
+        SELECT 'ai.aiTellsDocId', id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        FROM doc_pages
+        WHERE slug = 'ai-writing-tells'
+        LIMIT 1`,
+    ],
+  },
+  {
     name: '0047',
     description: 'Lead firmographics: promote industry / employee_count / revenue_band / monthly_visits / lead_type / linkedin_url / linkedin_personal_url / tech_stack / country / year_founded out of the brief blob into first-class columns on `leads`. Unlocks structured editing on the lead detail page, real filtering in the list view, and discriminating scoring signals (Haiku can now score on actual employee count + industry instead of guessing from prose). Backfill from existing brief blobs runs via POST /api/admin/leads/backfill-fields.',
     statements: [

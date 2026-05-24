@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, desc, eq, ne, sql } from 'drizzle-orm'
+import { loadAiContext } from '@/lib/ai-context'
 
 export const dynamic = 'force-dynamic'
 
@@ -192,6 +193,14 @@ export async function POST(
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 500 })
   }
 
+  // Load the canonical Tahi context docs (ICP, brand DNA, tone of voice,
+  // Liam's personal voice, AI writing tells, services + pricing). These
+  // are cached and prepended to the system prompt as a single ephemeral
+  // block, so the doc-hub edits propagate to AI replies within 5min.
+  const contextText = await loadAiContext([
+    'icp', 'brandDna', 'tone', 'liamVoice', 'aiTells', 'services',
+  ])
+
   let text = ''
   let inputTokens = 0
   let outputTokens = 0
@@ -200,14 +209,25 @@ export async function POST(
   try {
     const Anthropic = (await import('@anthropic-ai/sdk')).default
     const client = new Anthropic({ apiKey })
+
+    // Build the system blocks. Two ephemeral cache prefixes — the docs
+    // change rarely (5min TTL on our side, ~5min cache TTL on Anthropic's
+    // side), and the role prompt is stable. This means subsequent draft
+    // calls within the cache window pay only the user-message + output
+    // tokens, ~10% of the full-prompt cost.
+    const systemBlocks = contextText
+      ? [
+          { type: 'text' as const, text: contextText, cache_control: { type: 'ephemeral' as const } },
+          { type: 'text' as const, text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' as const } },
+        ]
+      : [
+          { type: 'text' as const, text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' as const } },
+        ]
+
     const response = await client.messages.create({
       model: MODEL,
       max_tokens: 1200,
-      system: [{
-        type: 'text',
-        text: SYSTEM_PROMPT,
-        cache_control: { type: 'ephemeral' },
-      }],
+      system: systemBlocks,
       messages: [{ role: 'user', content: userMessage }],
     })
     text = response.content

@@ -417,10 +417,25 @@ async function scoreLead(lead: ScoreInput): Promise<{
 
   const userMessage = buildScoreMessage(lead)
 
+  // Prepend the ICP + services context as a cached system block. The
+  // ICP doc defines who Tahi sells to (employee bands by market,
+  // verticals, AEO pain signals) — without it Haiku falls back to
+  // generic SaaS heuristics and clusters all cold-outreach leads at
+  // 25/35. With it, scoring discriminates on the actual ICP shape.
+  const { loadAiContext } = await import('@/lib/ai-context')
+  const contextText = await loadAiContext(['icp', 'services'])
+
+  const systemBlocks = contextText
+    ? [
+        { type: 'text' as const, text: contextText, cache_control: { type: 'ephemeral' as const } },
+        { type: 'text' as const, text: SYSTEM_PROMPT_SCORE },
+      ]
+    : [{ type: 'text' as const, text: SYSTEM_PROMPT_SCORE }]
+
   const response = await client.messages.create({
     model: SCORE_MODEL,
     max_tokens: 256,
-    system: SYSTEM_PROMPT_SCORE,
+    system: systemBlocks,
     messages: [{ role: 'user', content: userMessage }],
   })
 
@@ -434,10 +449,24 @@ async function scoreLead(lead: ScoreInput): Promise<{
   const rawScore = scoreMatch ? parseInt(scoreMatch[1], 10) : NaN
   const score = Number.isFinite(rawScore) ? Math.max(0, Math.min(100, rawScore)) : null
 
+  // Include cache tokens in the spend total — cache reads are heavily
+  // discounted but still real cost, and cache creation is the same as
+  // uncached input on the first call.
+  const usage = response.usage as {
+    input_tokens: number
+    output_tokens: number
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?: number
+  }
+  const tokensSpent = usage.input_tokens
+    + usage.output_tokens
+    + (usage.cache_creation_input_tokens ?? 0)
+    + (usage.cache_read_input_tokens ?? 0)
+
   return {
     score,
     scoreReason: reasonMatch?.[1]?.trim() ?? null,
-    tokensSpent: response.usage.input_tokens + response.usage.output_tokens,
+    tokensSpent,
   }
 }
 

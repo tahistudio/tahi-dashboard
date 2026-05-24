@@ -396,21 +396,30 @@ async function callAnthropic(
   const Anthropic = (await import('@anthropic-ai/sdk')).default
   const client = new Anthropic({ apiKey })
 
-  // Prompt caching: the system prompt is identical on every enrichment
-  // run (~2000 tokens, comfortably over Sonnet's 1024-token minimum)
-  // so wrapping it in a cache_control breakpoint makes the second +
-  // subsequent runs within the 5-minute TTL pay ~10% of input cost on
-  // those tokens instead of full price. The web_search tool definition
-  // also gets cached — tool changes invalidate the cache, but we
-  // never toggle web search on/off so this stays warm.
+  // Load ICP + services from Docs Hub. ICP tells Sonnet what "good fit"
+  // looks like (NZ/AU 50+, US/UK 200+, WordPress switchers, Webflow
+  // already, AEO pain). Services tells it what we sell so the fit
+  // assessment can name the actual product. Both cached at our layer
+  // and at Anthropic's, so steady-state cost is minimal.
+  const { loadAiContext } = await import('@/lib/ai-context')
+  const contextText = await loadAiContext(['icp', 'services'])
+
+  const systemBlocks = contextText
+    ? [
+        { type: 'text' as const, text: contextText, cache_control: { type: 'ephemeral' as const } },
+        { type: 'text' as const, text: systemPrompt, cache_control: { type: 'ephemeral' as const } },
+      ]
+    : [
+        { type: 'text' as const, text: systemPrompt, cache_control: { type: 'ephemeral' as const } },
+      ]
+
+  // Prompt caching: the system prompt + context blocks are identical on
+  // every enrichment run, so cache_control breakpoints make subsequent
+  // runs within the 5-minute TTL pay ~10% of input cost on cached tokens.
   const response = await client.messages.create({
     model,
     max_tokens: 2048,
-    system: [{
-      type: 'text',
-      text: systemPrompt,
-      cache_control: { type: 'ephemeral' },
-    }],
+    system: systemBlocks,
     messages: [{ role: 'user', content: userMessage }],
     ...(withWebSearch && {
       tools: [{

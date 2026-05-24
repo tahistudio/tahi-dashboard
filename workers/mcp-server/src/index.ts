@@ -623,6 +623,13 @@ const TOOLS: ToolDef[] = [
     dealId: prop('string', 'Deal ID'),
   }, ['dealId']),
 
+  // ── Lead rescore (batched, ICP-aware) ────────────────────────────────
+  tool('leads_rescore_batch', 'Force-rescore a batch of leads with Haiku using the current ICP-aware rubric. Loop until scored=0 to drain the backlog. Any lead scoring >= enrichThreshold (default 60) gets queued for Sonnet full enrichment on the next cron tick. Use after the ICP doc is updated or the scoring prompt changes.', {
+    limit: prop('number', 'Max leads to process this call (default 20, max 25)'),
+    enrichThreshold: prop('number', 'Score threshold for auto-enrich queue (default 60)'),
+    force: prop('boolean', 'Re-process leads even if already scored (default false — processes oldest-scored-first)'),
+  }),
+
   // ── Social (Liam's personal Buffer) ──────────────────────────────────
   // Pulls from Liam Miller's personal Buffer account (BUFFER_API_KEY env
   // var on the dashboard). Scoped to personal social profiles, NOT the
@@ -1541,6 +1548,16 @@ async function executeTool(
     }
     case 'list_deal_nudges':
       return json(await apiGet(`/api/admin/deals/${s('dealId')}/nudges`, token))
+
+    // ── Lead rescore ──────────────────────────────────────────────────
+    case 'leads_rescore_batch': {
+      const params = new URLSearchParams()
+      if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+      if (typeof args.enrichThreshold === 'number') params.set('enrichThreshold', String(args.enrichThreshold))
+      if (args.force === true) params.set('force', '1')
+      const qs = params.toString()
+      return json(await apiWrite(`/api/admin/leads/rescore-all${qs ? `?${qs}` : ''}`, token, 'POST', {}))
+    }
 
     // ── Social (Buffer) ───────────────────────────────────────────────
     case 'buffer_get_status':
