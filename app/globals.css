@@ -778,6 +778,32 @@ textarea,
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* DataTable pagination footer.
+   Mobile: count on its own line, then a single row with size dropdown
+   on the left and prev/next nav on the right. Avoids the wrap-mess of
+   the previous flex-wrap layout.
+   Desktop: classic 3-column with count left, dropdown centre, nav right. */
+.tahi-table-pagination-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "count count"
+    "size  nav";
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+.tahi-table-pagination-count { grid-area: count; }
+.tahi-table-pagination-size  { grid-area: size; justify-self: start; }
+.tahi-table-pagination-nav   { grid-area: nav;  justify-self: end; }
+
+@media (min-width: 40rem) {
+  .tahi-table-pagination-row {
+    grid-template-columns: 1fr auto auto;
+    grid-template-areas: "count size nav";
+  }
+  .tahi-table-pagination-size { justify-self: end; }
+}
+
 /* MessageBubble hover actions. Always discoverable at low opacity
    so the user knows reply / react / more are there; brightens on
    row hover or focus. */

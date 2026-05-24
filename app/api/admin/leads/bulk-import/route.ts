@@ -41,6 +41,12 @@ import { lookupOrCreatePerson } from '@/lib/people'
 export const dynamic = 'force-dynamic'
 
 const MAX_ROWS = 2000
+/** Hard per-call processing cap. D1 times out around 45s on Cloudflare
+ *  Workers; ~40 row-inserts (each = lookupOrCreatePerson + lead insert
+ *  + activity insert = 3 round-trips) leaves headroom. Callers that
+ *  pass >50 rows in `csv` get the first 50 processed + the rest
+ *  returned as `remainingCsv` so the client can re-POST in a loop. */
+const PROCESS_PER_CALL = 50
 
 type LeadField =
   | 'name'
@@ -158,6 +164,25 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Name+source dedupe for contact-less rows (e.g. cold-outreach lists
+  // where every lead is a company with no email). Without this, re-
+  // running an import on the same CSV would duplicate every row.
+  // Lower-cased name match, scoped to the same source value.
+  const candidateNames = parsed.rows
+    .map(row => valueFor(row, fieldIndex.name))
+    .filter((n): n is string => !!n && n.trim().length > 0)
+    .map(n => n.trim().toLowerCase())
+  const existingNamesForSource = new Set<string>()
+  if (candidateNames.length > 0 && skipDuplicates) {
+    const rows = await database
+      .select({ name: schema.leads.name })
+      .from(schema.leads)
+      .where(eq(schema.leads.source, defaultSource))
+    for (const r of rows) {
+      if (r.name) existingNamesForSource.add(r.name.trim().toLowerCase())
+    }
+  }
+
   interface PreparedLead {
     rowIndex: number
     name: string
@@ -183,6 +208,12 @@ export async function POST(req: NextRequest) {
     }
     const email = valueFor(row, fieldIndex.email)?.trim() || null
     if (email && existingEmails.has(email.toLowerCase())) {
+      skipped++
+      return
+    }
+    // Contact-less rows: dedupe by lower-cased name within the same
+    // source. Catches re-runs of cold-outreach CSVs cleanly.
+    if (!email && skipDuplicates && existingNamesForSource.has(name.toLowerCase())) {
       skipped++
       return
     }
@@ -220,11 +251,19 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  // Cap this call to PROCESS_PER_CALL rows. Anything beyond gets
+  // returned as remainingCsv so the client can re-POST in a loop
+  // without hitting the 45s D1 timeout. The header row + the
+  // unprocessed source lines (de-quoted from the original CSV via
+  // the parser-reassembled slice) are concatenated for the caller.
+  const totalPrepared = prepared.length
+  const overBudget = totalPrepared > PROCESS_PER_CALL
+  const toWrite = overBudget ? prepared.slice(0, PROCESS_PER_CALL) : prepared
+  const deferred = overBudget ? prepared.slice(PROCESS_PER_CALL) : []
+
   // Write loop. Each lead gets a person via lookup-or-create on email.
-  // Bounded by Workers CPU budget — for >500 rows the caller should
-  // split into chunks.
   let created = 0
-  for (const p of prepared) {
+  for (const p of toWrite) {
     try {
       const personId = await lookupOrCreatePerson(database, {
         fullName: p.name,
@@ -271,12 +310,47 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // When over-budget, hand the deferred rows back as a new CSV blob
+  // the client can POST again with the same mapping/defaults.
+  let remainingCsv: string | undefined
+  if (deferred.length > 0) {
+    const csvEscape = (v: string | null) => {
+      if (v == null) return ''
+      return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
+    }
+    const lines: string[] = []
+    lines.push(['name','email','phone','company','jobTitle','website','brief','sourceDetail','estimatedValue'].join(','))
+    for (const p of deferred) {
+      lines.push([
+        csvEscape(p.name),
+        csvEscape(p.email),
+        csvEscape(p.phone),
+        csvEscape(p.company),
+        csvEscape(p.jobTitle),
+        csvEscape(p.website),
+        csvEscape(p.brief),
+        csvEscape(p.sourceDetail),
+        p.estimatedValue != null ? String(p.estimatedValue) : '',
+      ].join(','))
+    }
+    remainingCsv = lines.join('\n')
+  }
+
   return NextResponse.json({
     parsed: parsed.rows.length,
     created,
     skipped,
     errors,
     headers,
+    // Continuation payload — the client loops POSTing remainingCsv +
+    // the mapping below until the field is absent.
+    remainingCount: deferred.length,
+    remainingCsv,
+    remainingMapping: deferred.length > 0 ? {
+      name: 'name', email: 'email', phone: 'phone', company: 'company',
+      jobTitle: 'jobTitle', website: 'website', brief: 'brief',
+      sourceDetail: 'sourceDetail', estimatedValue: 'estimatedValue',
+    } : undefined,
   })
 }
 

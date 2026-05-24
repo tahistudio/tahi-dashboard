@@ -1875,36 +1875,57 @@ function BulkImportPanel({ onDone }: { onDone: () => Promise<void> }) {
   async function runImport() {
     setError(null)
     setBusy(true)
+    // Loop until the server says no rows remain. Each call is bounded
+    // at PROCESS_PER_CALL rows server-side; the response hands back
+    // remainingCsv + remainingMapping when there's more to do. This
+    // is what stops the 248-row WordPress list from timing out.
+    let currentCsv = csv
+    let currentMapping: Record<string, string> = mapping
+    let totalParsed = 0, totalCreated = 0, totalSkipped = 0
+    let allErrors: Array<{ row: number; error: string }> = []
+    const MAX_LOOPS = 50  // safety: ~2500 rows
     try {
-      const res = await fetch(apiPath('/api/admin/leads/bulk-import'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          csv,
-          mapping,
-          defaults: { source: defaultSource },
-          skipDuplicates,
-          dryRun: false,
-        }),
-      })
-      const data = await res.json() as {
-        parsed?: number; created?: number; skipped?: number
-        errors?: Array<{ row: number; error: string }>
-        error?: string
+      for (let i = 0; i < MAX_LOOPS; i++) {
+        const res = await fetch(apiPath('/api/admin/leads/bulk-import'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            csv: currentCsv,
+            mapping: currentMapping,
+            defaults: { source: defaultSource },
+            skipDuplicates,
+            dryRun: false,
+          }),
+        })
+        const data = await res.json() as {
+          parsed?: number; created?: number; skipped?: number
+          errors?: Array<{ row: number; error: string }>
+          error?: string
+          remainingCount?: number
+          remainingCsv?: string
+          remainingMapping?: Record<string, string>
+        }
+        if (!res.ok) throw new Error(data.error ?? 'Import failed')
+        totalParsed += data.parsed ?? 0
+        totalCreated += data.created ?? 0
+        totalSkipped += data.skipped ?? 0
+        if (data.errors?.length) allErrors = allErrors.concat(data.errors)
+        // Live progress so Liam can see large imports moving.
+        setSummary({
+          parsed: totalParsed,
+          created: totalCreated,
+          skipped: totalSkipped,
+          errors: allErrors,
+        })
+        if (!data.remainingCsv || !data.remainingMapping || (data.remainingCount ?? 0) === 0) break
+        currentCsv = data.remainingCsv
+        currentMapping = data.remainingMapping
       }
-      if (!res.ok) throw new Error(data.error ?? 'Import failed')
-      setSummary({
-        parsed: data.parsed ?? 0,
-        created: data.created ?? 0,
-        skipped: data.skipped ?? 0,
-        errors: data.errors ?? [],
-      })
       setPreview(null)
-      // If everything imported cleanly, close + refresh after a beat.
-      if ((data.errors?.length ?? 0) === 0) {
+      if (allErrors.length === 0) {
         setTimeout(() => { void onDone() }, 1200)
       } else {
-        await onDone()  // refresh in background; keep panel open so Liam sees errors
+        await onDone()
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed')

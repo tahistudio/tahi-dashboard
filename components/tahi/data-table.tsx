@@ -757,73 +757,74 @@ export function TablePagination({
 
   return (
     <div
+      className="tahi-table-pagination"
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '0.75rem',
-        padding: '0.5rem 1rem',
+        padding: '0.5rem 0.75rem',
         borderTop: '1px solid var(--color-border-subtle)',
         background: 'var(--color-bg)',
         fontSize: '0.75rem',
         color: 'var(--color-text-muted)',
-        flexWrap: 'wrap',
       }}
     >
-      <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-        {totalRows === 0 ? 'No items' : `Showing ${start.toLocaleString()}–${end.toLocaleString()} of ${totalRows.toLocaleString()}`}
-      </span>
-
-      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4375rem' }}>
-        <label htmlFor="pgnsize" style={{ fontSize: '0.6875rem' }}>Rows per page</label>
-        <select
-          id="pgnsize"
-          value={pageSize}
-          onChange={(e) => {
-            const v = e.target.value
-            onPageSizeChange(v === 'all' ? 'all' : (parseInt(v, 10) as 20 | 50 | 100))
-          }}
-          className="tahi-select"
-          style={{
-            height: '1.75rem',
-            padding: '0 0.4375rem',
-            background: 'var(--color-bg-secondary)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-sm)',
-            fontSize: '0.75rem',
-            color: 'var(--color-text)',
-            outline: 'none',
-          }}
+      <div className="tahi-table-pagination-row">
+        <span
+          className="tahi-table-pagination-count"
+          style={{ fontVariantNumeric: 'tabular-nums' }}
         >
-          <option value="20">20</option>
-          <option value="50">50</option>
-          <option value="100">100</option>
-          <option value="all">All</option>
-        </select>
-      </div>
-
-      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
-        <button
-          type="button"
-          onClick={() => canPrev && onPageChange(pageIndex - 1)}
-          disabled={!canPrev}
-          aria-label="Previous page"
-          style={paginationBtnStyle(canPrev)}
-        >
-          ←
-        </button>
-        <span style={{ fontSize: '0.6875rem', fontVariantNumeric: 'tabular-nums', minWidth: '5rem', textAlign: 'center' }}>
-          Page {pageIndex + 1} of {totalPages}
+          {totalRows === 0 ? 'No items' : `${start.toLocaleString()}–${end.toLocaleString()} of ${totalRows.toLocaleString()}`}
         </span>
-        <button
-          type="button"
-          onClick={() => canNext && onPageChange(pageIndex + 1)}
-          disabled={!canNext}
-          aria-label="Next page"
-          style={paginationBtnStyle(canNext)}
-        >
-          →
-        </button>
+
+        <div className="tahi-table-pagination-size" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4375rem' }}>
+          <label htmlFor="pgnsize" style={{ fontSize: '0.6875rem' }}>Rows</label>
+          <select
+            id="pgnsize"
+            value={pageSize}
+            onChange={(e) => {
+              const v = e.target.value
+              onPageSizeChange(v === 'all' ? 'all' : (parseInt(v, 10) as 20 | 50 | 100))
+            }}
+            className="tahi-select"
+            style={{
+              height: '1.75rem',
+              padding: '0 0.4375rem',
+              background: 'var(--color-bg-secondary)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '0.75rem',
+              color: 'var(--color-text)',
+              outline: 'none',
+            }}
+          >
+            <option value="20">20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="all">All</option>
+          </select>
+        </div>
+
+        <div className="tahi-table-pagination-nav" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+          <button
+            type="button"
+            onClick={() => canPrev && onPageChange(pageIndex - 1)}
+            disabled={!canPrev}
+            aria-label="Previous page"
+            style={paginationBtnStyle(canPrev)}
+          >
+            ←
+          </button>
+          <span style={{ fontSize: '0.6875rem', fontVariantNumeric: 'tabular-nums', minWidth: '4rem', textAlign: 'center' }}>
+            {pageIndex + 1} / {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => canNext && onPageChange(pageIndex + 1)}
+            disabled={!canNext}
+            aria-label="Next page"
+            style={paginationBtnStyle(canNext)}
+          >
+            →
+          </button>
+        </div>
       </div>
     </div>
   )
