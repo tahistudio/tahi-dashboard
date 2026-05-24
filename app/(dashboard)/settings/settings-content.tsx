@@ -3636,41 +3636,46 @@ function AiContextDocsSection({
 }
 
 // ── Buffer integration (Liam's personal social) ─────────────────────────
-// Read-only surface. Connected profiles + recent posts + engagement
-// totals from BUFFER_API_KEY env var. Intentionally scoped to Liam's
-// personal Buffer account — not the Tahi company page.
+// Uses Buffer's new GraphQL API (api.buffer.com). Surfaces connected
+// channels + recent posts. Per-post engagement metrics are NOT
+// available on this API (Buffer gates those behind Analyze) — so the
+// UI shows post text + date + channel only.
+// Intentionally scoped to Liam's personal Buffer, not the Tahi page.
 
-interface BufferProfileLite {
+interface BufferChannelLite {
   id: string
+  name: string | null
+  displayName: string | null
   service: string
-  serviceUsername: string | null
-  formattedUsername: string | null
-  formattedService: string | null
   avatarUrl: string | null
+  isQueuePaused: boolean
 }
 
 interface BufferPostLite {
   id: string
-  profileService: string
+  channelId: string
   text: string
+  status: string
   sentAt: string | null
-  serviceLink: string | null
-  statistics: Record<string, number>
+  scheduledAt: string | null
+  createdAt: string | null
 }
 
 interface BufferStatusResponse {
   configured: boolean
   connected: boolean
-  profiles: BufferProfileLite[]
+  organizationId: string | null
+  organizationName: string | null
+  channels: BufferChannelLite[]
   errorMessage: string | null
 }
 
 interface BufferPostsResponse {
   posts: BufferPostLite[]
+  channels: BufferChannelLite[]
   totals: {
     posts: number
     byService: Record<string, number>
-    engagement: Record<string, number>
   }
 }
 
@@ -3690,7 +3695,11 @@ function BufferIntegrationSection() {
       const data = await res.json() as BufferStatusResponse
       setStatus(data)
     } catch {
-      setStatus({ configured: false, connected: false, profiles: [], errorMessage: 'Status check failed' })
+      setStatus({
+        configured: false, connected: false,
+        organizationId: null, organizationName: null,
+        channels: [], errorMessage: 'Status check failed',
+      })
     } finally {
       setLoadingStatus(false)
     }
@@ -3720,6 +3729,16 @@ function BufferIntegrationSection() {
     if (status?.connected) void fetchPosts()
   }, [status?.connected, fetchPosts])
 
+  // Channel id → display label lookup for posts
+  const channelLabel = (id: string) => {
+    const c = status?.channels.find(ch => ch.id === id)
+    if (!c) return id.slice(0, 8)
+    return c.displayName ?? c.name ?? c.service
+  }
+  const channelService = (id: string) => {
+    return status?.channels.find(ch => ch.id === id)?.service ?? 'unknown'
+  }
+
   return (
     <section id="buffer">
       <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
@@ -3729,20 +3748,20 @@ function BufferIntegrationSection() {
 
       <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 space-y-4">
         <p className="text-xs text-[var(--color-text-muted)]">
-          Pulls Liam&apos;s personal social posts (LinkedIn, Twitter, etc.) from Buffer for analytics + the AI to reference when drafting content. This is the personal account, not the Tahi Studio company page.
+          Pulls Liam&apos;s personal social posts (LinkedIn, Twitter, etc.) from Buffer for the AI to reference when drafting content. This is the personal account, not the Tahi Studio company page. Per-post engagement metrics aren&apos;t exposed by Buffer&apos;s API (they require their Analyze product).
         </p>
 
         {loadingStatus && <LoadingSkeleton rows={1} />}
 
         {!loadingStatus && status && !status.configured && (
           <div className="text-sm text-[var(--color-warning)] bg-[var(--color-warning-bg)] border border-[var(--color-warning)] rounded-lg p-3">
-            BUFFER_API_KEY is not configured. Add a Personal Access Token from <a href="https://publish.buffer.com/account/apps" target="_blank" rel="noopener noreferrer" className="underline">publish.buffer.com/account/apps</a> as BUFFER_API_KEY in Webflow Cloud env vars.
+            BUFFER_API_KEY is not configured. Get a Personal Access Token from <a href="https://publish.buffer.com/settings/api" target="_blank" rel="noopener noreferrer" className="underline">publish.buffer.com/settings/api</a> and set it as BUFFER_API_KEY in Webflow Cloud env vars.
           </div>
         )}
 
         {!loadingStatus && status && status.configured && !status.connected && (
           <div className="text-sm text-[var(--color-danger)] bg-[var(--color-danger-bg)] border border-[var(--color-danger)] rounded-lg p-3">
-            {status.errorMessage ?? 'Buffer API returned no profiles. Check the token has access and you have connected social accounts.'}
+            {status.errorMessage ?? 'Buffer returned no channels. Check the token has access and you have connected social accounts.'}
           </div>
         )}
 
@@ -3751,14 +3770,15 @@ function BufferIntegrationSection() {
             <div className="flex items-start gap-3 flex-wrap">
               <Badge tone="positive" variant="soft" size="sm">Connected</Badge>
               <div className="text-sm text-[var(--color-text)]">
-                {status.profiles.length} profile{status.profiles.length === 1 ? '' : 's'} linked
+                {status.channels.length} channel{status.channels.length === 1 ? '' : 's'}
+                {status.organizationName ? ` · ${status.organizationName}` : ''}
               </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
-              {status.profiles.map(p => (
+              {status.channels.map(c => (
                 <div
-                  key={p.id}
+                  key={c.id}
                   className="flex items-center gap-2 px-2.5 py-1 rounded-full"
                   style={{
                     background: 'var(--color-bg-secondary)',
@@ -3766,17 +3786,21 @@ function BufferIntegrationSection() {
                   }}
                 >
                   <span className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">
-                    {p.formattedService ?? p.service}
+                    {c.service}
                   </span>
                   <span className="text-xs text-[var(--color-text)]">
-                    {p.formattedUsername ?? p.serviceUsername ?? p.id.slice(0, 8)}
+                    {c.displayName ?? c.name ?? c.id.slice(0, 8)}
                   </span>
+                  {c.isQueuePaused && (
+                    <Badge tone="warning" variant="soft" size="sm">paused</Badge>
+                  )}
                 </div>
               ))}
             </div>
 
-            {/* Engagement summary across last 10 posts per profile */}
-            {postsTotals && Object.keys(postsTotals.engagement).length > 0 && (
+            {/* Service breakdown (post counts) — Buffer GraphQL doesn't
+                expose engagement on this endpoint */}
+            {postsTotals && Object.keys(postsTotals.byService).length > 0 && (
               <div
                 className="text-xs text-[var(--color-text-muted)] p-3 rounded-lg"
                 style={{
@@ -3786,16 +3810,15 @@ function BufferIntegrationSection() {
               >
                 <div className="font-medium text-[var(--color-text)] mb-1">Last {postsTotals.posts} posts</div>
                 <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  {Object.entries(postsTotals.engagement).map(([k, v]) => (
+                  {Object.entries(postsTotals.byService).map(([k, v]) => (
                     <span key={k}>
-                      <strong>{v.toLocaleString()}</strong> {k}
+                      <strong>{v}</strong> on {k}
                     </span>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Recent posts list */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-[var(--color-text)]">Recent posts</h3>
@@ -3833,10 +3856,14 @@ function BufferIntegrationSection() {
                     >
                       <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
                         <span className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">
-                          {post.profileService}
+                          {channelService(post.channelId)} · {channelLabel(post.channelId)}
                         </span>
                         <span className="text-xs text-[var(--color-text-subtle)]">
-                          {post.sentAt ? new Date(post.sentAt).toLocaleDateString() : ''}
+                          {post.sentAt
+                            ? new Date(post.sentAt).toLocaleDateString()
+                            : post.scheduledAt
+                              ? `Scheduled ${new Date(post.scheduledAt).toLocaleDateString()}`
+                              : ''}
                         </span>
                       </div>
                       <p className="text-sm text-[var(--color-text)] leading-relaxed whitespace-pre-wrap" style={{
@@ -3847,36 +3874,6 @@ function BufferIntegrationSection() {
                       }}>
                         {post.text}
                       </p>
-                      <div className="flex items-center gap-3 mt-2 text-xs text-[var(--color-text-muted)] flex-wrap">
-                        {(post.statistics.likes != null || post.statistics.favorites != null) && (
-                          <span className="inline-flex items-center gap-1">
-                            <Heart className="w-3 h-3" aria-hidden="true" />
-                            {(post.statistics.likes ?? post.statistics.favorites ?? 0).toLocaleString()}
-                          </span>
-                        )}
-                        {post.statistics.comments != null && (
-                          <span className="inline-flex items-center gap-1">
-                            <MessageCircle className="w-3 h-3" aria-hidden="true" />
-                            {post.statistics.comments.toLocaleString()}
-                          </span>
-                        )}
-                        {(post.statistics.shares != null || post.statistics.retweets != null) && (
-                          <span className="inline-flex items-center gap-1">
-                            <Share2 className="w-3 h-3" aria-hidden="true" />
-                            {(post.statistics.shares ?? post.statistics.retweets ?? 0).toLocaleString()}
-                          </span>
-                        )}
-                        {post.serviceLink && (
-                          <a
-                            href={post.serviceLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="underline text-[var(--color-text-active)]"
-                          >
-                            View
-                          </a>
-                        )}
-                      </div>
                     </li>
                   ))}
                 </ul>

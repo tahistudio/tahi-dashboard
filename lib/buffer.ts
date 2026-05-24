@@ -1,189 +1,274 @@
 /**
- * Buffer API client (personal account).
+ * Buffer GraphQL API client (personal account).
  *
- * This wraps Buffer's classic REST API (api.bufferapp.com/1). Auth is a
- * single Personal Access Token via `Authorization: Bearer <token>`, set
- * as the BUFFER_API_KEY env var. The token belongs to ONE user — in our
- * case, Liam Miller's personal Buffer account — and exposes that user's
- * connected social profiles (personal Twitter, personal LinkedIn,
- * Instagram, etc).
+ * This wraps Buffer's new GraphQL API at https://api.buffer.com. The
+ * older REST API at api.bufferapp.com/1/ has been retired in favour
+ * of GraphQL.
  *
- * IMPORTANT: this is intentionally Liam's personal social activity, not
- * the Tahi Studio company page. Tahi page metrics live in a separate
- * surface if/when we add a company-level integration.
+ * Auth: a Personal Access Token from
+ *   https://publish.buffer.com/settings/api
+ * (NOT an OIDC token from the web login flow — those are explicitly
+ * rejected by the API.) Set as BUFFER_API_KEY.
  *
- * Endpoints used:
- *   GET /profiles.json
- *   GET /profiles/:id/updates/sent.json?count=N
- *   GET /profiles/:id/updates/pending.json?count=N
+ * IMPORTANT: this is intentionally Liam Miller's personal Buffer
+ * account, not the Tahi Studio company page.
  *
- * Per-post engagement metrics live on each `update.statistics` blob.
- * Shape varies by service (Twitter has favorites/retweets, LinkedIn has
- * likes/comments/shares, etc.), so consumers should treat statistics as
- * an opaque record and surface what the service actually returned.
+ * Capabilities exposed by the GraphQL API:
+ *   - organizations: needed to scope all other queries
+ *   - channels:      connected social profiles (LinkedIn, Twitter, etc.)
+ *   - posts:         scheduled / sent / draft posts with text + dates
+ *
+ * NOT available via this API (would need Buffer's separate Analyze
+ * product for these):
+ *   - per-post engagement metrics (likes, comments, shares, reach)
+ *   - aggregate channel analytics
+ *
+ * So this integration surfaces "what has Liam been posting" but cannot
+ * show how those posts performed.
  */
 
-const BASE_URL = 'https://api.bufferapp.com/1'
+const ENDPOINT = 'https://api.buffer.com'
 
-export interface BufferProfile {
+export interface BufferOrganization {
   id: string
-  service: string                // 'twitter' | 'linkedin' | 'instagram' | 'facebook' | ...
-  serviceUsername: string | null // e.g. 'liammiller'
-  formattedUsername: string | null  // e.g. '@liammiller'
-  formattedService: string | null   // e.g. 'Twitter', 'LinkedIn'
+  name: string | null
+}
+
+export interface BufferChannel {
+  id: string
+  name: string | null
+  displayName: string | null
+  service: string                 // 'twitter' | 'linkedin' | 'facebook' | 'instagram' | etc.
   avatarUrl: string | null
-  timezone: string | null
+  isQueuePaused: boolean
 }
 
-export interface BufferUpdate {
+export type BufferPostStatus = 'sent' | 'scheduled' | 'draft' | 'failed' | 'needs_approval'
+
+export interface BufferPost {
   id: string
-  profileId: string
-  profileService: string
+  channelId: string
   text: string
-  textFormatted: string | null
-  sentAt: string | null            // ISO timestamp (from `sent_at` epoch)
+  status: string
+  createdAt: string | null         // ISO timestamp
+  sentAt: string | null            // ISO if status=sent
   scheduledAt: string | null
-  status: 'sent' | 'buffer' | 'pending' | 'failed' | string
-  statistics: Record<string, number>
-  /** Public URL of the live post if Buffer knows it (otherwise null). */
-  serviceLink: string | null
-  /** First media URL if any. */
-  mediaUrl: string | null
 }
 
-interface RawProfile {
+export interface BufferPostPage {
+  posts: BufferPost[]
+  hasNextPage: boolean
+  endCursor: string | null
+}
+
+interface RawOrganization { id?: string; name?: string | null }
+interface RawChannel {
   id?: string
+  name?: string | null
+  displayName?: string | null
   service?: string
-  service_username?: string | null
-  formatted_username?: string | null
-  formatted_service?: string | null
   avatar?: string | null
-  timezone?: string | null
+  isQueuePaused?: boolean
 }
-
-interface RawStatistics {
-  [k: string]: number | undefined
-}
-
-interface RawUpdate {
+interface RawPost {
   id?: string
-  profile_id?: string
-  profile_service?: string
+  channelId?: string
   text?: string
-  text_formatted?: string | null
-  sent_at?: number | null
-  scheduled_at?: number | null
   status?: string
-  statistics?: RawStatistics | null
-  service_link?: string | null
-  media?: { picture?: string | null; thumbnail?: string | null } | null
+  createdAt?: string | null
+  sentAt?: string | null
+  scheduledAt?: string | null
 }
 
-function epochToIso(epoch: number | null | undefined): string | null {
-  if (epoch == null) return null
-  if (!Number.isFinite(epoch)) return null
-  return new Date(epoch * 1000).toISOString()
+interface GqlResponse<T> {
+  data?: T
+  errors?: Array<{ message: string; path?: string[] }>
 }
 
-function toProfile(raw: RawProfile): BufferProfile | null {
-  if (!raw.id || !raw.service) return null
-  return {
-    id: raw.id,
-    service: raw.service,
-    serviceUsername: raw.service_username ?? null,
-    formattedUsername: raw.formatted_username ?? null,
-    formattedService: raw.formatted_service ?? null,
-    avatarUrl: raw.avatar ?? null,
-    timezone: raw.timezone ?? null,
-  }
-}
-
-function toUpdate(raw: RawUpdate): BufferUpdate | null {
-  if (!raw.id) return null
-  const stats: Record<string, number> = {}
-  if (raw.statistics) {
-    for (const [k, v] of Object.entries(raw.statistics)) {
-      if (typeof v === 'number' && Number.isFinite(v)) stats[k] = v
-    }
-  }
-  return {
-    id: raw.id,
-    profileId: raw.profile_id ?? '',
-    profileService: raw.profile_service ?? '',
-    text: raw.text ?? '',
-    textFormatted: raw.text_formatted ?? null,
-    sentAt: epochToIso(raw.sent_at ?? null),
-    scheduledAt: epochToIso(raw.scheduled_at ?? null),
-    status: raw.status ?? 'unknown',
-    statistics: stats,
-    serviceLink: raw.service_link ?? null,
-    mediaUrl: raw.media?.picture ?? raw.media?.thumbnail ?? null,
-  }
-}
-
-async function bufferFetch(path: string, token: string): Promise<unknown> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
+async function gql<T>(token: string, query: string, variables?: Record<string, unknown>): Promise<T> {
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ query, variables: variables ?? {} }),
   })
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
-    throw new Error(`Buffer API ${res.status}: ${detail.slice(0, 200) || res.statusText}`)
+    throw new Error(`Buffer API ${res.status}: ${detail.slice(0, 300) || res.statusText}`)
   }
-  return res.json()
+  const body = await res.json() as GqlResponse<T>
+  if (body.errors && body.errors.length > 0) {
+    const messages = body.errors.map(e => e.message).join('; ')
+    throw new Error(`Buffer GraphQL: ${messages}`)
+  }
+  if (!body.data) {
+    throw new Error('Buffer GraphQL: empty response')
+  }
+  return body.data
 }
 
-export async function listProfiles(token: string): Promise<BufferProfile[]> {
-  const raw = await bufferFetch('/profiles.json', token) as unknown
-  if (!Array.isArray(raw)) return []
-  return raw.map(p => toProfile(p as RawProfile)).filter((p): p is BufferProfile => p !== null)
-}
+// ── Organizations ──────────────────────────────────────────────────────────
 
-export async function listSentUpdates(
-  token: string,
-  profileId: string,
-  count = 20,
-): Promise<BufferUpdate[]> {
-  const safeCount = Math.max(1, Math.min(100, Math.round(count)))
-  const raw = await bufferFetch(`/profiles/${encodeURIComponent(profileId)}/updates/sent.json?count=${safeCount}`, token) as unknown
-  const obj = (raw && typeof raw === 'object' && 'updates' in raw) ? raw as { updates?: unknown } : null
-  const updates = obj?.updates
-  if (!Array.isArray(updates)) return []
-  return updates.map(u => toUpdate(u as RawUpdate)).filter((u): u is BufferUpdate => u !== null)
-}
-
-export async function listPendingUpdates(
-  token: string,
-  profileId: string,
-  count = 20,
-): Promise<BufferUpdate[]> {
-  const safeCount = Math.max(1, Math.min(100, Math.round(count)))
-  const raw = await bufferFetch(`/profiles/${encodeURIComponent(profileId)}/updates/pending.json?count=${safeCount}`, token) as unknown
-  const obj = (raw && typeof raw === 'object' && 'updates' in raw) ? raw as { updates?: unknown } : null
-  const updates = obj?.updates
-  if (!Array.isArray(updates)) return []
-  return updates.map(u => toUpdate(u as RawUpdate)).filter((u): u is BufferUpdate => u !== null)
-}
-
-/** Aggregate engagement across a list of updates. Sums whatever metrics
- *  the underlying service returned. Useful for "total likes this month"
- *  style headline numbers. */
-export function aggregateStats(updates: BufferUpdate[]): Record<string, number> {
-  const totals: Record<string, number> = {}
-  for (const u of updates) {
-    for (const [k, v] of Object.entries(u.statistics)) {
-      totals[k] = (totals[k] ?? 0) + v
+const QUERY_ORGS = `
+  query GetOrganizations {
+    account {
+      organizations {
+        id
+        name
+      }
     }
   }
-  return totals
+`
+
+interface OrgsResponse {
+  account: { organizations: RawOrganization[] } | null
 }
 
-/** Group updates by profile service for service-level analytics. */
-export function groupByService(updates: BufferUpdate[]): Record<string, BufferUpdate[]> {
-  const out: Record<string, BufferUpdate[]> = {}
-  for (const u of updates) {
-    const key = u.profileService || 'unknown'
-    if (!out[key]) out[key] = []
-    out[key].push(u)
+export async function listOrganizations(token: string): Promise<BufferOrganization[]> {
+  const data = await gql<OrgsResponse>(token, QUERY_ORGS)
+  const orgs = data.account?.organizations ?? []
+  return orgs
+    .filter((o): o is RawOrganization & { id: string } => !!o?.id)
+    .map(o => ({ id: o.id, name: o.name ?? null }))
+}
+
+// ── Channels (connected social profiles) ───────────────────────────────────
+
+const QUERY_CHANNELS = `
+  query GetChannels($organizationId: String!) {
+    channels(input: { organizationId: $organizationId }) {
+      id
+      name
+      displayName
+      service
+      avatar
+      isQueuePaused
+    }
+  }
+`
+
+interface ChannelsResponse {
+  channels: RawChannel[] | null
+}
+
+export async function listChannels(token: string, organizationId: string): Promise<BufferChannel[]> {
+  const data = await gql<ChannelsResponse>(token, QUERY_CHANNELS, { organizationId })
+  const channels = data.channels ?? []
+  return channels
+    .filter((c): c is RawChannel & { id: string; service: string } => !!c?.id && !!c?.service)
+    .map(c => ({
+      id: c.id,
+      name: c.name ?? null,
+      displayName: c.displayName ?? null,
+      service: c.service,
+      avatarUrl: c.avatar ?? null,
+      isQueuePaused: !!c.isQueuePaused,
+    }))
+}
+
+// ── Posts ──────────────────────────────────────────────────────────────────
+
+const QUERY_POSTS = `
+  query GetPosts(
+    $organizationId: String!,
+    $statuses: [PostStatus!],
+    $channelIds: [String!],
+    $first: Int,
+    $after: String
+  ) {
+    posts(
+      input: {
+        organizationId: $organizationId,
+        filter: { status: $statuses, channelIds: $channelIds }
+      },
+      first: $first,
+      after: $after
+    ) {
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+      edges {
+        node {
+          id
+          text
+          status
+          createdAt
+          sentAt
+          scheduledAt
+          channelId
+        }
+      }
+    }
+  }
+`
+
+interface PostEdge { node: RawPost }
+interface PostsResponse {
+  posts: {
+    pageInfo: { endCursor: string | null; hasNextPage: boolean }
+    edges: PostEdge[]
+  } | null
+}
+
+export async function listPosts(
+  token: string,
+  organizationId: string,
+  opts: {
+    statuses?: BufferPostStatus[]
+    channelIds?: string[]
+    first?: number
+    after?: string | null
+  } = {},
+): Promise<BufferPostPage> {
+  const first = Math.max(1, Math.min(100, opts.first ?? 20))
+  const data = await gql<PostsResponse>(token, QUERY_POSTS, {
+    organizationId,
+    statuses: opts.statuses?.length ? opts.statuses : ['sent'],
+    channelIds: opts.channelIds && opts.channelIds.length > 0 ? opts.channelIds : null,
+    first,
+    after: opts.after ?? null,
+  })
+  const wrapper = data.posts
+  if (!wrapper) return { posts: [], hasNextPage: false, endCursor: null }
+  const posts: BufferPost[] = wrapper.edges
+    .map(e => e.node)
+    .filter((n): n is RawPost & { id: string } => !!n?.id)
+    .map(n => ({
+      id: n.id,
+      channelId: n.channelId ?? '',
+      text: n.text ?? '',
+      status: n.status ?? 'unknown',
+      createdAt: n.createdAt ?? null,
+      sentAt: n.sentAt ?? null,
+      scheduledAt: n.scheduledAt ?? null,
+    }))
+  return {
+    posts,
+    hasNextPage: !!wrapper.pageInfo?.hasNextPage,
+    endCursor: wrapper.pageInfo?.endCursor ?? null,
+  }
+}
+
+// ── Grouping helper (engagement aggregation isn't possible — the
+// GraphQL API doesn't expose per-post metrics) ────────────────────────────
+
+export function groupPostsByChannel(
+  posts: BufferPost[],
+  channels: BufferChannel[],
+): Array<{ channel: BufferChannel; posts: BufferPost[] }> {
+  const byId = new Map(channels.map(c => [c.id, c]))
+  const grouped = new Map<string, BufferPost[]>()
+  for (const p of posts) {
+    if (!grouped.has(p.channelId)) grouped.set(p.channelId, [])
+    grouped.get(p.channelId)!.push(p)
+  }
+  const out: Array<{ channel: BufferChannel; posts: BufferPost[] }> = []
+  for (const [channelId, ps] of grouped) {
+    const channel = byId.get(channelId)
+    if (channel) out.push({ channel, posts: ps })
   }
   return out
 }

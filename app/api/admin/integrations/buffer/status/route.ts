@@ -1,22 +1,23 @@
 /**
  * GET /api/admin/integrations/buffer/status
  *
- * Lightweight status for the Settings card. Returns:
+ * Returns:
  *   {
  *     configured: boolean,         // BUFFER_API_KEY env var present
- *     connected:  boolean,         // token works + at least one profile
- *     profiles:   BufferProfile[], // Liam's connected social profiles
+ *     connected:  boolean,         // token works + at least one channel
+ *     organizationId: string | null,
+ *     organizationName: string | null,
+ *     channels:   BufferChannel[], // Liam's connected social profiles
  *     errorMessage: string | null
  *   }
  *
- * IMPORTANT: this surface is intentionally scoped to Liam Miller's
- * PERSONAL Buffer account. The Tahi Studio company page (if separately
- * scheduled) is not represented here.
+ * Scoped to Liam Miller's personal Buffer account — NOT the Tahi
+ * Studio company page. Uses Buffer's GraphQL API (api.buffer.com).
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
-import { listProfiles } from '@/lib/buffer'
+import { listOrganizations, listChannels } from '@/lib/buffer'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,24 +32,46 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       configured: false,
       connected: false,
-      profiles: [],
+      organizationId: null,
+      organizationName: null,
+      channels: [],
       errorMessage: null,
     })
   }
 
   try {
-    const profiles = await listProfiles(token)
+    // Buffer's GraphQL requires an organizationId for everything. Pick
+    // the first org on the account — single-user Personal Access
+    // Tokens typically only have one. If Liam has multiple in future
+    // we'd add a setting to pick the active one.
+    const orgs = await listOrganizations(token)
+    if (orgs.length === 0) {
+      return NextResponse.json({
+        configured: true,
+        connected: false,
+        organizationId: null,
+        organizationName: null,
+        channels: [],
+        errorMessage: 'Buffer token works but no organisations found on this account.',
+      })
+    }
+    const org = orgs[0]
+    const channels = await listChannels(token, org.id)
     return NextResponse.json({
       configured: true,
-      connected: profiles.length > 0,
-      profiles,
+      connected: channels.length > 0,
+      organizationId: org.id,
+      organizationName: org.name,
+      channels,
       errorMessage: null,
     })
   } catch (err) {
     return NextResponse.json({
       configured: true,
       connected: false,
-      profiles: [],
+      organizationId: null,
+      organizationName: null,
+      channels: [],
       errorMessage: err instanceof Error ? err.message : 'Buffer API call failed',
     })
   }

@@ -1,16 +1,16 @@
 /**
- * Tests for the Buffer API client wrapper.
+ * Tests for the Buffer GraphQL API client.
  *
- * Mocks fetch and exercises the parsing + aggregation helpers.
+ * Mocks fetch and exercises the GraphQL-shaped responses.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
-  listProfiles, listSentUpdates, aggregateStats, groupByService,
-  type BufferUpdate,
+  listOrganizations, listChannels, listPosts, groupPostsByChannel,
+  type BufferPost, type BufferChannel,
 } from '../buffer'
 
-describe('Buffer client', () => {
+describe('Buffer GraphQL client', () => {
   const originalFetch = globalThis.fetch
 
   afterEach(() => {
@@ -18,143 +18,197 @@ describe('Buffer client', () => {
     vi.restoreAllMocks()
   })
 
-  function mockFetch(payload: unknown, ok = true) {
+  function mockGql(data: unknown, ok = true, errors?: Array<{ message: string }>) {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok,
       status: ok ? 200 : 500,
       statusText: ok ? 'OK' : 'Server Error',
-      json: () => Promise.resolve(payload),
-      text: () => Promise.resolve(JSON.stringify(payload)),
+      json: () => Promise.resolve({ data, errors }),
+      text: () => Promise.resolve(JSON.stringify({ data, errors })),
     } as unknown as Response)
   }
 
-  describe('listProfiles', () => {
-    it('maps raw profile fields to typed BufferProfile', async () => {
-      mockFetch([
-        {
-          id: 'p1',
-          service: 'twitter',
-          service_username: 'liammiller',
-          formatted_username: '@liammiller',
-          formatted_service: 'Twitter',
-          avatar: 'https://...',
-          timezone: 'Pacific/Auckland',
-        },
-        {
-          id: 'p2',
-          service: 'linkedin',
-          service_username: null,
-          formatted_username: 'Liam Miller',
-          formatted_service: 'LinkedIn',
-        },
-      ])
-      const profiles = await listProfiles('fake-token')
-      expect(profiles).toHaveLength(2)
-      expect(profiles[0].service).toBe('twitter')
-      expect(profiles[0].formattedUsername).toBe('@liammiller')
-      expect(profiles[1].service).toBe('linkedin')
+  describe('listOrganizations', () => {
+    it('extracts orgs from account.organizations payload', async () => {
+      mockGql({ account: { organizations: [{ id: 'org1', name: 'Tahi' }, { id: 'org2', name: null }] } })
+      const orgs = await listOrganizations('fake')
+      expect(orgs).toHaveLength(2)
+      expect(orgs[0]).toEqual({ id: 'org1', name: 'Tahi' })
+      expect(orgs[1]).toEqual({ id: 'org2', name: null })
     })
 
-    it('filters out malformed profile rows', async () => {
-      mockFetch([
-        { id: 'good', service: 'twitter' },
-        { /* no id */ service: 'twitter' },
-        { id: 'no-service' },
-      ])
-      const profiles = await listProfiles('fake')
-      expect(profiles).toHaveLength(1)
+    it('returns empty array when account is null', async () => {
+      mockGql({ account: null })
+      const orgs = await listOrganizations('fake')
+      expect(orgs).toEqual([])
     })
 
-    it('returns empty array on non-array payload', async () => {
-      mockFetch({ error: 'something' })
-      const profiles = await listProfiles('fake')
-      expect(profiles).toEqual([])
+    it('filters out orgs without ids', async () => {
+      mockGql({ account: { organizations: [{ id: 'good' }, { name: 'no-id' }] } })
+      const orgs = await listOrganizations('fake')
+      expect(orgs).toHaveLength(1)
+      expect(orgs[0].id).toBe('good')
     })
 
-    it('throws on non-OK response', async () => {
-      mockFetch({ error: 'unauthorized' }, false)
-      await expect(listProfiles('fake')).rejects.toThrow(/Buffer API 500/)
+    it('throws on GraphQL errors', async () => {
+      mockGql(null, true, [{ message: 'OIDC tokens not accepted' }])
+      await expect(listOrganizations('fake')).rejects.toThrow(/OIDC tokens not accepted/)
+    })
+
+    it('throws on HTTP error', async () => {
+      mockGql({ account: null }, false)
+      await expect(listOrganizations('fake')).rejects.toThrow(/Buffer API 500/)
     })
   })
 
-  describe('listSentUpdates', () => {
-    it('converts epoch sent_at to ISO and extracts statistics', async () => {
-      mockFetch({
-        updates: [
+  describe('listChannels', () => {
+    it('maps raw channel fields to typed BufferChannel', async () => {
+      mockGql({
+        channels: [
           {
-            id: 'u1',
-            profile_id: 'p1',
-            profile_service: 'twitter',
-            text: 'Hello world',
-            sent_at: 1717200000,
-            statistics: { favorites: 10, retweets: 3, reach: 500 },
-            service_link: 'https://twitter.com/x/status/123',
-            media: { picture: 'https://...' },
+            id: 'ch1',
+            name: 'liam-twitter',
+            displayName: '@liammiller',
+            service: 'twitter',
+            avatar: 'https://...',
+            isQueuePaused: false,
+          },
+          {
+            id: 'ch2',
+            displayName: 'Liam Miller',
+            service: 'linkedin',
+            isQueuePaused: true,
           },
         ],
       })
-      const updates = await listSentUpdates('fake', 'p1', 10)
-      expect(updates).toHaveLength(1)
-      expect(updates[0].text).toBe('Hello world')
-      expect(updates[0].sentAt).toMatch(/^2024-06-01T/)
-      expect(updates[0].statistics).toEqual({ favorites: 10, retweets: 3, reach: 500 })
-      expect(updates[0].mediaUrl).toBe('https://...')
+      const channels = await listChannels('fake', 'org1')
+      expect(channels).toHaveLength(2)
+      expect(channels[0].service).toBe('twitter')
+      expect(channels[0].displayName).toBe('@liammiller')
+      expect(channels[0].isQueuePaused).toBe(false)
+      expect(channels[1].isQueuePaused).toBe(true)
     })
 
-    it('caps count at 100', async () => {
-      mockFetch({ updates: [] })
-      await listSentUpdates('fake', 'p1', 999)
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        expect.stringMatching(/count=100/),
-        expect.anything(),
-      )
+    it('drops channels without id or service', async () => {
+      mockGql({
+        channels: [
+          { id: 'good', service: 'twitter' },
+          { service: 'no-id' },
+          { id: 'no-service' },
+        ],
+      })
+      const channels = await listChannels('fake', 'org1')
+      expect(channels).toHaveLength(1)
+      expect(channels[0].id).toBe('good')
     })
 
-    it('floors count at 1', async () => {
-      mockFetch({ updates: [] })
-      await listSentUpdates('fake', 'p1', 0)
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        expect.stringMatching(/count=1\b/),
-        expect.anything(),
-      )
-    })
-  })
-
-  describe('aggregateStats', () => {
-    it('sums per-key across updates', () => {
-      const updates: BufferUpdate[] = [
-        { id: 'a', profileId: 'p', profileService: 'twitter', text: '', textFormatted: null, sentAt: null, scheduledAt: null, status: 'sent', statistics: { likes: 5, comments: 2 }, serviceLink: null, mediaUrl: null },
-        { id: 'b', profileId: 'p', profileService: 'twitter', text: '', textFormatted: null, sentAt: null, scheduledAt: null, status: 'sent', statistics: { likes: 3, shares: 1 }, serviceLink: null, mediaUrl: null },
-      ]
-      expect(aggregateStats(updates)).toEqual({ likes: 8, comments: 2, shares: 1 })
-    })
-
-    it('returns empty object for empty input', () => {
-      expect(aggregateStats([])).toEqual({})
+    it('returns empty when channels is null', async () => {
+      mockGql({ channels: null })
+      const channels = await listChannels('fake', 'org1')
+      expect(channels).toEqual([])
     })
   })
 
-  describe('groupByService', () => {
-    it('groups updates by profileService', () => {
-      const updates: BufferUpdate[] = [
-        { id: 'a', profileId: 'p1', profileService: 'twitter', text: '', textFormatted: null, sentAt: null, scheduledAt: null, status: 'sent', statistics: {}, serviceLink: null, mediaUrl: null },
-        { id: 'b', profileId: 'p2', profileService: 'linkedin', text: '', textFormatted: null, sentAt: null, scheduledAt: null, status: 'sent', statistics: {}, serviceLink: null, mediaUrl: null },
-        { id: 'c', profileId: 'p1', profileService: 'twitter', text: '', textFormatted: null, sentAt: null, scheduledAt: null, status: 'sent', statistics: {}, serviceLink: null, mediaUrl: null },
-      ]
-      const grouped = groupByService(updates)
-      expect(grouped.twitter).toHaveLength(2)
-      expect(grouped.linkedin).toHaveLength(1)
+  describe('listPosts', () => {
+    it('extracts posts from edges/node structure', async () => {
+      mockGql({
+        posts: {
+          pageInfo: { endCursor: 'cursor1', hasNextPage: true },
+          edges: [
+            {
+              node: {
+                id: 'p1',
+                channelId: 'ch1',
+                text: 'Hello world',
+                status: 'sent',
+                createdAt: '2026-05-20T12:00:00Z',
+                sentAt: '2026-05-20T12:05:00Z',
+                scheduledAt: null,
+              },
+            },
+            {
+              node: {
+                id: 'p2',
+                channelId: 'ch2',
+                text: 'Second post',
+                status: 'sent',
+                createdAt: '2026-05-19T10:00:00Z',
+                sentAt: '2026-05-19T10:05:00Z',
+                scheduledAt: null,
+              },
+            },
+          ],
+        },
+      })
+      const page = await listPosts('fake', 'org1', { first: 10 })
+      expect(page.posts).toHaveLength(2)
+      expect(page.posts[0].text).toBe('Hello world')
+      expect(page.posts[0].sentAt).toBe('2026-05-20T12:05:00Z')
+      expect(page.hasNextPage).toBe(true)
+      expect(page.endCursor).toBe('cursor1')
     })
 
-    it('uses "unknown" key for empty profileService', () => {
-      const updates: BufferUpdate[] = [
-        { id: 'a', profileId: 'p', profileService: '', text: '', textFormatted: null, sentAt: null, scheduledAt: null, status: 'sent', statistics: {}, serviceLink: null, mediaUrl: null },
-      ]
-      expect(Object.keys(groupByService(updates))).toEqual(['unknown'])
+    it('clamps first to 1-100 range', async () => {
+      mockGql({ posts: { pageInfo: { endCursor: null, hasNextPage: false }, edges: [] } })
+      await listPosts('fake', 'org1', { first: 999 })
+      const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+      const body = JSON.parse(call[1].body as string) as { variables: { first: number } }
+      expect(body.variables.first).toBe(100)
+    })
+
+    it('defaults status filter to sent', async () => {
+      mockGql({ posts: { pageInfo: { endCursor: null, hasNextPage: false }, edges: [] } })
+      await listPosts('fake', 'org1')
+      const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+      const body = JSON.parse(call[1].body as string) as { variables: { statuses: string[] } }
+      expect(body.variables.statuses).toEqual(['sent'])
+    })
+
+    it('passes channelIds filter through', async () => {
+      mockGql({ posts: { pageInfo: { endCursor: null, hasNextPage: false }, edges: [] } })
+      await listPosts('fake', 'org1', { channelIds: ['ch1', 'ch2'] })
+      const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+      const body = JSON.parse(call[1].body as string) as { variables: { channelIds: string[] } }
+      expect(body.variables.channelIds).toEqual(['ch1', 'ch2'])
+    })
+
+    it('returns empty page when posts is null', async () => {
+      mockGql({ posts: null })
+      const page = await listPosts('fake', 'org1')
+      expect(page).toEqual({ posts: [], hasNextPage: false, endCursor: null })
     })
   })
-})
 
-beforeEach(() => {
-  // reset between tests
+  describe('groupPostsByChannel', () => {
+    it('groups posts by channelId with denormalised channel info', () => {
+      const channels: BufferChannel[] = [
+        { id: 'ch1', name: 't', displayName: 'Twitter', service: 'twitter', avatarUrl: null, isQueuePaused: false },
+        { id: 'ch2', name: 'l', displayName: 'LinkedIn', service: 'linkedin', avatarUrl: null, isQueuePaused: false },
+      ]
+      const posts: BufferPost[] = [
+        { id: 'p1', channelId: 'ch1', text: 'a', status: 'sent', createdAt: null, sentAt: null, scheduledAt: null },
+        { id: 'p2', channelId: 'ch1', text: 'b', status: 'sent', createdAt: null, sentAt: null, scheduledAt: null },
+        { id: 'p3', channelId: 'ch2', text: 'c', status: 'sent', createdAt: null, sentAt: null, scheduledAt: null },
+      ]
+      const grouped = groupPostsByChannel(posts, channels)
+      expect(grouped).toHaveLength(2)
+      const twitter = grouped.find(g => g.channel.service === 'twitter')
+      expect(twitter?.posts).toHaveLength(2)
+      const linkedin = grouped.find(g => g.channel.service === 'linkedin')
+      expect(linkedin?.posts).toHaveLength(1)
+    })
+
+    it('skips posts whose channel id is unknown', () => {
+      const channels: BufferChannel[] = [
+        { id: 'ch1', name: null, displayName: null, service: 'twitter', avatarUrl: null, isQueuePaused: false },
+      ]
+      const posts: BufferPost[] = [
+        { id: 'p1', channelId: 'ch1', text: 'a', status: 'sent', createdAt: null, sentAt: null, scheduledAt: null },
+        { id: 'p2', channelId: 'orphan', text: 'b', status: 'sent', createdAt: null, sentAt: null, scheduledAt: null },
+      ]
+      const grouped = groupPostsByChannel(posts, channels)
+      expect(grouped).toHaveLength(1)
+      expect(grouped[0].posts).toHaveLength(1)
+    })
+  })
 })

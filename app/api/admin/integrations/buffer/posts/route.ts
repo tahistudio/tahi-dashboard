@@ -1,22 +1,26 @@
 /**
  * GET /api/admin/integrations/buffer/posts
  *
- * Returns recent sent posts across all of Liam's connected Buffer
- * profiles, sorted newest-first. Each post carries the per-service
- * engagement statistics (Twitter favorites/retweets, LinkedIn
- * likes/comments/shares, etc.) — surfaced verbatim from Buffer.
+ * Returns recent posts (default status='sent') from Liam's connected
+ * Buffer channels, sorted newest-first by sentAt.
+ *
+ * IMPORTANT: Buffer's GraphQL API does NOT expose per-post engagement
+ * metrics (likes, comments, shares, reach). Those live in their
+ * separate Analyze product. This endpoint surfaces post text + dates
+ * + channel only — i.e. "what has Liam been posting" without the
+ * "how did it perform" half.
  *
  * Query:
- *   ?profileId=ID    — only this profile
- *   ?service=twitter — filter to one service across all matching profiles
- *   ?count=N         — per-profile fetch cap (default 20, max 50)
- *   ?status=sent|pending — default 'sent'
+ *   ?channelId=ID    — only this channel
+ *   ?service=twitter — filter to channels of this service across all orgs
+ *   ?count=N         — fetch cap (default 20, max 100)
+ *   ?status=sent|scheduled|draft  — default 'sent'
  *
  * Returns:
  *   {
- *     posts: BufferUpdate[],
- *     totals: { posts: number, byService: Record<string, number>,
- *               engagement: Record<string, number> }
+ *     posts: BufferPost[],
+ *     channels: BufferChannel[],  // denormalised for the UI to show service + name
+ *     totals: { posts: number, byService: Record<string, number> }
  *   }
  *
  * Scoped to Liam Miller's personal Buffer — see lib/buffer.ts header.
@@ -25,8 +29,8 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  listProfiles, listSentUpdates, listPendingUpdates,
-  aggregateStats, type BufferUpdate,
+  listOrganizations, listChannels, listPosts,
+  type BufferPostStatus,
 } from '@/lib/buffer'
 
 export const dynamic = 'force-dynamic'
@@ -43,51 +47,65 @@ export async function GET(req: NextRequest) {
   }
 
   const url = new URL(req.url)
-  const filterProfileId = url.searchParams.get('profileId')
+  const filterChannelId = url.searchParams.get('channelId')
   const filterService = url.searchParams.get('service')
   const countRaw = parseInt(url.searchParams.get('count') ?? '', 10)
-  const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.min(countRaw, 50) : 20
-  const status = url.searchParams.get('status') === 'pending' ? 'pending' : 'sent'
-  const fetcher = status === 'pending' ? listPendingUpdates : listSentUpdates
+  const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.min(countRaw, 100) : 20
+  const statusRaw = url.searchParams.get('status') ?? 'sent'
+  const status: BufferPostStatus = (
+    ['sent', 'scheduled', 'draft', 'failed', 'needs_approval'].includes(statusRaw)
+      ? statusRaw
+      : 'sent'
+  ) as BufferPostStatus
 
   try {
-    const profiles = await listProfiles(token)
-    const targetProfiles = profiles.filter(p => {
-      if (filterProfileId && p.id !== filterProfileId) return false
-      if (filterService && p.service !== filterService) return false
+    const orgs = await listOrganizations(token)
+    if (orgs.length === 0) {
+      return NextResponse.json({ posts: [], channels: [], totals: { posts: 0, byService: {} } })
+    }
+    const org = orgs[0]
+    const channels = await listChannels(token, org.id)
+
+    const targetChannels = channels.filter(c => {
+      if (filterChannelId && c.id !== filterChannelId) return false
+      if (filterService && c.service !== filterService) return false
       return true
     })
 
-    // Parallel fetch posts for each target profile. One fetch per profile —
-    // a typical Buffer account has 3-5 connected, so this is bounded.
-    const fetched = await Promise.all(
-      targetProfiles.map(p => fetcher(token, p.id, count).catch(() => [] as BufferUpdate[]))
-    )
-    const flat = fetched.flat()
+    const channelIds = targetChannels.map(c => c.id)
+    if (channelIds.length === 0) {
+      return NextResponse.json({ posts: [], channels: targetChannels, totals: { posts: 0, byService: {} } })
+    }
 
-    // Sort by sentAt (sent posts) or scheduledAt (pending), newest first.
-    flat.sort((a, b) => {
-      const aT = a.sentAt ?? a.scheduledAt ?? ''
-      const bT = b.sentAt ?? b.scheduledAt ?? ''
+    const page = await listPosts(token, org.id, {
+      statuses: [status],
+      channelIds,
+      first: count,
+    })
+
+    // Sort newest-first. sentAt for sent posts, scheduledAt otherwise.
+    const sorted = [...page.posts].sort((a, b) => {
+      const aT = a.sentAt ?? a.scheduledAt ?? a.createdAt ?? ''
+      const bT = b.sentAt ?? b.scheduledAt ?? b.createdAt ?? ''
       return bT.localeCompare(aT)
     })
 
+    // Service breakdown (counts only — Buffer GraphQL doesn't expose
+    // engagement metrics on this endpoint).
     const byService: Record<string, number> = {}
-    for (const p of flat) {
-      byService[p.profileService] = (byService[p.profileService] ?? 0) + 1
+    const channelById = new Map(channels.map(c => [c.id, c]))
+    for (const p of sorted) {
+      const ch = channelById.get(p.channelId)
+      const key = ch?.service ?? 'unknown'
+      byService[key] = (byService[key] ?? 0) + 1
     }
-    const engagement = aggregateStats(flat)
 
     return NextResponse.json({
-      posts: flat,
-      totals: {
-        posts: flat.length,
-        byService,
-        engagement,
-      },
-      profilesUsed: targetProfiles.map(p => ({
-        id: p.id, service: p.service, formattedUsername: p.formattedUsername,
-      })),
+      posts: sorted,
+      channels: targetChannels,
+      totals: { posts: sorted.length, byService },
+      hasNextPage: page.hasNextPage,
+      endCursor: page.endCursor,
     })
   } catch (err) {
     return NextResponse.json({
