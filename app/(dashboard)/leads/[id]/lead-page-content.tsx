@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import {
   Mail, Phone, Building2, Globe, User, Tag, ExternalLink,
   Sparkles, RefreshCw, ArrowUpRight, Trash2, Edit3, Save, X,
-  Linkedin, Users, DollarSign, Eye, MapPin, Calendar,
+  Linkedin, Users, DollarSign, Eye, MapPin, Calendar, Send,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
@@ -70,6 +70,17 @@ interface LeadActivity {
   description: string | null
   createdAt: string
   authorName: string | null
+}
+
+interface PendingReplyDraft {
+  id: string
+  aiDraftSubject: string | null
+  aiDraftBody: string
+  finalSubject: string | null
+  finalBody: string | null
+  status: 'pending' | 'sent' | 'dismissed'
+  tokensSpent: number | null
+  createdAt: string
 }
 
 /** Draft mirrors Lead but numeric fields are strings (form inputs). */
@@ -162,6 +173,14 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
   const [draft, setDraft] = useState<LeadDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  // AI reply draft state
+  const [replyDraft, setReplyDraft] = useState<PendingReplyDraft | null>(null)
+  const [draftingReply, setDraftingReply] = useState(false)
+  const [sendingReply, setSendingReply] = useState(false)
+  const [replyError, setReplyError] = useState<string | null>(null)
+  // Editable working copy of the AI draft (so the user can tweak before send).
+  const [replySubjectEdit, setReplySubjectEdit] = useState('')
+  const [replyBodyEdit, setReplyBodyEdit] = useState('')
 
   const load = useCallback(async () => {
     try {
@@ -174,10 +193,20 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
         lead: Lead
         activities?: LeadActivity[]
         discoveryQuestionsTemplate?: string[]
+        pendingReplyDraft?: PendingReplyDraft | null
       }
       setLead(data.lead)
       setActivities(data.activities ?? [])
       setDiscoveryTemplate(data.discoveryQuestionsTemplate ?? [])
+      const pending = data.pendingReplyDraft ?? null
+      setReplyDraft(pending)
+      if (pending) {
+        setReplySubjectEdit(pending.finalSubject ?? pending.aiDraftSubject ?? '')
+        setReplyBodyEdit(pending.finalBody ?? pending.aiDraftBody)
+      } else {
+        setReplySubjectEdit('')
+        setReplyBodyEdit('')
+      }
     } finally {
       setLoading(false)
     }
@@ -249,6 +278,62 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
       setSaveError(err instanceof Error ? err.message : 'Save failed')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function generateReplyDraft() {
+    if (!lead) return
+    setDraftingReply(true)
+    setReplyError(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/leads/${lead.id}/draft-reply`), { method: 'POST' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string; detail?: string }
+        throw new Error(err.detail ?? err.error ?? 'Draft generation failed')
+      }
+      await load()
+    } catch (err) {
+      setReplyError(err instanceof Error ? err.message : 'Draft generation failed')
+    } finally {
+      setDraftingReply(false)
+    }
+  }
+
+  async function sendReplyDraft() {
+    if (!replyDraft) return
+    setSendingReply(true)
+    setReplyError(null)
+    try {
+      // Persist edits first (only if changed from current saved state)
+      const subjectChanged = replySubjectEdit !== (replyDraft.finalSubject ?? replyDraft.aiDraftSubject ?? '')
+      const bodyChanged = replyBodyEdit !== (replyDraft.finalBody ?? replyDraft.aiDraftBody)
+      if (subjectChanged || bodyChanged) {
+        await fetch(apiPath(`/api/admin/ai-reply-drafts/${replyDraft.id}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ finalSubject: replySubjectEdit, finalBody: replyBodyEdit }),
+        })
+      }
+      const res = await fetch(apiPath(`/api/admin/ai-reply-drafts/${replyDraft.id}/send`), { method: 'POST' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string; detail?: string }
+        throw new Error(err.detail ?? err.error ?? 'Send failed')
+      }
+      await load()
+    } catch (err) {
+      setReplyError(err instanceof Error ? err.message : 'Send failed')
+    } finally {
+      setSendingReply(false)
+    }
+  }
+
+  async function dismissReplyDraft() {
+    if (!replyDraft) return
+    try {
+      await fetch(apiPath(`/api/admin/ai-reply-drafts/${replyDraft.id}`), { method: 'DELETE' })
+      await load()
+    } catch {
+      // ignore
     }
   }
 
@@ -514,6 +599,124 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
                       </li>
                     ))}
                   </ul>
+                </div>
+              )}
+            </PageCard>
+          )}
+
+          {/* AI reply draft — only shown when the lead has an email
+              (otherwise there's nowhere to send the reply) */}
+          {!editing && lead.email && (
+            <PageCard title="AI first reply">
+              {!replyDraft ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <p style={{
+                    margin: 0,
+                    fontSize: '0.8125rem',
+                    color: 'var(--color-text-muted)',
+                    lineHeight: 1.55,
+                  }}>
+                    Generate a personalised first reply to {lead.email}. The draft uses lead context, AI briefing, and your past edits as tone examples.
+                  </p>
+                  <div>
+                    <TahiButton
+                      size="sm"
+                      onClick={() => { void generateReplyDraft() }}
+                      disabled={draftingReply}
+                      iconLeft={draftingReply
+                        ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        : <Sparkles className="w-3.5 h-3.5" />}
+                    >
+                      {draftingReply ? 'Drafting...' : 'Draft a reply'}
+                    </TahiButton>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <label style={{
+                      fontSize: '0.625rem',
+                      fontWeight: 600,
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase',
+                      color: 'var(--color-text-subtle)',
+                    }}>Subject</label>
+                    <Input
+                      value={replySubjectEdit}
+                      onChange={e => setReplySubjectEdit(e.target.value)}
+                      placeholder="(no subject)"
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <label style={{
+                      fontSize: '0.625rem',
+                      fontWeight: 600,
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase',
+                      color: 'var(--color-text-subtle)',
+                    }}>Body</label>
+                    <textarea
+                      value={replyBodyEdit}
+                      onChange={e => setReplyBodyEdit(e.target.value)}
+                      rows={10}
+                      style={{
+                        width: '100%',
+                        fontSize: '0.8125rem',
+                        fontFamily: 'inherit',
+                        color: 'var(--color-text)',
+                        background: 'var(--color-bg)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '0.5rem 0.625rem',
+                        lineHeight: 1.55,
+                        resize: 'vertical',
+                      }}
+                    />
+                  </div>
+                  {replyError && (
+                    <div style={{
+                      padding: '0.5rem 0.75rem',
+                      background: 'var(--color-danger-bg)',
+                      border: '1px solid var(--color-danger)',
+                      borderRadius: 'var(--radius-md)',
+                      fontSize: '0.75rem',
+                      color: 'var(--color-danger)',
+                    }}>{replyError}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <TahiButton
+                      size="sm"
+                      onClick={() => { void sendReplyDraft() }}
+                      disabled={sendingReply || !replyBodyEdit.trim()}
+                      iconLeft={sendingReply
+                        ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        : <Send className="w-3.5 h-3.5" />}
+                    >
+                      {sendingReply ? 'Sending...' : `Send to ${lead.email}`}
+                    </TahiButton>
+                    <TahiButton
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => { void generateReplyDraft() }}
+                      disabled={draftingReply}
+                      iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
+                    >
+                      Regenerate
+                    </TahiButton>
+                    <TahiButton
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => { void dismissReplyDraft() }}
+                      iconLeft={<X className="w-3.5 h-3.5" />}
+                    >
+                      Dismiss
+                    </TahiButton>
+                    {replyDraft.tokensSpent != null && replyDraft.tokensSpent > 0 && (
+                      <span style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', marginLeft: 'auto' }}>
+                        {replyDraft.tokensSpent.toLocaleString()} tokens
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
             </PageCard>
