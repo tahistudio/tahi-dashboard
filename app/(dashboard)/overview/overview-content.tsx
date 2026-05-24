@@ -188,6 +188,9 @@ export function AdminOverview({ userName }: { userName: string }) {
       {/* 5. Pipeline summary */}
       <PipelineSummaryCard />
 
+      {/* 5b. Weighted forecast */}
+      <PipelineForecastCard />
+
       {/* 6. Team Capacity */}
       <PipelineCapacityCard />
 
@@ -1765,6 +1768,163 @@ function TodayFocusStrip() {
               : 'Set an expected close date on a deal to surface it here.'}
         </FeatureCard.Description>
       </FeatureCard>
+    </div>
+  )
+}
+
+// ─── Pipeline Forecast Card (weighted by stage probability) ───────────
+
+interface ForecastByStage {
+  stageId: string
+  name: string
+  slug: string
+  probability: number
+  position: number
+  colour: string | null
+  isClosedWon: boolean
+  isClosedLost: boolean
+  dealCount: number
+  upfrontNzd: number
+  monthlyNzd: number
+  weightedUpfrontNzd: number
+  weightedMonthlyNzd: number
+}
+
+interface ForecastResponse {
+  totalDeals: number
+  unweightedUpfrontNzd: number
+  unweightedMonthlyNzd: number
+  weightedUpfrontNzd: number
+  weightedMonthlyNzd: number
+  byStage: ForecastByStage[]
+}
+
+function PipelineForecastCard() {
+  const [data, setData] = useState<ForecastResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/reports/pipeline-forecast'))
+      .then(r => r.ok ? r.json() as Promise<ForecastResponse> : null)
+      .then(d => setData(d))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const fmt = (n: number) =>
+    new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD', maximumFractionDigits: 0 }).format(n)
+
+  const activeStages = data?.byStage.filter(s => !s.isClosedWon && !s.isClosedLost && s.dealCount > 0) ?? []
+  // Max weighted upfront for bar scaling
+  const maxWeighted = Math.max(1, ...activeStages.map(s => s.weightedUpfrontNzd + s.weightedMonthlyNzd * 6))
+
+  return (
+    <div style={{
+      padding: 'var(--space-6)',
+      background: 'var(--color-bg)',
+      border: '1px solid var(--color-border-subtle)',
+      borderRadius: 'var(--radius-lg)',
+    }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-4)' }}>
+        <div>
+          <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
+            Pipeline forecast
+          </h2>
+          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)' }}>
+            Weighted by each stage&apos;s probability
+          </p>
+        </div>
+        <Link
+          href="/deals"
+          className="view-link"
+          style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)' }}
+        >
+          View pipeline <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
+        </Link>
+      </div>
+
+      {loading ? (
+        <div className="animate-pulse" style={{
+          height: '6rem',
+          background: 'var(--color-bg-tertiary)',
+          borderRadius: 'var(--radius-md)',
+        }} />
+      ) : !data || activeStages.length === 0 ? (
+        <EmptyRows title="No active deals" message="Add deals to the pipeline to see a weighted forecast." />
+      ) : (
+        <>
+          {/* Summary numbers — weighted vs unweighted */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
+            <ForecastStat label="Weighted upfront" value={fmt(data.weightedUpfrontNzd)} sub={`of ${fmt(data.unweightedUpfrontNzd)}`} />
+            <ForecastStat label="Weighted MRR" value={fmt(data.weightedMonthlyNzd)} sub={`of ${fmt(data.unweightedMonthlyNzd)}`} />
+            <ForecastStat label="Active deals" value={String(activeStages.reduce((s, x) => s + x.dealCount, 0))} sub={`${data.totalDeals} total`} />
+            <ForecastStat label="12-mo expected" value={fmt(data.weightedUpfrontNzd + data.weightedMonthlyNzd * 12)} sub="upfront + 12× MRR" />
+          </div>
+
+          {/* Per-stage bars */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            {activeStages.map(stage => {
+              const total = stage.weightedUpfrontNzd + stage.weightedMonthlyNzd * 6
+              const pct = Math.round((total / maxWeighted) * 100)
+              return (
+                <div key={stage.stageId}>
+                  <div className="flex items-center justify-between" style={{ fontSize: 'var(--text-xs)', marginBottom: 'var(--space-1)' }}>
+                    <span style={{ color: 'var(--color-text)', fontWeight: 500 }}>
+                      {stage.name}
+                      <span style={{ color: 'var(--color-text-subtle)', marginLeft: 'var(--space-2)' }}>
+                        {stage.dealCount} × {stage.probability}% probability
+                      </span>
+                    </span>
+                    <span style={{ color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
+                      {fmt(stage.weightedUpfrontNzd)}
+                      {stage.weightedMonthlyNzd > 0 && (
+                        <span style={{ color: 'var(--color-text-subtle)' }}>
+                          {' + '}{fmt(stage.weightedMonthlyNzd)}/mo
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div style={{
+                    height: '0.375rem',
+                    background: 'var(--color-bg-tertiary)',
+                    borderRadius: '9999px',
+                    overflow: 'hidden',
+                  }}>
+                    <div style={{
+                      width: `${pct}%`,
+                      height: '100%',
+                      background: stage.colour ?? 'var(--color-brand)',
+                      borderRadius: '9999px',
+                      transition: 'width 400ms ease-out',
+                    }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function ForecastStat({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div style={{
+      padding: 'var(--space-3)',
+      background: 'var(--color-bg-secondary)',
+      border: '1px solid var(--color-border-subtle)',
+      borderRadius: 'var(--radius-md)',
+    }}>
+      <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+        {label}
+      </p>
+      <p style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--color-text)', marginTop: 'var(--space-1)', fontVariantNumeric: 'tabular-nums' }}>
+        {value}
+      </p>
+      <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)' }}>
+        {sub}
+      </p>
     </div>
   )
 }
