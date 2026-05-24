@@ -206,7 +206,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
     : 'neutral'
 
   return (
-    <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '72rem' }}>
+    <div style={{ padding: '1.25rem 0', display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '72rem' }}>
       <Breadcrumb
         items={[
           { label: 'Leads', href: '/leads' },

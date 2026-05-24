@@ -621,7 +621,7 @@ export function LeadsContent() {
   ]
 
   return (
-    <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+    <div style={{ padding: '1.25rem 0', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: '14rem' }}>
