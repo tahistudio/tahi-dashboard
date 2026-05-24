@@ -648,12 +648,17 @@ const TOOLS: ToolDef[] = [
   // var on the dashboard). Scoped to personal social profiles, NOT the
   // Tahi Studio company page.
   tool('buffer_get_status', 'Get Buffer integration status: configured / connected / list of linked social profiles (LinkedIn, Twitter, Instagram, etc.) for Liam Miller personally. Returns { configured, connected, profiles: [{id, service, formattedUsername}] }.'),
-  tool('buffer_list_posts', 'List recent SENT posts from Liam\'s personal Buffer across all connected profiles, newest-first. Each post includes per-service engagement statistics (likes, comments, shares, retweets — varies by service). Use this to summarise recent social activity, identify high-engagement posts, or generate similar content. Personal account — NOT Tahi company page.', {
-    profileId: prop('string', 'Optional: limit to one Buffer profile id (get from buffer_get_status)'),
+  tool('buffer_list_posts', 'List Liam\'s recent Buffer posts across all connected channels (LinkedIn, etc.), newest-first. Returns post text + channel + dates only — Buffer\'s API does NOT expose engagement (likes/comments). For engagement, the Buffer in-app dashboard is the source. Personal account, NOT Tahi page.', {
+    channelId: prop('string', 'Optional: limit to one Buffer channel id (get from buffer_get_status)'),
     service: prop('string', 'Optional service filter: twitter | linkedin | instagram | facebook'),
-    count: prop('number', 'Per-profile fetch cap (default 20, max 50)'),
-    status: prop('string', 'sent (default) or pending (queued posts)'),
+    count: prop('number', 'Fetch cap (default 20, max 100)'),
+    status: prop('string', 'sent (default) | scheduled | draft | failed'),
   }),
+  tool('buffer_schedule_posts', 'Bulk-schedule a batch of posts to a Buffer channel. Supports 4 schedule modes: queue (use Buffer\'s existing posting schedule), spread (every N hours starting from startAt), daily (postsPerDay across consecutive days), explicit (per-post ISO timestamps). Max 50 posts per call. Each post: { text: string, imageUrls?: string[], firstComment?: string }. firstComment is the LinkedIn first-comment pinned reply (may be ignored on non-LinkedIn channels). Returns scheduled count + per-post results with the created Buffer post id.', {
+    posts: prop('array', 'Array of { text, imageUrls?, firstComment? } objects. text is required, imageUrls is optional array of public URLs, firstComment is optional LinkedIn pinned-comment text.'),
+    channelId: prop('string', 'Buffer channel id (omit to use the first connected channel)'),
+    schedule: prop('object', 'Schedule spec. Examples: { mode: "queue" } | { mode: "spread", startAt: "2026-06-01T09:00:00Z", intervalHours: 24 } | { mode: "daily", startAt: "2026-06-01T09:00:00Z", postsPerDay: 2 } | { mode: "explicit", dates: ["ISO1", "ISO2", ...] }'),
+  }, ['posts']),
 
   // ── Calls ─────────────────────────────────────────────────────────────
   tool('list_calls', 'List all scheduled calls'),
@@ -1597,12 +1602,15 @@ async function executeTool(
       return json(await apiGet('/api/admin/integrations/buffer/status', token))
     case 'buffer_list_posts': {
       const params = new URLSearchParams()
-      if (typeof args.profileId === 'string') params.set('profileId', args.profileId)
+      if (typeof args.channelId === 'string') params.set('channelId', args.channelId)
       if (typeof args.service === 'string') params.set('service', args.service)
       if (typeof args.count === 'number') params.set('count', String(args.count))
       if (typeof args.status === 'string') params.set('status', args.status)
       const qs = params.toString()
       return json(await apiGet(`/api/admin/integrations/buffer/posts${qs ? `?${qs}` : ''}`, token))
+    }
+    case 'buffer_schedule_posts': {
+      return json(await apiWrite('/api/admin/integrations/buffer/schedule-posts', token, 'POST', args as Record<string, unknown>))
     }
 
     // ── Calls ─────────────────────────────────────────────────────────

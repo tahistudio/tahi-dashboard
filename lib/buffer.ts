@@ -294,3 +294,116 @@ export function groupPostsByChannel(
   }
   return out
 }
+
+// ── Post creation (mutations) ──────────────────────────────────────────────
+
+export type SchedulingType = 'automatic' | 'notification'
+export type PostMode = 'customScheduled' | 'addToQueue' | 'shareNow' | 'draft'
+
+export interface ImageAsset { url: string }
+export interface CreatePostOpts {
+  text: string
+  channelId: string
+  /** ISO timestamp. Required when mode='customScheduled'. */
+  dueAt?: string
+  /** Default: customScheduled. */
+  mode?: PostMode
+  /** Default: automatic. */
+  schedulingType?: SchedulingType
+  /** Optional image URLs to attach. Buffer fetches each by URL. */
+  imageUrls?: string[]
+  /** LinkedIn first comment text — sometimes accepted (Essentials+).
+   *  Will be silently ignored if Buffer's schema doesn't support it
+   *  on the target channel. */
+  firstComment?: string
+}
+
+interface CreatePostResponse {
+  createPost?: {
+    post?: { id?: string; text?: string } | null
+    message?: string | null
+  } | null
+}
+
+/** Create a single scheduled (or immediately-queued) post on a Buffer
+ *  channel. Returns the created post id on success. */
+export async function createPost(token: string, opts: CreatePostOpts): Promise<{ id: string }> {
+  const mode: PostMode = opts.mode ?? 'customScheduled'
+  const schedulingType: SchedulingType = opts.schedulingType ?? 'automatic'
+
+  const assets = (opts.imageUrls ?? []).map(url => ({ image: { url } }))
+
+  // Compose mutation. First-comment is included only when provided so
+  // Buffer doesn't reject the mutation on channels that don't support
+  // it (Twitter, Instagram).
+  const fields: string[] = [
+    `text: $text`,
+    `channelId: $channelId`,
+    `schedulingType: $schedulingType`,
+    `mode: $mode`,
+  ]
+  if (mode === 'customScheduled') fields.push(`dueAt: $dueAt`)
+  if (assets.length > 0) fields.push(`assets: $assets`)
+  if (opts.firstComment) fields.push(`firstComment: $firstComment`)
+
+  const variableDefs: string[] = [
+    '$text: String!',
+    '$channelId: ChannelId!',
+    '$schedulingType: SchedulingType!',
+    '$mode: PostMode!',
+  ]
+  if (mode === 'customScheduled') variableDefs.push('$dueAt: DateTime!')
+  if (assets.length > 0) variableDefs.push('$assets: [PostAssetInput!]')
+  if (opts.firstComment) variableDefs.push('$firstComment: String')
+
+  const mutation = `
+    mutation CreatePost(${variableDefs.join(', ')}) {
+      createPost(input: { ${fields.join(', ')} }) {
+        ... on PostActionSuccess {
+          post { id text }
+        }
+        ... on MutationError {
+          message
+        }
+      }
+    }
+  `
+
+  const variables: Record<string, unknown> = {
+    text: opts.text,
+    channelId: opts.channelId,
+    schedulingType,
+    mode,
+  }
+  if (mode === 'customScheduled') {
+    if (!opts.dueAt) throw new Error('dueAt is required when mode=customScheduled')
+    variables.dueAt = opts.dueAt
+  }
+  if (assets.length > 0) variables.assets = assets
+  if (opts.firstComment) variables.firstComment = opts.firstComment
+
+  const data = await gql<CreatePostResponse>(token, mutation, variables)
+  const result = data.createPost
+  if (!result) throw new Error('Buffer createPost returned no payload')
+  if (result.message) throw new Error(`Buffer createPost: ${result.message}`)
+  if (!result.post?.id) throw new Error('Buffer createPost returned no post id')
+  return { id: result.post.id }
+}
+
+/** Delete a scheduled post. */
+const DELETE_POST = `
+  mutation DeletePost($postId: PostId!) {
+    deletePost(input: { postId: $postId }) {
+      ... on PostActionSuccess { post { id } }
+      ... on MutationError { message }
+    }
+  }
+`
+
+export async function deletePost(token: string, postId: string): Promise<void> {
+  const data = await gql<{ deletePost?: { post?: { id?: string } | null; message?: string | null } | null }>(
+    token, DELETE_POST, { postId }
+  )
+  const result = data.deletePost
+  if (result?.message) throw new Error(`Buffer deletePost: ${result.message}`)
+}
