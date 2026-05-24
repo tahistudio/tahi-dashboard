@@ -117,15 +117,32 @@ export async function POST(
     const response = await client.messages.create({
       model: MODEL,
       max_tokens: 1500,
-      system: SYSTEM_PROMPT,
+      // Cache the system prompt — identical across every transcript
+      // extraction and well over Sonnet's 1024-token cache minimum.
+      // Second + subsequent extracts within the 5-minute TTL pay ~10%
+      // input price on the cached portion.
+      system: [{
+        type: 'text',
+        text: SYSTEM_PROMPT,
+        cache_control: { type: 'ephemeral' },
+      }],
       messages: [{ role: 'user', content: userMessage }],
     })
     text = response.content
       .filter(b => b.type === 'text')
       .map(b => (b as { text: string }).text)
       .join('\n')
-    inputTokens = response.usage.input_tokens
-    outputTokens = response.usage.output_tokens
+    // Include cached token counts so aiTokensSpent still reflects the
+    // total volume routed through the model (cached tokens are
+    // discounted but still count toward visibility).
+    const usage = response.usage as typeof response.usage & {
+      cache_read_input_tokens?: number
+      cache_creation_input_tokens?: number
+    }
+    inputTokens = usage.input_tokens
+      + (usage.cache_read_input_tokens ?? 0)
+      + (usage.cache_creation_input_tokens ?? 0)
+    outputTokens = usage.output_tokens
   } catch (err) {
     return NextResponse.json({
       error: 'Extraction failed',

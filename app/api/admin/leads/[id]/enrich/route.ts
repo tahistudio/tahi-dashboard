@@ -362,6 +362,12 @@ interface AnthropicCallResult {
   text: string
   inputTokens: number
   outputTokens: number
+  /** Tokens read from the prompt cache. Charged at ~10% of input rate. */
+  cacheReadTokens: number
+  /** Tokens written to the prompt cache. Charged at ~125% of input on
+   *  the first call; subsequent calls within the 5-minute TTL hit
+   *  cacheReadTokens instead. */
+  cacheCreationTokens: number
 }
 
 async function callAnthropic(
@@ -376,16 +382,28 @@ async function callAnthropic(
   const Anthropic = (await import('@anthropic-ai/sdk')).default
   const client = new Anthropic({ apiKey })
 
+  // Prompt caching: the system prompt is identical on every enrichment
+  // run (~2000 tokens, comfortably over Sonnet's 1024-token minimum)
+  // so wrapping it in a cache_control breakpoint makes the second +
+  // subsequent runs within the 5-minute TTL pay ~10% of input cost on
+  // those tokens instead of full price. The web_search tool definition
+  // also gets cached — tool changes invalidate the cache, but we
+  // never toggle web search on/off so this stays warm.
   const response = await client.messages.create({
     model,
     max_tokens: 2048,
-    system: systemPrompt,
+    system: [{
+      type: 'text',
+      text: systemPrompt,
+      cache_control: { type: 'ephemeral' },
+    }],
     messages: [{ role: 'user', content: userMessage }],
     ...(withWebSearch && {
       tools: [{
         type: 'web_search_20250305' as const,
         name: 'web_search',
         max_uses: 4,
+        cache_control: { type: 'ephemeral' },
       }],
     }),
   })
@@ -396,10 +414,16 @@ async function callAnthropic(
     .map(b => (b as { text: string }).text)
     .join('\n')
 
+  const usage = response.usage as typeof response.usage & {
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+  }
   return {
     text,
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+    cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
   }
 }
 
@@ -457,7 +481,7 @@ export async function POST(
 
   try {
     if (mode === 'score') {
-      const { text, inputTokens, outputTokens } = await callAnthropic(
+      const { text, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens } = await callAnthropic(
         MODEL_SCORE,
         SYSTEM_PROMPT_SCORE,
         userMessage,
@@ -469,7 +493,7 @@ export async function POST(
         .set({
           aiScore: parsed.score,
           aiScoreReason: parsed.scoreReason,
-          aiTokensSpent: (lead.aiTokensSpent ?? 0) + inputTokens + outputTokens,
+          aiTokensSpent: (lead.aiTokensSpent ?? 0) + inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
           lastAiRunAt: now,
           updatedAt: now,
         })
@@ -478,7 +502,9 @@ export async function POST(
         mode,
         score: parsed.score,
         scoreReason: parsed.scoreReason,
-        tokensThisRun: inputTokens + outputTokens,
+        tokensThisRun: inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
+        cacheReadTokens,
+        cacheCreationTokens,
       })
     }
 
@@ -493,7 +519,7 @@ export async function POST(
           }))
         : Promise.resolve({ tech: [], fetchedUrl: '' })
 
-    const [{ text, inputTokens, outputTokens }, sniffResult] = await Promise.all([
+    const [{ text, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens }, sniffResult] = await Promise.all([
       callAnthropic(MODEL_FULL, SYSTEM_PROMPT_FULL, userMessage, true),
       sniffPromise,
     ])
@@ -519,7 +545,7 @@ export async function POST(
         .set({
           aiScore: parsed.score ?? lead.aiScore,
           aiScoreReason: parsed.scoreReason ?? lead.aiScoreReason,
-          aiTokensSpent: (lead.aiTokensSpent ?? 0) + inputTokens + outputTokens,
+          aiTokensSpent: (lead.aiTokensSpent ?? 0) + inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
           lastAiRunAt: now,
           updatedAt: now,
         })
@@ -529,7 +555,9 @@ export async function POST(
         warning: 'Enrichment produced no usable summary or sources. Existing data preserved.',
         score: parsed.score,
         scoreReason: parsed.scoreReason,
-        tokensThisRun: inputTokens + outputTokens,
+        tokensThisRun: inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
+        cacheReadTokens,
+        cacheCreationTokens,
       })
     }
 
@@ -546,7 +574,7 @@ export async function POST(
         aiSources: JSON.stringify(parsed.sources),
         aiQuestions: JSON.stringify(parsed.questions),
         aiSignals: signalsJson,
-        aiTokensSpent: (lead.aiTokensSpent ?? 0) + inputTokens + outputTokens,
+        aiTokensSpent: (lead.aiTokensSpent ?? 0) + inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
         enrichedAt: now,
         lastAiRunAt: now,
         // Clear the "don't ask again" suppression: explicit re-enrich
@@ -579,7 +607,9 @@ export async function POST(
       sources: parsed.sources,
       questions: parsed.questions,
       signals: parsed.signals,
-      tokensThisRun: inputTokens + outputTokens,
+      tokensThisRun: inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
+        cacheReadTokens,
+        cacheCreationTokens,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
