@@ -443,6 +443,62 @@ export function LeadsContent() {
     }
   }
 
+  async function extractCall(callId: string): Promise<Partial<DiscoveryCall> | null> {
+    try {
+      const res = await fetch(apiPath(`/api/admin/discovery-calls/${callId}/extract`), { method: 'POST' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string; detail?: string }
+        throw new Error(err.detail ?? err.error ?? 'Extraction failed')
+      }
+      const data = await res.json() as { suggestions: Partial<DiscoveryCall> }
+      return data.suggestions ?? null
+    } catch {
+      return null
+    }
+  }
+
+  async function promoteCallToDeal(leadId: string, call: DiscoveryCall) {
+    // Build a deal-notes blob from the call's captured fields. Easier
+    // than threading them into separate deal columns and Liam can
+    // refine on the deal page itself.
+    const notesParts: string[] = []
+    if (call.summary) notesParts.push(`Call summary: ${call.summary}`)
+    if (call.scopeNotes) notesParts.push(`Scope: ${call.scopeNotes}`)
+    if (call.outcomeNotes) notesParts.push(`Next step: ${call.outcomeNotes}`)
+    if (call.budgetMin || call.budgetMax) {
+      const range = call.budgetMin && call.budgetMax && call.budgetMin !== call.budgetMax
+        ? `${call.budgetMin} - ${call.budgetMax}`
+        : String(call.budgetMin ?? call.budgetMax ?? '')
+      notesParts.push(`Budget signal: ${range} ${call.budgetCurrency ?? ''}`.trim())
+    }
+    if (call.timeline) notesParts.push(`Timeline: ${call.timeline}`)
+
+    // Use the budget midpoint as the upfront if we have a range.
+    const upfrontValue = call.budgetMin && call.budgetMax
+      ? Math.round((call.budgetMin + call.budgetMax) / 2)
+      : (call.budgetMin ?? call.budgetMax ?? undefined)
+
+    try {
+      const res = await fetch(apiPath(`/api/admin/leads/${leadId}/promote`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          createOrg: true,
+          notes: notesParts.join('\n\n') || undefined,
+          upfrontValue,
+          currency: call.budgetCurrency || undefined,
+          sourceCallId: call.id,
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json() as { dealId?: string }
+        if (data.dealId) window.location.href = apiPath(`/pipeline?deal=${data.dealId}`)
+      }
+    } catch {
+      // best-effort — UI just keeps the call in place if promote fails
+    }
+  }
+
   async function deleteCall(callId: string) {
     try {
       await fetch(apiPath(`/api/admin/discovery-calls/${callId}`), { method: 'DELETE' })
@@ -757,6 +813,8 @@ export function LeadsContent() {
                   onCreateCall={(body) => createCall(selectedLead.id, body)}
                   onUpdateCall={(callId, patch) => updateCall(callId, patch)}
                   onDeleteCall={(callId) => deleteCall(callId)}
+                  onExtractCall={(callId) => extractCall(callId)}
+                  onPromoteCallToDeal={(call) => promoteCallToDeal(selectedLead.id, call)}
                 />
               )}
             </SlideOver.Body>
@@ -1040,6 +1098,8 @@ function LeadDetail({
   onCreateCall,
   onUpdateCall,
   onDeleteCall,
+  onExtractCall,
+  onPromoteCallToDeal,
 }: {
   lead: Lead
   activities: LeadActivity[]
@@ -1058,6 +1118,8 @@ function LeadDetail({
   }) => Promise<void>
   onUpdateCall: (callId: string, patch: Partial<DiscoveryCall>) => Promise<void>
   onDeleteCall: (callId: string) => Promise<void>
+  onExtractCall: (callId: string) => Promise<Partial<DiscoveryCall> | null>
+  onPromoteCallToDeal: (call: DiscoveryCall) => Promise<void>
 }) {
   const status = STATUS_BY_VALUE.get(lead.status)
   const aiSources = safeJsonArray<string>(lead.aiSources)
@@ -1139,10 +1201,13 @@ function LeadDetail({
 
       <CallsSection
         leadId={lead.id}
+        leadPromoted={!!lead.promotedDealId}
         calls={calls}
         onCreateCall={onCreateCall}
         onUpdateCall={onUpdateCall}
         onDeleteCall={onDeleteCall}
+        onExtractCall={onExtractCall}
+        onPromoteCallToDeal={onPromoteCallToDeal}
       />
 
       {activities.length > 0 && <ActivityTimeline activities={activities} />}
@@ -1506,13 +1571,17 @@ function AiSection({
 // ── Calls section ─────────────────────────────────────────────────────────
 
 function CallsSection({
-  leadId,
+  leadId: _leadId,
+  leadPromoted,
   calls,
   onCreateCall,
   onUpdateCall,
   onDeleteCall,
+  onExtractCall,
+  onPromoteCallToDeal,
 }: {
   leadId: string
+  leadPromoted: boolean
   calls: DiscoveryCall[]
   onCreateCall: (body: {
     title: string
@@ -1523,6 +1592,8 @@ function CallsSection({
   }) => Promise<void>
   onUpdateCall: (callId: string, patch: Partial<DiscoveryCall>) => Promise<void>
   onDeleteCall: (callId: string) => Promise<void>
+  onExtractCall: (callId: string) => Promise<Partial<DiscoveryCall> | null>
+  onPromoteCallToDeal: (call: DiscoveryCall) => Promise<void>
 }) {
   const [showForm, setShowForm] = useState(false)
   const now = Date.now()
@@ -1588,8 +1659,11 @@ function CallsSection({
               <CallRow
                 key={c.id}
                 call={c}
+                leadPromoted={leadPromoted}
                 onUpdate={(p) => onUpdateCall(c.id, p)}
                 onDelete={() => onDeleteCall(c.id)}
+                onExtract={() => onExtractCall(c.id)}
+                onPromoteToDeal={() => onPromoteCallToDeal(c)}
               />
             ))}
           </ul>
@@ -1605,8 +1679,11 @@ function CallsSection({
               <CallRow
                 key={c.id}
                 call={c}
+                leadPromoted={leadPromoted}
                 onUpdate={(p) => onUpdateCall(c.id, p)}
                 onDelete={() => onDeleteCall(c.id)}
+                onExtract={() => onExtractCall(c.id)}
+                onPromoteToDeal={() => onPromoteCallToDeal(c)}
               />
             ))}
           </ul>
@@ -1726,12 +1803,18 @@ function CallScheduleForm({
 
 function CallRow({
   call,
+  leadPromoted,
   onUpdate,
   onDelete,
+  onExtract,
+  onPromoteToDeal,
 }: {
   call: DiscoveryCall
+  leadPromoted: boolean
   onUpdate: (patch: Partial<DiscoveryCall>) => Promise<void>
   onDelete: () => Promise<void>
+  onExtract: () => Promise<Partial<DiscoveryCall> | null>
+  onPromoteToDeal: () => Promise<void>
 }) {
   const [expanded, setExpanded] = useState(false)
   const isUpcoming = new Date(call.scheduledAt).getTime() >= Date.now() && call.status === 'scheduled'
@@ -1816,9 +1899,13 @@ function CallRow({
             </div>
           )}
 
-          <CallPostFields call={call} onUpdate={onUpdate} />
+          <CallPostFields
+            call={call}
+            onUpdate={onUpdate}
+            onExtract={onExtract}
+          />
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.25rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem', gap: '0.5rem', flexWrap: 'wrap' }}>
             <button
               type="button"
               onClick={() => { void onDelete() }}
@@ -1833,6 +1920,15 @@ function CallRow({
             >
               Delete call
             </button>
+            {!leadPromoted && call.status === 'completed' && (call.outcome === 'promote' || call.outcome === 'good_call') && (
+              <TahiButton
+                size="sm"
+                onClick={() => { void onPromoteToDeal() }}
+                iconLeft={<ArrowUpRight className="w-3.5 h-3.5" />}
+              >
+                Create deal from this call
+              </TahiButton>
+            )}
           </div>
         </div>
       )}
@@ -1843,9 +1939,11 @@ function CallRow({
 function CallPostFields({
   call,
   onUpdate,
+  onExtract,
 }: {
   call: DiscoveryCall
   onUpdate: (patch: Partial<DiscoveryCall>) => Promise<void>
+  onExtract: () => Promise<Partial<DiscoveryCall> | null>
 }) {
   const [transcript, setTranscript] = useState(call.transcript ?? '')
   const [summary, setSummary] = useState(call.summary ?? '')
@@ -1857,6 +1955,12 @@ function CallPostFields({
   const [budgetCurrency, setBudgetCurrency] = useState(call.budgetCurrency ?? 'NZD')
   const [timeline, setTimeline] = useState(call.timeline ?? '')
   const [saving, setSaving] = useState(false)
+  const [extracting, setExtracting] = useState(false)
+  const [extractionError, setExtractionError] = useState<string | null>(null)
+  /** AI suggestions returned by /extract. UI applies them to local
+   *  state on accept (doesn't overwrite values the user has already
+   *  typed). */
+  const [suggestion, setSuggestion] = useState<Partial<DiscoveryCall> | null>(null)
 
   // Determine which fields changed from props for the save button state.
   const dirty =
@@ -1895,8 +1999,107 @@ function CallPostFields({
     }
   }
 
+  async function runExtraction() {
+    setExtracting(true)
+    setExtractionError(null)
+    try {
+      const s = await onExtract()
+      if (s && Object.keys(s).length > 0) setSuggestion(s)
+      else setExtractionError('No suggestions returned. Make sure the transcript has been saved first.')
+    } catch (err) {
+      setExtractionError(err instanceof Error ? err.message : 'Extraction failed')
+    } finally {
+      setExtracting(false)
+    }
+  }
+
+  function applySuggestion() {
+    if (!suggestion) return
+    if (suggestion.outcome && !outcome) setOutcome(suggestion.outcome)
+    if (suggestion.summary && !summary.trim()) setSummary(suggestion.summary)
+    if (suggestion.outcomeNotes && !outcomeNotes.trim()) setOutcomeNotes(suggestion.outcomeNotes)
+    if (suggestion.scopeNotes && !scopeNotes.trim()) setScopeNotes(suggestion.scopeNotes)
+    if (suggestion.budgetMin != null && !budgetMin) setBudgetMin(String(suggestion.budgetMin))
+    if (suggestion.budgetMax != null && !budgetMax) setBudgetMax(String(suggestion.budgetMax))
+    if (suggestion.budgetCurrency && budgetCurrency === 'NZD') setBudgetCurrency(suggestion.budgetCurrency)
+    if (suggestion.timeline && !timeline) setTimeline(suggestion.timeline)
+    setSuggestion(null)
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      {/* AI extraction banner: visible when transcript exists and no
+          live suggestion is showing. Click extract → show banner with
+          suggestions → Apply fills only empty fields. */}
+      {transcript.trim() && !suggestion && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '0.5rem',
+          padding: '0.5rem 0.625rem',
+          background: 'var(--color-brand-50)',
+          border: '1px solid var(--color-brand-100)',
+          borderRadius: 'var(--radius-md)',
+          fontSize: '0.75rem',
+          color: 'var(--color-brand-dark)',
+        }}>
+          <span>Have AI extract outcome, scope, budget, and next step from the transcript.</span>
+          <TahiButton
+            size="sm"
+            variant="secondary"
+            onClick={() => { void runExtraction() }}
+            disabled={extracting}
+            iconLeft={extracting
+              ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              : <Sparkles className="w-3.5 h-3.5" />}
+          >
+            {extracting ? 'Extracting...' : 'Extract'}
+          </TahiButton>
+        </div>
+      )}
+
+      {suggestion && (
+        <div style={{
+          padding: '0.75rem 0.875rem',
+          background: 'var(--color-brand-50)',
+          border: '1px solid var(--color-brand-100)',
+          borderRadius: 'var(--radius-md)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.5rem',
+        }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-brand-dark)' }}>
+            AI suggestions from the transcript
+          </div>
+          <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            {suggestion.outcome && <SuggestionLine label="Outcome" value={CALL_OUTCOMES.find(o => o.value === suggestion.outcome)?.label ?? suggestion.outcome} />}
+            {suggestion.summary && <SuggestionLine label="Summary" value={suggestion.summary} />}
+            {suggestion.outcomeNotes && <SuggestionLine label="Next step" value={suggestion.outcomeNotes} />}
+            {suggestion.scopeNotes && <SuggestionLine label="Scope" value={suggestion.scopeNotes} />}
+            {(suggestion.budgetMin != null || suggestion.budgetMax != null) && (
+              <SuggestionLine label="Budget" value={`${suggestion.budgetMin ?? '?'} - ${suggestion.budgetMax ?? '?'} ${suggestion.budgetCurrency ?? ''}`.trim()} />
+            )}
+            {suggestion.timeline && <SuggestionLine label="Timeline" value={CALL_TIMELINES.find(t => t.value === suggestion.timeline)?.label ?? suggestion.timeline} />}
+          </ul>
+          <div style={{ display: 'flex', gap: '0.4375rem', justifyContent: 'flex-end' }}>
+            <TahiButton size="sm" variant="secondary" onClick={() => setSuggestion(null)}>Dismiss</TahiButton>
+            <TahiButton size="sm" onClick={applySuggestion}>Apply to empty fields</TahiButton>
+          </div>
+        </div>
+      )}
+
+      {extractionError && (
+        <div style={{
+          padding: '0.4375rem 0.625rem',
+          background: 'var(--color-danger-bg)',
+          border: '1px solid var(--color-danger)',
+          borderRadius: 'var(--radius-sm)',
+          fontSize: '0.6875rem',
+          color: 'var(--color-danger)',
+        }}>{extractionError}</div>
+      )}
+
       <Field label="Outcome">
         <select
           value={outcome}
@@ -2001,6 +2204,15 @@ function CallPostFields({
         </TahiButton>
       </div>
     </div>
+  )
+}
+
+function SuggestionLine({ label, value }: { label: string; value: string }) {
+  return (
+    <li style={{ display: 'flex', gap: '0.5rem', fontSize: '0.75rem', lineHeight: 1.5 }}>
+      <span style={{ width: '5.5rem', flexShrink: 0, color: 'var(--color-text-muted)', fontWeight: 500 }}>{label}</span>
+      <span style={{ flex: 1, color: 'var(--color-text)', wordBreak: 'break-word' }}>{value}</span>
+    </li>
   )
 }
 

@@ -66,6 +66,13 @@ export async function POST(req: NextRequest, { params }: Params) {
     upfrontValue?: number | null
     monthlyValue?: number | null
     currency?: string
+    /** Optional override for deal.notes. Used by promote-from-call so
+     *  the captured scope/outcome notes land on the deal instead of the
+     *  generic lead.brief. */
+    notes?: string | null
+    /** Optional discovery_calls.id. When set, the activity row stamps
+     *  with a reference back so the deal can show "promoted from call X". */
+    sourceCallId?: string | null
   }
   try {
     body = await req.json()
@@ -156,6 +163,11 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (tm.length > 0) ownerId = tm[0].id
   }
 
+  // Deal notes: explicit body.notes wins (set when promoting from a
+  // call so the captured scope lands here). Else fall back to the
+  // lead's brief.
+  const dealNotes = (typeof body.notes === 'string' ? body.notes.trim() : null) || lead.brief || null
+
   await database.insert(schema.deals).values({
     id: dealId,
     title: dealTitle,
@@ -170,10 +182,23 @@ export async function POST(req: NextRequest, { params }: Params) {
     monthlyValue,
     monthlyValueNzd: monthlyValue,
     source: lead.source ?? 'lead',
-    notes: lead.brief ?? null,
+    notes: dealNotes,
     createdAt: now,
     updatedAt: now,
   })
+
+  // When promoted from a call, link the call to the new deal so the
+  // deal can show the originating conversation.
+  if (body.sourceCallId) {
+    try {
+      await database
+        .update(schema.discoveryCalls)
+        .set({ dealId, updatedAt: now })
+        .where(eq(schema.discoveryCalls.id, body.sourceCallId))
+    } catch {
+      // best-effort — promotion still succeeds even if the link fails
+    }
+  }
 
   // ── deal_contacts junction ──
   await database.insert(schema.dealContacts).values({

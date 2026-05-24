@@ -504,6 +504,16 @@ const TOOLS: ToolDef[] = [
   tool('delete_lead_call', 'Hard-delete a discovery call.', {
     callId: prop('string', 'Discovery call ID'),
   }, ['callId']),
+  tool('extract_call_insights', 'Read the call transcript via Sonnet 4.6 and return structured suggestions for outcome / summary / scope notes / budget / timeline / next step. Conservative — only extracts what was EXPLICITLY discussed (no inference for unmentioned budgets etc). Returns suggestions object; does NOT auto-apply.', {
+    callId: prop('string', 'Discovery call ID. Must have a transcript saved first.'),
+  }, ['callId']),
+  tool('promote_lead_call_to_deal', 'Convert a completed discovery call into a deal. Reuses promote_lead logic but pre-fills deal.notes with the call summary + scope + next step + budget signal + timeline. Sets the deal value from the call budget midpoint when present. Links discoveryCalls.dealId back to the new deal so the conversation history follows.', {
+    leadId: prop('string', 'Lead the call is attached to'),
+    callId: prop('string', 'Discovery call ID'),
+    orgId: prop('string', 'Optional existing org ID. Omit to create a new org from the lead company.'),
+    stageId: prop('string', 'Optional landing pipeline stage; defaults to the first open stage.'),
+    dealTitle: prop('string', 'Optional title override'),
+  }, ['leadId', 'callId']),
 
   // ── Deals / Pipeline ──────────────────────────────────────────────────
   tool('list_deals', 'List all sales pipeline deals with stage, value, owner, company'),
@@ -1405,6 +1415,49 @@ async function executeTool(
     }
     case 'delete_lead_call':
       return json(await apiWrite(`/api/admin/discovery-calls/${s('callId')}`, token, 'DELETE'))
+    case 'extract_call_insights':
+      return json(await apiWrite(`/api/admin/discovery-calls/${s('callId')}/extract`, token, 'POST'))
+    case 'promote_lead_call_to_deal': {
+      // Fetch the call, build the same body the UI's promoteCallToDeal
+      // builds, fire the promote endpoint.
+      const callData = await apiGet(`/api/admin/discovery-calls/${s('callId')}`, token).catch(() => null) as { call?: Record<string, unknown> } | null
+      // The discovery-calls endpoint doesn't have a GET (PATCH/DELETE only),
+      // so pull via the lead's calls list instead.
+      const listed = await apiGet(`/api/admin/leads/${s('leadId')}/calls`, token) as { calls?: Array<Record<string, unknown>> }
+      const call = listed.calls?.find(c => c.id === args.callId)
+      if (!call) return json({ error: 'Call not found on this lead' })
+      const summary = (call.summary as string | null) ?? ''
+      const scopeNotes = (call.scopeNotes as string | null) ?? ''
+      const outcomeNotes = (call.outcomeNotes as string | null) ?? ''
+      const budgetMin = call.budgetMin as number | null
+      const budgetMax = call.budgetMax as number | null
+      const budgetCurrency = call.budgetCurrency as string | null
+      const timeline = call.timeline as string | null
+      const parts: string[] = []
+      if (summary) parts.push(`Call summary: ${summary}`)
+      if (scopeNotes) parts.push(`Scope: ${scopeNotes}`)
+      if (outcomeNotes) parts.push(`Next step: ${outcomeNotes}`)
+      if (budgetMin || budgetMax) {
+        const range = budgetMin && budgetMax && budgetMin !== budgetMax
+          ? `${budgetMin} - ${budgetMax}`
+          : String(budgetMin ?? budgetMax ?? '')
+        parts.push(`Budget signal: ${range} ${budgetCurrency ?? ''}`.trim())
+      }
+      if (timeline) parts.push(`Timeline: ${timeline}`)
+      const upfrontValue = budgetMin && budgetMax
+        ? Math.round((budgetMin + budgetMax) / 2)
+        : (budgetMin ?? budgetMax ?? undefined)
+      return json(await apiWrite(`/api/admin/leads/${s('leadId')}/promote`, token, 'POST', {
+        createOrg: true,
+        orgId: typeof args.orgId === 'string' ? args.orgId : undefined,
+        stageId: typeof args.stageId === 'string' ? args.stageId : undefined,
+        dealTitle: typeof args.dealTitle === 'string' ? args.dealTitle : undefined,
+        notes: parts.join('\n\n') || undefined,
+        upfrontValue,
+        currency: budgetCurrency ?? undefined,
+        sourceCallId: args.callId,
+      }))
+    }
 
     case 'list_deals':
       return json(await apiGet('/api/admin/deals', token))
