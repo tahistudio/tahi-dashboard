@@ -71,6 +71,11 @@ interface Lead {
   updatedAt: string
 }
 
+interface AiQuestion {
+  text: string
+  rationale?: string
+}
+
 interface LeadActivity {
   id: string
   type: string
@@ -965,7 +970,12 @@ function LeadDetail({
 }) {
   const status = STATUS_BY_VALUE.get(lead.status)
   const aiSources = safeJsonArray<string>(lead.aiSources)
-  const aiQuestions = safeJsonArray<string>(lead.aiQuestions)
+  const aiQuestionsRaw = safeJsonArray<string | AiQuestion>(lead.aiQuestions)
+  // Normalise legacy string[] entries into { text } shape so downstream code
+  // doesn't care about the storage history.
+  const aiQuestions: AiQuestion[] = aiQuestionsRaw.map(q =>
+    typeof q === 'string' ? { text: q } : q,
+  )
   const aiSignals = safeJsonObject<AiSignals>(lead.aiSignals)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
@@ -1210,7 +1220,7 @@ function AiSection({
 }: {
   lead: Lead
   aiSources: string[]
-  aiQuestions: string[]
+  aiQuestions: AiQuestion[]
   aiSignals: AiSignals
   discoveryTemplate: string[]
   enriching: boolean
@@ -1238,18 +1248,32 @@ function AiSection({
     : lead.aiScore >= 40 ? 'warning'
     : 'neutral'
 
+  // Empty state: only render the Run AI button + any error. No paragraph.
+  if (!hasEnrichment) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+        <div>
+          <TahiButton
+            size="sm"
+            onClick={onRunEnrich}
+            disabled={enriching}
+            iconLeft={enriching
+              ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              : <Sparkles className="w-3.5 h-3.5" />}
+          >
+            {enriching ? 'Researching...' : 'Run AI'}
+          </TahiButton>
+        </div>
+        {enrichError && <EnrichErrorBox message={enrichError} />}
+      </div>
+    )
+  }
+
+  // Enriched state: split into separate cards with breathing room so
+  // nothing reads as a wall of text.
   return (
-    <section
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.75rem',
-        padding: '0.875rem 1rem',
-        background: 'var(--color-bg-secondary)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-card)',
-      }}
-    >
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+      {/* Score header — no border, just the badge row */}
       <header style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', color: 'var(--color-brand-dark)', fontWeight: 600, fontSize: '0.8125rem' }}>
           <Sparkles size={13} aria-hidden="true" />
@@ -1267,36 +1291,19 @@ function AiSection({
         )}
       </header>
 
-      {!hasEnrichment && (
-        <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', lineHeight: 1.55 }}>
-          Sonnet 4.6 will research this lead on the web, draft a short briefing with sources, and suggest 3 discovery questions tailored to them. Run it now or wait for the daily cron to scoop it up.
-          <div style={{ marginTop: '0.625rem' }}>
-            <TahiButton
-              size="sm"
-              onClick={onRunEnrich}
-              disabled={enriching}
-              iconLeft={enriching
-                ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                : <Sparkles className="w-3.5 h-3.5" />}
-            >
-              {enriching ? 'Researching...' : 'Run AI now'}
-            </TahiButton>
-          </div>
-        </div>
-      )}
-
       {lead.aiScoreReason && (
-        <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+        <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-muted)', fontStyle: 'italic', lineHeight: 1.5 }}>
           {lead.aiScoreReason}
         </p>
       )}
 
+      {/* Auto-fill suggestions — brand-50 banner, only when actionable */}
       {suggestionEntries.length > 0 && (
         <div style={{
-          padding: '0.625rem 0.75rem',
+          padding: '0.75rem 0.875rem',
           background: 'var(--color-brand-50)',
           border: '1px solid var(--color-brand-100)',
-          borderRadius: 'var(--radius-md)',
+          borderRadius: 'var(--radius-card)',
           display: 'flex',
           flexDirection: 'column',
           gap: '0.5rem',
@@ -1315,22 +1322,38 @@ function AiSection({
             ))}
           </ul>
           <div style={{ display: 'flex', gap: '0.4375rem' }}>
-            <TahiButton
-              size="sm"
-              onClick={() => onApplySuggestions(suggestionPatch)}
-            >
-              Apply all
-            </TahiButton>
+            <TahiButton size="sm" onClick={() => onApplySuggestions(suggestionPatch)}>Apply all</TahiButton>
           </div>
         </div>
       )}
 
-      {lead.aiSummary && <BriefingSummary raw={lead.aiSummary} />}
+      {/* Discovery questions card — top priority for pre-call glance */}
+      {(discoveryTemplate.length > 0 || aiQuestions.length > 0) && (
+        <AiCard title="Discovery call">
+          {discoveryTemplate.length > 0 && (
+            <QuestionGroup
+              label="Always ask"
+              questions={discoveryTemplate.map(q => ({ text: q }))}
+            />
+          )}
+          {discoveryTemplate.length > 0 && aiQuestions.length > 0 && <CardDivider />}
+          {aiQuestions.length > 0 && (
+            <QuestionGroup label="For this lead" questions={aiQuestions} />
+          )}
+        </AiCard>
+      )}
 
-      {Object.keys(aiSignals).length > 0 && (
-        <div>
-          <SectionLabel>Company signals</SectionLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3125rem' }}>
+      {/* Briefing card — snapshot / fit / watch-outs */}
+      {lead.aiSummary && (
+        <AiCard title="Briefing">
+          <BriefingSummary raw={lead.aiSummary} />
+        </AiCard>
+      )}
+
+      {/* Company signals card */}
+      {Object.keys(aiSignals).length > 0 && hasAnyVisibleSignal(aiSignals) && (
+        <AiCard title="Company signals">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4375rem' }}>
             {aiSignals.employeeCount && (
               <SignalRow label="Team" value={aiSignals.employeeCount} source={aiSignals.employeeCountSource} />
             )}
@@ -1360,65 +1383,139 @@ function AiSection({
               />
             )}
           </div>
+        </AiCard>
+      )}
+
+      {/* Sources + token footer */}
+      {(aiSources.length > 0 || (lead.aiTokensSpent && lead.aiTokensSpent > 0)) && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {aiSources.length > 0 ? <SourcesToggle sources={aiSources} /> : <span />}
+          {lead.aiTokensSpent != null && lead.aiTokensSpent > 0 && (
+            <span style={{
+              fontSize: '0.625rem',
+              color: 'var(--color-text-subtle)',
+            }}>
+              {lead.aiTokensSpent.toLocaleString()} tokens spent
+            </span>
+          )}
         </div>
       )}
 
-      {aiSources.length > 0 && <SourcesToggle sources={aiSources} />}
+      {enrichError && <EnrichErrorBox message={enrichError} />}
+    </div>
+  )
+}
 
-      {discoveryTemplate.length > 0 && (
-        <div>
-          <SectionLabel>Always ask</SectionLabel>
-          <ol style={{ margin: 0, paddingLeft: '1.125rem', display: 'flex', flexDirection: 'column', gap: '0.4375rem' }}>
-            {discoveryTemplate.map((q, i) => (
-              <li key={`t-${i}`} style={{ fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.5 }}>
-                {q}
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
-
-      {aiQuestions.length > 0 && (
-        <div>
-          <SectionLabel>For this lead</SectionLabel>
-          <ol style={{ margin: 0, paddingLeft: '1.125rem', display: 'flex', flexDirection: 'column', gap: '0.4375rem' }}>
-            {aiQuestions.map((q, i) => (
-              <li key={`q-${i}`} style={{
-                fontSize: '0.8125rem',
-                color: 'var(--color-text)',
-                lineHeight: 1.5,
-              }}>
-                {q}
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
-
-      {enrichError && (
-        <div style={{
-          padding: '0.5rem 0.625rem',
-          background: 'var(--color-danger-bg)',
-          border: '1px solid var(--color-danger)',
-          borderRadius: 'var(--radius-sm)',
-          fontSize: '0.75rem',
-          color: 'var(--color-danger)',
-        }}>
-          {enrichError}
-        </div>
-      )}
-
-      {lead.aiTokensSpent != null && lead.aiTokensSpent > 0 && (
-        <p style={{
-          margin: 0,
-          fontSize: '0.625rem',
-          color: 'var(--color-text-subtle)',
-          textAlign: 'right',
-        }}>
-          {lead.aiTokensSpent.toLocaleString()} tokens spent on this lead
-        </p>
-      )}
+/** Bordered subsection card. Used for Discovery / Briefing / Signals so each
+ *  block reads as its own scannable unit instead of one mega-card. */
+function AiCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section style={{
+      padding: '0.875rem 1rem',
+      background: 'var(--color-bg)',
+      border: '1px solid var(--color-border-subtle)',
+      borderRadius: 'var(--radius-card)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '0.625rem',
+    }}>
+      <div style={{
+        fontSize: '0.625rem',
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        color: 'var(--color-text-subtle)',
+      }}>{title}</div>
+      {children}
     </section>
+  )
+}
+
+function CardDivider() {
+  return <div style={{ borderTop: '1px solid var(--color-border-subtle)', margin: '0.125rem 0' }} />
+}
+
+/** Renders one group of questions (e.g. "Always ask" or "For this lead").
+ *  Each question is a numbered line with its rationale as small muted
+ *  text below. Generous spacing between questions so the whole block is
+ *  scannable as a call brief. */
+function QuestionGroup({ label, questions }: { label: string; questions: AiQuestion[] }) {
+  return (
+    <div>
+      <div style={{
+        fontSize: '0.625rem',
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        color: 'var(--color-text-subtle)',
+        marginBottom: '0.5rem',
+      }}>{label}</div>
+      <ol style={{
+        margin: 0,
+        padding: 0,
+        listStyle: 'none',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.75rem',
+        counterReset: 'q',
+      }}>
+        {questions.map((q, i) => (
+          <li
+            key={i}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1.25rem 1fr',
+              gap: '0.4375rem',
+              alignItems: 'baseline',
+            }}
+          >
+            <span style={{
+              color: 'var(--color-text-subtle)',
+              fontSize: '0.75rem',
+              fontVariantNumeric: 'tabular-nums',
+              fontWeight: 500,
+            }}>{i + 1}.</span>
+            <div>
+              <div style={{ fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.5 }}>
+                {q.text}
+              </div>
+              {q.rationale && (
+                <div style={{
+                  fontSize: '0.6875rem',
+                  color: 'var(--color-text-muted)',
+                  fontStyle: 'italic',
+                  marginTop: '0.1875rem',
+                  lineHeight: 1.4,
+                }}>
+                  {q.rationale}
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+function EnrichErrorBox({ message }: { message: string }) {
+  return (
+    <div style={{
+      padding: '0.5rem 0.625rem',
+      background: 'var(--color-danger-bg)',
+      border: '1px solid var(--color-danger)',
+      borderRadius: 'var(--radius-sm)',
+      fontSize: '0.75rem',
+      color: 'var(--color-danger)',
+    }}>{message}</div>
+  )
+}
+
+function hasAnyVisibleSignal(s: AiSignals): boolean {
+  return !!(
+    s.employeeCount || s.fundingRaised || s.revenueEstimate
+    || s.pricingVisible || s.customerCount || s.siteTechStack
+    || s.decisionMaker
   )
 }
 

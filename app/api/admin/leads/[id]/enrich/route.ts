@@ -92,16 +92,31 @@ Structured deal-sizing signals. Every populated field MUST have a matching <fiel
 <url>https://...</url>
 </sources>
 <questions>
-<q>Question one specific to this company's context. Should surface insight relevant to scoping a project.</q>
-<q>Question two specific to this company's situation. Should help Tahi understand fit / urgency / budget.</q>
-<q>Question three specific to this company's signals. Should surface decision-making process or competitive landscape.</q>
+Each question has the question itself plus a SHORT one-line rationale on what to listen for. Rationale is one fragment, lowercase, under 12 words.
+
+<q>
+<text>Question one specific to this company's context. Should surface insight relevant to scoping a project.</text>
+<rationale>e.g. "uncovers project scope" or "tests budget signal"</rationale>
+</q>
+<q>
+<text>Question two specific to this company's situation. Should help Tahi understand fit / urgency / budget.</text>
+<rationale>one-line "why ask"</rationale>
+</q>
+<q>
+<text>Question three specific to this company's signals. Should surface decision-making process or competitive landscape.</text>
+<rationale>one-line "why ask"</rationale>
+</q>
 </questions>
 <suggested_fields>
-Fields you confidently identified during research that could fill gaps in the lead record. ONLY include a field when you have high confidence the value is correct. Skip any field you are unsure about. The dashboard will offer these as one-click "Apply" suggestions to fill empty lead fields. Wrong values waste Liam's time — be conservative.
+Fields you confidently identified during research that could fill gaps in the lead record. STRICT RULES:
+- Only include a field when you have a CONCRETE, HIGH-CONFIDENCE value backed by a real source.
+- Never include hedging language like "Unknown", "Likely X", "Possibly Y", "Probably Z", or "Could not confirm". If you would have to hedge, OMIT the entire field tag.
+- The dashboard will offer these as one-click "Apply" suggestions that overwrite empty lead fields. Wrong or hedged values waste Liam's time.
+- Prose explanations belong in <summary>, not here.
 
-<person_name>Primary contact's full name, e.g. "Heather Disher". Omit if the lead's "name" already looks correct.</person_name>
+<person_name>Primary contact's full name, e.g. "Heather Disher". Omit if the lead's "name" already looks correct OR if you cannot confirm a concrete name.</person_name>
 <person_email>Confirmed email if found in public sources. Omit if not directly visible.</person_email>
-<job_title>Role at the company, e.g. "Founder & Director" or "Head of Marketing".</job_title>
+<job_title>Role at the company, e.g. "Founder & Director" or "Head of Marketing". Omit if you cannot confirm a specific title.</job_title>
 <company_name>Company name. Omit if the lead's "company" already looks correct.</company_name>
 <website>Official company website URL with https:// prefix.</website>
 </suggested_fields>
@@ -185,13 +200,18 @@ interface AiSignals {
   }
 }
 
+export interface AiQuestion {
+  text: string
+  rationale?: string
+}
+
 interface ParsedFull {
   score: number | null
   scoreReason: string | null
   /** Compiled into a single JSON string for aiSummary storage: { snapshot, fit, watchOuts }. */
   summary: string | null
   sources: string[]
-  questions: string[]
+  questions: AiQuestion[]
   signals: AiSignals
 }
 
@@ -214,9 +234,20 @@ function parseFullResponse(text: string): ParsedFull {
     .filter(u => /^https?:\/\//i.test(u))
 
   const questionsBlock = matchText(text, /<questions>([\s\S]*?)<\/questions>/i) ?? ''
-  const questions = Array.from(questionsBlock.matchAll(/<q>([\s\S]*?)<\/q>/gi))
-    .map(m => m[1].trim())
-    .filter(q => q.length > 0)
+  const questions: AiQuestion[] = Array.from(questionsBlock.matchAll(/<q>([\s\S]*?)<\/q>/gi))
+    .map(m => {
+      const body = m[1]
+      // New shape: <text> and <rationale> sub-tags.
+      const textTag = body.match(/<text>([\s\S]*?)<\/text>/i)?.[1]?.trim()
+      const rationale = body.match(/<rationale>([\s\S]*?)<\/rationale>/i)?.[1]?.trim()
+      if (textTag) {
+        return { text: textTag, rationale: rationale || undefined }
+      }
+      // Legacy shape: bare text inside <q>.
+      const bare = body.trim()
+      return bare ? { text: bare } : null
+    })
+    .filter((q): q is AiQuestion => q !== null && q.text.length > 0)
     .slice(0, 3)
 
   // Signals block. Each field is optional. A field is only included
