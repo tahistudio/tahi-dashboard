@@ -649,7 +649,6 @@ export function LeadsContent() {
       <SlideOver
         open={!!selectedLead && !showNewForm}
         onClose={() => { setSelectedLead(null); setEditing(false); setDraft(null) }}
-        icon={<User size={15} />}
         title={editing ? (draft?.name?.trim() || 'New lead') : (selectedLead?.name ?? '')}
         subtitle={selectedLead && !editing ? leadSubtitle(selectedLead) : undefined}
         maxWidth="48rem"
@@ -696,17 +695,6 @@ export function LeadsContent() {
                   >
                     Delete
                   </TahiButton>
-                  <TahiButton
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => runEnrich(selectedLead.id)}
-                    disabled={enriching}
-                    iconLeft={enriching
-                      ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      : <Sparkles className="w-3.5 h-3.5" />}
-                  >
-                    {enriching ? 'Researching...' : (selectedLead.enrichedAt ? 'Re-run AI' : 'Run AI')}
-                  </TahiButton>
                   <div style={{ flex: 1 }} />
                   <TahiButton
                     variant="secondary"
@@ -735,7 +723,6 @@ export function LeadsContent() {
       <SlideOver
         open={showNewForm}
         onClose={() => { setShowNewForm(false); setDraft(null) }}
-        icon={<Plus size={15} />}
         title="New lead"
         subtitle="Capture a prospect before the discovery call."
         maxWidth="48rem"
@@ -1248,50 +1235,48 @@ function AiSection({
     : lead.aiScore >= 40 ? 'warning'
     : 'neutral'
 
-  // Empty state: only render the Run AI button + any error. No paragraph.
-  if (!hasEnrichment) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
-        <div>
-          <TahiButton
-            size="sm"
-            onClick={onRunEnrich}
-            disabled={enriching}
-            iconLeft={enriching
-              ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              : <Sparkles className="w-3.5 h-3.5" />}
-          >
-            {enriching ? 'Researching...' : 'Run AI'}
-          </TahiButton>
-        </div>
-        {enrichError && <EnrichErrorBox message={enrichError} />}
-      </div>
-    )
-  }
-
-  // Enriched state: split into separate cards with breathing room so
-  // nothing reads as a wall of text.
+  // Single layout for both states. The Discovery card always shows
+  // when the always-ask template exists (they're universal, not AI-
+  // dependent). The briefing / signals / sources / score header only
+  // show after enrichment has run.
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-      {/* Score header — no border, just the badge row */}
+      {/* Score header + Run AI button. Header only when enriched; Run AI
+          button always so Liam can fire / re-fire from anywhere. */}
       <header style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', color: 'var(--color-brand-dark)', fontWeight: 600, fontSize: '0.8125rem' }}>
-          <Sparkles size={13} aria-hidden="true" />
-          AI briefing
-        </div>
-        {lead.aiScore != null && (
-          <Badge tone={scoreTone} variant="soft" size="sm" dot={false}>
-            Score {lead.aiScore}
-          </Badge>
+        {hasEnrichment && (
+          <>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', color: 'var(--color-brand-dark)', fontWeight: 600, fontSize: '0.8125rem' }}>
+              <Sparkles size={13} aria-hidden="true" />
+              AI briefing
+            </div>
+            {lead.aiScore != null && (
+              <Badge tone={scoreTone} variant="soft" size="sm" dot={false}>
+                Score {lead.aiScore}
+              </Badge>
+            )}
+            {relTime(lead.enrichedAt) && (
+              <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+                Enriched {relTime(lead.enrichedAt)}
+              </span>
+            )}
+            <div style={{ flex: 1 }} />
+          </>
         )}
-        {relTime(lead.enrichedAt) && (
-          <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
-            Enriched {relTime(lead.enrichedAt)}
-          </span>
-        )}
+        <TahiButton
+          size="sm"
+          variant={hasEnrichment ? 'secondary' : 'primary'}
+          onClick={onRunEnrich}
+          disabled={enriching}
+          iconLeft={enriching
+            ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            : <Sparkles className="w-3.5 h-3.5" />}
+        >
+          {enriching ? 'Researching...' : (hasEnrichment ? 'Re-run AI' : 'Run AI')}
+        </TahiButton>
       </header>
 
-      {lead.aiScoreReason && (
+      {hasEnrichment && lead.aiScoreReason && (
         <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-muted)', fontStyle: 'italic', lineHeight: 1.5 }}>
           {lead.aiScoreReason}
         </p>

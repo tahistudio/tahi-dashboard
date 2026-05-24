@@ -445,6 +445,20 @@ const TOOLS: ToolDef[] = [
     currency: prop('string', 'Currency code. Defaults to the lead\'s currency.'),
   }, ['leadId']),
 
+  // ── Lead AI ─────────────────────────────────────────────────────────
+  tool('enrich_lead', 'Run AI enrichment on a lead. Sonnet 4.6 + web search drafts a snapshot/fit/watch-outs briefing, scores 0-100, finds company signals (employee count, funding, pricing, tech stack, decision-maker) and writes 3 unique discovery questions. Costs ~$0.30 per run. Mode="full" (default) is the works; mode="score" is the cheap Haiku score-only path used by the daily cron.', {
+    leadId: prop('string', 'Lead ID'),
+    mode: prop('string', '"full" (default — Sonnet + web search) or "score" (cheap Haiku, no web search)'),
+    force: prop('boolean', 'Bypass the 25k-token-per-lead cost cap. Default false.'),
+  }, ['leadId']),
+  tool('get_lead_ai_briefing', 'Get the AI briefing for a lead in one compact object: score + summary + signals + sources + 3 always-ask + 3 unique discovery questions. Use this before drafting outreach or before a discovery call.', {
+    leadId: prop('string', 'Lead ID'),
+  }, ['leadId']),
+  tool('apply_lead_ai_suggestions', 'Apply the AI-suggested field values (name, email, jobTitle, company, website) to an enriched lead. Only fields that are currently empty get filled. Safe to call repeatedly.', {
+    leadId: prop('string', 'Lead ID'),
+  }, ['leadId']),
+  tool('run_lead_ai_cron', 'Manually fire the daily lead-AI cron. Scores active leads where lastAiRunAt is stale; sends transition notifications (high-intent, idle qualifying); applies auto-status flips if enabled in settings. Idempotent — safe to call any time.', {}),
+
   // ── Deals / Pipeline ──────────────────────────────────────────────────
   tool('list_deals', 'List all sales pipeline deals with stage, value, owner, company'),
   tool('get_pipeline_stages', 'Get all pipeline stages'),
@@ -1258,6 +1272,70 @@ async function executeTool(
       const dryRun = args.dryRun !== false  // default true
       const p: Record<string, string> = { dryRun: String(dryRun) }
       return json(await apiWrite(`/api/admin/leads/triage-pipeline?dryRun=${dryRun}`, token, 'POST'))
+    }
+
+    // ── Lead AI ──────────────────────────────────────────────────────
+    case 'enrich_lead': {
+      const params = new URLSearchParams()
+      if (typeof args.mode === 'string') params.set('mode', args.mode)
+      if (args.force === true) params.set('force', '1')
+      const qs = params.toString() ? `?${params.toString()}` : ''
+      return json(await apiWrite(`/api/admin/leads/${s('leadId')}/enrich${qs}`, token, 'POST'))
+    }
+    case 'get_lead_ai_briefing': {
+      const data = await apiGet(`/api/admin/leads/${s('leadId')}`, token) as {
+        lead?: Record<string, unknown>
+        discoveryQuestionsTemplate?: string[]
+      }
+      const lead = (data.lead ?? {}) as Record<string, unknown>
+      const parseJson = <T,>(raw: unknown, fallback: T): T => {
+        if (typeof raw !== 'string' || !raw) return fallback
+        try {
+          const p: unknown = JSON.parse(raw)
+          return (p as T) ?? fallback
+        } catch { return fallback }
+      }
+      return json({
+        leadId: lead.id,
+        name: lead.name,
+        company: lead.company,
+        score: lead.aiScore,
+        scoreReason: lead.aiScoreReason,
+        enrichedAt: lead.enrichedAt,
+        summary: parseJson(lead.aiSummary, null),
+        signals: parseJson(lead.aiSignals, {}),
+        sources: parseJson(lead.aiSources, []),
+        alwaysAskQuestions: data.discoveryQuestionsTemplate ?? [],
+        leadSpecificQuestions: parseJson(lead.aiQuestions, []),
+        tokensSpent: lead.aiTokensSpent,
+      })
+    }
+    case 'apply_lead_ai_suggestions': {
+      // Read the lead + the parsed signals, build a patch of empty fields
+      // that the AI suggested values for, PATCH it. Same logic as the UI's
+      // "Apply all" button so Claude can drive this from MCP.
+      const data = await apiGet(`/api/admin/leads/${s('leadId')}`, token) as { lead?: Record<string, unknown> }
+      const lead = (data.lead ?? {}) as Record<string, unknown>
+      let signals: Record<string, unknown> = {}
+      if (typeof lead.aiSignals === 'string') {
+        try { signals = JSON.parse(lead.aiSignals) as Record<string, unknown> } catch { /* keep empty */ }
+      }
+      const suggested = (signals.suggestedFields ?? {}) as Record<string, string | undefined>
+      const isEmpty = (v: unknown) => typeof v !== 'string' || !v.trim()
+      const patch: Record<string, string> = {}
+      if (suggested.name && isEmpty(lead.name)) patch.name = suggested.name
+      if (suggested.email && isEmpty(lead.email)) patch.email = suggested.email
+      if (suggested.jobTitle && isEmpty(lead.jobTitle)) patch.jobTitle = suggested.jobTitle
+      if (suggested.company && isEmpty(lead.company)) patch.company = suggested.company
+      if (suggested.website && isEmpty(lead.website)) patch.website = suggested.website
+      if (Object.keys(patch).length === 0) {
+        return json({ applied: 0, message: 'No suggested fields available (or all already filled).' })
+      }
+      await apiWrite(`/api/admin/leads/${s('leadId')}`, token, 'PATCH', patch)
+      return json({ applied: Object.keys(patch).length, patch })
+    }
+    case 'run_lead_ai_cron': {
+      return json(await apiWrite('/api/admin/cron/leads-ai', token, 'POST'))
     }
 
     case 'list_deals':
