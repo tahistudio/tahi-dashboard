@@ -293,7 +293,7 @@ function PipelineSummaryCard() {
 
   return (
     <Link
-      href="/pipeline"
+      href="/deals"
       className="block"
       style={{
         background: 'var(--color-bg)',
@@ -442,7 +442,7 @@ function PipelineCapacityCard() {
             {utilizationPct}%
           </span>
         </div>
-        <Link href="/pipeline" className="view-link" style={{
+        <Link href="/deals" className="view-link" style={{
           fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)',
         }}>
           View pipeline <ArrowRight size={12} aria-hidden="true" className="view-arrow" />

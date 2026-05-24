@@ -78,7 +78,7 @@ const ADMIN_NAV: NavGroup[] = [
     collapsible: true,
     items: [
       { label: 'Leads',              href: '/leads',               icon: UserPlus,      adminOnly: true },
-      { label: 'Pipeline',           href: '/pipeline',            icon: TrendingUp,    adminOnly: true },
+      { label: 'Deals',              href: '/deals',               icon: TrendingUp,    adminOnly: true },
       { label: 'Proposals',          href: '/proposals',           icon: FileText,      adminOnly: true },
       { label: 'Schedules',          href: '/schedules',           icon: Calendar,      adminOnly: true },
       { label: 'Contracts',          href: '/contracts',           icon: FileSignature, adminOnly: true },

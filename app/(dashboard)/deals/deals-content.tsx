@@ -182,7 +182,7 @@ interface TeamMemberOption {
   name: string
 }
 
-export function PipelineContent() {
+export function DealsContent() {
   const searchParams = useSearchParams()
   const [view, setView] = useUserPreference<ViewMode>(
     'pipeline.viewMode',

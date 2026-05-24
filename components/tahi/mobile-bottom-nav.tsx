@@ -64,7 +64,7 @@ const ADMIN_DRAWER: DrawerNavGroup[] = [
     group: 'Sales',
     items: [
       { label: 'Leads',           href: '/leads',           icon: UserPlus },
-      { label: 'Pipeline',        href: '/pipeline',        icon: TrendingUp },
+      { label: 'Deals',           href: '/deals',           icon: TrendingUp },
       { label: 'Proposals',       href: '/proposals',       icon: FileText },
       { label: 'Schedules',       href: '/schedules',       icon: Calendar },
       { label: 'Contracts',       href: '/contracts',       icon: FileSignature },

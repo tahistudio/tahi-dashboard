@@ -63,6 +63,15 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+
+  // Permanent redirects for renamed routes. Old bookmarks land on the
+  // new page without breaking. Add new entries here when renaming.
+  async redirects() {
+    return [
+      { source: '/pipeline',         destination: '/deals',         permanent: true },
+      { source: '/pipeline/:path*',  destination: '/deals/:path*',  permanent: true },
+    ]
+  },
 }
 
 export default nextConfig

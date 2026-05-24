@@ -204,9 +204,9 @@ export function CalculatorContent({ dealId, orgId }: { dealId: string | null; or
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-      <Link href={dealId ? `/pipeline/${dealId}` : '/pipeline'} className="inline-flex items-center" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', textDecoration: 'none', gap: '0.375rem' }}>
+      <Link href={dealId ? `/deals/${dealId}` : '/deals'} className="inline-flex items-center" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', textDecoration: 'none', gap: '0.375rem' }}>
         <ArrowLeft size={14} />
-        {dealId ? 'Back to deal' : 'Back to pipeline'}
+        {dealId ? 'Back to deal' : 'Back to deals'}
       </Link>
 
       <header style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>

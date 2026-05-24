@@ -267,7 +267,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
       const res = await fetch(apiPath(`/api/admin/deals/${dealId}`), { method: 'DELETE' })
       if (!res.ok) throw new Error(`Status ${res.status}`)
       showToast('Deal archived', 'success')
-      router.push('/pipeline')
+      router.push('/deals')
     } catch {
       showToast('Failed to archive deal', 'error')
       setArchiving(false)
@@ -346,7 +346,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
     return (
       <div style={{ padding: '1.5rem' }}>
         <Link
-          href="/pipeline"
+          href="/deals"
           className="inline-flex items-center gap-1.5 font-medium transition-colors"
           style={{ fontSize: '0.875rem', color: 'var(--color-brand)', textDecoration: 'none', marginBottom: '1rem', display: 'inline-flex' }}
         >
@@ -362,7 +362,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
     <div>
       {/* Back link */}
       <Link
-        href="/pipeline"
+        href="/deals"
         className="view-link"
         style={{
           fontSize: 'var(--text-sm)',

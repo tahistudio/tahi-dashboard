@@ -3559,7 +3559,7 @@ function DealsTab({ clientId, orgName }: { clientId: string; orgName: string }) 
             </span>
           )}
         </h2>
-        <TahiButton variant="primary" size="sm" onClick={() => router.push('/pipeline')}>
+        <TahiButton variant="primary" size="sm" onClick={() => router.push('/deals')}>
           <Plus className="w-3.5 h-3.5 mr-1.5" />
           New Deal
         </TahiButton>

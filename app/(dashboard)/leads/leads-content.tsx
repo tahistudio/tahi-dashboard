@@ -407,7 +407,7 @@ export function LeadsContent() {
       })
       if (res.ok) {
         const data = await res.json() as { dealId?: string }
-        if (data.dealId) window.location.href = apiPath(`/pipeline?deal=${data.dealId}`)
+        if (data.dealId) window.location.href = apiPath(`/deals?deal=${data.dealId}`)
       }
     } catch {
       // best-effort — UI just keeps the call in place if promote fails
@@ -447,7 +447,7 @@ export function LeadsContent() {
         await fetchLeads()
         // Redirect to the new deal so Liam lands where he can keep
         // working — pipeline → deal detail.
-        if (data.dealId) window.location.href = apiPath(`/pipeline?deal=${data.dealId}`)
+        if (data.dealId) window.location.href = apiPath(`/deals?deal=${data.dealId}`)
       }
     } finally {
       setPromoting(false)
@@ -1107,7 +1107,7 @@ function LeadDetail({
         }}>
           ✓ Promoted{relTime(lead.promotedAt) ? ` ${relTime(lead.promotedAt)}` : ''}
           {' · '}
-          <a href={`/pipeline?deal=${lead.promotedDealId}`} style={{ fontWeight: 600, color: 'var(--color-brand-dark)', textDecoration: 'underline' }}>
+          <a href={`/deals?deal=${lead.promotedDealId}`} style={{ fontWeight: 600, color: 'var(--color-brand-dark)', textDecoration: 'underline' }}>
             Open deal
           </a>
         </div>
