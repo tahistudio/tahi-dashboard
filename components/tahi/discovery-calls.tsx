@@ -79,7 +79,9 @@ const PARENT_PATH: Record<CallParentType, string> = {
   deal: '/api/admin/deals',
   request: '/api/admin/requests',
   task: '/api/admin/tasks',
-  org: '/api/admin/organisations',
+  // orgs are at /api/admin/clients in this codebase (legacy naming —
+  // see Decision #001 in DECISIONS.md). Same `organisations` table.
+  org: '/api/admin/clients',
 }
 
 // ── Main component ────────────────────────────────────────────────────────

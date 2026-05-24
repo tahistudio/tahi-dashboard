@@ -14,6 +14,7 @@ import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { useToast } from '@/components/tahi/toast'
 import { Card } from '@/components/tahi/card'
+import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -1107,6 +1108,9 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
 
         {/* Right column: Metadata sidebar */}
         <div className="flex flex-col gap-4">
+          {/* Calls: planning sync, review, etc */}
+          {isAdmin && <DiscoveryCallsCard parentType="task" parentId={taskId} />}
+
           {/* Status actions (admin only) */}
           {isAdmin && (
             <SidebarCard title="Status">

@@ -23,6 +23,7 @@ import { SubRequestsPanel, type SubRequestRow } from '@/components/tahi/sub-requ
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { PeoplePanel, type Participant } from '@/components/tahi/people-panel'
 import { TimeCard } from '@/components/tahi/time-card'
+import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -833,6 +834,9 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         <div className="flex flex-col gap-4">
           {/* Time (admin only): live timer + manual log + recent entries */}
           {isAdmin && <TimeCard requestId={requestId} />}
+
+          {/* Calls: kickoff, scope review, mid-build check-ins */}
+          {isAdmin && <DiscoveryCallsCard parentType="request" parentId={requestId} />}
 
           {/* Actions: status dropdown, scope flag toggle, make top-level */}
           {isAdmin && (

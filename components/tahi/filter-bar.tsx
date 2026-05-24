@@ -601,9 +601,15 @@ function MultiSelectChip({
         open={open}
         onClose={() => { setOpen(false); onEditorClosed() }}
         align="start"
-        width="14rem"
+        width="16rem"
       >
-        <div role="group" aria-label={`${def.label} options`}>
+        <div
+          role="group"
+          aria-label={`${def.label} options`}
+          // Cap height + scroll so long option lists (e.g. 9 sources)
+          // don't push items past the viewport edge.
+          style={{ maxHeight: '20rem', overflowY: 'auto' }}
+        >
           {def.options.map(opt => {
             const isSelected = values.includes(opt.value)
             return (
@@ -647,7 +653,7 @@ function MultiSelectChip({
                 {opt.tone ? (
                   <Badge tone={opt.tone} variant="soft" size="sm" leader={false}>{opt.label}</Badge>
                 ) : (
-                  <span style={{ flex: 1 }}>{opt.label}</span>
+                  <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{opt.label}</span>
                 )}
                 {!opt.tone && <span style={{ flex: 1 }} />}
               </button>

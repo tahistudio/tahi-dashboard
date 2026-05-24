@@ -52,6 +52,7 @@ import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badg
 import { TrackMeter } from '@/components/tahi/track-meter'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { RequestCard } from '@/components/tahi/request-card'
+import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { FeatureCard } from '@/components/tahi/feature-card'
 import { DonutChart, type DonutSegment } from '@/components/tahi/chart'
@@ -380,7 +381,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
           <ContactsTab clientId={clientId} contacts={contacts} onUpdated={load} />
         )}
         {activeTab === 'calls' && (
-          <CallsTab clientId={clientId} orgName={org.name} />
+          <DiscoveryCallsCard parentType="org" parentId={clientId} />
         )}
         {activeTab === 'messages' && (
           <MessagesTab clientId={clientId} orgName={org.name} />
