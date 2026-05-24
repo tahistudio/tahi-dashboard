@@ -1,22 +1,9 @@
 /**
- * POST /api/admin/leads/[id]/calls
+ * GET + POST /api/admin/deals/[id]/calls
  *
- * Schedule a discovery call against a lead. Writes a discoveryCalls row
- * and stamps a lead_call_scheduled activity so the lead timeline shows
- * the event.
- *
- * Body:
- *   title         (required)
- *   scheduledAt   (required, ISO 8601)
- *   durationMinutes (default 30)
- *   googleMeetUrl (optional — paste from Google Calendar)
- *   googleCalendarEventId (optional — set when wired via Calendar sync)
- *   attendees     (optional, JSON array of {name, email, role})
- *
- * GET /api/admin/leads/[id]/calls — list calls for the lead (newest
- * scheduled date first). Same data lives on the GET /leads/[id]
- * payload too; this endpoint exists for callers that just want the
- * call list without re-fetching the lead.
+ * Same shape as /api/admin/leads/[id]/calls but for deal-stage calls
+ * (kickoff, scope refinement, proposal walkthrough, multi-meeting deal
+ * conversations). Shared logic lives in lib/calls.ts.
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -36,7 +23,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const { id } = await params
   const database = await db()
-  const calls = await listCallsForParent(database, 'lead', id)
+  const calls = await listCallsForParent(database, 'deal', id)
   return NextResponse.json({ calls })
 }
 
@@ -67,18 +54,17 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const database = await db()
 
-  // Confirm the lead exists so we don't end up with orphan calls.
-  const leadExists = await database
-    .select({ id: schema.leads.id })
-    .from(schema.leads)
-    .where(eq(schema.leads.id, id))
+  const dealExists = await database
+    .select({ id: schema.deals.id })
+    .from(schema.deals)
+    .where(eq(schema.deals.id, id))
     .limit(1)
-  if (leadExists.length === 0) {
-    return NextResponse.json({ error: 'Lead not found' }, { status: 404 })
+  if (dealExists.length === 0) {
+    return NextResponse.json({ error: 'Deal not found' }, { status: 404 })
   }
 
   try {
-    const { id: callId } = await createCallForParent(database, 'lead', id, {
+    const { id: callId } = await createCallForParent(database, 'deal', id, {
       title: body.title ?? '',
       scheduledAt: body.scheduledAt ?? '',
       durationMinutes: body.durationMinutes,

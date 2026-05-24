@@ -1250,8 +1250,15 @@ export const contracts = sqliteTable('contracts', {
 
 export const discoveryCalls = sqliteTable('discovery_calls', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // Polymorphic parent: any of leadId / dealId / requestId / taskId /
+  // orgId can be set. A call usually has one parent but can be linked
+  // to several (e.g. an org call that's also tied to a specific deal).
+  // At least one must be set at the API layer.
   leadId: text('lead_id').references(() => leads.id, { onDelete: 'set null' }),
   dealId: text('deal_id').references(() => deals.id, { onDelete: 'set null' }),
+  requestId: text('request_id'),
+  taskId: text('task_id'),
+  orgId: text('org_id').references(() => organisations.id, { onDelete: 'set null' }),
   // Google Calendar linkage. When set, we can sync the event details
   // (attendees, scheduledAt, meetingUrl) back from Calendar on each
   // poll. event_id is the unique Calendar event id.
@@ -1293,6 +1300,9 @@ export const discoveryCalls = sqliteTable('discovery_calls', {
 }, (table) => [
   index('idx_discovery_calls_lead').on(table.leadId),
   index('idx_discovery_calls_deal').on(table.dealId),
+  index('idx_discovery_calls_request').on(table.requestId),
+  index('idx_discovery_calls_task').on(table.taskId),
+  index('idx_discovery_calls_org').on(table.orgId),
   index('idx_discovery_calls_scheduled').on(table.scheduledAt),
   index('idx_discovery_calls_status').on(table.status),
   index('idx_discovery_calls_gcal').on(table.googleCalendarEventId),

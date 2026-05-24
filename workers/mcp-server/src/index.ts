@@ -515,6 +515,19 @@ const TOOLS: ToolDef[] = [
     dealTitle: prop('string', 'Optional title override'),
   }, ['leadId', 'callId']),
 
+  // ── Deal calls (multi-meeting deal conversations) ─────────────────────
+  tool('list_deal_calls', 'List calls scheduled or completed against a deal (kickoff, scope refinement, proposal walkthrough, etc). Newest scheduled first.', {
+    dealId: prop('string', 'Deal ID'),
+  }, ['dealId']),
+  tool('schedule_deal_call', 'Schedule a call against a deal. Writes a discovery_calls row with deal_id set + a deal_call_scheduled activity. Same field shape as schedule_lead_call.', {
+    dealId: prop('string', 'Deal ID'),
+    title: prop('string', 'Call title, e.g. "Scope refinement with Anna"'),
+    scheduledAt: prop('string', 'ISO 8601 datetime'),
+    durationMinutes: prop('number', 'Defaults to 30'),
+    googleMeetUrl: prop('string', 'Optional — paste the Google Meet link'),
+    googleCalendarEventId: prop('string', 'Optional — set when wired via Calendar sync'),
+  }, ['dealId', 'title', 'scheduledAt']),
+
   // ── Deals / Pipeline ──────────────────────────────────────────────────
   tool('list_deals', 'List all sales pipeline deals with stage, value, owner, company'),
   tool('get_pipeline_stages', 'Get all pipeline stages'),
@@ -1417,6 +1430,12 @@ async function executeTool(
       return json(await apiWrite(`/api/admin/discovery-calls/${s('callId')}`, token, 'DELETE'))
     case 'extract_call_insights':
       return json(await apiWrite(`/api/admin/discovery-calls/${s('callId')}/extract`, token, 'POST'))
+    case 'list_deal_calls':
+      return json(await apiGet(`/api/admin/deals/${s('dealId')}/calls`, token))
+    case 'schedule_deal_call': {
+      const { dealId: dcDealId, ...body } = args
+      return json(await apiWrite(`/api/admin/deals/${dcDealId}/calls`, token, 'POST', body))
+    }
     case 'promote_lead_call_to_deal': {
       // Fetch the call, build the same body the UI's promoteCallToDeal
       // builds, fire the promote endpoint.

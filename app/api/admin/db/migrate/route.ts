@@ -748,6 +748,18 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0044',
+    description: 'Polymorphic discovery_calls: add request_id, task_id, org_id (nullable) so a call can attach to any parent (lead / deal / request / task / org). Unblocks "multiple meetings per deal", "kickoff calls per request", "client check-in calls" etc — same UI component renders on every parent page.',
+    statements: [
+      `ALTER TABLE discovery_calls ADD COLUMN request_id TEXT`,
+      `ALTER TABLE discovery_calls ADD COLUMN task_id TEXT`,
+      `ALTER TABLE discovery_calls ADD COLUMN org_id TEXT`,
+      `CREATE INDEX IF NOT EXISTS idx_discovery_calls_request ON discovery_calls(request_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_discovery_calls_task ON discovery_calls(task_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_discovery_calls_org ON discovery_calls(org_id)`,
+    ],
+  },
+  {
     name: '0043',
     description: 'Phase B · 7 discovery_calls table. Pre-call prep + Google Meet linkage + Gemini transcript + outcome tagging + scope/budget/timeline capture. Linked via lead_id (always) and optionally deal_id (after promotion) so a single call row tracks the conversation from "qualifying" through "won".',
     statements: [
