@@ -81,16 +81,41 @@ Not a priority. Slated for after the dashboard becomes the daily driver for sale
 
 Decided 2026-05-24 after a "what would actually help" review. Inbound is THIN (Webflow Partner leads dried up when minimum moved from $2.5k → $5k USD; Tahi's own website doesn't generate leads because it needs redesign + SEO). So the lever is NOT volume automation — it's making every inbound count.
 
-27. **AI-drafted first reply on new inbound** — when a lead lands, Sonnet drafts a personalised reply in Liam's voice using the existing enrichment (snapshot + signals + scope). Lands on his phone via push / Resend; he taps Send or Edit. Cuts speed-to-response from hours to ~30 seconds. Industry stat: 9× conversion lift when replying within 5 min vs 1 hour.
-28. **Pre-call digest** — 30 min before each Calendar-synced call, the AI briefing + 6 questions + last activity items lands in Liam's inbox / SMS. Never have to remember to open the dashboard for prep. Trivial to build once Calendar OAuth is live.
-29. **Discovery → Proposal → Contract → Tasks pipeline** — the big one. After a discovery call, the dashboard generates:
+**Progress update 2026-05-25 (overnight build):** 5 of 5 deliverable items shipped. Item 29 (the big pipeline) still pending — that one's a multi-week build that needs proposal visual overhaul first.
+
+27. **AI-drafted first reply on new inbound — SHIPPED ✓ (2026-05-24).** Sonnet drafts a personalised reply in Liam's voice using all 6 canonical docs (ICP, brand DNA, tone of voice, Liam personal voice, AI tells, services) + last 5 edited drafts as few-shot tone examples. Lives on the lead detail page; Liam taps Generate → Edit → Send. Tone learning compounds.
+28. **Pre-call digest — SHIPPED ✓ (2026-05-25).** Cron at `/api/admin/cron/pre-call-digest` fires every ~5 min, scans calls in the next 25-35 min window, sends a React Email brief to business@tahi.studio with lead context + AI score/briefing + discovery questions + sources + Join button. Idempotent via activity stamps.
+29. **Discovery → Proposal → Contract → Tasks pipeline (PENDING — task #148)** — the big one. After a discovery call, the dashboard generates:
     a. **AI-draft proposal** from transcript + scope notes + enrichment + Tahi's pricing logic + existing proposal templates. Liam edits, then sends within an hour of the call ending.
     b. **Capacity check baked in** — uses live capacity data to propose a realistic timeline ("you're at 65% this month, propose 6-week not 3").
     c. **Accept → auto-generate contract** from the proposal sections + Tahi's template library + the agreed scope. Liam reviews + sends for signature.
     d. **Sign → auto-create tasks + requests** with scope items as the work breakdown. Project kicks off without manual setup.
-    Path to "1 hour from discovery to proposal sent, 1 day from accept to project kicked off." Multi-day build in slices.
-30. **Affiliate reactivation prompts** — 12 affiliates on the books, most likely 2 active. Monthly cron: "[Affiliate name] hasn't sent a lead in 90 days, draft a check-in email?" with an AI-drafted message. Cheap, real revenue lever (1-2 reactivations a year = thousands in commission flow).
+    Half-shipped: `/api/admin/cron/auto-promote-calls` closes the discovery→deal loop (outcome='promote' → auto-create deal with budget seed). Proposal/contract/tasks chain blocked on the proposals visual overhaul.
+30. **Affiliate reactivation prompts — SHIPPED ✓ (2026-05-25).** `/api/admin/cron/affiliate-reactivation` scans `leads.affiliateCode` groups, finds codes idle 60+ days, pushes one notification per stale code (capped at 5/run, 30-day dedup). When the affiliates table lands later, swap the source — behaviour stays the same.
 31. **Lead reactivation (DEFERRED)** — re-score archived leads weekly. Deprioritised because thin inbound volume = small archived pool. Revisit when archived > 50 leads.
+
+### Phase G+ · Operational glue shipped overnight 2026-05-25
+
+These weren't on Phase G originally but landed in the same push:
+
+- **Cron scoring parallelisation (#151) ✓** — leads-ai cron processes 5 leads concurrently. 25-lead backlog drains in ~8s instead of 38s.
+- **Force-rescore + auto-enrich queue ✓** — `/api/admin/leads/rescore-all` drains the entire active-leads pool with the ICP-aware rubric. Anything scoring ≥60 gets queued for Sonnet enrichment on the next cron tick.
+- **Docs Hub → AI prompts wiring ✓ (#156)** — 6 settings (ai.icpDocId, ai.brandDnaDocId, ai.toneDocId, ai.liamVoiceDocId, ai.aiTellsDocId, ai.servicesDocId) point at Docs Hub pages. lib/ai-context.ts loads + caches them, prepends as ephemeral system blocks. Edit doc → AI updates within 5 min.
+- **Lead firmographics columns ✓ (#153)** — 11 first-class columns (industry, employees, revenue, monthly visits, lead type, both LinkedIns, tech stack, cms, country, year founded) promoted out of brief blob. Edit-in-place on `/leads/[id]`.
+- **Drive Gemini transcript autopull ✓ (#146)** — scans Drive for "Notes by Gemini" docs, matches to discovery_calls by time + attendee name, writes transcript + summary + next steps.
+- **Buffer integration ✓** — personal social posts surfaced in Settings with engagement stats. 2 MCP tools for AI.
+- **Daily summary notification ✓** — morning cron pushes a 1-line digest of yesterday's activity.
+- **Pipeline weighted forecast ✓** — homepage card showing weighted-by-stage MRR projection + 12-month expected.
+- **Lead score history sparkline ✓** — inline 200×28 SVG on the lead detail AI briefing card, parsed from activity timeline.
+- **CSV export for leads ✓** — full firmographic columns + AI score + reason.
+- **Bulk operations on leads ✓** — archive/rescore/assign-owner/set-status/delete backend endpoint.
+- **Public lead intake with UTM capture ✓** — `/api/public/leads` accepts Webflow form payloads with utm_source/medium/campaign, gated by Bearer secret.
+- **Auto-promote on positive call outcome ✓** — closes the call→deal loop.
+- **AI cost report ✓** — `/api/admin/reports/ai-cost` aggregates token spend across surfaces.
+- **AI context docs settings card ✓** — Liam can see which doc is wired to each AI surface + swap.
+- **Upcoming Calls widget fix ✓** — reads `discovery_calls` (so Calendar-synced meetings appear).
+- **Google OAuth bounce fix ✓** — callback no longer redirects to home page after auth.
+- **Vitest test suite ✓** — 33 unit tests covering gemini-parser, tech-sniffer, buffer.
 
 ### Content + presence (low priority but written down)
 
