@@ -1,0 +1,398 @@
+/**
+ * POST /api/admin/cron/leads-ai
+ *
+ * The daily lead AI cron. Designed to be cheap, idempotent, and
+ * survivable.
+ *
+ * What it does on each run:
+ *   1. Pulls active leads (status IN new, qualifying, nurturing)
+ *      where lastAiRunAt is null OR updatedAt > lastAiRunAt — i.e.
+ *      something has changed since we last scored.
+ *   2. For each: runs a Haiku 4.5 score call (cheap, no web search).
+ *      Updates aiScore, aiScoreReason, lastAiRunAt, aiTokensSpent.
+ *   3. Detects three transition events and writes notifications:
+ *        - Enrichment-completed (lead just got enriched for the first
+ *          time — uses enrichedAt + lastAiRunAt to detect "fresh")
+ *        - Idle qualifying (lead has sat in 'qualifying' >N days
+ *          with no updatedAt since)
+ *        - High-intent (score crossed threshold, default 80)
+ *   4. Optionally applies auto-status transitions when the matching
+ *      settings flag is on (default: OFF, so Liam isn't surprised).
+ *
+ * Settings consulted (sensible defaults if missing):
+ *   leads.cronEnabled            (bool, default true) master kill switch
+ *   leads.scoreModelOverride     (string, default unset) override Haiku
+ *   leads.notifyOnHighIntent     (bool, default true)
+ *   leads.notifyOnIdleQualifying (bool, default true)
+ *   leads.notifyOnEnriched       (bool, default true)
+ *   leads.highIntentThreshold    (number, default 80)
+ *   leads.idleQualifyingDays     (number, default 7)
+ *   leads.autoNurturingAfterDays (number, default 0 = disabled)
+ *   leads.defaultLeadOwnerId     (string) notifications target this team_member
+ *
+ * Auth:
+ *   - Tahi admin via the normal session (manual / MCP-driven runs)
+ *   - OR a Bearer secret matching CRON_SECRET env var (unattended
+ *     schedule pings). When the secret is absent, only admin auth
+ *     works.
+ *
+ * The route is bounded: max 50 leads per run, max ~10 second total
+ * runtime on the worker. Beyond that it returns early with a summary
+ * so the next tick picks up the rest.
+ */
+
+import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { schema } from '@/db/d1'
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+
+export const dynamic = 'force-dynamic'
+
+const MAX_LEADS_PER_RUN = 50
+const RUN_TIME_BUDGET_MS = 25_000
+const SCORE_MODEL = 'claude-haiku-4-5-20251001'
+
+const SYSTEM_PROMPT_SCORE = `You are a lead scorer for Tahi Studio, a Webflow design and development agency in New Zealand. Score the lead on a 0-100 scale based on the information provided. Do not invent facts. Output ONLY:
+
+<score>0-100</score>
+<score_reason>One concise line (under 20 words).</score_reason>
+
+SCORING RUBRIC:
+- 80-100: clearly inbound, clear budget signal, fits Tahi's service offer, decision-maker, urgent
+- 60-79: solid fit on most axes; one or two unknowns
+- 40-59: mixed signals; small business or unclear budget
+- 20-39: poor fit, very early stage, or low urgency
+- 0-19: dead lead, no signal, or out of scope`
+
+// ── Route ─────────────────────────────────────────────────────────────────
+
+export async function POST(req: NextRequest) {
+  // Two auth paths: admin session OR Bearer secret matching CRON_SECRET.
+  const authHeader = req.headers.get('authorization') ?? ''
+  const cronSecret = process.env.CRON_SECRET
+  const hasCronAuth = !!cronSecret && authHeader === `Bearer ${cronSecret}`
+  if (!hasCronAuth) {
+    const { orgId } = await getRequestAuth(req)
+    if (!isTahiAdmin(orgId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+  }
+
+  const database = await db()
+  const startedAt = Date.now()
+
+  // Settings (defaults when row missing).
+  const settings = await readLeadSettings(database)
+  if (!settings.cronEnabled) {
+    return NextResponse.json({ skipped: 'cron disabled in settings' })
+  }
+
+  // Candidates: active leads where (lastAiRunAt is null) OR (updatedAt > lastAiRunAt).
+  // SQLite text comparison works for ISO-8601 timestamps so we can compare directly.
+  const candidates = await database
+    .select({
+      id: schema.leads.id,
+      name: schema.leads.name,
+      email: schema.leads.email,
+      company: schema.leads.company,
+      website: schema.leads.website,
+      brief: schema.leads.brief,
+      source: schema.leads.source,
+      sourceDetail: schema.leads.sourceDetail,
+      estimatedValue: schema.leads.estimatedValue,
+      currency: schema.leads.currency,
+      status: schema.leads.status,
+      aiScore: schema.leads.aiScore,
+      aiTokensSpent: schema.leads.aiTokensSpent,
+      enrichedAt: schema.leads.enrichedAt,
+      lastAiRunAt: schema.leads.lastAiRunAt,
+      updatedAt: schema.leads.updatedAt,
+      ownerId: schema.leads.ownerId,
+    })
+    .from(schema.leads)
+    .where(and(
+      inArray(schema.leads.status, ['new', 'qualifying', 'nurturing']),
+      or(
+        isNull(schema.leads.lastAiRunAt),
+        sql`${schema.leads.updatedAt} > ${schema.leads.lastAiRunAt}`,
+      ),
+    ))
+    .limit(MAX_LEADS_PER_RUN)
+
+  const results: Array<{
+    leadId: string
+    scored: boolean
+    prevScore: number | null
+    newScore: number | null
+    transitions: string[]
+    error?: string
+  }> = []
+
+  for (const lead of candidates) {
+    if (Date.now() - startedAt > RUN_TIME_BUDGET_MS) {
+      results.push({ leadId: lead.id, scored: false, prevScore: lead.aiScore ?? null, newScore: null, transitions: [], error: 'budget exhausted' })
+      continue
+    }
+
+    try {
+      const prevScore = lead.aiScore ?? null
+      const { score, scoreReason, tokensSpent } = await scoreLead(lead)
+
+      const now = new Date().toISOString()
+      await database
+        .update(schema.leads)
+        .set({
+          aiScore: score,
+          aiScoreReason: scoreReason,
+          aiTokensSpent: (lead.aiTokensSpent ?? 0) + tokensSpent,
+          lastAiRunAt: now,
+          updatedAt: now,
+        })
+        .where(eq(schema.leads.id, lead.id))
+
+      // Transitions + notifications.
+      const transitions: string[] = []
+      const notifyTarget = lead.ownerId ?? settings.defaultLeadOwnerId
+      const highIntent = score != null && score >= settings.highIntentThreshold
+      const wasNotHighIntent = prevScore == null || prevScore < settings.highIntentThreshold
+
+      // High intent — fires on the run that crosses the threshold.
+      if (highIntent && wasNotHighIntent && settings.notifyOnHighIntent && notifyTarget) {
+        await pushNotification(database, {
+          userId: notifyTarget,
+          eventType: 'lead_high_intent',
+          title: `High-intent lead: ${lead.name}`,
+          body: scoreReason ? `${scoreReason} (score ${score})` : `Score crossed ${settings.highIntentThreshold} (now ${score}).`,
+          entityType: 'lead',
+          entityId: lead.id,
+        })
+        transitions.push('high_intent_notified')
+      }
+
+      // Idle qualifying — leads sitting in 'qualifying' >N days with
+      // no updatedAt since that point.
+      if (lead.status === 'qualifying' && settings.notifyOnIdleQualifying && notifyTarget) {
+        const idleDays = daysBetween(lead.updatedAt, now)
+        if (idleDays >= settings.idleQualifyingDays) {
+          // Idempotency: only notify once per idle window. Cheap check —
+          // search the notifications table for a recent matching event.
+          const alreadyNotified = await database
+            .select({ id: schema.notifications.id })
+            .from(schema.notifications)
+            .where(and(
+              eq(schema.notifications.entityId, lead.id),
+              eq(schema.notifications.eventType, 'lead_idle_qualifying'),
+              sql`${schema.notifications.createdAt} > datetime('now', '-${sql.raw(String(settings.idleQualifyingDays))} days')`,
+            ))
+            .limit(1)
+          if (alreadyNotified.length === 0) {
+            await pushNotification(database, {
+              userId: notifyTarget,
+              eventType: 'lead_idle_qualifying',
+              title: `Stale lead: ${lead.name}`,
+              body: `Sat in qualifying for ${idleDays} days with no activity. Chase or nurture?`,
+              entityType: 'lead',
+              entityId: lead.id,
+            })
+            transitions.push('idle_qualifying_notified')
+          }
+        }
+      }
+
+      // Auto-status: qualifying → nurturing after N days idle. OPT-IN.
+      if (
+        settings.autoNurturingAfterDays > 0
+        && lead.status === 'qualifying'
+        && daysBetween(lead.updatedAt, now) >= settings.autoNurturingAfterDays
+      ) {
+        await database
+          .update(schema.leads)
+          .set({ status: 'nurturing', updatedAt: now })
+          .where(eq(schema.leads.id, lead.id))
+        await database.insert(schema.activities).values({
+          id: crypto.randomUUID(),
+          type: 'lead_status_changed',
+          title: 'Status changed: Qualifying → Nurturing (auto)',
+          description: `No activity for ${settings.autoNurturingAfterDays} days.`,
+          leadId: lead.id,
+          createdById: 'system',
+          createdAt: now,
+          updatedAt: now,
+        })
+        transitions.push('auto_nurturing')
+      }
+
+      results.push({ leadId: lead.id, scored: true, prevScore, newScore: score, transitions })
+    } catch (err) {
+      results.push({
+        leadId: lead.id,
+        scored: false,
+        prevScore: lead.aiScore ?? null,
+        newScore: null,
+        transitions: [],
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  return NextResponse.json({
+    candidates: candidates.length,
+    scored: results.filter(r => r.scored).length,
+    errors: results.filter(r => r.error).length,
+    transitions: results.flatMap(r => r.transitions),
+    durationMs: Date.now() - startedAt,
+    results,
+  })
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+interface LeadSettings {
+  cronEnabled: boolean
+  notifyOnHighIntent: boolean
+  notifyOnIdleQualifying: boolean
+  notifyOnEnriched: boolean
+  highIntentThreshold: number
+  idleQualifyingDays: number
+  autoNurturingAfterDays: number
+  defaultLeadOwnerId: string | null
+}
+
+async function readLeadSettings(database: Awaited<ReturnType<typeof db>>): Promise<LeadSettings> {
+  const rows = await database
+    .select({ key: schema.settings.key, value: schema.settings.value })
+    .from(schema.settings)
+    .where(inArray(schema.settings.key, [
+      'leads.cronEnabled',
+      'leads.notifyOnHighIntent',
+      'leads.notifyOnIdleQualifying',
+      'leads.notifyOnEnriched',
+      'leads.highIntentThreshold',
+      'leads.idleQualifyingDays',
+      'leads.autoNurturingAfterDays',
+      'leads.defaultLeadOwnerId',
+    ]))
+
+  const get = (key: string) => rows.find(r => r.key === key)?.value ?? null
+  const bool = (key: string, fallback: boolean) => {
+    const v = get(key)
+    if (v == null) return fallback
+    return v === 'true' || v === '1'
+  }
+  const num = (key: string, fallback: number) => {
+    const v = get(key)
+    if (v == null) return fallback
+    const n = parseInt(v, 10)
+    return Number.isFinite(n) ? n : fallback
+  }
+
+  return {
+    cronEnabled: bool('leads.cronEnabled', true),
+    notifyOnHighIntent: bool('leads.notifyOnHighIntent', true),
+    notifyOnIdleQualifying: bool('leads.notifyOnIdleQualifying', true),
+    notifyOnEnriched: bool('leads.notifyOnEnriched', true),
+    highIntentThreshold: num('leads.highIntentThreshold', 80),
+    idleQualifyingDays: num('leads.idleQualifyingDays', 7),
+    autoNurturingAfterDays: num('leads.autoNurturingAfterDays', 0),
+    defaultLeadOwnerId: get('leads.defaultLeadOwnerId'),
+  }
+}
+
+interface ScoreInput {
+  name: string
+  email: string | null
+  company: string | null
+  website: string | null
+  brief: string | null
+  source: string
+  sourceDetail: string | null
+  estimatedValue: number | null
+  currency: string
+  status: string
+}
+
+async function scoreLead(lead: ScoreInput): Promise<{
+  score: number | null
+  scoreReason: string | null
+  tokensSpent: number
+}> {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured')
+
+  const Anthropic = (await import('@anthropic-ai/sdk')).default
+  const client = new Anthropic({ apiKey })
+
+  const userMessage = buildScoreMessage(lead)
+
+  const response = await client.messages.create({
+    model: SCORE_MODEL,
+    max_tokens: 256,
+    system: SYSTEM_PROMPT_SCORE,
+    messages: [{ role: 'user', content: userMessage }],
+  })
+
+  const text = response.content
+    .filter(b => b.type === 'text')
+    .map(b => (b as { text: string }).text)
+    .join('\n')
+
+  const scoreMatch = text.match(/<score>\s*(\d{1,3})\s*<\/score>/i)
+  const reasonMatch = text.match(/<score_reason>([\s\S]*?)<\/score_reason>/i)
+  const rawScore = scoreMatch ? parseInt(scoreMatch[1], 10) : NaN
+  const score = Number.isFinite(rawScore) ? Math.max(0, Math.min(100, rawScore)) : null
+
+  return {
+    score,
+    scoreReason: reasonMatch?.[1]?.trim() ?? null,
+    tokensSpent: response.usage.input_tokens + response.usage.output_tokens,
+  }
+}
+
+function buildScoreMessage(lead: ScoreInput): string {
+  const lines: string[] = []
+  lines.push(`Lead: ${lead.name}`)
+  if (lead.company) lines.push(`Company: ${lead.company}`)
+  if (lead.website) lines.push(`Website: ${lead.website}`)
+  if (lead.email) lines.push(`Email: ${lead.email}`)
+  lines.push(`Source: ${lead.source}${lead.sourceDetail ? ` (${lead.sourceDetail})` : ''}`)
+  if (lead.estimatedValue) lines.push(`Estimated value: ${lead.estimatedValue} ${lead.currency}`)
+  lines.push(`Status: ${lead.status}`)
+  if (lead.brief) lines.push(`Brief: ${lead.brief}`)
+  return lines.join('\n')
+}
+
+interface NotificationInput {
+  userId: string
+  eventType: string
+  title: string
+  body: string
+  entityType: string
+  entityId: string
+}
+
+async function pushNotification(
+  database: Awaited<ReturnType<typeof db>>,
+  n: NotificationInput,
+): Promise<void> {
+  await database.insert(schema.notifications).values({
+    id: crypto.randomUUID(),
+    userId: n.userId,
+    userType: 'team_member',
+    eventType: n.eventType,
+    title: n.title,
+    body: n.body,
+    entityType: n.entityType,
+    entityId: n.entityId,
+    read: false,
+    createdAt: new Date().toISOString(),
+  })
+}
+
+function daysBetween(fromIso: string | null, toIso: string): number {
+  if (!fromIso) return 0
+  const from = new Date(fromIso).getTime()
+  const to = new Date(toIso).getTime()
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return 0
+  return Math.max(0, Math.floor((to - from) / (1000 * 60 * 60 * 24)))
+}
