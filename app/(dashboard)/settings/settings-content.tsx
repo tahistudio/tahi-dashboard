@@ -402,6 +402,15 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
             />
           )}
 
+          {/* AI context docs (Docs Hub pages wired into AI prompts) */}
+          {isAdmin && (
+            <AiContextDocsSection
+              settings={settings as Record<string, string>}
+              onSave={saveSetting}
+              savingKey={savingKey}
+            />
+          )}
+
           {/* Google Workspace (Calendar + Drive) */}
           {isAdmin && <GoogleIntegrationSection />}
 
@@ -3362,6 +3371,131 @@ function ModulesSection({
       <p className="text-xs text-[var(--color-text-subtle)] mt-2">
         Disabled modules will be hidden from the sidebar navigation.
       </p>
+    </section>
+  )
+}
+
+// ── AI context docs (Docs Hub → AI prompts) ─────────────────────────────
+// Read-only inventory of the canonical docs wired into the AI prompts
+// + a docs picker so Liam can swap them. The actual loading +
+// caching happens in lib/ai-context.ts on the server.
+
+interface DocLite { id: string; title: string; slug: string; category: string | null }
+
+interface AiContextRow {
+  settingKey: string
+  label: string
+  description: string
+  surfaces: string  // human-readable list of where the doc is used
+}
+
+const AI_CONTEXT_ROWS: AiContextRow[] = [
+  { settingKey: 'ai.icpDocId',       label: 'Ideal Client Profile',  description: 'Drives lead scoring + enrichment fit. Discriminating signal for the AI.', surfaces: 'Scoring (Haiku) · Enrichment (Sonnet) · Reply drafting' },
+  { settingKey: 'ai.brandDnaDocId',  label: 'Brand DNA',             description: 'Tahi positioning + voice principles. Frames how AI talks about us.',     surfaces: 'Reply drafting' },
+  { settingKey: 'ai.toneDocId',      label: 'Tone of Voice',         description: 'Cadence + phrasing rules. NZ English, no em dashes, direct + warm.',     surfaces: 'Reply drafting' },
+  { settingKey: 'ai.liamVoiceDocId', label: 'Liam Personal Voice',   description: 'How Liam writes personally. Outreach style for first-touch replies.',    surfaces: 'Reply drafting' },
+  { settingKey: 'ai.aiTellsDocId',   label: 'AI Writing Tells',      description: 'Anti-patterns the AI must avoid. Phrases that scream "AI wrote this".',  surfaces: 'Reply drafting' },
+  { settingKey: 'ai.servicesDocId',  label: 'Services + Pricing',    description: 'Product catalogue. AI knows what we sell when assessing fit.',           surfaces: 'Scoring · Enrichment' },
+]
+
+function AiContextDocsSection({
+  settings,
+  onSave,
+  savingKey,
+}: {
+  settings: Record<string, string>
+  onSave: (key: string, value: string) => Promise<void>
+  savingKey: string | null
+}) {
+  const [docs, setDocs] = useState<DocLite[]>([])
+  const [loadingDocs, setLoadingDocs] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/docs'))
+      .then(r => r.ok ? r.json() : { pages: [] })
+      .then(data => {
+        const typed = data as { pages?: DocLite[] }
+        setDocs(typed.pages ?? [])
+      })
+      .catch(() => setDocs([]))
+      .finally(() => setLoadingDocs(false))
+  }, [])
+
+  return (
+    <section id="ai-context">
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <Sparkles className="w-5 h-5" />
+        AI context docs
+      </h2>
+
+      <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 space-y-4">
+        <p className="text-xs text-[var(--color-text-muted)]">
+          Tahi&apos;s AI surfaces (lead scoring, enrichment, reply drafting) read these Docs Hub pages as canonical context. Edit the doc → AI behaviour updates within 5 minutes. Pick a different page below if you want to swap.
+        </p>
+
+        {loadingDocs && <LoadingSkeleton rows={2} />}
+
+        {!loadingDocs && AI_CONTEXT_ROWS.map(row => {
+          const currentDocId = settings[row.settingKey] ?? ''
+          const currentDoc = docs.find(d => d.id === currentDocId)
+          return (
+            <div
+              key={row.settingKey}
+              className="rounded-lg p-3"
+              style={{
+                background: 'var(--color-bg-secondary)',
+                border: '1px solid var(--color-border-subtle)',
+              }}
+            >
+              <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-[var(--color-text)]">{row.label}</p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{row.description}</p>
+                  <p className="text-xs text-[var(--color-text-subtle)] mt-1 italic">Used by: {row.surfaces}</p>
+                </div>
+                {currentDoc ? (
+                  <Badge tone="positive" variant="soft" size="sm">Wired</Badge>
+                ) : (
+                  <Badge tone="warning" variant="soft" size="sm">Not set</Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={currentDocId}
+                  onChange={e => { void onSave(row.settingKey, e.target.value) }}
+                  disabled={savingKey === row.settingKey}
+                  className="flex-1 min-w-0 text-sm rounded-md px-2 py-1.5"
+                  style={{
+                    background: 'var(--color-bg)',
+                    border: '1px solid var(--color-border)',
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  <option value="">— pick a doc —</option>
+                  {docs
+                    .slice()
+                    .sort((a, b) => (a.category ?? '').localeCompare(b.category ?? '') || a.title.localeCompare(b.title))
+                    .map(d => (
+                      <option key={d.id} value={d.id}>
+                        {d.category ? `${d.category} · ` : ''}{d.title}
+                      </option>
+                    ))}
+                </select>
+                {currentDoc && (
+                  <a
+                    href={`/dashboard/docs/${currentDoc.slug}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-[var(--color-brand)] underline hover:no-underline"
+                  >
+                    Open doc
+                  </a>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </section>
   )
 }
