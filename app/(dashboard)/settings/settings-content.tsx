@@ -6,7 +6,7 @@ import {
   CreditCard, Link2, Bell, Building2,
   FileText, Plus, Trash2, GripVertical, ChevronDown, ChevronUp,
   Webhook, Loader2, User, Palette, ToggleLeft,
-  Target, ClipboardList, Pencil,
+  Target, ClipboardList, Pencil, Sparkles,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -392,6 +392,15 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
 
           {/* Pipeline Stages (admin only) - T289 */}
           {isAdmin && <PipelineStagesSection />}
+
+          {/* Lead AI & automations (admin only) */}
+          {isAdmin && (
+            <LeadAutomationsSection
+              settings={settings}
+              onSave={saveSetting}
+              savingKey={savingKey}
+            />
+          )}
 
           {/* Google Calendar Booking (admin only) - T87 */}
           {isAdmin && <BookingLinkSection settings={settings} onSave={saveSetting} savingKey={savingKey} />}
@@ -1498,6 +1507,383 @@ function PipelineDefaultsSection({
         </div>
       </div>
     </section>
+  )
+}
+
+// -- Lead AI & Automations Section --
+// All toggles + tunables live in the key/value `settings` table so no
+// schema migration is needed. The cron route (POST /api/admin/cron/leads-ai)
+// reads these on every run.
+
+function LeadAutomationsSection({
+  settings,
+  onSave,
+  savingKey,
+}: {
+  settings: Record<string, string | null>
+  onSave: (key: string, value: string) => Promise<void>
+  savingKey: string | null
+}) {
+  const [members, setMembers] = useState<TeamMemberOption[]>([])
+  const [loadingMembers, setLoadingMembers] = useState(true)
+
+  const ownerKey = 'leads.defaultLeadOwnerId'
+  const cronEnabledKey = 'leads.cronEnabled'
+  const highIntentKey = 'leads.highIntentThreshold'
+  const idleDaysKey = 'leads.idleQualifyingDays'
+  const autoNurturingKey = 'leads.autoNurturingAfterDays'
+  const notifyHighIntentKey = 'leads.notifyOnHighIntent'
+  const notifyIdleKey = 'leads.notifyOnIdleQualifying'
+  const notifyEnrichedKey = 'leads.notifyOnEnriched'
+  const discoveryTemplateKey = 'leads.discoveryQuestionsTemplate'
+
+  // Hydrate discovery questions from JSON.
+  const rawTemplate = settings[discoveryTemplateKey] ?? '[]'
+  const initialQuestions: string[] = (() => {
+    try {
+      const p = JSON.parse(rawTemplate)
+      return Array.isArray(p) ? p.filter((q: unknown): q is string => typeof q === 'string') : []
+    } catch { return [] }
+  })()
+  const [questions, setQuestions] = useState<string[]>(initialQuestions)
+  const [questionsDirty, setQuestionsDirty] = useState(false)
+
+  useEffect(() => {
+    // Re-hydrate if settings.discoveryQuestionsTemplate changes externally.
+    try {
+      const p = JSON.parse(settings[discoveryTemplateKey] ?? '[]')
+      if (Array.isArray(p)) setQuestions(p.filter((q: unknown): q is string => typeof q === 'string'))
+    } catch {
+      // ignore
+    }
+    setQuestionsDirty(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings[discoveryTemplateKey]])
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      try {
+        const res = await fetch(apiPath('/api/admin/team-members'))
+        if (!res.ok) throw new Error('Failed to load team members')
+        const data = await res.json() as { items?: TeamMemberOption[] }
+        if (!cancelled) setMembers(data.items ?? [])
+      } catch {
+        if (!cancelled) setMembers([])
+      } finally {
+        if (!cancelled) setLoadingMembers(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [])
+
+  // Helper to read bool settings with defaults.
+  const boolSetting = (key: string, fallback: boolean): boolean => {
+    const v = settings[key]
+    if (v == null) return fallback
+    return v === 'true' || v === '1'
+  }
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <Sparkles className="w-5 h-5" />
+        Lead AI &amp; Automations
+      </h2>
+
+      <div className="space-y-4">
+        {/* Default lead owner */}
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+          <label htmlFor="default-lead-owner" className="block text-sm font-medium text-[var(--color-text)]">
+            Default lead owner
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5 mb-3">
+            Auto-assigned as the owner of every new lead. Also where lead AI notifications get sent.
+          </p>
+          {loadingMembers ? (
+            <LoadingSkeleton rows={1} />
+          ) : (
+            <select
+              id="default-lead-owner"
+              value={settings[ownerKey] ?? ''}
+              onChange={(e) => { void onSave(ownerKey, e.target.value) }}
+              disabled={savingKey === ownerKey}
+              className="w-full sm:w-80 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            >
+              <option value="">No default (leave unassigned)</option>
+              {members.map(m => (
+                <option key={m.id} value={m.id}>
+                  {m.name}{m.email ? ` (${m.email})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        {/* Discovery questions template */}
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+          <label className="block text-sm font-medium text-[var(--color-text)]">
+            3 always-ask discovery questions
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5 mb-3">
+            These appear on every lead&apos;s call brief, alongside 3 unique AI-generated questions tailored to that prospect.
+          </p>
+          <div className="space-y-2">
+            {[0, 1, 2].map((i) => (
+              <input
+                key={i}
+                type="text"
+                value={questions[i] ?? ''}
+                onChange={(e) => {
+                  const next = [...questions]
+                  next[i] = e.target.value
+                  setQuestions(next)
+                  setQuestionsDirty(true)
+                }}
+                placeholder={`Question ${i + 1}`}
+                className="w-full text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              />
+            ))}
+          </div>
+          {questionsDirty && (
+            <div className="flex items-center justify-end gap-2 mt-3">
+              <TahiButton
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  try {
+                    const p = JSON.parse(settings[discoveryTemplateKey] ?? '[]')
+                    if (Array.isArray(p)) setQuestions(p.filter((q: unknown): q is string => typeof q === 'string'))
+                  } catch { setQuestions([]) }
+                  setQuestionsDirty(false)
+                }}
+              >
+                Discard
+              </TahiButton>
+              <TahiButton
+                size="sm"
+                onClick={() => { void onSave(discoveryTemplateKey, JSON.stringify(questions.filter(Boolean).slice(0, 3))) }}
+                disabled={savingKey === discoveryTemplateKey}
+              >
+                {savingKey === discoveryTemplateKey ? 'Saving...' : 'Save questions'}
+              </TahiButton>
+            </div>
+          )}
+        </div>
+
+        {/* Daily cron master switch */}
+        <ToggleRow
+          label="Daily AI scoring cron"
+          help="Re-scores active leads each day where something has changed. Cheap (Haiku, no web search). Turn off to pause AI processing entirely."
+          settingKey={cronEnabledKey}
+          defaultOn={true}
+          settings={settings}
+          onSave={onSave}
+          savingKey={savingKey}
+        />
+
+        {/* High-intent threshold */}
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+          <label htmlFor="high-intent" className="block text-sm font-medium text-[var(--color-text)]">
+            High-intent score threshold
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5 mb-3">
+            When a lead&apos;s score crosses this number, the cron fires a &quot;high intent&quot; notification to the default lead owner. 80 is a strong fit by default.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              id="high-intent"
+              type="number"
+              min={1}
+              max={100}
+              defaultValue={settings[highIntentKey] ?? '80'}
+              onBlur={(e) => {
+                const v = e.currentTarget.value.trim()
+                const n = parseInt(v, 10)
+                const next = Number.isFinite(n) && n > 0 ? String(Math.min(100, Math.max(1, n))) : '80'
+                if (next !== (settings[highIntentKey] ?? '80')) void onSave(highIntentKey, next)
+              }}
+              disabled={savingKey === highIntentKey}
+              className="text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              style={{ width: '6rem', minHeight: '2.5rem' }}
+            />
+            <span className="text-sm text-[var(--color-text-muted)]">/ 100</span>
+          </div>
+          <div className="mt-3">
+            <ToggleRow
+              compact
+              label="Notify me when a lead crosses the threshold"
+              help=""
+              settingKey={notifyHighIntentKey}
+              defaultOn={true}
+              settings={settings}
+              onSave={onSave}
+              savingKey={savingKey}
+            />
+          </div>
+        </div>
+
+        {/* Idle qualifying threshold */}
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+          <label htmlFor="idle-days" className="block text-sm font-medium text-[var(--color-text)]">
+            Idle &quot;Qualifying&quot; notification
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5 mb-3">
+            Notify when a lead has sat in Qualifying with no activity for this many days. 7 keeps the funnel honest.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              id="idle-days"
+              type="number"
+              min={1}
+              max={60}
+              defaultValue={settings[idleDaysKey] ?? '7'}
+              onBlur={(e) => {
+                const v = e.currentTarget.value.trim()
+                const n = parseInt(v, 10)
+                const next = Number.isFinite(n) && n > 0 ? String(Math.min(60, Math.max(1, n))) : '7'
+                if (next !== (settings[idleDaysKey] ?? '7')) void onSave(idleDaysKey, next)
+              }}
+              disabled={savingKey === idleDaysKey}
+              className="text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              style={{ width: '6rem', minHeight: '2.5rem' }}
+            />
+            <span className="text-sm text-[var(--color-text-muted)]">days</span>
+          </div>
+          <div className="mt-3">
+            <ToggleRow
+              compact
+              label="Send idle-lead notifications"
+              help=""
+              settingKey={notifyIdleKey}
+              defaultOn={true}
+              settings={settings}
+              onSave={onSave}
+              savingKey={savingKey}
+            />
+          </div>
+        </div>
+
+        {/* Auto-status transition (opt-in) */}
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5">
+          <label htmlFor="auto-nurturing" className="block text-sm font-medium text-[var(--color-text)]">
+            Auto-flip Qualifying → Nurturing
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5 mb-3">
+            Automatically moves a lead from Qualifying to Nurturing after this many days of no activity. Set to 0 to disable. Off by default so you stay in control.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              id="auto-nurturing"
+              type="number"
+              min={0}
+              max={90}
+              defaultValue={settings[autoNurturingKey] ?? '0'}
+              onBlur={(e) => {
+                const v = e.currentTarget.value.trim()
+                const n = parseInt(v, 10)
+                const next = Number.isFinite(n) && n >= 0 ? String(Math.min(90, Math.max(0, n))) : '0'
+                if (next !== (settings[autoNurturingKey] ?? '0')) void onSave(autoNurturingKey, next)
+              }}
+              disabled={savingKey === autoNurturingKey}
+              className="text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              style={{ width: '6rem', minHeight: '2.5rem' }}
+            />
+            <span className="text-sm text-[var(--color-text-muted)]">days (0 = off)</span>
+          </div>
+        </div>
+
+        {/* Enriched notification toggle */}
+        <ToggleRow
+          label="Notify me when AI enrichment completes"
+          help="Sent the first time a lead is enriched. Useful right after a Webflow form lead lands and the AI finishes researching it."
+          settingKey={notifyEnrichedKey}
+          defaultOn={true}
+          settings={settings}
+          onSave={onSave}
+          savingKey={savingKey}
+        />
+      </div>
+    </section>
+  )
+
+  // Tiny helper to keep boolean toggles uniform. Defined inside the component
+  // so it can close over the loaded `settings` map for the current value.
+  function _useBool(key: string, fallback: boolean) {
+    return boolSetting(key, fallback)
+  }
+  // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+  void _useBool
+}
+
+/** Small reusable toggle pill backed by a boolean setting. */
+function ToggleRow({
+  label,
+  help,
+  settingKey,
+  defaultOn,
+  settings,
+  onSave,
+  savingKey,
+  compact,
+}: {
+  label: string
+  help: string
+  settingKey: string
+  defaultOn: boolean
+  settings: Record<string, string | null>
+  onSave: (key: string, value: string) => Promise<void>
+  savingKey: string | null
+  compact?: boolean
+}) {
+  const raw = settings[settingKey]
+  const value = raw == null ? defaultOn : (raw === 'true' || raw === '1')
+
+  const containerClass = compact
+    ? 'flex items-start justify-between gap-3'
+    : 'bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 flex items-start justify-between gap-3'
+
+  return (
+    <div className={containerClass}>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium text-[var(--color-text)]">{label}</div>
+        {help && <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{help}</p>}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={value}
+        disabled={savingKey === settingKey}
+        onClick={() => { void onSave(settingKey, value ? 'false' : 'true') }}
+        style={{
+          flexShrink: 0,
+          width: '2.5rem',
+          height: '1.5rem',
+          borderRadius: '9999px',
+          background: value ? 'var(--color-brand)' : 'var(--color-border)',
+          padding: 0,
+          border: 'none',
+          cursor: 'pointer',
+          transition: 'background-color 150ms ease',
+          position: 'relative',
+        }}
+        aria-label={label}
+      >
+        <span style={{
+          display: 'block',
+          width: '1.125rem',
+          height: '1.125rem',
+          borderRadius: '9999px',
+          background: '#ffffff',
+          position: 'absolute',
+          top: '0.1875rem',
+          left: value ? 'calc(100% - 1.3125rem)' : '0.1875rem',
+          transition: 'left 200ms cubic-bezier(0.22, 1, 0.36, 1)',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+        }} />
+      </button>
+    </div>
   )
 }
 
