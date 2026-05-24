@@ -1125,11 +1125,15 @@ function QuickBtn({
 
 interface UpcomingCall {
   id: string
-  orgName: string | null
   title: string
   scheduledAt: string
   durationMinutes: number
   meetingUrl: string | null
+  withName: string | null
+  withSubtitle: string | null
+  parentType: 'lead' | 'deal' | 'org' | 'request' | 'task' | null
+  parentHref: string | null
+  fromCalendar: boolean
 }
 
 function UpcomingCallsWidget() {
@@ -1137,7 +1141,10 @@ function UpcomingCallsWidget() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch(apiPath('/api/admin/calls?status=scheduled&limit=5'))
+    // Reads from discovery_calls (polymorphic) not the legacy
+    // scheduled_calls table — that's why Google Calendar synced
+    // meetings now show up here.
+    fetch(apiPath('/api/admin/discovery-calls/upcoming?limit=5&includePast=1'))
       .then(r => {
         if (!r.ok) throw new Error('Failed')
         return r.json() as Promise<{ calls: UpcomingCall[] }>
@@ -1212,11 +1219,21 @@ function UpcomingCallsWidget() {
                 <Video size={14} aria-hidden="true" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="truncate" style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
-                  {call.title}
-                </p>
+                {call.parentHref ? (
+                  <Link
+                    href={call.parentHref}
+                    className="truncate hover:underline"
+                    style={{ display: 'block', fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}
+                  >
+                    {call.withName ?? call.title}
+                  </Link>
+                ) : (
+                  <p className="truncate" style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
+                    {call.withName ?? call.title}
+                  </p>
+                )}
                 <p className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
-                  {call.orgName ? `${call.orgName} \u00b7 ` : ''}
+                  {call.withSubtitle ? `${call.withSubtitle} \u00b7 ` : ''}
                   {d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}
                   {' at '}
                   {d.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}
