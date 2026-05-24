@@ -623,6 +623,12 @@ const TOOLS: ToolDef[] = [
     dealId: prop('string', 'Deal ID'),
   }, ['dealId']),
 
+  // ── Cron-style endpoints (admin-triggered, idempotent) ───────────────
+  tool('cron_auto_promote_calls', 'Scans completed discovery_calls where outcome=\'promote\' and the linked lead isn\'t already promoted. Auto-creates a deal seeded with the call\'s budget signal + scope/summary notes. Idempotent via activity stamp dedup (30-day window).'),
+  tool('cron_daily_summary', 'Computes day-over-day metrics (new leads, scoring, calls, replies, promotions) and pushes a single in-app notification to the default lead owner. Skip if a daily_summary was already pushed in the last 23h.'),
+  tool('cron_affiliate_reactivation', 'Finds affiliateCode values that haven\'t sent a lead in the last 60 days (default), pushes a reactivation notification for each. Capped at 5 notifications per run; 30-day dedup per code.'),
+  tool('cron_pre_call_digest', 'Scans discovery_calls scheduled in the next 25-35 min window. For each: composes a pre-call brief (lead context + AI score + briefing + questions + sources) and emails to leads.preCallDigestEmail (default business@tahi.studio). Idempotent.'),
+
   // ── Google Drive: Gemini transcript autopull ─────────────────────────
   tool('drive_sync_gemini_transcripts', 'Scan Google Drive for "Notes by Gemini" docs modified in the last N hours, parse the summary + transcript + next steps, and write them to matching discovery_calls. Matches by parsed meeting time (±2h) + attendee name in the call title or attendees JSON. Idempotent — already-synced calls are skipped.', {
     sinceHours: prop('number', 'Only consider docs modified in the last N hours (default 72)'),
@@ -1555,6 +1561,16 @@ async function executeTool(
     }
     case 'list_deal_nudges':
       return json(await apiGet(`/api/admin/deals/${s('dealId')}/nudges`, token))
+
+    // ── Cron-style endpoints ──────────────────────────────────────────
+    case 'cron_auto_promote_calls':
+      return json(await apiWrite('/api/admin/cron/auto-promote-calls', token, 'POST', {}))
+    case 'cron_daily_summary':
+      return json(await apiWrite('/api/admin/cron/daily-summary', token, 'POST', {}))
+    case 'cron_affiliate_reactivation':
+      return json(await apiWrite('/api/admin/cron/affiliate-reactivation', token, 'POST', {}))
+    case 'cron_pre_call_digest':
+      return json(await apiWrite('/api/admin/cron/pre-call-digest', token, 'POST', {}))
 
     // ── Drive transcript autopull ─────────────────────────────────────
     case 'drive_sync_gemini_transcripts': {
