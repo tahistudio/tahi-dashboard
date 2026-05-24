@@ -692,8 +692,9 @@ export function LeadsContent() {
               }
             />
           }
-          onRowPreview={(r) => openLead(r.id)}
+          onRowClick={(r) => { window.location.href = apiPath(`/leads/${r.id}`) }}
           rowActions={(r) => [
+            { label: 'Quick view (slide-over)', icon: <Edit3 size={14} />, onClick: () => openLead(r.id) },
             { label: 'Edit', icon: <Edit3 size={14} />, onClick: () => startEdit(r) },
             ...(r.status !== 'promoted' ? [
               { label: 'Promote to deal', icon: <ArrowUpRight size={14} />, onClick: () => setPendingPromote(r) },
