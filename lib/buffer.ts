@@ -137,7 +137,7 @@ export async function listOrganizations(token: string): Promise<BufferOrganizati
 // ── Channels (connected social profiles) ───────────────────────────────────
 
 const QUERY_CHANNELS = `
-  query GetChannels($organizationId: String!) {
+  query GetChannels($organizationId: OrganizationId!) {
     channels(input: { organizationId: $organizationId }) {
       id
       name
@@ -172,9 +172,9 @@ export async function listChannels(token: string, organizationId: string): Promi
 
 const QUERY_POSTS = `
   query GetPosts(
-    $organizationId: String!,
+    $organizationId: OrganizationId!,
     $statuses: [PostStatus!],
-    $channelIds: [String!],
+    $channelIds: [ChannelId!],
     $first: Int,
     $after: String
   ) {

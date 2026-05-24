@@ -35,7 +35,16 @@ export const dynamic = 'force-dynamic'
 
 const MODEL_FULL = 'claude-sonnet-4-6'
 const MODEL_SCORE = 'claude-haiku-4-5-20251001'
-const TOKEN_HARD_CAP = 25_000
+// Per-lead token cap. Set via AI_PER_LEAD_TOKEN_CAP env var. 0 or unset
+// = disabled (no per-lead limit). Operator-level cost is managed by
+// the daily-enrichment quota in cron + the global Anthropic spend
+// dashboard, not per-lead, so this defaults to off.
+const TOKEN_HARD_CAP = (() => {
+  const raw = process.env.AI_PER_LEAD_TOKEN_CAP
+  if (!raw) return 0
+  const n = parseInt(raw, 10)
+  return Number.isFinite(n) && n > 0 ? n : 0
+})()
 
 // ── Prompt building ─────────────────────────────────────────────────────────
 
@@ -478,9 +487,9 @@ export async function POST(
     return NextResponse.json({ error: 'Lead not found' }, { status: 404 })
   }
 
-  if (!force && lead.aiTokensSpent && lead.aiTokensSpent >= TOKEN_HARD_CAP) {
+  if (TOKEN_HARD_CAP > 0 && !force && lead.aiTokensSpent && lead.aiTokensSpent >= TOKEN_HARD_CAP) {
     return NextResponse.json({
-      error: 'Token cap reached for this lead. Retry with ?force=1 to override.',
+      error: `Token cap reached for this lead (${TOKEN_HARD_CAP}). Retry with ?force=1 to override, or unset AI_PER_LEAD_TOKEN_CAP env var to disable.`,
       tokensSpent: lead.aiTokensSpent,
     }, { status: 429 })
   }

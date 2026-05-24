@@ -1159,8 +1159,8 @@ function UpcomingCallsWidget() {
 
   if (!loading && calls.length === 0) {
     return (
-      <SectionCard title="Upcoming Calls" action={{ label: 'Schedule', href: '/calls' }}>
-        <EmptyRows title="No upcoming calls" message="Schedule a call with a client." />
+      <SectionCard title="Upcoming Calls" action={{ label: 'Open leads', href: '/leads' }}>
+        <EmptyRows title="No upcoming calls" message="Calls auto-sync from Google Calendar. Schedule one in Google Cal with a lead's email." />
       </SectionCard>
     )
   }
@@ -1170,7 +1170,7 @@ function UpcomingCallsWidget() {
       <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-3)' }}>
         <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>Upcoming Calls</h2>
         <Link
-          href="/calls"
+          href="/leads"
           className="view-link"
           style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)' }}
         >

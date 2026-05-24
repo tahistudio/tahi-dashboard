@@ -22,18 +22,27 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, inArray } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { getGoogleAccessToken, listCalendarEvents, GoogleNotConnectedError } from '@/lib/google'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
-  if (!isTahiAdmin(orgId)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-  if (!userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Two auth paths: admin session OR cron secret (matches /api/admin/cron/*).
+  const cronHeader = req.headers.get('x-cron-secret')
+  const authHeader = req.headers.get('authorization')
+  const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
+  const hasCronAuth = !!cronSecret && (cronHeader === cronSecret || authHeader === `Bearer ${cronSecret}`)
+  let userId = 'system'
+  if (!hasCronAuth) {
+    const auth = await getRequestAuth(req)
+    if (!isTahiAdmin(auth.orgId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (!auth.userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    userId = auth.userId
   }
 
   const database = await db()
@@ -86,12 +95,39 @@ export async function POST(req: NextRequest) {
 
   // Lead lookup (by lead.email)
   const leadRows = emails.length > 0 ? await database
-    .select({ id: schema.leads.id, email: schema.leads.email, status: schema.leads.status })
+    .select({ id: schema.leads.id, email: schema.leads.email, status: schema.leads.status, website: schema.leads.website })
     .from(schema.leads)
     .where(inArray(schema.leads.email, emails)) : []
   const leadByEmail = new Map<string, { id: string; status: string }>()
   for (const r of leadRows) {
     if (r.email) leadByEmail.set(r.email.toLowerCase(), { id: r.id, status: r.status })
+  }
+
+  // Domain-based fallback lookup: for any attendee whose email didn't
+  // match a lead directly, check whether the email's domain matches
+  // any lead.website. Lets calendar invites from new contacts at
+  // existing prospect companies auto-attach to the right lead AND
+  // backfill the lead's missing email with the contact's.
+  const attendeeDomains = new Set<string>()
+  for (const e of emails) {
+    const at = e.lastIndexOf('@')
+    if (at > 0) attendeeDomains.add(e.slice(at + 1))
+  }
+  // Pull all leads with a website set (cheap — typically <500 rows)
+  const leadsWithSite = attendeeDomains.size > 0 ? await database
+    .select({ id: schema.leads.id, email: schema.leads.email, website: schema.leads.website, status: schema.leads.status })
+    .from(schema.leads)
+    .where(sql`${schema.leads.website} IS NOT NULL AND ${schema.leads.website} != ''`) : []
+  // Map domain → leadId. Strip protocol + www + trailing slashes.
+  const leadByDomain = new Map<string, { id: string; status: string; hasEmail: boolean }>()
+  for (const r of leadsWithSite) {
+    const raw = (r.website ?? '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].split('?')[0]
+    if (raw && attendeeDomains.has(raw)) {
+      // Only register the first matching lead per domain (deterministic)
+      if (!leadByDomain.has(raw)) {
+        leadByDomain.set(raw, { id: r.id, status: r.status, hasEmail: !!r.email?.trim() })
+      }
+    }
   }
 
   // Contact lookup (by contact.email) — gives us org + active deals
@@ -160,6 +196,11 @@ export async function POST(req: NextRequest) {
     let parentType: 'deal' | 'org' | 'lead' | null = null
     let parentId: string | null = null
 
+    // Track which attendee email we matched against so the post-match
+    // backfill knows which email to write onto an email-less lead.
+    let matchedAttendeeEmail: string | null = null
+    let matchedByDomain = false
+
     outer: for (const a of (ev.attendees ?? [])) {
       const email = a.email?.toLowerCase().trim()
       if (!email || email === myEmail) continue
@@ -168,18 +209,36 @@ export async function POST(req: NextRequest) {
         // Prefer attaching to a deal this contact is on
         const dealCandidates = (dealIdsByContact.get(contact.contactId) ?? []).filter(d => activeDealIds.has(d))
         if (dealCandidates.length > 0) {
-          parentType = 'deal'; parentId = dealCandidates[0]; break outer
+          parentType = 'deal'; parentId = dealCandidates[0]; matchedAttendeeEmail = email; break outer
         }
         if (contact.orgId) {
-          parentType = 'org'; parentId = contact.orgId
-          // keep looking in case a later attendee unlocks a deal match
+          parentType = 'org'; parentId = contact.orgId; matchedAttendeeEmail = email
           continue
         }
       }
       const lead = leadByEmail.get(email)
       if (lead && !parentType) {
-        parentType = 'lead'; parentId = lead.id
-        // keep looking in case a later attendee unlocks a deal/org
+        parentType = 'lead'; parentId = lead.id; matchedAttendeeEmail = email
+      }
+    }
+
+    // Domain fallback — if no direct email match, try matching attendee
+    // domain against lead.website. Fires only when the loop above
+    // didn't find anything.
+    if (!parentType) {
+      for (const a of (ev.attendees ?? [])) {
+        const email = a.email?.toLowerCase().trim()
+        if (!email || email === myEmail) continue
+        const at = email.lastIndexOf('@')
+        const domain = at > 0 ? email.slice(at + 1) : ''
+        const lead = leadByDomain.get(domain)
+        if (lead) {
+          parentType = 'lead'
+          parentId = lead.id
+          matchedAttendeeEmail = email
+          matchedByDomain = true
+          break
+        }
       }
     }
 
@@ -263,6 +322,22 @@ export async function POST(req: NextRequest) {
 
       created++
       results.push({ eventId: ev.id, action: 'created', parent: `${parentType}:${parentId}` })
+    }
+
+    // Domain-match backfill: when we matched a lead by website-domain
+    // (not direct email) AND the lead has no email yet, write the
+    // attendee's email onto the lead so future calendar invites match
+    // directly + Liam has a contact point.
+    if (matchedByDomain && parentType === 'lead' && parentId && matchedAttendeeEmail) {
+      const cached = leadByDomain.get(matchedAttendeeEmail.slice(matchedAttendeeEmail.lastIndexOf('@') + 1))
+      if (cached && !cached.hasEmail) {
+        await database
+          .update(schema.leads)
+          .set({ email: matchedAttendeeEmail, updatedAt: nowIso })
+          .where(eq(schema.leads.id, parentId))
+        // Prevent re-firing on the same lead within this sync run
+        cached.hasEmail = true
+      }
     }
   }
 

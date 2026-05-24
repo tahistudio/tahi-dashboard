@@ -48,9 +48,15 @@ interface DocResult {
 }
 
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
-  if (!isTahiAdmin(orgId)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const cronHeader = req.headers.get('x-cron-secret')
+  const authHeader = req.headers.get('authorization')
+  const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
+  const hasCronAuth = !!cronSecret && (cronHeader === cronSecret || authHeader === `Bearer ${cronSecret}`)
+  if (!hasCronAuth) {
+    const { orgId } = await getRequestAuth(req)
+    if (!isTahiAdmin(orgId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
   }
 
   const url = new URL(req.url)
