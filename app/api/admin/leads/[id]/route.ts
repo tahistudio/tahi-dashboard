@@ -42,10 +42,21 @@ export async function GET(req: NextRequest, { params }: Params) {
     }
   }
 
-  const activities = await database
-    .select()
+  const activityRows = await database
+    .select({
+      id: schema.activities.id,
+      type: schema.activities.type,
+      title: schema.activities.title,
+      description: schema.activities.description,
+      createdById: schema.activities.createdById,
+      createdAt: schema.activities.createdAt,
+      authorName: schema.teamMembers.name,
+      authorAvatarUrl: schema.teamMembers.avatarUrl,
+    })
     .from(schema.activities)
+    .leftJoin(schema.teamMembers, eq(schema.activities.createdById, schema.teamMembers.id))
     .where(eq(schema.activities.leadId, id))
+  const activities = activityRows
 
   // Pull the always-ask discovery questions template (3 strings) so
   // the UI can render them next to the AI-generated ones in one shot.
@@ -164,6 +175,31 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       type: 'lead_archived',
       title: `Lead archived${typeof updates.archiveReason === 'string' ? `: ${updates.archiveReason}` : ''}`,
       description: typeof updates.archiveReason === 'string' ? updates.archiveReason : null,
+      leadId: id,
+      createdById: userId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+  }
+
+  // Status change activity (any transition except → archived which is
+  // already covered above with the archive-specific row).
+  const statusChanged = typeof updates.status === 'string' && updates.status !== existing.status
+  if (statusChanged && !becomesArchived) {
+    const STATUS_LABELS: Record<string, string> = {
+      new: 'New',
+      qualifying: 'Qualifying',
+      nurturing: 'Nurturing',
+      promoted: 'Promoted',
+      archived: 'Archived',
+    }
+    const fromLabel = STATUS_LABELS[existing.status] ?? existing.status
+    const toLabel = STATUS_LABELS[String(updates.status)] ?? String(updates.status)
+    await database.insert(schema.activities).values({
+      id: crypto.randomUUID(),
+      type: 'lead_status_changed',
+      title: `Status changed: ${fromLabel} → ${toLabel}`,
+      description: null,
       leadId: id,
       createdById: userId,
       createdAt: new Date().toISOString(),

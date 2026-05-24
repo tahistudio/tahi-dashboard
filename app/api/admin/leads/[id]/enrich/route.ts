@@ -525,6 +525,21 @@ export async function POST(
       })
       .where(eq(schema.leads.id, id))
 
+    // Activity row for the timeline: "AI enrichment ran (score N)".
+    // System-attributed because there's no real user behind a cron
+    // run. For manual runs, the createdById is still the worker ID
+    // (good enough — the title carries the meaning).
+    await database.insert(schema.activities).values({
+      id: crypto.randomUUID(),
+      type: 'lead_enriched',
+      title: `AI enrichment ran${parsed.score != null ? ` (score ${parsed.score})` : ''}`,
+      description: parsed.scoreReason ?? null,
+      leadId: id,
+      createdById: 'system',
+      createdAt: now,
+      updatedAt: now,
+    })
+
     return NextResponse.json({
       mode,
       score: parsed.score,

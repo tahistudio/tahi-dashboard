@@ -71,6 +71,17 @@ interface Lead {
   updatedAt: string
 }
 
+interface LeadActivity {
+  id: string
+  type: string
+  title: string
+  description: string | null
+  createdById: string
+  createdAt: string
+  authorName: string | null
+  authorAvatarUrl: string | null
+}
+
 interface AiSignals {
   employeeCount?: string
   employeeCountSource?: string
@@ -141,6 +152,7 @@ export function LeadsContent() {
   ])
 
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
+  const [selectedActivities, setSelectedActivities] = useState<LeadActivity[]>([])
   const [discoveryTemplate, setDiscoveryTemplate] = useState<string[]>([])
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Partial<Lead> | null>(null)
@@ -217,8 +229,13 @@ export function LeadsContent() {
     try {
       const res = await fetch(apiPath(`/api/admin/leads/${id}`))
       if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { lead: Lead; discoveryQuestionsTemplate?: string[] }
+      const data = await res.json() as {
+        lead: Lead
+        discoveryQuestionsTemplate?: string[]
+        activities?: LeadActivity[]
+      }
       setSelectedLead(data.lead)
+      setSelectedActivities(data.activities ?? [])
       setDiscoveryTemplate(data.discoveryQuestionsTemplate ?? [])
       setEditing(false)
       setDraft(null)
@@ -640,6 +657,7 @@ export function LeadsContent() {
               ) : (
                 <LeadDetail
                   lead={selectedLead}
+                  activities={selectedActivities}
                   discoveryTemplate={discoveryTemplate}
                   enriching={enriching}
                   enrichError={enrichError}
@@ -930,6 +948,7 @@ function LeadForm({
 
 function LeadDetail({
   lead,
+  activities,
   discoveryTemplate,
   enriching,
   enrichError,
@@ -937,6 +956,7 @@ function LeadDetail({
   onApplySuggestions,
 }: {
   lead: Lead
+  activities: LeadActivity[]
   discoveryTemplate: string[]
   enriching: boolean
   enrichError: string | null
@@ -1015,7 +1035,77 @@ function LeadDetail({
           </a>
         </div>
       )}
+
+      {activities.length > 0 && <ActivityTimeline activities={activities} />}
     </div>
+  )
+}
+
+function ActivityTimeline({ activities }: { activities: LeadActivity[] }) {
+  // Newest first. The API returns oldest-first by default; sort here
+  // so the freshest event is at the top.
+  const sorted = [...activities].sort((a, b) =>
+    (b.createdAt ?? '').localeCompare(a.createdAt ?? ''),
+  )
+  return (
+    <div>
+      <SectionLabel>Activity</SectionLabel>
+      <ul style={{
+        margin: 0,
+        padding: 0,
+        listStyle: 'none',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.5rem',
+      }}>
+        {sorted.map((a) => (
+          <ActivityRow key={a.id} activity={a} />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function ActivityRow({ activity }: { activity: LeadActivity }) {
+  const isSystem = activity.createdById === 'system' || activity.type === 'lead_enriched'
+  const accent = isSystem ? 'var(--color-brand)' : 'var(--color-text-subtle)'
+  return (
+    <li style={{ display: 'flex', gap: '0.5625rem', alignItems: 'flex-start' }}>
+      <span
+        aria-hidden="true"
+        style={{
+          flexShrink: 0,
+          marginTop: '0.4375rem',
+          width: '0.4375rem',
+          height: '0.4375rem',
+          borderRadius: '50%',
+          background: accent,
+        }}
+      />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.4 }}>
+          {activity.title}
+        </div>
+        {activity.description && (
+          <div style={{
+            fontSize: '0.75rem',
+            color: 'var(--color-text-muted)',
+            lineHeight: 1.45,
+            marginTop: '0.125rem',
+          }}>
+            {activity.description}
+          </div>
+        )}
+        <div style={{
+          fontSize: '0.625rem',
+          color: 'var(--color-text-subtle)',
+          marginTop: '0.1875rem',
+        }}>
+          {isSystem ? 'AI' : (activity.authorName ?? 'Tahi')}
+          {relTime(activity.createdAt) ? ` · ${relTime(activity.createdAt)}` : ''}
+        </div>
+      </div>
+    </li>
   )
 }
 
