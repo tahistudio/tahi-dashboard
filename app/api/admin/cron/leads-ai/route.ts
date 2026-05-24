@@ -176,15 +176,58 @@ export async function POST(req: NextRequest) {
     error?: string
   }> = []
 
-  for (const lead of candidates) {
+  // ── Parallel scoring (#151 fix) ────────────────────────────────────
+  // Score in batches of SCORE_CONCURRENCY so a tick processes ~25
+  // leads in ~7-8s instead of one at a time. Haiku calls are
+  // network-bound and Anthropic happily handles concurrent requests.
+  // DB writes + notifications stay serial after scoring to keep D1
+  // transactions clean.
+  const SCORE_CONCURRENCY = 5
+  interface ScoreOutcome {
+    lead: typeof candidates[number]
+    score: number | null
+    scoreReason: string | null
+    tokensSpent: number
+    error?: string
+  }
+  const scoreOutcomes: ScoreOutcome[] = []
+  for (let i = 0; i < candidates.length; i += SCORE_CONCURRENCY) {
     if (Date.now() - startedAt > RUN_TIME_BUDGET_MS) {
-      results.push({ leadId: lead.id, scored: false, prevScore: lead.aiScore ?? null, newScore: null, autoEnriched: false, transitions: [], error: 'budget exhausted' })
+      for (const lead of candidates.slice(i)) {
+        scoreOutcomes.push({ lead, score: null, scoreReason: null, tokensSpent: 0, error: 'budget exhausted' })
+      }
+      break
+    }
+    const batch = candidates.slice(i, i + SCORE_CONCURRENCY)
+    const batchResults = await Promise.allSettled(
+      batch.map(lead => scoreLead(lead).then(r => ({ ...r, lead })))
+    )
+    for (let j = 0; j < batchResults.length; j++) {
+      const r = batchResults[j]
+      const lead = batch[j]
+      if (r.status === 'fulfilled') {
+        scoreOutcomes.push({ lead, score: r.value.score, scoreReason: r.value.scoreReason, tokensSpent: r.value.tokensSpent })
+      } else {
+        scoreOutcomes.push({
+          lead,
+          score: null,
+          scoreReason: null,
+          tokensSpent: 0,
+          error: r.reason instanceof Error ? r.reason.message : String(r.reason),
+        })
+      }
+    }
+  }
+
+  for (const outcome of scoreOutcomes) {
+    const lead = outcome.lead
+    if (outcome.error) {
+      results.push({ leadId: lead.id, scored: false, prevScore: lead.aiScore ?? null, newScore: null, autoEnriched: false, transitions: [], error: outcome.error })
       continue
     }
-
     try {
       const prevScore = lead.aiScore ?? null
-      const { score, scoreReason, tokensSpent } = await scoreLead(lead)
+      const { score, scoreReason, tokensSpent } = outcome
 
       const now = new Date().toISOString()
       await database
