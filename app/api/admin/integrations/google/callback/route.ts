@@ -6,13 +6,23 @@
  * service='google_workspace', then redirects to /settings#google.
  */
 
-import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
+
+// NOTE: This callback is intentionally public (see middleware.ts public
+// route list). The cross-origin redirect from accounts.google.com strips
+// the Clerk session cookie under some SameSite + cookie-prefix policies,
+// which used to leave the user bounced to /sign-in instead of completing
+// the connection. Auth is implicitly provided by:
+//   1. The single-use Google authorization code (bound to our registered
+//      redirect_uri — an attacker cannot forge one).
+//   2. The token exchange itself, which fails for any non-genuine code.
+//   3. The org-wide integrations row (only one google_workspace per
+//      install), so token storage doesn't need to identify a user.
 
 interface GoogleTokenResponse {
   access_token?: string
@@ -31,11 +41,6 @@ interface GoogleUserInfo {
 }
 
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
-  if (!isTahiAdmin(orgId)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
   const url = new URL(req.url)
   const code = url.searchParams.get('code')
   const oauthError = url.searchParams.get('error')

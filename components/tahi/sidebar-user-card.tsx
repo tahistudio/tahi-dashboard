@@ -18,7 +18,7 @@ import * as React from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useUser, useClerk } from '@clerk/nextjs'
-import { Sun, Moon, Settings, LogOut, ChevronDown, User as UserIcon, Eye, EyeOff } from 'lucide-react'
+import { Sun, Moon, Settings, LogOut, ChevronDown, Eye, EyeOff } from 'lucide-react'
 import { Avatar } from '@/components/tahi/avatar'
 import { Popover } from '@/components/tahi/popover'
 
@@ -164,14 +164,9 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
         anchorRef={triggerRef}
         align="start"
         width="14rem"
+        mobileFullWidth
       >
         <div role="menu" aria-label="Account">
-          <MenuItem
-            icon={<UserIcon className="w-4 h-4" />}
-            label="Manage account"
-            href="/settings"
-            onClick={() => setOpen(false)}
-          />
           <MenuItem
             icon={<Settings className="w-4 h-4" />}
             label="Settings"

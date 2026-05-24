@@ -19,7 +19,7 @@ import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Inbox, MessageSquare, FileText, Users, FolderOpen,
   Menu, X, CheckSquare, TrendingUp, Star, CreditCard, Clock, BarChart2,
-  Gauge, UserCog, FileSignature, BookOpen, Settings, ShoppingBag, Calendar,
+  Gauge, UserCog, FileSignature, BookOpen, ShoppingBag, Calendar,
   Megaphone, UserPlus,
 } from 'lucide-react'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
@@ -102,10 +102,8 @@ const ADMIN_DRAWER: DrawerNavGroup[] = [
     group: 'Knowledge',
     items: [{ label: 'Docs Hub', href: '/docs', icon: BookOpen }],
   },
-  {
-    group: 'Account',
-    items: [{ label: 'Settings', href: '/settings', icon: Settings }],
-  },
+  // Settings intentionally absent here — it lives in the user card popup
+  // pinned to the bottom of the drawer to avoid two links to the same place.
 ]
 
 const CLIENT_DRAWER: DrawerNavGroup[] = [

@@ -17,6 +17,17 @@ const isPublicRoute = createRouteMatcher([
   // x-cron-secret in the route handler (Decision #043). Clerk's middleware
   // doesn't know about that header so must let the request through.
   '/api/admin/ai/briefing/cron(.*)',
+  // OAuth callbacks from third-party providers (Google, Xero, etc.) need
+  // to bypass Clerk middleware because the cross-origin redirect from
+  // accounts.google.com / login.xero.com loses the Clerk session cookie
+  // in some browser SameSite + cookie-prefix combinations. The route
+  // handler still validates: the single-use authorisation code is bound
+  // to our registered redirect_uri, and the token exchange would fail
+  // for a forged request. After successful exchange, the handler
+  // redirects back to /settings#<service>?connected=1 which IS Clerk-
+  // protected, so the user has to be signed in to actually see results.
+  '/api/admin/integrations/google/callback(.*)',
+  '/api/admin/integrations/xero/callback(.*)',
   // Public-share routes for schedules / proposals / contracts. Token-based
   // access — the route handler validates the token before returning data.
   // Pages live under /p/<resource>/<token>; their data APIs under /api/public.
@@ -30,6 +41,8 @@ const isPublicRoute = createRouteMatcher([
   '/dashboard/api/case-study/(.*)',
   '/dashboard/api/admin/docs/seed(.*)',
   '/dashboard/api/admin/ai/briefing/cron(.*)',
+  '/dashboard/api/admin/integrations/google/callback(.*)',
+  '/dashboard/api/admin/integrations/xero/callback(.*)',
   '/dashboard/p/(.*)',
   '/dashboard/api/public/(.*)',
 ])

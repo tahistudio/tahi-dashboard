@@ -52,7 +52,15 @@ interface PopoverProps {
   /** Alignment along the anchor's horizontal axis. Default 'start'
    *  (panel's left aligns with anchor's left). */
   align?: 'start' | 'end'
+  /** When true, the panel spans viewport width (minus 8px margins) on
+   *  small screens (<480px) instead of its declared width. Great for
+   *  finger-friendly menus on phones — the user card popup, attachment
+   *  pickers etc. Desktop layout unchanged. */
+  mobileFullWidth?: boolean
 }
+
+const MOBILE_BREAKPOINT = 480
+const MOBILE_MARGIN = 8
 
 export function Popover({
   anchorRef,
@@ -63,6 +71,7 @@ export function Popover({
   maxHeight = '20rem',
   offset = 4,
   align = 'start',
+  mobileFullWidth = false,
 }: PopoverProps) {
   const [mounted, setMounted] = useState(false)
   const [position, setPosition] = useState<{
@@ -91,6 +100,17 @@ export function Popover({
     const spaceAbove = r.top
     const flip = spaceBelow < Math.min(panelH, 240) && spaceAbove > spaceBelow
     const placement: 'below' | 'above' = flip ? 'above' : 'below'
+    // Mobile full-width override: pin the panel to viewport edges with
+    // an 8px margin, ignoring the declared width entirely. Caller opts
+    // in via `mobileFullWidth`.
+    const isMobile = window.innerWidth < MOBILE_BREAKPOINT
+    if (mobileFullWidth && isMobile) {
+      const panelW = window.innerWidth - MOBILE_MARGIN * 2
+      const top = placement === 'below' ? r.bottom + offset : r.top - offset - panelH
+      setPosition({ left: MOBILE_MARGIN, top, width: panelW, placement })
+      return
+    }
+
     // Resolve the panel's actual width. When `width` is a string ("16rem"
     // etc.) we don't know the px until after layout, so measure the rendered
     // panel; fall back to anchor width.
@@ -112,7 +132,7 @@ export function Popover({
 
     const top = placement === 'below' ? r.bottom + offset : r.top - offset - panelH
     setPosition({ left, top, width: r.width, placement })
-  }, [anchorRef, onClose, width, offset, align])
+  }, [anchorRef, onClose, width, offset, align, mobileFullWidth])
 
   // Position on open + keep aligned on scroll/resize.
   useEffect(() => {
@@ -168,7 +188,12 @@ export function Popover({
 
   if (!open || !mounted) return null
 
-  const finalWidth = width
+  // Mobile override wins over the declared width so the first paint is
+  // already full-width (before measure() runs).
+  const isMobileViewport = typeof window !== 'undefined' && window.innerWidth < MOBILE_BREAKPOINT
+  const finalWidth = (mobileFullWidth && isMobileViewport)
+    ? `${window.innerWidth - MOBILE_MARGIN * 2}px`
+    : width
     ? (typeof width === 'number' ? `${width}px` : width)
     : position
     ? `${position.width}px`
