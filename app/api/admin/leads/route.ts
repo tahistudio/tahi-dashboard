@@ -27,7 +27,10 @@ export async function GET(req: NextRequest) {
   const search = url.searchParams.get('search') ?? ''
   const owner  = url.searchParams.get('owner')  ?? ''
   const page   = Math.max(1, parseInt(url.searchParams.get('page') ?? '1'))
-  const limit  = 50
+  // Default 1000 so the client gets everything in one shot — pagination
+  // happens client-side in DataTable. Caller can still pass ?limit= for
+  // legacy paged callers (e.g. the cron's old endpoint).
+  const limit  = Math.min(2000, parseInt(url.searchParams.get('limit') ?? '1000'))
   const offset = (page - 1) * limit
 
   const database = await db()

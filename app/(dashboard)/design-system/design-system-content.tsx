@@ -2962,6 +2962,11 @@ function DataTableShowcase() {
             onSelectionChange={setSelected}
             rowActions={rowActionsFor}
             onRowPreview={(r) => setPreviewRow(r)}
+            // Pagination — default 20/page, options 20 / 50 / 100 / All.
+            // Force-enabled on this demo so the footer is visible even
+            // with under-20-row datasets. Auto-enables on real tables
+            // when rows.length > 20.
+            paginate
             columns={[
               { key: 'number', header: 'Invoice', sortable: true,
                 accessor: r => r.number,

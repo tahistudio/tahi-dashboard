@@ -170,6 +170,14 @@ interface DataTableProps<Row> {
    *  row, the row click toggles its expansion instead of firing
    *  onRowClick. */
   renderExpand?: (row: Row) => React.ReactNode
+
+  // ── Pagination ──
+  /** Enable client-side pagination. Defaults to true when rows.length > 20.
+   *  Pass false to disable entirely. */
+  paginate?: boolean
+  /** Initial page size. Defaults to 20. User can change via the size
+   *  selector in the pagination footer (20 / 50 / 100 / all). */
+  defaultPageSize?: 20 | 50 | 100 | 'all'
 }
 
 // ── Implementation ──────────────────────────────────────────────────────────
@@ -194,6 +202,8 @@ export function DataTable<Row>({
   rowActions,
   renderExpand,
   onRowPreview,
+  paginate,
+  defaultPageSize = 20,
 }: DataTableProps<Row>) {
   const isControlledSort = sort !== undefined
   const [internalSort, setInternalSort] = React.useState<DataTableSort | null>(defaultSort)
@@ -244,6 +254,25 @@ export function DataTable<Row>({
     })
     return sorted
   }, [rows, activeSort, columns])
+
+  // ── Pagination ──────────────────────────────────────────────────────────
+  // Auto-enable when rows.length > 20 unless caller explicitly says false.
+  // 'all' means no slicing.
+  const pagEnabled = paginate ?? (sortedRows.length > 20)
+  const [pageSize, setPageSize] = React.useState<20 | 50 | 100 | 'all'>(defaultPageSize)
+  const [pageIndex, setPageIndex] = React.useState(0)
+  // Reset to page 0 if the row set shrinks past the current page.
+  React.useEffect(() => {
+    const size = typeof pageSize === 'number' ? pageSize : sortedRows.length
+    const lastPage = Math.max(0, Math.ceil(sortedRows.length / Math.max(1, size)) - 1)
+    if (pageIndex > lastPage) setPageIndex(0)
+  }, [sortedRows.length, pageSize, pageIndex])
+
+  const pagedRows = React.useMemo(() => {
+    if (!pagEnabled || pageSize === 'all') return sortedRows
+    const start = pageIndex * pageSize
+    return sortedRows.slice(start, start + pageSize)
+  }, [sortedRows, pagEnabled, pageSize, pageIndex])
 
   const rowPaddingY = density === 'compact' ? '0.5rem' : '0.75rem'
 
@@ -405,9 +434,9 @@ export function DataTable<Row>({
                 </td>
               </tr>
             ) : (
-              sortedRows.map((row, rowIndex) => {
+              pagedRows.map((row, rowIndex) => {
                 const id = getRowId(row)
-                const isLast = rowIndex === sortedRows.length - 1
+                const isLast = rowIndex === pagedRows.length - 1
                 const isSelected = activeSelection?.has(id) ?? false
                 const expandContent = renderExpand?.(row) ?? null
                 const isExpandable = expandContent != null
@@ -440,6 +469,18 @@ export function DataTable<Row>({
           </tbody>
         </table>
       </div>
+
+      {/* Pagination footer — only rendered when enabled AND there's
+          actually more than one page worth of data. */}
+      {pagEnabled && !loading && sortedRows.length > 0 && (
+        <TablePagination
+          totalRows={sortedRows.length}
+          pageSize={pageSize}
+          pageIndex={pageIndex}
+          onPageSizeChange={(next) => { setPageSize(next); setPageIndex(0) }}
+          onPageChange={setPageIndex}
+        />
+      )}
 
       {/* Right-click action menu. Floating at cursor position. */}
       {actionMenu && rowActions && (
@@ -681,6 +722,127 @@ function DataRow<Row>({
       )}
     </>
   )
+}
+
+// ── Pagination footer ──────────────────────────────────────────────────────
+//
+// Lightweight client-side pagination. Sits below the table with three
+// blocks: "Showing X–Y of Z" on the left, page-size dropdown in the
+// middle, prev/next + page indicator on the right.
+//
+// Exported in case a page wants to render a standalone instance against
+// its own data (e.g. a custom non-DataTable list view).
+
+export interface TablePaginationProps {
+  totalRows: number
+  pageSize: 20 | 50 | 100 | 'all'
+  pageIndex: number
+  onPageSizeChange: (next: 20 | 50 | 100 | 'all') => void
+  onPageChange: (nextIndex: number) => void
+}
+
+export function TablePagination({
+  totalRows,
+  pageSize,
+  pageIndex,
+  onPageSizeChange,
+  onPageChange,
+}: TablePaginationProps) {
+  const numericSize = pageSize === 'all' ? totalRows : pageSize
+  const totalPages = Math.max(1, Math.ceil(totalRows / Math.max(1, numericSize)))
+  const start = pageSize === 'all' ? (totalRows > 0 ? 1 : 0) : (pageIndex * pageSize) + 1
+  const end = pageSize === 'all' ? totalRows : Math.min(totalRows, (pageIndex + 1) * pageSize)
+  const canPrev = pageIndex > 0
+  const canNext = pageIndex + 1 < totalPages
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '0.75rem',
+        padding: '0.5rem 1rem',
+        borderTop: '1px solid var(--color-border-subtle)',
+        background: 'var(--color-bg)',
+        fontSize: '0.75rem',
+        color: 'var(--color-text-muted)',
+        flexWrap: 'wrap',
+      }}
+    >
+      <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {totalRows === 0 ? 'No items' : `Showing ${start.toLocaleString()}–${end.toLocaleString()} of ${totalRows.toLocaleString()}`}
+      </span>
+
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4375rem' }}>
+        <label htmlFor="pgnsize" style={{ fontSize: '0.6875rem' }}>Rows per page</label>
+        <select
+          id="pgnsize"
+          value={pageSize}
+          onChange={(e) => {
+            const v = e.target.value
+            onPageSizeChange(v === 'all' ? 'all' : (parseInt(v, 10) as 20 | 50 | 100))
+          }}
+          className="tahi-select"
+          style={{
+            height: '1.75rem',
+            padding: '0 0.4375rem',
+            background: 'var(--color-bg-secondary)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.75rem',
+            color: 'var(--color-text)',
+            outline: 'none',
+          }}
+        >
+          <option value="20">20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+          <option value="all">All</option>
+        </select>
+      </div>
+
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+        <button
+          type="button"
+          onClick={() => canPrev && onPageChange(pageIndex - 1)}
+          disabled={!canPrev}
+          aria-label="Previous page"
+          style={paginationBtnStyle(canPrev)}
+        >
+          ←
+        </button>
+        <span style={{ fontSize: '0.6875rem', fontVariantNumeric: 'tabular-nums', minWidth: '5rem', textAlign: 'center' }}>
+          Page {pageIndex + 1} of {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => canNext && onPageChange(pageIndex + 1)}
+          disabled={!canNext}
+          aria-label="Next page"
+          style={paginationBtnStyle(canNext)}
+        >
+          →
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function paginationBtnStyle(enabled: boolean): React.CSSProperties {
+  return {
+    width: '1.75rem',
+    height: '1.75rem',
+    borderRadius: 'var(--radius-sm)',
+    border: '1px solid var(--color-border)',
+    background: enabled ? 'var(--color-bg-secondary)' : 'transparent',
+    color: enabled ? 'var(--color-text)' : 'var(--color-text-subtle)',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    fontSize: '0.875rem',
+    lineHeight: 1,
+    opacity: enabled ? 1 : 0.5,
+    transition: 'background-color 120ms ease',
+  }
 }
 
 // ── Selection checkbox ──────────────────────────────────────────────────────
