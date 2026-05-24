@@ -68,6 +68,7 @@ export async function POST(req: NextRequest) {
     type?: string
     title?: string
     description?: string
+    leadId?: string
     dealId?: string
     orgId?: string
     contactId?: string
@@ -97,6 +98,7 @@ export async function POST(req: NextRequest) {
     type: body.type,
     title: body.title.trim(),
     description: body.description ?? null,
+    leadId: body.leadId ?? null,
     dealId: body.dealId ?? null,
     orgId: body.orgId ?? null,
     contactId: body.contactId ?? null,

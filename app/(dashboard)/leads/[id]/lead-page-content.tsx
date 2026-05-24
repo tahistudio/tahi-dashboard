@@ -103,6 +103,13 @@ interface LeadDraft {
   techStack: string
   cms: string
   brief: string
+  ownerId: string
+  status: string
+}
+
+interface TeamMemberLite {
+  id: string
+  name: string
 }
 
 const STATUS_TONES: Record<string, BadgeTone> = {
@@ -152,6 +159,8 @@ function toDraft(lead: Lead): LeadDraft {
     techStack: safeJsonArray<string>(lead.techStack).join(', '),
     cms: lead.cms ?? '',
     brief: lead.brief ?? '',
+    ownerId: lead.ownerId ?? '',
+    status: lead.status,
   }
 }
 
@@ -173,6 +182,12 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
   const [draft, setDraft] = useState<LeadDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  // Team members for owner dropdown
+  const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([])
+  // Activity composer state
+  const [newActivityNote, setNewActivityNote] = useState('')
+  const [savingActivity, setSavingActivity] = useState(false)
+  const [activityError, setActivityError] = useState<string | null>(null)
   // AI reply draft state
   const [replyDraft, setReplyDraft] = useState<PendingReplyDraft | null>(null)
   const [draftingReply, setDraftingReply] = useState(false)
@@ -213,6 +228,61 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
   }, [leadId])
 
   useEffect(() => { void load() }, [load])
+
+  // Team members for owner dropdown — fetch once
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch(apiPath('/api/admin/team-members'))
+        if (!res.ok) return
+        const data = await res.json() as { items?: TeamMemberLite[]; members?: TeamMemberLite[] }
+        const items = data.items ?? data.members ?? []
+        setTeamMembers(items.filter(m => m && m.id && m.name))
+      } catch { /* ignore */ }
+    })()
+  }, [])
+
+  async function saveActivity() {
+    if (!lead || !newActivityNote.trim()) return
+    setSavingActivity(true)
+    setActivityError(null)
+    try {
+      const res = await fetch(apiPath('/api/admin/activities'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'note',
+          title: newActivityNote.trim().slice(0, 80),
+          description: newActivityNote.trim().length > 80 ? newActivityNote.trim() : null,
+          leadId: lead.id,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string }
+        throw new Error(err.error ?? 'Failed to save note')
+      }
+      setNewActivityNote('')
+      await load()
+    } catch (err) {
+      setActivityError(err instanceof Error ? err.message : 'Failed to save note')
+    } finally {
+      setSavingActivity(false)
+    }
+  }
+
+  async function quickPatchLead(updates: Record<string, unknown>) {
+    if (!lead) return
+    try {
+      await fetch(apiPath(`/api/admin/leads/${lead.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+      await load()
+    } catch {
+      // ignore — UI will show stale state until next refresh
+    }
+  }
 
   function startEdit() {
     if (!lead) return
@@ -424,7 +494,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
     : 'neutral'
 
   return (
-    <div style={{ padding: '1.25rem 0', display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '72rem' }}>
+    <div style={{ padding: '1.25rem 0', display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '88rem' }}>
       <Breadcrumb
         items={[
           { label: 'Leads', href: '/leads' },
@@ -443,14 +513,61 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
             letterSpacing: '-0.015em',
           }}>{lead.name}</h1>
           <div style={{ marginTop: '0.4375rem', display: 'flex', flexWrap: 'wrap', gap: '0.375rem', alignItems: 'center' }}>
-            <Badge tone={STATUS_TONES[lead.status] ?? 'neutral'} variant="soft" size="sm" dot={false}>
-              {lead.status}
-            </Badge>
+            {/* Status quick-picker (always editable, no edit-mode required) */}
+            <select
+              value={lead.status}
+              onChange={e => { void quickPatchLead({ status: e.target.value }) }}
+              aria-label="Lead status"
+              style={{
+                fontSize: '0.6875rem',
+                fontWeight: 600,
+                padding: '0.1875rem 0.5rem 0.1875rem 0.4375rem',
+                borderRadius: '9999px',
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                cursor: 'pointer',
+                textTransform: 'capitalize',
+              }}
+            >
+              <option value="new">new</option>
+              <option value="qualifying">qualifying</option>
+              <option value="nurturing">nurturing</option>
+              <option value="promoted">promoted</option>
+              <option value="archived">archived</option>
+            </select>
             {lead.aiScore != null && (
               <Badge tone={scoreTone} variant="soft" size="sm" dot={false}>
                 Score {lead.aiScore}
               </Badge>
             )}
+            {/* Owner quick-picker (always editable). Falls back to a
+                read-only label until the team-members list arrives. */}
+            {teamMembers.length > 0 ? (
+              <select
+                value={lead.ownerId ?? ''}
+                onChange={e => { void quickPatchLead({ ownerId: e.target.value || null }) }}
+                aria-label="Lead owner"
+                style={{
+                  fontSize: '0.6875rem',
+                  padding: '0.1875rem 0.5rem',
+                  borderRadius: '9999px',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  color: 'var(--color-text)',
+                  cursor: 'pointer',
+                }}
+              >
+                <option value="">Unassigned</option>
+                {teamMembers.map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            ) : lead.ownerName ? (
+              <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
+                Owner: {lead.ownerName}
+              </span>
+            ) : null}
             {lead.company && (
               <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
                 {lead.company}
@@ -754,9 +871,66 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
             />
           )}
 
+          {/* Activity composer + timeline */}
+          {!editing && (
+            <PageCard title="Activity">
+              {/* Compose a note */}
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: activities.length > 0 ? '0.875rem' : 0 }}>
+                <textarea
+                  value={newActivityNote}
+                  onChange={e => setNewActivityNote(e.target.value)}
+                  onKeyDown={e => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                      e.preventDefault()
+                      void saveActivity()
+                    }
+                  }}
+                  placeholder="Log a note (Cmd/Ctrl+Enter to save)…"
+                  rows={2}
+                  style={{
+                    flex: 1,
+                    fontSize: '0.8125rem',
+                    fontFamily: 'inherit',
+                    color: 'var(--color-text)',
+                    background: 'var(--color-bg)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '0.4375rem 0.5625rem',
+                    lineHeight: 1.5,
+                    resize: 'vertical',
+                    minHeight: '2.5rem',
+                  }}
+                />
+                <TahiButton
+                  size="sm"
+                  onClick={() => { void saveActivity() }}
+                  disabled={savingActivity || !newActivityNote.trim()}
+                >
+                  {savingActivity ? 'Saving…' : 'Log'}
+                </TahiButton>
+              </div>
+              {activityError && (
+                <div style={{
+                  padding: '0.4375rem 0.625rem',
+                  marginBottom: '0.625rem',
+                  background: 'var(--color-danger-bg)',
+                  border: '1px solid var(--color-danger)',
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: '0.75rem',
+                  color: 'var(--color-danger)',
+                }}>{activityError}</div>
+              )}
+              {activities.length === 0 ? (
+                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>
+                  No activity yet. Log a note above, or any AI/manual action will show up here.
+                </p>
+              ) : null}
+            </PageCard>
+          )}
+
           {/* Activity timeline */}
           {!editing && activities.length > 0 && (
-            <PageCard title="Activity">
+            <PageCard title="Timeline">
               <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
                 {[...activities].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')).map(a => {
                   const isSystem = a.type === 'lead_enriched' || (a.type === 'lead_status_changed' && !a.authorName)

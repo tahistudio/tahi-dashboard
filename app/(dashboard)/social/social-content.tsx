@@ -135,7 +135,7 @@ export function SocialContent() {
   }, [status?.channels])
 
   return (
-    <div style={{ padding: '1.5rem 0', display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '72rem' }}>
+    <div style={{ padding: '1.5rem 0', display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '88rem' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
         <div>
           <h1 style={{
