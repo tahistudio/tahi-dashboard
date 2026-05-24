@@ -170,10 +170,14 @@ export async function listChannels(token: string, organizationId: string): Promi
 
 // ── Posts ──────────────────────────────────────────────────────────────────
 
+// Status filter dropped from the GraphQL query because Buffer's docs
+// give two different shapes (array vs scalar) and the API silently
+// returns 0 results when the shape is wrong. Safer: pull everything,
+// filter status client-side in lib/buffer.ts:listPosts. Channel +
+// sort + pagination still go through GraphQL.
 const QUERY_POSTS = `
   query GetPosts(
     $organizationId: OrganizationId!,
-    $statuses: [PostStatus!],
     $channelIds: [ChannelId!],
     $first: Int,
     $after: String
@@ -181,7 +185,11 @@ const QUERY_POSTS = `
     posts(
       input: {
         organizationId: $organizationId,
-        filter: { status: $statuses, channelIds: $channelIds }
+        sort: [
+          { field: dueAt, direction: desc },
+          { field: createdAt, direction: desc }
+        ],
+        filter: { channelIds: $channelIds }
       },
       first: $first,
       after: $after
@@ -217,6 +225,10 @@ export async function listPosts(
   token: string,
   organizationId: string,
   opts: {
+    /** Client-side status filter. Buffer's status enum varies across
+     *  versions (sent / published / SENT), so we fetch all and filter
+     *  here after normalising to lowercase. Pass empty array or omit
+     *  to skip filtering entirely. */
     statuses?: BufferPostStatus[]
     channelIds?: string[]
     first?: number
@@ -226,14 +238,13 @@ export async function listPosts(
   const first = Math.max(1, Math.min(100, opts.first ?? 20))
   const data = await gql<PostsResponse>(token, QUERY_POSTS, {
     organizationId,
-    statuses: opts.statuses?.length ? opts.statuses : ['sent'],
     channelIds: opts.channelIds && opts.channelIds.length > 0 ? opts.channelIds : null,
     first,
     after: opts.after ?? null,
   })
   const wrapper = data.posts
   if (!wrapper) return { posts: [], hasNextPage: false, endCursor: null }
-  const posts: BufferPost[] = wrapper.edges
+  const all: BufferPost[] = wrapper.edges
     .map(e => e.node)
     .filter((n): n is RawPost & { id: string } => !!n?.id)
     .map(n => ({
@@ -245,6 +256,14 @@ export async function listPosts(
       sentAt: n.sentAt ?? null,
       scheduledAt: n.scheduledAt ?? null,
     }))
+  // Client-side status filter. Treat 'sent' and 'published' as
+  // synonyms — Buffer has used both spellings depending on era.
+  let posts = all
+  if (opts.statuses && opts.statuses.length > 0) {
+    const requested = new Set(opts.statuses.map(s => s.toLowerCase()))
+    if (requested.has('sent')) requested.add('published')
+    posts = all.filter(p => requested.has((p.status || '').toLowerCase()))
+  }
   return {
     posts,
     hasNextPage: !!wrapper.pageInfo?.hasNextPage,
