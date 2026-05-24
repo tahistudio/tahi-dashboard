@@ -87,6 +87,13 @@ interface AiSignals {
   siteTechSource?: string
   decisionMaker?: string
   decisionMakerConfidence?: 'low' | 'medium' | 'high'
+  suggestedFields?: {
+    name?: string
+    email?: string
+    jobTitle?: string
+    company?: string
+    website?: string
+  }
 }
 
 interface StatusDef {
@@ -334,6 +341,23 @@ export function LeadsContent() {
       await openLead(leadId)
     } catch {
       // best-effort
+    }
+  }
+
+  /** Patches the lead with AI-suggested values for fields that are
+   *  currently empty. After applying, the suggestion banner naturally
+   *  hides because the corresponding lead fields are no longer empty. */
+  async function applySuggestions(leadId: string, patch: Partial<Lead>) {
+    try {
+      await fetch(apiPath(`/api/admin/leads/${leadId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      await openLead(leadId)
+      await fetchLeads()
+    } catch {
+      // best-effort — UI just leaves the banner visible if the patch fails
     }
   }
 
@@ -620,6 +644,7 @@ export function LeadsContent() {
                   enriching={enriching}
                   enrichError={enrichError}
                   onRunEnrich={() => runEnrich(selectedLead.id)}
+                  onApplySuggestions={(patch) => applySuggestions(selectedLead.id, patch)}
                 />
               )}
             </SlideOver.Body>
@@ -909,12 +934,14 @@ function LeadDetail({
   enriching,
   enrichError,
   onRunEnrich,
+  onApplySuggestions,
 }: {
   lead: Lead
   discoveryTemplate: string[]
   enriching: boolean
   enrichError: string | null
   onRunEnrich: () => void
+  onApplySuggestions: (patch: Partial<Lead>) => void
 }) {
   const status = STATUS_BY_VALUE.get(lead.status)
   const aiSources = safeJsonArray<string>(lead.aiSources)
@@ -959,6 +986,7 @@ function LeadDetail({
         enriching={enriching}
         enrichError={enrichError}
         onRunEnrich={onRunEnrich}
+        onApplySuggestions={onApplySuggestions}
       />
 
       {lead.brief && (
@@ -1088,6 +1116,7 @@ function AiSection({
   enriching,
   enrichError,
   onRunEnrich,
+  onApplySuggestions,
 }: {
   lead: Lead
   aiSources: string[]
@@ -1097,7 +1126,20 @@ function AiSection({
   enriching: boolean
   enrichError: string | null
   onRunEnrich: () => void
+  onApplySuggestions: (patch: Partial<Lead>) => void
 }) {
+  // Build the apply-suggestion patch: only fields the AI suggested AND
+  // the lead is currently missing. If nothing actionable, no banner.
+  const suggestionPatch: Partial<Lead> = {}
+  const suggested = aiSignals.suggestedFields
+  if (suggested) {
+    if (suggested.name && !lead.name?.trim().includes(suggested.name)) suggestionPatch.name = suggested.name
+    if (suggested.email && !lead.email?.trim()) suggestionPatch.email = suggested.email
+    if (suggested.jobTitle && !lead.jobTitle?.trim()) suggestionPatch.jobTitle = suggested.jobTitle
+    if (suggested.company && !lead.company?.trim()) suggestionPatch.company = suggested.company
+    if (suggested.website && !lead.website?.trim()) suggestionPatch.website = suggested.website
+  }
+  const suggestionEntries = Object.entries(suggestionPatch) as Array<[keyof Lead, string]>
   const hasEnrichment = !!lead.enrichedAt
   const scoreTone: BadgeTone =
     lead.aiScore == null ? 'neutral'
@@ -1157,6 +1199,40 @@ function AiSection({
         <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
           {lead.aiScoreReason}
         </p>
+      )}
+
+      {suggestionEntries.length > 0 && (
+        <div style={{
+          padding: '0.625rem 0.75rem',
+          background: 'var(--color-brand-50)',
+          border: '1px solid var(--color-brand-100)',
+          borderRadius: 'var(--radius-md)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.5rem',
+        }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-brand-dark)' }}>
+            AI found {suggestionEntries.length} field{suggestionEntries.length === 1 ? '' : 's'} to fill in
+          </div>
+          <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            {suggestionEntries.map(([field, value]) => (
+              <li key={field} style={{ display: 'flex', gap: '0.5rem', fontSize: '0.75rem', lineHeight: 1.5 }}>
+                <span style={{ width: '5.5rem', flexShrink: 0, color: 'var(--color-text-muted)', textTransform: 'capitalize', fontWeight: 500 }}>
+                  {fieldLabel(field)}
+                </span>
+                <span style={{ flex: 1, color: 'var(--color-text)', wordBreak: 'break-word' }}>{value}</span>
+              </li>
+            ))}
+          </ul>
+          <div style={{ display: 'flex', gap: '0.4375rem' }}>
+            <TahiButton
+              size="sm"
+              onClick={() => onApplySuggestions(suggestionPatch)}
+            >
+              Apply all
+            </TahiButton>
+          </div>
+        </div>
       )}
 
       {lead.aiSummary && <BriefingSummary raw={lead.aiSummary} />}
@@ -1427,6 +1503,18 @@ function SignalRow({ label, value, source }: { label: string; value: string; sou
       </span>
     </div>
   )
+}
+
+function fieldLabel(field: keyof Lead): string {
+  switch (field) {
+    case 'jobTitle': return 'Job title'
+    case 'name':     return 'Name'
+    case 'email':    return 'Email'
+    case 'company':  return 'Company'
+    case 'website':  return 'Website'
+    case 'phone':    return 'Phone'
+    default:         return String(field)
+  }
 }
 
 function normaliseUrl(input: string): string {

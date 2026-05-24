@@ -96,6 +96,15 @@ Structured deal-sizing signals. Every populated field MUST have a matching <fiel
 <q>Question two specific to this company's situation. Should help Tahi understand fit / urgency / budget.</q>
 <q>Question three specific to this company's signals. Should surface decision-making process or competitive landscape.</q>
 </questions>
+<suggested_fields>
+Fields you confidently identified during research that could fill gaps in the lead record. ONLY include a field when you have high confidence the value is correct. Skip any field you are unsure about. The dashboard will offer these as one-click "Apply" suggestions to fill empty lead fields. Wrong values waste Liam's time — be conservative.
+
+<person_name>Primary contact's full name, e.g. "Heather Disher". Omit if the lead's "name" already looks correct.</person_name>
+<person_email>Confirmed email if found in public sources. Omit if not directly visible.</person_email>
+<job_title>Role at the company, e.g. "Founder & Director" or "Head of Marketing".</job_title>
+<company_name>Company name. Omit if the lead's "company" already looks correct.</company_name>
+<website>Official company website URL with https:// prefix.</website>
+</suggested_fields>
 
 SCORING RUBRIC:
 - 80-100: clearly inbound, clear budget signal, fits Tahi's service offer, decision-maker, urgent
@@ -164,6 +173,16 @@ interface AiSignals {
   siteTechSource?: string
   decisionMaker?: string
   decisionMakerConfidence?: 'low' | 'medium' | 'high'
+  /** Field suggestions the UI can offer as one-click "Apply" actions.
+   *  Only fields Sonnet is confident about. UI checks these against
+   *  the lead's current values and only surfaces gaps. */
+  suggestedFields?: {
+    name?: string
+    email?: string
+    jobTitle?: string
+    company?: string
+    website?: string
+  }
 }
 
 interface ParsedFull {
@@ -233,6 +252,25 @@ function parseFullResponse(text: string): ParsedFull {
   if (decisionMaker) signals.decisionMaker = decisionMaker
   if (confidence === 'low' || confidence === 'medium' || confidence === 'high') {
     signals.decisionMakerConfidence = confidence
+  }
+
+  // Suggested fields block (separate top-level block, not nested in <signals>).
+  const suggestionsBlock = matchText(text, /<suggested_fields>([\s\S]*?)<\/suggested_fields>/i) ?? ''
+  if (suggestionsBlock) {
+    const fieldOf = (name: string) =>
+      matchText(suggestionsBlock, new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, 'i'))?.trim() ?? null
+    const suggested: NonNullable<AiSignals['suggestedFields']> = {}
+    const name = fieldOf('person_name')
+    const email = fieldOf('person_email')
+    const jobTitle = fieldOf('job_title')
+    const company = fieldOf('company_name')
+    const website = fieldOf('website')
+    if (name) suggested.name = name
+    if (email && /@/.test(email)) suggested.email = email
+    if (jobTitle) suggested.jobTitle = jobTitle
+    if (company) suggested.company = company
+    if (website) suggested.website = website
+    if (Object.keys(suggested).length > 0) signals.suggestedFields = suggested
   }
 
   return {
