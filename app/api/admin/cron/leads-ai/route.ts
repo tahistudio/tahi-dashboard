@@ -241,6 +241,26 @@ export async function POST(req: NextRequest) {
         })
         .where(eq(schema.leads.id, lead.id))
 
+      // Stamp lead_scored activity when the score CHANGES. Skip when
+      // identical to prevent timeline noise on stable leads. The
+      // description carries the numeric score so the lead detail page
+      // can build a score-over-time sparkline by parsing recent
+      // activity rows.
+      if (score != null && score !== prevScore) {
+        await database.insert(schema.activities).values({
+          id: crypto.randomUUID(),
+          type: 'lead_scored',
+          title: prevScore != null
+            ? `Score: ${prevScore} → ${score}`
+            : `Score: ${score}`,
+          description: `score:${score}${scoreReason ? ` ${scoreReason}` : ''}`,
+          leadId: lead.id,
+          createdById: 'system',
+          createdAt: now,
+          updatedAt: now,
+        })
+      }
+
       // Smart-enrich gate: auto-trigger full Sonnet enrichment when
       // (a) the score crossed the threshold, (b) the lead hasn't been
       // enriched yet, and (c) we still have budget today.

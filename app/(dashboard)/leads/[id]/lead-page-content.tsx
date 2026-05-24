@@ -559,6 +559,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
           {/* AI briefing — only when enriched */}
           {!editing && lead.enrichedAt && (
             <PageCard title="AI briefing">
+              <ScoreHistorySparkline activities={activities} currentScore={lead.aiScore} />
               {lead.aiScoreReason && (
                 <p style={{
                   margin: '0 0 0.625rem', fontSize: '0.8125rem',
@@ -1147,6 +1148,70 @@ function BriefBlock({ label, body }: { label: string; body: string }) {
     <div>
       <SubLabel>{label}</SubLabel>
       <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.55 }}>{body}</p>
+    </div>
+  )
+}
+
+// Tiny inline SVG sparkline of the lead's score history, parsed from
+// the activities timeline. Looks for lead_scored + lead_enriched rows
+// with "score N" in title/description. Renders 60×24 sparkline.
+function ScoreHistorySparkline({
+  activities, currentScore,
+}: { activities: LeadActivity[]; currentScore: number | null }) {
+  const points: Array<{ score: number; at: string }> = []
+  for (const a of activities) {
+    if (a.type !== 'lead_scored' && a.type !== 'lead_enriched') continue
+    // Try description first (carries "score:N"), then title ("Score: A → B" or "Score: B")
+    let score: number | null = null
+    const descMatch = a.description?.match(/score:(\d{1,3})/i)
+    if (descMatch) score = parseInt(descMatch[1], 10)
+    if (score == null) {
+      const titleMatch = a.title.match(/\b(?:score|→)\s*(\d{1,3})\b/i)
+      if (titleMatch) score = parseInt(titleMatch[1], 10)
+    }
+    if (score != null && score >= 0 && score <= 100) {
+      points.push({ score, at: a.createdAt })
+    }
+  }
+  // Chronological asc for plotting
+  points.sort((a, b) => a.at.localeCompare(b.at))
+  // Append the current score as the rightmost point if it's not already
+  // captured (e.g. score was set by a path that didn't stamp an activity)
+  if (currentScore != null && (points.length === 0 || points[points.length - 1].score !== currentScore)) {
+    points.push({ score: currentScore, at: new Date().toISOString() })
+  }
+  if (points.length < 2) return null
+
+  const W = 200, H = 28, P = 2
+  const xs = points.map((_, i) => P + (i / (points.length - 1)) * (W - 2 * P))
+  const ys = points.map(p => P + (1 - p.score / 100) * (H - 2 * P))
+  const path = xs.map((x, i) => `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${ys[i].toFixed(1)}`).join(' ')
+  const latestY = ys[ys.length - 1]
+  const latestX = xs[xs.length - 1]
+  const min = Math.min(...points.map(p => p.score))
+  const max = Math.max(...points.map(p => p.score))
+
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.625rem',
+      padding: '0.5rem 0.625rem',
+      marginBottom: '0.625rem',
+      background: 'var(--color-bg-secondary)',
+      border: '1px solid var(--color-border-subtle)',
+      borderRadius: 'var(--radius-sm)',
+    }}>
+      <span style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        Score trend
+      </span>
+      <svg width={W} height={H} style={{ display: 'block', flexShrink: 0 }} aria-label={`Score history: ${points.length} points, min ${min}, max ${max}, current ${currentScore ?? '?'}`}>
+        <path d={path} fill="none" stroke="var(--color-brand)" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={latestX} cy={latestY} r="2.5" fill="var(--color-brand)" />
+      </svg>
+      <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+        {points.length} pts · min {min} · max {max}
+      </span>
     </div>
   )
 }

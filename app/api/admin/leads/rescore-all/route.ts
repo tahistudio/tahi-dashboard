@@ -189,6 +189,23 @@ Do not invent facts. Use what is in the input. Output ONLY:
         })
         .where(eq(schema.leads.id, lead.id))
 
+      // Stamp lead_scored activity for the history chart (only when
+      // the score actually changes — keeps the timeline clean).
+      if (newScore != null && newScore !== lead.aiScore) {
+        await database.insert(schema.activities).values({
+          id: crypto.randomUUID(),
+          type: 'lead_scored',
+          title: lead.aiScore != null
+            ? `Score: ${lead.aiScore} → ${newScore}`
+            : `Score: ${newScore}`,
+          description: `score:${newScore}${reason ? ` ${reason}` : ''}`,
+          leadId: lead.id,
+          createdById: 'system',
+          createdAt: now,
+          updatedAt: now,
+        })
+      }
+
       if (samples.length < 10) {
         samples.push({
           id: lead.id,
