@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const filterOrgId = url.searchParams.get('orgId')
   const filterDealId = url.searchParams.get('dealId')
+  const filterLeadId = url.searchParams.get('leadId')
   const filterProposalId = url.searchParams.get('proposalId')
   const filterStatus = url.searchParams.get('status')
 
@@ -25,6 +26,7 @@ export async function GET(req: NextRequest) {
   const conditions = []
   if (filterOrgId) conditions.push(eq(schema.projectSchedules.orgId, filterOrgId))
   if (filterDealId) conditions.push(eq(schema.projectSchedules.dealId, filterDealId))
+  if (filterLeadId) conditions.push(eq(schema.projectSchedules.leadId, filterLeadId))
   if (filterProposalId) conditions.push(eq(schema.projectSchedules.proposalId, filterProposalId))
   if (filterStatus) conditions.push(eq(schema.projectSchedules.status, filterStatus))
 
@@ -33,6 +35,7 @@ export async function GET(req: NextRequest) {
       id: schema.projectSchedules.id,
       orgId: schema.projectSchedules.orgId,
       dealId: schema.projectSchedules.dealId,
+      leadId: schema.projectSchedules.leadId,
       proposalId: schema.projectSchedules.proposalId,
       title: schema.projectSchedules.title,
       subtitle: schema.projectSchedules.subtitle,
@@ -47,10 +50,12 @@ export async function GET(req: NextRequest) {
       updatedAt: schema.projectSchedules.updatedAt,
       orgName: schema.organisations.name,
       dealTitle: schema.deals.title,
+      leadName: schema.leads.name,
     })
     .from(schema.projectSchedules)
     .leftJoin(schema.organisations, eq(schema.projectSchedules.orgId, schema.organisations.id))
     .leftJoin(schema.deals, eq(schema.projectSchedules.dealId, schema.deals.id))
+    .leftJoin(schema.leads, eq(schema.projectSchedules.leadId, schema.leads.id))
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(schema.projectSchedules.updatedAt))
 
@@ -112,6 +117,7 @@ export async function POST(req: NextRequest) {
     subtitle?: string
     orgId?: string | null
     dealId?: string | null
+    leadId?: string | null
     proposalId?: string | null
     preparedFor?: string
     preparedBy?: string
@@ -162,6 +168,7 @@ export async function POST(req: NextRequest) {
     id,
     orgId: body.orgId ?? null,
     dealId: body.dealId ?? null,
+    leadId: body.leadId ?? null,
     proposalId: body.proposalId ?? null,
     title: resolvedTitle,
     subtitle: body.subtitle?.trim() ?? meta.subtitle ?? null,

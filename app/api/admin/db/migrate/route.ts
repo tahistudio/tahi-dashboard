@@ -748,6 +748,14 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0049',
+    description: 'Project schedules: add lead_id column so a schedule can attach to a lead (pre-deal). Supports the AI-drafted schedule that lands alongside a proposal during the sales loop — before the lead becomes a deal. Backfill is unnecessary (column nullable).',
+    statements: [
+      `ALTER TABLE project_schedules ADD COLUMN lead_id TEXT`,
+      `CREATE INDEX IF NOT EXISTS idx_project_schedules_lead ON project_schedules(lead_id)`,
+    ],
+  },
+  {
     name: '0048',
     description: 'AI context: seed settings that point at Docs Hub pages used as canonical Tahi context for all AI surfaces (scoring, enrichment, reply drafting). Seeds ai.icpDocId (Ideal Client Profile), ai.brandDnaDocId, ai.toneDocId, ai.liamVoiceDocId, ai.servicesDocId by matching docs.slug to known seeded slugs. Uses INSERT OR IGNORE so re-running is safe and existing operator-picked values are preserved.',
     statements: [
