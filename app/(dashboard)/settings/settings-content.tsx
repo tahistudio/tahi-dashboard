@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import {
   RefreshCw, Sun, Moon,
   CreditCard, Link2, Bell, Building2,
@@ -401,6 +402,11 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
               savingKey={savingKey}
             />
           )}
+
+          {/* Scheduled jobs visibility (admin only) — links to the new
+              /settings/crons page where each cron's last run + manual
+              triggers live. */}
+          {isAdmin && <ScheduledJobsLinkSection />}
 
           {/* AI context docs (Docs Hub pages wired into AI prompts) */}
           {isAdmin && (
@@ -1523,6 +1529,46 @@ function PipelineDefaultsSection({
             <span className="text-sm text-[var(--color-text-muted)]">months</span>
           </div>
         </div>
+      </div>
+    </section>
+  )
+}
+
+// -- Scheduled jobs link card --
+// Cheap entry point — the full UI lives at /settings/crons.
+function ScheduledJobsLinkSection() {
+  return (
+    <section
+      style={{
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-card)',
+        padding: '1.25rem 1.5rem',
+      }}
+    >
+      <div className="flex items-start justify-between" style={{ gap: '1rem', flexWrap: 'wrap' }}>
+        <div className="min-w-0">
+          <h2 className="text-sm font-bold text-[var(--color-text)]">Scheduled jobs</h2>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1" style={{ lineHeight: 1.5 }}>
+            Calendar pull, transcript pull, pre-call digest, lead AI, daily summary, auto-promote, affiliate reactivation — see their last run + fire any one manually.
+          </p>
+        </div>
+        <Link
+          href="/settings/crons"
+          className="inline-flex items-center"
+          style={{
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            padding: '0.4375rem 0.75rem',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--color-text)',
+            textDecoration: 'none',
+            background: 'var(--color-bg)',
+          }}
+        >
+          Open scheduled jobs →
+        </Link>
       </div>
     </section>
   )
