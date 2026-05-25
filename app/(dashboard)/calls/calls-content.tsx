@@ -124,6 +124,23 @@ export function CallsContent() {
     }
   }
 
+  async function reclassify(callId: string, meetingType: 'discovery' | 'client' | 'partnership') {
+    // Optimistic update — flip the local row immediately, then PATCH.
+    setItems(prev => prev.map(c => c.id === callId ? { ...c, meetingType } : c))
+    try {
+      const r = await fetch(apiPath(`/api/admin/discovery-calls/${callId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingType }),
+      })
+      if (!r.ok) throw new Error('Failed')
+      showToast(`Reclassified as ${meetingType}`, 'success')
+    } catch {
+      showToast('Could not reclassify — refresh and try again', 'error')
+      await fetchAll()
+    }
+  }
+
   const selectedTypes = useMemo(() => {
     const f = activeFilters.find(a => a.id === 'type')
     return new Set(f?.values ?? [])
@@ -336,6 +353,22 @@ export function CallsContent() {
                 onClick: () => {
                   if (typeof window !== 'undefined') window.location.href = `/leads/${r.leadId}`
                 },
+              })
+            }
+            // Inline reclassify actions — let Liam move a call between
+            // buckets without leaving the index. Skips the type the row
+            // is currently in.
+            const types: Array<['discovery' | 'client' | 'partnership', string, React.ReactNode]> = [
+              ['discovery', 'Mark as Discovery', <UserPlus key="d" size={14} />],
+              ['client', 'Mark as Client', <Building2 key="c" size={14} />],
+              ['partnership', 'Mark as Partnership', <TrendingUp key="p" size={14} />],
+            ]
+            for (const [val, label, icon] of types) {
+              if (r.meetingType === val) continue
+              actions.push({
+                label,
+                icon,
+                onClick: () => void reclassify(r.id, val),
               })
             }
             return actions
