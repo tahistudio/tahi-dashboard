@@ -36,7 +36,7 @@ import {
   BarChart2, BookOpen, UserCog, MessageSquare,
   FolderOpen, ShoppingBag, PanelLeftClose, PanelLeftOpen,
   LayoutDashboard, Star, TrendingUp, FileSignature, Gauge,
-  Calendar, Megaphone, ChevronDown, UserPlus, Share2,
+  Calendar, Megaphone, ChevronDown, UserPlus, Share2, Phone,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
@@ -78,6 +78,7 @@ const ADMIN_NAV: NavGroup[] = [
     collapsible: true,
     items: [
       { label: 'Leads',              href: '/leads',               icon: UserPlus,      adminOnly: true },
+      { label: 'Calls',              href: '/calls',               icon: Phone,         adminOnly: true },
       { label: 'Deals',              href: '/deals',               icon: TrendingUp,    adminOnly: true },
       { label: 'Proposals',          href: '/proposals',           icon: FileText,      adminOnly: true },
       { label: 'Schedules',          href: '/schedules',           icon: Calendar,      adminOnly: true },
