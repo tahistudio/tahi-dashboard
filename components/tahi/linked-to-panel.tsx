@@ -13,11 +13,12 @@
  */
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { Building2, TrendingUp, FileText, Link2, X, ChevronDown, UserPlus } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
+import { Popover } from '@/components/tahi/popover'
 
 interface OrgOption { id: string; name: string }
 interface DealOption { id: string; title: string; orgId: string | null; orgName: string | null; stageName: string | null }
@@ -217,38 +218,26 @@ export function LinkedToPanel({
           onRemove={orgId ? () => patch({ orgId: null }) : null}
           editing={editing === 'org'}
           onClose={() => setEditing(null)}
-        >
-          {editing === 'org' && (
-            <PickerRow
-              busy={busy}
-              currentId={orgId}
-              options={orgs.map(o => ({ id: o.id, label: o.name }))}
-              onPick={(id) => patch({ orgId: id })}
-              onClose={() => setEditing(null)}
-            />
-          )}
-        </LinkRow>
+          busy={busy}
+          currentId={orgId}
+          options={orgs.map(o => ({ id: o.id, label: o.name }))}
+          onPick={(id) => patch({ orgId: id })}
+        />
 
         <LinkRow
           icon={<TrendingUp className="w-3.5 h-3.5" />}
           label="Deal"
           valueLabel={dealTitle ?? null}
-          valueHref={dealId ? `/pipeline/${dealId}` : null}
+          valueHref={dealId ? `/deals/${dealId}` : null}
           onChange={() => setEditing('deal')}
           onRemove={dealId ? () => patch({ dealId: null }) : null}
           editing={editing === 'deal'}
           onClose={() => setEditing(null)}
-        >
-          {editing === 'deal' && (
-            <PickerRow
-              busy={busy}
-              currentId={dealId}
-              options={dealOptions.map(d => ({ id: d.id, label: `${d.title}${d.orgName ? ` · ${d.orgName}` : ''}${d.stageName ? ` · ${d.stageName}` : ''}` }))}
-              onPick={(id) => patch({ dealId: id })}
-              onClose={() => setEditing(null)}
-            />
-          )}
-        </LinkRow>
+          busy={busy}
+          currentId={dealId}
+          options={dealOptions.map(d => ({ id: d.id, label: `${d.title}${d.orgName ? ` · ${d.orgName}` : ''}${d.stageName ? ` · ${d.stageName}` : ''}` }))}
+          onPick={(id) => patch({ dealId: id })}
+        />
 
         {showLeadRow && (
           <LinkRow
@@ -260,17 +249,11 @@ export function LinkedToPanel({
             onRemove={leadId ? () => patch({ leadId: null }) : null}
             editing={editing === 'lead'}
             onClose={() => setEditing(null)}
-          >
-            {editing === 'lead' && (
-              <PickerRow
-                busy={busy}
-                currentId={leadId ?? null}
-                options={leads.map(l => ({ id: l.id, label: `${l.name}${l.company ? ` · ${l.company}` : ''}${l.status ? ` · ${l.status}` : ''}` }))}
-                onPick={(id) => patch({ leadId: id })}
-                onClose={() => setEditing(null)}
-              />
-            )}
-          </LinkRow>
+            busy={busy}
+            currentId={leadId ?? null}
+            options={leads.map(l => ({ id: l.id, label: `${l.name}${l.company ? ` · ${l.company}` : ''}${l.status ? ` · ${l.status}` : ''}` }))}
+            onPick={(id) => patch({ leadId: id })}
+          />
         )}
 
         {showProposalRow && (
@@ -283,17 +266,11 @@ export function LinkedToPanel({
             onRemove={proposalId ? () => patch({ proposalId: null }) : null}
             editing={editing === 'proposal'}
             onClose={() => setEditing(null)}
-          >
-            {editing === 'proposal' && (
-              <PickerRow
-                busy={busy}
-                currentId={proposalId ?? null}
-                options={proposalOptions.map(p => ({ id: p.id, label: `${p.title}${p.orgName ? ` · ${p.orgName}` : ''}` }))}
-                onPick={(id) => patch({ proposalId: id })}
-                onClose={() => setEditing(null)}
-              />
-            )}
-          </LinkRow>
+            busy={busy}
+            currentId={proposalId ?? null}
+            options={proposalOptions.map(p => ({ id: p.id, label: `${p.title}${p.orgName ? ` · ${p.orgName}` : ''}` }))}
+            onPick={(id) => patch({ proposalId: id })}
+          />
         )}
       </div>
     </div>
@@ -303,7 +280,8 @@ export function LinkedToPanel({
 // ─── Subcomponents ─────────────────────────────────────────────────────────
 
 function LinkRow({
-  icon, label, valueLabel, valueHref, onChange, onRemove, editing, onClose, children,
+  icon, label, valueLabel, valueHref, onChange, onRemove, editing, onClose,
+  busy, currentId, options, onPick,
 }: {
   icon: React.ReactNode
   label: string
@@ -313,8 +291,12 @@ function LinkRow({
   onRemove: (() => void) | null
   editing: boolean
   onClose: () => void
-  children?: React.ReactNode
+  busy: boolean
+  currentId: string | null
+  options: Array<{ id: string; label: string }>
+  onPick: (id: string) => void
 }) {
+  const triggerRef = useRef<HTMLButtonElement>(null)
   return (
     <div>
       <div className="flex items-center" style={{ gap: 'var(--space-3)', flexWrap: 'wrap' }}>
@@ -334,8 +316,9 @@ function LinkRow({
           ) : (
             <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>Not linked</span>
           )}
-          <div className="flex items-center" style={{ gap: 'var(--space-1), marginLeft: auto' }}>
+          <div className="flex items-center" style={{ gap: 'var(--space-1)', marginLeft: 'auto' }}>
             <button
+              ref={triggerRef}
               onClick={editing ? onClose : onChange}
               className="inline-flex items-center"
               style={{
@@ -372,12 +355,27 @@ function LinkRow({
           </div>
         </div>
       </div>
-      {children}
+      <Popover
+        anchorRef={triggerRef}
+        open={editing}
+        onClose={onClose}
+        width="18rem"
+        align="end"
+        mobileFullWidth
+      >
+        <PickerPanel
+          busy={busy}
+          currentId={currentId}
+          options={options}
+          onPick={onPick}
+          onClose={onClose}
+        />
+      </Popover>
     </div>
   )
 }
 
-function PickerRow({
+function PickerPanel({
   busy, currentId, options, onPick, onClose,
 }: {
   busy: boolean
@@ -391,11 +389,7 @@ function PickerRow({
   return (
     <div
       style={{
-        marginTop: 'var(--space-2)',
         padding: 'var(--space-3)',
-        background: 'var(--color-bg-secondary)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-md)',
         display: 'grid',
         gap: 'var(--space-2)',
       }}
@@ -419,7 +413,7 @@ function PickerRow({
       />
       <div
         style={{
-          maxHeight: '12rem',
+          maxHeight: '14rem',
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
