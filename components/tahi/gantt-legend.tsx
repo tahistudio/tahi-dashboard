@@ -52,7 +52,11 @@ export function GanttLegend({ compact = false, light = true }: GanttLegendProps)
       <Item label="Sign-off gate" swatch={<Diamond />} />
       <Item label="Critical gate" swatch={<Diamond critical />} />
       <Divider color={subtleColor} />
-      <Item label="Risk of delay" swatch={<Swatch baseColor="#5A824E" overlay={RISK_OVERLAY} />} />
+      {/* Risk overlay sits over CLIENT (dark) bars in practice — that's
+          where the risk-of-delay flag actually appears most often (client-
+          owned dependencies). Showing it over Tahi-green was confusing
+          because it suggested Tahi was at risk, not the client task. */}
+      <Item label="Risk of delay" swatch={<Swatch baseColor="#1f2c1a" overlay={RISK_OVERLAY} />} />
     </div>
   )
 }

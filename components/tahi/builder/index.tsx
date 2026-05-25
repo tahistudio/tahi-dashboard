@@ -66,6 +66,26 @@ function BuilderStyles() {
         }
       }
 
+      /* Mobile-overflow safety: any content inside a builder
+         (gantt grids, wide tables, etc.) gets a horizontal scroll
+         WITHIN its container, instead of pushing the whole page out.
+         Without this, the schedule builder's gantt + RACI tables
+         force horizontal scroll on the entire page on phones. */
+      @media (max-width: 768px) {
+        .tahi-builder {
+          overflow-x: hidden;
+          max-width: 100vw;
+        }
+        .tahi-builder main,
+        .tahi-builder aside {
+          min-width: 0;
+          max-width: 100vw;
+        }
+        .tahi-builder .tahi-builder-rail-wide {
+          padding: 1rem 0.875rem !important;
+        }
+      }
+
       /* Legacy three-column layout — kept for callers that still split nav and
          rail. Folds rail under main below 1280px, stacks below 900px. */
       @media (max-width: 1280px) {

@@ -20,6 +20,7 @@
 'use client'
 
 import * as React from 'react'
+import { TahiIconMark, TahiStudioWordmark } from '@/components/tahi/tahi-glyphs'
 
 // ── Brand tokens (mirror the PDF) ─────────────────────────────────────────
 //
@@ -116,49 +117,58 @@ export function AccentTitle({
 
 // ── Brand mark (logo + wordmark) ──────────────────────────────────────────
 
+/**
+ * Brand mark for deliverable surfaces. Pulls from the design-system
+ * glyphs (TahiIconMark + TahiStudioWordmark) rather than the favicon
+ * image so the artwork stays crisp at any size and inherits brand
+ * tokens consistently across light/dark surfaces.
+ *
+ * Three configurations:
+ *   - layout="full"        TahiIconMark + TahiStudioWordmark side by side
+ *                          (used on the cover hero)
+ *   - layout="icon-only"   just TahiIconMark (page chrome on inner pages)
+ *   - layout="wordmark"    just TahiStudioWordmark (fallback / footer)
+ *
+ * variant controls light/dark inversion. 'dark' = on light surface,
+ * 'white' = on dark surface. Both flip glyph colours via the
+ * TahiIconMark's built-in on-dark/on-light prop.
+ */
 export function BrandMark({
   size = 'md',
   variant = 'dark',
+  layout = 'icon-only',
 }: {
-  size?: 'sm' | 'md'
-  /** 'dark' = dark ink on light bg (default). 'white' = white ink on
-   *  dark bg (cover hero etc.) */
+  size?: 'sm' | 'md' | 'lg'
   variant?: 'dark' | 'white'
+  layout?: 'full' | 'icon-only' | 'wordmark'
 }) {
-  const dim = size === 'sm' ? '1.125rem' : '1.4rem'
-  const font = size === 'sm' ? '0.75rem' : '0.875rem'
-  // Both variants render the leaf favicon icon + "Tahi Studio" wordmark
-  // text. White variant inverts the icon to a pale colour for dark
-  // surfaces (cover hero). Same shape, just inverted colours.
+  // Icon dimensions by size token
+  const iconPx = size === 'sm' ? 22 : size === 'md' ? 30 : 40
+  const wordmarkH = size === 'sm' ? 18 : size === 'md' ? 24 : 36
   const isWhite = variant === 'white'
-  const inkColor = isWhite ? BRAND.surface : BRAND.ink
+  const iconVariant = isWhite ? 'on-dark' : 'on-light'
+  const wordmarkColor = isWhite ? BRAND.surface : BRAND.ink
+
+  if (layout === 'icon-only') {
+    return (
+      <TahiIconMark size={iconPx} variant={iconVariant} title="Tahi Studio" />
+    )
+  }
+
+  if (layout === 'wordmark') {
+    return (
+      <span style={{ display: 'inline-flex', color: wordmarkColor }}>
+        <TahiStudioWordmark height={wordmarkH} />
+      </span>
+    )
+  }
+
+  // 'full' — icon + wordmark side by side. Used on the cover hero.
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/dashboard/favicon.png"
-        alt=""
-        aria-hidden="true"
-        style={{
-          width: dim,
-          height: dim,
-          display: 'block',
-          flexShrink: 0,
-          // Brighten + invert turns the dark-green favicon into a pale
-          // version that reads cleanly on the dark hero. Comparable to
-          // a hand-built pale asset.
-          filter: isWhite ? 'brightness(0) invert(1)' : undefined,
-        }}
-      />
-      <span
-        style={{
-          fontSize: font,
-          fontWeight: 700,
-          color: inkColor,
-          letterSpacing: '-0.01em',
-        }}
-      >
-        Tahi Studio
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: size === 'lg' ? '0.875rem' : '0.625rem' }}>
+      <TahiIconMark size={iconPx} variant={iconVariant} title="Tahi Studio" />
+      <span style={{ display: 'inline-flex', color: wordmarkColor }}>
+        <TahiStudioWordmark height={wordmarkH} />
       </span>
     </div>
   )
@@ -208,7 +218,9 @@ export function PageChrome({
           borderBottom: `1px solid ${BRAND.borderSubtle}`,
         }}
       >
-        <BrandMark size="sm" />
+        {/* Inner section pages: icon-only, per the spec. Cover gets full
+            wordmark; subsequent pages get just the leaf mark. */}
+        <BrandMark size="sm" layout="icon-only" />
         {(sectionNumber || sectionName) && (
           <span
             style={{
@@ -355,14 +367,14 @@ export function CoverPage({
         boxShadow: '0 16px 48px rgba(31, 44, 26, 0.24)',
       }}
     >
-      {/* Top brand mark — pale wordmark variant on the dark hero */}
+      {/* Top brand mark — full TahiStudio wordmark + icon on the dark hero */}
       <div
         style={{
           position: 'relative',
           padding: 'clamp(1.25rem, 4vw, 2.5rem) clamp(1.25rem, 4vw, 3rem) 0',
         }}
       >
-        <BrandMark size="md" variant="white" />
+        <BrandMark size="md" variant="white" layout="full" />
       </div>
 
       {/* Center stack */}

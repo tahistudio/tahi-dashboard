@@ -214,7 +214,7 @@ export function ScheduleViewer(props: ScheduleViewerProps) {
 
       {/* Footer */}
       <footer style={footer}>
-        <BrandMark size="sm" />
+        <BrandMark size="sm" layout="icon-only" />
         <span style={{ fontSize: '0.6875rem', color: BRAND.subtle }}>
           Confidential · prepared {fmtDate(schedule.effectiveDate) ?? 'this period'}
         </span>
