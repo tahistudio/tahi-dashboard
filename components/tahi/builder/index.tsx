@@ -663,7 +663,11 @@ export function BuilderEditorShell({
   actions?: React.ReactNode
 }) {
   return (
-    <div style={{ maxWidth: '52rem', margin: '0 auto' }}>
+    // Span the full builder-main column with no inner max — the column
+    // itself is already constrained by the sidebar + rail. Editors get
+    // the room they need (especially gantt grids + tables); the
+    // builderMain padding gives breathing room from the edges.
+    <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
         <div>
           <div style={{ fontSize: '0.625rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
