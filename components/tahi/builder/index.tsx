@@ -134,17 +134,12 @@ function BuilderStyles() {
         to { opacity: 1; transform: translateY(0); }
       }
       .tahi-builder .nav-item-hover:hover { background: var(--color-bg-secondary) !important; }
+      /* Active row matches the sidebar's leaf-active treatment: brand-100
+         tint, leaf-sm corner, no left bar. Keeps the visual language
+         consistent across navigation surfaces. */
       .tahi-builder .nav-item-active {
-        background: linear-gradient(135deg, var(--color-brand-50) 0%, transparent 100%) !important;
-        color: var(--color-text) !important;
-      }
-      .tahi-builder .nav-item-active::before {
-        content: '';
-        position: absolute;
-        left: 0; top: 0.625rem; bottom: 0.625rem;
-        width: 0.1875rem;
-        background: var(--color-brand);
-        border-radius: 0 0.1875rem 0.1875rem 0;
+        background: var(--color-brand-100) !important;
+        color: var(--color-text-active) !important;
       }
     `}</style>
   )
@@ -561,7 +556,9 @@ export function BuilderNavItem({
         padding: '0.5rem 0.625rem',
         background: 'transparent',
         border: 'none',
-        borderRadius: 'var(--radius-sm)',
+        // Active row uses the leaf-sm corner (same as the sidebar's active
+        // nav link); idle rows keep the soft square.
+        borderRadius: active ? 'var(--radius-leaf-sm)' : 'var(--radius-sm)',
         textAlign: 'left',
         cursor: 'pointer',
         color: 'var(--color-text-muted)',
