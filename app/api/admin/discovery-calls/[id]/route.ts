@@ -59,7 +59,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const stringFields = [
     'title', 'scheduledAt', 'googleMeetUrl', 'googleCalendarEventId',
     'status', 'transcriptSource', 'summary', 'outcome', 'outcomeNotes',
-    'scopeNotes', 'budgetCurrency', 'timeline',
+    'scopeNotes', 'budgetCurrency', 'timeline', 'meetingType',
   ] as const
   for (const f of stringFields) {
     if (f in body) {
