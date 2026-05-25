@@ -81,12 +81,17 @@ function BuilderStyles() {
           min-width: 0;
           max-width: 100vw;
         }
-        /* Breathing room for the rail on phones — earlier values
-           (~0.875rem) pushed the LinkedToPanel and meta cards too close
-           to the screen edge. Bump to 1.25rem so content has consistent
-           gutters with the editor body above it. */
+        /* On phones the rail's white background was running edge-to-edge,
+           so it visually looked wider than the editor's white card above
+           it (which sits inside main's clamp(1rem, 3vw, 2.5rem) gutter).
+           Mirror that gutter with horizontal margin + a soft radius so
+           the rail reads as a sibling card, not a full-bleed sheet. */
         .tahi-builder .tahi-builder-rail-wide {
-          padding: 1rem 1.25rem !important;
+          margin: 0 clamp(1rem, 3vw, 2.5rem) clamp(1rem, 3vw, 2.5rem) !important;
+          padding: 1rem !important;
+          border-top: none !important;
+          border: 1px solid var(--color-border-subtle) !important;
+          border-radius: 0.875rem !important;
         }
         /* Hide the inline save indicator on phones — the header is
            already cramped with title + status pill + actions. Saves
