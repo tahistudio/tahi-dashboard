@@ -6,13 +6,12 @@ import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Plus, Trash2, AlertTriangle, Share2, Copy, ExternalLink, Mail, Eye,
   Diamond, FileText, ChevronUp, ChevronDown, BarChart3, GitBranch, Grid3x3, AlignLeft,
-  BookmarkPlus, Menu,
+  BookmarkPlus,
 } from 'lucide-react'
 import { EmailShareModal, type EmailRecipientSuggestion } from '@/components/tahi/email-share-modal'
 import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { PromptDialog } from '@/components/tahi/prompt-dialog'
-import { SlideOver } from '@/components/tahi/slide-over'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { GanttGrid, type GanttRow, type RowOwner, type RowType } from '@/components/tahi/gantt-grid'
@@ -133,7 +132,6 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   const [moreMenuOpen, setMoreMenuOpen] = useState(false)
   const [showAddSectionMenu, setShowAddSectionMenu] = useState(false)
   const [showSaveTemplate, setShowSaveTemplate] = useState(false)
-  const [mobileRailOpen, setMobileRailOpen] = useState(false)
 
   // Save indicator state — tracks in-flight saves and the most recent
   // successful save timestamp. trackSave wraps any promise so the
@@ -531,16 +529,14 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
     ? `${typeof window !== 'undefined' ? window.location.origin : ''}/dashboard/p/schedule/${schedule.publicShareToken}`
     : null
 
-  // Rail content — rendered inline on desktop (inside the right aside) and
-  // again inside a SlideOver on mobile (triggered by the Menu button in the
-  // header). Hiding the inline aside on mobile is the only way to stop the
-  // rail card pushing the editor down on narrow viewports.
+  // Rail content — rendered inline on the right aside. Extracted into a
+  // variable for readability since the JSX runs long.
   const railBody = (
     <>
       <BuilderNavGroup label="Schedule" count={1 + sortedSections.length}>
         <BuilderNavItem
           active={activeView === 'cover'}
-          onClick={() => { setActiveView('cover'); setMobileRailOpen(false) }}
+          onClick={() => setActiveView('cover')}
           number={1}
           icon={<FileText size={12} />}
           label="Cover"
@@ -550,7 +546,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
           <BuilderNavItem
             key={s.id}
             active={activeView === `section:${s.id}`}
-            onClick={() => { setActiveView(`section:${s.id}`); setMobileRailOpen(false) }}
+            onClick={() => setActiveView(`section:${s.id}`)}
             number={i + 2}
             icon={sectionIcon(s.type)}
             label={s.title || SECTION_LABEL[s.type]}
@@ -572,7 +568,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         <BuilderNavGroup label="More">
           <BuilderNavItem
             active={activeView === 'analytics'}
-            onClick={() => { setActiveView('analytics'); setMobileRailOpen(false) }}
+            onClick={() => setActiveView('analytics')}
             icon={<BarChart3 size={12} />}
             label="Analytics"
             hint="View, time on page"
@@ -734,10 +730,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   )
 
   return (
-    <BuilderShell className="schedule-builder rail-mobile-popover">
-      {/* Mobile rule defined in BuilderStyles: ".rail-mobile-popover"
-          hides the inline rail and the "schedule-mobile-rail-btn" class
-          on the trigger hides it above 768px. */}
+    <BuilderShell className="schedule-builder">
       {/* Sticky top bar: back link, inline title edit, status pill, save state, actions */}
       <header style={builderHeader}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', minWidth: 0, flex: 1 }}>
@@ -764,22 +757,6 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
-          <button
-            onClick={() => setMobileRailOpen(true)}
-            className="schedule-mobile-rail-btn inline-flex items-center justify-center"
-            aria-label="Open schedule menu"
-            style={{
-              width: '2rem',
-              height: '2rem',
-              borderRadius: '0.5rem',
-              border: '1px solid var(--color-border)',
-              background: 'var(--color-bg)',
-              color: 'var(--color-text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            <Menu size={15} />
-          </button>
           {publicUrl ? (
             <button
               onClick={() => { void ensureContacts(); setShowEmail(true) }}
@@ -869,27 +846,11 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
           )}
         </main>
 
-        {/* Right rail — navigator + public link + metadata combined.
-            Hidden below 768px (see <style> above); the same content
-            renders inside the mobileRailOpen SlideOver instead. */}
+        {/* Right rail — navigator + public link + metadata combined */}
         <aside style={builderRailWide} className="tahi-builder-rail-wide">
           {railBody}
         </aside>
       </div>
-
-      <SlideOver
-        open={mobileRailOpen}
-        onClose={() => setMobileRailOpen(false)}
-        title="Schedule menu"
-        icon={<Menu size={15} />}
-        maxWidth="22rem"
-      >
-        <SlideOver.Body>
-          <div style={{ padding: '1rem', display: 'grid', gap: '0.625rem' }}>
-            {railBody}
-          </div>
-        </SlideOver.Body>
-      </SlideOver>
 
       <EmailShareModal
         open={showEmail}

@@ -81,32 +81,18 @@ function BuilderStyles() {
           min-width: 0;
           max-width: 100vw;
         }
+        /* Breathing room for the rail on phones — earlier values
+           (~0.875rem) pushed the LinkedToPanel and meta cards too close
+           to the screen edge. Bump to 1.25rem so content has consistent
+           gutters with the editor body above it. */
         .tahi-builder .tahi-builder-rail-wide {
-          padding: 1rem 0.875rem !important;
+          padding: 1rem 1.25rem !important;
         }
         /* Hide the inline save indicator on phones — the header is
            already cramped with title + status pill + actions. Saves
            still fire silently; if the caller wants a visible signal
            they can listen for the savingCount transition and toast. */
         .tahi-builder .tahi-builder-save-indicator {
-          display: none !important;
-        }
-        /* Opt-in: pages that mount the rail content inside a SlideOver
-           on phones (see schedule-detail) add this class to the
-           BuilderShell. Hides the inline rail entirely and collapses
-           the single-rail grid to one column so the editor uses the
-           full width. */
-        .tahi-builder.rail-mobile-popover .tahi-builder-rail-wide {
-          display: none !important;
-        }
-        .tahi-builder.rail-mobile-popover .tahi-builder-grid-single {
-          grid-template-columns: 1fr !important;
-        }
-      }
-      /* The Menu trigger button is mobile-only — hide it on tablet+
-         where the inline rail is already visible. */
-      @media (min-width: 769px) {
-        .tahi-builder .schedule-mobile-rail-btn {
           display: none !important;
         }
       }
