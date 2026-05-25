@@ -156,29 +156,36 @@ export function ScheduleViewer(props: ScheduleViewerProps) {
 
   return (
     <div style={pageWrap}>
-      {/* Preview-mode pill — visible to admins viewing the live state */}
+      {/* Preview-mode pill — visible to admins viewing the live state.
+          nowrap so the chip stays as a single pill on mobile; on very
+          narrow screens it stays a horizontal capsule rather than
+          breaking into two lines. */}
       {isPreview && (
         <div
           style={{
             position: 'fixed',
-            top: '1rem',
+            top: '0.75rem',
             left: '50%',
             transform: 'translateX(-50%)',
             zIndex: 50,
-            padding: '0.5rem 1rem',
+            maxWidth: 'calc(100vw - 1rem)',
+            padding: '0.4375rem 0.875rem',
             background: BRAND.ink,
             color: BRAND.surface,
             borderRadius: '999px',
-            fontSize: '0.75rem',
+            fontSize: 'clamp(0.625rem, 2.5vw, 0.75rem)',
             fontWeight: 600,
             letterSpacing: '0.04em',
             boxShadow: '0 8px 24px rgba(31, 44, 26, 0.25)',
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '0.5rem',
+            gap: '0.4375rem',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
           }}
         >
-          <span style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: '#93c98a' }} />
+          <span style={{ width: '0.4375rem', height: '0.4375rem', borderRadius: '50%', background: '#93c98a', flexShrink: 0 }} />
           Admin preview · live, unpublished state
         </div>
       )}

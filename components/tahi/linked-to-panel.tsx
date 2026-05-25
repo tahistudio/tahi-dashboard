@@ -15,13 +15,14 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
-import { Building2, TrendingUp, FileText, Link2, X, ChevronDown } from 'lucide-react'
+import { Building2, TrendingUp, FileText, Link2, X, ChevronDown, UserPlus } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 
 interface OrgOption { id: string; name: string }
 interface DealOption { id: string; title: string; orgId: string | null; orgName: string | null; stageName: string | null }
 interface ProposalOption { id: string; title: string; orgId: string | null; orgName: string | null; status: string }
+interface LeadOption { id: string; name: string; company: string | null; status: string }
 
 interface Props {
   /** Which resource to patch. Drives the PATCH endpoint and which fields show. */
@@ -30,12 +31,16 @@ interface Props {
   /** Current values from the loaded resource. */
   orgId: string | null
   dealId: string | null
+  /** Lead linkage — only schedules support this today (migration 0049).
+   *  Hidden on resource types that don't have a lead_id column. */
+  leadId?: string | null
   /** Only used for schedule + contract. Null/undefined for proposal (it doesn't link to other proposals). */
   proposalId?: string | null
   /** Display labels — provided by the parent so we don't re-fetch on mount. */
   orgName?: string | null
   dealTitle?: string | null
   proposalTitle?: string | null
+  leadName?: string | null
   /** Called after a successful PATCH so the parent can refresh its state. */
   onChanged?: () => void
 }
@@ -47,19 +52,23 @@ const resourceLabel = {
 } as const
 
 export function LinkedToPanel({
-  resourceType, resourceId, orgId, dealId, proposalId, orgName: orgNameProp, dealTitle: dealTitleProp, proposalTitle: proposalTitleProp, onChanged,
+  resourceType, resourceId, orgId, dealId, leadId, proposalId,
+  orgName: orgNameProp, dealTitle: dealTitleProp, proposalTitle: proposalTitleProp, leadName: leadNameProp,
+  onChanged,
 }: Props) {
   const { showToast } = useToast()
-  const [editing, setEditing] = useState<null | 'org' | 'deal' | 'proposal'>(null)
+  const [editing, setEditing] = useState<null | 'org' | 'deal' | 'proposal' | 'lead'>(null)
   const [orgs, setOrgs] = useState<OrgOption[]>([])
   const [deals, setDeals] = useState<DealOption[]>([])
   const [proposals, setProposals] = useState<ProposalOption[]>([])
+  const [leads, setLeads] = useState<LeadOption[]>([])
   const [busy, setBusy] = useState(false)
   // Resolved labels — start with the props if provided, fall back to looking
   // up in the loaded option lists once they've been fetched.
   const [resolvedOrgName, setResolvedOrgName] = useState<string | null>(orgNameProp ?? null)
   const [resolvedDealTitle, setResolvedDealTitle] = useState<string | null>(dealTitleProp ?? null)
   const [resolvedProposalTitle, setResolvedProposalTitle] = useState<string | null>(proposalTitleProp ?? null)
+  const [resolvedLeadName, setResolvedLeadName] = useState<string | null>(leadNameProp ?? null)
 
   // Eagerly fetch enough to render the current labels when the parent
   // didn't supply them. Skip lookups when the link is null or already named.
@@ -94,14 +103,29 @@ export function LinkedToPanel({
       const hit = list.find(p => p.id === proposalId)
       if (hit) setResolvedProposalTitle(hit.title)
     }
-    void resolveOrg(); void resolveDeal(); void resolveProposal()
+    async function resolveLead() {
+      if (!leadId || resolvedLeadName) return
+      const r = await fetch(apiPath('/api/admin/leads')).catch(() => null)
+      if (!r?.ok || cancelled) return
+      const data = await r.json() as { items?: LeadOption[] }
+      const list = data.items ?? []
+      setLeads(list)
+      const hit = list.find(l => l.id === leadId)
+      if (hit) setResolvedLeadName(hit.name)
+    }
+    void resolveOrg(); void resolveDeal(); void resolveProposal(); void resolveLead()
     return () => { cancelled = true }
-  }, [orgId, dealId, proposalId, resolvedOrgName, resolvedDealTitle, resolvedProposalTitle])
+  }, [orgId, dealId, proposalId, leadId, resolvedOrgName, resolvedDealTitle, resolvedProposalTitle, resolvedLeadName])
 
   const orgName = resolvedOrgName
   const dealTitle = resolvedDealTitle
   const proposalTitle = resolvedProposalTitle
+  const leadName = resolvedLeadName
   const showProposalRow = resourceType !== 'proposal'
+  // Lead row only on schedules today (the only resource that has a
+  // lead_id column after migration 0049). Easy to extend to contracts/
+  // proposals later by adding the column + relaxing this check.
+  const showLeadRow = resourceType === 'schedule'
 
   // Lazy-load options when an editor opens.
   useEffect(() => {
@@ -130,11 +154,18 @@ export function LinkedToPanel({
             setProposals(data.items ?? [])
           }
         }
+        if (editing === 'lead' && leads.length === 0) {
+          const r = await fetch(apiPath('/api/admin/leads'))
+          if (r.ok && !cancelled) {
+            const data = await r.json() as { items?: LeadOption[] }
+            setLeads(data.items ?? [])
+          }
+        }
       } catch { /* silent */ }
     }
     void load()
     return () => { cancelled = true }
-  }, [editing, orgs.length, deals.length, proposals.length])
+  }, [editing, orgs.length, deals.length, proposals.length, leads.length])
 
   // Patch the resource via its detail endpoint.
   const patch = useCallback(async (changes: Record<string, string | null>) => {
@@ -218,6 +249,29 @@ export function LinkedToPanel({
             />
           )}
         </LinkRow>
+
+        {showLeadRow && (
+          <LinkRow
+            icon={<UserPlus className="w-3.5 h-3.5" />}
+            label="Lead"
+            valueLabel={leadName ?? null}
+            valueHref={leadId ? `/leads/${leadId}` : null}
+            onChange={() => setEditing('lead')}
+            onRemove={leadId ? () => patch({ leadId: null }) : null}
+            editing={editing === 'lead'}
+            onClose={() => setEditing(null)}
+          >
+            {editing === 'lead' && (
+              <PickerRow
+                busy={busy}
+                currentId={leadId ?? null}
+                options={leads.map(l => ({ id: l.id, label: `${l.name}${l.company ? ` · ${l.company}` : ''}${l.status ? ` · ${l.status}` : ''}` }))}
+                onPick={(id) => patch({ leadId: id })}
+                onClose={() => setEditing(null)}
+              />
+            )}
+          </LinkRow>
+        )}
 
         {showProposalRow && (
           <LinkRow

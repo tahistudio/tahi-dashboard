@@ -30,6 +30,7 @@ interface Schedule {
   id: string
   orgId: string | null
   dealId: string | null
+  leadId: string | null
   proposalId: string | null
   title: string
   subtitle: string | null
@@ -44,6 +45,7 @@ interface Schedule {
   publicSharedAt: string | null
   orgName: string | null
   dealTitle: string | null
+  leadName: string | null
   createdAt: string
   updatedAt: string
 }
@@ -760,9 +762,11 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
               resourceId={scheduleId}
               orgId={schedule.orgId}
               dealId={schedule.dealId}
+              leadId={schedule.leadId}
               proposalId={schedule.proposalId}
               orgName={schedule.orgName}
               dealTitle={schedule.dealTitle}
+              leadName={schedule.leadName}
               onChanged={() => void fetchAll({ silent: true })}
             />
           </RailSection>
