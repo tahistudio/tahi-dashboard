@@ -734,18 +734,10 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   )
 
   return (
-    <BuilderShell className="schedule-builder">
-      {/* Hide the inline rail on phones — its content moves into a SlideOver
-          triggered by the Menu button in the header. */}
-      <style>{`
-        @media (max-width: 768px) {
-          .schedule-builder .tahi-builder-rail-wide { display: none !important; }
-          .schedule-builder .tahi-builder-grid-single { grid-template-columns: 1fr !important; }
-        }
-        @media (min-width: 769px) {
-          .schedule-builder .schedule-mobile-rail-btn { display: none !important; }
-        }
-      `}</style>
+    <BuilderShell className="schedule-builder rail-mobile-popover">
+      {/* Mobile rule defined in BuilderStyles: ".rail-mobile-popover"
+          hides the inline rail and the "schedule-mobile-rail-btn" class
+          on the trigger hides it above 768px. */}
       {/* Sticky top bar: back link, inline title edit, status pill, save state, actions */}
       <header style={builderHeader}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', minWidth: 0, flex: 1 }}>

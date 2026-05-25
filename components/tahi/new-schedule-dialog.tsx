@@ -82,16 +82,16 @@ export function NewScheduleDialog({ open, onClose, templates, onCreated, default
       ])
       if (cancelled) return
       if (oRes?.ok) {
-        const data = await oRes.json() as { clients?: OrgOption[] }
-        setOrgs(data.clients ?? [])
+        const data = await oRes.json() as { organisations?: OrgOption[]; clients?: OrgOption[] }
+        setOrgs(data.organisations ?? data.clients ?? [])
       }
       if (dRes?.ok) {
         const data = await dRes.json() as { items?: DealOption[]; deals?: DealOption[] }
         setDeals(data.items ?? data.deals ?? [])
       }
       if (lRes?.ok) {
-        const data = await lRes.json() as { items?: LeadOption[] }
-        setLeads(data.items ?? [])
+        const data = await lRes.json() as { leads?: LeadOption[]; items?: LeadOption[] }
+        setLeads(data.leads ?? data.items ?? [])
       }
     }
     void load()

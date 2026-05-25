@@ -79,8 +79,8 @@ export function LinkedToPanel({
       if (!orgId || resolvedOrgName) return
       const r = await fetch(apiPath('/api/admin/clients')).catch(() => null)
       if (!r?.ok || cancelled) return
-      const data = await r.json() as { clients?: OrgOption[] }
-      setOrgs(data.clients ?? [])
+      const data = await r.json() as { organisations?: OrgOption[]; clients?: OrgOption[] }
+      setOrgs(data.organisations ?? data.clients ?? [])
       const hit = (data.clients ?? []).find(o => o.id === orgId)
       if (hit) setResolvedOrgName(hit.name)
     }
@@ -108,8 +108,8 @@ export function LinkedToPanel({
       if (!leadId || resolvedLeadName) return
       const r = await fetch(apiPath('/api/admin/leads')).catch(() => null)
       if (!r?.ok || cancelled) return
-      const data = await r.json() as { items?: LeadOption[] }
-      const list = data.items ?? []
+      const data = await r.json() as { leads?: LeadOption[]; items?: LeadOption[] }
+      const list = data.leads ?? data.items ?? []
       setLeads(list)
       const hit = list.find(l => l.id === leadId)
       if (hit) setResolvedLeadName(hit.name)
@@ -137,8 +137,8 @@ export function LinkedToPanel({
         if (editing === 'org' && orgs.length === 0) {
           const r = await fetch(apiPath('/api/admin/clients'))
           if (r.ok && !cancelled) {
-            const data = await r.json() as { clients?: OrgOption[] }
-            setOrgs(data.clients ?? [])
+            const data = await r.json() as { organisations?: OrgOption[]; clients?: OrgOption[] }
+            setOrgs(data.organisations ?? data.clients ?? [])
           }
         }
         if (editing === 'deal' && deals.length === 0) {
@@ -158,8 +158,8 @@ export function LinkedToPanel({
         if (editing === 'lead' && leads.length === 0) {
           const r = await fetch(apiPath('/api/admin/leads'))
           if (r.ok && !cancelled) {
-            const data = await r.json() as { items?: LeadOption[] }
-            setLeads(data.items ?? [])
+            const data = await r.json() as { leads?: LeadOption[]; items?: LeadOption[] }
+            setLeads(data.leads ?? data.items ?? [])
           }
         }
       } catch { /* silent */ }

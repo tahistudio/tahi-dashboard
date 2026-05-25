@@ -91,6 +91,24 @@ function BuilderStyles() {
         .tahi-builder .tahi-builder-save-indicator {
           display: none !important;
         }
+        /* Opt-in: pages that mount the rail content inside a SlideOver
+           on phones (see schedule-detail) add this class to the
+           BuilderShell. Hides the inline rail entirely and collapses
+           the single-rail grid to one column so the editor uses the
+           full width. */
+        .tahi-builder.rail-mobile-popover .tahi-builder-rail-wide {
+          display: none !important;
+        }
+        .tahi-builder.rail-mobile-popover .tahi-builder-grid-single {
+          grid-template-columns: 1fr !important;
+        }
+      }
+      /* The Menu trigger button is mobile-only — hide it on tablet+
+         where the inline rail is already visible. */
+      @media (min-width: 769px) {
+        .tahi-builder .schedule-mobile-rail-btn {
+          display: none !important;
+        }
       }
 
       /* Legacy three-column layout — kept for callers that still split nav and
