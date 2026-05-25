@@ -347,13 +347,17 @@ const TOOLS: ToolDef[] = [
     expiresAt: prop('string', 'ISO timestamp when contract expires (optional)'),
     signers: { type: 'array', description: 'Initial signers [{role, name, email, position?}]', items: { type: 'object' } },
   }, ['name']),
-  tool('update_contract', 'Patch an existing contract. Only provided fields are updated.', {
+  tool('update_contract', 'Patch an existing contract. Only provided fields are updated. Linkage fields (orgId, dealId, leadId, proposalId) accept null to detach.', {
     contractId: prop('string', 'Contract ID'),
     name: prop('string', 'Updated name'),
     status: prop('string', 'Updated status'),
     bodyHtml: prop('string', 'Updated body HTML'),
     expiresAt: prop('string', 'Updated expiry timestamp'),
     variableValues: { type: 'object', description: 'Updated variable values' },
+    orgId: prop('string', 'Linked organisation ID (null detaches)'),
+    dealId: prop('string', 'Linked deal ID (null detaches)'),
+    leadId: prop('string', 'Linked lead ID (null detaches). Added in migration 0053.'),
+    proposalId: prop('string', 'Linked proposal ID (null detaches)'),
   }, ['contractId']),
   tool('delete_contract', 'Delete a contract. Cascades to signers and signatures.', {
     contractId: prop('string', 'Contract ID'),
@@ -396,7 +400,7 @@ const TOOLS: ToolDef[] = [
   tool('get_lead', 'Get a lead with its activity timeline', {
     leadId: prop('string', 'Lead ID'),
   }, ['leadId']),
-  tool('create_lead', 'Create a new lead. Person identity is resolved via lookup-or-create on email — same person across roles.', {
+  tool('create_lead', 'Create a new lead. Person identity is resolved via lookup-or-create on email — same person across roles. Optional firmographic fields (industry, employeeCount, revenueBand, monthlyVisits, leadType, country, yearFounded, linkedinUrl, linkedinPersonalUrl, cms, techStack) are accepted.', {
     name: prop('string', 'Person full name'),
     email: prop('string', 'Person email'),
     phone: prop('string', 'Phone number'),
@@ -410,8 +414,19 @@ const TOOLS: ToolDef[] = [
     estimatedValue: prop('number', 'Heuristic deal-size estimate'),
     currency: prop('string', 'Currency code. Default "NZD".'),
     ownerId: prop('string', 'Owner team-member ID. Defaults to the calling user.'),
+    industry: prop('string', 'Industry / vertical'),
+    employeeCount: prop('number', 'Approx headcount'),
+    revenueBand: prop('string', 'Revenue band'),
+    monthlyVisits: prop('number', 'Approx monthly website visitors'),
+    leadType: prop('string', 'warm | cold | referral | inbound | partner'),
+    country: prop('string', 'ISO country code or country name'),
+    yearFounded: prop('number', 'Year the company was founded'),
+    linkedinUrl: prop('string', 'Company LinkedIn URL'),
+    linkedinPersonalUrl: prop('string', 'Personal LinkedIn URL'),
+    cms: prop('string', 'Detected CMS / platform'),
+    techStack: { type: 'array', items: { type: 'string' }, description: 'Tech stack tokens (Webflow, GA4, Klaviyo, etc).' },
   }, ['name']),
-  tool('update_lead', 'Update a lead. Status flips to "archived" also stamp archiveReason on the activity stream.', {
+  tool('update_lead', 'Update a lead. Status flips to "archived" also stamp archiveReason on the activity stream. All firmographic fields (industry, employeeCount, revenueBand, monthlyVisits, leadType, country, yearFounded, linkedinUrl, linkedinPersonalUrl, cms, techStack) are accepted — set to null to clear.', {
     leadId: prop('string', 'Lead ID'),
     name: prop('string', 'Updated person full name'),
     email: prop('string', 'Updated email'),
@@ -427,6 +442,19 @@ const TOOLS: ToolDef[] = [
     status: prop('string', 'new | qualifying | nurturing | promoted | archived'),
     archiveReason: prop('string', 'Why archived (only used when status flips to archived)'),
     ownerId: prop('string', 'New owner team-member ID'),
+    // Firmographics (migration 0047 — promoted out of the brief blob).
+    industry: prop('string', 'Industry / vertical (free text)'),
+    employeeCount: prop('number', 'Approx headcount'),
+    revenueBand: prop('string', 'Revenue band (e.g. "$1M-5M", "<$500k")'),
+    monthlyVisits: prop('number', 'Approx monthly website visitors'),
+    leadType: prop('string', 'Lead type: warm | cold | referral | inbound | partner'),
+    country: prop('string', 'ISO country code or country name'),
+    yearFounded: prop('number', 'Year the company was founded'),
+    linkedinUrl: prop('string', 'Company LinkedIn URL'),
+    linkedinPersonalUrl: prop('string', 'Personal LinkedIn URL for the contact'),
+    cms: prop('string', 'Detected CMS / platform (Webflow, Shopify, WordPress, etc)'),
+    techStack: { type: 'array', items: { type: 'string' }, description: 'Detected tech stack (Webflow, GA4, Klaviyo, etc). Pass an array of strings; the API accepts JSON-stringified arrays too.' },
+    affiliateCode: prop('string', 'Referral code attribution'),
   }, ['leadId']),
   tool('delete_lead', 'Delete a lead. Person row is preserved (other roles still apply).', {
     leadId: prop('string', 'Lead ID'),
@@ -478,14 +506,15 @@ const TOOLS: ToolDef[] = [
     googleMeetUrl: prop('string', 'Optional — paste the Google Meet link from Calendar'),
     googleCalendarEventId: prop('string', 'Optional — set when wired via Calendar sync (Phase 2)'),
   }, ['leadId', 'title', 'scheduledAt']),
-  tool('update_lead_call', 'Update a discovery call. Accepts any subset of pre-call fields (title, scheduledAt, durationMinutes, googleMeetUrl, status) and post-call fields (transcript, summary, outcome, outcomeNotes, scopeNotes, budgetMin/Max/Currency, timeline). When status flips to "completed" OR outcome is set for the first time, a lead_call_completed activity is written.', {
+  tool('update_lead_call', 'Update a discovery call. Accepts any subset of pre-call fields (title, scheduledAt, durationMinutes, googleMeetUrl, status, meetingType) and post-call fields (transcript, summary, outcome, outcomeNotes, scopeNotes, budgetMin/Max/Currency, timeline). When status flips to "completed" OR outcome is set for the first time, a lead_call_completed activity is written.', {
     callId: prop('string', 'Discovery call ID'),
     title: prop('string', 'Call title'),
     scheduledAt: prop('string', 'ISO 8601 datetime'),
     durationMinutes: prop('number', 'Length in minutes'),
     status: prop('string', 'scheduled | completed | cancelled | no_show | rescheduled'),
+    meetingType: prop('string', 'Classifier: discovery | client | partnership | unclassified. Calendar sync sets this automatically; pass it here to reclassify.'),
     googleMeetUrl: prop('string', 'Meet link'),
-    transcript: prop('string', 'Paste the Gemini / Whisper transcript. Capped at 50k chars at the API layer.'),
+    transcript: prop('string', 'Paste the Gemini / Whisper transcript. Capped at 250k chars at the API layer.'),
     transcriptSource: prop('string', 'gemini_meet | manual_paste | whisper_api'),
     summary: prop('string', '2-3 line headline of the call'),
     outcome: prop('string', 'good_call | promote | nurture | archive | no_show'),
@@ -501,7 +530,7 @@ const TOOLS: ToolDef[] = [
     outcome: prop('string', 'good_call | promote | nurture | archive | no_show'),
     summary: prop('string', '2-3 line headline of the call'),
     scopeNotes: prop('string', 'Pages, design, integrations, etc'),
-    transcript: prop('string', 'Full transcript (capped at 50k chars)'),
+    transcript: prop('string', 'Full transcript (capped at 250k chars)'),
     budgetMin: prop('number', 'Low end of budget signal'),
     budgetMax: prop('number', 'High end of budget signal'),
     budgetCurrency: prop('string', 'Currency code'),
@@ -624,6 +653,7 @@ const TOOLS: ToolDef[] = [
   }, ['dealId']),
 
   // ── Cron-style endpoints (admin-triggered, idempotent) ───────────────
+  tool('list_crons', 'List every scheduled job (pre-call digest, auto-promote, affiliate reactivation, daily summary, leads AI, calendar sync, drive transcripts) with each one\'s last-run status + summary + duration + most recent 10 runs. Reads from cron_runs (migration 0051).'),
   tool('cron_auto_promote_calls', 'Scans completed discovery_calls where outcome=\'promote\' and the linked lead isn\'t already promoted. Auto-creates a deal seeded with the call\'s budget signal + scope/summary notes. Idempotent via activity stamp dedup (30-day window).'),
   tool('cron_daily_summary', 'Computes day-over-day metrics (new leads, scoring, calls, replies, promotions) and pushes a single in-app notification to the default lead owner. Skip if a daily_summary was already pushed in the last 23h.'),
   tool('cron_affiliate_reactivation', 'Finds affiliateCode values that haven\'t sent a lead in the last 60 days (default), pushes a reactivation notification for each. Capped at 5 notifications per run; 30-day dedup per code.'),
@@ -661,7 +691,12 @@ const TOOLS: ToolDef[] = [
   }, ['posts']),
 
   // ── Calls ─────────────────────────────────────────────────────────────
-  tool('list_calls', 'List all scheduled calls'),
+  tool('list_calls', 'List all scheduled calls (legacy scheduled_calls table — client check-ins added manually). Use list_all_calls for the unified post-classifier list that also covers Google Calendar pull.'),
+  tool('list_all_calls', 'Unified list of every call from discovery_calls (the post-classifier polymorphic table). Returns lead-attached + client check-ins + partnership + unclassified rows with parent context (lead/deal/org name) and classification. Filters: type (discovery|client|partnership|unclassified), since/until ISO dates.', {
+    type: prop('string', 'Filter by meetingType: discovery | client | partnership | unclassified'),
+    since: prop('string', 'ISO datetime — earliest scheduledAt to include. Defaults to 60 days ago.'),
+    until: prop('string', 'ISO datetime — latest scheduledAt to include. Defaults to 60 days ahead.'),
+  }),
   tool('create_call', 'Schedule a new call with a client', {
     orgId: prop('string', 'Client organisation ID'),
     title: prop('string', 'Call title'),
@@ -698,7 +733,7 @@ const TOOLS: ToolDef[] = [
     templateId: prop('string', 'Schedule template ID — instantiates sections + rows from the template snapshot. Body fields override template meta when set.'),
     rows: { type: 'array', description: 'Optional initial rows (legacy — prefer templateId)', items: { type: 'object' } },
   }),
-  tool('update_schedule', 'Update a schedule\'s top-level metadata. Pass any subset.', {
+  tool('update_schedule', 'Update a schedule\'s top-level metadata. Pass any subset. Linkage fields (orgId, dealId, leadId, proposalId) accept null to detach.', {
     scheduleId: prop('string', 'Schedule ID'),
     title: prop('string', 'New title'),
     subtitle: prop('string', 'New subtitle'),
@@ -709,6 +744,13 @@ const TOOLS: ToolDef[] = [
     numberOfWeeks: prop('number', 'Total weeks (1-52)'),
     overviewHtml: prop('string', 'Tiptap HTML overview'),
     status: prop('string', 'draft | shared | archived'),
+    orgId: prop('string', 'Linked organisation ID (null detaches)'),
+    dealId: prop('string', 'Linked deal ID (null detaches)'),
+    leadId: prop('string', 'Linked lead ID (null detaches). Added in migration 0049.'),
+    proposalId: prop('string', 'Linked proposal ID (null detaches)'),
+  }, ['scheduleId']),
+  tool('publish_schedule', 'Snapshot the current schedule + sections + rows into publishedSnapshot. The public viewer reads the snapshot so admin edits don\'t leak until you re-publish. Mirrors the proposal publish flow. Idempotent — call again to re-snapshot latest state.', {
+    scheduleId: prop('string', 'Schedule ID'),
   }, ['scheduleId']),
   tool('delete_schedule', 'Delete a schedule and all its rows', {
     scheduleId: prop('string', 'Schedule ID'),
@@ -820,7 +862,7 @@ const TOOLS: ToolDef[] = [
     expiresAt: prop('string', 'Expiry date YYYY-MM-DD'),
     seedDefaults: prop('boolean', 'Seed a Standard variant + overview section (default true)'),
   }, ['title']),
-  tool('update_proposal', 'Update a proposal\'s top-level fields. Pass any subset.', {
+  tool('update_proposal', 'Update a proposal\'s top-level fields. Pass any subset. Linkage fields (orgId, dealId, leadId) accept null to detach.', {
     proposalId: prop('string', 'Proposal ID'),
     title: prop('string', 'Title'),
     subtitle: prop('string', 'Subtitle'),
@@ -829,6 +871,13 @@ const TOOLS: ToolDef[] = [
     effectiveDate: prop('string', 'Effective date'),
     expiresAt: prop('string', 'Expiry date'),
     status: prop('string', 'draft | shared | accepted | declined | withdrawn | expired'),
+    coverTheme: prop('string', 'brand_glass | toned_light | light | dark'),
+    orgId: prop('string', 'Linked organisation ID (null detaches)'),
+    dealId: prop('string', 'Linked deal ID (null detaches)'),
+    leadId: prop('string', 'Linked lead ID (null detaches). Added in migration 0053.'),
+  }, ['proposalId']),
+  tool('publish_proposal', 'Snapshot the current proposal + sections + variants into publishedSnapshot. The public viewer reads the snapshot so unpublished edits don\'t leak. Idempotent.', {
+    proposalId: prop('string', 'Proposal ID'),
   }, ['proposalId']),
   tool('delete_proposal', 'Delete a proposal (cascades to sections + variants + acceptances).', {
     proposalId: prop('string', 'Proposal ID'),
@@ -1616,6 +1665,16 @@ async function executeTool(
     // ── Calls ─────────────────────────────────────────────────────────
     case 'list_calls':
       return json(await apiGet('/api/admin/calls', token))
+    case 'list_all_calls': {
+      const qs = new URLSearchParams()
+      if (typeof args.type === 'string' && args.type) qs.set('type', args.type)
+      if (typeof args.since === 'string' && args.since) qs.set('since', args.since)
+      if (typeof args.until === 'string' && args.until) qs.set('until', args.until)
+      const q = qs.toString() ? `?${qs}` : ''
+      return json(await apiGet(`/api/admin/calls/index${q}`, token))
+    }
+    case 'list_crons':
+      return json(await apiGet('/api/admin/crons', token))
     case 'create_call':
       return json(await apiWrite('/api/admin/calls', token, 'POST', args as Record<string, unknown>))
     case 'update_call': {
@@ -1662,6 +1721,8 @@ async function executeTool(
     }
     case 'unshare_schedule':
       return json(await apiWrite(`/api/admin/schedules/${s('scheduleId')}/share`, token, 'DELETE'))
+    case 'publish_schedule':
+      return json(await apiWrite(`/api/admin/schedules/${s('scheduleId')}/publish`, token, 'POST'))
     case 'get_share_analytics': {
       const params = new URLSearchParams({
         resourceType: s('resourceType') ?? '',
@@ -1743,6 +1804,8 @@ async function executeTool(
     }
     case 'unshare_proposal':
       return json(await apiWrite(`/api/admin/proposals/${s('proposalId')}/share`, token, 'DELETE'))
+    case 'publish_proposal':
+      return json(await apiWrite(`/api/admin/proposals/${s('proposalId')}/publish`, token, 'POST'))
 
     // ── Subscriptions ─────────────────────────────────────────────────
     case 'get_subscription':
