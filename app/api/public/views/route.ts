@@ -37,7 +37,29 @@ async function validateToken(
     if (!row || row.status !== 'shared') return null
     return row.id
   }
-  // proposal / contract types extended in phase 2 / 3
+  if (resourceType === 'proposal') {
+    const [row] = await database
+      .select({ id: schema.proposals.id, status: schema.proposals.status })
+      .from(schema.proposals)
+      .where(eq(schema.proposals.publicShareToken, shareToken))
+      .limit(1)
+    // Proposals accept events while shared / accepted / declined — once a
+    // public link exists, the viewing audience is legitimate even after
+    // the proposal has been decided. Excludes draft + withdrawn.
+    if (!row || row.status === 'draft' || row.status === 'withdrawn') return null
+    return row.id
+  }
+  if (resourceType === 'contract') {
+    const [row] = await database
+      .select({ id: schema.contractDocuments.id, status: schema.contractDocuments.status })
+      .from(schema.contractDocuments)
+      .where(eq(schema.contractDocuments.publicShareToken, shareToken))
+      .limit(1)
+    // Contracts accept events for any non-cancelled state — the signer
+    // legitimately keeps the link to revisit after signing.
+    if (!row || row.status === 'cancelled') return null
+    return row.id
+  }
   return null
 }
 
