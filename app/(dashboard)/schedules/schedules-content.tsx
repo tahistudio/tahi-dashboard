@@ -1,15 +1,15 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   Calendar, Plus, RefreshCw, Building2, Target, Trash2, ExternalLink, Eye,
-  ChevronDown, Sparkles, FilePlus2,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
+import { NewScheduleDialog } from '@/components/tahi/new-schedule-dialog'
 import { apiPath } from '@/lib/api'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
@@ -87,29 +87,8 @@ export function SchedulesContent() {
     const f = activeFilters.find(a => a.id === 'status')
     return new Set(f?.values ?? [])
   }, [activeFilters])
-  const [creating, setCreating] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<ScheduleListItem | null>(null)
-  const [newMenuOpen, setNewMenuOpen] = useState(false)
-  const newMenuRef = useRef<HTMLDivElement | null>(null)
-
-  // Click-outside handling for the New menu.
-  useEffect(() => {
-    if (!newMenuOpen) return
-    function onDoc(e: MouseEvent) {
-      if (newMenuRef.current && !newMenuRef.current.contains(e.target as Node)) {
-        setNewMenuOpen(false)
-      }
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setNewMenuOpen(false)
-    }
-    document.addEventListener('mousedown', onDoc)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [newMenuOpen])
+  const [newDialogOpen, setNewDialogOpen] = useState(false)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -165,33 +144,9 @@ export function SchedulesContent() {
     },
   ]), [])
 
-  async function handleCreate(opts: { templateId?: string } = {}) {
-    setCreating(true)
-    setNewMenuOpen(false)
-    try {
-      const body: Record<string, unknown> = opts.templateId
-        ? { templateId: opts.templateId }
-        : {
-            title: 'New project schedule',
-            subtitle: 'PROJECT SCHEDULE, GANTT',
-            numberOfWeeks: 12,
-          }
-      const res = await fetch(apiPath('/api/admin/schedules'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      const data = await res.json() as { id?: string }
-      if (res.ok && data.id) {
-        router.push(`/schedules/${data.id}`)
-      } else {
-        showToast('Failed to create schedule', 'error')
-      }
-    } catch {
-      showToast('Failed to create schedule', 'error')
-    } finally {
-      setCreating(false)
-    }
+  function handleCreated(id: string) {
+    setNewDialogOpen(false)
+    router.push(`/schedules/${id}`)
   }
 
   async function handleDelete() {
@@ -331,75 +286,21 @@ export function SchedulesContent() {
             Templates
           </TahiButton>
         </Link>
-        <div ref={newMenuRef} style={{ position: 'relative' }}>
-          <TahiButton
-            size="sm"
-            onClick={() => {
-              if (templates.length === 0) {
-                void handleCreate()
-              } else {
-                setNewMenuOpen(v => !v)
-              }
-            }}
-            disabled={creating}
-            iconLeft={<Plus className="w-3.5 h-3.5" />}
-            iconRight={templates.length > 0 ? <ChevronDown className="w-3.5 h-3.5" /> : undefined}
-          >
-            {creating ? 'Creating...' : 'New schedule'}
-          </TahiButton>
-          {newMenuOpen && templates.length > 0 && (
-            <div
-              role="menu"
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 0.375rem)',
-                right: 0,
-                minWidth: '17rem',
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
-                borderRadius: '0.625rem',
-                boxShadow: '0 8px 24px rgba(31, 44, 26, 0.12)',
-                padding: '0.375rem',
-                zIndex: 50,
-              }}
-            >
-              <button
-                role="menuitem"
-                onClick={() => void handleCreate()}
-                className="w-full flex items-start gap-2 text-left px-3 py-2 rounded-md hover:bg-[var(--color-bg-secondary)] transition-colors"
-              >
-                <FilePlus2 className="w-4 h-4 mt-0.5 flex-shrink-0 text-[var(--color-text-muted)]" />
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-[var(--color-text)]">Blank schedule</div>
-                  <div className="text-xs text-[var(--color-text-muted)] mt-0.5">Empty 12-week gantt to start from scratch.</div>
-                </div>
-              </button>
-              <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '0.375rem 0.25rem' }} />
-              <div className="px-3 pt-1 pb-1.5 text-[0.625rem] font-bold tracking-wider uppercase text-[var(--color-text-subtle)]">
-                From template
-              </div>
-              <div style={{ maxHeight: '14rem', overflowY: 'auto' }}>
-                {templates.map(t => (
-                  <button
-                    key={t.id}
-                    role="menuitem"
-                    onClick={() => void handleCreate({ templateId: t.id })}
-                    className="w-full flex items-start gap-2 text-left px-3 py-2 rounded-md hover:bg-[var(--color-bg-secondary)] transition-colors"
-                  >
-                    <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0 text-[var(--color-brand)]" />
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-[var(--color-text)] truncate">{t.name}</div>
-                      {t.description && (
-                        <div className="text-xs text-[var(--color-text-muted)] mt-0.5 truncate">{t.description}</div>
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+        <TahiButton
+          size="sm"
+          onClick={() => setNewDialogOpen(true)}
+          iconLeft={<Plus className="w-3.5 h-3.5" />}
+        >
+          New schedule
+        </TahiButton>
       </PageHeader>
+
+      <NewScheduleDialog
+        open={newDialogOpen}
+        onClose={() => setNewDialogOpen(false)}
+        templates={templates}
+        onCreated={handleCreated}
+      />
 
       {/* Filter row: same FilterBar primitive used across Docs and the
           DataTable showcase. Status is a permanent multiselect chip; the
@@ -460,7 +361,7 @@ export function SchedulesContent() {
                 title="No schedules yet"
                 description="Create one to map a project timeline you can share with clients."
                 ctaLabel="New schedule"
-                onCtaClick={() => void handleCreate()}
+                onCtaClick={() => setNewDialogOpen(true)}
               />
             ) : (
               <EmptyState
