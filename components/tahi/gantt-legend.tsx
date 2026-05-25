@@ -23,21 +23,25 @@ interface GanttLegendProps {
 }
 
 export function GanttLegend({ compact = false, light = true }: GanttLegendProps) {
-  const subtleColor = light ? 'var(--color-text-subtle)' : 'rgba(255,255,255,0.55)'
-  const labelColor = light ? 'var(--color-text-muted)' : 'rgba(255,255,255,0.85)'
+  // Hardcoded hex (no CSS vars) so the legend renders correctly on
+  // public deliverable pages where dashboard tokens aren't loaded.
+  const subtleColor = light ? '#8a9987' : 'rgba(255,255,255,0.55)'
+  const labelColor = light ? '#5a6657' : 'rgba(255,255,255,0.85)'
+  const surfaceBg = light ? '#f5f7f5' : 'rgba(255,255,255,0.06)'
+  const surfaceBorder = light ? '#e8f0e6' : 'rgba(255,255,255,0.12)'
 
   return (
     <div
       className="flex flex-wrap items-center"
       style={{
-        gap: compact ? '0.625rem' : '1rem',
-        padding: compact ? '0.625rem 0.75rem' : '0.875rem 1rem',
-        background: light ? 'var(--color-bg-secondary)' : 'rgba(255,255,255,0.06)',
-        border: `1px solid ${light ? 'var(--color-border-subtle)' : 'rgba(255,255,255,0.12)'}`,
-        borderRadius: 'var(--radius-md)',
-        fontSize: compact ? '0.6875rem' : '0.75rem',
+        gap: compact ? '0.875rem' : '1.125rem',
+        padding: compact ? '0.75rem 0.875rem' : '0.875rem 1rem',
+        background: surfaceBg,
+        border: `1px solid ${surfaceBorder}`,
+        borderRadius: '0.5rem',
+        fontSize: compact ? '0.75rem' : '0.8125rem',
         color: labelColor,
-        rowGap: '0.5rem',
+        rowGap: '0.625rem',
       }}
     >
       <Item label="Tahi" swatch={<Swatch color="#5A824E" />} />
@@ -63,19 +67,25 @@ function Item({ swatch, label }: { swatch: React.ReactNode; label: string }) {
 }
 
 function Swatch({ color, baseColor, overlay }: { color?: string; baseColor?: string; overlay?: string }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        display: 'inline-block',
-        width: '1.125rem',
-        height: '0.625rem',
-        background: overlay ?? color,
-        backgroundColor: baseColor,
-        borderRadius: '0.125rem',
-      }}
-    />
-  )
+  // When both baseColor + overlay are set (risk-of-delay case), we need
+  // backgroundColor to win for the base and then layer overlay on top.
+  // Setting `background` shorthand resets backgroundColor, so we order
+  // them explicitly via two property names.
+  const style: React.CSSProperties = {
+    display: 'inline-block',
+    width: '1.5rem',
+    height: '0.75rem',
+    borderRadius: '0.1875rem',
+    flexShrink: 0,
+  }
+  if (overlay && baseColor) {
+    // Layer: baseColor underneath, overlay on top via `background-image`.
+    style.backgroundColor = baseColor
+    style.backgroundImage = overlay
+  } else if (color) {
+    style.backgroundColor = color
+  }
+  return <span aria-hidden="true" style={style} />
 }
 
 function Diamond({ critical }: { critical?: boolean }) {

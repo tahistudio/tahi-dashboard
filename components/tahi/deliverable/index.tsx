@@ -127,42 +127,28 @@ export function BrandMark({
 }) {
   const dim = size === 'sm' ? '1.125rem' : '1.4rem'
   const font = size === 'sm' ? '0.75rem' : '0.875rem'
-  // White variant uses the pale wordmark with leaf on a dark surface.
-  // The dashboard ships /dashboard/tahi-logo.png (pale) and
-  // /dashboard/favicon.png (dark). On the white variant we use the
-  // pale one; otherwise the dark favicon.
-  const src = variant === 'white' ? '/dashboard/tahi-logo.png' : '/dashboard/favicon.png'
-  const inkColor = variant === 'white' ? BRAND.surface : BRAND.ink
-  // The pale wordmark already has type baked in, so render only the
-  // image for the white variant. The dark variant pairs the favicon
-  // with a "Tahi Studio" wordmark.
-  if (variant === 'white') {
-    return (
-      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={src}
-          alt="Tahi Studio"
-          style={{
-            height: dim,
-            width: 'auto',
-            display: 'block',
-            flexShrink: 0,
-            // Pale variant; if the asset isn't pale, this brightens it.
-            filter: 'brightness(0) invert(1)',
-          }}
-        />
-      </div>
-    )
-  }
+  // Both variants render the leaf favicon icon + "Tahi Studio" wordmark
+  // text. White variant inverts the icon to a pale colour for dark
+  // surfaces (cover hero). Same shape, just inverted colours.
+  const isWhite = variant === 'white'
+  const inkColor = isWhite ? BRAND.surface : BRAND.ink
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={src}
+        src="/dashboard/favicon.png"
         alt=""
         aria-hidden="true"
-        style={{ width: dim, height: dim, display: 'block', flexShrink: 0 }}
+        style={{
+          width: dim,
+          height: dim,
+          display: 'block',
+          flexShrink: 0,
+          // Brighten + invert turns the dark-green favicon into a pale
+          // version that reads cleanly on the dark hero. Comparable to
+          // a hand-built pale asset.
+          filter: isWhite ? 'brightness(0) invert(1)' : undefined,
+        }}
       />
       <span
         style={{
@@ -281,7 +267,7 @@ export function SectionHeader({
   body?: string | React.ReactNode | null
 }) {
   return (
-    <header style={{ marginBottom: '1.5rem' }}>
+    <header style={{ marginBottom: '2rem' }}>
       {eyebrow && (
         <div
           style={{
@@ -290,7 +276,7 @@ export function SectionHeader({
             color: BRAND.subtle,
             textTransform: 'uppercase',
             letterSpacing: '0.1em',
-            marginBottom: '0.5rem',
+            marginBottom: '0.625rem',
           }}
         >
           {eyebrow}
@@ -300,15 +286,18 @@ export function SectionHeader({
       {body && (
         <div
           style={{
-            marginTop: '0.875rem',
+            marginTop: '1.125rem',
             fontSize: '0.9375rem',
-            lineHeight: 1.65,
+            lineHeight: 1.7,
             color: BRAND.body,
             maxWidth: '50rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.75rem',
           }}
         >
           {typeof body === 'string'
-            ? body.split('\n').map((line, i) => <p key={i} style={{ margin: '0 0 0.5rem' }}>{line}</p>)
+            ? body.split('\n').filter(Boolean).map((line, i) => <p key={i} style={{ margin: 0 }}>{line}</p>)
             : body}
         </div>
       )}
@@ -338,39 +327,41 @@ export function CoverPage({
   /** Project label for the bottom-right of the cover. */
   projectLabel?: string | null
 }) {
-  // Dark hero variant matching the proposal's 'dark' cover theme: deep
-  // brand-dark green with white type. No decorative circles — the
-  // glow gradient does the visual lifting instead.
+  // Dark cover matching the proposal viewer's 'dark' theme exactly:
+  // deeper #1f2c1a base with two soft brand-light-green radial glows
+  // at top-right (sharp) and bottom-left (softer). White type, brand-
+  // light eyebrow + accent words.
+  const darkBackground = [
+    'radial-gradient(120% 80% at 85% -20%, rgba(147,201,138,0.22) 0%, transparent 55%)',
+    'radial-gradient(80% 60% at -10% 110%, rgba(122,170,114,0.16) 0%, transparent 50%)',
+    '#1f2c1a',
+  ].join(', ')
+
   return (
     <section
       style={{
         position: 'relative',
-        width: '100%',
-        // Edge-to-edge: cover spans the full deliverable container,
-        // unlike subsequent pages which stay at 76rem.
-        background: BRAND.greenDark,
+        // Bleed past the page padding on desktop, but keep a small
+        // breathing room on mobile so it doesn't touch the screen
+        // edges. Achieved with negative margin equal to the page
+        // padding minus a mobile floor.
+        width: 'calc(100% - clamp(0.75rem, 3vw, 1.5rem))',
+        maxWidth: '90rem',
+        margin: '0 auto',
+        background: darkBackground,
         color: BRAND.surface,
         borderRadius: '1rem',
         overflow: 'hidden',
         boxShadow: '0 16px 48px rgba(31, 44, 26, 0.24)',
       }}
     >
-      {/* Two soft radial glows for depth — replaces the bordered circles. */}
+      {/* Top brand mark — pale wordmark variant on the dark hero */}
       <div
-        aria-hidden="true"
         style={{
-          position: 'absolute',
-          inset: 0,
-          background: `
-            radial-gradient(ellipse 60% 80% at 88% 18%, rgba(122, 171, 107, 0.42), transparent 60%),
-            radial-gradient(ellipse 50% 70% at 8% 92%, rgba(122, 171, 107, 0.28), transparent 60%)
-          `,
-          pointerEvents: 'none',
+          position: 'relative',
+          padding: 'clamp(1.25rem, 4vw, 2.5rem) clamp(1.25rem, 4vw, 3rem) 0',
         }}
-      />
-
-      {/* Top brand mark — white variant on the dark hero */}
-      <div style={{ position: 'relative', padding: 'clamp(1.5rem, 4vw, 2.5rem)', paddingBottom: 0 }}>
+      >
         <BrandMark size="md" variant="white" />
       </div>
 
@@ -381,20 +372,19 @@ export function CoverPage({
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center',
-          padding: 'clamp(2rem, 6vw, 4rem) clamp(1.5rem, 4vw, 3rem)',
-          minHeight: 'clamp(20rem, 50vh, 32rem)',
+          padding: 'clamp(1.75rem, 6vw, 4rem) clamp(1.25rem, 4vw, 3rem)',
+          minHeight: 'clamp(18rem, 50vh, 32rem)',
           gap: '0.875rem',
         }}
       >
         {eyebrow && (
           <div
             style={{
-              fontSize: '0.75rem',
+              fontSize: 'clamp(0.6875rem, 1.5vw, 0.8125rem)',
               fontWeight: 600,
-              color: BRAND.green100,
+              color: '#a8c89e',
               textTransform: 'uppercase',
               letterSpacing: '0.18em',
-              opacity: 0.85,
             }}
           >
             {eyebrow}
@@ -415,10 +405,10 @@ export function CoverPage({
           style={{
             position: 'relative',
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(9rem, 1fr))',
             gap: '1.25rem',
-            padding: 'clamp(1.25rem, 3vw, 1.875rem) clamp(1.5rem, 4vw, 3rem)',
-            borderTop: '1px solid rgba(255, 255, 255, 0.18)',
+            padding: 'clamp(1.25rem, 3vw, 1.875rem) clamp(1.25rem, 4vw, 3rem)',
+            borderTop: '1px solid rgba(220, 239, 216, 0.18)',
             background: 'rgba(0, 0, 0, 0.18)',
           }}
         >
@@ -428,11 +418,10 @@ export function CoverPage({
                 style={{
                   fontSize: '0.625rem',
                   fontWeight: 600,
-                  color: BRAND.green100,
+                  color: '#a8c89e',
                   textTransform: 'uppercase',
                   letterSpacing: '0.1em',
                   marginBottom: '0.375rem',
-                  opacity: 0.85,
                 }}
               >
                 {cell.label}

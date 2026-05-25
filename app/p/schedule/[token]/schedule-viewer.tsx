@@ -143,10 +143,13 @@ export function ScheduleViewer(props: ScheduleViewerProps) {
   if (schedule.effectiveDate) metadata.push({ label: 'Effective', value: fmtDate(schedule.effectiveDate) ?? schedule.effectiveDate })
   if (schedule.targetLaunchDate) metadata.push({ label: 'Target launch', value: fmtDate(schedule.targetLaunchDate) ?? schedule.targetLaunchDate })
 
-  // Project label for page chrome (bottom-right of each page)
+  // Project label for page chrome (bottom-right of each page). Avoid
+  // tacking " · build plan" onto a title that already contains it
+  // (e.g. "Giant Group 12 week build plan" → don't duplicate).
+  const titleHasBuildPlan = /build plan/i.test(schedule.title)
   const projectLabel = schedule.orgName
-    ? `${schedule.orgName} × Tahi Studio · build plan`
-    : `${schedule.title} · build plan`
+    ? `${schedule.orgName} × Tahi Studio${titleHasBuildPlan ? '' : ' · build plan'}`
+    : schedule.title
 
   // Cover eyebrow: prefer subtitle, fall back to a sensible default
   const coverEyebrow = schedule.subtitle ?? 'PROJECT SCHEDULE · GANTT'
