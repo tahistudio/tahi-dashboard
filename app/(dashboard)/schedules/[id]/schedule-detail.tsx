@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -145,6 +145,20 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       setLastSavedAt(Date.now())
     })
   }, [])
+
+  // Mobile-only "Saved" toast. The inline SaveIndicator is hidden via
+  // .tahi-builder-save-indicator under 768px (see components/tahi/builder),
+  // so on phones the only confirmation is this toast. Fires only when
+  // savingCount transitions from >0 to 0 and we're on a narrow viewport.
+  const prevSavingCount = React.useRef(savingCount)
+  useEffect(() => {
+    if (prevSavingCount.current > 0 && savingCount === 0) {
+      if (typeof window !== 'undefined' && window.innerWidth < 768) {
+        showToast('Saved', 'success')
+      }
+    }
+    prevSavingCount.current = savingCount
+  }, [savingCount, showToast])
 
   async function ensureContacts() {
     if (!schedule?.orgId || contacts.length > 0) return

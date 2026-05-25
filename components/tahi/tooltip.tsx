@@ -45,6 +45,11 @@ interface TooltipProps {
   asChild?: boolean
   /** Disable the tooltip entirely (passthrough). */
   disabled?: boolean
+  /** When true, a tap on touch devices SHOWS the tooltip (toggling)
+   *  instead of suppressing it. Tap outside dismisses. Default false
+   *  preserves the existing behaviour where touch suppresses tooltips
+   *  so the next click goes through cleanly. */
+  showOnTap?: boolean
 }
 
 export function Tooltip({
@@ -54,6 +59,7 @@ export function Tooltip({
   side = 'top',
   asChild = false,
   disabled = false,
+  showOnTap = false,
 }: TooltipProps) {
   const [open, setOpen] = React.useState(false)
   const [coords, setCoords] = React.useState<{ x: number, y: number, side: Side } | null>(null)
@@ -121,6 +127,23 @@ export function Tooltip({
     }
   }, [open, computePosition])
 
+  // Tap-outside dismiss when in showOnTap mode.
+  React.useEffect(() => {
+    if (!open || !showOnTap) return
+    function handleTouch(e: TouchEvent) {
+      const target = e.target as Node
+      if (triggerRef.current?.contains(target)) return
+      if (tooltipRef.current?.contains(target)) return
+      handleHide()
+    }
+    // Delay one frame so the tap that opened doesn't immediately close.
+    const id = setTimeout(() => document.addEventListener('touchstart', handleTouch), 0)
+    return () => {
+      clearTimeout(id)
+      document.removeEventListener('touchstart', handleTouch)
+    }
+  }, [open, showOnTap, handleHide])
+
   // Wire up the child's events while preserving any existing handlers.
   const child = children as React.ReactElement<{
     ref?: React.Ref<HTMLElement>
@@ -152,11 +175,16 @@ export function Tooltip({
     },
     onTouchStart: (e: React.TouchEvent<HTMLElement>) => {
       child.props.onTouchStart?.(e)
-      // Mark a touch so the next synthetic mouseenter is ignored.
-      // Clear after a short delay (touch + ghost mouseenter both fire
-      // within ~300ms of the tap).
       recentlyTouchedRef.current = true
-      handleHide()
+      if (showOnTap) {
+        // showOnTap: toggle the tooltip on tap. The next click on the
+        // trigger STILL fires (we don't prevent default) — useful for
+        // informational tooltips on actionable elements.
+        if (open) handleHide()
+        else handleShow(true)
+      } else {
+        handleHide()
+      }
       setTimeout(() => { recentlyTouchedRef.current = false }, 600)
     },
     onFocus: (e: React.FocusEvent<HTMLElement>) => {

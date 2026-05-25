@@ -84,6 +84,13 @@ function BuilderStyles() {
         .tahi-builder .tahi-builder-rail-wide {
           padding: 1rem 0.875rem !important;
         }
+        /* Hide the inline save indicator on phones — the header is
+           already cramped with title + status pill + actions. Saves
+           still fire silently; if the caller wants a visible signal
+           they can listen for the savingCount transition and toast. */
+        .tahi-builder .tahi-builder-save-indicator {
+          display: none !important;
+        }
       }
 
       /* Legacy three-column layout — kept for callers that still split nav and
@@ -353,6 +360,13 @@ export function statusPillStyle(p: { bg: string; fg: string; bd: string }): Reac
  * <SaveIndicator> - pulsing dot while saves are in flight, then a green
  * tick + relative time once they've all settled. Re-renders on a 5s tick
  * so "Saved 12s ago" updates without external state.
+ *
+ * Mobile: the inline indicator is hidden via a CSS class
+ * (.tahi-builder-save-indicator hidden under 640px). Saves still complete
+ * silently in the background — the toolbar stays uncluttered on phones.
+ * If you want a visible confirmation on mobile, wrap your builder in
+ * the toast provider and pass `mobileToast` so each save fires a brief
+ * "Saved" toast.
  */
 export function SaveIndicator({
   savingCount,
@@ -368,7 +382,7 @@ export function SaveIndicator({
   }, [])
   if (savingCount > 0) {
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
+      <span className="tahi-builder-save-indicator" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
         <span aria-hidden="true" style={{ width: '0.375rem', height: '0.375rem', borderRadius: '50%', background: 'var(--color-warning, #fb923c)', animation: 'pulse 1s ease-in-out infinite' }} />
         Saving...
       </span>
@@ -378,7 +392,7 @@ export function SaveIndicator({
   const elapsedSec = Math.max(1, Math.round((Date.now() - lastSavedAt) / 1000))
   const label = elapsedSec < 5 ? 'Saved' : elapsedSec < 60 ? `Saved ${elapsedSec}s ago` : `Saved ${Math.round(elapsedSec / 60)}m ago`
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
+    <span className="tahi-builder-save-indicator" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
       <Check size={11} style={{ color: 'var(--color-brand)' }} />
       {label}
     </span>
