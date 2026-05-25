@@ -11,6 +11,7 @@
 import React from 'react'
 import { GanttGrid, type GanttRow } from '@/components/tahi/gantt-grid'
 import { GanttLegend } from '@/components/tahi/gantt-legend'
+import { SectionHeader, AccentTitle } from '@/components/tahi/deliverable'
 
 export type SectionType = 'overview' | 'gantt' | 'risk_register' | 'raci_matrix' | 'text'
 
@@ -59,14 +60,38 @@ interface SlideChromeProps {
   eyebrow?: string
   title?: string
   sub?: string | null
+  /** When false, render content directly without the outer card chrome.
+   *  Used by the public viewer which wraps each section in <PageChrome>
+   *  from components/tahi/deliverable — so the SlideShell card would
+   *  double up. Defaults to true to keep the admin editor unchanged. */
+  chrome?: boolean
   children: React.ReactNode
 }
 
-export function SlideShell({ eyebrow, title, sub, children }: SlideChromeProps) {
+export function SlideShell({ eyebrow, title, sub, chrome = true, children }: SlideChromeProps) {
+  // chrome=false mode: render content with just SectionHeader (eyebrow
+  // + accent title), no outer card. Lets the parent <PageChrome>
+  // provide the page frame so the deliverable reads as one document.
+  if (!chrome) {
+    return (
+      <div>
+        {(eyebrow || title) && (
+          <SectionHeader
+            eyebrow={eyebrow ?? null}
+            title={title ?? ''}
+            body={sub}
+          />
+        )}
+        {children}
+      </div>
+    )
+  }
   return (
     <section style={slideShell}>
       {eyebrow && <div style={slideEyebrow}>{eyebrow}</div>}
-      {title && <h2 style={slideTitle}>{title}</h2>}
+      {title && (
+        <AccentTitle text={title} size="md" as="h2" style={{ margin: 0 }} />
+      )}
       {sub && <p style={slideSub}>{sub}</p>}
       <div style={{ marginTop: title || eyebrow ? '1.25rem' : 0 }}>{children}</div>
     </section>
@@ -75,13 +100,14 @@ export function SlideShell({ eyebrow, title, sub, children }: SlideChromeProps) 
 
 // ─── Per-type renderers ─────────────────────────────────────────────────
 
-export function OverviewSection({ section }: { section: ScheduleSection }) {
+export function OverviewSection({ section, chrome = true }: { section: ScheduleSection; chrome?: boolean }) {
   const data = safeParse<{ html?: string }>(section.data)
   const html = data?.html ?? ''
   return (
     <SlideShell
       eyebrow={section.subtitle ?? 'Executive overview'}
-      title={section.title ?? 'How it runs.'}
+      title={section.title ?? 'How {{it runs}}.'}
+      chrome={chrome}
     >
       <div style={proseStyle} dangerouslySetInnerHTML={{ __html: html }} />
     </SlideShell>
@@ -91,7 +117,8 @@ export function OverviewSection({ section }: { section: ScheduleSection }) {
 export function GanttSection({
   section,
   numberOfWeeks,
-}: { section: ScheduleSection; numberOfWeeks: number }) {
+  chrome = true,
+}: { section: ScheduleSection; numberOfWeeks: number; chrome?: boolean }) {
   const rows = section.rows ?? []
   // Optional zoom: when start/end set, render only those weeks. We map
   // global week indices into the local grid: a row spanning W3-W4 in a
@@ -117,8 +144,9 @@ export function GanttSection({
   return (
     <SlideShell
       eyebrow={section.subtitle ?? 'Project schedule'}
-      title={section.title ?? 'Whole project, one view.'}
+      title={section.title ?? 'Whole project, {{one view}}.'}
       sub={zoomed ? `Weeks ${zoomStart}–${zoomEnd}` : null}
+      chrome={chrome}
     >
       <GanttGrid rows={localRows} numberOfWeeks={localWeekCount} />
       <div style={{ marginTop: '1rem' }}>
@@ -128,14 +156,15 @@ export function GanttSection({
   )
 }
 
-export function RiskRegisterSection({ section }: { section: ScheduleSection }) {
+export function RiskRegisterSection({ section, chrome = true }: { section: ScheduleSection; chrome?: boolean }) {
   const data = safeParse<{ rows?: RiskRow[] }>(section.data)
   const rows = data?.rows ?? []
 
   return (
     <SlideShell
       eyebrow={section.subtitle ?? 'Risk & dependency register'}
-      title={section.title ?? 'What can slow this down, and who owns it.'}
+      title={section.title ?? 'What can {{slow this down}}, and who owns it.'}
+      chrome={chrome}
     >
       {rows.length === 0 ? (
         <EmptyHint>No risks listed yet.</EmptyHint>
@@ -171,7 +200,7 @@ export function RiskRegisterSection({ section }: { section: ScheduleSection }) {
   )
 }
 
-export function RaciMatrixSection({ section }: { section: ScheduleSection }) {
+export function RaciMatrixSection({ section, chrome = true }: { section: ScheduleSection; chrome?: boolean }) {
   const data = safeParse<RaciData>(section.data)
   const cols = data?.columns ?? []
   const rows = data?.rows ?? []
@@ -192,7 +221,8 @@ export function RaciMatrixSection({ section }: { section: ScheduleSection }) {
   return (
     <SlideShell
       eyebrow={section.subtitle ?? 'RACI matrix'}
-      title={section.title ?? 'Who is responsible for what.'}
+      title={section.title ?? 'Who is {{responsible}} for what.'}
+      chrome={chrome}
     >
       {rows.length === 0 || cols.length === 0 ? (
         <EmptyHint>No RACI data yet.</EmptyHint>
@@ -245,13 +275,14 @@ export function RaciMatrixSection({ section }: { section: ScheduleSection }) {
   )
 }
 
-export function TextSection({ section }: { section: ScheduleSection }) {
+export function TextSection({ section, chrome = true }: { section: ScheduleSection; chrome?: boolean }) {
   const data = safeParse<{ html?: string }>(section.data)
   const html = data?.html ?? ''
   return (
     <SlideShell
       eyebrow={section.subtitle ?? undefined}
       title={section.title ?? undefined}
+      chrome={chrome}
     >
       <div style={proseStyle} dangerouslySetInnerHTML={{ __html: html }} />
     </SlideShell>
@@ -261,15 +292,15 @@ export function TextSection({ section }: { section: ScheduleSection }) {
 // ─── Dispatcher ─────────────────────────────────────────────────────────
 
 export function SectionRenderer({
-  section, numberOfWeeks,
-}: { section: ScheduleSection; numberOfWeeks: number }) {
+  section, numberOfWeeks, chrome = true,
+}: { section: ScheduleSection; numberOfWeeks: number; chrome?: boolean }) {
   switch (section.type) {
-    case 'overview':       return <OverviewSection section={section} />
-    case 'gantt':          return <GanttSection section={section} numberOfWeeks={numberOfWeeks} />
-    case 'risk_register':  return <RiskRegisterSection section={section} />
-    case 'raci_matrix':    return <RaciMatrixSection section={section} />
-    case 'text':           return <TextSection section={section} />
-    default:               return <SlideShell title="Unknown section type"><EmptyHint>Type {section.type} is not yet supported.</EmptyHint></SlideShell>
+    case 'overview':       return <OverviewSection section={section} chrome={chrome} />
+    case 'gantt':          return <GanttSection section={section} numberOfWeeks={numberOfWeeks} chrome={chrome} />
+    case 'risk_register':  return <RiskRegisterSection section={section} chrome={chrome} />
+    case 'raci_matrix':    return <RaciMatrixSection section={section} chrome={chrome} />
+    case 'text':           return <TextSection section={section} chrome={chrome} />
+    default:               return <SlideShell chrome={chrome} title="Unknown section type"><EmptyHint>Type {section.type} is not yet supported.</EmptyHint></SlideShell>
   }
 }
 

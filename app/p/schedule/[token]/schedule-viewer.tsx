@@ -1,8 +1,25 @@
 'use client'
 
+/**
+ * <ScheduleViewer> — public, no-auth viewer for a project schedule.
+ *
+ * Visual reference: the Tahi Studio schedule PDFs (Tevalis, Giant Group).
+ * We mirror that document language: cream-white surface, brand-green
+ * accent words in titles via the {{...}} syntax, decorative organic
+ * circles on the cover, Tahi leaf top-left + section number top-right
+ * on every page, metadata footer strip on the cover.
+ *
+ * Primitives live in components/tahi/deliverable/. Section bodies still
+ * dispatch through schedule-section-renderers but each section is now
+ * wrapped in <PageChrome> so it reads as a paginated document.
+ */
+
 import { useEffect, useState } from 'react'
 import { type GanttRow } from '@/components/tahi/gantt-grid'
 import { SectionRenderer, type ScheduleSection } from '@/components/tahi/schedule-section-renderers'
+import {
+  BrandMark, CoverPage, PageChrome, type MetadataCell, BRAND,
+} from '@/components/tahi/deliverable'
 import { apiPath } from '@/lib/api'
 import { useShareViewTracking } from '@/components/tahi/use-share-view-tracking'
 
@@ -19,27 +36,6 @@ interface PublicSchedule {
   orgName: string | null
 }
 
-/**
- * Public, no-auth viewer for a project schedule. The token is validated
- * server-side; on miss/revoke we render a clean "not found" without
- * leaking that the URL was once valid.
- *
- * Layout goals:
- *   - Premium magazine-style cover that scales nicely from 360px to
- *     desktop. We DON'T force a 16:9 aspect ratio on phones — that
- *     ratio is great on a laptop but turns the cover into a postage
- *     stamp on mobile and starts truncating "Prepared for / Prepared by"
- *     metadata. On phones we let it grow to fit content; sm+ gets the
- *     wide cinematic look.
- *   - Real Tahi leaf brand mark (LeafLogo) — never the 🌿 emoji.
- *   - Optional executive overview slide between cover and gantt.
- *   - Shared legend component — same visual language as the editor.
- */
-/**
- * Two ways to mount the viewer:
- *   <ScheduleViewer token="..." />            // public, fetches via token
- *   <ScheduleViewer previewScheduleId="..." />// admin preview, fetches live data
- */
 type ScheduleViewerProps =
   | { token: string; previewScheduleId?: undefined }
   | { token?: undefined; previewScheduleId: string }
@@ -72,9 +68,6 @@ export function ScheduleViewer(props: ScheduleViewerProps) {
         }
         if (cancelled) return
         setSchedule(data.schedule)
-        // Sections is the new shape (post migration 0026). If missing
-        // (an unmigrated server somehow), fall back to a synthetic single
-        // gantt section built from the flat rows array.
         if (data.sections && data.sections.length > 0) {
           setSections(data.sections)
         } else if (data.rows) {
@@ -103,14 +96,22 @@ export function ScheduleViewer(props: ScheduleViewerProps) {
   useShareViewTracking({
     resourceType: 'schedule',
     resourceId: analyticsResourceId,
-    // No token in preview — share-view tracking endpoint requires one.
     shareToken: isPreview ? null : token,
   })
 
   if (state === 'loading') {
     return (
       <div style={loadingWrap}>
-        <div className="animate-pulse" style={{ height: '8rem', width: '100%', maxWidth: '60rem', background: 'rgba(255,255,255,0.5)', borderRadius: '1rem' }} />
+        <div
+          className="animate-pulse"
+          style={{
+            height: '8rem',
+            width: '100%',
+            maxWidth: '60rem',
+            background: 'rgba(255,255,255,0.5)',
+            borderRadius: '1rem',
+          }}
+        />
       </div>
     )
   }
@@ -120,10 +121,10 @@ export function ScheduleViewer(props: ScheduleViewerProps) {
       <div style={loadingWrap}>
         <div style={{ textAlign: 'center', maxWidth: '24rem', padding: '2rem' }}>
           <BrandMark />
-          <h1 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1f2c1a', marginTop: '1rem', marginBottom: '0.5rem' }}>
+          <h1 style={{ fontSize: '1.25rem', fontWeight: 700, color: BRAND.ink, marginTop: '1rem', marginBottom: '0.5rem' }}>
             This link isn&apos;t available
           </h1>
-          <p style={{ fontSize: '0.875rem', color: '#5a6657', lineHeight: 1.5 }}>
+          <p style={{ fontSize: '0.875rem', color: BRAND.muted, lineHeight: 1.5 }}>
             The schedule may have been revoked, or the link copied incorrectly. If you were expecting
             to see a project schedule, please reach out to the sender.
           </p>
@@ -135,17 +136,24 @@ export function ScheduleViewer(props: ScheduleViewerProps) {
   const fmtDate = (iso: string | null) =>
     iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : null
 
-  // Build the meta cells; only include cells that have a value so the
-  // grid doesn't render placeholder slots on small schedules.
-  const metaCells: { label: string; value: string }[] = []
-  if (schedule.preparedFor) metaCells.push({ label: 'Prepared for', value: schedule.preparedFor })
-  if (schedule.preparedBy) metaCells.push({ label: 'Prepared by', value: schedule.preparedBy })
-  if (schedule.effectiveDate) metaCells.push({ label: 'Effective', value: fmtDate(schedule.effectiveDate) ?? schedule.effectiveDate })
-  if (schedule.targetLaunchDate) metaCells.push({ label: 'Target launch', value: fmtDate(schedule.targetLaunchDate) ?? schedule.targetLaunchDate })
+  // Build cover metadata cells in the PDF order
+  const metadata: MetadataCell[] = []
+  if (schedule.preparedFor) metadata.push({ label: 'Prepared for', value: schedule.preparedFor })
+  if (schedule.preparedBy) metadata.push({ label: 'Prepared by', value: schedule.preparedBy })
+  if (schedule.effectiveDate) metadata.push({ label: 'Effective', value: fmtDate(schedule.effectiveDate) ?? schedule.effectiveDate })
+  if (schedule.targetLaunchDate) metadata.push({ label: 'Target launch', value: fmtDate(schedule.targetLaunchDate) ?? schedule.targetLaunchDate })
+
+  // Project label for page chrome (bottom-right of each page)
+  const projectLabel = schedule.orgName
+    ? `${schedule.orgName} × Tahi Studio · build plan`
+    : `${schedule.title} · build plan`
+
+  // Cover eyebrow: prefer subtitle, fall back to a sensible default
+  const coverEyebrow = schedule.subtitle ?? 'PROJECT SCHEDULE · GANTT'
 
   return (
     <div style={pageWrap}>
-      {/* Preview-mode pill — visible to admins viewing the live state. */}
+      {/* Preview-mode pill — visible to admins viewing the live state */}
       {isPreview && (
         <div
           style={{
@@ -155,8 +163,8 @@ export function ScheduleViewer(props: ScheduleViewerProps) {
             transform: 'translateX(-50%)',
             zIndex: 50,
             padding: '0.5rem 1rem',
-            background: '#1f2c1a',
-            color: '#FFFFFF',
+            background: BRAND.ink,
+            color: BRAND.surface,
             borderRadius: '999px',
             fontSize: '0.75rem',
             fontWeight: 600,
@@ -172,45 +180,39 @@ export function ScheduleViewer(props: ScheduleViewerProps) {
         </div>
       )}
 
-      {/* Cover slide */}
-      <section style={coverShell}>
-        <div style={coverBackdrop} aria-hidden="true" />
-        <div style={coverInner}>
-          <BrandMark />
+      {/* Cover page */}
+      <CoverPage
+        eyebrow={coverEyebrow}
+        title={schedule.title}
+        metadata={metadata}
+        projectLabel={projectLabel}
+      />
 
-          <div style={{ marginTop: 'auto' }}>
-            {schedule.subtitle && (
-              <div style={coverEyebrow}>{schedule.subtitle}</div>
-            )}
-            <h1 style={coverTitle}>{schedule.title}</h1>
-          </div>
-
-          {metaCells.length > 0 && (
-            <div style={coverMetaGrid}>
-              {metaCells.map(cell => (
-                <CoverMetaCell key={cell.label} label={cell.label} value={cell.value} />
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* Sections — render each by type via the shared dispatcher.
-          Replaces the legacy hardcoded "overview slide + gantt slide"
-          pair. Schedules without a section list (legacy) fall through
-          via the synthetic gantt fallback we set up on load. */}
-      {sections.map(section => (
-        <SectionRenderer
-          key={section.id}
-          section={section}
-          numberOfWeeks={schedule.numberOfWeeks}
-        />
-      ))}
+      {/* Sections — each wrapped in PageChrome for the leaf + page-number frame.
+          Section number is 1-indexed against the section list. */}
+      {sections.map((section, i) => {
+        const num = String(i + 1).padStart(2, '0')
+        const name = (section.subtitle ?? defaultSectionName(section.type)).toUpperCase()
+        return (
+          <PageChrome
+            key={section.id}
+            sectionNumber={num}
+            sectionName={name}
+            projectLabel={projectLabel}
+          >
+            <SectionRenderer
+              section={section}
+              numberOfWeeks={schedule.numberOfWeeks}
+              chrome={false}
+            />
+          </PageChrome>
+        )
+      })}
 
       {/* Footer */}
       <footer style={footer}>
         <BrandMark size="sm" />
-        <span style={{ fontSize: '0.6875rem', color: '#8a9987' }}>
+        <span style={{ fontSize: '0.6875rem', color: BRAND.subtle }}>
           Confidential · prepared {fmtDate(schedule.effectiveDate) ?? 'this period'}
         </span>
       </footer>
@@ -218,161 +220,29 @@ export function ScheduleViewer(props: ScheduleViewerProps) {
   )
 }
 
-// ─── Sub-components ──────────────────────────────────────────────────────
-
-function BrandMark({ size = 'md' }: { size?: 'sm' | 'md' }) {
-  // Uses the actual Tahi brand favicon (the dark-green circle with the
-  // leaf + numeral) which is designed for light surfaces. The pale
-  // tahi-logo.png wordmark is the inverted variant for dark backgrounds
-  // like the dashboard sidebar — would disappear on this white cover.
-  const dim = size === 'sm' ? '1.25rem' : '1.625rem'
-  return (
-    <div className="inline-flex items-center" style={{ gap: '0.5rem' }}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/dashboard/favicon.png"
-        alt=""
-        aria-hidden="true"
-        style={{
-          width: dim,
-          height: dim,
-          display: 'block',
-          flexShrink: 0,
-        }}
-      />
-      <span
-        style={{
-          fontSize: size === 'sm' ? '0.8125rem' : '0.9375rem',
-          fontWeight: 700,
-          color: '#1f2c1a',
-          letterSpacing: '-0.01em',
-        }}
-      >
-        Tahi Studio
-      </span>
-    </div>
-  )
+function defaultSectionName(type: string): string {
+  switch (type) {
+    case 'overview':       return 'Executive overview'
+    case 'gantt':          return 'High-level gantt'
+    case 'risk_register':  return 'Risk & dependency register'
+    case 'raci_matrix':    return 'RACI matrix'
+    case 'text':           return 'Notes'
+    default:               return type
+  }
 }
 
-function CoverMetaCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ minWidth: 0 }}>
-      <div
-        style={{
-          fontSize: '0.625rem',
-          fontWeight: 600,
-          color: '#8a9987',
-          textTransform: 'uppercase',
-          letterSpacing: '0.08em',
-          marginBottom: '0.25rem',
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: '0.9375rem',
-          fontWeight: 600,
-          color: '#1f2c1a',
-          // Wrap long values rather than truncating.
-          overflowWrap: 'break-word',
-          wordBreak: 'break-word',
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  )
-}
-
-// ─── Inline styles (no dashboard chrome, no Tailwind utilities) ──────────
+// ── Layout shells ─────────────────────────────────────────────────────────
 
 const pageWrap: React.CSSProperties = {
   minHeight: '100vh',
-  background: '#f5f7f5',
+  background: BRAND.band,
   fontFamily: 'var(--font-manrope, system-ui)',
-  color: '#1f2c1a',
+  color: BRAND.ink,
   padding: 'clamp(1rem, 4vw, 2.5rem)',
   display: 'flex',
   flexDirection: 'column',
   gap: 'clamp(1.25rem, 3vw, 2rem)',
 }
-
-// Cover: NO forced aspect ratio at narrow widths. Sized to content on
-// phones so meta text never truncates; capped to a cinematic 16:9-ish
-// look at sm+ via min-height.
-//
-// Surface treatment matches the proposal cover's `toned_light` palette:
-// flat brand-50 base instead of the previous off-brand pale-green
-// radials. Decorative ring goes on the backdrop element, not the base
-// surface.
-const coverShell: React.CSSProperties = {
-  position: 'relative',
-  width: '100%',
-  maxWidth: '76rem',
-  margin: '0 auto',
-  background: 'var(--color-brand-50, #f0f7ee)',
-  border: '1px solid var(--color-border-subtle, #e8f0e6)',
-  borderRadius: '0 24px 0 24px',
-  overflow: 'hidden',
-  boxShadow: '0 8px 32px rgba(31, 44, 26, 0.08)',
-}
-
-const coverBackdrop: React.CSSProperties = {
-  position: 'absolute',
-  top: '-14rem',
-  right: '-14rem',
-  width: '40rem',
-  height: '40rem',
-  borderRadius: '50%',
-  border: '5rem solid var(--color-brand, #5A824E)',
-  opacity: 0.12,
-  pointerEvents: 'none',
-}
-
-const coverInner: React.CSSProperties = {
-  position: 'relative',
-  display: 'flex',
-  flexDirection: 'column',
-  // Generous min-height instead of forced aspect ratio. Lets the cover
-  // breathe on phones without becoming a postage stamp.
-  minHeight: 'clamp(20rem, 48vh, 32rem)',
-  padding: 'clamp(1.25rem, 4vw, 3rem)',
-  gap: '1.25rem',
-}
-
-const coverEyebrow: React.CSSProperties = {
-  fontSize: '0.6875rem',
-  fontWeight: 600,
-  color: '#8a9987',
-  textTransform: 'uppercase',
-  letterSpacing: '0.1em',
-  marginBottom: '0.625rem',
-}
-
-const coverTitle: React.CSSProperties = {
-  fontSize: 'clamp(1.5rem, 5vw, 3rem)',
-  fontWeight: 800,
-  lineHeight: 1.05,
-  color: '#1f2c1a',
-  margin: 0,
-  letterSpacing: '-0.015em',
-  // Allow long titles to wrap rather than overflow.
-  overflowWrap: 'break-word',
-}
-
-const coverMetaGrid: React.CSSProperties = {
-  display: 'grid',
-  // Each cell gets at least 9rem before stacking — keeps "Prepared for"
-  // values readable and avoids the "Michael Day, Giant" → "Michael Day, Giant Group" truncation we saw on mobile.
-  gridTemplateColumns: 'repeat(auto-fit, minmax(9rem, 1fr))',
-  gap: '1.25rem',
-  paddingTop: '1.25rem',
-  borderTop: '1px solid #e8f0e6',
-  marginTop: 'auto',
-}
-
-// (slide-level styles moved into components/tahi/schedule-section-renderers.tsx)
 
 const footer: React.CSSProperties = {
   width: '100%',
@@ -384,7 +254,7 @@ const footer: React.CSSProperties = {
   flexWrap: 'wrap',
   gap: '0.75rem',
   padding: '1rem 0.5rem',
-  borderTop: '1px solid #e8f0e6',
+  borderTop: `1px solid ${BRAND.borderSubtle}`,
 }
 
 const loadingWrap: React.CSSProperties = {
@@ -392,6 +262,6 @@ const loadingWrap: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  background: '#f5f7f5',
+  background: BRAND.band,
   padding: '2rem',
 }
