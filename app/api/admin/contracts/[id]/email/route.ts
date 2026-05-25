@@ -37,8 +37,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params
   const body = await req.json().catch(() => ({})) as {
     signerIds?: string[]
+    cc?: Array<{ name?: string; email: string }>
+    bcc?: Array<{ name?: string; email: string }>
+    subject?: string
     message?: string
   }
+  const ccList = (Array.isArray(body.cc) ? body.cc : []).filter(r => r.email?.trim()).map(r => r.email.trim())
+  const bccList = (Array.isArray(body.bcc) ? body.bcc : []).filter(r => r.email?.trim()).map(r => r.email.trim())
+  const customSubject = body.subject?.trim() || null
 
   if (!process.env.RESEND_API_KEY) {
     return NextResponse.json({ error: 'Email service not configured' }, { status: 500 })
@@ -126,7 +132,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       await resend.emails.send({
         from: 'Tahi Studio <business@tahi.studio>',
         to: signer.email,
-        subject: `Please sign: ${doc.name}`,
+        cc: ccList.length ? ccList : undefined,
+        bcc: bccList.length ? bccList : undefined,
+        subject: customSubject ?? `Please sign: ${doc.name}`,
         html,
       })
       sent.push({ signerId: signer.id, email: signer.email })

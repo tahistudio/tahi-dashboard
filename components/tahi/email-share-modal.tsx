@@ -37,21 +37,30 @@ interface Props {
   suggestions: EmailRecipientSuggestion[]
   /** API route to POST to. */
   postUrl: string
-  /** When true, body shape is { signerIds: string[], message?: string }
-   *  (contract mode). Otherwise body shape is { to: [{name, email}], message?: string }. */
+  /** When true, body shape is { signerIds, cc?, bcc?, subject?, message? }
+   *  (contract mode). Otherwise body shape is
+   *  { to, cc?, bcc?, subject?, message? }. */
   mode: 'recipients' | 'signers'
+  /** Default subject — shown in the input so the user can edit before send.
+   *  When the field is left blank, the backend falls back to its own default. */
+  defaultSubject?: string
   onSent?: (result: { sent: number; failed: number }) => void
 }
 
 const inputCn = 'w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]'
 
 export function EmailShareModal({
-  open, onClose, resourceLabel, resourceTitle, suggestions, postUrl, mode, onSent,
+  open, onClose, resourceLabel, resourceTitle, suggestions, postUrl, mode, defaultSubject, onSent,
 }: Props) {
   const [selected, setSelected] = useState<Set<string>>(() =>
     new Set(suggestions.map(s => s.id ?? s.email))
   )
   const [adhoc, setAdhoc] = useState<Array<{ name: string; email: string }>>([])
+  const [cc, setCc] = useState<Array<{ name: string; email: string }>>([])
+  const [bcc, setBcc] = useState<Array<{ name: string; email: string }>>([])
+  const [showCc, setShowCc] = useState(false)
+  const [showBcc, setShowBcc] = useState(false)
+  const [subject, setSubject] = useState(defaultSubject ?? '')
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [result, setResult] = useState<null | { sent: number; failed: number; errors: string[] }>(null)
@@ -75,6 +84,9 @@ export function EmailShareModal({
     if (totalSelected === 0) return
     setSending(true)
     try {
+      const ccClean = cc.filter(a => a.email.trim())
+      const bccClean = bcc.filter(a => a.email.trim())
+      const trimmedSubject = subject.trim()
       let body: Record<string, unknown>
       if (mode === 'signers') {
         const signerIds = suggestions
@@ -82,6 +94,9 @@ export function EmailShareModal({
           .map(s => s.id!)
         body = {
           signerIds,
+          cc: ccClean.length ? ccClean : undefined,
+          bcc: bccClean.length ? bccClean : undefined,
+          subject: trimmedSubject || undefined,
           message: message.trim() || undefined,
         }
       } else {
@@ -93,6 +108,9 @@ export function EmailShareModal({
         ]
         body = {
           to,
+          cc: ccClean.length ? ccClean : undefined,
+          bcc: bccClean.length ? bccClean : undefined,
+          subject: trimmedSubject || undefined,
           message: message.trim() || undefined,
         }
       }
@@ -137,6 +155,11 @@ export function EmailShareModal({
     setResult(null)
     setMessage('')
     setAdhoc([])
+    setCc([])
+    setBcc([])
+    setShowCc(false)
+    setShowBcc(false)
+    setSubject(defaultSubject ?? '')
     onClose()
   }
 
@@ -237,14 +260,63 @@ export function EmailShareModal({
                   </div>
                 ))}
                 {mode === 'recipients' && (
-                  <button
-                    onClick={() => setAdhoc(prev => [...prev, { name: '', email: '' }])}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-brand-dark)] mt-1"
-                  >
-                    <Plus className="w-3.5 h-3.5" />Add recipient
-                  </button>
+                  <div className="flex flex-wrap items-center gap-3 mt-1">
+                    <button
+                      onClick={() => setAdhoc(prev => [...prev, { name: '', email: '' }])}
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-brand-dark)]"
+                    >
+                      <Plus className="w-3.5 h-3.5" />Add recipient
+                    </button>
+                    {!showCc && (
+                      <button
+                        onClick={() => { setShowCc(true); setCc(prev => prev.length ? prev : [{ name: '', email: '' }]) }}
+                        className="text-xs font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                      >
+                        + Cc
+                      </button>
+                    )}
+                    {!showBcc && (
+                      <button
+                        onClick={() => { setShowBcc(true); setBcc(prev => prev.length ? prev : [{ name: '', email: '' }]) }}
+                        className="text-xs font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                      >
+                        + Bcc
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
+            </div>
+
+            {showCc && (
+              <AdhocList
+                label="Cc"
+                items={cc}
+                onChange={setCc}
+                onHide={() => { setShowCc(false); setCc([]) }}
+              />
+            )}
+            {showBcc && (
+              <AdhocList
+                label="Bcc"
+                items={bcc}
+                onChange={setBcc}
+                onHide={() => { setShowBcc(false); setBcc([]) }}
+              />
+            )}
+
+            <div>
+              <label htmlFor="email-subject" className="block text-xs font-semibold text-[var(--color-text)] uppercase tracking-wide mb-2">
+                Subject
+              </label>
+              <input
+                id="email-subject"
+                type="text"
+                value={subject}
+                onChange={e => setSubject(e.target.value)}
+                className={inputCn}
+                placeholder={defaultSubject ?? `${resourceLabel.charAt(0).toUpperCase() + resourceLabel.slice(1)} from Tahi Studio`}
+              />
             </div>
 
             <div>
@@ -269,6 +341,63 @@ export function EmailShareModal({
             </div>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+function AdhocList({
+  label, items, onChange, onHide,
+}: {
+  label: string
+  items: Array<{ name: string; email: string }>
+  onChange: (next: Array<{ name: string; email: string }>) => void
+  onHide: () => void
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <label className="block text-xs font-semibold text-[var(--color-text)] uppercase tracking-wide">
+          {label}
+        </label>
+        <button
+          onClick={onHide}
+          className="text-[0.6875rem] font-medium text-[var(--color-text-subtle)] hover:text-[var(--color-text)]"
+        >
+          Remove
+        </button>
+      </div>
+      <div className="space-y-1.5">
+        {items.map((a, i) => (
+          <div key={`${label}-${i}`} className="grid grid-cols-[1fr_1fr_2rem] gap-1.5">
+            <input
+              placeholder="Name"
+              value={a.name}
+              onChange={e => onChange(items.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+              className={inputCn}
+            />
+            <input
+              type="email"
+              placeholder="email@example.com"
+              value={a.email}
+              onChange={e => onChange(items.map((x, j) => j === i ? { ...x, email: e.target.value } : x))}
+              className={inputCn}
+            />
+            <button
+              onClick={() => onChange(items.filter((_, j) => j !== i))}
+              className="rounded-lg border border-[var(--color-border)] hover:bg-red-50 hover:text-red-500 text-[var(--color-text-muted)] flex items-center justify-center"
+              aria-label="Remove"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
+        <button
+          onClick={() => onChange([...items, { name: '', email: '' }])}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-brand-dark)] mt-1"
+        >
+          <Plus className="w-3.5 h-3.5" />Add {label}
+        </button>
       </div>
     </div>
   )
