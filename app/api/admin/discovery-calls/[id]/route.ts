@@ -23,7 +23,11 @@ import { eq } from 'drizzle-orm'
 
 type Params = { params: Promise<{ id: string }> }
 
-const TRANSCRIPT_MAX_CHARS = 50_000
+// Transcripts can run long — a 60-minute Meet call easily produces
+// 100k+ chars of Gemini transcript. Cap is here to stop a runaway paste
+// blowing the D1 row size budget (~1MB hard limit), not to be miserly.
+// 250k is roughly a 3-hour call at typical transcript density.
+const TRANSCRIPT_MAX_CHARS = 250_000
 
 export async function PATCH(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)

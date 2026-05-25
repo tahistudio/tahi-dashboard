@@ -220,7 +220,7 @@ export async function POST(req: NextRequest) {
     // Only write transcript if not already set (Liam might have pasted
     // their own). Same for summary + outcomeNotes.
     if (parsed.transcript && !top.call.transcript) {
-      updates.transcript = parsed.transcript.slice(0, 50_000)  // cap to schema budget
+      updates.transcript = parsed.transcript.slice(0, 250_000)  // matches the discovery-calls PATCH cap
     }
     if (parsed.summary) {
       updates.summary = parsed.summary

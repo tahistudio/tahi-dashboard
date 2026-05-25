@@ -46,7 +46,20 @@ export async function GET(req: NextRequest) {
   // "Upcoming" means scheduled-status calls with a scheduledAt >= cutoff.
   // Cutoff is now (or now - 30min if includePast, so a meeting currently
   // running is still surfaced for the join button).
-  const cutoff = new Date(Date.now() - (includePast ? 30 * 60_000 : 0)).toISOString()
+  //
+  // We can't rely on SQLite's string comparison for scheduledAt here:
+  // Google Calendar returns event start times in the calendar's local
+  // timezone (e.g. "2026-05-25T21:00:00+12:00"), and lexicographic
+  // ordering breaks once the offsets differ. A "9am NZT" call (UTC 21:00
+  // prev day) lex-compares greater than "20:17Z", so the row leaks
+  // through the gte() filter and shows up as "upcoming" hours after it
+  // happened. Fix: pull a generous window with a cheap lex pre-filter,
+  // then re-test in JS as Date numerics for correctness.
+  const cutoffMs = Date.now() - (includePast ? 30 * 60_000 : 0)
+  // Lex pre-filter against TODAY's UTC date midnight (good enough to
+  // reduce row scan; everything before today is irrelevant). The JS
+  // filter below catches any straggler the lex pass let through.
+  const lexCutoff = new Date(cutoffMs - 36 * 60 * 60_000).toISOString()
 
   const calls = await database
     .select({
@@ -66,14 +79,14 @@ export async function GET(req: NextRequest) {
       orgId: schema.discoveryCalls.orgId,
     })
     .from(schema.discoveryCalls)
-    .where(gte(schema.discoveryCalls.scheduledAt, cutoff))
+    .where(gte(schema.discoveryCalls.scheduledAt, lexCutoff))
     .orderBy(asc(schema.discoveryCalls.scheduledAt))
-    .limit(limit * 3)  // overfetch — we'll filter to status=scheduled below
+    .limit(limit * 6)  // overfetch — JS filter strips past + non-scheduled
 
-  // Filter to scheduled only (rescheduled / cancelled / completed should
-  // never appear in "upcoming"). Drizzle's where can't easily combine
-  // gte + eq across nullable values cleanly here, so post-filter.
-  const upcoming = calls.filter(c => c.status === 'scheduled').slice(0, limit)
+  // Real "is it past?" check in JS, plus status filter — see comment above.
+  const upcoming = calls
+    .filter(c => c.status === 'scheduled' && new Date(c.scheduledAt).getTime() >= cutoffMs)
+    .slice(0, limit)
 
   // Denormalise the parent "with" field. Batch one query per parent type
   // for the rows we actually returned (max 5 typically).

@@ -31,6 +31,13 @@ export async function GET(req: NextRequest) {
 
   // discovery_calls (the unified surface). Joins to leads / deals / orgs
   // for parent labels. Limit to ±60 days unless overridden.
+  // Window: ±60 days. We pre-filter on the lex bounds (gte/lte) for
+  // index efficiency, but the calls index UI re-bins "upcoming vs past"
+  // in JS using real Date comparison — that side-steps the lex-vs-tz
+  // mismatch when Google returns local-timezone offsets (e.g. NZT
+  // "2026-05-25T21:00:00+12:00" lex-compares greater than "20:17Z" even
+  // though it's hours in the past). See discovery-calls/upcoming/route.ts
+  // for the matching fix and rationale.
   const defaultSince = new Date(Date.now() - 60 * 86400_000).toISOString()
   const defaultUntil = new Date(Date.now() + 60 * 86400_000).toISOString()
 
