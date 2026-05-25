@@ -453,6 +453,25 @@ body {
   justify-content: center;
   padding: 0.625rem 0;
 }
+/* Keyboard focus state. The sidebar's overflow-x: hidden clips the
+   global 2px outset shadow ring, and brand-light on the dark sidebar
+   surface is barely visible anyway. So sidebar nav uses an INSET ring
+   in a bright on-dark colour, plus a softer brand tint so the focused
+   row reads as both hovered and "I'm here via keyboard". */
+.tahi-sidebar .tahi-nav-link:focus-visible,
+.tahi-sidebar button:focus-visible,
+.tahi-sidebar a:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px #93c98a;
+  background: #2a3826 !important;
+  color: #ffffff !important;
+}
+/* Sidebar group toggle buttons (Workspace / Sales / Clients / etc) need
+   the same inset treatment — they're <button> not <a>, so cover both. */
+.tahi-sidebar .tahi-sidebar-group-toggle:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px #93c98a;
+}
 
 /* Nav icons. Default to 1rem (expanded) and 1.25rem when collapsed.
    We override Lucide's intrinsic size via the svg child selector so
