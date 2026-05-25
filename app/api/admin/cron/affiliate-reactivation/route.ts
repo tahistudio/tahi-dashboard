@@ -23,6 +23,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, isNotNull, sql } from 'drizzle-orm'
+import { logCronRun } from '@/lib/cron-runs'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,6 +35,7 @@ interface AffiliateAggregate {
 }
 
 export async function POST(req: NextRequest) {
+  const t0 = Date.now()
   const cronHeader = req.headers.get('x-cron-secret')
   const authHeader = req.headers.get('authorization')
   const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
@@ -62,7 +64,9 @@ export async function POST(req: NextRequest) {
   ])
 
   if (enabledRow[0]?.value === 'false') {
-    return NextResponse.json({ skipped: 'affiliates.reactivationEnabled is disabled' })
+    const summary = { skipped: 'affiliates.reactivationEnabled is disabled' }
+    await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'affiliate-reactivation', 'skipped', Date.now() - t0, summary, null)
+    return NextResponse.json(summary)
   }
   const idleDays = Number.isFinite(Number(daysRow[0]?.value)) ? Number(daysRow[0]?.value) : 60
   const cutoff = new Date(Date.now() - idleDays * 24 * 60 * 60_000).toISOString()
@@ -75,7 +79,9 @@ export async function POST(req: NextRequest) {
     .limit(1)
   const recipient = recipientRow?.value?.trim()
   if (!recipient) {
-    return NextResponse.json({ skipped: 'No leads.defaultLeadOwnerId — nowhere to send notifications' })
+    const summary = { skipped: 'No leads.defaultLeadOwnerId — nowhere to send notifications' }
+    await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'affiliate-reactivation', 'skipped', Date.now() - t0, summary, null)
+    return NextResponse.json(summary)
   }
 
   // Aggregate by affiliateCode
@@ -103,12 +109,14 @@ export async function POST(req: NextRequest) {
   const stale = aggregates.filter(a => a.lastLeadAt < cutoff)
 
   if (stale.length === 0) {
-    return NextResponse.json({
+    const summary = {
       scanned: aggregates.length,
       stale: 0,
       notified: 0,
       idleDays,
-    })
+    }
+    await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'affiliate-reactivation', 'success', Date.now() - t0, summary, null)
+    return NextResponse.json(summary)
   }
 
   // Dedup: skip codes we've already notified about in the last 30 days
@@ -142,7 +150,7 @@ export async function POST(req: NextRequest) {
     })
   }
 
-  return NextResponse.json({
+  const summary = {
     scanned: aggregates.length,
     stale: stale.length,
     notified: cappedNotify.length,
@@ -154,5 +162,7 @@ export async function POST(req: NextRequest) {
       promotedLeads: a.promotedLeads,
       daysSinceLast: Math.floor((Date.now() - new Date(a.lastLeadAt).getTime()) / (24 * 60 * 60_000)),
     })),
-  })
+  }
+  await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'affiliate-reactivation', 'success', Date.now() - t0, summary, null)
+  return NextResponse.json(summary)
 }

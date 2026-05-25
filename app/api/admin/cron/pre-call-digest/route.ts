@@ -30,6 +30,7 @@ import { render } from '@react-email/render'
 import { Resend } from 'resend'
 import { PreCallDigestEmail, type PreCallDigestEmailProps } from '@/emails/pre-call-digest'
 import { publicUrl } from '@/lib/app-url'
+import { logCronRun } from '@/lib/cron-runs'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,6 +45,7 @@ interface AttendeeLite {
 }
 
 export async function POST(req: NextRequest) {
+  const t0 = Date.now()
   // Auth: admin OR cron secret. Supports both the x-cron-secret header
   // (matches existing /api/admin/ai/briefing/cron pattern + GH Actions
   // workflow) and Authorization: Bearer for parity with other crons.
@@ -281,12 +283,17 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({
+  const summary = {
     windowStart,
     windowEnd,
     candidates: candidates.length,
     alreadySent: candidates.length - toProcess.length,
     processed: results.length,
     results,
-  })
+  }
+  // d1-typed database is a slightly different identifier than the
+  // logCronRun helper's expected one, but the underlying drizzle
+  // instance shape matches so we cast through unknown.
+  await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'pre-call-digest', 'success', Date.now() - t0, summary, null)
+  return NextResponse.json(summary)
 }

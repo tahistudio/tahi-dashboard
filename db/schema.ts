@@ -1302,6 +1302,13 @@ export const discoveryCalls = sqliteTable('discovery_calls', {
   budgetCurrency: text('budget_currency'),
   // urgent | this_quarter | this_year | no_rush
   timeline: text('timeline'),
+  // Meeting classification set by the calendar sync. 'discovery' is the
+  // default for lead-linked calls; 'client' for existing-org check-ins;
+  // 'partnership' for intro/sync meetings with unknown contacts whose
+  // titles hint at partnership; 'unclassified' for unmatched events that
+  // need triage. Lets the calls index segment without re-running the
+  // classifier on read.
+  meetingType: text('meeting_type'),
   createdById: text('created_by_id').notNull(),
   ...timestamps,
 }, (table) => [
@@ -1313,6 +1320,7 @@ export const discoveryCalls = sqliteTable('discovery_calls', {
   index('idx_discovery_calls_scheduled').on(table.scheduledAt),
   index('idx_discovery_calls_status').on(table.status),
   index('idx_discovery_calls_gcal').on(table.googleCalendarEventId),
+  index('idx_discovery_calls_meeting_type').on(table.meetingType),
 ])
 
 export const scheduledCalls = sqliteTable('scheduled_calls', {
@@ -1965,9 +1973,12 @@ export const scheduleSections = sqliteTable('schedule_sections', {
 
 export const proposals = sqliteTable('proposals', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  // Linkage. Either or both.
+  // Linkage. Any of these can be set; org/deal/lead form the polymorphic
+  // parent tree. Lead support added in migration 0053 so a proposal can
+  // attach to a lead pre-deal (mirrors schedules → leads from 0049).
   orgId: text('org_id').references(() => organisations.id, { onDelete: 'cascade' }),
   dealId: text('deal_id').references(() => deals.id, { onDelete: 'set null' }),
+  leadId: text('lead_id'),
   // Cover-page metadata
   title: text('title').notNull(),
   subtitle: text('subtitle'),
@@ -2199,6 +2210,9 @@ export const contractDocuments = sqliteTable('contract_documents', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   orgId: text('org_id').references(() => organisations.id, { onDelete: 'cascade' }),
   dealId: text('deal_id').references(() => deals.id, { onDelete: 'set null' }),
+  // Lead support added in migration 0053 — mirrors schedule's lead_id so
+  // a contract can attach to a lead before the deal exists (pre-sign).
+  leadId: text('lead_id'),
   proposalId: text('proposal_id').references(() => proposals.id, { onDelete: 'set null' }),
   templateId: text('template_id').references(() => contractTemplates.id, { onDelete: 'set null' }),
   // nda | sla | msa | sow | mou | other
@@ -2371,3 +2385,44 @@ export const projectCalculations = sqliteTable('project_calculations', {
   index('idx_project_calculations_deal').on(table.dealId),
   index('idx_project_calculations_org').on(table.orgId),
 ])
+
+// ── Cron run log ───────────────────────────────────────────────────────
+//
+// Every cron writes a row here on completion so /settings/automations
+// can show "last run" status without re-running the cron.
+export const cronRuns = sqliteTable('cron_runs', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  cron: text('cron').notNull(),
+  status: text('status').notNull(),
+  durationMs: integer('duration_ms').notNull().default(0),
+  summary: text('summary'),
+  error: text('error'),
+  ranAt: text('ran_at').notNull(),
+}, (table) => [
+  index('idx_cron_runs_cron').on(table.cron),
+  index('idx_cron_runs_ran_at').on(table.ranAt),
+])
+
+// ── Public viewer per-section dwell ────────────────────────────────────
+//
+// shareViewEvents above tracks each viewing SESSION. shareSectionViews
+// records each time within a session that a SECTION becomes visible.
+// IntersectionObserver in the public viewer fires enter/exit per section
+// and the batched POST lands here. Feeds the heatmap / dwell chart /
+// drop-off funnel in ShareAnalyticsCard.
+export const shareSectionViews = sqliteTable('share_section_views', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  resourceType: text('resource_type').notNull(),
+  resourceId: text('resource_id').notNull(),
+  sessionId: text('session_id').notNull(),
+  sectionId: text('section_id').notNull(),
+  dwellMs: integer('dwell_ms').notNull().default(0),
+  enteredAt: text('entered_at').notNull(),
+  exitedAt: text('exited_at'),
+  createdAt: text('created_at').notNull(),
+}, (table) => [
+  index('idx_share_section_views_resource').on(table.resourceType, table.resourceId),
+  index('idx_share_section_views_session').on(table.sessionId),
+  index('idx_share_section_views_section').on(table.sectionId),
+])
+

@@ -756,6 +756,61 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0050',
+    description: 'Discovery calls: meeting_type classifier column so unmatched / client / partnership calls can be routed into a triage queue instead of skipped. Values: discovery | client | partnership | unclassified.',
+    statements: [
+      `ALTER TABLE discovery_calls ADD COLUMN meeting_type TEXT`,
+      `CREATE INDEX IF NOT EXISTS idx_discovery_calls_meeting_type ON discovery_calls(meeting_type)`,
+    ],
+  },
+  {
+    name: '0051',
+    description: 'cron_runs table for /settings/automations dashboard. Each cron writes one row per fire with status, summary JSON and duration so the admin UI can show "last run" status without re-running.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS cron_runs (
+        id text PRIMARY KEY NOT NULL,
+        cron text NOT NULL,
+        status text NOT NULL,
+        duration_ms integer NOT NULL DEFAULT 0,
+        summary text,
+        error text,
+        ran_at text NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_cron_runs_cron ON cron_runs(cron)`,
+      `CREATE INDEX IF NOT EXISTS idx_cron_runs_ran_at ON cron_runs(ran_at)`,
+    ],
+  },
+  {
+    name: '0052',
+    description: 'Public viewer per-section dwell tracking. share_section_views records each time a viewer enters/exits a section on a shared schedule (later: proposal + contract). Pairs with share_view_events (which already tracks the session) so the heatmap + dwell chart + drop-off funnel can compute. Table name is share_section_views (not share_view_events) since share_view_events is already in use for session-level tracking.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS share_section_views (
+        id text PRIMARY KEY NOT NULL,
+        resource_type text NOT NULL,
+        resource_id text NOT NULL,
+        session_id text NOT NULL,
+        section_id text NOT NULL,
+        dwell_ms integer NOT NULL DEFAULT 0,
+        entered_at text NOT NULL,
+        exited_at text,
+        created_at text NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_share_section_views_resource ON share_section_views(resource_type, resource_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_share_section_views_session ON share_section_views(session_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_share_section_views_section ON share_section_views(section_id)`,
+    ],
+  },
+  {
+    name: '0053',
+    description: 'Contracts + proposals: add lead_id columns so each can attach to a lead pre-deal (mirrors schedules in migration 0049). Lets the AI-drafted contract / proposal during the sales loop sit on a lead before it becomes a deal.',
+    statements: [
+      `ALTER TABLE contract_documents ADD COLUMN lead_id TEXT`,
+      `ALTER TABLE proposals ADD COLUMN lead_id TEXT`,
+      `CREATE INDEX IF NOT EXISTS idx_contract_documents_lead ON contract_documents(lead_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_proposals_lead ON proposals(lead_id)`,
+    ],
+  },
+  {
     name: '0048',
     description: 'AI context: seed settings that point at Docs Hub pages used as canonical Tahi context for all AI surfaces (scoring, enrichment, reply drafting). Seeds ai.icpDocId (Ideal Client Profile), ai.brandDnaDocId, ai.toneDocId, ai.liamVoiceDocId, ai.servicesDocId by matching docs.slug to known seeded slugs. Uses INSERT OR IGNORE so re-running is safe and existing operator-picked values are preserved.',
     statements: [

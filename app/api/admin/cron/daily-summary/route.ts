@@ -26,12 +26,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, gte, lte, sql } from 'drizzle-orm'
+import { logCronRun } from '@/lib/cron-runs'
 
 export const dynamic = 'force-dynamic'
 
 const HIGH_INTENT_THRESHOLD = 70
 
 export async function POST(req: NextRequest) {
+  const t0 = Date.now()
   const cronHeader = req.headers.get('x-cron-secret')
   const authHeader = req.headers.get('authorization')
   const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
@@ -53,7 +55,9 @@ export async function POST(req: NextRequest) {
     .limit(1)
   const recipient = recipientRow?.value?.trim()
   if (!recipient) {
-    return NextResponse.json({ skipped: 'No leads.defaultLeadOwnerId configured' })
+    const summary = { skipped: 'No leads.defaultLeadOwnerId configured' }
+    await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'daily-summary', 'skipped', Date.now() - t0, summary, null)
+    return NextResponse.json(summary)
   }
 
   // Idempotency: skip if a daily_summary notification was already
@@ -69,7 +73,9 @@ export async function POST(req: NextRequest) {
     ))
     .limit(1)
   if (existing) {
-    return NextResponse.json({ skipped: 'daily_summary already sent in the last 23h' })
+    const summary = { skipped: 'daily_summary already sent in the last 23h' }
+    await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'daily-summary', 'skipped', Date.now() - t0, summary, null)
+    return NextResponse.json(summary)
   }
 
   // Window: previous calendar day, in UTC. (Liam's local 7am NZT
@@ -190,7 +196,9 @@ export async function POST(req: NextRequest) {
   const totalActivity = metrics.newLeads + metrics.leadsScored + metrics.enrichments
     + metrics.callsHeld + metrics.callsToday + metrics.repliesSent + metrics.promoted
   if (totalActivity === 0) {
-    return NextResponse.json({ skipped: 'No activity yesterday or today — quiet day' })
+    const summary = { skipped: 'No activity yesterday or today — quiet day' }
+    await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'daily-summary', 'skipped', Date.now() - t0, summary, null)
+    return NextResponse.json(summary)
   }
 
   // Compose body — top-line stats, no fluff
@@ -222,10 +230,7 @@ export async function POST(req: NextRequest) {
     createdAt: new Date().toISOString(),
   })
 
-  return NextResponse.json({
-    recipient,
-    dateLabel,
-    metrics,
-    body,
-  })
+  const summary = { recipient, dateLabel, metrics, body }
+  await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'daily-summary', 'success', Date.now() - t0, summary, null)
+  return NextResponse.json(summary)
 }

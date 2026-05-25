@@ -46,6 +46,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { logCronRun } from '@/lib/cron-runs'
 
 export const dynamic = 'force-dynamic'
 
@@ -114,7 +115,9 @@ export async function POST(req: NextRequest) {
   // Settings (defaults when row missing).
   const settings = await readLeadSettings(database)
   if (!settings.cronEnabled) {
-    return NextResponse.json({ skipped: 'cron disabled in settings' })
+    const summary = { skipped: 'cron disabled in settings' }
+    await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'leads-ai', 'skipped', Date.now() - startedAt, summary, null)
+    return NextResponse.json(summary)
   }
 
   // Candidates: active leads where (lastAiRunAt is null) OR (updatedAt > lastAiRunAt).
@@ -381,7 +384,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({
+  const summary = {
     candidates: candidates.length,
     scored: results.filter(r => r.scored).length,
     autoEnriched: results.filter(r => r.autoEnriched).length,
@@ -390,7 +393,9 @@ export async function POST(req: NextRequest) {
     transitions: results.flatMap(r => r.transitions),
     durationMs: Date.now() - startedAt,
     results,
-  })
+  }
+  await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'leads-ai', 'success', Date.now() - startedAt, summary, null)
+  return NextResponse.json(summary)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

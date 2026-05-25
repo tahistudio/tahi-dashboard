@@ -24,10 +24,12 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, inArray, sql } from 'drizzle-orm'
 import { getGoogleAccessToken, listCalendarEvents, GoogleNotConnectedError } from '@/lib/google'
+import { logCronRun } from '@/lib/cron-runs'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
+  const t0 = Date.now()
   // Two auth paths: admin session OR cron secret (matches /api/admin/cron/*).
   const cronHeader = req.headers.get('x-cron-secret')
   const authHeader = req.headers.get('authorization')
@@ -242,12 +244,32 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!parentType || !parentId) {
-      skipped++
-      results.push({ eventId: ev.id, action: 'skipped', reason: 'no CRM match' })
-      continue
+    // Classify the meeting. parentType drives the routing label so the
+    // calls index can show "client check-in" / "discovery" / "unclassified".
+    // - lead   → discovery (Liam still has to qualify)
+    // - org    → client check-in
+    // - deal   → discovery (active deal mid-pipeline)
+    // - none   → partnership if the title hints at it, else unclassified
+    function classifyTitle(t: string): 'partnership' | null {
+      const lower = t.toLowerCase()
+      if (/(partner|intro|sync|collab|webflow|catch[- ]?up|chat)/i.test(lower)) return 'partnership'
+      return null
     }
-    matched++
+    let meetingType: 'discovery' | 'client' | 'partnership' | 'unclassified' = 'unclassified'
+    if (parentType === 'lead') meetingType = 'discovery'
+    else if (parentType === 'org') meetingType = 'client'
+    else if (parentType === 'deal') meetingType = 'discovery'
+    else meetingType = classifyTitle(summary) ?? 'unclassified'
+
+    // Unmatched events are still recorded — they go into the triage
+    // queue on /calls so Liam can categorise rather than silently skip.
+    const isUnmatched = !parentType || !parentId
+    if (isUnmatched) {
+      // We still want a row, but with all parent IDs null. Continue with
+      // parentType/parentId both null and meetingType set above.
+    } else {
+      matched++
+    }
 
     const attendeesJson = JSON.stringify((ev.attendees ?? []).map(a => ({
       name: a.displayName ?? null,
@@ -265,6 +287,7 @@ export async function POST(req: NextRequest) {
         || existing.scheduledAt !== startIso
         || existing.durationMinutes !== durationMinutes
         || existing.googleMeetUrl !== meetUrl
+        || existing.meetingType !== meetingType
       if (changed) {
         await database
           .update(schema.discoveryCalls)
@@ -274,11 +297,12 @@ export async function POST(req: NextRequest) {
             durationMinutes,
             googleMeetUrl: meetUrl,
             attendees: attendeesJson,
+            meetingType,
             updatedAt: nowIso,
           })
           .where(eq(schema.discoveryCalls.id, existing.id))
         updated++
-        results.push({ eventId: ev.id, action: 'updated', parent: `${parentType}:${parentId}` })
+        results.push({ eventId: ev.id, action: 'updated', parent: parentType ? `${parentType}:${parentId}` : meetingType })
       } else {
         results.push({ eventId: ev.id, action: 'unchanged' })
       }
@@ -293,6 +317,7 @@ export async function POST(req: NextRequest) {
         googleCalendarEventId: ev.id,
         attendees: attendeesJson,
         status: 'scheduled',
+        meetingType,
         createdById: userId,
         createdAt: nowIso,
         updatedAt: nowIso,
@@ -321,7 +346,7 @@ export async function POST(req: NextRequest) {
       }
 
       created++
-      results.push({ eventId: ev.id, action: 'created', parent: `${parentType}:${parentId}` })
+      results.push({ eventId: ev.id, action: 'created', parent: parentType ? `${parentType}:${parentId}` : meetingType })
     }
 
     // Domain-match backfill: when we matched a lead by website-domain
@@ -347,12 +372,14 @@ export async function POST(req: NextRequest) {
     .set({ lastSyncedAt: new Date().toISOString() })
     .where(eq(schema.integrations.service, 'google_workspace'))
 
-  return NextResponse.json({
+  const summary = {
     fetched: usable.length,
     matched,
     created,
     updated,
     skipped,
     results: results.slice(0, 20),  // keep response small
-  })
+  }
+  await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'sync-calendar', 'success', Date.now() - t0, summary, null)
+  return NextResponse.json(summary)
 }

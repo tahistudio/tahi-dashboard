@@ -23,6 +23,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm'
+import { logCronRun } from '@/lib/cron-runs'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,6 +36,7 @@ interface ProcessResult {
 }
 
 export async function POST(req: NextRequest) {
+  const t0 = Date.now()
   // Auth: admin OR cron secret (x-cron-secret header or Bearer auth).
   // TAHI_CRON_SECRET first, falls back to CRON_SECRET for env-var parity.
   const cronHeader = req.headers.get('x-cron-secret')
@@ -58,7 +60,9 @@ export async function POST(req: NextRequest) {
     .limit(1)
   const enabled = toggleRow?.value !== 'false'
   if (!enabled) {
-    return NextResponse.json({ skipped: 'leads.autoPromoteFromCalls is disabled in settings' })
+    const summary = { skipped: 'leads.autoPromoteFromCalls is disabled in settings' }
+    await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'auto-promote-calls', 'skipped', Date.now() - t0, summary, null)
+    return NextResponse.json(summary)
   }
 
   // Candidate calls: outcome='promote', has a leadId, not already
@@ -83,7 +87,9 @@ export async function POST(req: NextRequest) {
     ))
 
   if (candidates.length === 0) {
-    return NextResponse.json({ scanned: 0, promoted: 0, results: [] })
+    const summary = { scanned: 0, promoted: 0, results: [] }
+    await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'auto-promote-calls', 'success', Date.now() - t0, summary, null)
+    return NextResponse.json(summary)
   }
 
   // Dedup against already-processed calls
@@ -207,12 +213,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({
+  const summary = {
     scanned: candidates.length,
     alreadyProcessed: candidates.length - toProcess.length,
     promoted,
     results,
-  })
+  }
+  await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'auto-promote-calls', 'success', Date.now() - t0, summary, null)
+  return NextResponse.json(summary)
   void isNull
   void ne
 }

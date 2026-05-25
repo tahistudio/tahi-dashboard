@@ -34,6 +34,7 @@ import { schema } from '@/db/d1'
 import { and, eq, gte, isNull, lte, or } from 'drizzle-orm'
 import { getGoogleAccessToken, listDriveFiles, exportDriveDocAsText } from '@/lib/google'
 import { parseGeminiTitle, parseGeminiTranscript } from '@/lib/gemini-transcript-parser'
+import { logCronRun } from '@/lib/cron-runs'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,6 +49,7 @@ interface DocResult {
 }
 
 export async function POST(req: NextRequest) {
+  const t0 = Date.now()
   const cronHeader = req.headers.get('x-cron-secret')
   const authHeader = req.headers.get('authorization')
   const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
@@ -252,12 +254,14 @@ export async function POST(req: NextRequest) {
     })
     .where(eq(schema.integrations.service, 'google_workspace'))
 
-  return NextResponse.json({
+  const summary = {
     dryRun,
     scanned: files.length,
     written,
     results,
-  })
+  }
+  await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'sync-drive-transcripts', 'success', Date.now() - t0, summary, null)
+  return NextResponse.json(summary)
   void isNull
   void or
 }
