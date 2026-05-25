@@ -123,10 +123,10 @@ export function LinkedToPanel({
   const proposalTitle = resolvedProposalTitle
   const leadName = resolvedLeadName
   const showProposalRow = resourceType !== 'proposal'
-  // Lead row only on schedules today (the only resource that has a
-  // lead_id column after migration 0049). Easy to extend to contracts/
-  // proposals later by adding the column + relaxing this check.
-  const showLeadRow = resourceType === 'schedule'
+  // Lead row supported on all three deliverable types after migrations
+  // 0049 (schedules) and 0053 (proposals + contracts). The corresponding
+  // PATCH endpoints accept leadId on the body.
+  const showLeadRow = true
 
   // Lazy-load options when an editor opens.
   useEffect(() => {

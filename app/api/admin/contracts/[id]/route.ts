@@ -50,6 +50,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     expiresAt?: string | null
     orgId?: string | null
     dealId?: string | null
+    leadId?: string | null
     proposalId?: string | null
   }
   const database = await db() as unknown as D1
@@ -70,6 +71,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.expiresAt !== undefined) updates.expiresAt = body.expiresAt
   if (body.orgId !== undefined) updates.orgId = body.orgId
   if (body.dealId !== undefined) updates.dealId = body.dealId
+  if (body.leadId !== undefined) updates.leadId = body.leadId
   if (body.proposalId !== undefined) updates.proposalId = body.proposalId
   await database.update(schema.contractDocuments).set(updates).where(eq(schema.contractDocuments.id, id))
 

@@ -21,6 +21,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       id: schema.proposals.id,
       orgId: schema.proposals.orgId,
       dealId: schema.proposals.dealId,
+      leadId: schema.proposals.leadId,
       title: schema.proposals.title,
       subtitle: schema.proposals.subtitle,
       preparedFor: schema.proposals.preparedFor,
@@ -38,10 +39,12 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       updatedAt: schema.proposals.updatedAt,
       orgName: schema.organisations.name,
       dealTitle: schema.deals.title,
+      leadName: schema.leads.name,
     })
     .from(schema.proposals)
     .leftJoin(schema.organisations, eq(schema.proposals.orgId, schema.organisations.id))
     .leftJoin(schema.deals, eq(schema.proposals.dealId, schema.deals.id))
+    .leftJoin(schema.leads, eq(schema.proposals.leadId, schema.leads.id))
     .where(eq(schema.proposals.id, id))
     .limit(1)
 
@@ -73,6 +76,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     subtitle?: string | null
     orgId?: string | null
     dealId?: string | null
+    leadId?: string | null
     preparedFor?: string | null
     preparedBy?: string | null
     effectiveDate?: string | null
@@ -96,6 +100,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.subtitle !== undefined) updates.subtitle = body.subtitle?.trim() ?? null
   if (body.orgId !== undefined) updates.orgId = body.orgId
   if (body.dealId !== undefined) updates.dealId = body.dealId
+  if (body.leadId !== undefined) updates.leadId = body.leadId
   if (body.preparedFor !== undefined) updates.preparedFor = body.preparedFor?.trim() ?? null
   if (body.preparedBy !== undefined) updates.preparedBy = body.preparedBy?.trim() ?? null
   if (body.effectiveDate !== undefined) updates.effectiveDate = body.effectiveDate
