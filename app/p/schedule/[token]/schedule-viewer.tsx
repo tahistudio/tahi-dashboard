@@ -22,6 +22,7 @@ import {
 } from '@/components/tahi/deliverable'
 import { apiPath } from '@/lib/api'
 import { useShareViewTracking } from '@/components/tahi/use-share-view-tracking'
+import { useSectionDwellTracking } from '@/components/tahi/use-section-dwell-tracking'
 
 interface PublicSchedule {
   title: string
@@ -96,6 +97,15 @@ export function ScheduleViewer(props: ScheduleViewerProps) {
   useShareViewTracking({
     resourceType: 'schedule',
     resourceId: analyticsResourceId,
+    shareToken: isPreview ? null : token,
+  })
+
+  // Per-section dwell tracking. Returns a ref setter we attach to each
+  // section element. Skipped in preview mode so admin previews don't
+  // pollute the production heatmap.
+  const observeSection = useSectionDwellTracking({
+    resourceType: 'schedule',
+    resourceId: isPreview ? null : analyticsResourceId,
     shareToken: isPreview ? null : token,
   })
 
@@ -191,31 +201,36 @@ export function ScheduleViewer(props: ScheduleViewerProps) {
       )}
 
       {/* Cover page */}
-      <CoverPage
-        eyebrow={coverEyebrow}
-        title={schedule.title}
-        metadata={metadata}
-        projectLabel={projectLabel}
-      />
+      <div ref={el => observeSection(el, 'cover')}>
+        <CoverPage
+          eyebrow={coverEyebrow}
+          title={schedule.title}
+          metadata={metadata}
+          projectLabel={projectLabel}
+        />
+      </div>
 
       {/* Sections — each wrapped in PageChrome for the leaf + page-number frame.
-          Section number is 1-indexed against the section list. */}
+          Section number is 1-indexed against the section list. The outer
+          <div ref> registers the section with IntersectionObserver so
+          dwell-time can be tracked per slide. */}
       {sections.map((section, i) => {
         const num = String(i + 1).padStart(2, '0')
         const name = (section.subtitle ?? defaultSectionName(section.type)).toUpperCase()
         return (
-          <PageChrome
-            key={section.id}
-            sectionNumber={num}
-            sectionName={name}
-            projectLabel={projectLabel}
-          >
-            <SectionRenderer
-              section={section}
-              numberOfWeeks={schedule.numberOfWeeks}
-              chrome={false}
-            />
-          </PageChrome>
+          <div key={section.id} ref={el => observeSection(el, section.id)}>
+            <PageChrome
+              sectionNumber={num}
+              sectionName={name}
+              projectLabel={projectLabel}
+            >
+              <SectionRenderer
+                section={section}
+                numberOfWeeks={schedule.numberOfWeeks}
+                chrome={false}
+              />
+            </PageChrome>
+          </div>
         )
       })}
 

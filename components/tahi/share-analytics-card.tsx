@@ -13,6 +13,23 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Eye, Users, Clock, RefreshCw, Globe } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { AnalyticsHeatmap } from '@/components/tahi/analytics-heatmap'
+
+interface SectionAgg {
+  sectionId: string
+  views: number
+  uniqueSessions: number
+  totalDwellMs: number
+  avgDwellMs: number
+  maxDwellMs: number
+}
+
+interface SectionsResponse {
+  totalSessions: number
+  totalEvents: number
+  returnVisits: number
+  sections: SectionAgg[]
+}
 
 interface ShareViewEvent {
   id: string
@@ -73,6 +90,7 @@ export function ShareAnalyticsCard({
 }) {
   const [stats, setStats] = useState<AnalyticsStats | null>(null)
   const [events, setEvents] = useState<ShareViewEvent[]>([])
+  const [sectionData, setSectionData] = useState<SectionsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -80,12 +98,19 @@ export function ShareAnalyticsCard({
     if (!silent) setLoading(true)
     else setRefreshing(true)
     try {
-      const url = `/api/admin/views?resourceType=${resourceType}&resourceId=${resourceId}&limit=15`
-      const res = await fetch(apiPath(url))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { stats: AnalyticsStats; events: ShareViewEvent[] }
-      setStats(data.stats)
-      setEvents(data.events ?? [])
+      const [vRes, sRes] = await Promise.all([
+        fetch(apiPath(`/api/admin/views?resourceType=${resourceType}&resourceId=${resourceId}&limit=15`)),
+        fetch(apiPath(`/api/admin/views/sections?resourceType=${resourceType}&resourceId=${resourceId}`)),
+      ])
+      if (vRes.ok) {
+        const data = await vRes.json() as { stats: AnalyticsStats; events: ShareViewEvent[] }
+        setStats(data.stats)
+        setEvents(data.events ?? [])
+      }
+      if (sRes.ok) {
+        const data = await sRes.json() as SectionsResponse
+        setSectionData(data)
+      }
     } catch {
       // Keep previous data; silent.
     } finally {
@@ -186,6 +211,28 @@ export function ShareAnalyticsCard({
               sub={null}
             />
           </div>
+
+          {/* Section heatmap — only renders when section-level dwell
+              events are available. Until viewers scroll through a viewer
+              instrumented with useSectionDwellTracking, sectionData will
+              be null/empty and the heatmap stays hidden. */}
+          {sectionData && sectionData.sections.length > 0 && (
+            <div style={{ marginBottom: '1rem' }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: '0.5rem', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Heatmap by section
+                </p>
+                <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+                  {sectionData.returnVisits > 0 && <>{sectionData.returnVisits} return visit{sectionData.returnVisits === 1 ? '' : 's'} · </>}
+                  {sectionData.totalEvents} section view{sectionData.totalEvents === 1 ? '' : 's'}
+                </p>
+              </div>
+              <AnalyticsHeatmap
+                sections={sectionData.sections}
+                totalUniqueSessions={sectionData.totalSessions}
+              />
+            </div>
+          )}
 
           {/* Recent events */}
           <div>
