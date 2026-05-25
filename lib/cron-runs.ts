@@ -42,6 +42,48 @@ export async function logCronRun(
       error,
       ranAt: new Date().toISOString(),
     })
+    // On error: push a notification to the default lead owner so the
+    // operator sees the failure in the bell menu without having to open
+    // /settings/crons. Dedup window: 1 row per cron per 6 hours so a
+    // failing cron doesn't flood the inbox.
+    if (status === 'error') {
+      try {
+        const { eq, and, sql } = await import('drizzle-orm')
+        const [recent] = await database
+          .select({ id: schema.notifications.id })
+          .from(schema.notifications)
+          .where(and(
+            eq(schema.notifications.eventType, 'cron_failed'),
+            eq(schema.notifications.entityId, `cron:${cron}`),
+            sql`${schema.notifications.createdAt} > datetime('now', '-6 hours')`,
+          ))
+          .limit(1)
+        if (!recent) {
+          const [ownerRow] = await database
+            .select({ value: schema.settings.value })
+            .from(schema.settings)
+            .where(eq(schema.settings.key, 'leads.defaultLeadOwnerId'))
+            .limit(1)
+          const recipient = ownerRow?.value?.trim()
+          if (recipient) {
+            await database.insert(schema.notifications).values({
+              id: crypto.randomUUID(),
+              userId: recipient,
+              userType: 'team_member',
+              eventType: 'cron_failed',
+              title: `Cron failed: ${cron}`,
+              body: error?.slice(0, 200) ?? 'See /settings/crons for details.',
+              entityType: 'cron',
+              entityId: `cron:${cron}`,
+              read: false,
+              createdAt: new Date().toISOString(),
+            })
+          }
+        }
+      } catch {
+        // Silent — never let notification plumbing break a cron.
+      }
+    }
   } catch {
     // Don't let a failed log break the cron itself.
   }
