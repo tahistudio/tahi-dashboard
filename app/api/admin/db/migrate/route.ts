@@ -811,6 +811,14 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0054',
+    description: 'Schedules: add publishedSnapshot + publishedAt for draft/publish flow. Admin edits stay local until they hit Publish; public viewer reads the snapshot. Mirrors the proposal draft/publish model.',
+    statements: [
+      `ALTER TABLE project_schedules ADD COLUMN published_snapshot TEXT`,
+      `ALTER TABLE project_schedules ADD COLUMN published_at TEXT`,
+    ],
+  },
+  {
     name: '0048',
     description: 'AI context: seed settings that point at Docs Hub pages used as canonical Tahi context for all AI surfaces (scoring, enrichment, reply drafting). Seeds ai.icpDocId (Ideal Client Profile), ai.brandDnaDocId, ai.toneDocId, ai.liamVoiceDocId, ai.servicesDocId by matching docs.slug to known seeded slugs. Uses INSERT OR IGNORE so re-running is safe and existing operator-picked values are preserved.',
     statements: [

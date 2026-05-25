@@ -38,6 +38,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       numberOfWeeks: schema.projectSchedules.numberOfWeeks,
       overviewHtml: schema.projectSchedules.overviewHtml,
       status: schema.projectSchedules.status,
+      publishedSnapshot: schema.projectSchedules.publishedSnapshot,
       orgName: schema.organisations.name,
     })
     .from(schema.projectSchedules)
@@ -49,8 +50,67 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
-  // Sectioned schedules (migration 0026). Public viewer renders one slide
-  // per section; each gantt section gets its rows nested in.
+  // Draft / publish: if a published snapshot exists, return it. Otherwise
+  // fall back to the live tables (back-compat with schedules created
+  // before migration 0054 / never explicitly published).
+  if (scheduleRow.publishedSnapshot) {
+    try {
+      const snapshot = JSON.parse(scheduleRow.publishedSnapshot) as {
+        schedule: {
+          title: string
+          subtitle: string | null
+          preparedFor: string | null
+          preparedBy: string | null
+          effectiveDate: string | null
+          targetLaunchDate: string | null
+          numberOfWeeks: number
+          overviewHtml: string | null
+        }
+        sections: Array<{
+          id: string
+          type: string
+          title: string | null
+          subtitle: string | null
+          startWeek: number | null
+          endWeek: number | null
+          data: unknown
+          position: number
+        }>
+        rows: Array<{
+          id: string
+          sectionId: string | null
+          rowType: string
+          label: string
+          owner: string | null
+          startWeek: number | null
+          endWeek: number | null
+          riskFlag: number
+          position: number
+        }>
+      }
+      const rowsBySection = new Map<string, typeof snapshot.rows>()
+      for (const r of snapshot.rows) {
+        const key = r.sectionId ?? '__unsectioned__'
+        const arr = rowsBySection.get(key) ?? []
+        arr.push(r)
+        rowsBySection.set(key, arr)
+      }
+      const sections = snapshot.sections.map(s => ({
+        ...s,
+        rows: s.type === 'gantt' ? (rowsBySection.get(s.id) ?? []) : [],
+      }))
+      return NextResponse.json({
+        schedule: { ...snapshot.schedule, status: scheduleRow.status, orgName: scheduleRow.orgName },
+        sections,
+        rows: snapshot.rows,
+        analyticsResourceId: scheduleRow.id,
+      })
+    } catch {
+      // Corrupt snapshot — fall through to live read.
+    }
+  }
+
+  // Live fallback (no snapshot yet).
   const [sectionRows, allRows] = await Promise.all([
     database
       .select({
@@ -96,13 +156,11 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     rows: s.type === 'gantt' ? (rowsBySection.get(s.id) ?? []) : [],
   }))
 
-  // Strip the internal ID from the shared schedule object; expose via
-  // analyticsResourceId for the view-tracking hook only.
-  const { id: internalId, ...safeSchedule } = scheduleRow
+  const { id: internalId, publishedSnapshot: _ps, ...safeSchedule } = scheduleRow
+  void _ps
   return NextResponse.json({
     schedule: safeSchedule,
     sections,
-    // Back-compat for the old single-section public viewer.
     rows: allRows,
     analyticsResourceId: internalId,
   })

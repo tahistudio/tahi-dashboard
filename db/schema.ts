@@ -1865,6 +1865,14 @@ export const projectSchedules = sqliteTable('project_schedules', {
   status: text('status').notNull().default('draft'), // draft | shared | archived
   publicShareToken: text('public_share_token'),       // null until shared
   publicSharedAt: text('public_shared_at'),
+  // Draft / Publish snapshot (migration 0054). Admin edits live values
+  // freely; the public viewer reads `publishedSnapshot` if present so
+  // half-finished edits don't leak. Shape mirrors proposals' snapshot:
+  //   { schedule: {...}, sections: [...], rows: [...] }
+  // null = "not yet published" — public viewer falls back to live so
+  // schedules created before this column shipped still work.
+  publishedSnapshot: text('published_snapshot'),
+  publishedAt: text('published_at'),
   // Audit
   createdById: text('created_by_id').notNull(),
   ...timestamps,

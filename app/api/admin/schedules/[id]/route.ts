@@ -34,6 +34,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       status: schema.projectSchedules.status,
       publicShareToken: schema.projectSchedules.publicShareToken,
       publicSharedAt: schema.projectSchedules.publicSharedAt,
+      publishedAt: schema.projectSchedules.publishedAt,
       createdAt: schema.projectSchedules.createdAt,
       updatedAt: schema.projectSchedules.updatedAt,
       orgName: schema.organisations.name,

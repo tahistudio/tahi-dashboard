@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Plus, Trash2, AlertTriangle, Share2, Copy, ExternalLink, Mail, Eye,
   Diamond, FileText, ChevronUp, ChevronDown, BarChart3, GitBranch, Grid3x3, AlignLeft,
-  BookmarkPlus,
+  BookmarkPlus, Upload,
 } from 'lucide-react'
 import { EmailShareModal, type EmailRecipientSuggestion } from '@/components/tahi/email-share-modal'
 import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
@@ -43,6 +43,7 @@ interface Schedule {
   status: 'draft' | 'shared' | 'sent' | 'signed' | 'completed' | 'archived'
   publicShareToken: string | null
   publicSharedAt: string | null
+  publishedAt: string | null
   orgName: string | null
   dealTitle: string | null
   leadName: string | null
@@ -482,6 +483,25 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   }
 
   // ── Share / unshare ──────────────────────────────────────────────────
+  // Publish: snapshots current state into publishedSnapshot. Public viewer
+  // reads the snapshot so half-finished edits don't leak. Mirrors proposal
+  // publish flow.
+  const [publishing, setPublishing] = useState(false)
+  async function handlePublish() {
+    setPublishing(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/schedules/${scheduleId}/publish`), { method: 'POST' })
+      const data = await res.json() as { publishedAt?: string; error?: string }
+      if (!res.ok || !data.publishedAt) throw new Error(data.error ?? 'Failed')
+      setSchedule(prev => prev ? { ...prev, publishedAt: data.publishedAt! } : prev)
+      showToast('Published — clients now see the latest version', 'success')
+    } catch {
+      showToast('Failed to publish', 'error')
+    } finally {
+      setPublishing(false)
+    }
+  }
+
   async function handleShare() {
     setSharing(true)
     try {
@@ -757,6 +777,25 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+          {/* Publish button — visible once the schedule has been shared
+              (i.e. has a public token). Snapshots current state so the
+              live link reflects this exact moment. The save indicator
+              still says "saved" for every keystroke; "Published" is the
+              separate "ok now clients can see this" step. */}
+          {publicUrl && (
+            <button
+              onClick={() => trackSave(handlePublish())}
+              disabled={publishing}
+              className="inline-flex items-center"
+              style={toolbarBtn}
+              title={schedule.publishedAt
+                ? `Last published ${new Date(schedule.publishedAt).toLocaleString()}`
+                : 'Publish so the live link reflects current edits'}
+            >
+              <Upload size={13} />
+              {publishing ? 'Publishing' : (schedule.publishedAt ? 'Republish' : 'Publish')}
+            </button>
+          )}
           {publicUrl ? (
             <button
               onClick={() => { void ensureContacts(); setShowEmail(true) }}
