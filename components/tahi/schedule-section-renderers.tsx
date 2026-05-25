@@ -8,10 +8,24 @@
  */
 'use client'
 
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { GanttGrid, type GanttRow } from '@/components/tahi/gantt-grid'
 import { GanttLegend } from '@/components/tahi/gantt-legend'
 import { SectionHeader, AccentTitle } from '@/components/tahi/deliverable'
+
+// Simple viewport-width hook for "stack as cards on mobile" decisions.
+// SSR-safe: returns false on first render, then updates after mount.
+function useIsNarrow(breakpointPx = 720): boolean {
+  const [isNarrow, setIsNarrow] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const check = () => setIsNarrow(window.innerWidth < breakpointPx)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [breakpointPx])
+  return isNarrow
+}
 
 export type SectionType = 'overview' | 'gantt' | 'risk_register' | 'raci_matrix' | 'text'
 
@@ -159,6 +173,7 @@ export function GanttSection({
 export function RiskRegisterSection({ section, chrome = true }: { section: ScheduleSection; chrome?: boolean }) {
   const data = safeParse<{ rows?: RiskRow[] }>(section.data)
   const rows = data?.rows ?? []
+  const isNarrow = useIsNarrow()
 
   return (
     <SlideShell
@@ -168,6 +183,40 @@ export function RiskRegisterSection({ section, chrome = true }: { section: Sched
     >
       {rows.length === 0 ? (
         <EmptyHint>No risks listed yet.</EmptyHint>
+      ) : isNarrow ? (
+        // Mobile: stack each risk as a card. The table's 5 columns
+        // squeezed into a phone width make the text unreadable;
+        // card-stack puts each field on its own line with proper room.
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {rows.map((r, i) => (
+            <article
+              key={r.id ?? i}
+              style={{
+                background: '#ffffff',
+                border: '1px solid var(--color-border-subtle, #e8f0e6)',
+                borderRadius: '0.625rem',
+                padding: '0.875rem 1rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem',
+              }}
+            >
+              <header style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.625rem', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 700, color: '#1f2c1a', lineHeight: 1.35 }}>
+                    {r.risk}
+                  </h3>
+                  <p style={{ margin: '0.1875rem 0 0', fontSize: '0.6875rem', color: '#8a9987', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                    Owner: {r.owner}
+                  </p>
+                </div>
+                <ImpactPill level={r.impact} />
+              </header>
+              <CardField label="Mitigation" value={r.mitigation} />
+              <CardField label="Timeline implication" value={r.contractualImplication} />
+            </article>
+          ))}
+        </div>
       ) : (
         <div style={tableWrap}>
           <table style={tableStyle}>
@@ -197,6 +246,24 @@ export function RiskRegisterSection({ section, chrome = true }: { section: Sched
         </div>
       )}
     </SlideShell>
+  )
+}
+
+function CardField({ label, value }: { label: string; value: string }) {
+  if (!value) return null
+  return (
+    <div>
+      <p style={{
+        margin: 0,
+        fontSize: '0.625rem',
+        color: '#8a9987',
+        textTransform: 'uppercase',
+        letterSpacing: '0.06em',
+        fontWeight: 600,
+        marginBottom: '0.1875rem',
+      }}>{label}</p>
+      <p style={{ margin: 0, fontSize: '0.8125rem', color: '#2d3a26', lineHeight: 1.55 }}>{value}</p>
+    </div>
   )
 }
 

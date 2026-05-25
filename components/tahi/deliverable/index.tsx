@@ -67,11 +67,15 @@ export function AccentTitle({
   size = 'lg',
   as: Tag = 'h1',
   style,
+  /** When rendering on a dark surface (cover hero), flip the accent
+   *  colour to light-green so it stays readable. Defaults to false. */
+  onDark = false,
 }: {
   text: string
   size?: 'lg' | 'md' | 'sm'
   as?: 'h1' | 'h2' | 'h3'
   style?: React.CSSProperties
+  onDark?: boolean
 }) {
   const fontSize = size === 'lg'
     ? 'clamp(2rem, 5vw, 3.25rem)'
@@ -83,6 +87,7 @@ export function AccentTitle({
 
   // Split on {{...}} preserving the tokens
   const parts = text.split(/(\{\{[^}]+\}\})/g).filter(Boolean)
+  const accentColour = onDark ? BRAND.greenLight : BRAND.green
 
   return (
     <Tag
@@ -100,7 +105,7 @@ export function AccentTitle({
       {parts.map((part, i) => {
         const m = part.match(/^\{\{([^}]+)\}\}$/)
         return m ? (
-          <span key={i} style={{ color: BRAND.green }}>{m[1]}</span>
+          <span key={i} style={{ color: accentColour }}>{m[1]}</span>
         ) : (
           <React.Fragment key={i}>{part}</React.Fragment>
         )
@@ -111,14 +116,50 @@ export function AccentTitle({
 
 // ── Brand mark (logo + wordmark) ──────────────────────────────────────────
 
-export function BrandMark({ size = 'md' }: { size?: 'sm' | 'md' }) {
+export function BrandMark({
+  size = 'md',
+  variant = 'dark',
+}: {
+  size?: 'sm' | 'md'
+  /** 'dark' = dark ink on light bg (default). 'white' = white ink on
+   *  dark bg (cover hero etc.) */
+  variant?: 'dark' | 'white'
+}) {
   const dim = size === 'sm' ? '1.125rem' : '1.4rem'
   const font = size === 'sm' ? '0.75rem' : '0.875rem'
+  // White variant uses the pale wordmark with leaf on a dark surface.
+  // The dashboard ships /dashboard/tahi-logo.png (pale) and
+  // /dashboard/favicon.png (dark). On the white variant we use the
+  // pale one; otherwise the dark favicon.
+  const src = variant === 'white' ? '/dashboard/tahi-logo.png' : '/dashboard/favicon.png'
+  const inkColor = variant === 'white' ? BRAND.surface : BRAND.ink
+  // The pale wordmark already has type baked in, so render only the
+  // image for the white variant. The dark variant pairs the favicon
+  // with a "Tahi Studio" wordmark.
+  if (variant === 'white') {
+    return (
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt="Tahi Studio"
+          style={{
+            height: dim,
+            width: 'auto',
+            display: 'block',
+            flexShrink: 0,
+            // Pale variant; if the asset isn't pale, this brightens it.
+            filter: 'brightness(0) invert(1)',
+          }}
+        />
+      </div>
+    )
+  }
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src="/dashboard/favicon.png"
+        src={src}
         alt=""
         aria-hidden="true"
         style={{ width: dim, height: dim, display: 'block', flexShrink: 0 }}
@@ -127,7 +168,7 @@ export function BrandMark({ size = 'md' }: { size?: 'sm' | 'md' }) {
         style={{
           fontSize: font,
           fontWeight: 700,
-          color: BRAND.ink,
+          color: inkColor,
           letterSpacing: '-0.01em',
         }}
       >
@@ -157,7 +198,7 @@ export function PageChrome({
     <section
       style={{
         position: 'relative',
-        width: '100%',
+        width: 'calc(100% - clamp(1.5rem, 6vw, 3rem))',
         maxWidth: '76rem',
         margin: '0 auto',
         background: BRAND.surface,
@@ -297,27 +338,40 @@ export function CoverPage({
   /** Project label for the bottom-right of the cover. */
   projectLabel?: string | null
 }) {
+  // Dark hero variant matching the proposal's 'dark' cover theme: deep
+  // brand-dark green with white type. No decorative circles — the
+  // glow gradient does the visual lifting instead.
   return (
     <section
       style={{
         position: 'relative',
         width: '100%',
-        maxWidth: '76rem',
-        margin: '0 auto',
-        background: BRAND.surface,
-        border: `1px solid ${BRAND.borderSubtle}`,
+        // Edge-to-edge: cover spans the full deliverable container,
+        // unlike subsequent pages which stay at 76rem.
+        background: BRAND.greenDark,
+        color: BRAND.surface,
         borderRadius: '1rem',
-        boxShadow: '0 8px 32px rgba(31, 44, 26, 0.08)',
         overflow: 'hidden',
+        boxShadow: '0 16px 48px rgba(31, 44, 26, 0.24)',
       }}
     >
-      {/* Decorative organic circles in two corners */}
-      <DecorCircle position="top-right" />
-      <DecorCircle position="bottom-left" />
+      {/* Two soft radial glows for depth — replaces the bordered circles. */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: `
+            radial-gradient(ellipse 60% 80% at 88% 18%, rgba(122, 171, 107, 0.42), transparent 60%),
+            radial-gradient(ellipse 50% 70% at 8% 92%, rgba(122, 171, 107, 0.28), transparent 60%)
+          `,
+          pointerEvents: 'none',
+        }}
+      />
 
-      {/* Top brand mark */}
+      {/* Top brand mark — white variant on the dark hero */}
       <div style={{ position: 'relative', padding: 'clamp(1.5rem, 4vw, 2.5rem)', paddingBottom: 0 }}>
-        <BrandMark />
+        <BrandMark size="md" variant="white" />
       </div>
 
       {/* Center stack */}
@@ -327,9 +381,9 @@ export function CoverPage({
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center',
-          padding: 'clamp(2rem, 6vw, 4rem) clamp(1.5rem, 4vw, 2.5rem)',
-          minHeight: 'clamp(18rem, 44vh, 26rem)',
-          gap: '0.75rem',
+          padding: 'clamp(2rem, 6vw, 4rem) clamp(1.5rem, 4vw, 3rem)',
+          minHeight: 'clamp(20rem, 50vh, 32rem)',
+          gap: '0.875rem',
         }}
       >
         {eyebrow && (
@@ -337,18 +391,25 @@ export function CoverPage({
             style={{
               fontSize: '0.75rem',
               fontWeight: 600,
-              color: BRAND.muted,
+              color: BRAND.green100,
               textTransform: 'uppercase',
               letterSpacing: '0.18em',
+              opacity: 0.85,
             }}
           >
             {eyebrow}
           </div>
         )}
-        <AccentTitle text={title} size="lg" as="h1" />
+        <AccentTitle
+          text={title}
+          size="lg"
+          as="h1"
+          onDark
+          style={{ color: BRAND.surface }}
+        />
       </div>
 
-      {/* Metadata footer strip */}
+      {/* Metadata footer strip — translucent over the dark hero */}
       {((metadata && metadata.length > 0) || projectLabel) && (
         <div
           style={{
@@ -356,8 +417,9 @@ export function CoverPage({
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))',
             gap: '1.25rem',
-            padding: 'clamp(1.25rem, 3vw, 1.875rem) clamp(1.5rem, 4vw, 2.5rem)',
-            borderTop: `1px solid ${BRAND.borderSubtle}`,
+            padding: 'clamp(1.25rem, 3vw, 1.875rem) clamp(1.5rem, 4vw, 3rem)',
+            borderTop: '1px solid rgba(255, 255, 255, 0.18)',
+            background: 'rgba(0, 0, 0, 0.18)',
           }}
         >
           {(metadata ?? []).map(cell => (
@@ -366,10 +428,11 @@ export function CoverPage({
                 style={{
                   fontSize: '0.625rem',
                   fontWeight: 600,
-                  color: BRAND.subtle,
+                  color: BRAND.green100,
                   textTransform: 'uppercase',
                   letterSpacing: '0.1em',
                   marginBottom: '0.375rem',
+                  opacity: 0.85,
                 }}
               >
                 {cell.label}
@@ -378,7 +441,7 @@ export function CoverPage({
                 style={{
                   fontSize: '0.875rem',
                   fontWeight: 600,
-                  color: BRAND.ink,
+                  color: BRAND.surface,
                   overflowWrap: 'break-word',
                   wordBreak: 'break-word',
                 }}
@@ -390,27 +453,6 @@ export function CoverPage({
         </div>
       )}
     </section>
-  )
-}
-
-function DecorCircle({ position }: { position: 'top-right' | 'bottom-left' }) {
-  const isTopRight = position === 'top-right'
-  return (
-    <div
-      aria-hidden="true"
-      style={{
-        position: 'absolute',
-        ...(isTopRight
-          ? { top: '-10rem', right: '-10rem' }
-          : { bottom: '-12rem', left: '-12rem' }),
-        width: '28rem',
-        height: '28rem',
-        borderRadius: '50%',
-        background: BRAND.green50,
-        opacity: 0.7,
-        pointerEvents: 'none',
-      }}
-    />
   )
 }
 

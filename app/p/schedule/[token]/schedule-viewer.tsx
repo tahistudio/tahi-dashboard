@@ -232,13 +232,18 @@ function defaultSectionName(type: string): string {
 }
 
 // ── Layout shells ─────────────────────────────────────────────────────────
+//
+// pageWrap: vertical-only padding so the cover bleeds edge-to-edge.
+// Subsequent sections get their own horizontal padding via PageChrome
+// (so they stay constrained at 76rem). Result: cover is wider and
+// dramatic, sections stay readable.
 
 const pageWrap: React.CSSProperties = {
   minHeight: '100vh',
   background: BRAND.band,
   fontFamily: 'var(--font-manrope, system-ui)',
   color: BRAND.ink,
-  padding: 'clamp(1rem, 4vw, 2.5rem)',
+  padding: 'clamp(1rem, 3vw, 1.5rem) 0',
   display: 'flex',
   flexDirection: 'column',
   gap: 'clamp(1.25rem, 3vw, 2rem)',
@@ -253,7 +258,7 @@ const footer: React.CSSProperties = {
   justifyContent: 'space-between',
   flexWrap: 'wrap',
   gap: '0.75rem',
-  padding: '1rem 0.5rem',
+  padding: '1rem 1.5rem',
   borderTop: `1px solid ${BRAND.borderSubtle}`,
 }
 
