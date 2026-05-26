@@ -334,7 +334,7 @@ export function FinancialReportsContent() {
 
       {/* Disposable cash NOW + breakdown */}
       <Card>
-        <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="p-4 sm:p-6">
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-2">
             Disposable cash right now
           </div>
@@ -358,13 +358,14 @@ export function FinancialReportsContent() {
                 No funded bank accounts. Sync Airwallex / Xero to populate.
               </div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <table style={{ width: '100%', minWidth: '20rem', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
                     <th className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider" style={{ textAlign: 'left', padding: '0.4375rem 0.5rem', borderBottom: '1px solid var(--color-border-subtle)' }}>Account</th>
                     <th className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider" style={{ textAlign: 'right', padding: '0.4375rem 0.5rem', borderBottom: '1px solid var(--color-border-subtle)' }}>Native</th>
                     <th className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider" style={{ textAlign: 'right', padding: '0.4375rem 0.5rem', borderBottom: '1px solid var(--color-border-subtle)' }}>≈ {cur}</th>
-                    <th className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider" style={{ textAlign: 'right', padding: '0.4375rem 0.5rem', borderBottom: '1px solid var(--color-border-subtle)', width: '6rem' }}>Source</th>
+                    <th className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider" style={{ textAlign: 'right', padding: '0.4375rem 0.5rem', borderBottom: '1px solid var(--color-border-subtle)' }}>Source</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -391,6 +392,7 @@ export function FinancialReportsContent() {
                   </tr>
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </div>
@@ -417,7 +419,7 @@ export function FinancialReportsContent() {
 
       {/* MRR / ARR / YTD revenue */}
       <Card>
-        <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="p-4 sm:p-6">
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
             Revenue
           </div>
@@ -462,7 +464,7 @@ export function FinancialReportsContent() {
 
       {/* Sales velocity */}
       <Card>
-        <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="p-4 sm:p-6">
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
             Sales velocity
           </div>
@@ -476,7 +478,7 @@ export function FinancialReportsContent() {
 
       {/* Client concentration */}
       <Card>
-        <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="p-4 sm:p-6">
           <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
             <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
               Client concentration
@@ -530,7 +532,7 @@ export function FinancialReportsContent() {
 
       {/* AR aging */}
       <Card>
-        <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="p-4 sm:p-6">
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
             AR aging
           </div>
@@ -546,7 +548,7 @@ export function FinancialReportsContent() {
 
       {/* Tax owed (NZ tax year — Apr 1 → Mar 31) */}
       <Card>
-        <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="p-4 sm:p-6">
           <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
             <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
               Tax owed (NZ tax year — Apr 1 → Mar 31)
@@ -591,7 +593,7 @@ export function FinancialReportsContent() {
       {/* Discretionary vs essential spend split */}
       {(data.spendSplit.discretionary > 0 || data.spendSplit.essential > 0) && (
         <Card>
-          <div style={{ padding: '1.25rem 1.5rem' }}>
+          <div className="p-4 sm:p-6">
             <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
               <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
                 Discretionary vs essential spend
@@ -608,7 +610,7 @@ export function FinancialReportsContent() {
                 accent
               />
               <MetricBlock
-                label="Discretionary (can cut tomorrow)"
+                label="Discretionary (can cut now)"
                 value={formatNative(data.spendSplit.discretionary, 'NZD')}
                 sub={data.spendSplit.discretionary > 0
                   ? `${formatNative(data.spendSplit.discretionary * 12, 'NZD')}/yr if you trimmed all of it`
@@ -621,7 +623,7 @@ export function FinancialReportsContent() {
 
       {/* YoY comparison */}
       <Card>
-        <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="p-4 sm:p-6">
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
             This month vs last year
           </div>
@@ -654,7 +656,7 @@ export function FinancialReportsContent() {
       {/* Reserves breakdown */}
       {data.reserves.items.length > 0 && (
         <Card>
-          <div style={{ padding: '1.25rem 1.5rem' }}>
+          <div className="p-4 sm:p-6">
             <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
               Reserve pots
             </div>
@@ -722,7 +724,7 @@ export function FinancialReportsContent() {
       {/* Recent activity feed */}
       {(data.recentActivity.invoices.length > 0 || data.recentActivity.deals.length > 0) && (
         <Card>
-          <div style={{ padding: '1.25rem 1.5rem' }}>
+          <div className="p-4 sm:p-6">
             <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
               Recent activity
             </div>
@@ -870,7 +872,7 @@ function TakeHomeCard({ takeHome, formatNative, onSaved }: {
 
   return (
     <Card>
-      <div style={{ padding: '1.25rem 1.5rem' }}>
+      <div className="p-4 sm:p-6">
         <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
             Take-home (Liam + Staci)
@@ -1007,7 +1009,7 @@ function QuarterAndProjectionCard({ quarterly, yearEnd, ytdRevenue, effectiveMon
 
   return (
     <Card>
-      <div style={{ padding: '1.25rem 1.5rem' }}>
+      <div className="p-4 sm:p-6">
         <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
             Quarter + year-end
@@ -1106,7 +1108,7 @@ function ForexCard({ forex, formatNative }: {
   if (forex.items.length === 0) return null
   return (
     <Card>
-      <div style={{ padding: '1.25rem 1.5rem' }}>
+      <div className="p-4 sm:p-6">
         <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
             Forex exposure
@@ -1157,7 +1159,7 @@ function RevenueHistoryCard({ history, cur, toCur }: {
   const barWidth = (w - 20) / history.length
   return (
     <Card>
-      <div style={{ padding: '1.25rem 1.5rem' }}>
+      <div className="p-4 sm:p-6">
         <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
           Monthly revenue, last 12 months
         </div>
@@ -1194,7 +1196,7 @@ function CostMixCard({ costMix, formatNative }: {
   const total = costMix.reduce((s, c) => s + c.monthly, 0)
   return (
     <Card>
-      <div style={{ padding: '1.25rem 1.5rem' }}>
+      <div className="p-4 sm:p-6">
         <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
             Cost mix
@@ -1238,7 +1240,7 @@ function PipelineFunnelCard({ funnel, open, formatNative }: {
   const maxValue = Math.max(...stages.map(s => s.value), 1)
   return (
     <Card>
-      <div style={{ padding: '1.25rem 1.5rem' }}>
+      <div className="p-4 sm:p-6">
         <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
             Pipeline → cash funnel
@@ -1283,7 +1285,7 @@ function ProductivityCard({ revenuePerHour, hours, cashConversion, timeToPay, ou
 }) {
   return (
     <Card>
-      <div style={{ padding: '1.25rem 1.5rem' }}>
+      <div className="p-4 sm:p-6">
         <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
           Efficiency + sales economics
         </div>
@@ -1406,7 +1408,7 @@ function AnomaliesCard() {
 
   return (
     <Card>
-      <div style={{ padding: '1.25rem 1.5rem' }}>
+      <div className="p-4 sm:p-6">
         <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
             Anomalies — AI weekly + monthly scan
@@ -1499,7 +1501,7 @@ function SubscriptionsAuditCard({ formatNative }: {
   if (loading) {
     return (
       <Card>
-        <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="p-4 sm:p-6">
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
             Recurring outflows
           </div>
@@ -1512,7 +1514,7 @@ function SubscriptionsAuditCard({ formatNative }: {
   if (items.length === 0) {
     return (
       <Card>
-        <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="p-4 sm:p-6">
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-2">
             Recurring outflows
           </div>
@@ -1528,7 +1530,7 @@ function SubscriptionsAuditCard({ formatNative }: {
 
   return (
     <Card>
-      <div style={{ padding: '1.25rem 1.5rem' }}>
+      <div className="p-4 sm:p-6">
         <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
             Recurring outflows
@@ -1686,7 +1688,7 @@ function SpendImpactCard({ startingCash, burn, revenue, reserveTarget, formatNat
 
   return (
     <Card>
-      <div style={{ padding: '1.25rem 1.5rem' }}>
+      <div className="p-4 sm:p-6">
         <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
             Spend impact calculator
@@ -1811,7 +1813,7 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
 
   return (
     <Card>
-      <div style={{ padding: '1.25rem 1.5rem' }}>
+      <div className="p-4 sm:p-6">
         <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
             Reserve target
