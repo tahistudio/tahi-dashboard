@@ -65,31 +65,24 @@ export async function GET(req: NextRequest) {
   const reservesTotal = reserves.reduce((sum, r) => sum + r.accruedAmount, 0)
 
   // ── MRR: retainers + projects (amortised over duration) ───────────
-  // Retainer MRR: organisations.custom_mrr (set per client when they
-  // have a retainer) summed across active clients. Falls back to deals
-  // with monthly_value_nzd on a closed-won stage when custom_mrr is
-  // empty. Raw SQL because custom_mrr predates the Drizzle schema.
-  const retainerRows = await database.all<{ mrr: number | null }>(sql`
-    SELECT COALESCE(SUM(o.custom_mrr), 0) AS mrr
+  // Retainer MRR = SUM of organisations.custom_mrr across active clients.
+  // Decision #037 — custom_mrr is the operator-confirmed truth. We do
+  // NOT fall back to deals.monthly_value_nzd because that bucket is
+  // contaminated by old won deals where the engagement already ended
+  // without an engagement_end_date set. If custom_mrr is empty, MRR is
+  // honestly empty and the UI prompts the operator to set it.
+  // Raw SQL because custom_mrr predates the Drizzle schema.
+  const retainerRows = await database.all<{ mrr: number | null; client_count: number | null }>(sql`
+    SELECT
+      COALESCE(SUM(o.custom_mrr), 0) AS mrr,
+      COUNT(*) AS client_count
     FROM organisations o
-    WHERE o.status = 'active' AND o.custom_mrr IS NOT NULL AND o.custom_mrr > 0
+    WHERE o.status = 'active'
+      AND o.custom_mrr IS NOT NULL
+      AND o.custom_mrr > 0
   `)
-  const retainerFromOrgs = Number(retainerRows[0]?.mrr ?? 0)
-
-  const dealMrrRows = await database.all<{ mrr: number | null }>(sql`
-    SELECT COALESCE(SUM(d.monthly_value_nzd), 0) AS mrr
-    FROM deals d
-    INNER JOIN pipeline_stages s ON d.stage_id = s.id
-    WHERE s.is_closed_won = 1
-      AND d.monthly_value_nzd > 0
-      AND (d.engagement_end_date IS NULL OR d.engagement_end_date > datetime('now'))
-  `)
-  const retainerFromDeals = Number(dealMrrRows[0]?.mrr ?? 0)
-
-  // Use the higher of the two sources — custom_mrr is the operator-
-  // confirmed truth; deal monthly_value is the inferred fallback when
-  // custom_mrr hasn't been filled in.
-  const retainerMrr = Math.max(retainerFromOrgs, retainerFromDeals)
+  const retainerMrr = Number(retainerRows[0]?.mrr ?? 0)
+  const retainerClientCount = Number(retainerRows[0]?.client_count ?? 0)
 
   // Project MRR = sum over active projects of (price / months active).
   // Active = (startDate ≤ now AND expectedDelivery ≥ now) OR no
@@ -120,15 +113,20 @@ export async function GET(req: NextRequest) {
   const combinedMrr = retainerMrr + projectMrr
   const arr = combinedMrr * 12
 
-  // ── YTD revenue (paid invoices this calendar year) ────────────────
-  const ytdRows = await database
-    .select({ totalUsd: schema.invoices.totalUsd, paidAt: schema.invoices.paidAt })
-    .from(schema.invoices)
-    .where(and(
-      eq(schema.invoices.status, 'paid'),
-      gte(schema.invoices.paidAt, yearStart),
-    ))
-  const ytdRevenue = ytdRows.reduce((sum, r) => sum + (r.totalUsd ?? 0), 0)
+  // ── YTD revenue (any invoice with paidAt this calendar year) ─────
+  // Don't filter on status='paid' string — Stripe + Xero imports use
+  // different status vocabularies. paidAt set + > yearStart is the
+  // reliable signal that money landed.
+  const ytdRows = await database.all<{ total: number | null; cnt: number }>(sql`
+    SELECT
+      COALESCE(SUM(total_usd), 0) AS total,
+      COUNT(*) AS cnt
+    FROM invoices
+    WHERE paid_at IS NOT NULL
+      AND paid_at >= ${yearStart}
+  `)
+  const ytdRevenue = Number(ytdRows[0]?.total ?? 0)
+  const ytdInvoiceCount = Number(ytdRows[0]?.cnt ?? 0)
 
   // ── Sales velocity (deals signed in trailing windows) ─────────────
   // "Signed" = deal on a closed-won pipeline stage with a closed_at in
@@ -175,6 +173,9 @@ export async function GET(req: NextRequest) {
         if (disposableCash > combinedMrr) return 'amber'        // 1 month runway
         return 'red'
       case 'mrr':
+        // Unmeasured (no custom_mrr set on any active client) is amber,
+        // not green. "$0 MRR" only counts as green when configured.
+        if (retainerClientCount === 0 && projectMrr === 0) return 'amber'
         return combinedMrr > 0 ? 'green' : 'red'
       case 'ar':
         // Only red if overdue stack > 20% of MRR.
@@ -219,9 +220,16 @@ export async function GET(req: NextRequest) {
       retainer: retainerMrr,
       project: projectMrr,
       combined: combinedMrr,
+      // Data-quality flag: when 0 active clients have custom_mrr set
+      // AND there are active clients overall, MRR is unmeasured (not
+      // honestly $0). UI shows a "set up MRR per client" hint instead
+      // of a green "on track" tile.
+      retainerClientCount,
+      configured: retainerClientCount > 0 || projectMrr > 0,
     },
     arr,
     ytdRevenue,
+    ytdInvoiceCount,
     salesVelocity: {
       last30Days: { count: signed30.length, value: signed30.reduce((s, d) => s + (d.value ?? 0), 0) },
       last60Days: { count: signed60.length, value: signed60.reduce((s, d) => s + (d.value ?? 0), 0) },

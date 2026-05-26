@@ -36,9 +36,16 @@ interface SummaryResponse {
     items: Array<{ id: string; name: string; category: string; currency: string; accruedAmount: number; targetAmount: number | null; accrualRate: number | null }>
   }
   disposableCash: number
-  mrr: { retainer: number; project: number; combined: number }
+  mrr: {
+    retainer: number
+    project: number
+    combined: number
+    retainerClientCount: number
+    configured: boolean
+  }
   arr: number
   ytdRevenue: number
+  ytdInvoiceCount: number
   salesVelocity: {
     last30Days: { count: number; value: number }
     last60Days: { count: number; value: number }
@@ -183,7 +190,11 @@ export function FinancialReportsContent() {
           : 'More than 3 months runway'
         } />
         <StatusTile label="MRR" status={data.status.mrr} hint={
-          data.mrr.combined > 0 ? `${fmtCurrency(data.mrr.combined, cur)}/mo` : 'No recurring revenue tracked'
+          !data.mrr.configured
+            ? 'Not configured — set custom_mrr per active client'
+            : data.mrr.combined > 0
+              ? `${fmtCurrency(data.mrr.combined, cur)}/mo across ${data.mrr.retainerClientCount} client${data.mrr.retainerClientCount === 1 ? '' : 's'}`
+              : 'No recurring revenue tracked'
         } />
         <StatusTile label="AR" status={data.status.ar} hint={
           data.overdueCount > 0 ? `${data.overdueCount} overdue, ${fmtCurrency(data.outstandingAr, cur)} total`
@@ -256,10 +267,30 @@ export function FinancialReportsContent() {
             Revenue
           </div>
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(12rem, 1fr))', gap: '1.5rem' }}>
-            <MetricBlock label="Combined MRR" value={fmtCurrency(data.mrr.combined, cur)} sub={`Retainer ${fmtCurrency(data.mrr.retainer, cur)} · Project ${fmtCurrency(data.mrr.project, cur)}`} accent />
-            <MetricBlock label="ARR" value={fmtCurrency(data.arr, cur)} sub="Combined MRR × 12" />
-            <MetricBlock label="YTD revenue" value={fmtCurrency(data.ytdRevenue, cur)} sub="Paid invoices, this calendar year" />
-            <MetricBlock label="Outstanding AR" value={fmtCurrency(data.outstandingAr, cur)} sub={data.overdueCount > 0 ? `${data.overdueCount} overdue` : 'All current'} />
+            <MetricBlock
+              label="Combined MRR"
+              value={data.mrr.configured ? fmtCurrency(data.mrr.combined, cur) : '—'}
+              sub={data.mrr.configured
+                ? `Retainer ${fmtCurrency(data.mrr.retainer, cur)} · Project ${fmtCurrency(data.mrr.project, cur)}`
+                : 'Set custom_mrr on active clients to track this'
+              }
+              accent
+            />
+            <MetricBlock
+              label="ARR (projection)"
+              value={data.mrr.configured ? fmtCurrency(data.arr, cur) : '—'}
+              sub="MRR × 12 — assumes current MRR holds for a year"
+            />
+            <MetricBlock
+              label="YTD revenue"
+              value={fmtCurrency(data.ytdRevenue, cur)}
+              sub={`${data.ytdInvoiceCount} paid invoice${data.ytdInvoiceCount === 1 ? '' : 's'} this calendar year`}
+            />
+            <MetricBlock
+              label="Outstanding AR"
+              value={fmtCurrency(data.outstandingAr, cur)}
+              sub={data.overdueCount > 0 ? `${data.overdueCount} overdue` : 'All current'}
+            />
           </div>
         </div>
       </Card>
