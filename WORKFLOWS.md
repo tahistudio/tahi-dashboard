@@ -117,6 +117,77 @@ These weren't on Phase G originally but landed in the same push:
 - **Google OAuth bounce fix ✓** — callback no longer redirects to home page after auth.
 - **Vitest test suite ✓** — 33 unit tests covering gemini-parser, tech-sniffer, buffer.
 
+### Phase G++ · Sales-loop deliverables (shipped 2026-05-25 → 2026-05-26)
+
+The schedule + deliverable rebuild that closed off most of Slice 1 + parts of Slice 2/3 prep:
+
+- **Schedule viewer rebuild ✓** — CoverPage / PageChrome / SectionHeader / AccentTitle (with `{{accent}}` brace syntax) / BrandMark primitives in `components/tahi/deliverable/`. Dark gradient cover. Edge-to-edge on desktop, breathing room on mobile.
+- **Schedule editor polish ✓** — leaf-sm active nav state (matches sidebar), mobile rail-as-card with clamp gutter, full-width slide editor (was 52rem-capped), publish/republish button in header, lead linkage row.
+- **Schedule analytics deep dive ✓** — per-section dwell tracking via IntersectionObserver, `share_section_views` table, AnalyticsHeatmap primitive, ShareAnalyticsCard now shows brand-tinted heat bars + dwell + return-visit counts.
+- **Schedule draft/publish ✓** — `publishedSnapshot` + `publishedAt` columns. Public viewer reads snapshot; falls back to live for pre-existing schedules. Mirrors proposal model. Edits no longer leak the moment they save.
+- **Calendar classifier ✓** — Google Meet events get a `meetingType` (discovery / client / partnership / unclassified) on import based on attendee match + title heuristics. Unmatched events now land in a triage queue instead of being silently skipped.
+- **/calls index page ✓** — unified list across all classification buckets, Upcoming/Past tabs, Type filter chips, inline reclassify actions per row.
+- **/settings/crons ✓** — observability page with Run-now per cron + last-run + 10-run history. `cron_runs` table + `logCronRun` helper wired into every cron. Notifications fire on cron failure (6h dedup).
+- **Transcript cap 50k → 250k ✓** — full Gemini transcripts no longer clip mid-call.
+- **Past-call upcoming bug ✓** — Google Calendar's timezone-offset format caused lex-comparison to leak past calls onto the Upcoming widget. Numeric Date compare now.
+- **LinkedToPanel polish ✓** — portal popovers (no more layout shift), lead row on schedules + proposals + contracts (post-migration 0053).
+- **NewScheduleDialog ✓** — Client / Deal / Lead pickers at creation time.
+- **EmailShareModal: Cc / Bcc / Subject ✓** — full email composition for proposal/schedule/contract sharing.
+- **MCP catch-up ✓** — 4 new tools (publish_schedule, publish_proposal, list_crons, list_all_calls) + lead firmographic schema + meeting type / linkage fields + 250k transcript doc. Worker auto-deploy via GitHub Actions.
+
+### Phase H · Finance overhaul (next up, 2026-05-26)
+
+Triggered by the hiring decision + need for "am I on track?" visibility. Reports/billing/invoices/time placement gets rethought.
+
+**Headline shape:**
+- `/financial-reports` — single top-level page (not nested under /reports). Top half answers "am I on track?" (status traffic-lights, disposable cash now, cashflow forecast with scenarios). Bottom half answers "huh, that's interesting" (charts).
+- `/billing` deleted. Recurring-billing setup folds into `/clients/[id]` (Billing tab).
+- `/invoices` becomes the operational ledger — Stripe + Xero + Airwallex reconciliation, status, actions.
+- `/time` stays in Workspace (personal action). Rollups live inside the finance + operations reports.
+- `/reports` becomes a tiny hub linking to `/financial-reports`, `/sales-reports`, `/operations-reports`, `/marketing-reports` (built later as needed).
+
+**Data sources, daily-synced:**
+- Stripe (subscriptions + one-off charges)
+- Xero (invoices + bills + reconciliation)
+- Airwallex (bank balances + transactions — the truth-of-truths)
+- Manual (cost rows added by hand)
+
+Each invoice/expense row carries up to 4 source IDs. Mismatches surface as anomalies.
+
+**Schema additions:**
+- `projects.durationMonths` for project-MRR amortisation (value / months across the active window)
+- `costs.frequency` + `nextDueAt` + `expectedAmount` — categorise as fixed_monthly / recurring_variable / one_off
+- `reserves` table — tax accrual + custom reserve pots
+- `accountIntegrations.airwallex` config row
+- Multi-source IDs on invoices + costs: `stripeId`, `xeroId`, `airwallexTxnId`, `bankReconciledAt`
+
+**Crons:**
+- Daily 06:00 NZT — Airwallex + Stripe + Xero sync, reconcile pass
+- Weekly Monday — AI sanity scan of recurring items
+- Monthly 1st — AI deep scan: anomalies, hole-finding, cost-mix drift, monthly recap
+
+**Charts to build / extend (reusable primitives in `components/tahi/charts/`):**
+- MRR stacked area (retainer + project) with new/churn deltas
+- Revenue per client over time (top 10)
+- Cost-mix donut with month-on-month delta arrows
+- Profit per logged hour (per employee + overall)
+- Pipeline → cash conversion funnel
+- Revenue seasonality heatmap
+- Time-to-pay distribution
+
+**Status: not started.** Spec locked 2026-05-26 morning session. Build order: WORKFLOWS lock → schema + migrations → Airwallex sync → reconciliation pass → cashflow forecast page → MRR/charts → daily/weekly/monthly crons.
+
+### Phase H+ · Calculator dial-in (after finance lands)
+
+Triggered by Slice 3 (AI proposal draft) needing a trustworthy pricing engine.
+
+- Three input modes: range (`$10-15k`), hard scope (`6-page site, 3 integrations`), free text (`"redesign their portal + add Klaviyo + ship in 8 weeks"`)
+- Output: price + time + capacity check, each cost component visible (Webflow build 30h, design 20h, integration 8h)
+- Speed: keyboard-first, sub-second feel — usable on a live discovery call
+- Calibration: seeded from last N projects' actual time + revenue (from Finance data). Liam tunes multipliers in a settings panel; AI learns from acceptance/reject signals over time.
+
+**Status: not started.** Needs Liam in the room — pricing intuition isn't AI-guessable.
+
 ### Content + presence (low priority but written down)
 
 Liam's stated goal (2026-05-24): 1 newsletter / month + 1 LinkedIn post / day. Real value, not noise. Dashboard can help by surfacing patterns from the lead/customer data (common pain points, tech-stack distribution, etc.) as content prompts. Build as a "Content Studio" surface once the sales loop is locked.

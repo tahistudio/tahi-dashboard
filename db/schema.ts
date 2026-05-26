@@ -634,10 +634,19 @@ export const invoices = sqliteTable('invoices', {
   sentAt: text('sent_at'),
   viewedAt: text('viewed_at'),
   paidAt: text('paid_at'),
+  // Multi-source reconciliation (migration 0055). When an Airwallex
+  // deposit lands, the reconciliation pass writes its txn id here.
+  // reconciliationStatus: 'matched' (all sources agree) | 'mismatch'
+  // (paidAmount differs across sources) | 'unmatched' (Stripe says paid
+  // but no Airwallex deposit). Surfaces on the anomaly strip.
+  airwallexTxnId: text('airwallex_txn_id'),
+  reconciliationStatus: text('reconciliation_status'),
+  lastReconciledAt: text('last_reconciled_at'),
   ...timestamps,
 }, (table) => [
   index('idx_invoices_org').on(table.orgId),
   index('idx_invoices_status').on(table.status),
+  index('idx_invoices_recon_status').on(table.reconciliationStatus),
 ])
 
 // ============================================================
@@ -989,6 +998,11 @@ export const expenseCommitments = sqliteTable('expense_commitments', {
   notes: text('notes'),
   // Optional Xero account name this reconciles against (e.g. "Salaries")
   linkedXeroAccount: text('linked_xero_account'),
+  // Last actual Airwallex transaction that matched this commitment
+  // (migration 0055). Lets the reconciliation pass surface "expected
+  // hit but no bank txn" anomalies.
+  lastAirwallexTxnId: text('last_airwallex_txn_id'),
+  lastReconciledAt: text('last_reconciled_at'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 }, (table) => [
@@ -1006,6 +1020,106 @@ export const xeroBankBalances = sqliteTable('xero_bank_balances', {
   asOf: text('as_of').notNull(),
   updatedAt: text('updated_at').notNull(),
 })
+
+// ============================================================
+// AIRWALLEX (bank source-of-truth, migration 0055)
+// ============================================================
+//
+// Airwallex is the operating bank — the truth for what cash is actually
+// where right now. Xero shows what cash "should" be (per invoice +
+// reconciliation state); Airwallex shows what cash IS.
+//
+// Two tables:
+//   airwallex_balances     — current per-account balance, refreshed by
+//                            daily sync. One row per account.
+//   airwallex_transactions — line-item ledger of inbound/outbound. Joins
+//                            to invoices via airwallexTxnId + to
+//                            expenseCommitments by description match for
+//                            the reconciliation pass.
+
+export const airwallexBalances = sqliteTable('airwallex_balances', {
+  // Airwallex's own account id (acct_*). Stable across syncs.
+  accountId: text('account_id').primaryKey(),
+  accountName: text('account_name').notNull(),
+  currency: text('currency').notNull(),
+  // Total amount including pending
+  balance: real('balance').notNull().default(0),
+  // Cleared funds that can be moved/spent right now
+  availableBalance: real('available_balance').notNull().default(0),
+  asOf: text('as_of').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const airwallexTransactions = sqliteTable('airwallex_transactions', {
+  // Airwallex transaction id (their primary key)
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  // Positive = inbound, negative = outbound
+  amount: real('amount').notNull(),
+  currency: text('currency').notNull(),
+  // Airwallex's category: deposit | withdrawal | fee | conversion | transfer
+  type: text('type').notNull(),
+  description: text('description'),
+  // Free-text counterparty (sender on inbound, recipient on outbound).
+  // Used by the AI sanity pass to match against invoice debtors +
+  // recurring vendors.
+  counterparty: text('counterparty'),
+  // ISO datetime the txn settled (vs pending).
+  settledAt: text('settled_at'),
+  // Cross-source links — populated by the reconciliation pass.
+  // Multiple Airwallex txns can map to one Xero entry (split payments).
+  linkedXeroId: text('linked_xero_id'),
+  linkedStripeId: text('linked_stripe_id'),
+  // When this transaction was last reconciled across sources. Null =
+  // never reconciled (suspicious, needs review).
+  reconciledAt: text('reconciled_at'),
+  // For the multi-source-conflict warning strip. 'matched' | 'orphan' |
+  // 'mismatch' | 'manual'.
+  reconciliationStatus: text('reconciliation_status').default('orphan'),
+  createdAt: text('created_at').notNull(),
+}, (table) => [
+  index('idx_airwallex_txns_account').on(table.accountId),
+  index('idx_airwallex_txns_settled').on(table.settledAt),
+  index('idx_airwallex_txns_recon').on(table.reconciliationStatus),
+])
+
+// ============================================================
+// RESERVES (tax + custom pots, migration 0055)
+// ============================================================
+//
+// Disposable cash = bank balance − reserves. Tax is the obvious one
+// (~28% NZ corp rate accrued from revenue); custom pots cover things
+// like "$5k buffer for shareholder distribution", "deposit returns
+// owed back to clients", etc.
+//
+// Auto-accrual: when a reserve has accrualRate set, the daily sync
+// adds (today's revenue × rate) to accruedAmount. Manual reserves leave
+// accrualRate null and just hold whatever Liam manually allocated.
+
+export const reserves = sqliteTable('reserves', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
+  // tax | buffer | deposits | other
+  category: text('category').notNull().default('other'),
+  currency: text('currency').notNull().default('NZD'),
+  // Optional target — e.g. "have $20k tax pot by year-end"
+  targetAmount: real('target_amount'),
+  // What's currently set aside. Disposable-cash math subtracts this from
+  // the bank balance.
+  accruedAmount: real('accrued_amount').notNull().default(0),
+  // When set (0.0-1.0), the daily sync auto-accrues (revenue × rate)
+  // into accruedAmount. 0.28 = NZ corporate tax rate. Null = manual.
+  accrualRate: real('accrual_rate'),
+  lastAccrualAt: text('last_accrual_at'),
+  notes: text('notes'),
+  // When false, hidden from the disposable-cash subtotal.
+  active: integer('active', { mode: 'boolean' }).default(true),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  index('idx_reserves_active').on(table.active),
+  index('idx_reserves_category').on(table.category),
+])
 
 // ============================================================
 // CLIENT COSTS (gross margin tracking per client)
