@@ -20,7 +20,7 @@ import {
   LayoutDashboard, Inbox, MessageSquare, FileText, Users, FolderOpen,
   Menu, X, CheckSquare, TrendingUp, Star, CreditCard, Clock, BarChart2,
   Gauge, UserCog, FileSignature, BookOpen, ShoppingBag, Calendar,
-  Megaphone, UserPlus, Share2,
+  Megaphone, UserPlus, Share2, Phone,
 } from 'lucide-react'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { SidebarUserCard } from '@/components/tahi/sidebar-user-card'
@@ -64,6 +64,7 @@ const ADMIN_DRAWER: DrawerNavGroup[] = [
     group: 'Sales',
     items: [
       { label: 'Leads',           href: '/leads',           icon: UserPlus },
+      { label: 'Calls',           href: '/calls',           icon: Phone },
       { label: 'Deals',           href: '/deals',           icon: TrendingUp },
       { label: 'Proposals',       href: '/proposals',       icon: FileText },
       { label: 'Schedules',       href: '/schedules',       icon: Calendar },
@@ -86,10 +87,11 @@ const ADMIN_DRAWER: DrawerNavGroup[] = [
   {
     group: 'Finance',
     items: [
-      { label: 'Invoices', href: '/invoices', icon: FileText },
-      { label: 'Billing',  href: '/billing',  icon: CreditCard },
-      { label: 'Time',     href: '/time',     icon: Clock },
-      { label: 'Reports',  href: '/reports',  icon: BarChart2 },
+      { label: 'Financial reports', href: '/financial-reports', icon: BarChart2 },
+      { label: 'Invoices',          href: '/invoices',          icon: FileText },
+      { label: 'Billing',           href: '/billing',           icon: CreditCard },
+      { label: 'Time',              href: '/time',              icon: Clock },
+      { label: 'Reports',           href: '/reports',           icon: BarChart2 },
     ],
   },
   {
