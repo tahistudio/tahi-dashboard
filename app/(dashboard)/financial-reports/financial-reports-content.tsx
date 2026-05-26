@@ -1699,7 +1699,7 @@ function SpendImpactCard({ startingCash, burn, revenue, reserveTarget, formatNat
         </div>
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
           <div>
-            <label style={labelStyle}>What's the spend?</label>
+            <label style={labelStyle}>What&apos;s the spend?</label>
             <input value={label} onChange={e => setLabel(e.target.value)} style={inputStyle} placeholder="Dev hire / SaaS / ad spend" />
           </div>
           <div>
