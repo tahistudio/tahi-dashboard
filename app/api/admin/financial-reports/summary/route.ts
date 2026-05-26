@@ -297,21 +297,17 @@ export async function GET(req: NextRequest) {
   const churnedClientsThisMonth = Number(churnedThisMonthRows[0]?.cnt ?? 0)
 
   // ── Client concentration ──────────────────────────────────────────
-  // % of MRR from top 1 + top 3 clients. Surfaces "if I lose Brogan's
-  // tomorrow…" exposure. Reads only active clients with custom_mrr set.
-  const concentrationRows = await database.all<{ name: string; mrr: number }>(sql`
-    SELECT name, COALESCE(custom_mrr, 0) AS mrr
-    FROM organisations
-    WHERE status = 'active' AND custom_mrr IS NOT NULL AND custom_mrr > 0
-    ORDER BY custom_mrr DESC
-    LIMIT 10
-  `)
-  const totalNamedMrr = concentrationRows.reduce((s, r) => s + Number(r.mrr), 0)
+  // % of MRR from top 1 + top 3 clients. Surfaces "if I lose your top
+  // client…" exposure. Built off retainerBreakdown (already NZD-converted)
+  // — selecting raw custom_mrr would sum native currencies as if they
+  // were the same unit, which inflated the % shares.
+  const concentrationRows = retainerBreakdown.slice(0, 10).map(r => ({ name: r.name, mrr: r.mrrNzd }))
+  const totalNamedMrr = retainerMrr
   const topClientShare = totalNamedMrr > 0 && concentrationRows[0]
-    ? (Number(concentrationRows[0].mrr) / totalNamedMrr)
+    ? (concentrationRows[0].mrr / totalNamedMrr)
     : 0
   const top3Share = totalNamedMrr > 0
-    ? concentrationRows.slice(0, 3).reduce((s, r) => s + Number(r.mrr), 0) / totalNamedMrr
+    ? concentrationRows.slice(0, 3).reduce((s, r) => s + r.mrr, 0) / totalNamedMrr
     : 0
 
   // ── AR aging buckets ──────────────────────────────────────────────
