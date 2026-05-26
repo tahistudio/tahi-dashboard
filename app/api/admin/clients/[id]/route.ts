@@ -53,6 +53,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   try {
     const rows = await drizzle.all<{
       custom_mrr: number | null
+      custom_mrr_currency: string | null
       billing_model: string | null
       retainer_start_date: string | null
       retainer_end_date: string | null
@@ -60,13 +61,14 @@ export async function GET(req: NextRequest, { params }: Params) {
       retainer_dates_is_manual: number | null
       custom_mrr_is_manual: number | null
     }>(
-      sql`SELECT custom_mrr, billing_model, retainer_start_date, retainer_end_date,
+      sql`SELECT custom_mrr, custom_mrr_currency, billing_model, retainer_start_date, retainer_end_date,
                  billing_model_is_manual, retainer_dates_is_manual, custom_mrr_is_manual
           FROM organisations WHERE id = ${id} LIMIT 1`
     )
     if (rows?.[0]) {
       billingExtras = {
         customMrr: rows[0].custom_mrr,
+        customMrrCurrency: rows[0].custom_mrr_currency,
         billingModel: rows[0].billing_model,
         retainerStartDate: rows[0].retainer_start_date,
         retainerEndDate: rows[0].retainer_end_date,

@@ -995,6 +995,10 @@ export const expenseCommitments = sqliteTable('expense_commitments', {
   billingDayOfMonth: integer('billing_day_of_month'),
   // When false, commitment is excluded from forecast (kept for history)
   active: integer('active', { mode: 'boolean' }).default(true),
+  // When true, this is a nice-to-have. False = essential to operate.
+  // Powers the "discretionary vs essential" split on /financial-reports
+  // and the "if I cut all discretionary" affordability math.
+  isDiscretionary: integer('is_discretionary', { mode: 'boolean' }).default(false),
   notes: text('notes'),
   // Optional Xero account name this reconciles against (e.g. "Salaries")
   linkedXeroAccount: text('linked_xero_account'),

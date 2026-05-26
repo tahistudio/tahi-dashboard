@@ -28,6 +28,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     notes: string | null
     linkedXeroAccount: string | null
     active: boolean
+    isDiscretionary: boolean
   }>
 
   const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() }
@@ -44,6 +45,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if ('notes' in body) patch.notes = body.notes ?? null
   if ('linkedXeroAccount' in body) patch.linkedXeroAccount = body.linkedXeroAccount ?? null
   if (body.active !== undefined) patch.active = body.active
+  if (body.isDiscretionary !== undefined) patch.isDiscretionary = body.isDiscretionary
 
   const drizzle = (await db()) as D1
   await drizzle.update(schema.expenseCommitments).set(patch).where(eq(schema.expenseCommitments.id, id))

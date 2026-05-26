@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
     notes: string | null
     linkedXeroAccount: string | null
     active: boolean
+    isDiscretionary: boolean
   }>
 
   if (!body.name?.trim()) {
@@ -80,6 +81,7 @@ export async function POST(req: NextRequest) {
     endDate: body.endDate ?? null,
     billingDayOfMonth: body.billingDayOfMonth ?? null,
     active: body.active ?? true,
+    isDiscretionary: body.isDiscretionary ?? false,
     notes: body.notes ?? null,
     linkedXeroAccount: body.linkedXeroAccount ?? null,
     createdAt: now,

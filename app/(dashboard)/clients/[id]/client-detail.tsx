@@ -116,6 +116,7 @@ interface Organisation {
   brands: string | null
   preferredCurrency: string | null
   customMrr: number | null
+  customMrrCurrency: string | null
   billingModel: string | null
   defaultHourlyRate: number | null
   retainerStartDate: string | null
@@ -950,6 +951,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
     healthNote: org.healthNote ?? '',
     billingModel: org.billingModel ?? 'none',
     customMrr: org.customMrr ? String(org.customMrr) : '',
+    customMrrCurrency: org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD',
     defaultHourlyRate: org.defaultHourlyRate ? String(org.defaultHourlyRate) : '',
     preferredCurrency: org.preferredCurrency ?? 'NZD',
     retainerStartDate: org.retainerStartDate ?? '',
@@ -963,6 +965,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
       const patch: Record<string, unknown> = {
         ...form,
         customMrr: form.customMrr ? parseFloat(form.customMrr) : null,
+        customMrrCurrency: form.customMrrCurrency || null,
         defaultHourlyRate: form.defaultHourlyRate ? parseFloat(form.defaultHourlyRate) : null,
         retainerStartDate: form.retainerStartDate || null,
         retainerEndDate: form.retainerEndDate || null,
@@ -1013,7 +1016,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
         ) : (
           <div className="flex gap-2">
             <button
-              onClick={() => { setEditing(false); setForm({ name: org.name, website: org.website ?? '', industry: org.industry ?? '', status: org.status, healthStatus: org.healthStatus ?? 'green', healthNote: org.healthNote ?? '', billingModel: org.billingModel ?? 'none', customMrr: org.customMrr ? String(org.customMrr) : '', defaultHourlyRate: org.defaultHourlyRate ? String(org.defaultHourlyRate) : '', preferredCurrency: org.preferredCurrency ?? 'NZD', retainerStartDate: org.retainerStartDate ?? '', retainerEndDate: org.retainerEndDate ?? '' }) }}
+              onClick={() => { setEditing(false); setForm({ name: org.name, website: org.website ?? '', industry: org.industry ?? '', status: org.status, healthStatus: org.healthStatus ?? 'green', healthNote: org.healthNote ?? '', billingModel: org.billingModel ?? 'none', customMrr: org.customMrr ? String(org.customMrr) : '', customMrrCurrency: org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD', defaultHourlyRate: org.defaultHourlyRate ? String(org.defaultHourlyRate) : '', preferredCurrency: org.preferredCurrency ?? 'NZD', retainerStartDate: org.retainerStartDate ?? '', retainerEndDate: org.retainerEndDate ?? '' }) }}
               className="flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
             >
               <X className="w-3.5 h-3.5" /> Cancel
@@ -1118,15 +1121,26 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
           </div>
           {(form.billingModel === 'retainer' || form.billingModel === 'none') && (
             <div>
-              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">MRR ({form.preferredCurrency})</label>
-              <input
-                type="number"
-                step="0.01"
-                value={form.customMrr}
-                onChange={e => setForm(f => ({ ...f, customMrr: e.target.value }))}
-                placeholder="e.g. 3125"
-                className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
-              />
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">MRR (what we actually bill them)</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.customMrr}
+                  onChange={e => setForm(f => ({ ...f, customMrr: e.target.value }))}
+                  placeholder="e.g. 3125"
+                  className="flex-1 px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                />
+                <select
+                  value={form.customMrrCurrency}
+                  onChange={e => setForm(f => ({ ...f, customMrrCurrency: e.target.value }))}
+                  className="w-20 px-2 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                  title="Currency this client pays you in"
+                >
+                  {['NZD', 'USD', 'GBP', 'EUR', 'AUD'].map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <p className="text-[10px] text-[var(--color-text-subtle)] mt-1">Native currency. Converted to NZD in finance reports.</p>
             </div>
           )}
           {form.billingModel === 'hourly' && (
@@ -1234,10 +1248,10 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
               <dd className="text-[var(--color-text)] font-medium">
                 {org.customMrr ? (
                   <>
-                    <span>{new Intl.NumberFormat('en-NZ', { style: 'currency', currency: org.preferredCurrency ?? 'NZD', maximumFractionDigits: 0 }).format(org.customMrr)}</span>
-                    {(org.preferredCurrency ?? 'NZD') !== displayCurrency && (
+                    <span>{new Intl.NumberFormat('en-NZ', { style: 'currency', currency: org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD', maximumFractionDigits: 0 }).format(org.customMrr)}</span>
+                    {(org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD') !== displayCurrency && (
                       <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginLeft: '0.5rem', fontWeight: 400 }}>
-                        {formatNativeWithDisplay(org.customMrr, org.preferredCurrency ?? 'NZD').split('\u2248 ')[1] ?? ''}
+                        {formatNativeWithDisplay(org.customMrr, org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD').split('\u2248 ')[1] ?? ''}
                       </span>
                     )}
                   </>

@@ -3161,6 +3161,7 @@ interface Commitment {
   endDate: string | null
   billingDayOfMonth: number | null
   active: boolean
+  isDiscretionary: boolean
   notes: string | null
   linkedXeroAccount: string | null
 }
@@ -3196,10 +3197,11 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
     billingDayOfMonth: string
     notes: string
     active: boolean
+    isDiscretionary: boolean
   }>({
     name: '', vendor: '', amount: '', currency: 'NZD', cadence: 'monthly',
     category: 'other', nextDueDate: '', startDate: '', endDate: '',
-    billingDayOfMonth: '', notes: '', active: true,
+    billingDayOfMonth: '', notes: '', active: true, isDiscretionary: false,
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -3223,7 +3225,7 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
   function resetForm() {
     setForm({ name: '', vendor: '', amount: '', currency: 'NZD', cadence: 'monthly',
               category: 'other', nextDueDate: '', startDate: '', endDate: '',
-              billingDayOfMonth: '', notes: '', active: true })
+              billingDayOfMonth: '', notes: '', active: true, isDiscretionary: false })
     setEditingId(null)
     setError(null)
   }
@@ -3242,6 +3244,7 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
       billingDayOfMonth: c.billingDayOfMonth ? String(c.billingDayOfMonth) : '',
       notes: c.notes ?? '',
       active: c.active,
+      isDiscretionary: c.isDiscretionary ?? false,
     })
     setEditingId(c.id)
     setShowForm(true)
@@ -3271,6 +3274,7 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
         billingDayOfMonth: billingDay && billingDay >= 1 && billingDay <= 31 ? billingDay : null,
         notes: form.notes.trim() || null,
         active: form.active,
+        isDiscretionary: form.isDiscretionary,
       }
       const url = editingId ? apiPath(`/api/admin/commitments/${editingId}`) : apiPath('/api/admin/commitments')
       const method = editingId ? 'PATCH' : 'POST'
@@ -3313,6 +3317,20 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
     } catch { /* noop */ }
   }
 
+  async function toggleDiscretionary(c: Commitment) {
+    // Optimistic flip
+    setItems(prev => prev?.map(x => x.id === c.id ? { ...x, isDiscretionary: !c.isDiscretionary } : x) ?? prev)
+    try {
+      await fetch(apiPath(`/api/admin/commitments/${c.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isDiscretionary: !c.isDiscretionary }),
+      })
+    } catch {
+      await load()
+    }
+  }
+
   if (loading) {
     return (
       <div>
@@ -3328,6 +3346,13 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
     return s + monthlyEqFromNzd(c.cadence, nzd)
   }, 0)
   const annualNzd = totalMonthlyNzd * 12
+  const essentialMonthlyNzd = active.reduce((s, c) => {
+    if (c.isDiscretionary) return s
+    const nzd = toDisplayNzd(c.amount, c.currency, exchangeRates)
+    return s + monthlyEqFromNzd(c.cadence, nzd)
+  }, 0)
+  const discretionaryMonthlyNzd = totalMonthlyNzd - essentialMonthlyNzd
+  const untaggedCount = active.filter(c => c.isDiscretionary === undefined || c.isDiscretionary === null).length
 
   return (
     <div className="rounded-xl border p-6" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
@@ -3342,6 +3367,24 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
             <strong>Monthly run rate:</strong> {formatInCur(totalMonthlyNzd, displayCurrency, exchangeRates)} ·
             <strong> Annual:</strong> {formatInCur(annualNzd, displayCurrency, exchangeRates)} ·
             {active.length} active commitment{active.length === 1 ? '' : 's'}
+          </p>
+          <p className="text-xs mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
+            <span style={{ color: 'var(--color-text)' }}>
+              <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ background: 'var(--color-brand)' }} />
+              <strong>Essential</strong> {formatInCur(essentialMonthlyNzd, displayCurrency, exchangeRates)}/mo
+            </span>
+            <span style={{ color: 'var(--color-text-muted)' }}>
+              <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ background: 'var(--color-warning)' }} />
+              <strong>Discretionary</strong> {formatInCur(discretionaryMonthlyNzd, displayCurrency, exchangeRates)}/mo
+              {discretionaryMonthlyNzd > 0 && (
+                <span className="text-[var(--color-text-subtle)]"> · {formatInCur(discretionaryMonthlyNzd * 12, displayCurrency, exchangeRates)}/yr if cut</span>
+              )}
+            </span>
+            {untaggedCount > 0 && (
+              <span style={{ color: 'var(--color-warning)' }}>
+                {untaggedCount} untagged
+              </span>
+            )}
           </p>
         </div>
         <button
@@ -3415,10 +3458,14 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
             <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Notes (optional)</label>
             <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="w-full px-3 py-2 text-sm border rounded-lg" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }} />
           </div>
-          <div className="md:col-span-2 flex items-center gap-2">
+          <div className="md:col-span-2 flex items-center gap-5 flex-wrap">
             <label className="flex items-center gap-2 text-sm text-[var(--color-text)]">
               <input type="checkbox" checked={form.active} onChange={e => setForm(f => ({ ...f, active: e.target.checked }))} />
               Active (include in cash flow forecast)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-[var(--color-text)]">
+              <input type="checkbox" checked={form.isDiscretionary} onChange={e => setForm(f => ({ ...f, isDiscretionary: e.target.checked }))} />
+              Discretionary (nice-to-have, could cut if needed)
             </label>
           </div>
           {error && <p className="md:col-span-2 text-sm" style={{ color: 'var(--color-danger)' }}>{error}</p>}
@@ -3446,6 +3493,7 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
               <th className="py-2 pr-3 text-right">Amount</th>
               <th className="py-2 pr-3">Cadence</th>
               <th className="py-2 pr-3 text-right">Monthly equiv.</th>
+              <th className="py-2 pr-3">Tag</th>
               <th className="py-2 pr-3">Active</th>
               <th className="py-2 pr-3"></th>
             </tr>
@@ -3477,6 +3525,20 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
                   </td>
                   <td className="py-2 pr-3 text-right text-[var(--color-text-muted)]">
                     {formatInCur(monthlyDisplay, displayCurrency, exchangeRates)}
+                  </td>
+                  <td className="py-2 pr-3">
+                    <button
+                      onClick={() => toggleDiscretionary(c)}
+                      title={c.isDiscretionary ? 'Nice-to-have. Click to mark essential.' : 'Essential. Click to mark discretionary.'}
+                      className="text-xs font-medium px-2 py-0.5 rounded transition-colors"
+                      style={{
+                        background: c.isDiscretionary ? 'var(--color-warning-bg, #fff7ed)' : 'var(--color-brand-50)',
+                        color: c.isDiscretionary ? 'var(--color-warning)' : 'var(--color-brand)',
+                        border: 'none', cursor: 'pointer',
+                      }}
+                    >
+                      {c.isDiscretionary ? 'Discretionary' : 'Essential'}
+                    </button>
                   </td>
                   <td className="py-2 pr-3">
                     <button onClick={() => toggleActive(c)} className="text-xs font-medium px-2 py-0.5 rounded transition-colors" style={{
