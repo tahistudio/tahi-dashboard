@@ -39,7 +39,11 @@ export async function POST(req: NextRequest) {
   }
 
   const url = new URL(req.url)
-  const days = Math.max(1, Math.min(365, parseInt(url.searchParams.get('days') ?? '30', 10)))
+  // Default 14 days. 30+ was hitting Cloudflare Workers' execution
+  // budget on the contiguous D1 writes (Airwallex can return hundreds
+  // of txns over 30 days). 14 days is enough for daily-sync freshness;
+  // pass ?days=N up to 365 for an explicit backfill.
+  const days = Math.max(1, Math.min(365, parseInt(url.searchParams.get('days') ?? '14', 10)))
   const fromCreatedAt = new Date(Date.now() - days * 86400_000).toISOString()
   const toCreatedAt = new Date().toISOString()
 

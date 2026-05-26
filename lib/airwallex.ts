@@ -35,9 +35,10 @@ interface AirwallexBalance {
   available_amount: number
 }
 
-interface AirwallexBalanceResponse {
-  balances: AirwallexBalance[]
-}
+// Airwallex returns either a bare array of balances OR a wrapped object
+// {items: [...]} / {balances: [...]} depending on API era + endpoint.
+// We accept all three shapes.
+type AirwallexBalanceResponse = AirwallexBalance[] | { balances?: AirwallexBalance[]; items?: AirwallexBalance[] }
 
 interface AirwallexTransaction {
   id: string
@@ -164,7 +165,8 @@ async function airwallexGet<T>(path: string, query: Record<string, string | unde
 /** Fetch the current balance per currency for the configured account. */
 export async function listBalances(): Promise<AirwallexBalance[]> {
   const data = await airwallexGet<AirwallexBalanceResponse>('/api/v1/balances/current')
-  return data.balances ?? []
+  if (Array.isArray(data)) return data
+  return data.balances ?? data.items ?? []
 }
 
 /**
