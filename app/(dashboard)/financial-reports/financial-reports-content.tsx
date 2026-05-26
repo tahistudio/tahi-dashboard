@@ -48,6 +48,22 @@ interface SummaryResponse {
   arr: number
   ytdRevenue: number
   ytdInvoiceCount: number
+  projectRevenue: { projection: number; trailing5moActual: number }
+  effectiveMonthlyRevenue: number
+  newMrrThisMonth: { amount: number; wonDeals: number; churnedClients: number }
+  clientConcentration: {
+    totalNamedMrr: number
+    topClientShare: number
+    top3Share: number
+    top: Array<{ name: string; mrr: number }>
+  }
+  arAging: { current: number; days30: number; days60: number; days90: number; days90plus: number }
+  taxes: { gstOwedYtd: number; corpTaxOwedYtd: number; ytdProfit: number; ytdExpensesApprox: number }
+  yoy: { thisMonth: number; lastYearSameMonth: number; deltaPct: number | null }
+  recentActivity: {
+    invoices: Array<{ id: string; totalUsd: number; paidAt: string | null; orgName: string | null }>
+    deals: Array<{ id: string; title: string; value: number; closedAt: string | null; orgName: string | null }>
+  }
   salesVelocity: {
     last30Days: { count: number; value: number }
     last60Days: { count: number; value: number }
@@ -320,13 +336,18 @@ export function FinancialReportsContent() {
           </div>
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(12rem, 1fr))', gap: '1.5rem' }}>
             <MetricBlock
-              label="Combined MRR"
+              label="Effective monthly revenue"
+              value={toCur(data.effectiveMonthlyRevenue, data.primaryCurrency)}
+              sub={`Retainer ${toCur(data.mrr.retainer, data.primaryCurrency)} + 5mo project avg ${toCur(data.projectRevenue.trailing5moActual, data.primaryCurrency)}`}
+              accent
+            />
+            <MetricBlock
+              label="Combined MRR (projection)"
               value={data.mrr.configured ? toCur(data.mrr.combined, data.primaryCurrency) : '—'}
               sub={data.mrr.configured
-                ? `Retainer ${toCur(data.mrr.retainer, data.primaryCurrency)} · Project ${toCur(data.mrr.project, data.primaryCurrency)}`
+                ? `Retainer ${toCur(data.mrr.retainer, data.primaryCurrency)} · Project amortised ${toCur(data.mrr.project, data.primaryCurrency)}`
                 : 'Set custom_mrr on active clients to track this'
               }
-              accent
             />
             <MetricBlock
               label="ARR (projection)"
@@ -337,6 +358,11 @@ export function FinancialReportsContent() {
               label="YTD revenue"
               value={toCur(data.ytdRevenue, data.primaryCurrency)}
               sub={`${data.ytdInvoiceCount} paid invoice${data.ytdInvoiceCount === 1 ? '' : 's'} this calendar year`}
+            />
+            <MetricBlock
+              label="Net new MRR this month"
+              value={toCur(data.newMrrThisMonth.amount, data.primaryCurrency)}
+              sub={`${data.newMrrThisMonth.wonDeals} won deal${data.newMrrThisMonth.wonDeals === 1 ? '' : 's'} · ${data.newMrrThisMonth.churnedClients} churned`}
             />
             <MetricBlock
               label="Outstanding AR"
@@ -357,6 +383,140 @@ export function FinancialReportsContent() {
             <MetricBlock label="Last 30 days" value={`${data.salesVelocity.last30Days.count} deals`} sub={toCur(data.salesVelocity.last30Days.value, data.primaryCurrency)} />
             <MetricBlock label="Last 60 days" value={`${data.salesVelocity.last60Days.count} deals`} sub={toCur(data.salesVelocity.last60Days.value, data.primaryCurrency)} />
             <MetricBlock label="Last 90 days" value={`${data.salesVelocity.last90Days.count} deals`} sub={toCur(data.salesVelocity.last90Days.value, data.primaryCurrency)} />
+          </div>
+        </div>
+      </Card>
+
+      {/* Client concentration */}
+      <Card>
+        <div style={{ padding: '1.25rem 1.5rem' }}>
+          <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+              Client concentration
+            </div>
+            <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+              {data.clientConcentration.totalNamedMrr > 0
+                ? 'Risk indicator: if you lose your top client tomorrow…'
+                : 'No client MRR configured yet'}
+            </div>
+          </div>
+          {data.clientConcentration.totalNamedMrr === 0 ? (
+            <p className="text-sm text-[var(--color-text-muted)]">
+              Set custom_mrr on your active clients to see concentration risk.
+            </p>
+          ) : (
+            <>
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '1.5rem', marginBottom: '1rem' }}>
+                <MetricBlock
+                  label="Top client share"
+                  value={`${Math.round(data.clientConcentration.topClientShare * 100)}%`}
+                  sub={data.clientConcentration.top[0]?.name ?? '—'}
+                  accent={data.clientConcentration.topClientShare > 0.5}
+                />
+                <MetricBlock
+                  label="Top 3 share"
+                  value={`${Math.round(data.clientConcentration.top3Share * 100)}%`}
+                  sub="Combined revenue at risk if all three left"
+                />
+              </div>
+              <div className="grid" style={{ gap: '0.375rem' }}>
+                {data.clientConcentration.top.map((c, i) => {
+                  const pct = data.clientConcentration.totalNamedMrr > 0 ? c.mrr / data.clientConcentration.totalNamedMrr : 0
+                  return (
+                    <div key={c.name} className="flex items-center" style={{ gap: '0.75rem' }}>
+                      <span className="text-xs text-[var(--color-text-subtle)]" style={{ width: '1rem', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
+                      <span className="text-sm text-[var(--color-text)] truncate" style={{ minWidth: '8rem', flex: 1 }}>{c.name}</span>
+                      <div style={{ flex: 2, height: '0.5rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
+                        <div style={{ width: `${Math.max(2, pct * 100)}%`, height: '100%', background: 'var(--color-brand)' }} />
+                      </div>
+                      <span className="text-xs text-[var(--color-text-muted)]" style={{ width: '5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                        {toCur(c.mrr, data.primaryCurrency)}/mo
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      </Card>
+
+      {/* AR aging */}
+      <Card>
+        <div style={{ padding: '1.25rem 1.5rem' }}>
+          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
+            AR aging
+          </div>
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))', gap: '1rem' }}>
+            <ArBucket label="Current" amount={data.arAging.current} cur={data.primaryCurrency} toCur={toCur} tone="positive" />
+            <ArBucket label="1-30 days" amount={data.arAging.days30} cur={data.primaryCurrency} toCur={toCur} tone="warning" />
+            <ArBucket label="31-60 days" amount={data.arAging.days60} cur={data.primaryCurrency} toCur={toCur} tone="warning" />
+            <ArBucket label="61-90 days" amount={data.arAging.days90} cur={data.primaryCurrency} toCur={toCur} tone="danger" />
+            <ArBucket label="90+ days" amount={data.arAging.days90plus} cur={data.primaryCurrency} toCur={toCur} tone="danger" />
+          </div>
+        </div>
+      </Card>
+
+      {/* Tax owed YTD */}
+      <Card>
+        <div style={{ padding: '1.25rem 1.5rem' }}>
+          <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+              Tax owed YTD (NZ)
+            </div>
+            <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+              Approximate — verify against IRD before remitting
+            </div>
+          </div>
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1.5rem' }}>
+            <MetricBlock
+              label="GST owed YTD"
+              value={toCur(data.taxes.gstOwedYtd, data.primaryCurrency)}
+              sub="Sum of tax_amount on YTD invoices (15% NZ default)"
+            />
+            <MetricBlock
+              label="Corp tax estimate"
+              value={toCur(data.taxes.corpTaxOwedYtd, data.primaryCurrency)}
+              sub={`28% × YTD profit (${toCur(data.taxes.ytdProfit, data.primaryCurrency)})`}
+              accent
+            />
+            <MetricBlock
+              label="YTD expenses (approx.)"
+              value={toCur(data.taxes.ytdExpensesApprox, data.primaryCurrency)}
+              sub="Recurring × months elapsed"
+            />
+          </div>
+        </div>
+      </Card>
+
+      {/* YoY comparison */}
+      <Card>
+        <div style={{ padding: '1.25rem 1.5rem' }}>
+          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
+            This month vs last year
+          </div>
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1.5rem' }}>
+            <MetricBlock
+              label="This month so far"
+              value={toCur(data.yoy.thisMonth, data.primaryCurrency)}
+              sub="Paid invoices, current calendar month"
+              accent
+            />
+            <MetricBlock
+              label="Same month last year"
+              value={toCur(data.yoy.lastYearSameMonth, data.primaryCurrency)}
+              sub={data.yoy.lastYearSameMonth === 0 ? 'No data — comparison N/A' : 'For perspective'}
+            />
+            <MetricBlock
+              label="Year-over-year"
+              value={data.yoy.deltaPct == null ? '—' : `${data.yoy.deltaPct >= 0 ? '+' : ''}${Math.round(data.yoy.deltaPct * 100)}%`}
+              sub={data.yoy.deltaPct == null
+                ? 'No baseline to compare'
+                : data.yoy.deltaPct > 0
+                  ? 'Growing month-over-prior-year'
+                  : 'Down vs same month last year'
+              }
+            />
           </div>
         </div>
       </Card>
@@ -413,6 +573,64 @@ export function FinancialReportsContent() {
         </Card>
       )}
 
+      {/* Recent activity feed */}
+      {(data.recentActivity.invoices.length > 0 || data.recentActivity.deals.length > 0) && (
+        <Card>
+          <div style={{ padding: '1.25rem 1.5rem' }}>
+            <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
+              Recent activity
+            </div>
+            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(18rem, 1fr))', gap: '1.5rem' }}>
+              <div>
+                <div className="text-xs font-semibold text-[var(--color-text)] mb-2">Last 5 paid invoices</div>
+                {data.recentActivity.invoices.length === 0 ? (
+                  <p className="text-xs text-[var(--color-text-subtle)] italic">No paid invoices yet.</p>
+                ) : (
+                  <div className="grid" style={{ gap: '0.375rem' }}>
+                    {data.recentActivity.invoices.map(inv => (
+                      <div key={inv.id} className="flex items-center justify-between text-xs" style={{ gap: '0.5rem', padding: '0.4375rem 0.625rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+                        <span className="text-[var(--color-text)] truncate" style={{ minWidth: 0, flex: 1 }}>
+                          {inv.orgName ?? '—'}
+                        </span>
+                        <span className="text-[var(--color-text-muted)] font-mono" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                          {toCur(inv.totalUsd, data.primaryCurrency)}
+                        </span>
+                        <span className="text-[var(--color-text-subtle)] text-[0.6875rem]" style={{ flexShrink: 0 }}>
+                          {inv.paidAt ? fmtRelative(inv.paidAt) : '—'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-[var(--color-text)] mb-2">Last 5 deals signed</div>
+                {data.recentActivity.deals.length === 0 ? (
+                  <p className="text-xs text-[var(--color-text-subtle)] italic">No deals closed yet.</p>
+                ) : (
+                  <div className="grid" style={{ gap: '0.375rem' }}>
+                    {data.recentActivity.deals.map(deal => (
+                      <div key={deal.id} className="flex items-center justify-between text-xs" style={{ gap: '0.5rem', padding: '0.4375rem 0.625rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+                        <span className="text-[var(--color-text)] truncate" style={{ minWidth: 0, flex: 1 }}>
+                          {deal.title}
+                          {deal.orgName && <span className="text-[var(--color-text-subtle)]"> · {deal.orgName}</span>}
+                        </span>
+                        <span className="text-[var(--color-text-muted)] font-mono" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                          {toCur(deal.value, data.primaryCurrency)}
+                        </span>
+                        <span className="text-[var(--color-text-subtle)] text-[0.6875rem]" style={{ flexShrink: 0 }}>
+                          {deal.closedAt ? fmtRelative(deal.closedAt) : '—'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Placeholder for the "huh, that's interesting" charts half */}
       <Card>
         <div style={{ padding: '1.25rem 1.5rem' }}>
@@ -444,6 +662,44 @@ function StatusTile({ label, status, hint }: { label: string; status: 'green' | 
         <Badge tone={STATUS_TONE[status]} variant="soft" size="sm">{STATUS_LABEL[status]}</Badge>
       </div>
       <span className="text-xs text-[var(--color-text-muted)]" style={{ lineHeight: 1.4 }}>{hint}</span>
+    </div>
+  )
+}
+
+function ArBucket({ label, amount, cur, toCur, tone }: {
+  label: string
+  amount: number
+  cur: string
+  toCur: (amount: number, fromCurrency: string) => string
+  tone: 'positive' | 'warning' | 'danger'
+}) {
+  // Hex literals because tone tokens vary by surface; want flat colour bars.
+  const accent = tone === 'positive' ? 'var(--color-brand)'
+    : tone === 'warning' ? '#fb923c'
+    : '#f87171'
+  const isEmpty = amount < 0.01
+  return (
+    <div>
+      <div className="text-xs text-[var(--color-text-muted)]">{label}</div>
+      <div className="text-base font-semibold mt-0.5" style={{
+        color: isEmpty ? 'var(--color-text-subtle)' : 'var(--color-text)',
+        fontVariantNumeric: 'tabular-nums',
+      }}>
+        {toCur(amount, cur)}
+      </div>
+      <div style={{
+        height: '0.25rem',
+        marginTop: '0.375rem',
+        background: 'var(--color-bg-secondary)',
+        borderRadius: '999px',
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          width: isEmpty ? '0%' : '100%',
+          height: '100%',
+          background: isEmpty ? 'transparent' : accent,
+        }} />
+      </div>
     </div>
   )
 }
