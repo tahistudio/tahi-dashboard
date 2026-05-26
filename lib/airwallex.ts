@@ -77,22 +77,18 @@ async function readCachedToken(): Promise<{ token: string; expiresAt: string } |
   return { token: row.accessToken, expiresAt: row.tokenExpiresAt }
 }
 
-/** Persist a fresh access token + expiry. */
+/**
+ * Persist a fresh access token + expiry. Uses INSERT … ON CONFLICT
+ * DO UPDATE keyed by service so concurrent calls (the parallel
+ * Balance + Transaction fetches each call getAirwallexToken) can't
+ * race the UNIQUE constraint on integrations.service.
+ */
 async function writeCachedToken(token: string, expiresAt: string): Promise<void> {
   const database = await db() as ReturnType<typeof import('drizzle-orm/d1').drizzle>
   const now = new Date().toISOString()
-  const [existing] = await database
-    .select({ id: schema.integrations.id })
-    .from(schema.integrations)
-    .where(eq(schema.integrations.service, SERVICE_KEY))
-    .limit(1)
-  if (existing) {
-    await database
-      .update(schema.integrations)
-      .set({ accessToken: token, tokenExpiresAt: expiresAt, updatedAt: now })
-      .where(eq(schema.integrations.id, existing.id))
-  } else {
-    await database.insert(schema.integrations).values({
+  await database
+    .insert(schema.integrations)
+    .values({
       id: crypto.randomUUID(),
       service: SERVICE_KEY,
       accessToken: token,
@@ -100,7 +96,14 @@ async function writeCachedToken(token: string, expiresAt: string): Promise<void>
       createdAt: now,
       updatedAt: now,
     })
-  }
+    .onConflictDoUpdate({
+      target: schema.integrations.service,
+      set: {
+        accessToken: token,
+        tokenExpiresAt: expiresAt,
+        updatedAt: now,
+      },
+    })
 }
 
 /** Exchange the client_id + api_key for a fresh Bearer token. */
