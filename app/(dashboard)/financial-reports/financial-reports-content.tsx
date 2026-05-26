@@ -24,6 +24,7 @@ import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
+import { DataTable } from '@/components/tahi/data-table'
 import { useToast } from '@/components/tahi/toast'
 import { apiPath } from '@/lib/api'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
@@ -52,6 +53,14 @@ interface SummaryResponse {
     combined: number
     retainerClientCount: number
     configured: boolean
+    breakdown: Array<{
+      id: string
+      name: string
+      nativeAmount: number
+      nativeCurrency: string
+      mrrNzd: number
+      share: number
+    }>
   }
   arr: number
   ytdRevenue: number
@@ -461,6 +470,74 @@ export function FinancialReportsContent() {
           </div>
         </div>
       </Card>
+
+      {/* Per-client MRR breakdown — uses DataTable so it sorts + is consistent
+          with the rest of the dashboard. Source of the "wait, why is MRR
+          70k?" answer: shows every retainer client with native + NZD. */}
+      {data.mrr.breakdown.length > 0 && (
+        <Card>
+          <div className="p-4 sm:p-6">
+            <div className="flex items-baseline justify-between flex-wrap" style={{ gap: '0.5rem', marginBottom: '0.75rem' }}>
+              <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+                MRR by client ({data.mrr.breakdown.length})
+              </div>
+              <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+                Native amount × FX = NZD contribution. Edit per-client on /clients.
+              </div>
+            </div>
+            <DataTable
+              rows={data.mrr.breakdown}
+              getRowId={(r) => r.id}
+              empty={<div className="p-4 text-sm text-[var(--color-text-muted)]">No retainer clients tracked. Set custom_mrr on a client to add them here.</div>}
+              columns={[
+                { key: 'name', header: 'Client', sortable: true, accessor: (r) => r.name },
+                {
+                  key: 'native',
+                  header: 'Native MRR',
+                  align: 'right',
+                  sortable: true,
+                  sortValue: (r) => r.nativeAmount,
+                  render: (r) => (
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {new Intl.NumberFormat('en-NZ', { style: 'currency', currency: r.nativeCurrency, maximumFractionDigits: 0 }).format(r.nativeAmount)}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'currency',
+                  header: 'Currency',
+                  render: (r) => <Badge tone="neutral" variant="soft" size="sm">{r.nativeCurrency}</Badge>,
+                },
+                {
+                  key: 'nzd',
+                  header: `≈ ${data.primaryCurrency}`,
+                  align: 'right',
+                  sortable: true,
+                  sortValue: (r) => r.mrrNzd,
+                  render: (r) => (
+                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>
+                      {toCur(r.mrrNzd, data.primaryCurrency)}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'share',
+                  header: 'Share',
+                  align: 'right',
+                  sortable: true,
+                  sortValue: (r) => r.share,
+                  render: (r) => (
+                    <span className="text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {(r.share * 100).toFixed(1)}%
+                    </span>
+                  ),
+                },
+              ]}
+              defaultSort={{ key: 'nzd', dir: 'desc' }}
+            />
+          </div>
+        </Card>
+      )}
 
       {/* Sales velocity */}
       <Card>

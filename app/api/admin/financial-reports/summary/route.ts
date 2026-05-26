@@ -19,6 +19,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, gte, sql } from 'drizzle-orm'
+import { buildRateMap, toNzd as toNzdHelper } from '@/lib/currency'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -99,35 +100,53 @@ export async function GET(req: NextRequest) {
   // Retainer MRR = SUM of organisations.custom_mrr across active clients,
   // converting each from its native currency to NZD via the FX table.
   // Most Tahi clients bill in USD/GBP/EUR — assuming NZD was wrong.
-  // Migration 0056 added custom_mrr_currency (default 'NZD' so existing
-  // rows behave the same until edited).
-  const retainerRowsByClient = await database.all<{ id: string; mrr: number | null; currency: string | null }>(sql`
-    SELECT id, custom_mrr AS mrr, COALESCE(custom_mrr_currency, 'NZD') AS currency
+  //
+  // Currency resolution order: custom_mrr_currency (set per-MRR) > the
+  // org's preferred_currency (the currency they're invoiced in) > NZD.
+  // Migration 0056 defaulted custom_mrr_currency to 'NZD' to be safe,
+  // but most clients had preferred_currency already set to USD/GBP from
+  // the New Deal dialog — fall back to that so the page is honest
+  // without making Liam touch 20 client records.
+  const retainerRowsByClient = await database.all<{ id: string; name: string; mrr: number | null; currency: string | null }>(sql`
+    SELECT id, name, custom_mrr AS mrr,
+           COALESCE(NULLIF(custom_mrr_currency, 'NZD'), preferred_currency, 'NZD') AS currency
     FROM organisations
     WHERE status = 'active'
       AND custom_mrr IS NOT NULL
       AND custom_mrr > 0
   `)
   // Convert each native amount to NZD via the exchange_rates table.
-  // Rates are stored as rate_to_usd (how many USD per 1 unit of currency).
-  // To go currency → NZD: (amount × rate_to_usd) ÷ nzd_rate_to_usd.
+  // Uses lib/currency.ts toNzd which does: amount / rateToUsd[currency] × rateToUsd[NZD].
+  // (Earlier inline version had the formula inverted — symptom was an
+  // inflated MRR because NZD-defaulted-but-actually-GBP/USD amounts were
+  // being summed at face value.)
   const fxRows = await database.all<{ currency: string; rateToUsd: number }>(sql`
     SELECT currency, rate_to_usd AS rateToUsd FROM exchange_rates
   `)
-  const fxMap = new Map<string, number>()
-  for (const r of fxRows) fxMap.set(r.currency, Number(r.rateToUsd))
-  const nzdRate = fxMap.get('NZD') ?? 0.6  // fallback NZD/USD ≈ 0.6
-  function toNzd(amount: number, currency: string): number {
-    if (currency === 'NZD') return amount
-    const rate = fxMap.get(currency)
-    if (!rate || rate <= 0 || nzdRate <= 0) return amount  // fallback: pass through if rate unknown
-    return (amount * rate) / nzdRate
-  }
+  const rateMap = buildRateMap(fxRows.map(r => ({ currency: r.currency, rateToUsd: Number(r.rateToUsd) })))
+  const toNzd = (amount: number, currency: string): number => toNzdHelper(amount, currency, rateMap)
   const retainerMrr = retainerRowsByClient.reduce(
     (sum, r) => sum + toNzd(Number(r.mrr ?? 0), r.currency ?? 'NZD'),
     0,
   )
   const retainerClientCount = retainerRowsByClient.length
+
+  // Per-client breakdown for the design-system DataTable on the page.
+  // Already converted to NZD so the UI can sort + show share-of-MRR.
+  const retainerBreakdown = retainerRowsByClient.map(r => {
+    const native = Number(r.mrr ?? 0)
+    const currency = r.currency ?? 'NZD'
+    const nzd = toNzd(native, currency)
+    const share = retainerMrr > 0 ? nzd / retainerMrr : 0
+    return {
+      id: r.id,
+      name: r.name,
+      nativeAmount: native,
+      nativeCurrency: currency,
+      mrrNzd: nzd,
+      share,
+    }
+  }).sort((a, b) => b.mrrNzd - a.mrrNzd)
 
   // Project MRR = sum over active projects of (price / months active).
   // Active = (startDate ≤ now AND expectedDelivery ≥ now) OR no
@@ -162,16 +181,21 @@ export async function GET(req: NextRequest) {
   // Don't filter on status='paid' string — Stripe + Xero imports use
   // different status vocabularies. paidAt set + > yearStart is the
   // reliable signal that money landed.
-  const ytdRows = await database.all<{ total: number | null; cnt: number }>(sql`
-    SELECT
-      COALESCE(SUM(total_usd), 0) AS total,
-      COUNT(*) AS cnt
+  // The total_usd column is misleadingly named: it holds the native
+  // amount in `currency`. Pull (amount, currency) per row and convert
+  // each individually so a £3,125 invoice doesn't get counted as $3,125
+  // NZD.
+  const ytdRows = await database.all<{ amount: number; currency: string }>(sql`
+    SELECT total_usd AS amount, currency
     FROM invoices
     WHERE paid_at IS NOT NULL
       AND paid_at >= ${yearStart}
   `)
-  const ytdRevenue = Number(ytdRows[0]?.total ?? 0)
-  const ytdInvoiceCount = Number(ytdRows[0]?.cnt ?? 0)
+  const ytdRevenue = ytdRows.reduce(
+    (sum, r) => sum + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'),
+    0,
+  )
+  const ytdInvoiceCount = ytdRows.length
 
   // ── Sales velocity (deals signed in trailing windows) ─────────────
   // "Signed" = deal on a closed-won pipeline stage with a closed_at in
@@ -210,11 +234,12 @@ export async function GET(req: NextRequest) {
   const quarterDaysElapsed = Math.max(1, Math.ceil((nowDate.getTime() - new Date(quarterStart).getTime()) / 86400_000))
   const quarterDaysTotal = Math.ceil((quarterEnd.getTime() - new Date(quarterStart).getTime()) / 86400_000)
 
-  const quarterRevenueRows = await database.all<{ total: number | null }>(sql`
-    SELECT COALESCE(SUM(total_usd), 0) AS total
+  const quarterInvoiceRows = await database.all<{ amount: number; currency: string }>(sql`
+    SELECT total_usd AS amount, currency
     FROM invoices
     WHERE paid_at IS NOT NULL AND paid_at >= ${quarterStart}
   `)
+  const quarterRevenueRows = [{ total: quarterInvoiceRows.reduce((s, r) => s + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'), 0) }]
   const quarterToDate = Number(quarterRevenueRows[0]?.total ?? 0)
   const quarterRunRate = quarterDaysElapsed > 0 ? (quarterToDate / quarterDaysElapsed) * quarterDaysTotal : 0
 
@@ -223,20 +248,26 @@ export async function GET(req: NextRequest) {
   const monthsRemaining = 11 - nowDate.getMonth()  // Dec → 0, Nov → 1 …
 
   // ── Trailing 5-month project revenue ──────────────────────────────
-  // Sum of paid invoices linked to a project in the last 150 days ÷ 5.
-  // This is the REAL number — what's actually landed in the bank from
-  // project work. Pairs with the projection-based projectMrr above so
-  // operator can see projection vs reality side by side.
-  const trailingProjectRows = await database.all<{ total: number | null; cnt: number }>(sql`
-    SELECT
-      COALESCE(SUM(total_usd), 0) AS total,
-      COUNT(*) AS cnt
-    FROM invoices
-    WHERE paid_at IS NOT NULL
-      AND paid_at > datetime('now', '-150 days')
-      AND project_id IS NOT NULL
+  // "Project" here = work that isn't a retainer. invoices.project_id is
+  // basically never set in production (Stripe + Xero imports don't
+  // populate it), so we use a better heuristic: invoices for orgs that
+  // don't have a non-zero custom_mrr at all. Retainer clients get
+  // excluded; one-off/project clients get included. Convert to NZD via
+  // the invoice's own currency so a £3,125 deliverable doesn't get
+  // counted as $3,125 NZD.
+  const trailingProjectInvoices = await database.all<{ amount: number; currency: string }>(sql`
+    SELECT i.total_amount AS amount, i.currency AS currency
+    FROM invoices i
+    LEFT JOIN organisations o ON o.id = i.org_id
+    WHERE i.paid_at IS NOT NULL
+      AND i.paid_at > datetime('now', '-150 days')
+      AND (o.custom_mrr IS NULL OR o.custom_mrr = 0)
   `)
-  const trailing5moProjectRevenue = Number(trailingProjectRows[0]?.total ?? 0) / 5
+  const trailingProjectTotalNzd = trailingProjectInvoices.reduce(
+    (sum, r) => sum + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'),
+    0,
+  )
+  const trailing5moProjectRevenue = trailingProjectTotalNzd / 5
 
   // Effective monthly revenue = retainer MRR + 5-month project actuals.
   // What Liam asked for as the headline.
@@ -285,14 +316,16 @@ export async function GET(req: NextRequest) {
 
   // ── AR aging buckets ──────────────────────────────────────────────
   // Outstanding invoices (sent + overdue) grouped by days since due.
-  const arRows = await database.all<{ totalUsd: number | null; dueDate: string | null }>(sql`
-    SELECT total_usd AS totalUsd, due_date AS dueDate
+  // Convert each amount to NZD via its native currency so a £1,250
+  // invoice doesn't show as $1,250 NZD in the bucket.
+  const arRows = await database.all<{ totalUsd: number | null; currency: string; dueDate: string | null }>(sql`
+    SELECT total_usd AS totalUsd, currency, due_date AS dueDate
     FROM invoices
     WHERE status IN ('sent', 'overdue') AND paid_at IS NULL
   `)
   const arAging = { current: 0, days30: 0, days60: 0, days90: 0, days90plus: 0 }
   for (const r of arRows) {
-    const amt = Number(r.totalUsd ?? 0)
+    const amt = toNzd(Number(r.totalUsd ?? 0), r.currency ?? 'NZD')
     if (!r.dueDate) { arAging.current += amt; continue }
     const overdueMs = Date.now() - new Date(r.dueDate).getTime()
     if (overdueMs < 0) arAging.current += amt
@@ -314,11 +347,12 @@ export async function GET(req: NextRequest) {
     (new Date().getFullYear() - taxYearStartYear) * 12 + (new Date().getMonth() - 3) + 1,
   ))
 
-  const taxYearRevenueRows = await database.all<{ total: number | null }>(sql`
-    SELECT COALESCE(SUM(total_usd), 0) AS total
+  const taxYearInvoiceRows = await database.all<{ amount: number; currency: string }>(sql`
+    SELECT total_usd AS amount, currency
     FROM invoices
     WHERE paid_at IS NOT NULL AND paid_at >= ${taxYearStart}
   `)
+  const taxYearRevenueRows = [{ total: taxYearInvoiceRows.reduce((s, r) => s + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'), 0) }]
   const taxYearRevenue = Number(taxYearRevenueRows[0]?.total ?? 0)
 
   // GST: 15% of invoiced amount on NZ-domiciled clients. Sum of
@@ -349,32 +383,43 @@ export async function GET(req: NextRequest) {
   const thisMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
   const sameMonthLastYearStart = new Date(new Date().getFullYear() - 1, new Date().getMonth(), 1).toISOString()
   const sameMonthLastYearEnd = new Date(new Date().getFullYear() - 1, new Date().getMonth() + 1, 1).toISOString()
-  const thisMonthRevenueRows = await database.all<{ total: number | null }>(sql`
-    SELECT COALESCE(SUM(total_usd), 0) AS total
+  const thisMonthInvoices = await database.all<{ amount: number; currency: string }>(sql`
+    SELECT total_usd AS amount, currency
     FROM invoices
     WHERE paid_at IS NOT NULL AND paid_at >= ${thisMonthStart}
   `)
-  const lastYearMonthRevenueRows = await database.all<{ total: number | null }>(sql`
-    SELECT COALESCE(SUM(total_usd), 0) AS total
+  const thisMonthRevenueRows = [{ total: thisMonthInvoices.reduce((s, r) => s + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'), 0) }]
+  const lastYearMonthInvoices = await database.all<{ amount: number; currency: string }>(sql`
+    SELECT total_usd AS amount, currency
     FROM invoices
     WHERE paid_at IS NOT NULL
       AND paid_at >= ${sameMonthLastYearStart}
       AND paid_at < ${sameMonthLastYearEnd}
   `)
   const yoyThisMonth = Number(thisMonthRevenueRows[0]?.total ?? 0)
-  const yoyLastYear = Number(lastYearMonthRevenueRows[0]?.total ?? 0)
+  const lastYearMonthTotalNzd = lastYearMonthInvoices.reduce((s, r) => s + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'), 0)
+  const yoyLastYear = lastYearMonthTotalNzd
   const yoyDeltaPct = yoyLastYear > 0 ? ((yoyThisMonth - yoyLastYear) / yoyLastYear) : null
 
   // ── Tier 2: time-series + efficiency metrics ──────────────────────
   // 12-month revenue history grouped by month (for stacked area chart).
-  const monthlyRevenueRows = await database.all<{ ym: string; total: number | null }>(sql`
-    SELECT strftime('%Y-%m', paid_at) AS ym, COALESCE(SUM(total_usd), 0) AS total
+  // Pull raw rows + ym so we can convert each invoice individually then
+  // re-aggregate per month — SQL SUM ignores the currency column.
+  const monthlyRevenueRawRows = await database.all<{ ym: string; amount: number; currency: string }>(sql`
+    SELECT strftime('%Y-%m', paid_at) AS ym, total_usd AS amount, currency
     FROM invoices
     WHERE paid_at IS NOT NULL
       AND paid_at > datetime('now', '-13 months')
-    GROUP BY ym
-    ORDER BY ym ASC
   `)
+  const monthlyRevenueMap = new Map<string, number>()
+  for (const row of monthlyRevenueRawRows) {
+    const ymKey = row.ym
+    const nzd = toNzd(Number(row.amount ?? 0), row.currency ?? 'NZD')
+    monthlyRevenueMap.set(ymKey, (monthlyRevenueMap.get(ymKey) ?? 0) + nzd)
+  }
+  const monthlyRevenueRows = Array.from(monthlyRevenueMap.entries())
+    .map(([ym, total]) => ({ ym, total }))
+    .sort((a, b) => a.ym.localeCompare(b.ym))
 
   // Cost-mix: monthly outflow by category. Pulled from expense_commitments
   // (operator-confirmed truth).
@@ -486,14 +531,21 @@ export async function GET(req: NextRequest) {
   `)
 
   // Cash conversion ratio (last 90 days): collected ÷ invoiced.
-  const cashConvRows = await database.all<{ invoiced: number | null; collected: number | null }>(sql`
-    SELECT
-      COALESCE(SUM(CASE WHEN created_at > datetime('now', '-90 days') THEN total_usd ELSE 0 END), 0) AS invoiced,
-      COALESCE(SUM(CASE WHEN paid_at > datetime('now', '-90 days') THEN total_usd ELSE 0 END), 0) AS collected
+  // Pull invoices once + bucket in JS so we can convert each row's
+  // amount via its native currency.
+  const cashConvInvoices = await database.all<{ amount: number; currency: string; createdAt: string | null; paidAt: string | null }>(sql`
+    SELECT total_usd AS amount, currency, created_at AS createdAt, paid_at AS paidAt
     FROM invoices
+    WHERE created_at > datetime('now', '-90 days') OR paid_at > datetime('now', '-90 days')
   `)
-  const invoiced90 = Number(cashConvRows[0]?.invoiced ?? 0)
-  const collected90 = Number(cashConvRows[0]?.collected ?? 0)
+  const ninetyDaysAgoMs = Date.now() - 90 * 86400_000
+  let invoiced90 = 0
+  let collected90 = 0
+  for (const r of cashConvInvoices) {
+    const nzd = toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD')
+    if (r.createdAt && new Date(r.createdAt).getTime() > ninetyDaysAgoMs) invoiced90 += nzd
+    if (r.paidAt && new Date(r.paidAt).getTime() > ninetyDaysAgoMs) collected90 += nzd
+  }
 
   // Hours logged + cost. Profit per logged hour = (revenue ÷ hours) once
   // we know revenue per client; for now compute the agency-wide number.
@@ -628,6 +680,7 @@ export async function GET(req: NextRequest) {
       // of a green "on track" tile.
       retainerClientCount,
       configured: retainerClientCount > 0 || projectMrr > 0,
+      breakdown: retainerBreakdown,
     },
     arr,
     ytdRevenue,
