@@ -110,7 +110,8 @@ const ADMIN_NAV: NavGroup[] = [
       { label: 'Invoices',  href: '/invoices',  icon: FileText },
       { label: 'Billing',   href: '/billing',   icon: CreditCard,    adminOnly: true },
       { label: 'Time',      href: '/time',      icon: Clock,         adminOnly: true },
-      { label: 'Reports',   href: '/reports',   icon: BarChart2,     adminOnly: true },
+      { label: 'Financial reports', href: '/financial-reports', icon: BarChart2, adminOnly: true },
+      { label: 'Reports',           href: '/reports',           icon: BarChart2, adminOnly: true },
     ],
   },
   {
