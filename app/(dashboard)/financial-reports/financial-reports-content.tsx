@@ -1558,7 +1558,6 @@ function SubscriptionsAuditCard({ formatNative }: {
   const [items, setItems] = useState<SubscriptionsAuditItem[]>([])
   const [summary, setSummary] = useState<{ count: number; monthlyTotal: number; annualTotal: number; staleCount: number } | null>(null)
   const [loading, setLoading] = useState(true)
-  const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -1574,36 +1573,6 @@ function SubscriptionsAuditCard({ formatNative }: {
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [])
-
-  if (loading) {
-    return (
-      <Card>
-        <div className="p-4 sm:p-6">
-          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
-            Recurring outflows
-          </div>
-          <div className="animate-pulse" style={{ height: '6rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)' }} />
-        </div>
-      </Card>
-    )
-  }
-
-  if (items.length === 0) {
-    return (
-      <Card>
-        <div className="p-4 sm:p-6">
-          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-2">
-            Recurring outflows
-          </div>
-          <p className="text-sm text-[var(--color-text-muted)]">
-            No expense commitments configured yet. Add software / payroll / shareholder distributions through Settings → Commitments to start tracking outflow patterns.
-          </p>
-        </div>
-      </Card>
-    )
-  }
-
-  const visible = expanded ? items : items.slice(0, 6)
 
   return (
     <Card>
@@ -1621,58 +1590,65 @@ function SubscriptionsAuditCard({ formatNative }: {
             )}
           </div>
         </div>
-        <div className="grid" style={{ gap: '0.375rem' }}>
-          {visible.map(item => {
-            const stale = !item.lastBankHit
-            return (
-              <div key={item.id} className="flex items-center" style={{
-                gap: '0.75rem',
-                padding: '0.5rem 0.75rem',
-                background: stale ? 'var(--color-warning-bg, #fff7ed)' : 'var(--color-bg-secondary)',
-                borderRadius: 'var(--radius-sm)',
-                border: stale ? '1px solid var(--color-warning-border, #fed7aa)' : '1px solid transparent',
-              }}>
-                <div className="min-w-0" style={{ flex: 2 }}>
-                  <div className="text-sm font-semibold text-[var(--color-text)] truncate">{item.name}</div>
+        <DataTable
+          rows={items}
+          getRowId={(r) => r.id}
+          loading={loading}
+          empty={
+            <div className="p-4 text-sm text-[var(--color-text-muted)]">
+              No expense commitments configured yet. Add software / payroll / shareholder distributions through Settings → Commitments to start tracking outflow patterns.
+            </div>
+          }
+          columns={[
+            {
+              key: 'name',
+              header: 'Commitment',
+              sortable: true,
+              accessor: (r) => r.name,
+              render: (r) => (
+                <div>
+                  <div className="font-medium text-[var(--color-text)]">{r.name}</div>
                   <div className="text-[0.6875rem] text-[var(--color-text-subtle)] truncate">
-                    {item.vendor ?? item.category} · {item.cadence}
+                    {r.vendor ?? r.category} · {r.cadence}
                   </div>
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div className="text-sm font-semibold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    {formatNative(item.amount, item.currency)}
+              ),
+            },
+            {
+              key: 'amount',
+              header: 'Native',
+              align: 'right',
+              sortable: true,
+              sortValue: (r) => r.annualisedNzd,
+              render: (r) => (
+                <div style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  <div className="text-[var(--color-text)] font-medium">{formatNative(r.amount, r.currency)}</div>
+                  <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">{formatNative(r.annualisedNzd, 'NZD')}/yr NZD</div>
+                </div>
+              ),
+            },
+            {
+              key: 'lastHit',
+              header: 'Last bank hit',
+              align: 'right',
+              sortable: true,
+              sortValue: (r) => r.lastBankHit?.settledAt ?? '',
+              render: (r) => r.lastBankHit ? (
+                <div style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  <div className="text-[var(--color-text-muted)] text-xs">
+                    {formatNative(r.lastBankHit.amount, r.lastBankHit.currency)}
                   </div>
                   <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-                    {formatNative(item.annualisedNzd, item.currency)}/yr
+                    {r.lastBankHit.settledAt ? fmtRelative(r.lastBankHit.settledAt) : '—'}
                   </div>
                 </div>
-                <div style={{ flex: 1.5, textAlign: 'right' }}>
-                  {item.lastBankHit ? (
-                    <>
-                      <div className="text-xs text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        Last hit: {formatNative(item.lastBankHit.amount, item.lastBankHit.currency)}
-                      </div>
-                      <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-                        {item.lastBankHit.settledAt ? fmtRelative(item.lastBankHit.settledAt) : '—'}
-                      </div>
-                    </>
-                  ) : (
-                    <Badge tone="warning" variant="soft" size="sm">No recent bank hit</Badge>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-        {items.length > 6 && (
-          <button
-            onClick={() => setExpanded(v => !v)}
-            className="text-xs font-medium text-[var(--color-brand-dark)] mt-3"
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
-          >
-            {expanded ? `Show top 6 only` : `Show all ${items.length}`}
-          </button>
-        )}
+              ) : (
+                <Badge tone="warning" variant="soft" size="sm">No recent hit</Badge>
+              ),
+            },
+          ]}
+          defaultSort={{ key: 'amount', dir: 'desc' }}
+        />
       </div>
     </Card>
   )
