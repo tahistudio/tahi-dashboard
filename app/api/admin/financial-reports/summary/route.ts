@@ -156,6 +156,152 @@ export async function GET(req: NextRequest) {
   const outstandingAr = outstandingRows.reduce((s, r) => s + (r.totalUsd ?? 0), 0)
               + overdueRows.reduce((s, r) => s + (r.totalUsd ?? 0), 0)
 
+  // ── Trailing 5-month project revenue ──────────────────────────────
+  // Sum of paid invoices linked to a project in the last 150 days ÷ 5.
+  // This is the REAL number — what's actually landed in the bank from
+  // project work. Pairs with the projection-based projectMrr above so
+  // operator can see projection vs reality side by side.
+  const trailingProjectRows = await database.all<{ total: number | null; cnt: number }>(sql`
+    SELECT
+      COALESCE(SUM(total_usd), 0) AS total,
+      COUNT(*) AS cnt
+    FROM invoices
+    WHERE paid_at IS NOT NULL
+      AND paid_at > datetime('now', '-150 days')
+      AND project_id IS NOT NULL
+  `)
+  const trailing5moProjectRevenue = Number(trailingProjectRows[0]?.total ?? 0) / 5
+
+  // Effective monthly revenue = retainer MRR + 5-month project actuals.
+  // What Liam asked for as the headline.
+  const effectiveMonthlyRevenue = retainerMrr + trailing5moProjectRevenue
+
+  // ── Net new MRR this month (won this month - churned this month) ──
+  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
+  const wonThisMonthRows = await database.all<{ total: number | null; cnt: number }>(sql`
+    SELECT
+      COALESCE(SUM(d.monthly_value_nzd), 0) AS total,
+      COUNT(*) AS cnt
+    FROM deals d
+    INNER JOIN pipeline_stages s ON d.stage_id = s.id
+    WHERE s.is_closed_won = 1
+      AND d.closed_at IS NOT NULL
+      AND d.closed_at >= ${monthStart}
+      AND d.monthly_value_nzd > 0
+  `)
+  const churnedThisMonthRows = await database.all<{ cnt: number }>(sql`
+    SELECT COUNT(*) AS cnt
+    FROM subscriptions
+    WHERE cancelled_at IS NOT NULL
+      AND cancelled_at >= ${monthStart}
+  `)
+  const newMrrThisMonth = Number(wonThisMonthRows[0]?.total ?? 0)
+  const wonDealsThisMonth = Number(wonThisMonthRows[0]?.cnt ?? 0)
+  const churnedClientsThisMonth = Number(churnedThisMonthRows[0]?.cnt ?? 0)
+
+  // ── Client concentration ──────────────────────────────────────────
+  // % of MRR from top 1 + top 3 clients. Surfaces "if I lose Brogan's
+  // tomorrow…" exposure. Reads only active clients with custom_mrr set.
+  const concentrationRows = await database.all<{ name: string; mrr: number }>(sql`
+    SELECT name, COALESCE(custom_mrr, 0) AS mrr
+    FROM organisations
+    WHERE status = 'active' AND custom_mrr IS NOT NULL AND custom_mrr > 0
+    ORDER BY custom_mrr DESC
+    LIMIT 10
+  `)
+  const totalNamedMrr = concentrationRows.reduce((s, r) => s + Number(r.mrr), 0)
+  const topClientShare = totalNamedMrr > 0 && concentrationRows[0]
+    ? (Number(concentrationRows[0].mrr) / totalNamedMrr)
+    : 0
+  const top3Share = totalNamedMrr > 0
+    ? concentrationRows.slice(0, 3).reduce((s, r) => s + Number(r.mrr), 0) / totalNamedMrr
+    : 0
+
+  // ── AR aging buckets ──────────────────────────────────────────────
+  // Outstanding invoices (sent + overdue) grouped by days since due.
+  const arRows = await database.all<{ totalUsd: number | null; dueDate: string | null }>(sql`
+    SELECT total_usd AS totalUsd, due_date AS dueDate
+    FROM invoices
+    WHERE status IN ('sent', 'overdue') AND paid_at IS NULL
+  `)
+  const arAging = { current: 0, days30: 0, days60: 0, days90: 0, days90plus: 0 }
+  for (const r of arRows) {
+    const amt = Number(r.totalUsd ?? 0)
+    if (!r.dueDate) { arAging.current += amt; continue }
+    const overdueMs = Date.now() - new Date(r.dueDate).getTime()
+    if (overdueMs < 0) arAging.current += amt
+    else if (overdueMs < 30 * 86400_000) arAging.days30 += amt
+    else if (overdueMs < 60 * 86400_000) arAging.days60 += amt
+    else if (overdueMs < 90 * 86400_000) arAging.days90 += amt
+    else arAging.days90plus += amt
+  }
+
+  // ── GST + Corp tax YTD ────────────────────────────────────────────
+  // GST: 15% of invoiced amount on NZ-domiciled clients. We can't always
+  // know billing country, so this is a heuristic — sum of tax_amount on
+  // YTD invoices. If tax_amount_usd is null (legacy data), zero.
+  const gstRows = await database.all<{ total: number | null }>(sql`
+    SELECT COALESCE(SUM(tax_amount_usd), 0) AS total
+    FROM invoices
+    WHERE paid_at IS NOT NULL AND paid_at >= ${yearStart}
+  `)
+  const gstOwedYtd = Number(gstRows[0]?.total ?? 0)
+
+  // Corp tax (NZ): 28% of net profit. Honest approximation: 28% of
+  // (YTD revenue − YTD recognised expense_commitments). Refines once
+  // the AI monthly scan reconciles against bank reality.
+  const ytdExpenseRows = await database.all<{ total: number | null }>(sql`
+    SELECT COALESCE(SUM(amount), 0) AS total
+    FROM expense_commitments
+    WHERE active = 1
+      AND (start_date IS NULL OR start_date <= datetime('now'))
+      AND (end_date IS NULL OR end_date >= ${yearStart})
+  `)
+  // Monthly recurring × months elapsed this year is the right model.
+  const monthsThisYear = new Date().getMonth() + 1
+  const ytdExpensesApprox = Number(ytdExpenseRows[0]?.total ?? 0) * monthsThisYear
+  const ytdProfit = ytdRevenue - ytdExpensesApprox
+  const corpTaxOwedYtd = Math.max(0, ytdProfit * 0.28)
+
+  // ── YoY comparison (same calendar month last year vs this) ───────
+  const thisMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
+  const sameMonthLastYearStart = new Date(new Date().getFullYear() - 1, new Date().getMonth(), 1).toISOString()
+  const sameMonthLastYearEnd = new Date(new Date().getFullYear() - 1, new Date().getMonth() + 1, 1).toISOString()
+  const thisMonthRevenueRows = await database.all<{ total: number | null }>(sql`
+    SELECT COALESCE(SUM(total_usd), 0) AS total
+    FROM invoices
+    WHERE paid_at IS NOT NULL AND paid_at >= ${thisMonthStart}
+  `)
+  const lastYearMonthRevenueRows = await database.all<{ total: number | null }>(sql`
+    SELECT COALESCE(SUM(total_usd), 0) AS total
+    FROM invoices
+    WHERE paid_at IS NOT NULL
+      AND paid_at >= ${sameMonthLastYearStart}
+      AND paid_at < ${sameMonthLastYearEnd}
+  `)
+  const yoyThisMonth = Number(thisMonthRevenueRows[0]?.total ?? 0)
+  const yoyLastYear = Number(lastYearMonthRevenueRows[0]?.total ?? 0)
+  const yoyDeltaPct = yoyLastYear > 0 ? ((yoyThisMonth - yoyLastYear) / yoyLastYear) : null
+
+  // ── Recent activity feed (last 5 paid invoices / new deals) ──────
+  const recentInvoices = await database.all<{ id: string; totalUsd: number | null; paidAt: string | null; orgName: string | null }>(sql`
+    SELECT i.id, i.total_usd AS totalUsd, i.paid_at AS paidAt, o.name AS orgName
+    FROM invoices i
+    LEFT JOIN organisations o ON i.org_id = o.id
+    WHERE i.paid_at IS NOT NULL
+    ORDER BY i.paid_at DESC
+    LIMIT 5
+  `)
+  const recentDeals = await database.all<{ id: string; title: string; value: number; closedAt: string | null; orgName: string | null }>(sql`
+    SELECT d.id, d.title, COALESCE(d.value_nzd, d.value, 0) AS value, d.closed_at AS closedAt, o.name AS orgName
+    FROM deals d
+    INNER JOIN pipeline_stages s ON d.stage_id = s.id
+    LEFT JOIN organisations o ON d.org_id = o.id
+    WHERE s.is_closed_won = 1 AND d.closed_at IS NOT NULL
+    ORDER BY d.closed_at DESC
+    LIMIT 5
+  `)
+
   // ── Disposable cash math ──────────────────────────────────────────
   // Primary currency for the headline number: prefer NZD if present,
   // else first available. (Multi-currency is shown per-currency below.)
@@ -230,6 +376,52 @@ export async function GET(req: NextRequest) {
     arr,
     ytdRevenue,
     ytdInvoiceCount,
+    // Project revenue: projection (above, in mrr.project) vs trailing
+    // 5-month actuals. UI shows both — projection drives planning,
+    // actuals drive trust.
+    projectRevenue: {
+      projection: projectMrr,
+      trailing5moActual: trailing5moProjectRevenue,
+    },
+    effectiveMonthlyRevenue,
+    newMrrThisMonth: {
+      amount: newMrrThisMonth,
+      wonDeals: wonDealsThisMonth,
+      churnedClients: churnedClientsThisMonth,
+    },
+    clientConcentration: {
+      totalNamedMrr,
+      topClientShare,
+      top3Share,
+      top: concentrationRows.slice(0, 5).map(r => ({ name: r.name, mrr: Number(r.mrr) })),
+    },
+    arAging,
+    taxes: {
+      gstOwedYtd,
+      corpTaxOwedYtd,
+      ytdProfit,
+      ytdExpensesApprox,
+    },
+    yoy: {
+      thisMonth: yoyThisMonth,
+      lastYearSameMonth: yoyLastYear,
+      deltaPct: yoyDeltaPct,
+    },
+    recentActivity: {
+      invoices: recentInvoices.map(i => ({
+        id: i.id,
+        totalUsd: Number(i.totalUsd ?? 0),
+        paidAt: i.paidAt,
+        orgName: i.orgName,
+      })),
+      deals: recentDeals.map(d => ({
+        id: d.id,
+        title: d.title,
+        value: Number(d.value),
+        closedAt: d.closedAt,
+        orgName: d.orgName,
+      })),
+    },
     salesVelocity: {
       last30Days: { count: signed30.length, value: signed30.reduce((s, d) => s + (d.value ?? 0), 0) },
       last60Days: { count: signed60.length, value: signed60.reduce((s, d) => s + (d.value ?? 0), 0) },
