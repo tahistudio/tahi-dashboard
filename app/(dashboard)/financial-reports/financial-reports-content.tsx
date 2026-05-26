@@ -68,6 +68,9 @@ interface SummaryResponse {
   arAging: { current: number; days30: number; days60: number; days90: number; days90plus: number }
   taxes: { gstOwedYtd: number; corpTaxOwedYtd: number; ytdProfit: number; ytdExpensesApprox: number }
   yoy: { thisMonth: number; lastYearSameMonth: number; deltaPct: number | null }
+  quarterly: { target: number; actual: number; projection: number; daysElapsed: number; daysTotal: number; pctElapsed: number; onPace: boolean | null }
+  yearEnd: { projection: number; monthsRemaining: number }
+  forex: { items: Array<{ currency: string; available: number }>; nzdShare: number }
   monthlyRevenueHistory: Array<{ ym: string; total: number }>
   costMix: Array<{ category: string; monthly: number }>
   pipelineFunnel: Array<{ stage: string; position: number; isClosedWon: boolean; count: number; value: number }>
@@ -632,6 +635,19 @@ export function FinancialReportsContent() {
         </Card>
       )}
 
+      {/* Quarterly target + year-end projection + benchmarks */}
+      <QuarterAndProjectionCard
+        quarterly={data.quarterly}
+        yearEnd={data.yearEnd}
+        ytdRevenue={data.ytdRevenue}
+        effectiveMonthly={data.effectiveMonthlyRevenue}
+        onSavedTarget={() => void fetchSummary()}
+        formatNative={formatNative}
+      />
+
+      {/* Forex exposure */}
+      <ForexCard forex={data.forex} formatNative={formatNative} />
+
       {/* Subscription audit */}
       <SubscriptionsAuditCard formatNative={formatNative} />
 
@@ -728,6 +744,191 @@ function StatusTile({ label, status, hint }: { label: string; status: 'green' | 
       </div>
       <span className="text-xs text-[var(--color-text-muted)]" style={{ lineHeight: 1.4 }}>{hint}</span>
     </div>
+  )
+}
+
+// ─── Tier 3 cards: quarter, year-end, forex ───────────────────────────
+
+function QuarterAndProjectionCard({ quarterly, yearEnd, ytdRevenue, effectiveMonthly, onSavedTarget, formatNative }: {
+  quarterly: { target: number; actual: number; projection: number; daysElapsed: number; daysTotal: number; pctElapsed: number; onPace: boolean | null }
+  yearEnd: { projection: number; monthsRemaining: number }
+  ytdRevenue: number
+  effectiveMonthly: number
+  onSavedTarget: () => void
+  formatNative: (n: number, currency: string) => string
+}) {
+  const { showToast } = useToast()
+  const [target, setTarget] = useState(String(quarterly.target || ''))
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    setSaving(true)
+    try {
+      await fetch(apiPath('/api/admin/settings'), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'finance.quarterlyTargetNzd', value: target || '0' }),
+      })
+      showToast('Quarterly target saved', 'success')
+      setEditing(false)
+      onSavedTarget()
+    } catch {
+      showToast('Could not save', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const progressPct = quarterly.target > 0 ? Math.min(100, (quarterly.actual / quarterly.target) * 100) : 0
+  const pacingDelta = quarterly.target > 0 ? quarterly.projection - quarterly.target : 0
+  const targetTrack: 'positive' | 'warning' | 'danger' = quarterly.target === 0
+    ? 'warning'
+    : quarterly.projection >= quarterly.target ? 'positive'
+    : quarterly.projection >= quarterly.target * 0.7 ? 'warning'
+    : 'danger'
+
+  // Industry benchmark overlays (NZ agency medians from 2024-25 surveys).
+  const benchmarks = {
+    netProfitMargin: { label: 'Agency net margin', median: '15-25%' },
+    ownerTakeHome: { label: 'Owner take-home', median: '$80-120k NZD' },
+  }
+
+  return (
+    <Card>
+      <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+            Quarter + year-end
+          </div>
+          <Badge tone={targetTrack === 'positive' ? 'positive' : targetTrack === 'warning' ? 'warning' : 'danger'} variant="soft" size="sm">
+            {quarterly.target === 0 ? 'No target set' : (targetTrack === 'positive' ? 'On track' : targetTrack === 'warning' ? 'Watch' : 'Off pace')}
+          </Badge>
+        </div>
+
+        {/* Quarter progress bar */}
+        <div style={{ marginBottom: '1rem' }}>
+          <div className="flex items-center justify-between mb-1 text-xs">
+            <span className="text-[var(--color-text)]">
+              {editing ? 'Quarterly target (NZD)' : `Quarter target: ${quarterly.target > 0 ? formatNative(quarterly.target, 'NZD') : 'not set'}`}
+            </span>
+            {!editing && (
+              <button
+                onClick={() => setEditing(true)}
+                className="text-[var(--color-brand-dark)] text-[0.6875rem] font-medium"
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                Edit
+              </button>
+            )}
+          </div>
+          {editing ? (
+            <div className="flex items-center" style={{ gap: '0.5rem' }}>
+              <input
+                type="number"
+                min={0}
+                step="1000"
+                value={target}
+                onChange={e => setTarget(e.target.value)}
+                placeholder="e.g. 30000"
+                style={{
+                  flex: 1,
+                  padding: '0.4375rem 0.625rem',
+                  fontSize: '0.875rem',
+                  background: 'var(--color-bg)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-sm)',
+                  color: 'var(--color-text)',
+                  outline: 'none',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              />
+              <TahiButton size="sm" loading={saving} onClick={() => void save()}>Save</TahiButton>
+              <TahiButton size="sm" variant="secondary" onClick={() => { setEditing(false); setTarget(String(quarterly.target || '')) }}>Cancel</TahiButton>
+            </div>
+          ) : (
+            <>
+              <div style={{ position: 'relative', height: '0.75rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
+                <div style={{ width: `${progressPct}%`, height: '100%', background: targetTrack === 'positive' ? 'var(--color-brand)' : targetTrack === 'warning' ? '#fb923c' : '#f87171' }} />
+                <div style={{ position: 'absolute', left: `${quarterly.pctElapsed * 100}%`, top: 0, bottom: 0, width: '2px', background: 'var(--color-text-subtle)' }} />
+              </div>
+              <div className="flex items-center justify-between text-[0.6875rem] text-[var(--color-text-subtle)] mt-1">
+                <span>{formatNative(quarterly.actual, 'NZD')} so far</span>
+                <span>{Math.round(quarterly.pctElapsed * 100)}% of quarter elapsed</span>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1.5rem' }}>
+          <MetricBlock
+            label="Quarter projection"
+            value={formatNative(quarterly.projection, 'NZD')}
+            sub={quarterly.target > 0 ? `${pacingDelta >= 0 ? '+' : ''}${formatNative(pacingDelta, 'NZD')} vs target` : 'Daily run-rate × quarter days'}
+            accent
+          />
+          <MetricBlock
+            label="Year-end projection"
+            value={formatNative(yearEnd.projection, 'NZD')}
+            sub={`YTD ${formatNative(ytdRevenue, 'NZD')} + ${yearEnd.monthsRemaining} mo × ${formatNative(effectiveMonthly, 'NZD')}`}
+          />
+          <MetricBlock
+            label={benchmarks.netProfitMargin.label}
+            value={benchmarks.netProfitMargin.median}
+            sub="NZ agency median — for comparison"
+          />
+          <MetricBlock
+            label={benchmarks.ownerTakeHome.label}
+            value={benchmarks.ownerTakeHome.median}
+            sub="NZ agency owner median — for comparison"
+          />
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function ForexCard({ forex, formatNative }: {
+  forex: { items: Array<{ currency: string; available: number }>; nzdShare: number }
+  formatNative: (n: number, currency: string) => string
+}) {
+  if (forex.items.length === 0) return null
+  return (
+    <Card>
+      <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+            Forex exposure
+          </div>
+          <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+            {Math.round(forex.nzdShare * 100)}% held in NZD
+          </div>
+        </div>
+        <div className="grid" style={{ gap: '0.375rem' }}>
+          {forex.items.filter(b => Math.abs(b.available) > 0.01).map(b => {
+            const totalAll = forex.items.reduce((s, x) => s + Math.max(0, x.available), 0)
+            const pct = totalAll > 0 ? b.available / totalAll : 0
+            return (
+              <div key={b.currency} className="flex items-center" style={{ gap: '0.75rem' }}>
+                <span className="text-sm text-[var(--color-text)]" style={{ minWidth: '3rem', fontVariantNumeric: 'tabular-nums' }}>{b.currency}</span>
+                <div style={{ flex: 1, height: '0.5rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
+                  <div style={{ width: `${Math.max(2, pct * 100)}%`, height: '100%', background: b.currency === 'NZD' ? 'var(--color-brand)' : 'var(--color-brand-light)' }} />
+                </div>
+                <span className="text-xs text-[var(--color-text-muted)]" style={{ width: '7rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {formatNative(b.available, b.currency)}
+                </span>
+                <span className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ width: '3rem', textAlign: 'right' }}>
+                  {Math.round(pct * 100)}%
+                </span>
+              </div>
+            )
+          })}
+        </div>
+        <p className="text-xs text-[var(--color-text-muted)] mt-3" style={{ lineHeight: 1.5 }}>
+          Costs are denominated in NZD. {forex.nzdShare < 0.7 ? 'A NZD strengthening would dent the non-NZD pots\' purchasing power for your domestic burn.' : 'Forex exposure is low — most cash is in operating currency.'}
+        </p>
+      </div>
+    </Card>
   )
 }
 

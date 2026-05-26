@@ -45,6 +45,9 @@ export async function GET(req: NextRequest) {
   const reserveTargetMonths = Math.max(1, Math.min(24, parseFloat(settingsMap.get('finance.reserveTargetMonths') ?? '4')))
   const monthlyBurnNzd = parseFloat(settingsMap.get('finance.monthlyBurnNzd') ?? '0') || null
   const lastYearTaxOwed = parseFloat(settingsMap.get('finance.lastYearTaxOwed') ?? '0') || 0
+  // Quarterly target (NZD). Operator sets one figure for the current
+  // quarter; the page shows progress against it.
+  const quarterlyTargetNzd = parseFloat(settingsMap.get('finance.quarterlyTargetNzd') ?? '0') || 0
 
   // ── Bank balances (Airwallex first, Xero fallback) ────────────────
   const [airwallexBalances, xeroBankBalances] = await Promise.all([
@@ -170,6 +173,27 @@ export async function GET(req: NextRequest) {
     .where(eq(schema.invoices.status, 'overdue'))
   const outstandingAr = outstandingRows.reduce((s, r) => s + (r.totalUsd ?? 0), 0)
               + overdueRows.reduce((s, r) => s + (r.totalUsd ?? 0), 0)
+
+  // ── Tier 3 derivatives ────────────────────────────────────────────
+  // Quarter-to-date revenue + projection. Quarter starts Jan/Apr/Jul/Oct.
+  const nowDate = new Date()
+  const quarterStartMonth = Math.floor(nowDate.getMonth() / 3) * 3
+  const quarterStart = new Date(nowDate.getFullYear(), quarterStartMonth, 1).toISOString()
+  const quarterEnd = new Date(nowDate.getFullYear(), quarterStartMonth + 3, 1)
+  const quarterDaysElapsed = Math.max(1, Math.ceil((nowDate.getTime() - new Date(quarterStart).getTime()) / 86400_000))
+  const quarterDaysTotal = Math.ceil((quarterEnd.getTime() - new Date(quarterStart).getTime()) / 86400_000)
+
+  const quarterRevenueRows = await database.all<{ total: number | null }>(sql`
+    SELECT COALESCE(SUM(total_usd), 0) AS total
+    FROM invoices
+    WHERE paid_at IS NOT NULL AND paid_at >= ${quarterStart}
+  `)
+  const quarterToDate = Number(quarterRevenueRows[0]?.total ?? 0)
+  const quarterRunRate = quarterDaysElapsed > 0 ? (quarterToDate / quarterDaysElapsed) * quarterDaysTotal : 0
+
+  // Year-end projection. We finalise this in the response builder once
+  // ytdRevenue + effectiveMonthlyRevenue are computed (further down).
+  const monthsRemaining = 11 - nowDate.getMonth()  // Dec → 0, Nov → 1 …
 
   // ── Trailing 5-month project revenue ──────────────────────────────
   // Sum of paid invoices linked to a project in the last 150 days ÷ 5.
@@ -580,6 +604,34 @@ export async function GET(req: NextRequest) {
       lastYearSameMonth: yoyLastYear,
       deltaPct: yoyDeltaPct,
     },
+    // ── Tier 3 surfaces ────────────────────────────────────────────
+    quarterly: {
+      target: quarterlyTargetNzd,
+      actual: quarterToDate,
+      projection: quarterRunRate,
+      daysElapsed: quarterDaysElapsed,
+      daysTotal: quarterDaysTotal,
+      pctElapsed: quarterDaysElapsed / quarterDaysTotal,
+      onPace: quarterlyTargetNzd > 0 ? quarterRunRate >= quarterlyTargetNzd : null,
+    },
+    yearEnd: {
+      // Honest projection: YTD + (effective monthly revenue × months
+      // remaining). Reflects what's likely to actually land.
+      projection: ytdRevenue + (effectiveMonthlyRevenue * monthsRemaining),
+      monthsRemaining,
+    },
+    forex: (() => {
+      // Forex exposure = % of total cash held in non-NZD currencies.
+      // Pulled from balancesByCurrency. We use the Xero+Airwallex
+      // numbers we already aggregated.
+      const totals = Array.from(balancesByCurrency.entries()).map(([cur, v]) => ({ currency: cur, available: v.available }))
+      const nzd = totals.find(t => t.currency === 'NZD')?.available ?? 0
+      const totalAll = totals.reduce((s, t) => s + t.available, 0)
+      return {
+        items: totals,
+        nzdShare: totalAll > 0 ? nzd / totalAll : 1,
+      }
+    })(),
     monthlyRevenueHistory: monthlyRevenueRows.map(r => ({ ym: r.ym, total: Number(r.total ?? 0) })),
     costMix: costMixRows.map(r => ({ category: r.category, monthly: Number(r.monthly ?? 0) })),
     pipelineFunnel: pipelineFunnelRows.map(r => ({
