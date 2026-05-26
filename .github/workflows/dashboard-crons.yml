@@ -46,6 +46,10 @@ on:
     # Weekly affiliate reactivation — Monday 19:00 UTC = Mon 7am NZST
     # / 8am NZDT. Same dedup pattern.
     - cron: '0 19 * * MON'
+    # Airwallex bank sync — daily 18:00 UTC = 06:00 NZT (next-day NZST/
+    # NZDT). Pulls current balances + last 30 days of transactions.
+    # Powers the disposable-cash strip on /financial-reports.
+    - cron: '0 18 * * *'
   # Manual trigger via the Actions UI — pick which cron to fire.
   workflow_dispatch:
     inputs:
@@ -62,6 +66,7 @@ on:
           - affiliate-reactivation
           - sync-calendar
           - sync-drive-transcripts
+          - sync-airwallex
 
 jobs:
   fire:
@@ -89,6 +94,7 @@ jobs:
               "7,37 * * * *")                    targets="sync-drive-transcripts" ;;
               "0 19 * * *"|"0 20 * * *")         targets="daily-summary" ;;
               "0 19 * * MON")                    targets="affiliate-reactivation" ;;
+              "0 18 * * *")                      targets="sync-airwallex" ;;
               *)                                 echo "::warning::Unknown schedule '$schedule'" ;;
             esac
           fi
@@ -117,6 +123,7 @@ jobs:
             # /integrations/google/.
             case "$target" in
               sync-calendar|sync-drive-transcripts) url="$root/integrations/google/$target" ;;
+              sync-airwallex)                       url="$root/integrations/airwallex/sync" ;;
               *)                                    url="$root/cron/$target" ;;
             esac
             echo "POST $url"

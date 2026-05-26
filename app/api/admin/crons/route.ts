@@ -71,6 +71,13 @@ const CRONS: CronDef[] = [
     endpoint: '/api/admin/integrations/google/sync-drive-transcripts',
     schedule: 'Every 30 min',
   },
+  {
+    cron: 'sync-airwallex',
+    label: 'Airwallex bank sync',
+    description: 'Pulls current account balances + the last 30 days of transactions from Airwallex. Powers the disposable-cash strip + reconciliation on /financial-reports.',
+    endpoint: '/api/admin/integrations/airwallex/sync',
+    schedule: 'Daily 06:00 NZT',
+  },
 ]
 
 export async function GET(req: NextRequest) {
