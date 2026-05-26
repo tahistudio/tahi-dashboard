@@ -68,6 +68,16 @@ interface SummaryResponse {
   arAging: { current: number; days30: number; days60: number; days90: number; days90plus: number }
   taxes: { gstOwedYtd: number; corpTaxOwedYtd: number; ytdProfit: number; ytdExpensesApprox: number }
   yoy: { thisMonth: number; lastYearSameMonth: number; deltaPct: number | null }
+  monthlyRevenueHistory: Array<{ ym: string; total: number }>
+  costMix: Array<{ category: string; monthly: number }>
+  pipelineFunnel: Array<{ stage: string; position: number; isClosedWon: boolean; count: number; value: number }>
+  outstandingWork: { value: number; contracts: number }
+  winRateBySource: Array<{ source: string; won: number; lost: number; total: number; rate: number }>
+  dealStats: { avgValue: number; avgCycleDays: number; count: number }
+  timeToPay: { avgDays: number; minDays: number; maxDays: number; count: number }
+  cashConversion: { invoiced90d: number; collected90d: number; ratio: number | null }
+  productivity: { hoursLast90d: number; revenuePerHour: number | null }
+  pipelineOpen: { value: number; count: number }
   recentActivity: {
     invoices: Array<{ id: string; totalUsd: number; paidAt: string | null; orgName: string | null }>
     deals: Array<{ id: string; title: string; value: number; closedAt: string | null; orgName: string | null }>
@@ -683,17 +693,20 @@ export function FinancialReportsContent() {
         </Card>
       )}
 
-      {/* Placeholder for the "huh, that's interesting" charts half */}
-      <Card>
-        <div style={{ padding: '1.25rem 1.5rem' }}>
-          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-2">
-            Coming next
-          </div>
-          <p className="text-sm text-[var(--color-text-muted)]" style={{ lineHeight: 1.5 }}>
-            MRR stacked area · revenue per client · cost-mix donut · profit per logged hour · pipeline → cash funnel · seasonality heatmap · time-to-pay distribution. Building these in the next pass.
-          </p>
-        </div>
-      </Card>
+      {/* Tier 2 charts cluster — the "huh, that's interesting" half */}
+      <RevenueHistoryCard history={data.monthlyRevenueHistory} cur={data.primaryCurrency} toCur={toCur} />
+      <CostMixCard costMix={data.costMix} formatNative={formatNative} />
+      <PipelineFunnelCard funnel={data.pipelineFunnel} open={data.pipelineOpen} formatNative={formatNative} />
+      <ProductivityCard
+        revenuePerHour={data.productivity.revenuePerHour}
+        hours={data.productivity.hoursLast90d}
+        cashConversion={data.cashConversion}
+        timeToPay={data.timeToPay}
+        outstandingWork={data.outstandingWork}
+        dealStats={data.dealStats}
+        winRateBySource={data.winRateBySource}
+        formatNative={formatNative}
+      />
     </div>
   )
 }
@@ -715,6 +728,204 @@ function StatusTile({ label, status, hint }: { label: string; status: 'green' | 
       </div>
       <span className="text-xs text-[var(--color-text-muted)]" style={{ lineHeight: 1.4 }}>{hint}</span>
     </div>
+  )
+}
+
+// ─── Tier 2 chart cards ───────────────────────────────────────────────
+
+function RevenueHistoryCard({ history, cur, toCur }: {
+  history: Array<{ ym: string; total: number }>
+  cur: string
+  toCur: (n: number, fromCurrency: string) => string
+}) {
+  if (history.length === 0) return null
+  // Inline SVG bar chart — 12 monthly bars.
+  const w = 640, chartH = 120
+  const maxValue = Math.max(...history.map(h => h.total), 1)
+  const barWidth = (w - 20) / history.length
+  return (
+    <Card>
+      <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
+          Monthly revenue, last 12 months
+        </div>
+        <svg width="100%" viewBox={`0 0 ${w} ${chartH + 30}`} preserveAspectRatio="xMidYMid meet" style={{ height: '8rem' }}>
+          {history.map((h, i) => {
+            const barH = (h.total / maxValue) * chartH
+            const x = 10 + i * barWidth
+            const y = chartH - barH
+            return (
+              <g key={h.ym}>
+                <rect x={x} y={y} width={Math.max(2, barWidth - 4)} height={barH} fill="var(--color-brand)" rx="2">
+                  <title>{h.ym}: {toCur(h.total, 'NZD')}</title>
+                </rect>
+                <text x={x + (barWidth - 4) / 2} y={140} fontSize="9" textAnchor="middle" fill="var(--color-text-subtle)">
+                  {h.ym.slice(5)}
+                </text>
+              </g>
+            )
+          })}
+        </svg>
+        <p className="text-xs text-[var(--color-text-muted)] mt-2">
+          {history.length === 12 ? 'Full 12-month history.' : `${history.length} month${history.length === 1 ? '' : 's'} of data.`} Peak: {toCur(maxValue, cur)}.
+        </p>
+      </div>
+    </Card>
+  )
+}
+
+function CostMixCard({ costMix, formatNative }: {
+  costMix: Array<{ category: string; monthly: number }>
+  formatNative: (n: number, currency: string) => string
+}) {
+  if (costMix.length === 0) return null
+  const total = costMix.reduce((s, c) => s + c.monthly, 0)
+  return (
+    <Card>
+      <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+            Cost mix
+          </div>
+          <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+            {formatNative(total, 'NZD')}/mo total recurring
+          </div>
+        </div>
+        <div className="grid" style={{ gap: '0.375rem' }}>
+          {costMix.map(c => {
+            const pct = total > 0 ? c.monthly / total : 0
+            return (
+              <div key={c.category} className="flex items-center" style={{ gap: '0.75rem' }}>
+                <span className="text-sm text-[var(--color-text)] capitalize" style={{ minWidth: '7rem' }}>{c.category}</span>
+                <div style={{ flex: 1, height: '0.625rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
+                  <div style={{ width: `${Math.max(2, pct * 100)}%`, height: '100%', background: 'var(--color-brand)' }} />
+                </div>
+                <span className="text-xs text-[var(--color-text-muted)]" style={{ width: '5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {formatNative(c.monthly, 'NZD')}
+                </span>
+                <span className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ width: '3rem', textAlign: 'right' }}>
+                  {Math.round(pct * 100)}%
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function PipelineFunnelCard({ funnel, open, formatNative }: {
+  funnel: Array<{ stage: string; position: number; isClosedWon: boolean; count: number; value: number }>
+  open: { value: number; count: number }
+  formatNative: (n: number, currency: string) => string
+}) {
+  // Drop closed-lost stages (already filtered server-side).
+  const stages = funnel.filter(s => s.count > 0 || !s.isClosedWon)
+  if (stages.length === 0) return null
+  const maxValue = Math.max(...stages.map(s => s.value), 1)
+  return (
+    <Card>
+      <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+            Pipeline → cash funnel
+          </div>
+          <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+            {formatNative(open.value, 'NZD')} open across {open.count} deals
+          </div>
+        </div>
+        <div className="grid" style={{ gap: '0.375rem' }}>
+          {stages.map(s => (
+            <div key={s.stage} className="flex items-center" style={{ gap: '0.75rem' }}>
+              <span className="text-sm text-[var(--color-text)]" style={{ minWidth: '9rem' }}>
+                {s.stage}
+                {s.isClosedWon && <span className="text-[0.625rem] text-[var(--color-brand)] ml-1">won</span>}
+              </span>
+              <div style={{ flex: 1, height: '0.5rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
+                <div style={{ width: `${(s.value / maxValue) * 100}%`, height: '100%', background: s.isClosedWon ? 'var(--color-brand-dark)' : 'var(--color-brand-light)' }} />
+              </div>
+              <span className="text-xs text-[var(--color-text-muted)]" style={{ width: '6rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                {formatNative(s.value, 'NZD')}
+              </span>
+              <span className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ width: '2.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                {s.count}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function ProductivityCard({ revenuePerHour, hours, cashConversion, timeToPay, outstandingWork, dealStats, winRateBySource, formatNative }: {
+  revenuePerHour: number | null
+  hours: number
+  cashConversion: { invoiced90d: number; collected90d: number; ratio: number | null }
+  timeToPay: { avgDays: number; minDays: number; maxDays: number; count: number }
+  outstandingWork: { value: number; contracts: number }
+  dealStats: { avgValue: number; avgCycleDays: number; count: number }
+  winRateBySource: Array<{ source: string; won: number; lost: number; total: number; rate: number }>
+  formatNative: (n: number, currency: string) => string
+}) {
+  return (
+    <Card>
+      <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
+          Efficiency + sales economics
+        </div>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1.5rem' }}>
+          <MetricBlock
+            label="Revenue per logged hour"
+            value={revenuePerHour != null && hours > 0 ? formatNative(revenuePerHour, 'NZD') : '—'}
+            sub={hours > 0 ? `${Math.round(hours)} hours logged last 90d` : 'Log hours to track this'}
+            accent
+          />
+          <MetricBlock
+            label="Cash conversion"
+            value={cashConversion.ratio != null ? `${Math.round(cashConversion.ratio * 100)}%` : '—'}
+            sub={`${formatNative(cashConversion.collected90d, 'NZD')} collected of ${formatNative(cashConversion.invoiced90d, 'NZD')} invoiced (90d)`}
+          />
+          <MetricBlock
+            label="Time to pay"
+            value={timeToPay.count > 0 ? `${Math.round(timeToPay.avgDays)}d avg` : '—'}
+            sub={timeToPay.count > 0 ? `Range ${Math.round(timeToPay.minDays)} to ${Math.round(timeToPay.maxDays)} days across ${timeToPay.count} invoices` : 'No paid invoices in window'}
+          />
+          <MetricBlock
+            label="Outstanding contracted work"
+            value={formatNative(outstandingWork.value, 'NZD')}
+            sub={`${outstandingWork.contracts} active retainer${outstandingWork.contracts === 1 ? '' : 's'} × months remaining`}
+          />
+          <MetricBlock
+            label="Average deal"
+            value={dealStats.count > 0 ? formatNative(dealStats.avgValue, 'NZD') : '—'}
+            sub={dealStats.count > 0 ? `${dealStats.count} won in 90d · ${Math.round(dealStats.avgCycleDays)}d avg cycle` : 'No won deals in 90d'}
+          />
+        </div>
+        {winRateBySource.length > 0 && (
+          <div className="mt-4">
+            <div className="text-xs font-semibold text-[var(--color-text)] mb-2">Win rate by source (180d)</div>
+            <div className="grid" style={{ gap: '0.375rem' }}>
+              {winRateBySource.map(s => (
+                <div key={s.source} className="flex items-center" style={{ gap: '0.75rem' }}>
+                  <span className="text-sm text-[var(--color-text)] truncate" style={{ minWidth: '8rem' }}>{s.source}</span>
+                  <div style={{ flex: 1, height: '0.375rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.round(s.rate * 100)}%`, height: '100%', background: s.rate >= 0.5 ? 'var(--color-brand)' : 'var(--color-brand-light)' }} />
+                  </div>
+                  <span className="text-xs text-[var(--color-text-muted)]" style={{ width: '4rem', textAlign: 'right' }}>
+                    {Math.round(s.rate * 100)}%
+                  </span>
+                  <span className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ width: '5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                    {s.won}/{s.total}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
   )
 }
 

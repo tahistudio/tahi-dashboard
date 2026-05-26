@@ -298,6 +298,139 @@ export async function GET(req: NextRequest) {
   const yoyLastYear = Number(lastYearMonthRevenueRows[0]?.total ?? 0)
   const yoyDeltaPct = yoyLastYear > 0 ? ((yoyThisMonth - yoyLastYear) / yoyLastYear) : null
 
+  // ── Tier 2: time-series + efficiency metrics ──────────────────────
+  // 12-month revenue history grouped by month (for stacked area chart).
+  const monthlyRevenueRows = await database.all<{ ym: string; total: number | null }>(sql`
+    SELECT strftime('%Y-%m', paid_at) AS ym, COALESCE(SUM(total_usd), 0) AS total
+    FROM invoices
+    WHERE paid_at IS NOT NULL
+      AND paid_at > datetime('now', '-13 months')
+    GROUP BY ym
+    ORDER BY ym ASC
+  `)
+
+  // Cost-mix: monthly outflow by category for the last 60 days vs the
+  // 60 days before that (delta arrow). Pulled from expense_commitments
+  // since that's the operator-confirmed truth; airwallex_transactions
+  // would be more accurate but lacks category metadata.
+  const costMixRows = await database.all<{ category: string; monthly: number | null }>(sql`
+    SELECT category,
+           COALESCE(SUM(
+             CASE cadence
+               WHEN 'monthly' THEN amount
+               WHEN 'quarterly' THEN amount / 3.0
+               WHEN 'annual' THEN amount / 12.0
+               ELSE 0
+             END
+           ), 0) AS monthly
+    FROM expense_commitments
+    WHERE active = 1
+    GROUP BY category
+    ORDER BY monthly DESC
+  `)
+
+  // Pipeline → cash funnel: open deals grouped by stage with value sum.
+  // Closed-won shows separately as "signed".
+  const pipelineFunnelRows = await database.all<{ stageName: string; position: number; isClosedWon: number; isClosedLost: number; cnt: number; value: number | null }>(sql`
+    SELECT s.name AS stageName,
+           s.position,
+           s.is_closed_won AS isClosedWon,
+           s.is_closed_lost AS isClosedLost,
+           COUNT(d.id) AS cnt,
+           COALESCE(SUM(d.value_nzd), 0) AS value
+    FROM pipeline_stages s
+    LEFT JOIN deals d ON d.stage_id = s.id
+      AND (s.is_closed_lost IS NULL OR s.is_closed_lost = 0)
+    GROUP BY s.id
+    ORDER BY s.position ASC
+  `)
+
+  // Outstanding work value — sum of (monthly × months remaining) for
+  // active won deals with engagement_end_date in the future.
+  const outstandingWorkRows = await database.all<{ total: number | null; cnt: number }>(sql`
+    SELECT
+      COALESCE(SUM(
+        d.monthly_value_nzd * MAX(0, (CAST((julianday(d.engagement_end_date) - julianday('now')) / 30.0 AS REAL)))
+      ), 0) AS total,
+      COUNT(*) AS cnt
+    FROM deals d
+    INNER JOIN pipeline_stages s ON d.stage_id = s.id
+    WHERE s.is_closed_won = 1
+      AND d.monthly_value_nzd > 0
+      AND d.engagement_end_date IS NOT NULL
+      AND d.engagement_end_date > datetime('now')
+  `)
+
+  // Win rate by source — looking at closed deals last 180 days.
+  const winRateRows = await database.all<{ source: string | null; wonCnt: number; lostCnt: number }>(sql`
+    SELECT
+      d.source AS source,
+      SUM(CASE WHEN s.is_closed_won = 1 THEN 1 ELSE 0 END) AS wonCnt,
+      SUM(CASE WHEN s.is_closed_lost = 1 THEN 1 ELSE 0 END) AS lostCnt
+    FROM deals d
+    INNER JOIN pipeline_stages s ON d.stage_id = s.id
+    WHERE (s.is_closed_won = 1 OR s.is_closed_lost = 1)
+      AND d.closed_at IS NOT NULL
+      AND d.closed_at > datetime('now', '-180 days')
+    GROUP BY d.source
+    ORDER BY wonCnt DESC
+  `)
+
+  // Average deal size + cycle length (last 90 days won deals).
+  const dealStatsRows = await database.all<{ avgValue: number | null; avgCycle: number | null; cnt: number }>(sql`
+    SELECT
+      AVG(COALESCE(d.value_nzd, d.value, 0)) AS avgValue,
+      AVG(CAST((julianday(d.closed_at) - julianday(d.created_at)) AS REAL)) AS avgCycle,
+      COUNT(*) AS cnt
+    FROM deals d
+    INNER JOIN pipeline_stages s ON d.stage_id = s.id
+    WHERE s.is_closed_won = 1
+      AND d.closed_at IS NOT NULL
+      AND d.closed_at > datetime('now', '-90 days')
+  `)
+
+  // Time-to-pay distribution (invoices paid in last 90 days).
+  const ttpRows = await database.all<{ avgDays: number | null; minDays: number | null; maxDays: number | null; cnt: number }>(sql`
+    SELECT
+      AVG(CAST((julianday(paid_at) - julianday(due_date)) AS REAL)) AS avgDays,
+      MIN(CAST((julianday(paid_at) - julianday(due_date)) AS REAL)) AS minDays,
+      MAX(CAST((julianday(paid_at) - julianday(due_date)) AS REAL)) AS maxDays,
+      COUNT(*) AS cnt
+    FROM invoices
+    WHERE paid_at IS NOT NULL
+      AND due_date IS NOT NULL
+      AND paid_at > datetime('now', '-90 days')
+  `)
+
+  // Cash conversion ratio (last 90 days): collected ÷ invoiced.
+  const cashConvRows = await database.all<{ invoiced: number | null; collected: number | null }>(sql`
+    SELECT
+      COALESCE(SUM(CASE WHEN created_at > datetime('now', '-90 days') THEN total_usd ELSE 0 END), 0) AS invoiced,
+      COALESCE(SUM(CASE WHEN paid_at > datetime('now', '-90 days') THEN total_usd ELSE 0 END), 0) AS collected
+    FROM invoices
+  `)
+  const invoiced90 = Number(cashConvRows[0]?.invoiced ?? 0)
+  const collected90 = Number(cashConvRows[0]?.collected ?? 0)
+
+  // Hours logged + cost. Profit per logged hour = (revenue ÷ hours) once
+  // we know revenue per client; for now compute the agency-wide number.
+  const hoursRows = await database.all<{ totalHours: number | null }>(sql`
+    SELECT COALESCE(SUM(hours), 0) AS totalHours
+    FROM time_entries
+    WHERE date > date('now', '-90 days')
+  `)
+  const hoursLast90d = Number(hoursRows[0]?.totalHours ?? 0)
+  const revenuePerHour = hoursLast90d > 0 ? collected90 / hoursLast90d : null
+
+  // Outstanding deal pipeline value (open deals).
+  const pipelineOpenRows = await database.all<{ value: number | null; cnt: number }>(sql`
+    SELECT COALESCE(SUM(d.value_nzd), 0) AS value, COUNT(*) AS cnt
+    FROM deals d
+    INNER JOIN pipeline_stages s ON d.stage_id = s.id
+    WHERE (s.is_closed_won IS NULL OR s.is_closed_won = 0)
+      AND (s.is_closed_lost IS NULL OR s.is_closed_lost = 0)
+  `)
+
   // ── Recent activity feed (last 5 paid invoices / new deals) ──────
   const recentInvoices = await database.all<{ id: string; totalUsd: number | null; paidAt: string | null; orgName: string | null }>(sql`
     SELECT i.id, i.total_usd AS totalUsd, i.paid_at AS paidAt, o.name AS orgName
@@ -446,6 +579,53 @@ export async function GET(req: NextRequest) {
       thisMonth: yoyThisMonth,
       lastYearSameMonth: yoyLastYear,
       deltaPct: yoyDeltaPct,
+    },
+    monthlyRevenueHistory: monthlyRevenueRows.map(r => ({ ym: r.ym, total: Number(r.total ?? 0) })),
+    costMix: costMixRows.map(r => ({ category: r.category, monthly: Number(r.monthly ?? 0) })),
+    pipelineFunnel: pipelineFunnelRows.map(r => ({
+      stage: r.stageName,
+      position: r.position,
+      isClosedWon: !!r.isClosedWon,
+      count: Number(r.cnt),
+      value: Number(r.value ?? 0),
+    })),
+    outstandingWork: {
+      value: Number(outstandingWorkRows[0]?.total ?? 0),
+      contracts: Number(outstandingWorkRows[0]?.cnt ?? 0),
+    },
+    winRateBySource: winRateRows.map(r => {
+      const won = Number(r.wonCnt)
+      const lost = Number(r.lostCnt)
+      const total = won + lost
+      return {
+        source: r.source ?? 'unspecified',
+        won, lost, total,
+        rate: total > 0 ? won / total : 0,
+      }
+    }),
+    dealStats: {
+      avgValue: Number(dealStatsRows[0]?.avgValue ?? 0),
+      avgCycleDays: Number(dealStatsRows[0]?.avgCycle ?? 0),
+      count: Number(dealStatsRows[0]?.cnt ?? 0),
+    },
+    timeToPay: {
+      avgDays: Number(ttpRows[0]?.avgDays ?? 0),
+      minDays: Number(ttpRows[0]?.minDays ?? 0),
+      maxDays: Number(ttpRows[0]?.maxDays ?? 0),
+      count: Number(ttpRows[0]?.cnt ?? 0),
+    },
+    cashConversion: {
+      invoiced90d: invoiced90,
+      collected90d: collected90,
+      ratio: invoiced90 > 0 ? collected90 / invoiced90 : null,
+    },
+    productivity: {
+      hoursLast90d,
+      revenuePerHour,
+    },
+    pipelineOpen: {
+      value: Number(pipelineOpenRows[0]?.value ?? 0),
+      count: Number(pipelineOpenRows[0]?.cnt ?? 0),
     },
     recentActivity: {
       invoices: recentInvoices.map(i => ({
