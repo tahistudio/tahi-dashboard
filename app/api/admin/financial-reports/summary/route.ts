@@ -256,7 +256,7 @@ export async function GET(req: NextRequest) {
   // the invoice's own currency so a £3,125 deliverable doesn't get
   // counted as $3,125 NZD.
   const trailingProjectInvoices = await database.all<{ amount: number; currency: string }>(sql`
-    SELECT i.total_amount AS amount, i.currency AS currency
+    SELECT i.total_usd AS amount, i.currency AS currency
     FROM invoices i
     LEFT JOIN organisations o ON o.id = i.org_id
     WHERE i.paid_at IS NOT NULL
