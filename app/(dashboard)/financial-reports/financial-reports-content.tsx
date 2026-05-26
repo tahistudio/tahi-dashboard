@@ -1331,7 +1331,7 @@ function PipelineFunnelCard({ funnel, open, formatNative }: {
             <div key={s.stage} className="flex items-center" style={{ gap: '0.75rem' }}>
               <span className="text-sm text-[var(--color-text)]" style={{ minWidth: '9rem' }}>
                 {s.stage}
-                {s.isClosedWon && <span className="text-[0.625rem] text-[var(--color-brand)] ml-1">won</span>}
+                {s.isClosedWon && !/won/i.test(s.stage) && <span className="text-[0.625rem] text-[var(--color-brand)] ml-1">won</span>}
               </span>
               <div style={{ flex: 1, height: '0.5rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
                 <div style={{ width: `${(s.value / maxValue) * 100}%`, height: '100%', background: s.isClosedWon ? 'var(--color-brand-dark)' : 'var(--color-brand-light)' }} />

@@ -27,12 +27,18 @@ export async function POST(req: NextRequest) {
   const now = new Date().toISOString()
 
   // Pull every org that has won deals + sum their monthly_value_nzd.
-  const orgMrrRows = await database.all<{ orgId: string; orgName: string; newMrr: number; oldMrr: number }>(sql`
+  // Skip orgs where custom_mrr has been manually set (custom_mrr_is_manual = 1)
+  // so an operator's correction isn't blown away by the next backfill.
+  // This was the source of the "Giant Group MRR is NZ$66,760" bug — the
+  // deal had a bad monthly_value_nzd, backfill wrote it to the org, and
+  // every manual fix got reverted on the next run.
+  const orgMrrRows = await database.all<{ orgId: string; orgName: string; newMrr: number; oldMrr: number; isManual: number }>(sql`
     SELECT
       o.id AS orgId,
       o.name AS orgName,
       COALESCE(SUM(d.monthly_value_nzd), 0) AS newMrr,
-      COALESCE(o.custom_mrr, 0) AS oldMrr
+      COALESCE(o.custom_mrr, 0) AS oldMrr,
+      COALESCE(o.custom_mrr_is_manual, 0) AS isManual
     FROM organisations o
     INNER JOIN deals d ON d.org_id = o.id
     INNER JOIN pipeline_stages s ON d.stage_id = s.id
@@ -44,11 +50,18 @@ export async function POST(req: NextRequest) {
 
   let updated = 0
   let unchanged = 0
+  let skippedManual = 0
   const changes: Array<{ orgId: string; orgName: string; oldMrr: number; newMrr: number }> = []
+  const skipped: Array<{ orgId: string; orgName: string; manualMrr: number; computedMrr: number }> = []
 
   for (const row of orgMrrRows) {
     const newMrr = Number(row.newMrr)
     const oldMrr = Number(row.oldMrr)
+    if (row.isManual === 1) {
+      skippedManual++
+      skipped.push({ orgId: row.orgId, orgName: row.orgName, manualMrr: oldMrr, computedMrr: newMrr })
+      continue
+    }
     if (Math.abs(newMrr - oldMrr) < 0.01) {
       unchanged++
       continue
@@ -66,6 +79,8 @@ export async function POST(req: NextRequest) {
     scanned: orgMrrRows.length,
     updated,
     unchanged,
+    skippedManual,
     changes,
+    skipped,
   })
 }
