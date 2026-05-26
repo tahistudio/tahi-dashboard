@@ -66,7 +66,25 @@ interface SummaryResponse {
     top: Array<{ name: string; mrr: number }>
   }
   arAging: { current: number; days30: number; days60: number; days90: number; days90plus: number }
-  taxes: { gstOwedYtd: number; corpTaxOwedYtd: number; ytdProfit: number; ytdExpensesApprox: number }
+  taxes: {
+    gstOwedYtd: number
+    corpTaxOwedYtd: number
+    ytdProfit: number
+    ytdExpensesApprox: number
+    taxYearStart: string
+    taxYearRevenue: number
+    monthsIntoTaxYear: number
+  }
+  spendSplit: { discretionary: number; essential: number }
+  takeHome: {
+    liamAnnual: number
+    staciAnnual: number
+    combinedAnnual: number
+    combinedMonthly: number
+    targetEach: number
+    gapEach: number
+    gapCombined: number
+  }
   yoy: { thisMonth: number; lastYearSameMonth: number; deltaPct: number | null }
   quarterly: { target: number; actual: number; projection: number; daysElapsed: number; daysTotal: number; pctElapsed: number; onPace: boolean | null }
   yearEnd: { projection: number; monthsRemaining: number }
@@ -334,39 +352,46 @@ export function FinancialReportsContent() {
               after reserves · displayed in {cur}
             </span>
           </div>
-          <div className="grid mt-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1rem' }}>
-            {fundedBanks.length === 0 && (
+          <div className="mt-4">
+            {fundedBanks.length === 0 ? (
               <div className="text-xs text-[var(--color-text-muted)]">
                 No funded bank accounts. Sync Airwallex / Xero to populate.
               </div>
-            )}
-            {fundedBanks.map(b => (
-              <div key={b.currency}>
-                <div className="text-xs text-[var(--color-text-muted)]">Bank {b.currency}</div>
-                <div className="text-base font-semibold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {formatNative(b.available, b.currency)}
-                </div>
-                {b.currency !== cur && (
-                  <div className="text-[0.6875rem] text-[var(--color-text-subtle)] mt-0.5" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    ≈ {toCur(b.available, b.currency)}
-                  </div>
-                )}
-                <div className="flex items-center gap-1 mt-0.5">
-                  {b.sources.map(s => (
-                    <Badge key={s} tone="neutral" variant="soft" size="sm">{s}</Badge>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider" style={{ textAlign: 'left', padding: '0.4375rem 0.5rem', borderBottom: '1px solid var(--color-border-subtle)' }}>Account</th>
+                    <th className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider" style={{ textAlign: 'right', padding: '0.4375rem 0.5rem', borderBottom: '1px solid var(--color-border-subtle)' }}>Native</th>
+                    <th className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider" style={{ textAlign: 'right', padding: '0.4375rem 0.5rem', borderBottom: '1px solid var(--color-border-subtle)' }}>≈ {cur}</th>
+                    <th className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider" style={{ textAlign: 'right', padding: '0.4375rem 0.5rem', borderBottom: '1px solid var(--color-border-subtle)', width: '6rem' }}>Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fundedBanks.map(b => (
+                    <tr key={b.currency}>
+                      <td className="text-sm font-medium text-[var(--color-text)]" style={{ padding: '0.5rem 0.5rem' }}>{b.currency}</td>
+                      <td className="text-sm text-[var(--color-text)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatNative(b.available, b.currency)}</td>
+                      <td className="text-sm text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{b.currency === cur ? '—' : toCur(b.available, b.currency)}</td>
+                      <td style={{ padding: '0.5rem 0.5rem', textAlign: 'right' }}>
+                        {b.sources.map(s => (
+                          <Badge key={s} tone="neutral" variant="soft" size="sm">{s}</Badge>
+                        ))}
+                      </td>
+                    </tr>
                   ))}
-                </div>
-              </div>
-            ))}
-            <div>
-              <div className="text-xs text-[var(--color-text-muted)]">Reserved</div>
-              <div className="text-base font-semibold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {toCur(data.reserves.total, data.primaryCurrency)}
-              </div>
-              <div className="text-[0.6875rem] text-[var(--color-text-subtle)] mt-0.5">
-                {data.reserves.items.length === 0 ? 'No pots configured' : `${data.reserves.items.length} pot${data.reserves.items.length === 1 ? '' : 's'}`}
-              </div>
-            </div>
+                  <tr style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
+                    <td className="text-sm font-medium text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem' }}>Reserved</td>
+                    <td colSpan={2} className="text-sm text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                      −{toCur(data.reserves.total, data.primaryCurrency)}
+                    </td>
+                    <td className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right' }}>
+                      {data.reserves.items.length === 0 ? 'unset' : `${data.reserves.items.length} pot${data.reserves.items.length === 1 ? '' : 's'}`}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       </Card>
@@ -519,37 +544,80 @@ export function FinancialReportsContent() {
         </div>
       </Card>
 
-      {/* Tax owed YTD */}
+      {/* Tax owed (NZ tax year — Apr 1 → Mar 31) */}
       <Card>
         <div style={{ padding: '1.25rem 1.5rem' }}>
           <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
             <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
-              Tax owed YTD (NZ)
+              Tax owed (NZ tax year — Apr 1 → Mar 31)
             </div>
             <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-              Approximate — verify against IRD before remitting
+              {data.taxes.monthsIntoTaxYear} of 12 months elapsed · approximate, verify with IRD
             </div>
           </div>
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1.5rem' }}>
             <MetricBlock
-              label="GST owed YTD"
-              value={toCur(data.taxes.gstOwedYtd, data.primaryCurrency)}
-              sub="Sum of tax_amount on YTD invoices (15% NZ default)"
-            />
-            <MetricBlock
-              label="Corp tax estimate"
+              label="Corp tax accrued"
               value={toCur(data.taxes.corpTaxOwedYtd, data.primaryCurrency)}
-              sub={`28% × YTD profit (${toCur(data.taxes.ytdProfit, data.primaryCurrency)})`}
+              sub={`28% × tax-year profit (${toCur(data.taxes.ytdProfit, data.primaryCurrency)})`}
               accent
             />
             <MetricBlock
-              label="YTD expenses (approx.)"
+              label="GST collected"
+              value={toCur(data.taxes.gstOwedYtd, data.primaryCurrency)}
+              sub="Tax_amount on paid invoices since Apr 1"
+            />
+            <MetricBlock
+              label="Tax-year revenue"
+              value={toCur(data.taxes.taxYearRevenue, data.primaryCurrency)}
+              sub={`Paid invoices since ${new Date(data.taxes.taxYearStart).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}`}
+            />
+            <MetricBlock
+              label="Expenses (approx.)"
               value={toCur(data.taxes.ytdExpensesApprox, data.primaryCurrency)}
-              sub="Recurring × months elapsed"
+              sub="Recurring × tax-year months elapsed"
             />
           </div>
         </div>
       </Card>
+
+      {/* Take-home tracking */}
+      <TakeHomeCard
+        takeHome={data.takeHome}
+        formatNative={formatNative}
+        onSaved={() => void fetchSummary()}
+      />
+
+      {/* Discretionary vs essential spend split */}
+      {(data.spendSplit.discretionary > 0 || data.spendSplit.essential > 0) && (
+        <Card>
+          <div style={{ padding: '1.25rem 1.5rem' }}>
+            <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+                Discretionary vs essential spend
+              </div>
+              <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+                Tag commitments via Settings → Commitments
+              </div>
+            </div>
+            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1.5rem' }}>
+              <MetricBlock
+                label="Essential (cannot cut)"
+                value={formatNative(data.spendSplit.essential, 'NZD')}
+                sub={`${Math.round((data.spendSplit.essential / Math.max(1, data.spendSplit.essential + data.spendSplit.discretionary)) * 100)}% of recurring outflow`}
+                accent
+              />
+              <MetricBlock
+                label="Discretionary (can cut tomorrow)"
+                value={formatNative(data.spendSplit.discretionary, 'NZD')}
+                sub={data.spendSplit.discretionary > 0
+                  ? `${formatNative(data.spendSplit.discretionary * 12, 'NZD')}/yr if you trimmed all of it`
+                  : 'None tagged yet — open Settings to mark some'}
+              />
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* YoY comparison */}
       <Card>
@@ -744,6 +812,149 @@ function StatusTile({ label, status, hint }: { label: string; status: 'green' | 
       </div>
       <span className="text-xs text-[var(--color-text-muted)]" style={{ lineHeight: 1.4 }}>{hint}</span>
     </div>
+  )
+}
+
+function TakeHomeCard({ takeHome, formatNative, onSaved }: {
+  takeHome: {
+    liamAnnual: number; staciAnnual: number; combinedAnnual: number
+    combinedMonthly: number; targetEach: number; gapEach: number; gapCombined: number
+  }
+  formatNative: (n: number, currency: string) => string
+  onSaved: () => void
+}) {
+  const { showToast } = useToast()
+  const [editing, setEditing] = useState(false)
+  const [liam, setLiam] = useState(String(takeHome.liamAnnual))
+  const [staci, setStaci] = useState(String(takeHome.staciAnnual))
+  const [target, setTarget] = useState(String(takeHome.targetEach))
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    setSaving(true)
+    try {
+      for (const w of [
+        { key: 'finance.liamTakeHomeAnnual', value: liam || '0' },
+        { key: 'finance.staciTakeHomeAnnual', value: staci || '0' },
+        { key: 'finance.takeHomeTargetEach', value: target || '0' },
+      ]) {
+        await fetch(apiPath('/api/admin/settings'), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(w),
+        })
+      }
+      showToast('Take-home saved', 'success')
+      setEditing(false)
+      onSaved()
+    } catch {
+      showToast('Could not save', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const liamPct = takeHome.targetEach > 0 ? Math.min(100, (takeHome.liamAnnual / takeHome.targetEach) * 100) : 0
+  const staciPct = takeHome.targetEach > 0 ? Math.min(100, (takeHome.staciAnnual / takeHome.targetEach) * 100) : 0
+  const fieldStyle: React.CSSProperties = {
+    padding: '0.4375rem 0.625rem',
+    fontSize: '0.875rem',
+    background: 'var(--color-bg)',
+    border: '1px solid var(--color-border)',
+    borderRadius: 'var(--radius-sm)',
+    color: 'var(--color-text)',
+    outline: 'none',
+    fontVariantNumeric: 'tabular-nums',
+    width: '100%',
+  }
+
+  return (
+    <Card>
+      <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+            Take-home (Liam + Staci)
+          </div>
+          {!editing ? (
+            <button onClick={() => setEditing(true)} className="text-[var(--color-brand-dark)] text-[0.6875rem] font-medium" style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
+              Edit
+            </button>
+          ) : (
+            <div className="flex" style={{ gap: '0.375rem' }}>
+              <TahiButton size="sm" loading={saving} onClick={() => void save()}>Save</TahiButton>
+              <TahiButton size="sm" variant="secondary" onClick={() => {
+                setEditing(false)
+                setLiam(String(takeHome.liamAnnual))
+                setStaci(String(takeHome.staciAnnual))
+                setTarget(String(takeHome.targetEach))
+              }}>Cancel</TahiButton>
+            </div>
+          )}
+        </div>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1.5rem' }}>
+          {editing ? (
+            <>
+              <div>
+                <label className="text-[0.6875rem] text-[var(--color-text-muted)]">Liam annual (NZD)</label>
+                <input type="number" min={0} step="1000" value={liam} onChange={e => setLiam(e.target.value)} style={fieldStyle} />
+              </div>
+              <div>
+                <label className="text-[0.6875rem] text-[var(--color-text-muted)]">Staci annual (NZD)</label>
+                <input type="number" min={0} step="1000" value={staci} onChange={e => setStaci(e.target.value)} style={fieldStyle} />
+              </div>
+              <div>
+                <label className="text-[0.6875rem] text-[var(--color-text-muted)]">Target each (NZD)</label>
+                <input type="number" min={0} step="1000" value={target} onChange={e => setTarget(e.target.value)} style={fieldStyle} />
+              </div>
+            </>
+          ) : (
+            <>
+              <MetricBlock
+                label="Combined annual"
+                value={formatNative(takeHome.combinedAnnual, 'NZD')}
+                sub={`${formatNative(takeHome.combinedMonthly, 'NZD')}/mo · target ${formatNative(takeHome.targetEach * 2, 'NZD')}`}
+                accent
+              />
+              <MetricBlock
+                label="Gap to target (combined)"
+                value={takeHome.gapCombined > 0 ? formatNative(takeHome.gapCombined, 'NZD') : 'On target'}
+                sub={takeHome.gapCombined > 0
+                  ? `+${formatNative(takeHome.gapCombined / 12, 'NZD')}/mo would close it`
+                  : 'Both at or above target'}
+              />
+              <div>
+                <div className="text-xs text-[var(--color-text-muted)]">Per-person progress</div>
+                <div className="mt-2">
+                  <div className="flex items-center justify-between text-[0.6875rem] mb-0.5">
+                    <span className="text-[var(--color-text-muted)]">Liam</span>
+                    <span className="text-[var(--color-text-subtle)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {formatNative(takeHome.liamAnnual, 'NZD')} / {formatNative(takeHome.targetEach, 'NZD')}
+                    </span>
+                  </div>
+                  <div style={{ height: '0.375rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden', marginBottom: '0.5rem' }}>
+                    <div style={{ width: `${liamPct}%`, height: '100%', background: 'var(--color-brand)' }} />
+                  </div>
+                  <div className="flex items-center justify-between text-[0.6875rem] mb-0.5">
+                    <span className="text-[var(--color-text-muted)]">Staci</span>
+                    <span className="text-[var(--color-text-subtle)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {formatNative(takeHome.staciAnnual, 'NZD')} / {formatNative(takeHome.targetEach, 'NZD')}
+                    </span>
+                  </div>
+                  <div style={{ height: '0.375rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
+                    <div style={{ width: `${staciPct}%`, height: '100%', background: 'var(--color-brand)' }} />
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+        {!editing && takeHome.gapCombined > 0 && (
+          <p className="text-xs text-[var(--color-text-muted)] mt-3" style={{ lineHeight: 1.5 }}>
+            Closing the combined gap costs {formatNative(takeHome.gapCombined, 'NZD')}/yr — roughly the same as one part-time hire at ~$2k USD/mo. Run that comparison in the Spend impact calculator below.
+          </p>
+        )}
+      </div>
+    </Card>
   )
 }
 

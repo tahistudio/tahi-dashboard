@@ -31,6 +31,7 @@ export async function GET(req: NextRequest) {
   const now = Date.now()
   const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString()
 
+  // Add take-home settings keys to the SELECT so they're in settingsMap.
   // ── Operator-configured reserve target ────────────────────────────
   // Three settings drive the cash traffic-light:
   //   finance.reserveTargetMonths  — months of burn to keep buffered (default 4)
@@ -39,7 +40,15 @@ export async function GET(req: NextRequest) {
   // All three editable from the page settings card.
   const settingsRows = await database.all<{ key: string; value: string }>(sql`
     SELECT key, value FROM settings
-    WHERE key IN ('finance.reserveTargetMonths', 'finance.monthlyBurnNzd', 'finance.lastYearTaxOwed')
+    WHERE key IN (
+      'finance.reserveTargetMonths',
+      'finance.monthlyBurnNzd',
+      'finance.lastYearTaxOwed',
+      'finance.quarterlyTargetNzd',
+      'finance.liamTakeHomeAnnual',
+      'finance.staciTakeHomeAnnual',
+      'finance.takeHomeTargetEach'
+    )
   `)
   const settingsMap = new Map(settingsRows.map(r => [r.key, r.value]))
   const reserveTargetMonths = Math.max(1, Math.min(24, parseFloat(settingsMap.get('finance.reserveTargetMonths') ?? '4')))
@@ -48,6 +57,10 @@ export async function GET(req: NextRequest) {
   // Quarterly target (NZD). Operator sets one figure for the current
   // quarter; the page shows progress against it.
   const quarterlyTargetNzd = parseFloat(settingsMap.get('finance.quarterlyTargetNzd') ?? '0') || 0
+  // Take-home tracking (Liam + Staci). Both pay themselves the same.
+  const liamTakeHome = parseFloat(settingsMap.get('finance.liamTakeHomeAnnual') ?? '52000') || 52000
+  const staciTakeHome = parseFloat(settingsMap.get('finance.staciTakeHomeAnnual') ?? '52000') || 52000
+  const takeHomeTargetEach = parseFloat(settingsMap.get('finance.takeHomeTargetEach') ?? '74000') || 74000
 
   // ── Bank balances (Airwallex first, Xero fallback) ────────────────
   const [airwallexBalances, xeroBankBalances] = await Promise.all([
@@ -83,24 +96,38 @@ export async function GET(req: NextRequest) {
   const reservesTotal = reserves.reduce((sum, r) => sum + r.accruedAmount, 0)
 
   // ── MRR: retainers + projects (amortised over duration) ───────────
-  // Retainer MRR = SUM of organisations.custom_mrr across active clients.
-  // Decision #037 — custom_mrr is the operator-confirmed truth. We do
-  // NOT fall back to deals.monthly_value_nzd because that bucket is
-  // contaminated by old won deals where the engagement already ended
-  // without an engagement_end_date set. If custom_mrr is empty, MRR is
-  // honestly empty and the UI prompts the operator to set it.
-  // Raw SQL because custom_mrr predates the Drizzle schema.
-  const retainerRows = await database.all<{ mrr: number | null; client_count: number | null }>(sql`
-    SELECT
-      COALESCE(SUM(o.custom_mrr), 0) AS mrr,
-      COUNT(*) AS client_count
-    FROM organisations o
-    WHERE o.status = 'active'
-      AND o.custom_mrr IS NOT NULL
-      AND o.custom_mrr > 0
+  // Retainer MRR = SUM of organisations.custom_mrr across active clients,
+  // converting each from its native currency to NZD via the FX table.
+  // Most Tahi clients bill in USD/GBP/EUR — assuming NZD was wrong.
+  // Migration 0056 added custom_mrr_currency (default 'NZD' so existing
+  // rows behave the same until edited).
+  const retainerRowsByClient = await database.all<{ id: string; mrr: number | null; currency: string | null }>(sql`
+    SELECT id, custom_mrr AS mrr, COALESCE(custom_mrr_currency, 'NZD') AS currency
+    FROM organisations
+    WHERE status = 'active'
+      AND custom_mrr IS NOT NULL
+      AND custom_mrr > 0
   `)
-  const retainerMrr = Number(retainerRows[0]?.mrr ?? 0)
-  const retainerClientCount = Number(retainerRows[0]?.client_count ?? 0)
+  // Convert each native amount to NZD via the exchange_rates table.
+  // Rates are stored as rate_to_usd (how many USD per 1 unit of currency).
+  // To go currency → NZD: (amount × rate_to_usd) ÷ nzd_rate_to_usd.
+  const fxRows = await database.all<{ currency: string; rateToUsd: number }>(sql`
+    SELECT currency, rate_to_usd AS rateToUsd FROM exchange_rates
+  `)
+  const fxMap = new Map<string, number>()
+  for (const r of fxRows) fxMap.set(r.currency, Number(r.rateToUsd))
+  const nzdRate = fxMap.get('NZD') ?? 0.6  // fallback NZD/USD ≈ 0.6
+  function toNzd(amount: number, currency: string): number {
+    if (currency === 'NZD') return amount
+    const rate = fxMap.get(currency)
+    if (!rate || rate <= 0 || nzdRate <= 0) return amount  // fallback: pass through if rate unknown
+    return (amount * rate) / nzdRate
+  }
+  const retainerMrr = retainerRowsByClient.reduce(
+    (sum, r) => sum + toNzd(Number(r.mrr ?? 0), r.currency ?? 'NZD'),
+    0,
+  )
+  const retainerClientCount = retainerRowsByClient.length
 
   // Project MRR = sum over active projects of (price / months active).
   // Active = (startDate ≤ now AND expectedDelivery ≥ now) OR no
@@ -275,32 +302,48 @@ export async function GET(req: NextRequest) {
     else arAging.days90plus += amt
   }
 
-  // ── GST + Corp tax YTD ────────────────────────────────────────────
-  // GST: 15% of invoiced amount on NZ-domiciled clients. We can't always
-  // know billing country, so this is a heuristic — sum of tax_amount on
-  // YTD invoices. If tax_amount_usd is null (legacy data), zero.
+  // ── GST + Corp tax (NZ tax year: Apr 1 → Mar 31) ──────────────────
+  // NZ tax year != calendar year. Tax year starts April 1. If we're
+  // currently before April, the active tax year started Apr 1 of the
+  // previous calendar year.
+  const monthsThisYear = new Date().getMonth() + 1
+  const taxYearStartYear = new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1
+  const taxYearStart = new Date(taxYearStartYear, 3, 1).toISOString()  // April 1
+  // Months elapsed within the NZ tax year (capped at 12).
+  const monthsIntoTaxYear = Math.min(12, Math.max(1,
+    (new Date().getFullYear() - taxYearStartYear) * 12 + (new Date().getMonth() - 3) + 1,
+  ))
+
+  const taxYearRevenueRows = await database.all<{ total: number | null }>(sql`
+    SELECT COALESCE(SUM(total_usd), 0) AS total
+    FROM invoices
+    WHERE paid_at IS NOT NULL AND paid_at >= ${taxYearStart}
+  `)
+  const taxYearRevenue = Number(taxYearRevenueRows[0]?.total ?? 0)
+
+  // GST: 15% of invoiced amount on NZ-domiciled clients. Sum of
+  // tax_amount on tax-year invoices is the truest proxy.
   const gstRows = await database.all<{ total: number | null }>(sql`
     SELECT COALESCE(SUM(tax_amount_usd), 0) AS total
     FROM invoices
-    WHERE paid_at IS NOT NULL AND paid_at >= ${yearStart}
+    WHERE paid_at IS NOT NULL AND paid_at >= ${taxYearStart}
   `)
   const gstOwedYtd = Number(gstRows[0]?.total ?? 0)
 
-  // Corp tax (NZ): 28% of net profit. Honest approximation: 28% of
-  // (YTD revenue − YTD recognised expense_commitments). Refines once
-  // the AI monthly scan reconciles against bank reality.
-  const ytdExpenseRows = await database.all<{ total: number | null }>(sql`
+  // Corp tax (NZ): 28% of net profit, computed against the NZ tax year.
+  const taxYearExpenseRows = await database.all<{ total: number | null }>(sql`
     SELECT COALESCE(SUM(amount), 0) AS total
     FROM expense_commitments
     WHERE active = 1
       AND (start_date IS NULL OR start_date <= datetime('now'))
-      AND (end_date IS NULL OR end_date >= ${yearStart})
+      AND (end_date IS NULL OR end_date >= ${taxYearStart})
   `)
-  // Monthly recurring × months elapsed this year is the right model.
-  const monthsThisYear = new Date().getMonth() + 1
-  const ytdExpensesApprox = Number(ytdExpenseRows[0]?.total ?? 0) * monthsThisYear
-  const ytdProfit = ytdRevenue - ytdExpensesApprox
+  const taxYearExpensesApprox = Number(taxYearExpenseRows[0]?.total ?? 0) * monthsIntoTaxYear
+  const ytdProfit = taxYearRevenue - taxYearExpensesApprox
   const corpTaxOwedYtd = Math.max(0, ytdProfit * 0.28)
+  // Keep ytdExpensesApprox name for the existing response so the UI
+  // doesn't break — but compute it against the NZ tax year now.
+  const ytdExpensesApprox = taxYearExpensesApprox
 
   // ── YoY comparison (same calendar month last year vs this) ───────
   const thisMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
@@ -333,11 +376,9 @@ export async function GET(req: NextRequest) {
     ORDER BY ym ASC
   `)
 
-  // Cost-mix: monthly outflow by category for the last 60 days vs the
-  // 60 days before that (delta arrow). Pulled from expense_commitments
-  // since that's the operator-confirmed truth; airwallex_transactions
-  // would be more accurate but lacks category metadata.
-  const costMixRows = await database.all<{ category: string; monthly: number | null }>(sql`
+  // Cost-mix: monthly outflow by category. Pulled from expense_commitments
+  // (operator-confirmed truth).
+  const costMixRows = await database.all<{ category: string; monthly: number | null; isDiscretionary: number }>(sql`
     SELECT category,
            COALESCE(SUM(
              CASE cadence
@@ -346,12 +387,30 @@ export async function GET(req: NextRequest) {
                WHEN 'annual' THEN amount / 12.0
                ELSE 0
              END
-           ), 0) AS monthly
+           ), 0) AS monthly,
+           COALESCE(MAX(is_discretionary), 0) AS isDiscretionary
     FROM expense_commitments
     WHERE active = 1
     GROUP BY category
     ORDER BY monthly DESC
   `)
+
+  // Discretionary vs essential split for the spend audit. Categories
+  // are independent of the per-row is_discretionary flag (an essential
+  // category can hold a discretionary line item).
+  const discretionaryRows = await database.all<{ discMonthly: number | null; essMonthly: number | null }>(sql`
+    SELECT
+      COALESCE(SUM(CASE WHEN is_discretionary = 1 THEN
+        CASE cadence WHEN 'monthly' THEN amount WHEN 'quarterly' THEN amount / 3.0 WHEN 'annual' THEN amount / 12.0 ELSE 0 END
+        ELSE 0 END), 0) AS discMonthly,
+      COALESCE(SUM(CASE WHEN is_discretionary = 0 OR is_discretionary IS NULL THEN
+        CASE cadence WHEN 'monthly' THEN amount WHEN 'quarterly' THEN amount / 3.0 WHEN 'annual' THEN amount / 12.0 ELSE 0 END
+        ELSE 0 END), 0) AS essMonthly
+    FROM expense_commitments
+    WHERE active = 1
+  `)
+  const discretionaryMonthly = Number(discretionaryRows[0]?.discMonthly ?? 0)
+  const essentialMonthly = Number(discretionaryRows[0]?.essMonthly ?? 0)
 
   // Pipeline → cash funnel: open deals grouped by stage with value sum.
   // Closed-won shows separately as "signed".
@@ -598,6 +657,9 @@ export async function GET(req: NextRequest) {
       corpTaxOwedYtd,
       ytdProfit,
       ytdExpensesApprox,
+      taxYearStart,
+      taxYearRevenue,
+      monthsIntoTaxYear,
     },
     yoy: {
       thisMonth: yoyThisMonth,
@@ -613,6 +675,15 @@ export async function GET(req: NextRequest) {
       daysTotal: quarterDaysTotal,
       pctElapsed: quarterDaysElapsed / quarterDaysTotal,
       onPace: quarterlyTargetNzd > 0 ? quarterRunRate >= quarterlyTargetNzd : null,
+    },
+    takeHome: {
+      liamAnnual: liamTakeHome,
+      staciAnnual: staciTakeHome,
+      combinedAnnual: liamTakeHome + staciTakeHome,
+      combinedMonthly: (liamTakeHome + staciTakeHome) / 12,
+      targetEach: takeHomeTargetEach,
+      gapEach: Math.max(0, takeHomeTargetEach - liamTakeHome),
+      gapCombined: Math.max(0, (takeHomeTargetEach * 2) - (liamTakeHome + staciTakeHome)),
     },
     yearEnd: {
       // Honest projection: YTD + (effective monthly revenue × months
@@ -634,6 +705,7 @@ export async function GET(req: NextRequest) {
     })(),
     monthlyRevenueHistory: monthlyRevenueRows.map(r => ({ ym: r.ym, total: Number(r.total ?? 0) })),
     costMix: costMixRows.map(r => ({ category: r.category, monthly: Number(r.monthly ?? 0) })),
+    spendSplit: { discretionary: discretionaryMonthly, essential: essentialMonthly },
     pipelineFunnel: pipelineFunnelRows.map(r => ({
       stage: r.stageName,
       position: r.position,

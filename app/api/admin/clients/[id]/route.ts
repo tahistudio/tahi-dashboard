@@ -181,6 +181,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     size: string | null
     annualRevenue: number | null
     customMrr: number | null
+    customMrrCurrency: string | null
     billingModel: string | null
     retainerStartDate: string | null
     retainerEndDate: string | null
@@ -218,6 +219,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   // /api/admin/clients/[id]/auto-derive with clearOverrides.
   const billingColumnMap: Record<string, { col: string; manualFlag: string | null }> = {
     customMrr: { col: 'custom_mrr', manualFlag: 'custom_mrr_is_manual' },
+    customMrrCurrency: { col: 'custom_mrr_currency', manualFlag: null },
     billingModel: { col: 'billing_model', manualFlag: 'billing_model_is_manual' },
     retainerStartDate: { col: 'retainer_start_date', manualFlag: 'retainer_dates_is_manual' },
     retainerEndDate: { col: 'retainer_end_date', manualFlag: 'retainer_dates_is_manual' },

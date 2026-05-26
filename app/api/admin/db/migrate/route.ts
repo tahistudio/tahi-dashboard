@@ -819,6 +819,14 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0056',
+    description: 'Phase H polish: native-currency MRR on organisations.custom_mrr (most Tahi clients bill in USD/GBP, not NZD) + discretionary flag on expense_commitments so Liam can tag every recurring cost as essential vs nice-to-have.',
+    statements: [
+      `ALTER TABLE organisations ADD COLUMN custom_mrr_currency TEXT DEFAULT 'NZD'`,
+      `ALTER TABLE expense_commitments ADD COLUMN is_discretionary INTEGER DEFAULT 0`,
+    ],
+  },
+  {
     name: '0055',
     description: 'Phase H finance overhaul: Airwallex bank-of-truth tables (balances + transactions), reserves pots (tax + custom), multi-source reconciliation columns on invoices + expense_commitments. Stripe + Xero + Airwallex become three sources reconciled into one truth.',
     statements: [
