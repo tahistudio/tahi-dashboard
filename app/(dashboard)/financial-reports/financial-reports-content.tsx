@@ -365,6 +365,15 @@ export function FinancialReportsContent() {
         onSaved={() => void fetchSummary()}
       />
 
+      {/* Spend impact calculator — "can I afford X?" */}
+      <SpendImpactCard
+        startingCash={data.disposableCash}
+        burn={data.reserveConfig.targetBurn}
+        revenue={data.effectiveMonthlyRevenue}
+        reserveTarget={data.reserveConfig.targetAmount}
+        formatNative={formatNative}
+      />
+
       {/* MRR / ARR / YTD revenue */}
       <Card>
         <div style={{ padding: '1.25rem 1.5rem' }}>
@@ -700,6 +709,160 @@ function StatusTile({ label, status, hint }: { label: string; status: 'green' | 
       </div>
       <span className="text-xs text-[var(--color-text-muted)]" style={{ lineHeight: 1.4 }}>{hint}</span>
     </div>
+  )
+}
+
+function SpendImpactCard({ startingCash, burn, revenue, reserveTarget, formatNative }: {
+  startingCash: number
+  burn: number
+  revenue: number
+  reserveTarget: number
+  formatNative: (amount: number, currency: string) => string
+}) {
+  // Generic "if I add $X/mo for Y months on Z, what does cash look like?"
+  // Works for hires, software, agency partners, ad spend, any recurring
+  // commitment. The chart projects 12 months out.
+  const [label, setLabel] = useState('Part-time dev hire')
+  const [monthlySpend, setMonthlySpend] = useState('3400')
+  const [durationMonths, setDurationMonths] = useState('12')
+  const [oneOff, setOneOff] = useState('0')
+
+  const spend = Math.max(0, parseFloat(monthlySpend) || 0)
+  const duration = Math.max(1, Math.min(60, parseInt(durationMonths, 10) || 12))
+  const upfront = Math.max(0, parseFloat(oneOff) || 0)
+
+  // Net burn/month under this scenario. Negative = cash growing.
+  const netBurnPerMonth = burn + spend - revenue
+  // 12-month projection points. Always show 12 even if the spend duration
+  // is shorter — see what happens after the cost goes away.
+  const horizon = 12
+  const projection: Array<{ month: number; cash: number; spendActive: boolean; belowTarget: boolean }> = []
+  let cash = startingCash - upfront
+  for (let m = 1; m <= horizon; m++) {
+    const spendActive = m <= duration
+    cash += revenue - burn - (spendActive ? spend : 0)
+    projection.push({ month: m, cash, spendActive, belowTarget: cash < reserveTarget })
+  }
+  const cashAt12 = projection[horizon - 1].cash
+  const lowest = projection.reduce((min, p) => p.cash < min.cash ? p : min, projection[0])
+  // First month the cash dips below the reserve target.
+  const targetBreach = projection.find(p => p.belowTarget)
+  // First month it would go negative.
+  const zeroBreach = projection.find(p => p.cash < 0)
+
+  let verdict: { tone: 'positive' | 'warning' | 'danger'; label: string; detail: string }
+  if (zeroBreach) {
+    verdict = {
+      tone: 'danger',
+      label: 'Not affordable',
+      detail: `Cash hits $0 around month ${zeroBreach.month}. Drop the spend, raise revenue, or extend duration carefully.`,
+    }
+  } else if (targetBreach) {
+    verdict = {
+      tone: 'warning',
+      label: 'Tight',
+      detail: `Cash dips below your ${formatNative(reserveTarget, 'NZD')} reserve target around month ${targetBreach.month}. Doable if you trust the revenue line.`,
+    }
+  } else {
+    verdict = {
+      tone: 'positive',
+      label: 'Affordable',
+      detail: `Stays above reserve target the whole 12 months. Lowest point: ${formatNative(lowest.cash, 'NZD')} at month ${lowest.month}.`,
+    }
+  }
+
+  const labelStyle: React.CSSProperties = { fontSize: '0.6875rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '0.25rem' }
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '0.4375rem 0.625rem',
+    fontSize: '0.875rem',
+    background: 'var(--color-bg)',
+    border: '1px solid var(--color-border)',
+    borderRadius: 'var(--radius-sm)',
+    color: 'var(--color-text)',
+    outline: 'none',
+    fontVariantNumeric: 'tabular-nums',
+  }
+
+  // Tiny inline sparkline: 12-point line, red below target, brand-green above.
+  const w = 320, h = 60
+  const maxCash = Math.max(startingCash, ...projection.map(p => p.cash))
+  const minCash = Math.min(0, ...projection.map(p => p.cash))
+  const range = Math.max(1, maxCash - minCash)
+  const points = [{ cash: startingCash }, ...projection].map((p, i) => {
+    const x = (i / horizon) * w
+    const y = h - ((p.cash - minCash) / range) * h
+    return { x, y }
+  })
+  const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ')
+  const targetY = h - ((reserveTarget - minCash) / range) * h
+
+  return (
+    <Card>
+      <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+            Spend impact calculator
+          </div>
+          <Badge tone={verdict.tone === 'positive' ? 'positive' : verdict.tone === 'warning' ? 'warning' : 'danger'} variant="soft" size="sm">
+            {verdict.label}
+          </Badge>
+        </div>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
+          <div>
+            <label style={labelStyle}>What's the spend?</label>
+            <input value={label} onChange={e => setLabel(e.target.value)} style={inputStyle} placeholder="Dev hire / SaaS / ad spend" />
+          </div>
+          <div>
+            <label style={labelStyle}>Monthly cost (NZD)</label>
+            <input type="number" min={0} step="100" value={monthlySpend} onChange={e => setMonthlySpend(e.target.value)} style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>Duration (months)</label>
+            <input type="number" min={1} max={60} step="1" value={durationMonths} onChange={e => setDurationMonths(e.target.value)} style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>One-off cost (NZD)</label>
+            <input type="number" min={0} step="100" value={oneOff} onChange={e => setOneOff(e.target.value)} style={inputStyle} placeholder="Setup / equipment" />
+          </div>
+        </div>
+        <div className="grid" style={{ gridTemplateColumns: '1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+          <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ height: '4rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+            {/* Reserve-target line */}
+            {targetY >= 0 && targetY <= h && (
+              <line x1="0" y1={targetY} x2={w} y2={targetY} stroke="var(--color-warning, #fb923c)" strokeWidth="1" strokeDasharray="3,3" />
+            )}
+            {/* Zero-line (visible only if cash goes negative) */}
+            {minCash < 0 && (
+              <line x1="0" y1={h - ((0 - minCash) / range) * h} x2={w} y2={h - ((0 - minCash) / range) * h} stroke="var(--color-danger, #f87171)" strokeWidth="1" />
+            )}
+            {/* Projection line */}
+            <path d={path} fill="none" stroke="var(--color-brand)" strokeWidth="2" strokeLinejoin="round" />
+          </svg>
+        </div>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1rem' }}>
+          <MetricBlock
+            label={`Cash at month 12`}
+            value={formatNative(cashAt12, 'NZD')}
+            sub={`Net burn ${netBurnPerMonth > 0 ? formatNative(netBurnPerMonth, 'NZD') + '/mo' : 'cash positive'} during spend`}
+            accent
+          />
+          <MetricBlock
+            label="Total cost of this spend"
+            value={formatNative(upfront + spend * duration, 'NZD')}
+            sub={`${formatNative(upfront, 'NZD')} upfront + ${duration}×${formatNative(spend, 'NZD')}/mo`}
+          />
+          <MetricBlock
+            label="Lowest cash point"
+            value={formatNative(lowest.cash, 'NZD')}
+            sub={`Month ${lowest.month}`}
+          />
+        </div>
+        <p className="text-xs text-[var(--color-text-muted)]" style={{ marginTop: '0.75rem', lineHeight: 1.5 }}>
+          {verdict.detail} Assumes revenue stays flat at {formatNative(revenue, 'NZD')}/mo and existing burn at {formatNative(burn, 'NZD')}/mo — adjust either in the reserve target card above for a different projection. <em>{label}</em>: this scenario.
+        </p>
+      </div>
+    </Card>
   )
 }
 
