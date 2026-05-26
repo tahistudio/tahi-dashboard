@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, inArray } from 'drizzle-orm'
-import { listBalances, listTransactions, AirwallexNotConfiguredError } from '@/lib/airwallex'
+import { listBalances, listTransactions, AirwallexNotConfiguredError, getAirwallexToken } from '@/lib/airwallex'
 import { logCronRun } from '@/lib/cron-runs'
 
 export const dynamic = 'force-dynamic'
@@ -47,7 +47,12 @@ export async function POST(req: NextRequest) {
 
   let balances, transactions
   try {
-    [balances, transactions] = await Promise.all([
+    // Warm the cached token FIRST. Without this, listBalances() and
+    // listTransactions() race for the login → both try INSERT-on-empty
+    // into integrations(service='airwallex') and one fails the UNIQUE
+    // constraint. Sequential pre-warm fixes it cheaply.
+    await getAirwallexToken()
+    ;[balances, transactions] = await Promise.all([
       listBalances(),
       listTransactions({ fromCreatedAt, toCreatedAt }),
     ])
