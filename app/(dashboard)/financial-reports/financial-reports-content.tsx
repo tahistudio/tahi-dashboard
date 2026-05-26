@@ -619,6 +619,9 @@ export function FinancialReportsContent() {
         </Card>
       )}
 
+      {/* Subscription audit */}
+      <SubscriptionsAuditCard formatNative={formatNative} />
+
       {/* Recent activity feed */}
       {(data.recentActivity.invoices.length > 0 || data.recentActivity.deals.length > 0) && (
         <Card>
@@ -709,6 +712,146 @@ function StatusTile({ label, status, hint }: { label: string; status: 'green' | 
       </div>
       <span className="text-xs text-[var(--color-text-muted)]" style={{ lineHeight: 1.4 }}>{hint}</span>
     </div>
+  )
+}
+
+interface SubscriptionsAuditItem {
+  id: string
+  name: string
+  vendor: string | null
+  amount: number
+  currency: string
+  cadence: string
+  category: string
+  nextDueDate: string | null
+  annualisedNzd: number
+  lastBankHit: { id: string; amount: number; currency: string; settledAt: string | null; counterparty: string | null } | null
+  hitsInWindow: number
+}
+
+function SubscriptionsAuditCard({ formatNative }: {
+  formatNative: (amount: number, currency: string) => string
+}) {
+  const [items, setItems] = useState<SubscriptionsAuditItem[]>([])
+  const [summary, setSummary] = useState<{ count: number; monthlyTotal: number; annualTotal: number; staleCount: number } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [expanded, setExpanded] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    fetch(apiPath('/api/admin/financial-reports/subscriptions-audit'))
+      .then(r => r.ok ? r.json() : null)
+      .then(raw => {
+        if (cancelled || !raw) return
+        const d = raw as { items?: SubscriptionsAuditItem[]; summary?: { count: number; monthlyTotal: number; annualTotal: number; staleCount: number } }
+        setItems(d.items ?? [])
+        setSummary(d.summary ?? null)
+      })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
+  if (loading) {
+    return (
+      <Card>
+        <div style={{ padding: '1.25rem 1.5rem' }}>
+          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
+            Recurring outflows
+          </div>
+          <div className="animate-pulse" style={{ height: '6rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)' }} />
+        </div>
+      </Card>
+    )
+  }
+
+  if (items.length === 0) {
+    return (
+      <Card>
+        <div style={{ padding: '1.25rem 1.5rem' }}>
+          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-2">
+            Recurring outflows
+          </div>
+          <p className="text-sm text-[var(--color-text-muted)]">
+            No expense commitments configured yet. Add software / payroll / shareholder distributions through Settings → Commitments to start tracking outflow patterns.
+          </p>
+        </div>
+      </Card>
+    )
+  }
+
+  const visible = expanded ? items : items.slice(0, 6)
+
+  return (
+    <Card>
+      <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+            Recurring outflows
+          </div>
+          <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+            {summary && (
+              <>
+                {summary.count} commitments · {formatNative(summary.monthlyTotal, 'NZD')}/mo · {formatNative(summary.annualTotal, 'NZD')}/yr
+                {summary.staleCount > 0 && <> · <span style={{ color: 'var(--color-warning, #fb923c)' }}>{summary.staleCount} with no recent bank hit</span></>}
+              </>
+            )}
+          </div>
+        </div>
+        <div className="grid" style={{ gap: '0.375rem' }}>
+          {visible.map(item => {
+            const stale = !item.lastBankHit
+            return (
+              <div key={item.id} className="flex items-center" style={{
+                gap: '0.75rem',
+                padding: '0.5rem 0.75rem',
+                background: stale ? 'var(--color-warning-bg, #fff7ed)' : 'var(--color-bg-secondary)',
+                borderRadius: 'var(--radius-sm)',
+                border: stale ? '1px solid var(--color-warning-border, #fed7aa)' : '1px solid transparent',
+              }}>
+                <div className="min-w-0" style={{ flex: 2 }}>
+                  <div className="text-sm font-semibold text-[var(--color-text)] truncate">{item.name}</div>
+                  <div className="text-[0.6875rem] text-[var(--color-text-subtle)] truncate">
+                    {item.vendor ?? item.category} · {item.cadence}
+                  </div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="text-sm font-semibold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {formatNative(item.amount, item.currency)}
+                  </div>
+                  <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+                    {formatNative(item.annualisedNzd, item.currency)}/yr
+                  </div>
+                </div>
+                <div style={{ flex: 1.5, textAlign: 'right' }}>
+                  {item.lastBankHit ? (
+                    <>
+                      <div className="text-xs text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        Last hit: {formatNative(item.lastBankHit.amount, item.lastBankHit.currency)}
+                      </div>
+                      <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+                        {item.lastBankHit.settledAt ? fmtRelative(item.lastBankHit.settledAt) : '—'}
+                      </div>
+                    </>
+                  ) : (
+                    <Badge tone="warning" variant="soft" size="sm">No recent bank hit</Badge>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        {items.length > 6 && (
+          <button
+            onClick={() => setExpanded(v => !v)}
+            className="text-xs font-medium text-[var(--color-brand-dark)] mt-3"
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+          >
+            {expanded ? `Show top 6 only` : `Show all ${items.length}`}
+          </button>
+        )}
+      </div>
+    </Card>
   )
 }
 
