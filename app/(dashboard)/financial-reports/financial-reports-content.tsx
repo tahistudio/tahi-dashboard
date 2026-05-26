@@ -26,6 +26,8 @@ import { Card } from '@/components/tahi/card'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { useToast } from '@/components/tahi/toast'
 import { apiPath } from '@/lib/api'
+import { useDisplayCurrency } from '@/lib/display-currency-context'
+import { convertToNzd } from '@/lib/currency'
 
 interface SummaryResponse {
   asOf: string
@@ -71,6 +73,13 @@ function fmtCurrency(n: number, currency: string): string {
   return formatter.format(Math.round(n))
 }
 
+// Filters out balance rows with zero available cash. Liam doesn't want
+// the row spam — Airwallex returns ~50 currencies regardless of whether
+// any are funded.
+function isFunded(b: { available: number; total: number }): boolean {
+  return Math.abs(b.available) > 0.01 || Math.abs(b.total) > 0.01
+}
+
 function fmtRelative(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
   const mins = Math.floor(diff / 60_000)
@@ -95,6 +104,11 @@ const STATUS_LABEL: Record<'green' | 'amber' | 'red', string> = {
 
 export function FinancialReportsContent() {
   const { showToast } = useToast()
+  // Every monetary number on the page follows the global nav currency
+  // switcher. Native amounts are still shown next to bank rows since
+  // those are bank-of-truth-in-currency, but the headline + status
+  // tiles + revenue card convert via the FX-rate context.
+  const { displayCurrency, toDisplay, format: formatDisplay, formatNative, exchangeRates, ratesLoaded } = useDisplayCurrency()
   const [data, setData] = useState<SummaryResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
@@ -155,7 +169,35 @@ export function FinancialReportsContent() {
     )
   }
 
-  const cur = data.primaryCurrency
+  // Helpers that convert source-currency values into the user's chosen
+  // display currency via the FX context. All headline numbers go through
+  // this so the page reads the same whether you've picked NZD, USD, GBP
+  // etc in the nav switcher.
+  const cur = displayCurrency
+  // toCur(amount, fromCurrency) — convert source-currency amount to
+  // the user's display currency, fully formatted. Step 1 normalises to
+  // NZD (the FX context's canonical pivot); step 2 lets toDisplay
+  // render in whatever the nav switcher is set to.
+  const toCur = (amount: number, fromCurrency: string): string => {
+    const inNzd = fromCurrency === 'NZD' || !ratesLoaded
+      ? amount
+      : convertToNzd(amount, fromCurrency, exchangeRates)
+    return formatDisplay(inNzd)
+  }
+  const toCurNumber = (amount: number, fromCurrency: string): number => {
+    const inNzd = fromCurrency === 'NZD' || !ratesLoaded
+      ? amount
+      : convertToNzd(amount, fromCurrency, exchangeRates)
+    return toDisplay(inNzd)
+  }
+  // Bank balances rendered in their NATIVE currency (with the display
+  // currency equivalent in smaller text below). Strip any row with a
+  // zero balance — Airwallex returns ~50 currencies regardless of
+  // funding state.
+  const fundedBanks = data.bankBalances.filter(isFunded)
+  // Disposable cash is computed server-side in the primary (source)
+  // currency. Convert to display for the headline.
+  const disposableDisplay = toCurNumber(data.disposableCash, data.primaryCurrency)
 
   return (
     <div className="space-y-5">
@@ -193,15 +235,15 @@ export function FinancialReportsContent() {
           !data.mrr.configured
             ? 'Not configured — set custom_mrr per active client'
             : data.mrr.combined > 0
-              ? `${fmtCurrency(data.mrr.combined, cur)}/mo across ${data.mrr.retainerClientCount} client${data.mrr.retainerClientCount === 1 ? '' : 's'}`
+              ? `${toCur(data.mrr.combined, data.primaryCurrency)}/mo across ${data.mrr.retainerClientCount} client${data.mrr.retainerClientCount === 1 ? '' : 's'}`
               : 'No recurring revenue tracked'
         } />
         <StatusTile label="AR" status={data.status.ar} hint={
-          data.overdueCount > 0 ? `${data.overdueCount} overdue, ${fmtCurrency(data.outstandingAr, cur)} total`
-          : `${fmtCurrency(data.outstandingAr, cur)} outstanding`
+          data.overdueCount > 0 ? `${data.overdueCount} overdue, ${toCur(data.outstandingAr, data.primaryCurrency)} total`
+          : `${toCur(data.outstandingAr, data.primaryCurrency)} outstanding`
         } />
         <StatusTile label="Reserves" status={data.status.reserves} hint={
-          data.reserves.total > 0 ? `${fmtCurrency(data.reserves.total, cur)} set aside`
+          data.reserves.total > 0 ? `${toCur(data.reserves.total, data.primaryCurrency)} set aside`
           : 'No tax reserve configured'
         } />
         <StatusTile label="Sales velocity" status={data.status.velocity} hint={
@@ -227,19 +269,29 @@ export function FinancialReportsContent() {
               color: 'var(--color-text)',
               fontVariantNumeric: 'tabular-nums',
             }}>
-              {fmtCurrency(data.disposableCash, cur)}
+              {formatDisplay(disposableDisplay)}
             </span>
             <span className="text-sm text-[var(--color-text-muted)]">
-              after reserves
+              after reserves · displayed in {cur}
             </span>
           </div>
           <div className="grid mt-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1rem' }}>
-            {data.bankBalances.map(b => (
+            {fundedBanks.length === 0 && (
+              <div className="text-xs text-[var(--color-text-muted)]">
+                No funded bank accounts. Sync Airwallex / Xero to populate.
+              </div>
+            )}
+            {fundedBanks.map(b => (
               <div key={b.currency}>
                 <div className="text-xs text-[var(--color-text-muted)]">Bank {b.currency}</div>
                 <div className="text-base font-semibold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {fmtCurrency(b.available, b.currency)}
+                  {formatNative(b.available, b.currency)}
                 </div>
+                {b.currency !== cur && (
+                  <div className="text-[0.6875rem] text-[var(--color-text-subtle)] mt-0.5" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    ≈ {toCur(b.available, b.currency)}
+                  </div>
+                )}
                 <div className="flex items-center gap-1 mt-0.5">
                   {b.sources.map(s => (
                     <Badge key={s} tone="neutral" variant="soft" size="sm">{s}</Badge>
@@ -250,7 +302,7 @@ export function FinancialReportsContent() {
             <div>
               <div className="text-xs text-[var(--color-text-muted)]">Reserved</div>
               <div className="text-base font-semibold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {fmtCurrency(data.reserves.total, cur)}
+                {toCur(data.reserves.total, data.primaryCurrency)}
               </div>
               <div className="text-[0.6875rem] text-[var(--color-text-subtle)] mt-0.5">
                 {data.reserves.items.length === 0 ? 'No pots configured' : `${data.reserves.items.length} pot${data.reserves.items.length === 1 ? '' : 's'}`}
@@ -269,26 +321,26 @@ export function FinancialReportsContent() {
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(12rem, 1fr))', gap: '1.5rem' }}>
             <MetricBlock
               label="Combined MRR"
-              value={data.mrr.configured ? fmtCurrency(data.mrr.combined, cur) : '—'}
+              value={data.mrr.configured ? toCur(data.mrr.combined, data.primaryCurrency) : '—'}
               sub={data.mrr.configured
-                ? `Retainer ${fmtCurrency(data.mrr.retainer, cur)} · Project ${fmtCurrency(data.mrr.project, cur)}`
+                ? `Retainer ${toCur(data.mrr.retainer, data.primaryCurrency)} · Project ${toCur(data.mrr.project, data.primaryCurrency)}`
                 : 'Set custom_mrr on active clients to track this'
               }
               accent
             />
             <MetricBlock
               label="ARR (projection)"
-              value={data.mrr.configured ? fmtCurrency(data.arr, cur) : '—'}
+              value={data.mrr.configured ? toCur(data.arr, data.primaryCurrency) : '—'}
               sub="MRR × 12 — assumes current MRR holds for a year"
             />
             <MetricBlock
               label="YTD revenue"
-              value={fmtCurrency(data.ytdRevenue, cur)}
+              value={toCur(data.ytdRevenue, data.primaryCurrency)}
               sub={`${data.ytdInvoiceCount} paid invoice${data.ytdInvoiceCount === 1 ? '' : 's'} this calendar year`}
             />
             <MetricBlock
               label="Outstanding AR"
-              value={fmtCurrency(data.outstandingAr, cur)}
+              value={toCur(data.outstandingAr, data.primaryCurrency)}
               sub={data.overdueCount > 0 ? `${data.overdueCount} overdue` : 'All current'}
             />
           </div>
@@ -302,9 +354,9 @@ export function FinancialReportsContent() {
             Sales velocity
           </div>
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '1.5rem' }}>
-            <MetricBlock label="Last 30 days" value={`${data.salesVelocity.last30Days.count} deals`} sub={fmtCurrency(data.salesVelocity.last30Days.value, cur)} />
-            <MetricBlock label="Last 60 days" value={`${data.salesVelocity.last60Days.count} deals`} sub={fmtCurrency(data.salesVelocity.last60Days.value, cur)} />
-            <MetricBlock label="Last 90 days" value={`${data.salesVelocity.last90Days.count} deals`} sub={fmtCurrency(data.salesVelocity.last90Days.value, cur)} />
+            <MetricBlock label="Last 30 days" value={`${data.salesVelocity.last30Days.count} deals`} sub={toCur(data.salesVelocity.last30Days.value, data.primaryCurrency)} />
+            <MetricBlock label="Last 60 days" value={`${data.salesVelocity.last60Days.count} deals`} sub={toCur(data.salesVelocity.last60Days.value, data.primaryCurrency)} />
+            <MetricBlock label="Last 90 days" value={`${data.salesVelocity.last90Days.count} deals`} sub={toCur(data.salesVelocity.last90Days.value, data.primaryCurrency)} />
           </div>
         </div>
       </Card>
@@ -332,8 +384,8 @@ export function FinancialReportsContent() {
                     </div>
                     <div className="text-right">
                       <div className="text-sm font-semibold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {fmtCurrency(r.accruedAmount, r.currency)}
-                        {r.targetAmount ? <span className="text-xs text-[var(--color-text-subtle)] font-normal"> / {fmtCurrency(r.targetAmount, r.currency)}</span> : null}
+                        {formatNative(r.accruedAmount, r.currency)}
+                        {r.targetAmount ? <span className="text-xs text-[var(--color-text-subtle)] font-normal"> / {formatNative(r.targetAmount, r.currency)}</span> : null}
                       </div>
                       {pct != null && (
                         <div style={{
