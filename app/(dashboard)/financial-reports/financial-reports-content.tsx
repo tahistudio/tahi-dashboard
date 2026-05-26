@@ -38,6 +38,14 @@ interface SummaryResponse {
     items: Array<{ id: string; name: string; category: string; currency: string; accruedAmount: number; targetAmount: number | null; accrualRate: number | null }>
   }
   disposableCash: number
+  reserveConfig: {
+    targetMonths: number
+    monthlyBurnNzd: number | null
+    lastYearTaxOwed: number
+    targetAmount: number
+    targetBurn: number
+    monthsOfRunway: number | null
+  }
   mrr: {
     retainer: number
     project: number
@@ -145,6 +153,21 @@ export function FinancialReportsContent() {
 
   useEffect(() => { void fetchSummary() }, [fetchSummary])
 
+  async function backfillMrr() {
+    try {
+      const r = await fetch(apiPath('/api/admin/financial-reports/backfill-mrr'), { method: 'POST' })
+      const j = await r.json() as { updated?: number; unchanged?: number; error?: string }
+      if (r.ok) {
+        showToast(`MRR backfilled — ${j.updated ?? 0} clients updated, ${j.unchanged ?? 0} unchanged`, 'success')
+        await fetchSummary()
+      } else {
+        showToast(`Backfill failed: ${j.error ?? 'unknown'}`, 'error')
+      }
+    } catch {
+      showToast('Backfill failed', 'error')
+    }
+  }
+
   async function syncAirwallex() {
     setSyncing(true)
     try {
@@ -233,6 +256,13 @@ export function FinancialReportsContent() {
         <TahiButton
           variant="secondary"
           size="sm"
+          onClick={() => void backfillMrr()}
+        >
+          Recompute MRR
+        </TahiButton>
+        <TahiButton
+          variant="secondary"
+          size="sm"
           onClick={() => void fetchSummary()}
           iconLeft={<Play className="w-3.5 h-3.5" />}
         >
@@ -243,9 +273,9 @@ export function FinancialReportsContent() {
       {/* Status strip — traffic lights per axis, plain-English label */}
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '0.875rem' }}>
         <StatusTile label="Cash runway" status={data.status.cash} hint={
-          data.status.cash === 'red' ? 'Less than 1 month at current burn'
-          : data.status.cash === 'amber' ? '1-3 months runway'
-          : 'More than 3 months runway'
+          data.reserveConfig.monthsOfRunway != null
+            ? `${data.reserveConfig.monthsOfRunway.toFixed(1)} months at ${formatNative(data.reserveConfig.targetBurn, 'NZD')}/mo burn · target ${data.reserveConfig.targetMonths}mo`
+            : 'Set monthly burn below to track this properly'
         } />
         <StatusTile label="MRR" status={data.status.mrr} hint={
           !data.mrr.configured
@@ -327,6 +357,13 @@ export function FinancialReportsContent() {
           </div>
         </div>
       </Card>
+
+      {/* Reserve target config */}
+      <ReserveTargetCard
+        config={data.reserveConfig}
+        formatNative={formatNative}
+        onSaved={() => void fetchSummary()}
+      />
 
       {/* MRR / ARR / YTD revenue */}
       <Card>
@@ -663,6 +700,132 @@ function StatusTile({ label, status, hint }: { label: string; status: 'green' | 
       </div>
       <span className="text-xs text-[var(--color-text-muted)]" style={{ lineHeight: 1.4 }}>{hint}</span>
     </div>
+  )
+}
+
+function ReserveTargetCard({ config, formatNative, onSaved }: {
+  config: {
+    targetMonths: number
+    monthlyBurnNzd: number | null
+    lastYearTaxOwed: number
+    targetAmount: number
+    monthsOfRunway: number | null
+  }
+  formatNative: (amount: number, currency: string) => string
+  onSaved: () => void
+}) {
+  const { showToast } = useToast()
+  const [months, setMonths] = useState(String(config.targetMonths))
+  const [burn, setBurn] = useState(config.monthlyBurnNzd != null ? String(config.monthlyBurnNzd) : '')
+  const [tax, setTax] = useState(String(config.lastYearTaxOwed || ''))
+  const [saving, setSaving] = useState(false)
+  const [dirty, setDirty] = useState(false)
+
+  async function save() {
+    setSaving(true)
+    try {
+      const writes: Array<{ key: string; value: string }> = [
+        { key: 'finance.reserveTargetMonths', value: months || '4' },
+        { key: 'finance.monthlyBurnNzd', value: burn || '0' },
+        { key: 'finance.lastYearTaxOwed', value: tax || '0' },
+      ]
+      for (const w of writes) {
+        await fetch(apiPath('/api/admin/settings'), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(w),
+        })
+      }
+      showToast('Reserve target saved', 'success')
+      setDirty(false)
+      onSaved()
+    } catch {
+      showToast('Could not save', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const labelStyle: React.CSSProperties = { fontSize: '0.6875rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '0.25rem' }
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '0.4375rem 0.625rem',
+    fontSize: '0.875rem',
+    background: 'var(--color-bg)',
+    border: '1px solid var(--color-border)',
+    borderRadius: 'var(--radius-sm)',
+    color: 'var(--color-text)',
+    outline: 'none',
+    fontVariantNumeric: 'tabular-nums',
+  }
+
+  return (
+    <Card>
+      <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+            Reserve target
+          </div>
+          <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+            Target = months × burn + last-year tax. Drives the Cash runway traffic light.
+          </div>
+        </div>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+          <div>
+            <label style={labelStyle}>Months of runway target</label>
+            <input
+              type="number"
+              min={1}
+              max={24}
+              step="0.5"
+              value={months}
+              onChange={e => { setMonths(e.target.value); setDirty(true) }}
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <label style={labelStyle}>Monthly burn (NZD)</label>
+            <input
+              type="number"
+              min={0}
+              step="100"
+              value={burn}
+              onChange={e => { setBurn(e.target.value); setDirty(true) }}
+              placeholder="e.g. 8000"
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <label style={labelStyle}>Last year tax owed (NZD)</label>
+            <input
+              type="number"
+              min={0}
+              step="100"
+              value={tax}
+              onChange={e => { setTax(e.target.value); setDirty(true) }}
+              placeholder="e.g. 20000"
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <label style={labelStyle}>Target amount</label>
+            <div style={{ ...inputStyle, border: 'none', padding: '0.4375rem 0', fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-brand-dark)' }}>
+              {formatNative(config.targetAmount, 'NZD')}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-between" style={{ gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div className="text-xs text-[var(--color-text-muted)]" style={{ lineHeight: 1.5 }}>
+            {config.monthsOfRunway != null
+              ? `Current runway: ${config.monthsOfRunway.toFixed(1)} months. ${config.monthsOfRunway >= config.targetMonths ? 'On target.' : config.monthsOfRunway >= config.targetMonths / 2 ? 'Below target, watch closely.' : 'Below half target — defer discretionary spend.'}`
+              : 'Set monthly burn to start tracking runway.'}
+          </div>
+          <TahiButton onClick={() => void save()} loading={saving} disabled={!dirty} size="sm">
+            Save reserve target
+          </TahiButton>
+        </div>
+      </div>
+    </Card>
   )
 }
 

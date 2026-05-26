@@ -31,6 +31,21 @@ export async function GET(req: NextRequest) {
   const now = Date.now()
   const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString()
 
+  // ── Operator-configured reserve target ────────────────────────────
+  // Three settings drive the cash traffic-light:
+  //   finance.reserveTargetMonths  — months of burn to keep buffered (default 4)
+  //   finance.monthlyBurnNzd       — operator's stated monthly burn (defaults to MRR if unset)
+  //   finance.lastYearTaxOwed      — flat extra reserve for prior-year tax (default 0)
+  // All three editable from the page settings card.
+  const settingsRows = await database.all<{ key: string; value: string }>(sql`
+    SELECT key, value FROM settings
+    WHERE key IN ('finance.reserveTargetMonths', 'finance.monthlyBurnNzd', 'finance.lastYearTaxOwed')
+  `)
+  const settingsMap = new Map(settingsRows.map(r => [r.key, r.value]))
+  const reserveTargetMonths = Math.max(1, Math.min(24, parseFloat(settingsMap.get('finance.reserveTargetMonths') ?? '4')))
+  const monthlyBurnNzd = parseFloat(settingsMap.get('finance.monthlyBurnNzd') ?? '0') || null
+  const lastYearTaxOwed = parseFloat(settingsMap.get('finance.lastYearTaxOwed') ?? '0') || 0
+
   // ── Bank balances (Airwallex first, Xero fallback) ────────────────
   const [airwallexBalances, xeroBankBalances] = await Promise.all([
     database.select().from(schema.airwallexBalances),
@@ -308,15 +323,32 @@ export async function GET(req: NextRequest) {
   const primaryCurrency = balancesByCurrency.has('NZD') ? 'NZD'
     : Array.from(balancesByCurrency.keys())[0] ?? 'NZD'
   const primaryBalance = balancesByCurrency.get(primaryCurrency)?.available ?? 0
-  const disposableCash = Math.max(0, primaryBalance - reservesTotal)
+  // Disposable = primary bank − reserve pots − last-year tax. The reserve
+  // pot total + last-year tax both come out of what's safe to spend right
+  // now. (Reserve target is a target, not a deduction.)
+  const disposableCash = Math.max(0, primaryBalance - reservesTotal - lastYearTaxOwed)
+
+  // Reserve target = months × burn + last-year tax pot. If burn isn't
+  // configured yet, fall back to effective monthly revenue × 0.5 as a
+  // rough proxy. The cash status traffic-light reads against this.
+  const reserveTargetBurn = monthlyBurnNzd ?? (effectiveMonthlyRevenue > 0 ? effectiveMonthlyRevenue * 0.5 : 0)
+  const reserveTargetAmount = reserveTargetBurn * reserveTargetMonths + lastYearTaxOwed
+  const reserveTargetMonthsOfRunway = reserveTargetBurn > 0 ? primaryBalance / reserveTargetBurn : null
 
   // ── Status traffic lights ─────────────────────────────────────────
   // Simple rules for now — refined when we plug real margin data in.
   function statusFor(metric: 'cash' | 'mrr' | 'ar' | 'reserves' | 'velocity'): 'green' | 'amber' | 'red' {
     switch (metric) {
       case 'cash':
-        if (disposableCash > combinedMrr * 3) return 'green'   // 3 months runway+
-        if (disposableCash > combinedMrr) return 'amber'        // 1 month runway
+        // Compare against the operator-set reserve target. Green at
+        // target, amber at half, red below half. If no burn is
+        // configured, fall back to "absolute disposable > 0" which is
+        // the only signal we trust.
+        if (!reserveTargetBurn || reserveTargetAmount <= 0) {
+          return disposableCash > 0 ? 'amber' : 'red'
+        }
+        if (disposableCash >= reserveTargetAmount) return 'green'
+        if (disposableCash >= reserveTargetAmount / 2) return 'amber'
         return 'red'
       case 'mrr':
         // Unmeasured (no custom_mrr set on any active client) is amber,
@@ -362,6 +394,14 @@ export async function GET(req: NextRequest) {
       })),
     },
     disposableCash,
+    reserveConfig: {
+      targetMonths: reserveTargetMonths,
+      monthlyBurnNzd,
+      lastYearTaxOwed,
+      targetAmount: reserveTargetAmount,
+      targetBurn: reserveTargetBurn,
+      monthsOfRunway: reserveTargetMonthsOfRunway,
+    },
     mrr: {
       retainer: retainerMrr,
       project: projectMrr,

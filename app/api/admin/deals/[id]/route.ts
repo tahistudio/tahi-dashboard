@@ -516,6 +516,39 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       },
       createdById: actor,
     })
+
+    // Auto-MRR on deal close. When the new stage is closed-won AND the
+    // deal sits on an org, recompute organisations.custom_mrr by summing
+    // monthly_value_nzd across ALL won deals on that org. Additive
+    // because multiple retainers on a single client should stack.
+    // Triggered any time a deal moves into a won stage so re-promotions
+    // and corrections stay accurate.
+    try {
+      const [stageInfo] = await database
+        .select({ isClosedWon: schema.pipelineStages.isClosedWon })
+        .from(schema.pipelineStages)
+        .where(eq(schema.pipelineStages.id, body.stageId))
+        .limit(1)
+      if (stageInfo?.isClosedWon && existing.orgId) {
+        const sumRows = await database.all<{ total: number | null }>(sql`
+          SELECT COALESCE(SUM(d.monthly_value_nzd), 0) AS total
+          FROM deals d
+          INNER JOIN pipeline_stages s ON d.stage_id = s.id
+          WHERE s.is_closed_won = 1
+            AND d.org_id = ${existing.orgId}
+            AND d.monthly_value_nzd > 0
+            AND (d.engagement_end_date IS NULL OR d.engagement_end_date > datetime('now'))
+        `)
+        const newCustomMrr = Number(sumRows[0]?.total ?? 0)
+        if (newCustomMrr > 0) {
+          await database.run(sql`
+            UPDATE organisations
+            SET custom_mrr = ${newCustomMrr}, updated_at = ${now}
+            WHERE id = ${existing.orgId}
+          `)
+        }
+      }
+    } catch { /* never block the stage update on an MRR recalc */ }
   }
 
   // Owner change
