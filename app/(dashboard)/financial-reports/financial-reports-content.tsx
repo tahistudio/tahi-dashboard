@@ -25,6 +25,8 @@ import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { DataTable } from '@/components/tahi/data-table'
+import { DonutChart } from '@/components/tahi/chart'
+import { CHART } from '@/lib/chart-colors'
 import { useToast } from '@/components/tahi/toast'
 import { apiPath } from '@/lib/api'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
@@ -571,38 +573,48 @@ export function FinancialReportsContent() {
               Set custom_mrr on your active clients to see concentration risk.
             </p>
           ) : (
-            <>
-              <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '1.5rem', marginBottom: '1rem' }}>
-                <MetricBlock
-                  label="Top client share"
-                  value={`${Math.round(data.clientConcentration.topClientShare * 100)}%`}
-                  sub={data.clientConcentration.top[0]?.name ?? '—'}
-                  accent={data.clientConcentration.topClientShare > 0.5}
-                />
-                <MetricBlock
-                  label="Top 3 share"
-                  value={`${Math.round(data.clientConcentration.top3Share * 100)}%`}
-                  sub="Combined revenue at risk if all three left"
+            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))', gap: '1.5rem', alignItems: 'center' }}>
+              {/* Donut: at-a-glance share of MRR. Centre shows top client %. */}
+              <div className="flex justify-center">
+                <DonutChart
+                  size={180}
+                  segments={data.clientConcentration.top.map(c => ({ label: c.name, value: c.mrr }))}
+                  centreLabel={<span className="text-[0.6875rem] uppercase tracking-wider text-[var(--color-text-subtle)]">Top client</span>}
+                  centreValue={
+                    <span className="text-xl font-bold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {Math.round(data.clientConcentration.topClientShare * 100)}%
+                    </span>
+                  }
+                  legend={false}
+                  ariaLabel="MRR share by client"
                 />
               </div>
-              <div className="grid" style={{ gap: '0.375rem' }}>
+              {/* Legend column: ranked list + share + native NZD. */}
+              <div className="grid" style={{ gap: '0.5rem' }}>
+                <div className="flex items-baseline justify-between text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ marginBottom: '0.25rem' }}>
+                  <span>Risk: if your top 3 leave</span>
+                  <span style={{ color: data.clientConcentration.top3Share > 0.7 ? 'var(--color-warning)' : 'var(--color-text)', fontWeight: 600 }}>
+                    {Math.round(data.clientConcentration.top3Share * 100)}% gone
+                  </span>
+                </div>
                 {data.clientConcentration.top.map((c, i) => {
                   const pct = data.clientConcentration.totalNamedMrr > 0 ? c.mrr / data.clientConcentration.totalNamedMrr : 0
+                  const dot = CHART.categorical[i % CHART.categorical.length]
                   return (
-                    <div key={c.name} className="flex items-center" style={{ gap: '0.75rem' }}>
-                      <span className="text-xs text-[var(--color-text-subtle)]" style={{ width: '1rem', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
-                      <span className="text-sm text-[var(--color-text)] truncate" style={{ minWidth: '8rem', flex: 1 }}>{c.name}</span>
-                      <div style={{ flex: 2, height: '0.5rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
-                        <div style={{ width: `${Math.max(2, pct * 100)}%`, height: '100%', background: 'var(--color-brand)' }} />
-                      </div>
-                      <span className="text-xs text-[var(--color-text-muted)]" style={{ width: '5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                        {toCur(c.mrr, data.primaryCurrency)}/mo
+                    <div key={c.name} className="flex items-center" style={{ gap: '0.625rem' }}>
+                      <span style={{ width: '0.5rem', height: '0.5rem', borderRadius: '999px', background: dot, flexShrink: 0 }} />
+                      <span className="text-sm text-[var(--color-text)] truncate" style={{ flex: 1, minWidth: 0 }}>{c.name}</span>
+                      <span className="text-xs text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                        {toCur(c.mrr, data.primaryCurrency)}
+                      </span>
+                      <span className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ fontVariantNumeric: 'tabular-nums', width: '2.5rem', textAlign: 'right', flexShrink: 0 }}>
+                        {(pct * 100).toFixed(0)}%
                       </span>
                     </div>
                   )
                 })}
               </div>
-            </>
+            </div>
           )}
         </div>
       </Card>
