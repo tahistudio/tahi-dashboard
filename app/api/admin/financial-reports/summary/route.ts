@@ -343,6 +343,55 @@ export async function GET(req: NextRequest) {
     (new Date().getFullYear() - taxYearStartYear) * 12 + (new Date().getMonth() - 3) + 1,
   ))
 
+  // ── Expense commitments aggregation (currency + cadence aware) ────
+  // SQL CASE-on-cadence does the cadence normalisation, but SQLite can't
+  // do FX conversion. Pull raw rows once, convert in JS via toNzd, then
+  // derive all three views (by category, by discretionary, total burn).
+  // This was the source of the Tax card showing NZ$25,151 expenses on
+  // 2 months elapsed — the prior version summed raw amounts ignoring
+  // both currency and cadence, then multiplied by months.
+  const commitmentRows = await database.all<{
+    category: string
+    amount: number
+    currency: string
+    cadence: string
+    isDiscretionary: number | null
+  }>(sql`
+    SELECT category, amount, currency, cadence, is_discretionary AS isDiscretionary
+    FROM expense_commitments
+    WHERE active = 1
+      AND (start_date IS NULL OR start_date <= datetime('now'))
+      AND (end_date IS NULL OR end_date >= ${taxYearStart})
+  `)
+  function cadenceToMonthly(cadence: string, amount: number): number {
+    switch (cadence) {
+      case 'monthly': return amount
+      case 'quarterly': return amount / 3
+      case 'annual': return amount / 12
+      default: return 0  // one_off — excluded from monthly burn
+    }
+  }
+  const commitmentMonthlyNzd = commitmentRows.map(r => {
+    const native = Number(r.amount ?? 0)
+    const monthlyNative = cadenceToMonthly(r.cadence, native)
+    const monthlyNzd = toNzd(monthlyNative, r.currency ?? 'NZD')
+    return {
+      category: r.category,
+      monthlyNzd,
+      isDiscretionary: Number(r.isDiscretionary ?? 0) === 1,
+    }
+  })
+  const totalMonthlyBurnNzd = commitmentMonthlyNzd.reduce((s, r) => s + r.monthlyNzd, 0)
+  const categoryMap = new Map<string, number>()
+  for (const r of commitmentMonthlyNzd) {
+    categoryMap.set(r.category, (categoryMap.get(r.category) ?? 0) + r.monthlyNzd)
+  }
+  const costMixRows = Array.from(categoryMap.entries())
+    .map(([category, monthly]) => ({ category, monthly, isDiscretionary: 0 }))
+    .sort((a, b) => b.monthly - a.monthly)
+  const discretionaryMonthly = commitmentMonthlyNzd.filter(r => r.isDiscretionary).reduce((s, r) => s + r.monthlyNzd, 0)
+  const essentialMonthly = totalMonthlyBurnNzd - discretionaryMonthly
+
   const taxYearInvoiceRows = await database.all<{ amount: number; currency: string }>(sql`
     SELECT total_usd AS amount, currency
     FROM invoices
@@ -351,24 +400,33 @@ export async function GET(req: NextRequest) {
   const taxYearRevenueRows = [{ total: taxYearInvoiceRows.reduce((s, r) => s + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'), 0) }]
   const taxYearRevenue = Number(taxYearRevenueRows[0]?.total ?? 0)
 
-  // GST: 15% of invoiced amount on NZ-domiciled clients. Sum of
-  // tax_amount on tax-year invoices is the truest proxy.
-  const gstRows = await database.all<{ total: number | null }>(sql`
-    SELECT COALESCE(SUM(tax_amount_usd), 0) AS total
+  // GST: 15% of NZ-domiciled paid invoices since Apr 1.
+  // tax_amount_usd is never populated by Stripe/Xero imports, so the
+  // old SUM(tax_amount_usd) always returned 0. Use a proxy instead:
+  // 15% of NZD-billed invoices (NZ clients) for the tax year.
+  // This is an estimate — Liam should still verify against Xero GST
+  // return for the period, but it stops the field being a useless 0.
+  const gstInvoiceRows = await database.all<{ amount: number; currency: string }>(sql`
+    SELECT total_usd AS amount, currency
     FROM invoices
-    WHERE paid_at IS NOT NULL AND paid_at >= ${taxYearStart}
+    WHERE paid_at IS NOT NULL
+      AND paid_at >= ${taxYearStart}
+      AND currency = 'NZD'
   `)
-  const gstOwedYtd = Number(gstRows[0]?.total ?? 0)
+  const gstableRevenueNzd = gstInvoiceRows.reduce(
+    (s, r) => s + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'),
+    0,
+  )
+  // NZ GST is GST-inclusive 15%, so output = revenue × 3/23 ≈ 13.04%
+  // of the gross. Use 15/115 for an inclusive figure.
+  const gstOwedYtd = gstableRevenueNzd * (15 / 115)
 
   // Corp tax (NZ): 28% of net profit, computed against the NZ tax year.
-  const taxYearExpenseRows = await database.all<{ total: number | null }>(sql`
-    SELECT COALESCE(SUM(amount), 0) AS total
-    FROM expense_commitments
-    WHERE active = 1
-      AND (start_date IS NULL OR start_date <= datetime('now'))
-      AND (end_date IS NULL OR end_date >= ${taxYearStart})
-  `)
-  const taxYearExpensesApprox = Number(taxYearExpenseRows[0]?.total ?? 0) * monthsIntoTaxYear
+  // Expenses are the currency+cadence-aware monthly burn × months
+  // elapsed in the tax year. The earlier inline SUM(amount) approach
+  // mixed currencies AND ignored cadence (annual line items were treated
+  // as monthly), which is why this card was showing wildly wrong numbers.
+  const taxYearExpensesApprox = totalMonthlyBurnNzd * monthsIntoTaxYear
   const ytdProfit = taxYearRevenue - taxYearExpensesApprox
   const corpTaxOwedYtd = Math.max(0, ytdProfit * 0.28)
   // Keep ytdExpensesApprox name for the existing response so the UI
@@ -416,42 +474,6 @@ export async function GET(req: NextRequest) {
   const monthlyRevenueRows = Array.from(monthlyRevenueMap.entries())
     .map(([ym, total]) => ({ ym, total }))
     .sort((a, b) => a.ym.localeCompare(b.ym))
-
-  // Cost-mix: monthly outflow by category. Pulled from expense_commitments
-  // (operator-confirmed truth).
-  const costMixRows = await database.all<{ category: string; monthly: number | null; isDiscretionary: number }>(sql`
-    SELECT category,
-           COALESCE(SUM(
-             CASE cadence
-               WHEN 'monthly' THEN amount
-               WHEN 'quarterly' THEN amount / 3.0
-               WHEN 'annual' THEN amount / 12.0
-               ELSE 0
-             END
-           ), 0) AS monthly,
-           COALESCE(MAX(is_discretionary), 0) AS isDiscretionary
-    FROM expense_commitments
-    WHERE active = 1
-    GROUP BY category
-    ORDER BY monthly DESC
-  `)
-
-  // Discretionary vs essential split for the spend audit. Categories
-  // are independent of the per-row is_discretionary flag (an essential
-  // category can hold a discretionary line item).
-  const discretionaryRows = await database.all<{ discMonthly: number | null; essMonthly: number | null }>(sql`
-    SELECT
-      COALESCE(SUM(CASE WHEN is_discretionary = 1 THEN
-        CASE cadence WHEN 'monthly' THEN amount WHEN 'quarterly' THEN amount / 3.0 WHEN 'annual' THEN amount / 12.0 ELSE 0 END
-        ELSE 0 END), 0) AS discMonthly,
-      COALESCE(SUM(CASE WHEN is_discretionary = 0 OR is_discretionary IS NULL THEN
-        CASE cadence WHEN 'monthly' THEN amount WHEN 'quarterly' THEN amount / 3.0 WHEN 'annual' THEN amount / 12.0 ELSE 0 END
-        ELSE 0 END), 0) AS essMonthly
-    FROM expense_commitments
-    WHERE active = 1
-  `)
-  const discretionaryMonthly = Number(discretionaryRows[0]?.discMonthly ?? 0)
-  const essentialMonthly = Number(discretionaryRows[0]?.essMonthly ?? 0)
 
   // Pipeline → cash funnel: open deals grouped by stage with value sum.
   // Closed-won shows separately as "signed".
