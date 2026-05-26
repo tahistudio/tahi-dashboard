@@ -78,6 +78,13 @@ const CRONS: CronDef[] = [
     endpoint: '/api/admin/integrations/airwallex/sync',
     schedule: 'Daily 06:00 NZT',
   },
+  {
+    cron: 'finance-anomaly-scan',
+    label: 'Finance anomaly scan (AI)',
+    description: 'Sonnet walks bank balances + commitments + AR + pipeline + MRR and surfaces 0-8 anomalies worth a look. Findings drop into Notifications as finance_anomaly events, deduped across 30-day windows.',
+    endpoint: '/api/admin/cron/finance-anomaly-scan',
+    schedule: 'Weekly Mon 07:00 NZT + Monthly 1st',
+  },
 ]
 
 export async function GET(req: NextRequest) {

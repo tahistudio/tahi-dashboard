@@ -50,6 +50,12 @@ on:
     # NZDT). Pulls current balances + last 30 days of transactions.
     # Powers the disposable-cash strip on /financial-reports.
     - cron: '0 18 * * *'
+    # Finance anomaly scan (AI) — Monday 21:00 UTC + 1st of month
+    # 21:00 UTC (offset from affiliate-reactivation @ 19:00 so the
+    # schedule→target mapping below stays unambiguous). Sonnet surfaces
+    # subscriptions creep, missing tax reserves, dry pipeline, etc.
+    - cron: '0 21 * * MON'
+    - cron: '0 21 1 * *'
   # Manual trigger via the Actions UI — pick which cron to fire.
   workflow_dispatch:
     inputs:
@@ -67,6 +73,7 @@ on:
           - sync-calendar
           - sync-drive-transcripts
           - sync-airwallex
+          - finance-anomaly-scan
 
 jobs:
   fire:
@@ -95,6 +102,7 @@ jobs:
               "0 19 * * *"|"0 20 * * *")         targets="daily-summary" ;;
               "0 19 * * MON")                    targets="affiliate-reactivation" ;;
               "0 18 * * *")                      targets="sync-airwallex" ;;
+              "0 21 * * MON"|"0 21 1 * *")       targets="finance-anomaly-scan" ;;
               *)                                 echo "::warning::Unknown schedule '$schedule'" ;;
             esac
           fi

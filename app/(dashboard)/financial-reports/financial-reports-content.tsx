@@ -358,6 +358,9 @@ export function FinancialReportsContent() {
         </div>
       </Card>
 
+      {/* AI anomaly findings — Sonnet's weekly + monthly scan output */}
+      <AnomaliesCard />
+
       {/* Reserve target config */}
       <ReserveTargetCard
         config={data.reserveConfig}
@@ -712,6 +715,124 @@ function StatusTile({ label, status, hint }: { label: string; status: 'green' | 
       </div>
       <span className="text-xs text-[var(--color-text-muted)]" style={{ lineHeight: 1.4 }}>{hint}</span>
     </div>
+  )
+}
+
+interface Anomaly {
+  id: string
+  title: string
+  body: string | null
+  entityId: string | null
+  createdAt: string
+}
+
+function AnomaliesCard() {
+  const [items, setItems] = useState<Anomaly[]>([])
+  const [loading, setLoading] = useState(true)
+  const [running, setRunning] = useState(false)
+  const { showToast } = useToast()
+
+  const fetchAnomalies = useCallback(async () => {
+    setLoading(true)
+    try {
+      const r = await fetch(apiPath('/api/admin/financial-reports/anomalies'))
+      if (r.ok) {
+        const d = await r.json() as { items?: Anomaly[] }
+        setItems(d.items ?? [])
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchAnomalies() }, [fetchAnomalies])
+
+  async function runScan() {
+    setRunning(true)
+    try {
+      const r = await fetch(apiPath('/api/admin/cron/finance-anomaly-scan'), { method: 'POST' })
+      const d = await r.json() as { inserted?: number; findingsRaw?: number; error?: string }
+      if (r.ok) {
+        showToast(`Scan ran — ${d.inserted ?? 0} new ${d.inserted === 1 ? 'finding' : 'findings'} (${(d.findingsRaw ?? 0) - (d.inserted ?? 0)} deduped)`, 'success')
+        await fetchAnomalies()
+      } else {
+        showToast(`Scan failed: ${d.error ?? 'unknown'}`, 'error')
+      }
+    } catch {
+      showToast('Scan failed', 'error')
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  async function resolve(id: string) {
+    // Optimistic remove. Marks the notification read so it drops out of
+    // the unresolved query on next fetch.
+    setItems(prev => prev.filter(x => x.id !== id))
+    try {
+      await fetch(apiPath(`/api/admin/notifications/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ read: true }),
+      })
+    } catch {
+      // Restore on failure.
+      await fetchAnomalies()
+    }
+  }
+
+  return (
+    <Card>
+      <div style={{ padding: '1.25rem 1.5rem' }}>
+        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+            Anomalies — AI weekly + monthly scan
+          </div>
+          <TahiButton size="sm" variant="secondary" loading={running} onClick={() => void runScan()}>
+            Run scan now
+          </TahiButton>
+        </div>
+        {loading ? (
+          <div className="animate-pulse" style={{ height: '4rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)' }} />
+        ) : items.length === 0 ? (
+          <p className="text-sm text-[var(--color-text-muted)]">
+            Nothing unusual. Sonnet runs the scan weekly + monthly; tap Run scan now to check immediately.
+          </p>
+        ) : (
+          <div className="grid" style={{ gap: '0.5rem' }}>
+            {items.map(a => (
+              <div key={a.id} className="flex items-start" style={{
+                gap: '0.75rem',
+                padding: '0.625rem 0.875rem',
+                background: 'var(--color-warning-bg, #fff7ed)',
+                border: '1px solid var(--color-warning-border, #fed7aa)',
+                borderRadius: 'var(--radius-md)',
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="text-sm font-semibold text-[var(--color-text)]">{a.title}</div>
+                  {a.body && <div className="text-xs text-[var(--color-text-muted)] mt-1" style={{ lineHeight: 1.5 }}>{a.body}</div>}
+                  <div className="text-[0.625rem] text-[var(--color-text-subtle)] mt-1">{fmtRelative(a.createdAt)}</div>
+                </div>
+                <button
+                  onClick={() => void resolve(a.id)}
+                  className="text-[0.6875rem] font-medium text-[var(--color-text-muted)]"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '0.25rem 0.5rem',
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
+                >
+                  Mark resolved
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
   )
 }
 
