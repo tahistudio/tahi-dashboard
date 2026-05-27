@@ -19,7 +19,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw, Play } from 'lucide-react'
+import { RefreshCw, Play, Plus, Pencil, Trash2 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
@@ -28,6 +28,9 @@ import { DataTable } from '@/components/tahi/data-table'
 import { DonutChart } from '@/components/tahi/chart'
 import { CHART } from '@/lib/chart-colors'
 import { useToast } from '@/components/tahi/toast'
+import { SlideOver } from '@/components/tahi/slide-over'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
+import { Input, Select, Textarea } from '@/components/tahi/input'
 import { apiPath } from '@/lib/api'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { convertToNzd } from '@/lib/currency'
@@ -807,8 +810,8 @@ export function FinancialReportsContent() {
       {/* Forex exposure */}
       <ForexCard forex={data.forex} formatNative={formatNative} />
 
-      {/* Subscription audit */}
-      <SubscriptionsAuditCard formatNative={formatNative} />
+      {/* Recurring outflows — full CRUD on expense commitments */}
+      <RecurringOutflowsCard formatNative={formatNative} />
 
       {/* Recent activity feed */}
       {(data.recentActivity.invoices.length > 0 || data.recentActivity.deals.length > 0) && (
@@ -1550,119 +1553,590 @@ function AnomaliesCard() {
   )
 }
 
-interface SubscriptionsAuditItem {
+interface CommitmentRow {
   id: string
   name: string
   vendor: string | null
   amount: number
   currency: string
-  cadence: string
+  cadence: 'monthly' | 'quarterly' | 'annual' | 'one_off'
   category: string
   nextDueDate: string | null
-  annualisedNzd: number
-  lastBankHit: { id: string; amount: number; currency: string; settledAt: string | null; counterparty: string | null } | null
-  hitsInWindow: number
+  startDate: string | null
+  endDate: string | null
+  billingDayOfMonth: number | null
+  active: boolean
+  isDiscretionary: boolean
+  notes: string | null
+  linkedXeroAccount: string | null
+  // Overlaid from /subscriptions-audit
+  annualisedNative?: number
+  lastBankHit?: { id: string; amount: number; currency: string; settledAt: string | null; counterparty: string | null } | null
 }
 
-function SubscriptionsAuditCard({ formatNative }: {
+const COMMITMENT_CADENCES = [
+  { value: 'monthly',   label: 'Monthly' },
+  { value: 'quarterly', label: 'Quarterly' },
+  { value: 'annual',    label: 'Annual' },
+  { value: 'one_off',   label: 'One-off' },
+] as const
+
+const COMMITMENT_CATEGORIES = [
+  { value: 'software',   label: 'Software' },
+  { value: 'salary',     label: 'Salary' },
+  { value: 'contractor', label: 'Contractor' },
+  { value: 'insurance',  label: 'Insurance' },
+  { value: 'tax',        label: 'Tax' },
+  { value: 'office',     label: 'Office' },
+  { value: 'marketing',  label: 'Marketing' },
+  { value: 'other',      label: 'Other' },
+] as const
+
+const COMMITMENT_CURRENCIES = ['NZD', 'USD', 'GBP', 'EUR', 'AUD'].map(c => ({ value: c, label: c }))
+
+interface CommitmentFormState {
+  name: string
+  vendor: string
+  amount: string
+  currency: string
+  cadence: CommitmentRow['cadence']
+  category: string
+  nextDueDate: string
+  startDate: string
+  endDate: string
+  billingDayOfMonth: string
+  notes: string
+  active: boolean
+  isDiscretionary: boolean
+}
+
+function emptyCommitmentForm(): CommitmentFormState {
+  return {
+    name: '', vendor: '', amount: '', currency: 'NZD', cadence: 'monthly',
+    category: 'software', nextDueDate: '', startDate: '', endDate: '',
+    billingDayOfMonth: '', notes: '', active: true, isDiscretionary: false,
+  }
+}
+
+// Monthly equivalent in the commitment's native currency. Active-aware.
+function monthlyEquivNative(c: CommitmentRow): number {
+  if (!c.active) return 0
+  switch (c.cadence) {
+    case 'monthly':   return c.amount
+    case 'quarterly': return c.amount / 3
+    case 'annual':    return c.amount / 12
+    case 'one_off':   return 0
+  }
+}
+
+function RecurringOutflowsCard({ formatNative }: {
   formatNative: (amount: number, currency: string) => string
 }) {
-  const [items, setItems] = useState<SubscriptionsAuditItem[]>([])
-  const [summary, setSummary] = useState<{ count: number; monthlyTotal: number; annualTotal: number; staleCount: number } | null>(null)
+  const [items, setItems] = useState<CommitmentRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [showInactive, setShowInactive] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null)
+  const [form, setForm] = useState<CommitmentFormState>(emptyCommitmentForm)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const { showToast } = useToast()
 
-  useEffect(() => {
-    let cancelled = false
+  const load = useCallback(async () => {
     setLoading(true)
-    fetch(apiPath('/api/admin/financial-reports/subscriptions-audit'))
-      .then(r => r.ok ? r.json() : null)
-      .then(raw => {
-        if (cancelled || !raw) return
-        const d = raw as { items?: SubscriptionsAuditItem[]; summary?: { count: number; monthlyTotal: number; annualTotal: number; staleCount: number } }
-        setItems(d.items ?? [])
-        setSummary(d.summary ?? null)
-      })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
+    try {
+      const [commitRes, auditRes] = await Promise.all([
+        fetch(apiPath('/api/admin/commitments')),
+        fetch(apiPath('/api/admin/financial-reports/subscriptions-audit')),
+      ])
+      const commitJson = commitRes.ok ? (await commitRes.json() as { commitments?: CommitmentRow[] }) : { commitments: [] }
+      const auditJson = auditRes.ok ? (await auditRes.json() as { items?: Array<{ id: string; annualisedNzd?: number; lastBankHit?: CommitmentRow['lastBankHit'] }> }) : { items: [] }
+      const auditMap = new Map((auditJson.items ?? []).map(a => [a.id, a]))
+      const merged: CommitmentRow[] = (commitJson.commitments ?? []).map(c => ({
+        ...c,
+        annualisedNative: auditMap.get(c.id)?.annualisedNzd, // misnamed upstream; it's actually native annualised
+        lastBankHit: auditMap.get(c.id)?.lastBankHit ?? null,
+      }))
+      setItems(merged)
+    } catch {
+      setItems([])
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
+  useEffect(() => { void load() }, [load])
+
+  function openCreate() {
+    setForm(emptyCommitmentForm())
+    setEditingId(null)
+    setError(null)
+    setDrawerOpen(true)
+  }
+
+  function openEdit(c: CommitmentRow) {
+    setForm({
+      name: c.name,
+      vendor: c.vendor ?? '',
+      amount: String(c.amount),
+      currency: c.currency,
+      cadence: c.cadence,
+      category: c.category,
+      nextDueDate: c.nextDueDate ?? '',
+      startDate: c.startDate ?? '',
+      endDate: c.endDate ?? '',
+      billingDayOfMonth: c.billingDayOfMonth != null ? String(c.billingDayOfMonth) : '',
+      notes: c.notes ?? '',
+      active: c.active,
+      isDiscretionary: c.isDiscretionary,
+    })
+    setEditingId(c.id)
+    setError(null)
+    setDrawerOpen(true)
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault()
+    const amount = parseFloat(form.amount)
+    if (!form.name.trim() || !Number.isFinite(amount)) {
+      setError('Name and a numeric amount are required.')
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      const day = form.billingDayOfMonth ? parseInt(form.billingDayOfMonth, 10) : null
+      const body = {
+        name: form.name.trim(),
+        vendor: form.vendor.trim() || null,
+        amount,
+        currency: form.currency,
+        cadence: form.cadence,
+        category: form.category,
+        nextDueDate: form.nextDueDate || null,
+        startDate: form.startDate || null,
+        endDate: form.endDate || null,
+        billingDayOfMonth: day && day >= 1 && day <= 31 ? day : null,
+        notes: form.notes.trim() || null,
+        active: form.active,
+        isDiscretionary: form.isDiscretionary,
+      }
+      const url = editingId ? apiPath(`/api/admin/commitments/${editingId}`) : apiPath('/api/admin/commitments')
+      const method = editingId ? 'PATCH' : 'POST'
+      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        setError(j.error ?? 'Save failed')
+        return
+      }
+      showToast(editingId ? 'Commitment updated' : 'Commitment added', 'success')
+      setDrawerOpen(false)
+      await load()
+    } catch {
+      setError('Network error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (!confirmDelete) return
+    try {
+      await fetch(apiPath(`/api/admin/commitments/${confirmDelete.id}`), { method: 'DELETE' })
+      showToast('Commitment deleted', 'success')
+      setConfirmDelete(null)
+      await load()
+    } catch {
+      showToast('Delete failed', 'error')
+    }
+  }
+
+  async function toggleActive(c: CommitmentRow) {
+    // Optimistic flip so the table updates instantly.
+    setItems(prev => prev.map(x => x.id === c.id ? { ...x, active: !c.active } : x))
+    try {
+      await fetch(apiPath(`/api/admin/commitments/${c.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !c.active }),
+      })
+    } catch { await load() }
+  }
+
+  const visible = showInactive ? items : items.filter(c => c.active)
+  // Display totals stay in native-currency sum (same behaviour as before).
+  // For accurate NZD totals, use the burn figure on the Reserves card.
+  const totalCount = items.length
+  const activeCount = items.filter(c => c.active).length
+  const staleCount = items.filter(c => c.active && !c.lastBankHit).length
+
   return (
-    <Card>
-      <div className="p-4 sm:p-6">
-        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
-            Recurring outflows
-          </div>
-          <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-            {summary && (
-              <>
-                {summary.count} commitments · {formatNative(summary.monthlyTotal, 'NZD')}/mo · {formatNative(summary.annualTotal, 'NZD')}/yr
-                {summary.staleCount > 0 && <> · <span style={{ color: 'var(--color-warning, #fb923c)' }}>{summary.staleCount} with no recent bank hit</span></>}
-              </>
-            )}
-          </div>
-        </div>
-        <DataTable
-          rows={items}
-          getRowId={(r) => r.id}
-          loading={loading}
-          empty={
-            <div className="p-4 text-sm text-[var(--color-text-muted)]">
-              No expense commitments configured yet. Add software / payroll / shareholder distributions through Settings → Commitments to start tracking outflow patterns.
+    <>
+      <Card>
+        <div className="p-4 sm:p-6">
+          <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div>
+              <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+                Recurring outflows
+              </div>
+              <div className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ marginTop: '0.25rem' }}>
+                {activeCount} active{showInactive && totalCount !== activeCount ? ` · ${totalCount - activeCount} paused` : ''}
+                {staleCount > 0 && (
+                  <> · <span style={{ color: 'var(--color-warning)' }}>{staleCount} with no recent bank hit</span></>
+                )}
+              </div>
             </div>
-          }
-          columns={[
-            {
-              key: 'name',
-              header: 'Commitment',
-              sortable: true,
-              accessor: (r) => r.name,
-              render: (r) => (
-                <div>
-                  <div className="font-medium text-[var(--color-text)]">{r.name}</div>
-                  <div className="text-[0.6875rem] text-[var(--color-text-subtle)] truncate">
-                    {r.vendor ?? r.category} · {r.cadence}
+            <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setShowInactive(v => !v)}
+                className="text-[0.6875rem] font-medium"
+                style={{
+                  padding: '0.25rem 0.625rem',
+                  borderRadius: 'var(--radius-md)',
+                  background: showInactive ? 'var(--color-bg-tertiary)' : 'transparent',
+                  color: 'var(--color-text-muted)',
+                  border: '1px solid var(--color-border-subtle)',
+                  cursor: 'pointer',
+                  minHeight: '1.75rem',
+                }}
+              >
+                {showInactive ? 'Hide paused' : 'Show paused'}
+              </button>
+              <TahiButton size="sm" variant="primary" iconLeft={<Plus size={14} />} onClick={openCreate}>
+                Add commitment
+              </TahiButton>
+            </div>
+          </div>
+          <DataTable
+            rows={visible}
+            getRowId={(r) => r.id}
+            loading={loading}
+            empty={
+              <div className="p-4 text-sm text-[var(--color-text-muted)]">
+                No expense commitments yet. Add software, salaries, agency contracts and other recurring spend.
+              </div>
+            }
+            columns={[
+              {
+                key: 'name',
+                header: 'Commitment',
+                sortable: true,
+                accessor: (r) => r.name,
+                render: (r) => (
+                  <div>
+                    <div className="font-medium text-[var(--color-text)]" style={{ opacity: r.active ? 1 : 0.55 }}>
+                      {r.name}
+                    </div>
+                    <div className="text-[0.6875rem] text-[var(--color-text-subtle)] truncate">
+                      {r.vendor ?? r.category} · {r.cadence.replace('_', ' ')}
+                      {r.billingDayOfMonth ? ` · day ${r.billingDayOfMonth}` : ''}
+                    </div>
+                    {(r.startDate || r.endDate) && (
+                      <div className="text-[0.6875rem]" style={{ marginTop: '0.125rem', color: 'var(--color-text-subtle)' }}>
+                        {r.startDate && <>from {r.startDate}</>}
+                        {r.startDate && r.endDate && ' · '}
+                        {r.endDate && <span style={{ color: 'var(--color-warning)' }}>ends {r.endDate}</span>}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ),
-            },
-            {
-              key: 'amount',
-              header: 'Native',
-              align: 'right',
-              sortable: true,
-              sortValue: (r) => r.annualisedNzd,
-              render: (r) => (
-                <div style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  <div className="text-[var(--color-text)] font-medium">{formatNative(r.amount, r.currency)}</div>
-                  <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">{formatNative(r.annualisedNzd, 'NZD')}/yr NZD</div>
-                </div>
-              ),
-            },
-            {
-              key: 'lastHit',
-              header: 'Last bank hit',
-              align: 'right',
-              sortable: true,
-              sortValue: (r) => r.lastBankHit?.settledAt ?? '',
-              render: (r) => r.lastBankHit ? (
-                <div style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  <div className="text-[var(--color-text-muted)] text-xs">
-                    {formatNative(r.lastBankHit.amount, r.lastBankHit.currency)}
+                ),
+              },
+              {
+                key: 'amount',
+                header: 'Native',
+                align: 'right',
+                sortable: true,
+                sortValue: (r) => monthlyEquivNative(r),
+                render: (r) => (
+                  <div style={{ fontVariantNumeric: 'tabular-nums', opacity: r.active ? 1 : 0.55 }}>
+                    <div className="text-[var(--color-text)] font-medium">{formatNative(r.amount, r.currency)}</div>
+                    <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+                      {formatNative(monthlyEquivNative(r), r.currency)}/mo
+                    </div>
                   </div>
-                  <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-                    {r.lastBankHit.settledAt ? fmtRelative(r.lastBankHit.settledAt) : '—'}
+                ),
+              },
+              {
+                key: 'lastHit',
+                header: 'Last bank hit',
+                align: 'right',
+                sortable: true,
+                sortValue: (r) => r.lastBankHit?.settledAt ?? '',
+                render: (r) => r.lastBankHit ? (
+                  <div style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    <div className="text-[var(--color-text-muted)] text-xs">
+                      {formatNative(r.lastBankHit.amount, r.lastBankHit.currency)}
+                    </div>
+                    <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+                      {r.lastBankHit.settledAt ? fmtRelative(r.lastBankHit.settledAt) : '—'}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <Badge tone="warning" variant="soft" size="sm">No recent hit</Badge>
-              ),
-            },
-          ]}
-          defaultSort={{ key: 'amount', dir: 'desc' }}
-        />
-      </div>
-    </Card>
+                ) : r.active ? (
+                  <Badge tone="warning" variant="soft" size="sm">No recent hit</Badge>
+                ) : (
+                  <Badge tone="neutral" variant="soft" size="sm">Paused</Badge>
+                ),
+              },
+              {
+                key: 'actions',
+                header: '',
+                align: 'right',
+                render: (r) => (
+                  <div className="flex items-center justify-end" style={{ gap: '0.25rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => toggleActive(r)}
+                      title={r.active ? 'Pause (exclude from forecast)' : 'Resume (include in forecast)'}
+                      className="text-[0.6875rem] font-medium"
+                      style={{
+                        padding: '0.1875rem 0.5rem',
+                        borderRadius: 'var(--radius-md)',
+                        background: r.active ? 'var(--color-brand-50)' : 'var(--color-bg-tertiary)',
+                        color: r.active ? 'var(--color-brand)' : 'var(--color-text-subtle)',
+                        border: 'none',
+                        cursor: 'pointer',
+                        minHeight: '1.75rem',
+                      }}
+                    >
+                      {r.active ? 'Active' : 'Paused'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEdit(r)}
+                      title="Edit"
+                      aria-label={`Edit ${r.name}`}
+                      style={{
+                        width: '1.75rem',
+                        height: '1.75rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 'var(--radius-md)',
+                        background: 'transparent',
+                        color: 'var(--color-text-muted)',
+                        border: 'none',
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)'; e.currentTarget.style.color = 'var(--color-text)' }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-muted)' }}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete({ id: r.id, name: r.name })}
+                      title="Delete"
+                      aria-label={`Delete ${r.name}`}
+                      style={{
+                        width: '1.75rem',
+                        height: '1.75rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 'var(--radius-md)',
+                        background: 'transparent',
+                        color: 'var(--color-text-muted)',
+                        border: 'none',
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)'; e.currentTarget.style.color = 'var(--color-danger)' }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-muted)' }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ),
+              },
+            ]}
+            defaultSort={{ key: 'amount', dir: 'desc' }}
+          />
+        </div>
+      </Card>
+
+      <SlideOver
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        title={editingId ? 'Edit commitment' : 'Add commitment'}
+        subtitle="Recurring expense that feeds your burn and cash-flow forecast"
+        maxWidth="32rem"
+      >
+        <form onSubmit={handleSave} style={{ display: 'contents' }}>
+          <SlideOver.Body>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.875rem' }}>
+              <CommitmentField label="Name" required className="col-span-2">
+                <Input
+                  value={form.name}
+                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="e.g. StraightIn (LinkedIn agency)"
+                />
+              </CommitmentField>
+              <CommitmentField label="Vendor / supplier">
+                <Input
+                  value={form.vendor}
+                  onChange={e => setForm(f => ({ ...f, vendor: e.target.value }))}
+                  placeholder="e.g. StraightIn"
+                />
+              </CommitmentField>
+              <CommitmentField label="Category">
+                <Select
+                  value={form.category}
+                  onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                  options={COMMITMENT_CATEGORIES}
+                  style={{ width: '100%' }}
+                />
+              </CommitmentField>
+              <CommitmentField label="Amount" required>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={form.amount}
+                  onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                  placeholder="0.00"
+                />
+              </CommitmentField>
+              <CommitmentField label="Currency">
+                <Select
+                  value={form.currency}
+                  onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}
+                  options={COMMITMENT_CURRENCIES}
+                  style={{ width: '100%' }}
+                />
+              </CommitmentField>
+              <CommitmentField label="Cadence">
+                <Select
+                  value={form.cadence}
+                  onChange={e => setForm(f => ({ ...f, cadence: e.target.value as CommitmentRow['cadence'] }))}
+                  options={COMMITMENT_CADENCES}
+                  style={{ width: '100%' }}
+                />
+              </CommitmentField>
+              <CommitmentField label="Billing day (1-31)" hint="When the charge typically hits">
+                <Input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={form.billingDayOfMonth}
+                  onChange={e => setForm(f => ({ ...f, billingDayOfMonth: e.target.value }))}
+                  placeholder="e.g. 1"
+                />
+              </CommitmentField>
+              <CommitmentField label="Start date" hint="Excluded from months before this">
+                <Input
+                  type="date"
+                  value={form.startDate}
+                  onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))}
+                />
+              </CommitmentField>
+              <CommitmentField label="End date" hint="Forecast drops off after this">
+                <Input
+                  type="date"
+                  value={form.endDate}
+                  onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))}
+                />
+              </CommitmentField>
+              {form.cadence !== 'monthly' && form.cadence !== 'one_off' && (
+                <CommitmentField label="Next due date" className="col-span-2">
+                  <Input
+                    type="date"
+                    value={form.nextDueDate}
+                    onChange={e => setForm(f => ({ ...f, nextDueDate: e.target.value }))}
+                  />
+                </CommitmentField>
+              )}
+              <CommitmentField label="Notes" className="col-span-2">
+                <Textarea
+                  rows={3}
+                  value={form.notes}
+                  onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="Anything you'd want to remember later."
+                />
+              </CommitmentField>
+              <div className="col-span-2" style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', paddingTop: '0.25rem' }}>
+                <label className="flex items-center" style={{ gap: '0.5rem', fontSize: '0.8125rem', color: 'var(--color-text)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={form.active}
+                    onChange={e => setForm(f => ({ ...f, active: e.target.checked }))}
+                  />
+                  Active (counted in burn)
+                </label>
+                <label className="flex items-center" style={{ gap: '0.5rem', fontSize: '0.8125rem', color: 'var(--color-text)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={form.isDiscretionary}
+                    onChange={e => setForm(f => ({ ...f, isDiscretionary: e.target.checked }))}
+                  />
+                  Discretionary (nice-to-have, could cut)
+                </label>
+              </div>
+              {error && (
+                <div className="col-span-2 text-sm" style={{ color: 'var(--color-danger)' }}>{error}</div>
+              )}
+            </div>
+            <style>{`.col-span-2 { grid-column: span 2; }`}</style>
+          </SlideOver.Body>
+          <SlideOver.Footer>
+            <div style={{ flex: 1 }}>
+              {editingId && (
+                <button
+                  type="button"
+                  onClick={() => { setDrawerOpen(false); setConfirmDelete({ id: editingId, name: form.name }) }}
+                  className="text-sm"
+                  style={{
+                    background: 'transparent',
+                    color: 'var(--color-danger)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '0.5rem 0',
+                    fontWeight: 500,
+                  }}
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+            <TahiButton type="button" variant="ghost" onClick={() => setDrawerOpen(false)}>Cancel</TahiButton>
+            <TahiButton type="submit" variant="primary" disabled={saving}>
+              {saving ? 'Saving…' : editingId ? 'Save changes' : 'Add commitment'}
+            </TahiButton>
+          </SlideOver.Footer>
+        </form>
+      </SlideOver>
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="Delete commitment?"
+        description={confirmDelete ? `"${confirmDelete.name}" will be removed from your forecast. You can re-add it later if needed.` : ''}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDelete(null)}
+      />
+    </>
+  )
+}
+
+function CommitmentField({ label, required, hint, className, children }: {
+  label: string
+  required?: boolean
+  hint?: string
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <label className={className} style={{ display: 'block' }}>
+      <span style={{ display: 'block', fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '0.3125rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+        {label}{required && <span style={{ color: 'var(--color-danger)' }}> *</span>}
+      </span>
+      {children}
+      {hint && (
+        <span style={{ display: 'block', marginTop: '0.25rem', fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+          {hint}
+        </span>
+      )}
+    </label>
   )
 }
 
