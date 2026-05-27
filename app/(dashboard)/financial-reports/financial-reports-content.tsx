@@ -20,7 +20,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw, Play, Plus, Pencil, Trash2 } from 'lucide-react'
+import { RefreshCw, Play, Plus, Pencil, Trash2, AlertCircle, TrendingDown, Receipt, Users, Wifi, ChevronRight } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
@@ -28,7 +28,6 @@ import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { DataTable } from '@/components/tahi/data-table'
 import { DonutChart, LineChart, BarChart } from '@/components/tahi/chart'
 import { CHART } from '@/lib/chart-colors'
-import { SectionTabs } from '@/components/tahi/section-tabs'
 import { useToast } from '@/components/tahi/toast'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
@@ -391,10 +390,9 @@ export function FinancialReportsContent() {
           Only renders when at least one alert applies. Aggregates the
           urgent "do something" signals from across the page so Liam
           doesn't have to scroll to find the red blinking lights. */}
-      <WatchlistStrip data={data} toCur={toCur} />
+      <NeedsAttentionCard data={data} toCur={toCur} />
 
       {/* ── Section jump nav ─────────────────────────────────────── */}
-      <SectionTabs items={FINANCE_SECTIONS} />
 
       {/* ── Cash section ─────────────────────────────────────────── */}
       <div id="cash" className="scroll-mt-20" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
@@ -767,19 +765,6 @@ export function FinancialReportsContent() {
   )
 }
 
-// ─── Section anchors (jump nav) ───────────────────────────────────────
-
-const FINANCE_SECTIONS = [
-  { id: 'cash',     label: 'Cash' },
-  { id: 'revenue',  label: 'Revenue' },
-  { id: 'mrr',      label: 'MRR' },
-  { id: 'sales',    label: 'Sales' },
-  { id: 'outflows', label: 'Outflows' },
-  { id: 'tax',      label: 'Tax' },
-  { id: 'takehome', label: 'Take-home' },
-  { id: 'planning', label: 'Planning' },
-] as const
-
 // ─── Layout helpers ───────────────────────────────────────────────────
 
 function SectionHeader({ title, hint }: { title: string; hint?: string }) {
@@ -923,103 +908,100 @@ function ConcentrationHint({ hint }: { hint: { tone: 'positive' | 'warning' | 'd
   )
 }
 
-// ─── Watchlist strip ──────────────────────────────────────────────────
+// ─── Needs your attention card ───────────────────────────────────────
 //
-// Aggregates the urgent finance-page alerts into one horizontal strip.
-// Only renders when at least one alert qualifies. Cap at 4 cards so the
-// strip never overflows past one row on desktop (h-scroll on mobile).
-// Warning chips outrank info chips when we're at the cap.
+// One restrained card with structured rows for the things Liam should
+// look at first. Icon on the left, the label, the amount on the right,
+// chevron to indicate it's tappable. Hover tints the row background
+// instead of using loud chip-style borders.
 
 type WatchlistTone = 'warning' | 'info'
 
-interface WatchlistChip {
+interface AttentionItem {
   id: string
   tone: WatchlistTone
+  icon: React.ReactNode
   label: string
-  /** Section id to scroll to on click. */
+  detail: string
   target: string | null
 }
 
-function buildWatchlist(data: SummaryResponse, toCur: (amount: number, fromCurrency: string) => string): WatchlistChip[] {
-  const chips: WatchlistChip[] = []
+function buildAttentionItems(data: SummaryResponse, toCur: (amount: number, fromCurrency: string) => string): AttentionItem[] {
+  const items: AttentionItem[] = []
   const primary = data.primaryCurrency
 
-  // Overdue AR (31d+). data.arAging exposes day-bucketed totals in primary
-  // currency. We collapse 31-60, 61-90, and 90+ into one "overdue" sum.
   const overdueAmount = (data.arAging.days30 ?? 0) + (data.arAging.days60 ?? 0) + (data.arAging.days90 ?? 0) + (data.arAging.days90plus ?? 0)
   const overdueCount = data.overdueCount ?? 0
   if (overdueAmount > 0 || overdueCount > 0) {
-    const noun = overdueCount === 1 ? 'overdue invoice' : 'overdue invoices'
-    chips.push({
+    items.push({
       id: 'ar-overdue',
       tone: 'warning',
+      icon: <Receipt size={14} />,
       label: overdueCount > 0
-        ? `${overdueCount} ${noun} · ${toCur(overdueAmount, primary)}`
-        : `${toCur(overdueAmount, primary)} overdue invoices`,
+        ? `${overdueCount} ${overdueCount === 1 ? 'invoice' : 'invoices'} overdue`
+        : 'Overdue invoices',
+      detail: toCur(overdueAmount, primary),
       target: 'sales',
     })
   }
 
-  // No deals signed in 60 days = sales engine stalled.
   if (data.salesVelocity.last60Days.count === 0) {
-    chips.push({
+    items.push({
       id: 'sales-stalled',
       tone: 'warning',
-      label: 'Sales engine stalled. No deals in 60 days.',
+      icon: <TrendingDown size={14} />,
+      label: 'Sales engine stalled',
+      detail: 'No deals in 60 days',
       target: 'sales',
     })
   }
 
-  // Unreserved corp tax. reserveConfig.unreservedTaxNzd is YTD owed minus
-  // what's already in a tax reserve pot. > 0 means we owe money we haven't
-  // ringfenced yet.
   if (data.reserveConfig.unreservedTaxNzd > 0) {
-    chips.push({
+    items.push({
       id: 'tax-unreserved',
       tone: 'warning',
-      label: `${toCur(data.reserveConfig.unreservedTaxNzd, 'NZD')} tax owed but not reserved`,
+      icon: <AlertCircle size={14} />,
+      label: 'Tax owed but not reserved',
+      detail: toCur(data.reserveConfig.unreservedTaxNzd, 'NZD'),
       target: 'tax',
     })
   }
 
-  // High client concentration. >50% of named MRR sitting with one client
-  // is a serious risk signal.
   if (data.clientConcentration.topClientShare > 0.5) {
-    chips.push({
+    items.push({
       id: 'concentration-high',
       tone: 'info',
-      label: `Top client is ${Math.round(data.clientConcentration.topClientShare * 100)}% of MRR`,
+      icon: <Users size={14} />,
+      label: 'High client concentration',
+      detail: `Top client is ${Math.round(data.clientConcentration.topClientShare * 100)}% of MRR`,
       target: 'mrr',
     })
   }
 
-  // Bank sync stale. > 7 days = info chip prompting a manual refresh.
   if (data.bankSyncedAt) {
     const ageDays = (Date.now() - new Date(data.bankSyncedAt).getTime()) / 86_400_000
     if (ageDays > 7) {
-      chips.push({
+      items.push({
         id: 'bank-stale',
         tone: 'info',
-        label: `Bank balances ${Math.floor(ageDays)} days old. Refresh to update.`,
+        icon: <Wifi size={14} />,
+        label: 'Bank balances out of date',
+        detail: `Last synced ${Math.floor(ageDays)}d ago`,
         target: 'cash',
       })
     }
   }
 
-  // Cap at 4. Warnings outrank info when trimming.
-  const warningsFirst = [...chips].sort((a, b) => {
-    if (a.tone === b.tone) return 0
-    return a.tone === 'warning' ? -1 : 1
-  })
-  return warningsFirst.slice(0, 4)
+  // Warnings before info, cap at 4 rows
+  return items.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'warning' ? -1 : 1)).slice(0, 4)
 }
 
-function WatchlistStrip({ data, toCur }: {
+function NeedsAttentionCard({ data, toCur }: {
   data: SummaryResponse
   toCur: (amount: number, fromCurrency: string) => string
 }) {
-  const chips = buildWatchlist(data, toCur)
-  if (chips.length === 0) return null
+  const items = buildAttentionItems(data, toCur)
+  if (items.length === 0) return null
 
   function jumpTo(id: string | null) {
     if (!id) return
@@ -1028,69 +1010,125 @@ function WatchlistStrip({ data, toCur }: {
   }
 
   return (
-    <div
-      className="h-scroll scrollbar-hide"
-      role="region"
-      aria-label="Finance watchlist"
-      style={{ minWidth: 0 }}
-    >
-      <div
-        className="flex"
-        style={{ gap: 'var(--space-2)' }}
-      >
-        {chips.map(chip => {
-          const tint = chip.tone === 'warning'
-            ? { bg: 'var(--color-warning-bg)', text: 'var(--color-warning)', border: 'var(--color-warning)' }
-            : { bg: 'var(--color-info-bg)', text: 'var(--color-info)', border: 'var(--color-info)' }
-          return (
-            <button
-              key={chip.id}
-              type="button"
-              onClick={() => jumpTo(chip.target)}
-              className="flex-shrink-0"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 'var(--space-2)',
-                padding: 'var(--space-2) var(--space-3)',
-                background: tint.bg,
-                border: `1px solid ${tint.border}`,
-                borderRadius: 'var(--radius-md)',
-                color: tint.text,
-                fontSize: 'var(--text-xs)',
-                fontWeight: 500,
-                cursor: chip.target ? 'pointer' : 'default',
-                transition: 'transform 150ms ease, box-shadow 150ms ease',
-                minHeight: '2.75rem',
-                textAlign: 'left',
-                whiteSpace: 'nowrap',
-              }}
-              onMouseEnter={e => {
-                if (!chip.target) return
-                e.currentTarget.style.transform = 'translateY(-1px)'
-                e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.06)'
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.transform = 'translateY(0)'
-                e.currentTarget.style.boxShadow = 'none'
-              }}
-            >
-              <span
-                aria-hidden="true"
+    <Card>
+      <div style={{ padding: 'var(--space-4) var(--space-5)' }}>
+        <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+          <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+            Needs your attention
+          </span>
+          <span
+            aria-hidden="true"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: '1.25rem',
+              height: '1.25rem',
+              padding: '0 0.375rem',
+              borderRadius: '999px',
+              background: 'var(--color-bg-tertiary)',
+              color: 'var(--color-text-muted)',
+              fontSize: '0.6875rem',
+              fontWeight: 600,
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {items.length}
+          </span>
+        </div>
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' }}>
+          {items.map((item, index) => {
+            const iconBg = item.tone === 'warning' ? 'var(--color-warning-bg)' : 'var(--color-info-bg)'
+            const iconFg = item.tone === 'warning' ? 'var(--color-warning)' : 'var(--color-info)'
+            return (
+              <li
+                key={item.id}
                 style={{
-                  width: '0.5rem',
-                  height: '0.5rem',
-                  borderRadius: '999px',
-                  background: tint.text,
-                  flexShrink: 0,
+                  borderTop: index === 0 ? 'none' : '1px solid var(--color-border-subtle)',
                 }}
-              />
-              {chip.label}
-            </button>
-          )
-        })}
+              >
+                <button
+                  type="button"
+                  onClick={() => jumpTo(item.target)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-3)',
+                    width: '100%',
+                    padding: 'var(--space-3) 0',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: item.target ? 'pointer' : 'default',
+                    textAlign: 'left',
+                    color: 'inherit',
+                    minHeight: '2.75rem',
+                    transition: 'background 150ms ease',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
+                  onMouseEnter={e => { if (item.target) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      flexShrink: 0,
+                      width: '1.75rem',
+                      height: '1.75rem',
+                      borderRadius: 'var(--radius-leaf-sm)',
+                      background: iconBg,
+                      color: iconFg,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginLeft: 'var(--space-2)',
+                    }}
+                  >
+                    {item.icon}
+                  </span>
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: 'var(--text-sm)',
+                      fontWeight: 500,
+                      color: 'var(--color-text)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {item.label}
+                  </span>
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      fontSize: 'var(--text-xs)',
+                      color: 'var(--color-text-muted)',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {item.detail}
+                  </span>
+                  {item.target && (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        flexShrink: 0,
+                        color: 'var(--color-text-subtle)',
+                        display: 'flex',
+                        marginRight: 'var(--space-2)',
+                      }}
+                    >
+                      <ChevronRight size={14} />
+                    </span>
+                  )}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
       </div>
-    </div>
+    </Card>
   )
 }
 

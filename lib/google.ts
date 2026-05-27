@@ -164,6 +164,63 @@ export async function listCalendarEvents(
   return data.items ?? []
 }
 
+/** Create a new event on the user's primary calendar.
+ *
+ *  The event is POSTed with attendees so Google sends invites + adds
+ *  the event to their calendars. We request `conferenceDataVersion=1`
+ *  and a `createRequest` so Google auto-creates a Meet link — the
+ *  returned `hangoutLink` becomes the meeting URL stored back on our
+ *  call row. Returns the created event so callers can persist the id.
+ */
+export async function createCalendarEvent(
+  accessToken: string,
+  input: {
+    title: string
+    description?: string | null
+    startIso: string
+    durationMinutes: number
+    attendeeEmails?: string[]
+    location?: string | null
+  },
+): Promise<CalendarEvent> {
+  const start = new Date(input.startIso)
+  if (Number.isNaN(start.getTime())) {
+    throw new Error(`createCalendarEvent: invalid startIso "${input.startIso}"`)
+  }
+  const end = new Date(start.getTime() + input.durationMinutes * 60_000)
+  const body: Record<string, unknown> = {
+    summary: input.title,
+    description: input.description ?? undefined,
+    start: { dateTime: start.toISOString() },
+    end: { dateTime: end.toISOString() },
+    attendees: (input.attendeeEmails ?? []).filter(Boolean).map(email => ({ email })),
+    conferenceData: {
+      createRequest: {
+        requestId: crypto.randomUUID(),
+        conferenceSolutionKey: { type: 'hangoutsMeet' },
+      },
+    },
+  }
+  if (input.location) body.location = input.location
+
+  const res = await fetch(
+    'https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1&sendUpdates=all',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    },
+  )
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Calendar create failed: ${res.status} ${text.slice(0, 300)}`)
+  }
+  return await res.json() as CalendarEvent
+}
+
 // ── Drive ─────────────────────────────────────────────────────────────────
 
 export interface DriveFile {

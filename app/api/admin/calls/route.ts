@@ -54,6 +54,11 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/admin/calls - create a call
+// Two-way Google Calendar sync: if Google is connected, also create the
+// event on the user's primary calendar so it shows up there + on every
+// attendee's calendar. We store the returned google_calendar_event_id
+// + the auto-generated Meet link back on our row so the home page
+// widget (which reads discovery_calls) sees it instantly.
 export async function POST(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
@@ -82,24 +87,103 @@ export async function POST(req: NextRequest) {
 
   const now = new Date().toISOString()
   const id = crypto.randomUUID()
+  const duration = body.durationMinutes ?? 30
+  const title = body.title.trim()
+  const description = body.description?.trim() || null
+  const attendees = body.attendees ?? []
+  let meetingUrl: string | null = body.meetingUrl?.trim() || null
+  let googleEventId: string | null = null
+  let calendarPushError: string | null = null
 
+  // Push to Google Calendar first so we can save the event id and the
+  // auto-generated Meet link with the row. Failures don't block the
+  // local insert — we still create the call and surface a warning.
   const database = await db()
+  try {
+    const { getGoogleAccessToken, createCalendarEvent, GoogleNotConnectedError } =
+      await import('@/lib/google')
+    try {
+      const tokens = await getGoogleAccessToken(database)
+      const attendeeEmails = attendees.map(a => a.email).filter(Boolean)
+      const event = await createCalendarEvent(tokens.accessToken, {
+        title,
+        description,
+        startIso: body.scheduledAt,
+        durationMinutes: duration,
+        attendeeEmails,
+      })
+      googleEventId = event.id ?? null
+      // Prefer caller's meeting URL; fall back to the Meet link Google made.
+      if (!meetingUrl) {
+        meetingUrl = event.hangoutLink
+          ?? event.conferenceData?.entryPoints?.find(e => e.entryPointType === 'video')?.uri
+          ?? null
+      }
+    } catch (err) {
+      if (err instanceof GoogleNotConnectedError) {
+        calendarPushError = 'google_not_connected'
+      } else {
+        calendarPushError = err instanceof Error ? err.message : String(err)
+      }
+    }
+  } catch {
+    // Module import failure — treat as disconnected.
+    calendarPushError = 'google_unavailable'
+  }
+
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
+  // Insert into legacy scheduled_calls (existing readers depend on it).
   await drizzle.insert(schema.scheduledCalls).values({
     id,
     orgId: body.orgId,
-    title: body.title.trim(),
-    description: body.description?.trim() || null,
+    title,
+    description,
     scheduledAt: body.scheduledAt,
-    durationMinutes: body.durationMinutes ?? 30,
-    meetingUrl: body.meetingUrl?.trim() || null,
-    attendees: JSON.stringify(body.attendees ?? []),
+    durationMinutes: duration,
+    meetingUrl,
+    attendees: JSON.stringify(attendees),
     status: 'scheduled',
     createdById: userId ?? 'system',
     createdAt: now,
     updatedAt: now,
   })
 
-  return NextResponse.json({ id }, { status: 201 })
+  // Also write a discovery_calls row so the unified home-page widget +
+  // /calls index see this call without waiting for the next pull-sync.
+  // googleCalendarEventId is what dedupes future pull-syncs from
+  // creating a duplicate (sync upserts by that key).
+  try {
+    await drizzle.insert(schema.discoveryCalls).values({
+      id: crypto.randomUUID(),
+      orgId: body.orgId,
+      title,
+      scheduledAt: body.scheduledAt,
+      durationMinutes: duration,
+      status: 'scheduled',
+      meetingType: 'client',
+      googleCalendarEventId: googleEventId,
+      googleMeetUrl: meetingUrl,
+      attendees: JSON.stringify(attendees.map(a => ({
+        name: a.name,
+        email: a.email,
+        role: a.type,
+      }))),
+      createdById: userId ?? 'system',
+      createdAt: now,
+      updatedAt: now,
+    })
+  } catch {
+    // If discovery_calls insert fails (schema mismatch on older D1s
+    // without the columns) we still consider the call created — the
+    // pull-sync will reconcile it later via googleCalendarEventId.
+  }
+
+  return NextResponse.json({
+    id,
+    googleEventId,
+    meetingUrl,
+    calendarPushed: !calendarPushError,
+    calendarPushError,
+  }, { status: 201 })
 }
