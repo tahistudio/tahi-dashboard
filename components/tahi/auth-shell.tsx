@@ -61,6 +61,8 @@ export function AuthShell({
         display: 'flex',
         flexDirection: 'row',
         background: 'var(--color-bg)',
+        overflowX: 'hidden',
+        maxWidth: '100vw',
       }}
       className="tahi-auth-shell"
     >
@@ -77,13 +79,15 @@ export function AuthShell({
         }}
       >
         <div style={{ width: '100%', maxWidth: '26rem' }}>
-          {/* Mobile-only compact brand header */}
+          {/* Mobile-only compact brand header. Wrapper is hidden by
+              default; the media query flips it to flex+center on small
+              viewports so the SVG wordmark always lands middle of the
+              viewport regardless of its intrinsic width. */}
           <div
             className="tahi-auth-mobile-brand"
             style={{
               display: 'none',
               marginBottom: '2rem',
-              textAlign: 'center',
               color: 'var(--color-text)',
             }}
           >
@@ -148,7 +152,10 @@ export function AuthShell({
             min-width: 0 !important;
           }
           .tahi-auth-shell .tahi-auth-mobile-brand {
-            display: block !important;
+            display: flex !important;
+            justify-content: center !important;
+            align-items: center !important;
+            width: 100% !important;
           }
         }
       `}</style>
