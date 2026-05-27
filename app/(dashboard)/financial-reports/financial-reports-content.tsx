@@ -359,7 +359,7 @@ export function FinancialReportsContent() {
       {/* ── Hero band: Where you stand right now ─────────────────────
           Two side-by-side FeatureCards. Left summarises cash and the
           two runway flavours; right summarises the revenue engine. */}
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(20rem, 1fr))', gap: 'var(--space-4)' }}>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 20rem), 1fr))', gap: 'var(--space-4)' }}>
         <HeroCashCard
           totalCashDisplay={totalCashDisplay}
           cur={cur}
@@ -397,7 +397,7 @@ export function FinancialReportsContent() {
       {/* ── Cash section ─────────────────────────────────────────── */}
       <div id="cash" className="scroll-mt-20" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
         <SectionHeader title="Cash" hint="Live bank balances and reserve pots." />
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(24rem, 1fr))', gap: 'var(--space-4)', alignItems: 'start' }}>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 24rem), 1fr))', gap: 'var(--space-4)', alignItems: 'start' }}>
           {/* Bank balances table */}
           <Card>
             <div className="p-4 sm:p-6">
@@ -505,7 +505,7 @@ export function FinancialReportsContent() {
       {/* ── Revenue section ─────────────────────────────────────── */}
       <div id="revenue" className="scroll-mt-20" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
         <SectionHeader title="Revenue" hint="Effective monthly, quarterly target and year-on-year." />
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(22rem, 1fr))', gap: 'var(--space-4)', alignItems: 'start' }}>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 22rem), 1fr))', gap: 'var(--space-4)', alignItems: 'start' }}>
           <QuarterAndProjectionCard
             quarterly={data.quarterly}
             yearEnd={data.yearEnd}
@@ -652,7 +652,7 @@ export function FinancialReportsContent() {
           <Card>
             <div className="p-4 sm:p-6">
               <SubSectionHeader title="Recent activity" meta="Last 5 paid invoices and last 5 deals signed." />
-              <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(18rem, 1fr))', gap: '1.5rem' }}>
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 18rem), 1fr))', gap: '1.5rem' }}>
                 <div style={{ minWidth: 0 }}>
                   <div className="text-xs font-semibold text-[var(--color-text)] mb-2">Paid invoices</div>
                   {data.recentActivity.invoices.length === 0 ? (
@@ -1844,7 +1844,7 @@ function CostMixCard({ costMix, spendSplit, formatNative }: {
           title="Cost mix and split"
           meta={`${formatNative(total, 'NZD')}/mo recurring · ${formatNative(splitTotal * 12, 'NZD')}/yr`}
         />
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(20rem, 1fr))', gap: 'var(--space-5)', alignItems: 'start', minWidth: 0 }}>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 20rem), 1fr))', gap: 'var(--space-5)', alignItems: 'start', minWidth: 0 }}>
           {/* Left: donut + legend by category. Donut + legend stack when
               the container is narrower than ~22rem (mobile portrait) so the
               legend isn't squeezed into 10rem of width. */}
@@ -2126,7 +2126,7 @@ function TaxSummaryCard({ taxes, reserves, primaryCurrency, toCur, formatNative 
           title="Tax owed and reserve progress"
           meta={`NZ tax year ${new Date(taxes.taxYearStart).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })} · ${taxes.monthsIntoTaxYear} of 12 months elapsed`}
         />
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(20rem, 1fr))', gap: 'var(--space-5)', alignItems: 'center' }}>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 20rem), 1fr))', gap: 'var(--space-5)', alignItems: 'center' }}>
           {/* Donut: how much of corp-tax-owed is already reserved. */}
           <div className="grid" style={{ gridTemplateColumns: '8rem 1fr', gap: 'var(--space-3)', alignItems: 'center' }}>
             <div style={{ width: '8rem', height: '8rem' }}>
@@ -2235,21 +2235,39 @@ function ProductivityCard({ revenuePerHour, hours, cashConversion, timeToPay, ou
           />
         </div>
         {winRateBySource.length > 0 && (
-          <div className="mt-4">
+          <div className="mt-4" style={{ minWidth: 0 }}>
             <div className="text-xs font-semibold text-[var(--color-text)] mb-2">Win rate by source (180d)</div>
-            <div className="grid" style={{ gap: '0.375rem' }}>
+            <div className="grid" style={{ gap: '0.625rem', minWidth: 0 }}>
               {winRateBySource.map(s => (
-                <div key={s.source} className="flex items-center" style={{ gap: '0.75rem' }}>
-                  <span className="text-sm text-[var(--color-text)] truncate" style={{ minWidth: '8rem' }}>{s.source}</span>
-                  <div style={{ flex: 1, height: '0.375rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
+                <div key={s.source} style={{ display: 'flex', flexDirection: 'column', gap: '0.3125rem', minWidth: 0 }}>
+                  <div className="flex items-center" style={{ gap: '0.5rem', minWidth: 0 }}>
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontSize: 'var(--text-sm)',
+                        color: 'var(--color-text)',
+                      }}
+                      title={s.source}
+                    >
+                      {s.source}
+                    </span>
+                    <span
+                      className="text-xs text-[var(--color-text-muted)]"
+                      style={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}
+                    >
+                      {Math.round(s.rate * 100)}%
+                      <span className="text-[var(--color-text-subtle)]" style={{ marginLeft: '0.375rem' }}>
+                        {s.won}/{s.total}
+                      </span>
+                    </span>
+                  </div>
+                  <div style={{ height: '0.375rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
                     <div style={{ width: `${Math.round(s.rate * 100)}%`, height: '100%', background: s.rate >= 0.5 ? 'var(--color-brand)' : 'var(--color-brand-light)' }} />
                   </div>
-                  <span className="text-xs text-[var(--color-text-muted)]" style={{ width: '4rem', textAlign: 'right' }}>
-                    {Math.round(s.rate * 100)}%
-                  </span>
-                  <span className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ width: '5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                    {s.won}/{s.total}
-                  </span>
                 </div>
               ))}
             </div>
