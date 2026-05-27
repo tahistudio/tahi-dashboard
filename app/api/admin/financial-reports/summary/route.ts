@@ -614,10 +614,15 @@ export async function GET(req: NextRequest) {
   // now. (Reserve target is a target, not a deduction.)
   const disposableCash = Math.max(0, primaryBalance - reservesTotal - lastYearTaxOwed)
 
-  // Reserve target = months × burn + last-year tax pot. If burn isn't
-  // configured yet, fall back to effective monthly revenue × 0.5 as a
-  // rough proxy. The cash status traffic-light reads against this.
-  const reserveTargetBurn = monthlyBurnNzd ?? (effectiveMonthlyRevenue > 0 ? effectiveMonthlyRevenue * 0.5 : 0)
+  // Reserve target = months × burn + last-year tax pot. Burn precedence:
+  //   1. Operator's manual override (`finance.monthlyBurnNzd`) — null when unset
+  //   2. Auto = sum of active commitments in NZD/mo (`totalMonthlyBurnNzd`)
+  //   3. Revenue × 0.5 as a last-ditch proxy (only when no commitments configured)
+  // The page exposes both manual + auto so the operator can flip between
+  // the two without losing their saved value.
+  const autoBurnNzd = totalMonthlyBurnNzd
+  const reserveTargetBurn = monthlyBurnNzd
+    ?? (autoBurnNzd > 0 ? autoBurnNzd : (effectiveMonthlyRevenue > 0 ? effectiveMonthlyRevenue * 0.5 : 0))
   const reserveTargetAmount = reserveTargetBurn * reserveTargetMonths + lastYearTaxOwed
   const reserveTargetMonthsOfRunway = reserveTargetBurn > 0 ? primaryBalance / reserveTargetBurn : null
 
@@ -682,10 +687,11 @@ export async function GET(req: NextRequest) {
     disposableCash,
     reserveConfig: {
       targetMonths: reserveTargetMonths,
-      monthlyBurnNzd,
+      monthlyBurnNzd,                   // operator's manual override (null = use auto)
+      autoBurnNzd,                      // sum of active commitments in NZD/mo
       lastYearTaxOwed,
       targetAmount: reserveTargetAmount,
-      targetBurn: reserveTargetBurn,
+      targetBurn: reserveTargetBurn,    // effective burn after manual/auto/fallback
       monthsOfRunway: reserveTargetMonthsOfRunway,
     },
     mrr: {

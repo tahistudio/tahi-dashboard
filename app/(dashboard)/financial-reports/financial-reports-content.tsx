@@ -47,6 +47,7 @@ interface SummaryResponse {
   reserveConfig: {
     targetMonths: number
     monthlyBurnNzd: number | null
+    autoBurnNzd: number
     lastYearTaxOwed: number
     targetAmount: number
     targetBurn: number
@@ -2298,6 +2299,7 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
   config: {
     targetMonths: number
     monthlyBurnNzd: number | null
+    autoBurnNzd: number
     lastYearTaxOwed: number
     targetAmount: number
     monthsOfRunway: number | null
@@ -2307,17 +2309,34 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
 }) {
   const { showToast } = useToast()
   const [months, setMonths] = useState(String(config.targetMonths))
+  // burnMode tracks whether the operator wants the auto-calculated burn
+  // (sum of active commitments) or their hand-set value. Switching to
+  // auto preserves the manual number in state so flipping back is
+  // friction-free — the input just blanks out visually.
+  const [burnMode, setBurnMode] = useState<'auto' | 'manual'>(
+    config.monthlyBurnNzd != null && config.monthlyBurnNzd > 0 ? 'manual' : 'auto'
+  )
   const [burn, setBurn] = useState(config.monthlyBurnNzd != null ? String(config.monthlyBurnNzd) : '')
   const [tax, setTax] = useState(String(config.lastYearTaxOwed || ''))
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
 
+  // Effective burn shown in the "Target amount" preview — recompute
+  // here so the preview updates as the user types, before save lands.
+  const previewBurn = burnMode === 'auto'
+    ? config.autoBurnNzd
+    : (parseFloat(burn) || 0)
+  const previewTarget = previewBurn * (parseFloat(months) || 0) + (parseFloat(tax) || 0)
+
   async function save() {
     setSaving(true)
     try {
+      // Auto mode persists as 0 — backend treats null/0 as "fall back
+      // to autoBurnNzd". Manual mode persists the typed number.
+      const burnValue = burnMode === 'auto' ? '0' : (burn || '0')
       const writes: Array<{ key: string; value: string }> = [
         { key: 'finance.reserveTargetMonths', value: months || '4' },
-        { key: 'finance.monthlyBurnNzd', value: burn || '0' },
+        { key: 'finance.monthlyBurnNzd', value: burnValue },
         { key: 'finance.lastYearTaxOwed', value: tax || '0' },
       ]
       for (const w of writes) {
@@ -2375,16 +2394,65 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
             />
           </div>
           <div>
-            <label style={labelStyle}>Monthly burn (NZD)</label>
-            <input
-              type="number"
-              min={0}
-              step="100"
-              value={burn}
-              onChange={e => { setBurn(e.target.value); setDirty(true) }}
-              placeholder="e.g. 8000"
-              style={inputStyle}
-            />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem', gap: '0.5rem' }}>
+              <label style={{ ...labelStyle, marginBottom: 0 }}>Monthly burn (NZD)</label>
+              <div role="group" aria-label="Burn calculation mode" style={{ display: 'inline-flex', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+                <button
+                  type="button"
+                  onClick={() => { setBurnMode('auto'); setDirty(true) }}
+                  className="text-[0.625rem] font-medium"
+                  style={{
+                    padding: '0.1875rem 0.5rem',
+                    background: burnMode === 'auto' ? 'var(--color-brand-50)' : 'transparent',
+                    color: burnMode === 'auto' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                  aria-pressed={burnMode === 'auto'}
+                >
+                  Auto
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setBurnMode('manual'); setDirty(true) }}
+                  className="text-[0.625rem] font-medium"
+                  style={{
+                    padding: '0.1875rem 0.5rem',
+                    background: burnMode === 'manual' ? 'var(--color-brand-50)' : 'transparent',
+                    color: burnMode === 'manual' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                    border: 'none',
+                    borderLeft: '1px solid var(--color-border)',
+                    cursor: 'pointer',
+                  }}
+                  aria-pressed={burnMode === 'manual'}
+                >
+                  Manual
+                </button>
+              </div>
+            </div>
+            {burnMode === 'auto' ? (
+              <div style={{ ...inputStyle, border: '1px dashed var(--color-border)', background: 'var(--color-bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontWeight: 600 }}>
+                <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatNative(config.autoBurnNzd, 'NZD')}</span>
+                <span style={{ fontSize: '0.625rem', fontWeight: 500, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  From commitments
+                </span>
+              </div>
+            ) : (
+              <input
+                type="number"
+                min={0}
+                step="100"
+                value={burn}
+                onChange={e => { setBurn(e.target.value); setDirty(true) }}
+                placeholder="e.g. 8000"
+                style={inputStyle}
+              />
+            )}
+            <div style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem', lineHeight: 1.45 }}>
+              {burnMode === 'auto'
+                ? 'Sum of every active commitment, currency-converted.'
+                : `Auto would give ${formatNative(config.autoBurnNzd, 'NZD')}/mo.`}
+            </div>
           </div>
           <div>
             <label style={labelStyle}>Last year tax owed (NZD)</label>
@@ -2401,8 +2469,13 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
           <div>
             <label style={labelStyle}>Target amount</label>
             <div style={{ ...inputStyle, border: 'none', padding: '0.4375rem 0', fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-brand-dark)' }}>
-              {formatNative(config.targetAmount, 'NZD')}
+              {formatNative(dirty ? previewTarget : config.targetAmount, 'NZD')}
             </div>
+            {dirty && Math.abs(previewTarget - config.targetAmount) > 0.5 && (
+              <div style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>
+                Was {formatNative(config.targetAmount, 'NZD')}. Save to apply.
+              </div>
+            )}
           </div>
         </div>
         <div className="flex items-center justify-between" style={{ gap: '0.75rem', flexWrap: 'wrap' }}>
