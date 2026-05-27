@@ -642,12 +642,12 @@ export function FinancialReportsContent() {
             <div className="p-4 sm:p-6">
               <SubSectionHeader title="Recent activity" meta="Last 5 paid invoices and last 5 deals signed." />
               <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(18rem, 1fr))', gap: '1.5rem' }}>
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <div className="text-xs font-semibold text-[var(--color-text)] mb-2">Paid invoices</div>
                   {data.recentActivity.invoices.length === 0 ? (
                     <p className="text-xs text-[var(--color-text-subtle)] italic">No paid invoices yet.</p>
                   ) : (
-                    <div className="grid" style={{ gap: '0.375rem' }}>
+                    <div className="grid" style={{ gap: '0.375rem', minWidth: 0 }}>
                       {data.recentActivity.invoices.map(inv => (
                         <ActivityRow
                           key={inv.id}
@@ -659,12 +659,12 @@ export function FinancialReportsContent() {
                     </div>
                   )}
                 </div>
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <div className="text-xs font-semibold text-[var(--color-text)] mb-2">Deals signed</div>
                   {data.recentActivity.deals.length === 0 ? (
                     <p className="text-xs text-[var(--color-text-subtle)] italic">No deals closed yet.</p>
                   ) : (
-                    <div className="grid" style={{ gap: '0.375rem' }}>
+                    <div className="grid" style={{ gap: '0.375rem', minWidth: 0 }}>
                       {data.recentActivity.deals.map(deal => (
                         <ActivityRow
                           key={deal.id}
@@ -853,12 +853,25 @@ function ShareCell({ pct }: { pct: number }) {
 }
 
 function ActivityRow({ title, amountLabel, dateLabel }: { title: string; amountLabel: string; dateLabel: string }) {
+  // minWidth: 0 on the outer flex container lets it shrink to its grid
+  // cell. Without it, a long deal title pushes the whole row wider than
+  // the parent and the page horizontal-scrolls on mobile.
   return (
     <div
       className="flex items-center justify-between text-xs"
-      style={{ gap: '0.5rem', padding: '0.4375rem 0.625rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-sm)' }}
+      style={{ gap: '0.5rem', padding: '0.4375rem 0.625rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-sm)', minWidth: 0 }}
     >
-      <span className="text-[var(--color-text)] truncate" style={{ minWidth: 0, flex: 1 }}>
+      <span
+        className="text-[var(--color-text)]"
+        style={{
+          minWidth: 0,
+          flex: 1,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+        title={title}
+      >
         {title}
       </span>
       <span className="text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0, fontWeight: 500 }}>
