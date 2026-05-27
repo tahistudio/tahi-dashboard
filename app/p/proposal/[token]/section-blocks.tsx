@@ -1494,19 +1494,29 @@ function PartnerBadges({ section }: { section: PublicSection }) {
 
 // ─── Shared styles (mirror proposal-viewer.tsx) ─────────────────────────────
 
-// One slide per section. On desktop the parent track lays slides out in
-// a horizontal row; on mobile they stack vertically (CSS in proposal-viewer
-// rewrites this on the .proposal-slide class).
+// Each section renders as one page inside a <PageChrome> frame (see
+// proposal-viewer.tsx). The shell here is therefore a document-flow block
+// rather than a 100svh slide. Transparent by default so the PageChrome
+// cream surface shows through for light sections; themed sections
+// (RetainerOffer etc) supply their own `background:` and continue to
+// render as coloured slabs inside the chrome.
+//
+// Modest internal padding so themed (dark/glass) sections retain
+// breathing room around their contents. Light sections appear flush
+// against the PageChrome inner wall, which is the desired editorial look.
 const slideShell: React.CSSProperties = {
   width: '100%',
-  background: '#FFFFFF',
+  background: 'transparent',
   border: 'none',
-  borderRadius: 0,
-  padding: 'clamp(2rem, 6vw, 5rem) clamp(1.25rem, 5vw, 3rem)',
-  minHeight: '100svh',
+  borderRadius: '0 16px 0 16px',
+  // Modest internal padding. Themed (dark / brand-glass) sections that
+  // supply their own `background:` need this so their slab keeps a calm
+  // inset around the contents; light sections inherit the cream surface
+  // of PageChrome and a touch more inset reads as breathing room.
+  padding: 'clamp(1rem, 2.5vw, 1.75rem) clamp(0.75rem, 2vw, 1.25rem)',
   display: 'flex',
   flexDirection: 'column',
-  justifyContent: 'center',
+  overflow: 'hidden',
   // Inner content rail.
   ['--rail-max' as string]: '64rem',
 }
