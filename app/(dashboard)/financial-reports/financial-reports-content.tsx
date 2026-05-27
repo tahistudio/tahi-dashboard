@@ -39,6 +39,10 @@ import { convertToNzd } from '@/lib/currency'
 
 interface SummaryResponse {
   asOf: string
+  /** Latest updatedAt across airwallex_balances. Null if Airwallex has
+   *  never synced. Surfaced on the cash hero as "Synced X ago" + the
+   *  Watchlist strip when older than 7 days. */
+  bankSyncedAt: string | null
   primaryCurrency: string
   bankBalances: Array<{ currency: string; available: number; total: number; sources: string[] }>
   reserves: {
@@ -366,6 +370,9 @@ export function FinancialReportsContent() {
           formatDisplay={formatDisplay}
           formatNative={formatNative}
           statusCash={data.status.cash}
+          bankSyncedAt={data.bankSyncedAt}
+          onRefreshBank={() => void syncAirwallex()}
+          syncing={syncing}
         />
         <HeroRevenueCard
           mrrCombined={toCurNumber(data.mrr.combined, data.primaryCurrency)}
@@ -379,6 +386,12 @@ export function FinancialReportsContent() {
           statusMrr={data.status.mrr}
         />
       </div>
+
+      {/* ── Watchlist strip ──────────────────────────────────────────
+          Only renders when at least one alert applies. Aggregates the
+          urgent "do something" signals from across the page so Liam
+          doesn't have to scroll to find the red blinking lights. */}
+      <WatchlistStrip data={data} toCur={toCur} />
 
       {/* ── Section jump nav ─────────────────────────────────────── */}
       <SectionTabs items={FINANCE_SECTIONS} />
@@ -910,6 +923,177 @@ function ConcentrationHint({ hint }: { hint: { tone: 'positive' | 'warning' | 'd
   )
 }
 
+// ─── Watchlist strip ──────────────────────────────────────────────────
+//
+// Aggregates the urgent finance-page alerts into one horizontal strip.
+// Only renders when at least one alert qualifies. Cap at 4 cards so the
+// strip never overflows past one row on desktop (h-scroll on mobile).
+// Warning chips outrank info chips when we're at the cap.
+
+type WatchlistTone = 'warning' | 'info'
+
+interface WatchlistChip {
+  id: string
+  tone: WatchlistTone
+  label: string
+  /** Section id to scroll to on click. */
+  target: string | null
+}
+
+function buildWatchlist(data: SummaryResponse, toCur: (amount: number, fromCurrency: string) => string): WatchlistChip[] {
+  const chips: WatchlistChip[] = []
+  const primary = data.primaryCurrency
+
+  // Overdue AR (31d+). data.arAging exposes day-bucketed totals in primary
+  // currency. We collapse 31-60, 61-90, and 90+ into one "overdue" sum.
+  const overdueAmount = (data.arAging.days30 ?? 0) + (data.arAging.days60 ?? 0) + (data.arAging.days90 ?? 0) + (data.arAging.days90plus ?? 0)
+  const overdueCount = data.overdueCount ?? 0
+  if (overdueAmount > 0 || overdueCount > 0) {
+    const noun = overdueCount === 1 ? 'overdue invoice' : 'overdue invoices'
+    chips.push({
+      id: 'ar-overdue',
+      tone: 'warning',
+      label: overdueCount > 0
+        ? `${overdueCount} ${noun} · ${toCur(overdueAmount, primary)}`
+        : `${toCur(overdueAmount, primary)} overdue invoices`,
+      target: 'sales',
+    })
+  }
+
+  // No deals signed in 60 days = sales engine stalled.
+  if (data.salesVelocity.last60Days.count === 0) {
+    chips.push({
+      id: 'sales-stalled',
+      tone: 'warning',
+      label: 'Sales engine stalled. No deals in 60 days.',
+      target: 'sales',
+    })
+  }
+
+  // Unreserved corp tax. reserveConfig.unreservedTaxNzd is YTD owed minus
+  // what's already in a tax reserve pot. > 0 means we owe money we haven't
+  // ringfenced yet.
+  if (data.reserveConfig.unreservedTaxNzd > 0) {
+    chips.push({
+      id: 'tax-unreserved',
+      tone: 'warning',
+      label: `${toCur(data.reserveConfig.unreservedTaxNzd, 'NZD')} tax owed but not reserved`,
+      target: 'tax',
+    })
+  }
+
+  // High client concentration. >50% of named MRR sitting with one client
+  // is a serious risk signal.
+  if (data.clientConcentration.topClientShare > 0.5) {
+    chips.push({
+      id: 'concentration-high',
+      tone: 'info',
+      label: `Top client is ${Math.round(data.clientConcentration.topClientShare * 100)}% of MRR`,
+      target: 'mrr',
+    })
+  }
+
+  // Bank sync stale. > 7 days = info chip prompting a manual refresh.
+  if (data.bankSyncedAt) {
+    const ageDays = (Date.now() - new Date(data.bankSyncedAt).getTime()) / 86_400_000
+    if (ageDays > 7) {
+      chips.push({
+        id: 'bank-stale',
+        tone: 'info',
+        label: `Bank balances ${Math.floor(ageDays)} days old. Refresh to update.`,
+        target: 'cash',
+      })
+    }
+  }
+
+  // Cap at 4. Warnings outrank info when trimming.
+  const warningsFirst = [...chips].sort((a, b) => {
+    if (a.tone === b.tone) return 0
+    return a.tone === 'warning' ? -1 : 1
+  })
+  return warningsFirst.slice(0, 4)
+}
+
+function WatchlistStrip({ data, toCur }: {
+  data: SummaryResponse
+  toCur: (amount: number, fromCurrency: string) => string
+}) {
+  const chips = buildWatchlist(data, toCur)
+  if (chips.length === 0) return null
+
+  function jumpTo(id: string | null) {
+    if (!id) return
+    const el = document.getElementById(id)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  return (
+    <div
+      className="h-scroll scrollbar-hide"
+      role="region"
+      aria-label="Finance watchlist"
+      style={{ minWidth: 0 }}
+    >
+      <div
+        className="flex"
+        style={{ gap: 'var(--space-2)' }}
+      >
+        {chips.map(chip => {
+          const tint = chip.tone === 'warning'
+            ? { bg: 'var(--color-warning-bg)', text: 'var(--color-warning)', border: 'var(--color-warning)' }
+            : { bg: 'var(--color-info-bg)', text: 'var(--color-info)', border: 'var(--color-info)' }
+          return (
+            <button
+              key={chip.id}
+              type="button"
+              onClick={() => jumpTo(chip.target)}
+              className="flex-shrink-0"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-2)',
+                padding: 'var(--space-2) var(--space-3)',
+                background: tint.bg,
+                border: `1px solid ${tint.border}`,
+                borderRadius: 'var(--radius-md)',
+                color: tint.text,
+                fontSize: 'var(--text-xs)',
+                fontWeight: 500,
+                cursor: chip.target ? 'pointer' : 'default',
+                transition: 'transform 150ms ease, box-shadow 150ms ease',
+                minHeight: '2.75rem',
+                textAlign: 'left',
+                whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={e => {
+                if (!chip.target) return
+                e.currentTarget.style.transform = 'translateY(-1px)'
+                e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.06)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.transform = 'translateY(0)'
+                e.currentTarget.style.boxShadow = 'none'
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: '0.5rem',
+                  height: '0.5rem',
+                  borderRadius: '999px',
+                  background: tint.text,
+                  flexShrink: 0,
+                }}
+              />
+              {chip.label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── Hero cards ────────────────────────────────────────────────────────
 
 function HeroCashCard({
@@ -921,6 +1105,9 @@ function HeroCashCard({
   formatDisplay,
   formatNative,
   statusCash,
+  bankSyncedAt,
+  onRefreshBank,
+  syncing,
 }: {
   totalCashDisplay: number
   cur: string
@@ -930,6 +1117,9 @@ function HeroCashCard({
   formatDisplay: (n: number) => string
   formatNative: (n: number, currency: string) => string
   statusCash: 'green' | 'amber' | 'red'
+  bankSyncedAt: string | null
+  onRefreshBank: () => void
+  syncing: boolean
 }) {
   const grossRunway = reserveConfig.grossRunwayMonths
   const netRunway = reserveConfig.netRunwayMonths
@@ -942,6 +1132,26 @@ function HeroCashCard({
     ? (surplus > 0 ? `+${formatNative(Math.max(0, surplus), 'NZD')}/mo` : 'n/a')
     : netRunway > 999 ? '∞' : `${netRunway.toFixed(1)} mo`
   const netLabelTitle = netRunway == null ? 'Cash positive' : 'Net-burn runway'
+
+  // Bank-sync freshness chip. Tints warning past 24h, danger past 7d so
+  // Liam never trusts a stale cash number. Refresh button next to it
+  // hand-fires the Airwallex sync.
+  const syncAgeHours = bankSyncedAt
+    ? Math.max(0, (Date.now() - new Date(bankSyncedAt).getTime()) / 3_600_000)
+    : null
+  const syncTone: 'muted' | 'warning' | 'danger' = syncAgeHours == null
+    ? 'muted'
+    : syncAgeHours >= 24 * 7
+      ? 'danger'
+      : syncAgeHours >= 24
+        ? 'warning'
+        : 'muted'
+  const syncColor = syncTone === 'danger'
+    ? 'var(--color-danger)'
+    : syncTone === 'warning'
+      ? 'var(--color-warning)'
+      : 'var(--color-text-subtle)'
+  const syncLabel = bankSyncedAt ? `Synced ${fmtRelative(bankSyncedAt)}` : 'Never synced'
 
   return (
     <Card>
@@ -965,6 +1175,56 @@ function HeroCashCard({
               <span className="text-xs text-[var(--color-text-muted)]">
                 across all accounts · displayed in {cur}
               </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-2)', flexWrap: 'wrap' }}>
+              <span
+                style={{
+                  fontSize: 'var(--text-xs)',
+                  color: syncColor,
+                  fontWeight: syncTone === 'muted' ? 400 : 500,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {syncLabel}
+              </span>
+              <button
+                type="button"
+                onClick={onRefreshBank}
+                disabled={syncing}
+                aria-label="Refresh bank balances"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.375rem',
+                  padding: '0.4375rem 0.625rem',
+                  fontSize: 'var(--text-xs)',
+                  fontWeight: 500,
+                  color: 'var(--color-text-muted)',
+                  background: 'transparent',
+                  border: '1px solid var(--color-border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  cursor: syncing ? 'not-allowed' : 'pointer',
+                  opacity: syncing ? 0.5 : 1,
+                  transition: 'background 150ms ease, color 150ms ease, border-color 150ms ease',
+                  minHeight: '2.25rem',
+                }}
+                onMouseEnter={e => {
+                  if (syncing) return
+                  e.currentTarget.style.background = 'var(--color-bg-secondary)'
+                  e.currentTarget.style.color = 'var(--color-brand)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'transparent'
+                  e.currentTarget.style.color = 'var(--color-text-muted)'
+                }}
+              >
+                <RefreshCw
+                  size={12}
+                  aria-hidden="true"
+                  className={syncing ? 'animate-spin' : undefined}
+                />
+                Refresh
+              </button>
             </div>
           </div>
           <Badge tone={STATUS_TONE[statusCash]} variant="soft" size="sm">

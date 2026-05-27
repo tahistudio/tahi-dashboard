@@ -88,6 +88,17 @@ export async function GET(req: NextRequest) {
     balancesByCurrency.set(cur, e)
   }
 
+  // Bank sync freshness. Latest updatedAt across the airwallex_balances
+  // rows is the truthiest "when did real cash data last refresh". The
+  // hero card on /financial-reports renders this as "Synced X ago" and
+  // tints warning/danger past 24h/7d. Null when no rows exist.
+  let bankSyncedAt: string | null = null
+  for (const b of airwallexBalances) {
+    if (!bankSyncedAt || (b.updatedAt && b.updatedAt > bankSyncedAt)) {
+      bankSyncedAt = b.updatedAt ?? bankSyncedAt
+    }
+  }
+
   // ── Reserves ──────────────────────────────────────────────────────
   const reserves = await database
     .select()
@@ -696,6 +707,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     asOf: nowIso,
+    bankSyncedAt,
     primaryCurrency,
     bankBalances: Array.from(balancesByCurrency.entries()).map(([currency, v]) => ({
       currency,

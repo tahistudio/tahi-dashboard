@@ -8,6 +8,7 @@ import {
   FileText, Plus, Trash2, GripVertical, ChevronDown, ChevronUp,
   Webhook, Loader2, User, Palette, ToggleLeft,
   Target, ClipboardList, Pencil, Sparkles, Share2, Heart, MessageCircle,
+  PiggyBank,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -15,7 +16,9 @@ import { useToast } from '@/components/tahi/toast'
 import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
 import { Badge } from '@/components/tahi/badge'
 import { Card } from '@/components/tahi/card'
-import { Input } from '@/components/tahi/input'
+import { Input, Select, Textarea } from '@/components/tahi/input'
+import { SlideOver } from '@/components/tahi/slide-over'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
 
 // -- Types --
@@ -351,6 +354,11 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
               )}
             </div>
           </section>
+
+          {/* Cash reserves (admin only). Sits between Notifications
+              and Integrations conceptually — surfaces the reserve pots
+              that drive the disposable-cash math on /financial-reports. */}
+          {isAdmin && <ReservesSection />}
 
           {/* Branding (admin only) - T277 */}
           {isAdmin && (
@@ -3928,6 +3936,538 @@ function BufferIntegrationSection() {
           </>
         )}
       </div>
+    </section>
+  )
+}
+
+// -- Cash reserves section --
+//
+// Surfaces the cash reserve pots that drive disposable-cash math on
+// /financial-reports. Each reserve is a "ringfenced" pot — tax, buffer,
+// client deposits, etc. — with an optional auto-accrual rate so the
+// daily cron can top it up from incoming revenue (e.g. 0.28 = NZ corp
+// tax rate).
+//
+// CRUD wires straight to /api/admin/reserves (+ /[id]). Soft-delete via
+// active=false is reserved for the backend cron; this UI uses hard
+// DELETE since Liam is unlikely to want stale rows hanging around.
+
+interface ReserveRow {
+  id: string
+  name: string
+  category: 'tax' | 'buffer' | 'deposits' | 'other'
+  currency: string
+  targetAmount: number | null
+  accruedAmount: number
+  accrualRate: number | null
+  notes: string | null
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+const RESERVE_CATEGORIES = [
+  { value: 'tax',      label: 'Tax' },
+  { value: 'buffer',   label: 'Buffer' },
+  { value: 'deposits', label: 'Client deposits' },
+  { value: 'other',    label: 'Other' },
+] as const
+
+const RESERVE_CURRENCIES = [
+  { value: 'NZD', label: 'NZD' },
+  { value: 'USD', label: 'USD' },
+  { value: 'GBP', label: 'GBP' },
+  { value: 'EUR', label: 'EUR' },
+  { value: 'AUD', label: 'AUD' },
+] as const
+
+const CATEGORY_TONE: Record<ReserveRow['category'], 'positive' | 'warning' | 'info' | 'neutral'> = {
+  tax: 'warning',
+  buffer: 'positive',
+  deposits: 'info',
+  other: 'neutral',
+}
+
+const CATEGORY_LABEL: Record<ReserveRow['category'], string> = {
+  tax: 'Tax',
+  buffer: 'Buffer',
+  deposits: 'Deposits',
+  other: 'Other',
+}
+
+function formatReserveAmount(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat('en-NZ', {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 0,
+    }).format(amount)
+  } catch {
+    return `${currency} ${amount.toFixed(0)}`
+  }
+}
+
+function ReservesSection() {
+  const { showToast } = useToast()
+  const [reserves, setReserves] = useState<ReserveRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [editing, setEditing] = useState<ReserveRow | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<ReserveRow | null>(null)
+
+  // Form state — single shared block so create + edit reuse the same fields.
+  const [formName, setFormName] = useState('')
+  const [formCategory, setFormCategory] = useState<ReserveRow['category']>('tax')
+  const [formCurrency, setFormCurrency] = useState('NZD')
+  const [formTarget, setFormTarget] = useState('')
+  const [formAccrued, setFormAccrued] = useState('0')
+  const [formRate, setFormRate] = useState('')
+  const [formNotes, setFormNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const fetchReserves = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/reserves'))
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as { reserves: ReserveRow[] }
+      setReserves(data.reserves ?? [])
+    } catch {
+      setReserves([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchReserves() }, [fetchReserves])
+
+  function resetForm() {
+    setFormName('')
+    setFormCategory('tax')
+    setFormCurrency('NZD')
+    setFormTarget('')
+    setFormAccrued('0')
+    setFormRate('')
+    setFormNotes('')
+  }
+
+  function openCreate() {
+    setEditing(null)
+    resetForm()
+    setDrawerOpen(true)
+  }
+
+  function openEdit(row: ReserveRow) {
+    setEditing(row)
+    setFormName(row.name)
+    setFormCategory(row.category)
+    setFormCurrency(row.currency)
+    setFormTarget(row.targetAmount != null ? String(row.targetAmount) : '')
+    setFormAccrued(String(row.accruedAmount))
+    setFormRate(row.accrualRate != null ? String(row.accrualRate) : '')
+    setFormNotes(row.notes ?? '')
+    setDrawerOpen(true)
+  }
+
+  function closeDrawer() {
+    setDrawerOpen(false)
+    setEditing(null)
+  }
+
+  async function handleSave() {
+    if (!formName.trim()) {
+      showToast('Name is required', 'error')
+      return
+    }
+    const targetParsed = formTarget.trim() === '' ? null : Number(formTarget)
+    const accruedParsed = formAccrued.trim() === '' ? 0 : Number(formAccrued)
+    const rateParsed = formRate.trim() === '' ? null : Number(formRate)
+
+    if (targetParsed != null && (!Number.isFinite(targetParsed) || targetParsed < 0)) {
+      showToast('Target amount must be zero or positive', 'error')
+      return
+    }
+    if (!Number.isFinite(accruedParsed) || accruedParsed < 0) {
+      showToast('Accrued amount must be zero or positive', 'error')
+      return
+    }
+    if (rateParsed != null && (!Number.isFinite(rateParsed) || rateParsed < 0 || rateParsed > 1)) {
+      showToast('Accrual rate must be between 0 and 1 (e.g. 0.28 for 28%)', 'error')
+      return
+    }
+
+    setSaving(true)
+    try {
+      const payload = {
+        name: formName.trim(),
+        category: formCategory,
+        currency: formCurrency,
+        targetAmount: targetParsed,
+        accruedAmount: accruedParsed,
+        accrualRate: rateParsed,
+        notes: formNotes.trim() === '' ? null : formNotes.trim(),
+      }
+      const url = editing
+        ? apiPath(`/api/admin/reserves/${editing.id}`)
+        : apiPath('/api/admin/reserves')
+      const method = editing ? 'PATCH' : 'POST'
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' })) as { error?: string }
+        throw new Error(err.error ?? 'Failed to save reserve')
+      }
+      showToast(editing ? 'Reserve updated' : 'Reserve created', 'success')
+      closeDrawer()
+      await fetchReserves()
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to save reserve', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (!confirmDelete) return
+    try {
+      const res = await fetch(apiPath(`/api/admin/reserves/${confirmDelete.id}`), { method: 'DELETE' })
+      if (!res.ok) throw new Error('Failed')
+      showToast('Reserve deleted', 'success')
+      setConfirmDelete(null)
+      await fetchReserves()
+    } catch {
+      showToast('Failed to delete reserve', 'error')
+    }
+  }
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <PiggyBank className="w-5 h-5" aria-hidden="true" />
+        Cash reserves
+      </h2>
+
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-card)',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Header strip with hint + add button */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: '1rem',
+            padding: '1rem 1.25rem',
+            borderBottom: '1px solid var(--color-border-subtle)',
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ flex: 1, minWidth: '12rem' }}>
+            <p className="text-sm text-[var(--color-text)]" style={{ margin: 0 }}>
+              Ringfence cash for tax, buffers, and client deposits. Reserves are subtracted from disposable cash on Financial reports.
+            </p>
+            {reserves.length === 0 && !loading && (
+              <p
+                className="text-xs"
+                style={{
+                  marginTop: '0.5rem',
+                  color: 'var(--color-text-muted)',
+                  lineHeight: 1.5,
+                }}
+              >
+                No reserves configured. Tahi recommends at minimum a tax pot (28% accrual rate, NZD).
+              </p>
+            )}
+          </div>
+          <TahiButton size="sm" onClick={openCreate} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+            Add reserve
+          </TahiButton>
+        </div>
+
+        {loading ? (
+          <div style={{ padding: '1rem 1.25rem' }}>
+            <LoadingSkeleton rows={3} />
+          </div>
+        ) : reserves.length === 0 ? (
+          <div
+            style={{
+              padding: '2rem 1.25rem',
+              textAlign: 'center',
+              color: 'var(--color-text-muted)',
+              fontSize: 'var(--text-sm)',
+            }}
+          >
+            Add your first reserve to start tracking ringfenced cash.
+          </div>
+        ) : (
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+            {reserves.map((row, idx) => {
+              const pct = row.targetAmount && row.targetAmount > 0
+                ? Math.min(100, Math.round((row.accruedAmount / row.targetAmount) * 100))
+                : null
+              return (
+                <li
+                  key={row.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '1rem',
+                    padding: '0.875rem 1.25rem',
+                    borderTop: idx === 0 ? 'none' : '1px solid var(--color-border-subtle)',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: '12rem' }}>
+                    <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+                      <span className="text-sm font-semibold text-[var(--color-text)]">{row.name}</span>
+                      <Badge tone={CATEGORY_TONE[row.category]} variant="soft" size="sm">
+                        {CATEGORY_LABEL[row.category]}
+                      </Badge>
+                      <Badge tone="neutral" variant="soft" size="sm">{row.currency}</Badge>
+                    </div>
+                    <div
+                      className="text-xs text-[var(--color-text-muted)]"
+                      style={{ marginTop: '0.25rem', fontVariantNumeric: 'tabular-nums' }}
+                    >
+                      {formatReserveAmount(row.accruedAmount, row.currency)}
+                      {row.targetAmount != null && row.targetAmount > 0 && (
+                        <> / {formatReserveAmount(row.targetAmount, row.currency)}</>
+                      )}
+                      {row.accrualRate != null && (
+                        <> · auto-accruing at {Math.round(row.accrualRate * 100)}%</>
+                      )}
+                      {row.accrualRate == null && (
+                        <> · manual</>
+                      )}
+                    </div>
+                    {pct != null && (
+                      <div
+                        aria-hidden="true"
+                        style={{
+                          marginTop: '0.5rem',
+                          height: '0.25rem',
+                          width: '100%',
+                          maxWidth: '14rem',
+                          background: 'var(--color-bg-secondary)',
+                          borderRadius: '999px',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: `${pct}%`,
+                            height: '100%',
+                            background: pct >= 100 ? 'var(--color-brand)' : 'var(--color-brand-light)',
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      onClick={() => openEdit(row)}
+                      aria-label={`Edit ${row.name}`}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '2.25rem',
+                        height: '2.25rem',
+                        borderRadius: 'var(--radius-md)',
+                        border: 'none',
+                        background: 'transparent',
+                        color: 'var(--color-text-muted)',
+                        cursor: 'pointer',
+                        transition: 'background 150ms ease, color 150ms ease',
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.background = 'var(--color-bg-secondary)'
+                        e.currentTarget.style.color = 'var(--color-brand)'
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.background = 'transparent'
+                        e.currentTarget.style.color = 'var(--color-text-muted)'
+                      }}
+                    >
+                      <Pencil className="w-4 h-4" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(row)}
+                      aria-label={`Delete ${row.name}`}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '2.25rem',
+                        height: '2.25rem',
+                        borderRadius: 'var(--radius-md)',
+                        border: 'none',
+                        background: 'transparent',
+                        color: 'var(--color-text-muted)',
+                        cursor: 'pointer',
+                        transition: 'background 150ms ease, color 150ms ease',
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.background = 'var(--color-bg-secondary)'
+                        e.currentTarget.style.color = 'var(--color-danger)'
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.background = 'transparent'
+                        e.currentTarget.style.color = 'var(--color-text-muted)'
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" aria-hidden="true" />
+                    </button>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
+
+      <SlideOver
+        open={drawerOpen}
+        onClose={closeDrawer}
+        title={editing ? 'Edit reserve' : 'Add reserve'}
+        subtitle={editing ? 'Update this ringfenced pot.' : 'Ringfence cash for tax, buffer, or client deposits.'}
+        icon={<PiggyBank size={15} aria-hidden="true" />}
+        maxWidth="30rem"
+      >
+        <SlideOver.Body>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1-5)' }}>
+              <span className="text-xs font-semibold text-[var(--color-text)]">Name</span>
+              <Input
+                value={formName}
+                onChange={e => setFormName(e.target.value)}
+                placeholder="Corp tax pot"
+                autoFocus
+              />
+            </label>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 'var(--space-3)',
+              }}
+            >
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1-5)' }}>
+                <span className="text-xs font-semibold text-[var(--color-text)]">Category</span>
+                <Select
+                  value={formCategory}
+                  onChange={e => setFormCategory(e.target.value as ReserveRow['category'])}
+                  options={RESERVE_CATEGORIES}
+                  style={{ width: '100%' }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1-5)' }}>
+                <span className="text-xs font-semibold text-[var(--color-text)]">Currency</span>
+                <Select
+                  value={formCurrency}
+                  onChange={e => setFormCurrency(e.target.value)}
+                  options={RESERVE_CURRENCIES}
+                  style={{ width: '100%' }}
+                />
+              </label>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 'var(--space-3)',
+              }}
+            >
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1-5)' }}>
+                <span className="text-xs font-semibold text-[var(--color-text)]">Currently accrued</span>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step="0.01"
+                  value={formAccrued}
+                  onChange={e => setFormAccrued(e.target.value)}
+                  placeholder="0"
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1-5)' }}>
+                <span className="text-xs font-semibold text-[var(--color-text)]">Target (optional)</span>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step="0.01"
+                  value={formTarget}
+                  onChange={e => setFormTarget(e.target.value)}
+                  placeholder="20000"
+                />
+              </label>
+            </div>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1-5)' }}>
+              <span className="text-xs font-semibold text-[var(--color-text)]">Accrual rate (optional)</span>
+              <Input
+                type="number"
+                inputMode="decimal"
+                min={0}
+                max={1}
+                step="0.01"
+                value={formRate}
+                onChange={e => setFormRate(e.target.value)}
+                placeholder="0.28"
+              />
+              <span className="text-xs text-[var(--color-text-muted)]">
+                Decimal between 0 and 1. The daily sync adds (revenue × rate) to the pot. Leave blank for manual.
+              </span>
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1-5)' }}>
+              <span className="text-xs font-semibold text-[var(--color-text)]">Notes</span>
+              <Textarea
+                value={formNotes}
+                onChange={e => setFormNotes(e.target.value)}
+                placeholder="Optional context for future-you."
+                rows={3}
+              />
+            </label>
+          </div>
+        </SlideOver.Body>
+        <SlideOver.Footer>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)' }}>
+            <TahiButton variant="secondary" size="sm" onClick={closeDrawer} disabled={saving}>
+              Cancel
+            </TahiButton>
+            <TahiButton size="sm" onClick={() => void handleSave()} loading={saving}>
+              {editing ? 'Save changes' : 'Create reserve'}
+            </TahiButton>
+          </div>
+        </SlideOver.Footer>
+      </SlideOver>
+
+      {confirmDelete && (
+        <ConfirmDialog
+          open={true}
+          title="Delete reserve?"
+          description={`"${confirmDelete.name}" will be removed permanently. The disposable cash figure on Financial reports will jump up by the accrued amount.`}
+          confirmLabel="Delete reserve"
+          variant="danger"
+          onConfirm={handleDelete}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
     </section>
   )
 }
