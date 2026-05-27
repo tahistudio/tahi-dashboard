@@ -1695,6 +1695,124 @@ interface FocusDeal {
   stageIsClosedLost: number | null
 }
 
+// Tick once a minute so the live-now status + countdown stay accurate
+// without forcing a refresh. Returns a render counter; consumers compute
+// their own freshness from `Date.now()` on each tick.
+function useMinuteTicker() {
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setTick(v => v + 1), 30_000)
+    return () => clearInterval(t)
+  }, [])
+  return tick
+}
+
+// Compute live status for a scheduled call. The window opens 5 minutes
+// before the start (so the join button appears in time) and closes at
+// scheduledAt + durationMinutes.
+function callPhase(scheduledAt: string, durationMinutes: number): {
+  phase: 'live' | 'soon' | 'upcoming' | 'past'
+  minutesUntilStart: number
+} {
+  const now = Date.now()
+  const start = new Date(scheduledAt).getTime()
+  const end = start + durationMinutes * 60_000
+  const minutesUntilStart = Math.round((start - now) / 60_000)
+  if (now >= start && now <= end) return { phase: 'live', minutesUntilStart }
+  if (now < start && start - now <= 5 * 60_000) return { phase: 'soon', minutesUntilStart }
+  if (now > end) return { phase: 'past', minutesUntilStart }
+  return { phase: 'upcoming', minutesUntilStart }
+}
+
+function NextCallLiveBadge({ scheduledAt, durationMinutes }: { scheduledAt: string; durationMinutes: number }) {
+  useMinuteTicker()
+  const { phase, minutesUntilStart } = callPhase(scheduledAt, durationMinutes)
+  if (phase === 'upcoming' || phase === 'past') return null
+  const tone = phase === 'live' ? '#4ade80' : '#fbbf24'
+  const label = phase === 'live' ? 'Live now' : minutesUntilStart <= 0 ? 'Starting now' : `In ${minutesUntilStart}m`
+  return (
+    <span
+      className="inline-flex items-center"
+      style={{
+        gap: '0.3125rem',
+        padding: '0.125rem 0.5rem',
+        borderRadius: '999px',
+        background: 'rgba(255, 255, 255, 0.14)',
+        fontSize: '0.625rem',
+        fontWeight: 600,
+        letterSpacing: '0.04em',
+        color: 'white',
+        textTransform: 'uppercase',
+      }}
+    >
+      <span
+        style={{
+          width: '0.4375rem',
+          height: '0.4375rem',
+          borderRadius: '999px',
+          background: tone,
+          animation: phase === 'live' ? 'tahi-call-pulse 1.4s ease-in-out infinite' : undefined,
+          flexShrink: 0,
+        }}
+      />
+      {label}
+      <style>{`
+        @keyframes tahi-call-pulse {
+          0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55); }
+          50%      { opacity: 0.65; box-shadow: 0 0 0 0.375rem rgba(74, 222, 128, 0); }
+        }
+      `}</style>
+    </span>
+  )
+}
+
+function NextCallJoinButton({ meetingUrl, scheduledAt, durationMinutes }: {
+  meetingUrl: string
+  scheduledAt: string
+  durationMinutes: number
+}) {
+  useMinuteTicker()
+  const { phase } = callPhase(scheduledAt, durationMinutes)
+  // Brand-green pop when the call is live or about to start. Muted
+  // secondary look for plain-upcoming calls so the home page doesn't
+  // shout "Join now" for something three days away.
+  const live = phase === 'live' || phase === 'soon'
+  return (
+    <a
+      href={meetingUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center"
+      style={{
+        gap: '0.4375rem',
+        padding: '0.5rem 0.875rem',
+        fontSize: '0.8125rem',
+        fontWeight: 600,
+        borderRadius: 'var(--radius-leaf-sm)',
+        background: live ? '#4ade80' : 'rgba(255, 255, 255, 0.14)',
+        color: live ? '#0f1d0e' : 'white',
+        textDecoration: 'none',
+        transition: 'background 150ms ease, transform 150ms ease',
+        boxShadow: live ? '0 0 0 0 rgba(74, 222, 128, 0.55)' : 'none',
+        animation: phase === 'live' ? 'tahi-join-pulse 1.6s ease-in-out infinite' : undefined,
+      }}
+      onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)' }}
+      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)' }}
+    >
+      {live ? 'Join now' : 'Open meeting link'}
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M7 17L17 7M9 7h8v8" />
+      </svg>
+      <style>{`
+        @keyframes tahi-join-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55); }
+          50%      { box-shadow: 0 0 0 0.5rem rgba(74, 222, 128, 0); }
+        }
+      `}</style>
+    </a>
+  )
+}
+
 function TodayFocusStrip() {
   const { format } = useDisplayCurrency()
   const [call, setCall] = useState<FocusCall | null>(null)
@@ -1737,7 +1855,12 @@ function TodayFocusStrip() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: 'var(--space-4)' }}>
       <FeatureCard variant="forest" padding="lg">
-        <FeatureCard.Eyebrow>Next call</FeatureCard.Eyebrow>
+        <FeatureCard.Eyebrow>
+          <span className="inline-flex items-center" style={{ gap: '0.5rem' }}>
+            Next call
+            {call && <NextCallLiveBadge scheduledAt={call.scheduledAt} durationMinutes={call.durationMinutes} />}
+          </span>
+        </FeatureCard.Eyebrow>
         <FeatureCard.Title>
           {loading
             ? 'Loading...'
@@ -1752,6 +1875,15 @@ function TodayFocusStrip() {
               ? `${call.withSubtitle ? `${call.withSubtitle} · ` : ''}${new Date(call.scheduledAt).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })} at ${new Date(call.scheduledAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })} (${call.durationMinutes}min)`
               : 'Schedule a call from the calls page when one comes up.'}
         </FeatureCard.Description>
+        {call && call.meetingUrl && (
+          <FeatureCard.Footer>
+            <NextCallJoinButton
+              meetingUrl={call.meetingUrl}
+              scheduledAt={call.scheduledAt}
+              durationMinutes={call.durationMinutes}
+            />
+          </FeatureCard.Footer>
+        )}
       </FeatureCard>
 
       <FeatureCard variant="lime" padding="lg">
