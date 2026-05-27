@@ -1,7 +1,7 @@
 # Tahi Dashboard — Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-05-24** by Claude (Phase A foundations)
+> Last updated: **2026-05-28** by Claude (Phase H finance + calendar two-way sync shipped)
 
 ---
 
@@ -9,10 +9,11 @@
 
 Features the user actively runs their workday on. Regressions here are P0.
 
-- **Sales pipeline** — deals, kanban, list, nudges, activity timeline, default owner
-- **Finance reports** — P&L, cash flow forecast, bank balances, invoice aging, retainer health, MRR forecast, expense dashboard
+- **Sales pipeline** — deals, kanban, list, nudges, activity timeline, default owner. Closed_at now auto-set on stage moves so sales velocity is honest.
+- **Financial reports (`/financial-reports`)** — Phase H finance overhaul shipped 2026-05-27/28. Cash hero (total cash + reserve donut + dual runway), Needs-attention card, MRR breakdown + concentration, Sales velocity + pipeline funnel + AR aging, Recurring outflows full CRUD with auto-detect cadence, Cost mix donut, Tax + reserve coverage, Take-home progress, Reserve target settings, Spend impact calculator. Currency switcher in nav respected page-wide.
 - **Docs Hub** — shipped + locked 2026-05-23. Reference list-page pattern (FilterBar + DataTable + SlideOver). Notion-grade editor with bubble menu, slash commands, task lists, image, and a 56rem slide-over with clickable version history.
 - **Proposals / contracts / schedules / calculator** — built and premium, but not yet in the user's daily routine (closest to crossing the line)
+- **Settings → Cash reserves** — new CRUD section shipped 2026-05-27 for tax/buffer/deposits pots that feed the disposable-cash math.
 
 ## Built but not daily-trusted
 
@@ -69,6 +70,15 @@ Full plan: `C:\Users\Work\.claude\plans\i-d-like-you-to-gentle-neumann.md`
 
 ---
 
+## Recent activity (2026-05-27 → 2026-05-28)
+
+- **Phase H finance shipped** — `/financial-reports` premium UI/UX overhaul. Hero band (cash + revenue side-by-side then stacked per user feedback), reserve donut, dual runway (worst-case + net-burn, tax-adjusted), bank-sync staleness stamp + Refresh button, currency switcher integration page-wide, Needs-attention card replacing the previous chip-style watchlist. Section tabs removed.
+- **Recurring outflows CRUD + auto-detect cadence** — add/edit/delete commitments via SlideOver. Auto/Manual burn toggle on Reserve target card. Cadence auto-detect reads 180d of Airwallex transactions and infers billing day + cadence with confidence scoring.
+- **Cash reserves CRUD** — new `/api/admin/reserves` routes + Settings section. Tax/buffer/deposits/other pots with target + accrued + accrual rate. Auto-cron accrues from daily revenue when rate is set.
+- **Calendar two-way sync** — `POST /api/admin/calls` now pushes to Google Calendar with auto-Meet link + attendee invites, writes the event id back, also lands in `discovery_calls` so home widget sees it instantly. "Next call" widget got Live-now badge + Join button.
+- **Auth shell premium rebuild** — split-pane sign-in / sign-up with `TahiStudioWordmark` SVG, brand-themed Clerk widget, client-focused copy, centred wordmark on mobile, no horizontal scroll.
+- **Data correctness fixes** — deal closed_at backfill (migration 0057) + auto-set on stage move so sales velocity reads real numbers. Inverted FX formula in summary route fixed. Retainer breakdown table on /financial-reports. Tax-adjusted runway. Monthly history chart year-aware labels.
+
 ## Recent activity (2026-05-23 → 2026-05-24)
 
 - **Lead intake foundation** — `leads` table + `people` canonical identity (one human, many roles via `person_id` on leads/contacts/team_members) + `/leads` page using DataTable + FilterBar + SlideOver + LeadForm. Lead MCP tools live on the worker.
@@ -78,16 +88,16 @@ Full plan: `C:\Users\Work\.claude\plans\i-d-like-you-to-gentle-neumann.md`
 
 ## Last shipped (last 10 commits, user-visible)
 
-- `408b333` — Contract PDF: pill wraps label cleanly, redundant hex dropped
-- `499f283` — Calc: tolerates old-shape scope on saved calculations
-- `0952f83` — Calc overhaul, draft-from-calc, schedule gradient, desktop fade-in, sidebar cleanup
-- `e013131` — Contracts/schedules: real PDF attachments, expanded schedule status
-- `7527ac8` — Calculator MVP: capacity, benchmarks, retainer pacing
-- `64d5225` — Emails: text-only Tahi Studio wordmark in header band
-- `8c46bc2` — Emails: kill duplicate wordmark
-- `eb00795` — Contracts/fully-signed: graceful fallback when PDF render fails
-- `825330d` — Phase 7/contracts: auto-email signed PDF when fully signed
-- `870f756` — Phase 7/schedule-templates: save-as-template + create-from-template
+- `35973d5` — /financial-reports mobile: equal-width cards + win-rate row wrap
+- `5d4fd8a` — Auth shell mobile: kill horizontal scroll, centre wordmark
+- `488d534` — Watchlist redesign + Section tabs removed + Calendar push-back
+- `a0c7278` — Cash reserves CRUD + sync staleness + watchlist on /financial-reports
+- `d5342d0` — Recent activity rows: stop overflowing on mobile
+- `86ceb7f` — Hero cash card: stack donut + metrics vertically
+- `d1b73d6` — Next call widget: live-now badge + Join button
+- `15fc002` — Mobile audit fixes: auth shell, financial reports, next-call widget, deals closed_at
+- `1673b74` — Auth pages: split-panel premium layout with proper brand mark
+- `61df271` — /financial-reports premium UI/UX overhaul aligned to design system
 
 ---
 

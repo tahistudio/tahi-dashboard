@@ -135,9 +135,29 @@ The schedule + deliverable rebuild that closed off most of Slice 1 + parts of Sl
 - **EmailShareModal: Cc / Bcc / Subject ✓** — full email composition for proposal/schedule/contract sharing.
 - **MCP catch-up ✓** — 4 new tools (publish_schedule, publish_proposal, list_crons, list_all_calls) + lead firmographic schema + meeting type / linkage fields + 250k transcript doc. Worker auto-deploy via GitHub Actions.
 
-### Phase H · Finance overhaul (next up, 2026-05-26)
+### Phase H · Finance overhaul (SHIPPED ✓ 2026-05-27 → 2026-05-28)
 
-Triggered by the hiring decision + need for "am I on track?" visibility. Reports/billing/invoices/time placement gets rethought.
+Triggered by the hiring decision + need for "am I on track?" visibility. Reports/billing/invoices/time placement got rethought.
+
+**What landed:**
+- `/financial-reports` page restructured into hero (Cash + Revenue) → Needs-attention card → Cash → Revenue → MRR → Sales → Outflows → Tax → Take-home → Planning. Section tabs removed after Liam pushed back on the visual noise.
+- Hero cash card: total cash NZD-equivalent, reserve donut, dual runway (worst-case + net-burn with tax adjustment), bank-sync staleness stamp + Refresh button.
+- Currency switcher in nav respected page-wide via a smart `formatNative` shim — NZD aggregates convert, native bank/reserve rows stay native.
+- Auto/manual burn toggle on the Reserve target card. Auto sums every active commitment (currency + cadence aware). Manual preserves saved override when flipping back to Auto.
+- Recurring outflows full CRUD: add/edit/delete via SlideOver, quick pause/resume, "Show paused" filter. Auto-detect cadence button infers billing day + cadence from 180d of Airwallex transactions with confidence scoring.
+- Cash reserves CRUD (Settings → Cash reserves): tax/buffer/deposits/other pots with target + accrued amounts and optional accrual rate (cron auto-accrues from daily revenue).
+- "Needs your attention" card surfaces overdue invoices, stalled sales engine, unreserved tax, high client concentration, and stale bank sync as a quiet structured list.
+- Mobile: every responsive grid wraps its column minimum in `min(100%, Nrem)` so cards line up the same width on 375px viewports. Win-rate-by-source rows stack label/numbers above a full-width bar so long source names don't overflow.
+- Bug fixes along the way: closed_at backfill on existing closed-won deals (migration 0057) + auto-set on stage move → sales velocity finally honest. Inverted FX formula fix in the summary route + retainer breakdown table. PB Tech transaction-related staleness surfaced via the sync stamp.
+
+**Calendar two-way sync (sister feature, shipped 2026-05-28):**
+- `POST /api/admin/calls` now pushes to Google Calendar with `conferenceData.createRequest` so Google generates a Meet link and emails attendees. Returned event id + Meet URL written back to the row.
+- Same write also lands in `discovery_calls` so the home page "Next call" widget sees new calls instantly (no waiting for the next pull-sync).
+- Home page "Next call" card got a live "Live now" badge + "Join now" button that pulses when the call is within 5 min or actively running.
+
+**Status: shipped.** Spec locked 2026-05-26. Live as of 2026-05-28 across desktop + mobile + dark mode. Liam has used the page on the deployed site to identify accuracy issues and triage them.
+
+**Original spec for reference:**
 
 **Headline shape:**
 - `/financial-reports` — single top-level page (not nested under /reports). Top half answers "am I on track?" (status traffic-lights, disposable cash now, cashflow forecast with scenarios). Bottom half answers "huh, that's interesting" (charts).
