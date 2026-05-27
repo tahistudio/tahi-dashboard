@@ -1,21 +1,22 @@
-'use client'
+﻿'use client'
 
 /**
- * /financial-reports — Phase H finance overhaul page.
+ * /financial-reports. The finance dashboard Liam opens to make hire,
+ * spend, and tax decisions.
  *
- * Two halves:
- *  - Top: "Am I on track?" — status traffic-lights, disposable cash now,
- *    MRR / ARR / YTD revenue, sales velocity, outstanding AR. This is
- *    the page Liam opens to make hire / spend / tax decisions.
- *  - Bottom (coming next): "Huh, that's interesting" charts —
- *    MRR stacked area, revenue per client, cost-mix donut, profit per
- *    logged hour, pipeline → cash funnel, seasonality heatmap.
+ * Structure:
+ *  - Hero band: cash and revenue at a glance.
+ *  - Sectioned scroll: Cash, Revenue, MRR, Sales, Outflows, Tax,
+ *    Take-home, Planning. Jump nav sticky on scroll.
+ *  - Every NZD aggregate respects the global currency switcher via
+ *    the `formatNative` shim. Native bank balances stay native.
  *
  * Design rules:
- *  - No icons on metric tiles (type leads; icons reserved for actions)
- *  - No touching cards with divider lines (gap-driven layout)
- *  - Numbers in tabular-nums + currency-aligned columns
- *  - Source-of-truth chips on every figure (Stripe / Xero / Airwallex)
+ *  - No icons on metric tiles (type leads; icons reserved for actions).
+ *  - No side-only borders. Borders are all-sides or absent.
+ *  - rem units only. No raw px.
+ *  - Numbers in tabular-nums and currency-aligned columns.
+ *  - Source-of-truth chips on bank rows (Stripe, Xero, Airwallex).
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -25,8 +26,9 @@ import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { DataTable } from '@/components/tahi/data-table'
-import { DonutChart } from '@/components/tahi/chart'
+import { DonutChart, LineChart, BarChart } from '@/components/tahi/chart'
 import { CHART } from '@/lib/chart-colors'
+import { SectionTabs } from '@/components/tahi/section-tabs'
 import { useToast } from '@/components/tahi/toast'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
@@ -139,17 +141,8 @@ interface SummaryResponse {
   }
 }
 
-function fmtCurrency(n: number, currency: string): string {
-  const formatter = new Intl.NumberFormat('en-NZ', {
-    style: 'currency',
-    currency,
-    maximumFractionDigits: 0,
-  })
-  return formatter.format(Math.round(n))
-}
-
 // Filters out balance rows with zero available cash. Liam doesn't want
-// the row spam — Airwallex returns ~50 currencies regardless of whether
+// the row spam. Airwallex returns ~50 currencies regardless of whether
 // any are funded.
 function isFunded(b: { available: number; total: number }): boolean {
   return Math.abs(b.available) > 0.01 || Math.abs(b.total) > 0.01
@@ -190,7 +183,7 @@ export function FinancialReportsContent() {
   //   - Genuinely native amounts (bank balances per currency, invoice billed
   //     in GBP) → stay native via the raw formatter from context.
   // This single shim is what makes every card on this page respect the
-  // switcher — children take this version as the `formatNative` prop.
+  // switcher. Children take this version as the `formatNative` prop.
   const formatNative = useCallback((amount: number, currency: string): string => {
     if (currency === 'NZD') return formatDisplay(amount)
     return formatNativeRaw(amount, currency)
@@ -220,7 +213,7 @@ export function FinancialReportsContent() {
       const r = await fetch(apiPath('/api/admin/financial-reports/backfill-mrr'), { method: 'POST' })
       const j = await r.json() as { updated?: number; unchanged?: number; error?: string }
       if (r.ok) {
-        showToast(`MRR backfilled — ${j.updated ?? 0} clients updated, ${j.unchanged ?? 0} unchanged`, 'success')
+        showToast(`MRR backfilled. ${j.updated ?? 0} clients updated, ${j.unchanged ?? 0} unchanged`, 'success')
         await fetchSummary()
       } else {
         showToast(`Backfill failed: ${j.error ?? 'unknown'}`, 'error')
@@ -236,7 +229,7 @@ export function FinancialReportsContent() {
       const r = await fetch(apiPath('/api/admin/integrations/airwallex/sync'), { method: 'POST' })
       const j = await r.json() as { balances?: number; transactions?: { fetched?: number }; error?: string }
       if (r.ok) {
-        showToast(`Airwallex synced — ${j.balances ?? 0} balances, ${j.transactions?.fetched ?? 0} txns`, 'success')
+        showToast(`Airwallex synced. ${j.balances ?? 0} balances, ${j.transactions?.fetched ?? 0} txns`, 'success')
         await fetchSummary()
       } else {
         showToast(`Sync failed: ${j.error ?? 'unknown'}`, 'error')
@@ -275,7 +268,7 @@ export function FinancialReportsContent() {
   // this so the page reads the same whether you've picked NZD, USD, GBP
   // etc in the nav switcher.
   const cur = displayCurrency
-  // toCur(amount, fromCurrency) — convert source-currency amount to
+  // toCur(amount, fromCurrency). Convert source-currency amount to
   // the user's display currency, fully formatted. Step 1 normalises to
   // NZD (the FX context's canonical pivot); step 2 lets toDisplay
   // render in whatever the nav switcher is set to.
@@ -293,18 +286,44 @@ export function FinancialReportsContent() {
   }
   // Bank balances rendered in their NATIVE currency (with the display
   // currency equivalent in smaller text below). Strip any row with a
-  // zero balance — Airwallex returns ~50 currencies regardless of
+  // zero balance. Airwallex returns ~50 currencies regardless of
   // funding state.
   const fundedBanks = data.bankBalances.filter(isFunded)
-  // Disposable cash is computed server-side in the primary (source)
-  // currency. Convert to display for the headline.
-  const disposableDisplay = toCurNumber(data.disposableCash, data.primaryCurrency)
+
+  // ── Hero numbers (pre-computed so the JSX stays readable) ────────────
+  // Total cash in the source/primary currency (typically NZD). Hero card
+  // surfaces this as the headline number, converted to the user's chosen
+  // display currency via formatDisplay.
+  const totalCashDisplay = toCurNumber(data.reserveConfig.totalCashNzd, 'NZD')
+  // % of reserve target reached. Drives the mini donut on the cash card.
+  const reservePct = data.reserveConfig.targetAmount > 0
+    ? Math.min(100, Math.round((data.reserveConfig.totalCashNzd / data.reserveConfig.targetAmount) * 100))
+    : 0
+  // Donut tone tracks the reserve traffic-light: green at/above target,
+  // amber when partway, red when far below.
+  const reserveTone: 'positive' | 'warning' | 'danger' = reservePct >= 100 ? 'positive'
+    : reservePct >= 50 ? 'warning'
+    : 'danger'
+  // Revenue sparkline source data. Falls back gracefully if the API
+  // hasn't shipped a monthly history yet.
+  const revenueSpark = data.monthlyRevenueHistory.map(h => ({
+    label: h.ym.slice(5),
+    value: h.total,
+  }))
+  // Client-concentration risk hint. Surfaces "high risk" when the top
+  // single client is over half of named MRR.
+  const concentrationRisk = data.clientConcentration.topClientShare
+  const concentrationHint = concentrationRisk >= 0.5
+    ? { tone: 'warning' as const, text: `High concentration. Your top client is ${Math.round(concentrationRisk * 100)}% of MRR.` }
+    : concentrationRisk >= 0.33
+      ? { tone: 'warning' as const, text: `Watch. Top client is ${Math.round(concentrationRisk * 100)}% of MRR.` }
+      : { tone: 'positive' as const, text: `Healthy spread. No single client is more than ${Math.round(concentrationRisk * 100)}% of MRR.` }
 
   return (
-    <div className="space-y-5">
+    <div className="page-flush-top" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
       <PageHeader
         title="Financial reports"
-        subtitle={`Snapshot as of ${fmtRelative(data.asOf)}. Stripe + Xero + Airwallex reconciled.`}
+        subtitle={`Snapshot ${fmtRelative(data.asOf)}. Stripe, Xero and Airwallex reconciled.`}
       >
         <TahiButton
           variant="secondary"
@@ -332,183 +351,175 @@ export function FinancialReportsContent() {
         </TahiButton>
       </PageHeader>
 
-      {/* Status strip — traffic lights per axis, plain-English label */}
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '0.875rem' }}>
-        <StatusTile label="Cash runway" status={data.status.cash} hint={
-          data.reserveConfig.netRunwayMonths == null && data.reserveConfig.monthlySurplusNzd >= 0
-            ? `Profitable: +${formatNative(Math.max(0, data.reserveConfig.monthlySurplusNzd), 'NZD')}/mo · ${data.reserveConfig.grossRunwayMonths != null ? `${data.reserveConfig.grossRunwayMonths.toFixed(1)} mo worst case` : 'set burn to track worst case'}`
-            : data.reserveConfig.grossRunwayMonths != null
-              ? `${data.reserveConfig.grossRunwayMonths.toFixed(1)} mo worst case · ${data.reserveConfig.netRunwayMonths != null ? `${data.reserveConfig.netRunwayMonths.toFixed(1)} mo at net burn` : 'no net burn'} · target ${data.reserveConfig.targetMonths}mo`
-              : 'Set monthly burn below to track this properly'
-        } />
-        <StatusTile label="MRR" status={data.status.mrr} hint={
-          !data.mrr.configured
-            ? 'Not configured — set custom_mrr per active client'
-            : data.mrr.combined > 0
-              ? `${toCur(data.mrr.combined, data.primaryCurrency)}/mo across ${data.mrr.retainerClientCount} client${data.mrr.retainerClientCount === 1 ? '' : 's'}`
-              : 'No recurring revenue tracked'
-        } />
-        <StatusTile label="AR" status={data.status.ar} hint={
-          data.overdueCount > 0 ? `${data.overdueCount} overdue, ${toCur(data.outstandingAr, data.primaryCurrency)} total`
-          : `${toCur(data.outstandingAr, data.primaryCurrency)} outstanding`
-        } />
-        <StatusTile label="Reserves" status={data.status.reserves} hint={
-          data.reserves.total > 0 ? `${toCur(data.reserves.total, data.primaryCurrency)} set aside`
-          : 'No tax reserve configured'
-        } />
-        <StatusTile label="Sales velocity" status={data.status.velocity} hint={
-          data.salesVelocity.last60Days.count > 0
-            ? `${data.salesVelocity.last60Days.count} signed in last 60d`
-            : data.salesVelocity.last90Days.count > 0
-              ? `${data.salesVelocity.last90Days.count} in last 90d — slowing`
-              : 'No deals signed in 90d'
-        } />
+      {/* ── Hero band: Where you stand right now ─────────────────────
+          Two side-by-side FeatureCards. Left summarises cash and the
+          two runway flavours; right summarises the revenue engine. */}
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(20rem, 1fr))', gap: 'var(--space-4)' }}>
+        <HeroCashCard
+          totalCashDisplay={totalCashDisplay}
+          cur={cur}
+          reserveConfig={data.reserveConfig}
+          reservePct={reservePct}
+          reserveTone={reserveTone}
+          formatDisplay={formatDisplay}
+          formatNative={formatNative}
+          statusCash={data.status.cash}
+        />
+        <HeroRevenueCard
+          mrrCombined={toCurNumber(data.mrr.combined, data.primaryCurrency)}
+          mrrLabel={data.mrr.configured ? formatDisplay(toCurNumber(data.mrr.combined, data.primaryCurrency)) : 'Not set'}
+          arrLabel={data.mrr.configured ? toCur(data.arr, data.primaryCurrency) : 'Not set'}
+          ytdLabel={toCur(data.ytdRevenue, data.primaryCurrency)}
+          newMrrLabel={toCur(data.newMrrThisMonth.amount, data.primaryCurrency)}
+          retainerCount={data.mrr.retainerClientCount}
+          spark={revenueSpark}
+          cur={cur}
+          statusMrr={data.status.mrr}
+        />
       </div>
 
-      {/* Disposable cash NOW + breakdown */}
-      <Card>
-        <div className="p-4 sm:p-6">
-          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-2">
-            Disposable cash right now
-          </div>
-          <div className="flex items-baseline" style={{ gap: '0.75rem', flexWrap: 'wrap' }}>
-            <span style={{
-              fontSize: '2.5rem',
-              fontWeight: 700,
-              letterSpacing: '-0.02em',
-              color: 'var(--color-text)',
-              fontVariantNumeric: 'tabular-nums',
-            }}>
-              {formatDisplay(disposableDisplay)}
-            </span>
-            <span className="text-sm text-[var(--color-text-muted)]">
-              after reserves · displayed in {cur}
-            </span>
-          </div>
-          <div className="mt-4">
-            {fundedBanks.length === 0 ? (
-              <div className="text-xs text-[var(--color-text-muted)]">
-                No funded bank accounts. Sync Airwallex / Xero to populate.
-              </div>
-            ) : (
-              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-              <table style={{ width: '100%', minWidth: '20rem', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>
-                    <th className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider" style={{ textAlign: 'left', padding: '0.4375rem 0.5rem', borderBottom: '1px solid var(--color-border-subtle)' }}>Account</th>
-                    <th className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider" style={{ textAlign: 'right', padding: '0.4375rem 0.5rem', borderBottom: '1px solid var(--color-border-subtle)' }}>Native</th>
-                    <th className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider" style={{ textAlign: 'right', padding: '0.4375rem 0.5rem', borderBottom: '1px solid var(--color-border-subtle)' }}>≈ {cur}</th>
-                    <th className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider" style={{ textAlign: 'right', padding: '0.4375rem 0.5rem', borderBottom: '1px solid var(--color-border-subtle)' }}>Source</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {fundedBanks.map(b => (
-                    <tr key={b.currency}>
-                      <td className="text-sm font-medium text-[var(--color-text)]" style={{ padding: '0.5rem 0.5rem' }}>{b.currency}</td>
-                      <td className="text-sm text-[var(--color-text)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatNativeRaw(b.available, b.currency)}</td>
-                      <td className="text-sm text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{b.currency === cur ? '—' : toCur(b.available, b.currency)}</td>
-                      <td style={{ padding: '0.5rem 0.5rem', textAlign: 'right' }}>
-                        {b.sources.map(s => (
-                          <Badge key={s} tone="neutral" variant="soft" size="sm">{s}</Badge>
-                        ))}
-                      </td>
-                    </tr>
-                  ))}
-                  <tr style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
-                    <td className="text-sm font-medium text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem' }}>Reserved</td>
-                    <td colSpan={2} className="text-sm text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                      −{toCur(data.reserves.total, data.primaryCurrency)}
-                    </td>
-                    <td className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right' }}>
-                      {data.reserves.items.length === 0 ? 'unset' : `${data.reserves.items.length} pot${data.reserves.items.length === 1 ? '' : 's'}`}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              </div>
-            )}
-          </div>
+      {/* ── Section jump nav ─────────────────────────────────────── */}
+      <SectionTabs items={FINANCE_SECTIONS} />
+
+      {/* ── Cash section ─────────────────────────────────────────── */}
+      <div id="cash" className="scroll-mt-20" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <SectionHeader title="Cash" hint="Live bank balances and reserve pots." />
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(24rem, 1fr))', gap: 'var(--space-4)', alignItems: 'start' }}>
+          {/* Bank balances table */}
+          <Card>
+            <div className="p-4 sm:p-6">
+              <SubSectionHeader title="Bank balances" meta={`${fundedBanks.length} funded ${fundedBanks.length === 1 ? 'account' : 'accounts'}`} />
+              {fundedBanks.length === 0 ? (
+                <EmptyHint>No funded bank accounts. Sync Airwallex or Xero to populate.</EmptyHint>
+              ) : (
+                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                  <table style={{ width: '100%', minWidth: '20rem', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <TableTh align="left">Account</TableTh>
+                        <TableTh align="right">Native</TableTh>
+                        <TableTh align="right">{`= ${cur}`}</TableTh>
+                        <TableTh align="right">Source</TableTh>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fundedBanks.map(b => (
+                        <tr key={b.currency}>
+                          <td className="text-sm font-medium text-[var(--color-text)]" style={{ padding: '0.5rem 0.5rem' }}>{b.currency}</td>
+                          <td className="text-sm text-[var(--color-text)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatNativeRaw(b.available, b.currency)}</td>
+                          <td className="text-sm text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{b.currency === cur ? 'native' : toCur(b.available, b.currency)}</td>
+                          <td style={{ padding: '0.5rem 0.5rem', textAlign: 'right' }}>
+                            {b.sources.map(s => (
+                              <Badge key={s} tone="neutral" variant="soft" size="sm">{s}</Badge>
+                            ))}
+                          </td>
+                        </tr>
+                      ))}
+                      <tr style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
+                        <td className="text-sm font-medium text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem' }}>Reserved</td>
+                        <td colSpan={2} className="text-sm text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                          -{toCur(data.reserves.total, data.primaryCurrency)}
+                        </td>
+                        <td className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right' }}>
+                          {data.reserves.items.length === 0 ? 'unset' : `${data.reserves.items.length} pot${data.reserves.items.length === 1 ? '' : 's'}`}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* Reserve pots (only renders when configured) */}
+          <Card>
+            <div className="p-4 sm:p-6">
+              <SubSectionHeader title="Reserve pots" meta={`${toCur(data.reserves.total, data.primaryCurrency)} set aside`} />
+              {data.reserves.items.length === 0 ? (
+                <EmptyHint>No reserve pots configured. Add one in Settings to start accruing tax or float reserves.</EmptyHint>
+              ) : (
+                <div className="grid" style={{ gap: '0.625rem' }}>
+                  {data.reserves.items.map(r => {
+                    const pct = r.targetAmount && r.targetAmount > 0
+                      ? Math.min(100, (r.accruedAmount / r.targetAmount) * 100)
+                      : null
+                    return (
+                      <div key={r.id} className="flex items-center justify-between" style={{ gap: '1rem', flexWrap: 'wrap' }}>
+                        <div className="min-w-0" style={{ flex: 1 }}>
+                          <div className="text-sm font-semibold text-[var(--color-text)]">{r.name}</div>
+                          <div className="text-xs text-[var(--color-text-muted)]">
+                            {r.category}
+                            {r.accrualRate ? ` · auto-accruing at ${Math.round(r.accrualRate * 100)}%` : ' · manual'}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-semibold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {formatNativeRaw(r.accruedAmount, r.currency)}
+                            {r.targetAmount ? <span className="text-xs text-[var(--color-text-subtle)] font-normal"> / {formatNativeRaw(r.targetAmount, r.currency)}</span> : null}
+                          </div>
+                          {pct != null && (
+                            <div style={{
+                              marginTop: '0.25rem',
+                              height: '0.25rem',
+                              width: '6rem',
+                              background: 'var(--color-bg-secondary)',
+                              borderRadius: '999px',
+                              overflow: 'hidden',
+                              marginLeft: 'auto',
+                            }}>
+                              <div style={{
+                                width: `${pct}%`,
+                                height: '100%',
+                                background: pct >= 100 ? 'var(--color-brand)' : 'var(--color-brand-light)',
+                              }} />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </Card>
         </div>
-      </Card>
 
-      {/* AI anomaly findings — Sonnet's weekly + monthly scan output */}
-      <AnomaliesCard />
+        {/* AI anomaly findings sit just below the cash split, since most
+            findings are about unusual cash movement. */}
+        <AnomaliesCard />
+      </div>
 
-      {/* Reserve target config */}
-      <ReserveTargetCard
-        config={data.reserveConfig}
-        formatNative={formatNative}
-        onSaved={() => void fetchSummary()}
-      />
-
-      {/* Spend impact calculator — "can I afford X?" */}
-      <SpendImpactCard
-        startingCash={data.disposableCash}
-        burn={data.reserveConfig.targetBurn}
-        revenue={data.effectiveMonthlyRevenue}
-        reserveTarget={data.reserveConfig.targetAmount}
-        formatNative={formatNative}
-      />
-
-      {/* MRR / ARR / YTD revenue */}
-      <Card>
-        <div className="p-4 sm:p-6">
-          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
-            Revenue
-          </div>
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(12rem, 1fr))', gap: '1.5rem' }}>
-            <MetricBlock
-              label="Effective monthly revenue"
-              value={toCur(data.effectiveMonthlyRevenue, data.primaryCurrency)}
-              sub={`Retainer ${toCur(data.mrr.retainer, data.primaryCurrency)} + 5mo project avg ${toCur(data.projectRevenue.trailing5moActual, data.primaryCurrency)}`}
-              accent
-            />
-            <MetricBlock
-              label="Combined MRR (projection)"
-              value={data.mrr.configured ? toCur(data.mrr.combined, data.primaryCurrency) : '—'}
-              sub={data.mrr.configured
-                ? `Retainer ${toCur(data.mrr.retainer, data.primaryCurrency)} · Project amortised ${toCur(data.mrr.project, data.primaryCurrency)}`
-                : 'Set custom_mrr on active clients to track this'
-              }
-            />
-            <MetricBlock
-              label="ARR (projection)"
-              value={data.mrr.configured ? toCur(data.arr, data.primaryCurrency) : '—'}
-              sub="MRR × 12 — assumes current MRR holds for a year"
-            />
-            <MetricBlock
-              label="YTD revenue"
-              value={toCur(data.ytdRevenue, data.primaryCurrency)}
-              sub={`${data.ytdInvoiceCount} paid invoice${data.ytdInvoiceCount === 1 ? '' : 's'} this calendar year`}
-            />
-            <MetricBlock
-              label="Net new MRR this month"
-              value={toCur(data.newMrrThisMonth.amount, data.primaryCurrency)}
-              sub={`${data.newMrrThisMonth.wonDeals} won deal${data.newMrrThisMonth.wonDeals === 1 ? '' : 's'} · ${data.newMrrThisMonth.churnedClients} churned`}
-            />
-            <MetricBlock
-              label="Outstanding AR"
-              value={toCur(data.outstandingAr, data.primaryCurrency)}
-              sub={data.overdueCount > 0 ? `${data.overdueCount} overdue` : 'All current'}
-            />
-          </div>
+      {/* ── Revenue section ─────────────────────────────────────── */}
+      <div id="revenue" className="scroll-mt-20" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <SectionHeader title="Revenue" hint="Effective monthly, quarterly target and year-on-year." />
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(22rem, 1fr))', gap: 'var(--space-4)', alignItems: 'start' }}>
+          <QuarterAndProjectionCard
+            quarterly={data.quarterly}
+            yearEnd={data.yearEnd}
+            ytdRevenue={data.ytdRevenue}
+            effectiveMonthly={data.effectiveMonthlyRevenue}
+            onSavedTarget={() => void fetchSummary()}
+            formatNative={formatNative}
+          />
+          <YoyCard
+            yoy={data.yoy}
+            history={data.monthlyRevenueHistory}
+            cur={data.primaryCurrency}
+            toCur={toCur}
+          />
         </div>
-      </Card>
+        <RevenueHistoryCard history={data.monthlyRevenueHistory} cur={data.primaryCurrency} toCur={toCur} />
+      </div>
 
-      {/* Per-client MRR breakdown — uses DataTable so it sorts + is consistent
-          with the rest of the dashboard. Source of the "wait, why is MRR
-          70k?" answer: shows every retainer client with native + NZD. */}
-      {data.mrr.breakdown.length > 0 && (
+      {/* ── MRR section ─────────────────────────────────────────── */}
+      <div id="mrr" className="scroll-mt-20" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <SectionHeader title="MRR" hint="Per-client breakdown and concentration risk." />
         <Card>
           <div className="p-4 sm:p-6">
-            <div className="flex items-baseline justify-between flex-wrap" style={{ gap: '0.5rem', marginBottom: '0.75rem' }}>
-              <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
-                MRR by client ({data.mrr.breakdown.length})
-              </div>
-              <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-                Native amount × FX = NZD contribution. Edit per-client on /clients.
-              </div>
-            </div>
+            <SubSectionHeader
+              title={`MRR by client (${data.mrr.breakdown.length})`}
+              meta="Native amount times FX equals NZD contribution. Edit per-client on /clients."
+            />
             <DataTable
               rows={data.mrr.breakdown}
               getRowId={(r) => r.id}
@@ -534,7 +545,7 @@ export function FinancialReportsContent() {
                 },
                 {
                   key: 'nzd',
-                  header: `≈ ${data.primaryCurrency}`,
+                  header: `= ${data.primaryCurrency}`,
                   align: 'right',
                   sortable: true,
                   sortValue: (r) => r.mrrNzd,
@@ -551,9 +562,7 @@ export function FinancialReportsContent() {
                   sortable: true,
                   sortValue: (r) => r.share,
                   render: (r) => (
-                    <span className="text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {(r.share * 100).toFixed(1)}%
-                    </span>
+                    <ShareCell pct={r.share} />
                   ),
                 },
               ]}
@@ -561,370 +570,507 @@ export function FinancialReportsContent() {
             />
           </div>
         </Card>
-      )}
 
-      {/* Sales velocity */}
-      <Card>
-        <div className="p-4 sm:p-6">
-          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
-            Sales velocity
-          </div>
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '1.5rem' }}>
-            <MetricBlock label="Last 30 days" value={`${data.salesVelocity.last30Days.count} deals`} sub={toCur(data.salesVelocity.last30Days.value, data.primaryCurrency)} />
-            <MetricBlock label="Last 60 days" value={`${data.salesVelocity.last60Days.count} deals`} sub={toCur(data.salesVelocity.last60Days.value, data.primaryCurrency)} />
-            <MetricBlock label="Last 90 days" value={`${data.salesVelocity.last90Days.count} deals`} sub={toCur(data.salesVelocity.last90Days.value, data.primaryCurrency)} />
-          </div>
-        </div>
-      </Card>
-
-      {/* Client concentration */}
-      <Card>
-        <div className="p-4 sm:p-6">
-          <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-            <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
-              Client concentration
-            </div>
-            <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-              {data.clientConcentration.totalNamedMrr > 0
-                ? 'Risk indicator: if you lose your top client tomorrow…'
-                : 'No client MRR configured yet'}
-            </div>
-          </div>
-          {data.clientConcentration.totalNamedMrr === 0 ? (
-            <p className="text-sm text-[var(--color-text-muted)]">
-              Set custom_mrr on your active clients to see concentration risk.
-            </p>
-          ) : (
-            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))', gap: '1.5rem', alignItems: 'center' }}>
-              {/* Donut: at-a-glance share of MRR. Centre shows top client %. */}
-              <div className="flex justify-center">
-                <DonutChart
-                  size={180}
-                  segments={data.clientConcentration.top.map(c => ({ label: c.name, value: c.mrr }))}
-                  centreLabel={<span className="text-[0.6875rem] uppercase tracking-wider text-[var(--color-text-subtle)]">Top client</span>}
-                  centreValue={
-                    <span className="text-xl font-bold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {Math.round(data.clientConcentration.topClientShare * 100)}%
-                    </span>
-                  }
-                  legend={false}
-                  ariaLabel="MRR share by client"
-                />
-              </div>
-              {/* Legend column: ranked list + share + native NZD. */}
-              <div className="grid" style={{ gap: '0.5rem' }}>
-                <div className="flex items-baseline justify-between text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ marginBottom: '0.25rem' }}>
-                  <span>Risk: if your top 3 leave</span>
-                  <span style={{ color: data.clientConcentration.top3Share > 0.7 ? 'var(--color-warning)' : 'var(--color-text)', fontWeight: 600 }}>
-                    {Math.round(data.clientConcentration.top3Share * 100)}% gone
-                  </span>
-                </div>
-                {data.clientConcentration.top.map((c, i) => {
-                  const pct = data.clientConcentration.totalNamedMrr > 0 ? c.mrr / data.clientConcentration.totalNamedMrr : 0
-                  const dot = CHART.categorical[i % CHART.categorical.length]
-                  return (
-                    <div key={c.name} className="flex items-center" style={{ gap: '0.625rem' }}>
-                      <span style={{ width: '0.5rem', height: '0.5rem', borderRadius: '999px', background: dot, flexShrink: 0 }} />
-                      <span className="text-sm text-[var(--color-text)] truncate" style={{ flex: 1, minWidth: 0 }}>{c.name}</span>
-                      <span className="text-xs text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-                        {toCur(c.mrr, data.primaryCurrency)}
-                      </span>
-                      <span className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ fontVariantNumeric: 'tabular-nums', width: '2.5rem', textAlign: 'right', flexShrink: 0 }}>
-                        {(pct * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      </Card>
-
-      {/* AR aging */}
-      <Card>
-        <div className="p-4 sm:p-6">
-          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
-            AR aging
-          </div>
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))', gap: '1rem' }}>
-            <ArBucket label="Current" amount={data.arAging.current} cur={data.primaryCurrency} toCur={toCur} tone="positive" />
-            <ArBucket label="1-30 days" amount={data.arAging.days30} cur={data.primaryCurrency} toCur={toCur} tone="warning" />
-            <ArBucket label="31-60 days" amount={data.arAging.days60} cur={data.primaryCurrency} toCur={toCur} tone="warning" />
-            <ArBucket label="61-90 days" amount={data.arAging.days90} cur={data.primaryCurrency} toCur={toCur} tone="danger" />
-            <ArBucket label="90+ days" amount={data.arAging.days90plus} cur={data.primaryCurrency} toCur={toCur} tone="danger" />
-          </div>
-        </div>
-      </Card>
-
-      {/* Tax owed (NZ tax year — Apr 1 → Mar 31) */}
-      <Card>
-        <div className="p-4 sm:p-6">
-          <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-            <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
-              Tax owed (NZ tax year — Apr 1 → Mar 31)
-            </div>
-            <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-              {data.taxes.monthsIntoTaxYear} of 12 months elapsed · approximate, verify with IRD
-            </div>
-          </div>
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1.5rem' }}>
-            <MetricBlock
-              label="Corp tax accrued"
-              value={toCur(data.taxes.corpTaxOwedYtd, data.primaryCurrency)}
-              sub={`28% × tax-year profit (${toCur(data.taxes.ytdProfit, data.primaryCurrency)})`}
-              accent
-            />
-            <MetricBlock
-              label="GST collected"
-              value={toCur(data.taxes.gstOwedYtd, data.primaryCurrency)}
-              sub="Tax_amount on paid invoices since Apr 1"
-            />
-            <MetricBlock
-              label="Tax-year revenue"
-              value={toCur(data.taxes.taxYearRevenue, data.primaryCurrency)}
-              sub={`Paid invoices since ${new Date(data.taxes.taxYearStart).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}`}
-            />
-            <MetricBlock
-              label="Expenses (approx.)"
-              value={toCur(data.taxes.ytdExpensesApprox, data.primaryCurrency)}
-              sub="Recurring × tax-year months elapsed"
-            />
-          </div>
-        </div>
-      </Card>
-
-      {/* Take-home tracking */}
-      <TakeHomeCard
-        takeHome={data.takeHome}
-        formatNative={formatNative}
-        onSaved={() => void fetchSummary()}
-      />
-
-      {/* Discretionary vs essential spend split */}
-      {(data.spendSplit.discretionary > 0 || data.spendSplit.essential > 0) && (
         <Card>
           <div className="p-4 sm:p-6">
-            <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
-                Discretionary vs essential spend
-              </div>
-              <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-                Tag commitments via Settings → Commitments
-              </div>
-            </div>
-            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1.5rem' }}>
-              <MetricBlock
-                label="Essential (cannot cut)"
-                value={formatNative(data.spendSplit.essential, 'NZD')}
-                sub={`${Math.round((data.spendSplit.essential / Math.max(1, data.spendSplit.essential + data.spendSplit.discretionary)) * 100)}% of recurring outflow`}
-                accent
-              />
-              <MetricBlock
-                label="Discretionary (can cut now)"
-                value={formatNative(data.spendSplit.discretionary, 'NZD')}
-                sub={data.spendSplit.discretionary > 0
-                  ? `${formatNative(data.spendSplit.discretionary * 12, 'NZD')}/yr if you trimmed all of it`
-                  : 'None tagged yet — open Settings to mark some'}
-              />
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* YoY comparison */}
-      <Card>
-        <div className="p-4 sm:p-6">
-          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
-            This month vs last year
-          </div>
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1.5rem' }}>
-            <MetricBlock
-              label="This month so far"
-              value={toCur(data.yoy.thisMonth, data.primaryCurrency)}
-              sub="Paid invoices, current calendar month"
-              accent
+            <SubSectionHeader
+              title="Client concentration"
+              meta={data.clientConcentration.totalNamedMrr > 0
+                ? 'Risk if your top client churns tomorrow.'
+                : 'No client MRR configured yet.'}
             />
-            <MetricBlock
-              label="Same month last year"
-              value={toCur(data.yoy.lastYearSameMonth, data.primaryCurrency)}
-              sub={data.yoy.lastYearSameMonth === 0 ? 'No data — comparison N/A' : 'For perspective'}
-            />
-            <MetricBlock
-              label="Year-over-year"
-              value={data.yoy.deltaPct == null ? '—' : `${data.yoy.deltaPct >= 0 ? '+' : ''}${Math.round(data.yoy.deltaPct * 100)}%`}
-              sub={data.yoy.deltaPct == null
-                ? 'No baseline to compare'
-                : data.yoy.deltaPct > 0
-                  ? 'Growing month-over-prior-year'
-                  : 'Down vs same month last year'
-              }
-            />
-          </div>
-        </div>
-      </Card>
-
-      {/* Reserves breakdown */}
-      {data.reserves.items.length > 0 && (
-        <Card>
-          <div className="p-4 sm:p-6">
-            <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
-              Reserve pots
-            </div>
-            <div className="grid" style={{ gap: '0.625rem' }}>
-              {data.reserves.items.map(r => {
-                const pct = r.targetAmount && r.targetAmount > 0
-                  ? Math.min(100, (r.accruedAmount / r.targetAmount) * 100)
-                  : null
-                return (
-                  <div key={r.id} className="flex items-center justify-between" style={{ gap: '1rem', flexWrap: 'wrap' }}>
-                    <div className="min-w-0" style={{ flex: 1 }}>
-                      <div className="text-sm font-semibold text-[var(--color-text)]">{r.name}</div>
-                      <div className="text-xs text-[var(--color-text-muted)]">
-                        {r.category}
-                        {r.accrualRate ? ` · auto-accruing at ${Math.round(r.accrualRate * 100)}%` : ' · manual'}
-                      </div>
+            {data.clientConcentration.totalNamedMrr === 0 ? (
+              <EmptyHint>Set custom_mrr on your active clients to see concentration risk.</EmptyHint>
+            ) : (
+              <>
+                <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))', gap: '1.5rem', alignItems: 'center' }}>
+                  <div className="flex justify-center">
+                    <DonutChart
+                      size={180}
+                      segments={data.clientConcentration.top.map(c => ({ label: c.name, value: c.mrr }))}
+                      centreLabel={<span className="text-[0.6875rem] uppercase tracking-wider text-[var(--color-text-subtle)]">Top client</span>}
+                      centreValue={
+                        <span className="text-xl font-bold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                          {Math.round(data.clientConcentration.topClientShare * 100)}%
+                        </span>
+                      }
+                      legend={false}
+                      ariaLabel="MRR share by client"
+                    />
+                  </div>
+                  <div className="grid" style={{ gap: '0.5rem' }}>
+                    <div className="flex items-baseline justify-between text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ marginBottom: '0.25rem' }}>
+                      <span>If your top 3 leave</span>
+                      <span style={{ color: data.clientConcentration.top3Share > 0.7 ? 'var(--color-warning)' : 'var(--color-text)', fontWeight: 600 }}>
+                        {Math.round(data.clientConcentration.top3Share * 100)}% gone
+                      </span>
                     </div>
-                    <div className="text-right">
-                      <div className="text-sm font-semibold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {formatNativeRaw(r.accruedAmount, r.currency)}
-                        {r.targetAmount ? <span className="text-xs text-[var(--color-text-subtle)] font-normal"> / {formatNativeRaw(r.targetAmount, r.currency)}</span> : null}
-                      </div>
-                      {pct != null && (
-                        <div style={{
-                          marginTop: '0.25rem',
-                          height: '0.25rem',
-                          width: '6rem',
-                          background: 'var(--color-bg-secondary)',
-                          borderRadius: '999px',
-                          overflow: 'hidden',
-                          marginLeft: 'auto',
-                        }}>
-                          <div style={{
-                            width: `${pct}%`,
-                            height: '100%',
-                            background: pct >= 100 ? 'var(--color-brand)' : 'var(--color-brand-light)',
-                          }} />
+                    {data.clientConcentration.top.map((c, i) => {
+                      const pct = data.clientConcentration.totalNamedMrr > 0 ? c.mrr / data.clientConcentration.totalNamedMrr : 0
+                      const dot = CHART.categorical[i % CHART.categorical.length]
+                      return (
+                        <div key={c.name} className="flex items-center" style={{ gap: '0.625rem' }}>
+                          <span style={{ width: '0.5rem', height: '0.5rem', borderRadius: '999px', background: dot, flexShrink: 0 }} />
+                          <span className="text-sm text-[var(--color-text)] truncate" style={{ flex: 1, minWidth: 0 }}>{c.name}</span>
+                          <span className="text-xs text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                            {toCur(c.mrr, data.primaryCurrency)}
+                          </span>
+                          <span className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ fontVariantNumeric: 'tabular-nums', width: '2.5rem', textAlign: 'right', flexShrink: 0 }}>
+                            {(pct * 100).toFixed(0)}%
+                          </span>
                         </div>
-                      )}
-                    </div>
+                      )
+                    })}
                   </div>
-                )
-              })}
-            </div>
+                </div>
+                <ConcentrationHint hint={concentrationHint} />
+              </>
+            )}
           </div>
         </Card>
-      )}
+      </div>
 
-      {/* Quarterly target + year-end projection + benchmarks */}
-      <QuarterAndProjectionCard
-        quarterly={data.quarterly}
-        yearEnd={data.yearEnd}
-        ytdRevenue={data.ytdRevenue}
-        effectiveMonthly={data.effectiveMonthlyRevenue}
-        onSavedTarget={() => void fetchSummary()}
-        formatNative={formatNative}
-      />
+      {/* ── Sales section ───────────────────────────────────────── */}
+      <div id="sales" className="scroll-mt-20" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <SectionHeader title="Sales" hint="Pipeline funnel, recent deals and AR aging." />
+        <SalesVelocityCard salesVelocity={data.salesVelocity} primaryCurrency={data.primaryCurrency} toCur={toCur} />
+        <PipelineFunnelCard funnel={data.pipelineFunnel} open={data.pipelineOpen} formatNative={formatNative} />
+        {(data.recentActivity.invoices.length > 0 || data.recentActivity.deals.length > 0) && (
+          <Card>
+            <div className="p-4 sm:p-6">
+              <SubSectionHeader title="Recent activity" meta="Last 5 paid invoices and last 5 deals signed." />
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(18rem, 1fr))', gap: '1.5rem' }}>
+                <div>
+                  <div className="text-xs font-semibold text-[var(--color-text)] mb-2">Paid invoices</div>
+                  {data.recentActivity.invoices.length === 0 ? (
+                    <p className="text-xs text-[var(--color-text-subtle)] italic">No paid invoices yet.</p>
+                  ) : (
+                    <div className="grid" style={{ gap: '0.375rem' }}>
+                      {data.recentActivity.invoices.map(inv => (
+                        <ActivityRow
+                          key={inv.id}
+                          title={inv.orgName ?? '(unattributed)'}
+                          amountLabel={toCur(inv.totalUsd, data.primaryCurrency)}
+                          dateLabel={inv.paidAt ? fmtRelative(inv.paidAt) : ''}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-[var(--color-text)] mb-2">Deals signed</div>
+                  {data.recentActivity.deals.length === 0 ? (
+                    <p className="text-xs text-[var(--color-text-subtle)] italic">No deals closed yet.</p>
+                  ) : (
+                    <div className="grid" style={{ gap: '0.375rem' }}>
+                      {data.recentActivity.deals.map(deal => (
+                        <ActivityRow
+                          key={deal.id}
+                          title={`${deal.title}${deal.orgName ? ` · ${deal.orgName}` : ''}`}
+                          amountLabel={toCur(deal.value, data.primaryCurrency)}
+                          dateLabel={deal.closedAt ? fmtRelative(deal.closedAt) : ''}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </Card>
+        )}
 
-      {/* Forex exposure */}
-      <ForexCard forex={data.forex} formatNative={formatNative} />
-
-      {/* Recurring outflows — full CRUD on expense commitments */}
-      <RecurringOutflowsCard formatNative={formatNative} />
-
-      {/* Recent activity feed */}
-      {(data.recentActivity.invoices.length > 0 || data.recentActivity.deals.length > 0) && (
+        {/* AR aging */}
         <Card>
           <div className="p-4 sm:p-6">
-            <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
-              Recent activity
-            </div>
-            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(18rem, 1fr))', gap: '1.5rem' }}>
-              <div>
-                <div className="text-xs font-semibold text-[var(--color-text)] mb-2">Last 5 paid invoices</div>
-                {data.recentActivity.invoices.length === 0 ? (
-                  <p className="text-xs text-[var(--color-text-subtle)] italic">No paid invoices yet.</p>
-                ) : (
-                  <div className="grid" style={{ gap: '0.375rem' }}>
-                    {data.recentActivity.invoices.map(inv => (
-                      <div key={inv.id} className="flex items-center justify-between text-xs" style={{ gap: '0.5rem', padding: '0.4375rem 0.625rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
-                        <span className="text-[var(--color-text)] truncate" style={{ minWidth: 0, flex: 1 }}>
-                          {inv.orgName ?? '—'}
-                        </span>
-                        <span className="text-[var(--color-text-muted)] font-mono" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-                          {toCur(inv.totalUsd, data.primaryCurrency)}
-                        </span>
-                        <span className="text-[var(--color-text-subtle)] text-[0.6875rem]" style={{ flexShrink: 0 }}>
-                          {inv.paidAt ? fmtRelative(inv.paidAt) : '—'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div>
-                <div className="text-xs font-semibold text-[var(--color-text)] mb-2">Last 5 deals signed</div>
-                {data.recentActivity.deals.length === 0 ? (
-                  <p className="text-xs text-[var(--color-text-subtle)] italic">No deals closed yet.</p>
-                ) : (
-                  <div className="grid" style={{ gap: '0.375rem' }}>
-                    {data.recentActivity.deals.map(deal => (
-                      <div key={deal.id} className="flex items-center justify-between text-xs" style={{ gap: '0.5rem', padding: '0.4375rem 0.625rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
-                        <span className="text-[var(--color-text)] truncate" style={{ minWidth: 0, flex: 1 }}>
-                          {deal.title}
-                          {deal.orgName && <span className="text-[var(--color-text-subtle)]"> · {deal.orgName}</span>}
-                        </span>
-                        <span className="text-[var(--color-text-muted)] font-mono" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-                          {toCur(deal.value, data.primaryCurrency)}
-                        </span>
-                        <span className="text-[var(--color-text-subtle)] text-[0.6875rem]" style={{ flexShrink: 0 }}>
-                          {deal.closedAt ? fmtRelative(deal.closedAt) : '—'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+            <SubSectionHeader title="AR aging" meta={`${toCur(data.outstandingAr, data.primaryCurrency)} outstanding · ${data.overdueCount} overdue`} />
+            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))', gap: '1rem' }}>
+              <ArBucket label="Current" amount={data.arAging.current} cur={data.primaryCurrency} toCur={toCur} tone="positive" />
+              <ArBucket label="1 to 30 days" amount={data.arAging.days30} cur={data.primaryCurrency} toCur={toCur} tone="warning" />
+              <ArBucket label="31 to 60 days" amount={data.arAging.days60} cur={data.primaryCurrency} toCur={toCur} tone="warning" />
+              <ArBucket label="61 to 90 days" amount={data.arAging.days90} cur={data.primaryCurrency} toCur={toCur} tone="danger" />
+              <ArBucket label="90+ days" amount={data.arAging.days90plus} cur={data.primaryCurrency} toCur={toCur} tone="danger" />
             </div>
           </div>
         </Card>
-      )}
+      </div>
 
-      {/* Tier 2 charts cluster — the "huh, that's interesting" half */}
-      <RevenueHistoryCard history={data.monthlyRevenueHistory} cur={data.primaryCurrency} toCur={toCur} />
-      <CostMixCard costMix={data.costMix} formatNative={formatNative} />
-      <PipelineFunnelCard funnel={data.pipelineFunnel} open={data.pipelineOpen} formatNative={formatNative} />
-      <ProductivityCard
-        revenuePerHour={data.productivity.revenuePerHour}
-        hours={data.productivity.hoursLast90d}
-        cashConversion={data.cashConversion}
-        timeToPay={data.timeToPay}
-        outstandingWork={data.outstandingWork}
-        dealStats={data.dealStats}
-        winRateBySource={data.winRateBySource}
-        formatNative={formatNative}
-      />
+      {/* ── Outflows section ────────────────────────────────────── */}
+      <div id="outflows" className="scroll-mt-20" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <SectionHeader title="Outflows" hint="Recurring spend, category mix and essential vs discretionary." />
+        <RecurringOutflowsCard formatNative={formatNative} />
+        <CostMixCard
+          costMix={data.costMix}
+          spendSplit={data.spendSplit}
+          formatNative={formatNative}
+        />
+        <ForexCard forex={data.forex} formatNative={formatNative} />
+      </div>
+
+      {/* ── Tax section ─────────────────────────────────────────── */}
+      <div id="tax" className="scroll-mt-20" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <SectionHeader title="Tax" hint="Reserve progress versus what you owe right now." />
+        <TaxSummaryCard taxes={data.taxes} reserves={data.reserves} primaryCurrency={data.primaryCurrency} toCur={toCur} formatNative={formatNative} />
+      </div>
+
+      {/* ── Take-home section ───────────────────────────────────── */}
+      <div id="takehome" className="scroll-mt-20" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <SectionHeader title="Take-home" hint="Liam and Staci progress toward each annual target." />
+        <TakeHomeCard
+          takeHome={data.takeHome}
+          formatNative={formatNative}
+          onSaved={() => void fetchSummary()}
+        />
+      </div>
+
+      {/* ── Footer planning tools ───────────────────────────────── */}
+      <div id="planning" className="scroll-mt-20" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <SectionHeader title="Planning" hint="Reserve target and spend impact what-ifs." />
+        <ReserveTargetCard
+          config={data.reserveConfig}
+          formatNative={formatNative}
+          onSaved={() => void fetchSummary()}
+        />
+        <SpendImpactCard
+          startingCash={data.disposableCash}
+          burn={data.reserveConfig.targetBurn}
+          revenue={data.effectiveMonthlyRevenue}
+          reserveTarget={data.reserveConfig.targetAmount}
+          formatNative={formatNative}
+        />
+        <ProductivityCard
+          revenuePerHour={data.productivity.revenuePerHour}
+          hours={data.productivity.hoursLast90d}
+          cashConversion={data.cashConversion}
+          timeToPay={data.timeToPay}
+          outstandingWork={data.outstandingWork}
+          dealStats={data.dealStats}
+          winRateBySource={data.winRateBySource}
+          formatNative={formatNative}
+        />
+      </div>
     </div>
   )
 }
 
-function StatusTile({ label, status, hint }: { label: string; status: 'green' | 'amber' | 'red'; hint: string }) {
+// ─── Section anchors (jump nav) ───────────────────────────────────────
+
+const FINANCE_SECTIONS = [
+  { id: 'cash',     label: 'Cash' },
+  { id: 'revenue',  label: 'Revenue' },
+  { id: 'mrr',      label: 'MRR' },
+  { id: 'sales',    label: 'Sales' },
+  { id: 'outflows', label: 'Outflows' },
+  { id: 'tax',      label: 'Tax' },
+  { id: 'takehome', label: 'Take-home' },
+  { id: 'planning', label: 'Planning' },
+] as const
+
+// ─── Layout helpers ───────────────────────────────────────────────────
+
+function SectionHeader({ title, hint }: { title: string; hint?: string }) {
   return (
-    <div style={{
-      padding: '0.875rem 1rem',
-      background: 'var(--color-bg)',
-      border: '1px solid var(--color-border-subtle)',
-      borderRadius: 'var(--radius-card)',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '0.5rem',
-    }}>
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-[var(--color-text)]">{label}</span>
-        <Badge tone={STATUS_TONE[status]} variant="soft" size="sm">{STATUS_LABEL[status]}</Badge>
-      </div>
-      <span className="text-xs text-[var(--color-text-muted)]" style={{ lineHeight: 1.4 }}>{hint}</span>
+    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+      <h2 style={{
+        margin: 0,
+        fontSize: 'var(--text-lg)',
+        fontWeight: 600,
+        letterSpacing: '-0.01em',
+        color: 'var(--color-text)',
+      }}>
+        {title}
+      </h2>
+      {hint && (
+        <span className="text-xs text-[var(--color-text-muted)]" style={{ fontWeight: 500 }}>
+          {hint}
+        </span>
+      )}
     </div>
+  )
+}
+
+function SubSectionHeader({ title, meta }: { title: string; meta?: string }) {
+  return (
+    <div className="flex items-baseline justify-between" style={{ marginBottom: '0.875rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+      <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+        {title}
+      </div>
+      {meta && (
+        <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+          {meta}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EmptyHint({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-sm text-[var(--color-text-muted)]" style={{ lineHeight: 1.55 }}>
+      {children}
+    </p>
+  )
+}
+
+function TableTh({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' | 'center' }) {
+  return (
+    <th
+      className="text-[0.6875rem] font-semibold text-[var(--color-text-subtle)] uppercase tracking-wider"
+      style={{
+        textAlign: align,
+        padding: '0.4375rem 0.5rem',
+        borderBottom: '1px solid var(--color-border-subtle)',
+      }}
+    >
+      {children}
+    </th>
+  )
+}
+
+function ShareCell({ pct }: { pct: number }) {
+  const display = Math.round(pct * 100)
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'flex-end' }}>
+      <div style={{
+        width: '3.5rem',
+        height: '0.3125rem',
+        background: 'var(--color-bg-secondary)',
+        borderRadius: '999px',
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          width: `${Math.min(100, display)}%`,
+          height: '100%',
+          background: 'var(--color-brand)',
+        }} />
+      </div>
+      <span className="text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', minWidth: '2.5rem', textAlign: 'right' }}>
+        {display}%
+      </span>
+    </div>
+  )
+}
+
+function ActivityRow({ title, amountLabel, dateLabel }: { title: string; amountLabel: string; dateLabel: string }) {
+  return (
+    <div
+      className="flex items-center justify-between text-xs"
+      style={{ gap: '0.5rem', padding: '0.4375rem 0.625rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-sm)' }}
+    >
+      <span className="text-[var(--color-text)] truncate" style={{ minWidth: 0, flex: 1 }}>
+        {title}
+      </span>
+      <span className="text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0, fontWeight: 500 }}>
+        {amountLabel}
+      </span>
+      {dateLabel && (
+        <span className="text-[var(--color-text-subtle)] text-[0.6875rem]" style={{ flexShrink: 0 }}>
+          {dateLabel}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function ConcentrationHint({ hint }: { hint: { tone: 'positive' | 'warning' | 'danger'; text: string } }) {
+  const bg = hint.tone === 'positive' ? 'var(--color-brand-50)'
+    : hint.tone === 'warning' ? '#fff7ed'
+    : '#fef2f2'
+  const fg = hint.tone === 'positive' ? 'var(--color-brand-dark)'
+    : hint.tone === 'warning' ? '#9a3412'
+    : '#991b1b'
+  return (
+    <div
+      style={{
+        marginTop: 'var(--space-4)',
+        padding: '0.625rem 0.875rem',
+        background: bg,
+        color: fg,
+        borderRadius: 'var(--radius-md)',
+        fontSize: 'var(--text-xs)',
+        lineHeight: 1.5,
+      }}
+    >
+      {hint.text}
+    </div>
+  )
+}
+
+// ─── Hero cards ────────────────────────────────────────────────────────
+
+function HeroCashCard({
+  totalCashDisplay,
+  cur,
+  reserveConfig,
+  reservePct,
+  reserveTone,
+  formatDisplay,
+  formatNative,
+  statusCash,
+}: {
+  totalCashDisplay: number
+  cur: string
+  reserveConfig: SummaryResponse['reserveConfig']
+  reservePct: number
+  reserveTone: 'positive' | 'warning' | 'danger'
+  formatDisplay: (n: number) => string
+  formatNative: (n: number, currency: string) => string
+  statusCash: 'green' | 'amber' | 'red'
+}) {
+  const grossRunway = reserveConfig.grossRunwayMonths
+  const netRunway = reserveConfig.netRunwayMonths
+  const surplus = reserveConfig.monthlySurplusNzd
+
+  // Bottom block shows the two runway flavours side by side. "Profitable"
+  // is a soft replacement for any net-runway value when we are cash positive.
+  const grossLabel = grossRunway != null ? `${grossRunway.toFixed(1)} mo` : 'n/a'
+  const netLabel = netRunway == null
+    ? (surplus > 0 ? `+${formatNative(Math.max(0, surplus), 'NZD')}/mo` : 'n/a')
+    : netRunway > 999 ? '∞' : `${netRunway.toFixed(1)} mo`
+  const netLabelTitle = netRunway == null ? 'Cash positive' : 'Net-burn runway'
+
+  return (
+    <Card>
+      <div style={{ padding: 'var(--space-5) var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <div className="flex items-start justify-between" style={{ gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]" style={{ marginBottom: '0.375rem' }}>
+              Cash and runway
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span style={{
+                fontSize: '2.25rem',
+                fontWeight: 700,
+                letterSpacing: '-0.02em',
+                color: 'var(--color-text)',
+                fontVariantNumeric: 'tabular-nums',
+                lineHeight: 1.05,
+              }}>
+                {formatDisplay(totalCashDisplay)}
+              </span>
+              <span className="text-xs text-[var(--color-text-muted)]">
+                across all accounts · displayed in {cur}
+              </span>
+            </div>
+          </div>
+          <Badge tone={STATUS_TONE[statusCash]} variant="soft" size="sm">
+            {STATUS_LABEL[statusCash]}
+          </Badge>
+        </div>
+
+        <div className="grid" style={{ gridTemplateColumns: '6rem 1fr', gap: 'var(--space-4)', alignItems: 'center' }}>
+          {/* Mini donut: % of reserve target reached. Hard-coded to the
+              traffic-light tone so a glance reads as red / amber / green. */}
+          <div style={{ width: '6rem', height: '6rem' }}>
+            <DonutChart
+              size={96}
+              segments={[
+                { label: 'Reached', value: reservePct, colour: reserveTone === 'positive' ? '#5A824E' : reserveTone === 'warning' ? '#fb923c' : '#f87171' },
+                { label: 'Remaining', value: Math.max(0, 100 - reservePct), colour: 'var(--color-bg-tertiary)' },
+              ]}
+              centreLabel={<span className="text-[0.6875rem] uppercase tracking-wider text-[var(--color-text-subtle)]">Reserve</span>}
+              centreValue={
+                <span className="text-base font-bold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {reservePct}%
+                </span>
+              }
+              legend={false}
+              ariaLabel="Reserve target progress"
+            />
+          </div>
+          <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
+            <MetricBlock
+              label="Worst case runway"
+              value={grossLabel}
+              sub={grossRunway != null ? 'All cash ÷ burn, no income' : 'Set burn to compute'}
+              compact
+            />
+            <MetricBlock
+              label={netLabelTitle}
+              value={netLabel}
+              sub={netRunway == null ? 'Revenue exceeds burn' : 'At current burn vs revenue'}
+              compact
+            />
+          </div>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function HeroRevenueCard({
+  mrrCombined,
+  mrrLabel,
+  arrLabel,
+  ytdLabel,
+  newMrrLabel,
+  retainerCount,
+  spark,
+  cur,
+  statusMrr,
+}: {
+  mrrCombined: number
+  mrrLabel: string
+  arrLabel: string
+  ytdLabel: string
+  newMrrLabel: string
+  retainerCount: number
+  spark: Array<{ label: string; value: number }>
+  cur: string
+  statusMrr: 'green' | 'amber' | 'red'
+}) {
+  return (
+    <Card>
+      <div style={{ padding: 'var(--space-5) var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <div className="flex items-start justify-between" style={{ gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]" style={{ marginBottom: '0.375rem' }}>
+              Revenue engine
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span style={{
+                fontSize: '2.25rem',
+                fontWeight: 700,
+                letterSpacing: '-0.02em',
+                color: 'var(--color-text)',
+                fontVariantNumeric: 'tabular-nums',
+                lineHeight: 1.05,
+              }}>
+                {mrrLabel}
+              </span>
+              <span className="text-xs text-[var(--color-text-muted)]">
+                MRR · {retainerCount} retainer{retainerCount === 1 ? '' : 's'} · {cur}
+              </span>
+            </div>
+          </div>
+          <Badge tone={STATUS_TONE[statusMrr]} variant="soft" size="sm">
+            {STATUS_LABEL[statusMrr]}
+          </Badge>
+        </div>
+
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-3)' }}>
+          <MetricBlock label="ARR" value={arrLabel} sub="MRR x 12" compact />
+          <MetricBlock label="YTD revenue" value={ytdLabel} sub="Paid invoices" compact />
+          <MetricBlock label="New MRR this mo" value={newMrrLabel} sub="Won minus churn" compact />
+        </div>
+
+        {spark.length > 1 ? (
+          <div style={{ marginTop: '0.25rem' }}>
+            <LineChart
+              data={spark}
+              height={64}
+              area
+              showYAxis={false}
+              showGrid={false}
+              ariaLabel="Monthly revenue trend, last 12 months"
+            />
+          </div>
+        ) : (
+          <div style={{ height: '4rem', display: 'flex', alignItems: 'center' }}>
+            <span className="text-xs text-[var(--color-text-subtle)]">Trend shows when more than one month of history exists. MRR base: {Math.round(mrrCombined).toLocaleString()}.</span>
+          </div>
+        )}
+      </div>
+    </Card>
   )
 }
 
@@ -981,12 +1127,13 @@ function TakeHomeCard({ takeHome, formatNative, onSaved }: {
     width: '100%',
   }
 
+  const onTarget = takeHome.gapCombined <= 0
   return (
     <Card>
       <div className="p-4 sm:p-6">
-        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.875rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
-            Take-home (Liam + Staci)
+            Take-home (Liam and Staci)
           </div>
           {!editing ? (
             <button onClick={() => setEditing(true)} className="text-[var(--color-brand-dark)] text-[0.6875rem] font-medium" style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
@@ -1004,70 +1151,116 @@ function TakeHomeCard({ takeHome, formatNative, onSaved }: {
             </div>
           )}
         </div>
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1.5rem' }}>
-          {editing ? (
-            <>
-              <div>
-                <label className="text-[0.6875rem] text-[var(--color-text-muted)]">Liam annual (NZD)</label>
-                <input type="number" min={0} step="1000" value={liam} onChange={e => setLiam(e.target.value)} style={fieldStyle} />
+        {editing ? (
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1.25rem' }}>
+            <div>
+              <label className="text-[0.6875rem] text-[var(--color-text-muted)]">Liam annual (NZD)</label>
+              <input type="number" min={0} step="1000" value={liam} onChange={e => setLiam(e.target.value)} style={fieldStyle} />
+            </div>
+            <div>
+              <label className="text-[0.6875rem] text-[var(--color-text-muted)]">Staci annual (NZD)</label>
+              <input type="number" min={0} step="1000" value={staci} onChange={e => setStaci(e.target.value)} style={fieldStyle} />
+            </div>
+            <div>
+              <label className="text-[0.6875rem] text-[var(--color-text-muted)]">Target each (NZD)</label>
+              <input type="number" min={0} step="1000" value={target} onChange={e => setTarget(e.target.value)} style={fieldStyle} />
+            </div>
+          </div>
+        ) : (
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))', gap: 'var(--space-5)', alignItems: 'start' }}>
+            {/* Left: hero gap + supporting combined number. */}
+            <div>
+              <div className="text-xs text-[var(--color-text-muted)]" style={{ fontWeight: 500 }}>Gap to target (combined)</div>
+              <div style={{
+                fontSize: '2rem',
+                fontWeight: 700,
+                letterSpacing: '-0.02em',
+                color: onTarget ? 'var(--color-brand-dark)' : 'var(--color-text)',
+                fontVariantNumeric: 'tabular-nums',
+                marginTop: '0.125rem',
+                lineHeight: 1.1,
+              }}>
+                {onTarget ? 'On target' : formatNative(takeHome.gapCombined, 'NZD')}
               </div>
-              <div>
-                <label className="text-[0.6875rem] text-[var(--color-text-muted)]">Staci annual (NZD)</label>
-                <input type="number" min={0} step="1000" value={staci} onChange={e => setStaci(e.target.value)} style={fieldStyle} />
+              <div className="text-xs text-[var(--color-text-muted)]" style={{ marginTop: '0.25rem', lineHeight: 1.5 }}>
+                {onTarget
+                  ? 'Both founders at or above their target.'
+                  : `Closing the gap costs about ${formatNative(takeHome.gapCombined / 12, 'NZD')}/mo over the next year.`}
               </div>
-              <div>
-                <label className="text-[0.6875rem] text-[var(--color-text-muted)]">Target each (NZD)</label>
-                <input type="number" min={0} step="1000" value={target} onChange={e => setTarget(e.target.value)} style={fieldStyle} />
+              <div style={{ marginTop: 'var(--space-3)', display: 'grid', gap: 'var(--space-2)', gridTemplateColumns: '1fr 1fr' }}>
+                <MetricBlock
+                  label="Combined annual"
+                  value={formatNative(takeHome.combinedAnnual, 'NZD')}
+                  sub={`${formatNative(takeHome.combinedMonthly, 'NZD')}/mo`}
+                  compact
+                />
+                <MetricBlock
+                  label="Target each"
+                  value={formatNative(takeHome.targetEach, 'NZD')}
+                  sub={`Combined ${formatNative(takeHome.targetEach * 2, 'NZD')}`}
+                  compact
+                />
               </div>
-            </>
-          ) : (
-            <>
-              <MetricBlock
-                label="Combined annual"
-                value={formatNative(takeHome.combinedAnnual, 'NZD')}
-                sub={`${formatNative(takeHome.combinedMonthly, 'NZD')}/mo · target ${formatNative(takeHome.targetEach * 2, 'NZD')}`}
-                accent
+            </div>
+            {/* Right: per-person progress chart. */}
+            <div>
+              <div className="text-xs text-[var(--color-text-muted)]" style={{ fontWeight: 500, marginBottom: 'var(--space-2)' }}>Per-person progress</div>
+              <ProgressRow
+                label="Liam"
+                current={takeHome.liamAnnual}
+                target={takeHome.targetEach}
+                pct={liamPct}
+                formatNative={formatNative}
               />
-              <MetricBlock
-                label="Gap to target (combined)"
-                value={takeHome.gapCombined > 0 ? formatNative(takeHome.gapCombined, 'NZD') : 'On target'}
-                sub={takeHome.gapCombined > 0
-                  ? `+${formatNative(takeHome.gapCombined / 12, 'NZD')}/mo would close it`
-                  : 'Both at or above target'}
-              />
-              <div>
-                <div className="text-xs text-[var(--color-text-muted)]">Per-person progress</div>
-                <div className="mt-2">
-                  <div className="flex items-center justify-between text-[0.6875rem] mb-0.5">
-                    <span className="text-[var(--color-text-muted)]">Liam</span>
-                    <span className="text-[var(--color-text-subtle)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {formatNative(takeHome.liamAnnual, 'NZD')} / {formatNative(takeHome.targetEach, 'NZD')}
-                    </span>
-                  </div>
-                  <div style={{ height: '0.375rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden', marginBottom: '0.5rem' }}>
-                    <div style={{ width: `${liamPct}%`, height: '100%', background: 'var(--color-brand)' }} />
-                  </div>
-                  <div className="flex items-center justify-between text-[0.6875rem] mb-0.5">
-                    <span className="text-[var(--color-text-muted)]">Staci</span>
-                    <span className="text-[var(--color-text-subtle)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {formatNative(takeHome.staciAnnual, 'NZD')} / {formatNative(takeHome.targetEach, 'NZD')}
-                    </span>
-                  </div>
-                  <div style={{ height: '0.375rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
-                    <div style={{ width: `${staciPct}%`, height: '100%', background: 'var(--color-brand)' }} />
-                  </div>
-                </div>
+              <div style={{ marginTop: 'var(--space-3)' }}>
+                <ProgressRow
+                  label="Staci"
+                  current={takeHome.staciAnnual}
+                  target={takeHome.targetEach}
+                  pct={staciPct}
+                  formatNative={formatNative}
+                />
               </div>
-            </>
-          )}
-        </div>
-        {!editing && takeHome.gapCombined > 0 && (
+            </div>
+          </div>
+        )}
+        {!editing && !onTarget && (
           <p className="text-xs text-[var(--color-text-muted)] mt-3" style={{ lineHeight: 1.5 }}>
-            Closing the combined gap costs {formatNative(takeHome.gapCombined, 'NZD')}/yr — roughly the same as one part-time hire at ~$2k USD/mo. Run that comparison in the Spend impact calculator below.
+            Closing the combined gap is roughly equivalent to one part-time hire at about $2k USD per month. Run the comparison in the Spend impact calculator below.
           </p>
         )}
       </div>
     </Card>
+  )
+}
+
+function ProgressRow({ label, current, target, pct, formatNative }: {
+  label: string
+  current: number
+  target: number
+  pct: number
+  formatNative: (n: number, currency: string) => string
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between text-[0.6875rem] mb-0.5">
+        <span className="text-[var(--color-text)]" style={{ fontWeight: 500 }}>{label}</span>
+        <span className="text-[var(--color-text-subtle)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+          {formatNative(current, 'NZD')} of {formatNative(target, 'NZD')}
+        </span>
+      </div>
+      <div style={{ height: '0.4375rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
+        <div style={{
+          width: `${Math.max(2, pct)}%`,
+          height: '100%',
+          background: pct >= 100 ? 'var(--color-brand)' : 'var(--color-brand-light)',
+          transition: 'width 600ms cubic-bezier(0.22, 1, 0.36, 1)',
+        }} />
+      </div>
+      <div className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ marginTop: '0.25rem', fontVariantNumeric: 'tabular-nums' }}>
+        {Math.round(pct)}% of target
+      </div>
+    </div>
   )
 }
 
@@ -1121,9 +1314,9 @@ function QuarterAndProjectionCard({ quarterly, yearEnd, ytdRevenue, effectiveMon
   return (
     <Card>
       <div className="p-4 sm:p-6">
-        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.875rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
-            Quarter + year-end
+            Quarter and year-end
           </div>
           <Badge tone={targetTrack === 'positive' ? 'positive' : targetTrack === 'warning' ? 'warning' : 'danger'} variant="soft" size="sm">
             {quarterly.target === 0 ? 'No target set' : (targetTrack === 'positive' ? 'On track' : targetTrack === 'warning' ? 'Watch' : 'Off pace')}
@@ -1188,23 +1381,23 @@ function QuarterAndProjectionCard({ quarterly, yearEnd, ytdRevenue, effectiveMon
           <MetricBlock
             label="Quarter projection"
             value={formatNative(quarterly.projection, 'NZD')}
-            sub={quarterly.target > 0 ? `${pacingDelta >= 0 ? '+' : ''}${formatNative(pacingDelta, 'NZD')} vs target` : 'Daily run-rate × quarter days'}
+            sub={quarterly.target > 0 ? `${pacingDelta >= 0 ? '+' : ''}${formatNative(pacingDelta, 'NZD')} vs target` : 'Daily run-rate over quarter days'}
             accent
           />
           <MetricBlock
             label="Year-end projection"
             value={formatNative(yearEnd.projection, 'NZD')}
-            sub={`YTD ${formatNative(ytdRevenue, 'NZD')} + ${yearEnd.monthsRemaining} mo × ${formatNative(effectiveMonthly, 'NZD')}`}
+            sub={`YTD ${formatNative(ytdRevenue, 'NZD')} plus ${yearEnd.monthsRemaining} mo of ${formatNative(effectiveMonthly, 'NZD')}`}
           />
           <MetricBlock
             label={benchmarks.netProfitMargin.label}
             value={benchmarks.netProfitMargin.median}
-            sub="NZ agency median — for comparison"
+            sub="NZ agency median, for comparison"
           />
           <MetricBlock
             label={benchmarks.ownerTakeHome.label}
             value={benchmarks.ownerTakeHome.median}
-            sub="NZ agency owner median — for comparison"
+            sub="NZ agency owner median, for comparison"
           />
         </div>
       </div>
@@ -1249,7 +1442,7 @@ function ForexCard({ forex, formatNative }: {
           })}
         </div>
         <p className="text-xs text-[var(--color-text-muted)] mt-3" style={{ lineHeight: 1.5 }}>
-          Costs are denominated in NZD. {forex.nzdShare < 0.7 ? 'A NZD strengthening would dent the non-NZD pots\' purchasing power for your domestic burn.' : 'Forex exposure is low — most cash is in operating currency.'}
+          Costs are denominated in NZD. {forex.nzdShare < 0.7 ? 'A NZD strengthening would dent the non-NZD pots\' purchasing power for your domestic burn.' : 'Forex exposure is low. Most cash is already in operating currency.'}
         </p>
       </div>
     </Card>
@@ -1264,76 +1457,132 @@ function RevenueHistoryCard({ history, cur, toCur }: {
   toCur: (n: number, fromCurrency: string) => string
 }) {
   if (history.length === 0) return null
-  // Inline SVG bar chart — 12 monthly bars.
-  const w = 640, chartH = 120
   const maxValue = Math.max(...history.map(h => h.total), 1)
-  const barWidth = (w - 20) / history.length
+  // Compact format function for the Y axis so big numbers don't break the layout.
+  const compactFmt = (v: number): string => {
+    if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k`
+    return Math.round(v).toString()
+  }
   return (
     <Card>
       <div className="p-4 sm:p-6">
-        <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)] mb-3">
-          Monthly revenue, last 12 months
-        </div>
-        <svg width="100%" viewBox={`0 0 ${w} ${chartH + 30}`} preserveAspectRatio="xMidYMid meet" style={{ height: '8rem' }}>
-          {history.map((h, i) => {
-            const barH = (h.total / maxValue) * chartH
-            const x = 10 + i * barWidth
-            const y = chartH - barH
-            return (
-              <g key={h.ym}>
-                <rect x={x} y={y} width={Math.max(2, barWidth - 4)} height={barH} fill="var(--color-brand)" rx="2">
-                  <title>{h.ym}: {toCur(h.total, 'NZD')}</title>
-                </rect>
-                <text x={x + (barWidth - 4) / 2} y={140} fontSize="9" textAnchor="middle" fill="var(--color-text-subtle)">
-                  {h.ym.slice(5)}
-                </text>
-              </g>
-            )
-          })}
-        </svg>
-        <p className="text-xs text-[var(--color-text-muted)] mt-2">
-          {history.length === 12 ? 'Full 12-month history.' : `${history.length} month${history.length === 1 ? '' : 's'} of data.`} Peak: {toCur(maxValue, cur)}.
-        </p>
+        <SubSectionHeader
+          title="Monthly revenue, last 12 months"
+          meta={history.length === 12 ? `Peak ${toCur(maxValue, cur)}` : `${history.length} month${history.length === 1 ? '' : 's'} of data`}
+        />
+        <BarChart
+          data={history.map(h => ({ label: h.ym.slice(5), value: h.total }))}
+          height={200}
+          variant="pill"
+          tone="positive"
+          formatValue={compactFmt}
+          ariaLabel="Monthly revenue, last 12 months"
+        />
       </div>
     </Card>
   )
 }
 
-function CostMixCard({ costMix, formatNative }: {
+function CostMixCard({ costMix, spendSplit, formatNative }: {
   costMix: Array<{ category: string; monthly: number }>
+  spendSplit: { discretionary: number; essential: number }
   formatNative: (n: number, currency: string) => string
 }) {
-  if (costMix.length === 0) return null
   const total = costMix.reduce((s, c) => s + c.monthly, 0)
+  const splitTotal = spendSplit.essential + spendSplit.discretionary
+  const essentialPct = splitTotal > 0 ? (spendSplit.essential / splitTotal) * 100 : 0
+  // No data branch. Keep a neat empty hint inside the consistent shell.
+  if (costMix.length === 0 && splitTotal === 0) {
+    return (
+      <Card>
+        <div className="p-4 sm:p-6">
+          <SubSectionHeader title="Cost mix and split" />
+          <EmptyHint>No outflow data yet. Add some commitments above to populate this view.</EmptyHint>
+        </div>
+      </Card>
+    )
+  }
   return (
     <Card>
       <div className="p-4 sm:p-6">
-        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
-            Cost mix
+        <SubSectionHeader
+          title="Cost mix and split"
+          meta={`${formatNative(total, 'NZD')}/mo recurring · ${formatNative(splitTotal * 12, 'NZD')}/yr`}
+        />
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(20rem, 1fr))', gap: 'var(--space-5)', alignItems: 'start' }}>
+          {/* Left: donut + legend by category */}
+          <div className="grid" style={{ gridTemplateColumns: '10rem 1fr', gap: 'var(--space-3)', alignItems: 'center' }}>
+            <div style={{ width: '10rem', height: '10rem' }}>
+              <DonutChart
+                size={160}
+                segments={costMix.map(c => ({ label: c.category, value: c.monthly }))}
+                centreLabel={<span className="text-[0.6875rem] uppercase tracking-wider text-[var(--color-text-subtle)]">Monthly</span>}
+                centreValue={
+                  <span className="text-base font-bold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {formatNative(total, 'NZD')}
+                  </span>
+                }
+                legend={false}
+                ariaLabel="Cost mix by category"
+              />
+            </div>
+            <div className="grid" style={{ gap: '0.4375rem' }}>
+              {costMix.map((c, i) => {
+                const pct = total > 0 ? c.monthly / total : 0
+                const dot = CHART.categorical[i % CHART.categorical.length]
+                return (
+                  <div key={c.category} className="flex items-center" style={{ gap: '0.5rem' }}>
+                    <span style={{ width: '0.5rem', height: '0.5rem', borderRadius: '999px', background: dot, flexShrink: 0 }} />
+                    <span className="text-xs text-[var(--color-text)] capitalize truncate" style={{ flex: 1, minWidth: 0 }}>{c.category}</span>
+                    <span className="text-xs text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                      {formatNative(c.monthly, 'NZD')}
+                    </span>
+                    <span className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ fontVariantNumeric: 'tabular-nums', width: '2.5rem', textAlign: 'right', flexShrink: 0 }}>
+                      {Math.round(pct * 100)}%
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
           </div>
-          <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-            {formatNative(total, 'NZD')}/mo total recurring
+
+          {/* Right: essential vs discretionary split */}
+          <div>
+            <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]" style={{ marginBottom: '0.5rem' }}>
+              Essential vs discretionary
+            </div>
+            <div style={{
+              height: '0.75rem',
+              background: 'var(--color-bg-secondary)',
+              borderRadius: '999px',
+              overflow: 'hidden',
+              display: 'flex',
+              marginBottom: '0.625rem',
+            }}>
+              <div style={{ width: `${essentialPct}%`, height: '100%', background: 'var(--color-brand)' }} />
+              <div style={{ width: `${100 - essentialPct}%`, height: '100%', background: 'var(--color-brand-light)' }} />
+            </div>
+            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
+              <MetricBlock
+                label="Essential (cannot cut)"
+                value={formatNative(spendSplit.essential, 'NZD')}
+                sub={`${Math.round(essentialPct)}% of recurring outflow`}
+                compact
+                accent
+              />
+              <MetricBlock
+                label="Discretionary (could cut)"
+                value={formatNative(spendSplit.discretionary, 'NZD')}
+                sub={spendSplit.discretionary > 0
+                  ? `${formatNative(spendSplit.discretionary * 12, 'NZD')}/yr if trimmed`
+                  : 'None tagged yet'}
+                compact
+              />
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)]" style={{ marginTop: 'var(--space-3)', lineHeight: 1.55 }}>
+              Tag commitments in the table above as discretionary or essential to drive this split.
+            </p>
           </div>
-        </div>
-        <div className="grid" style={{ gap: '0.375rem' }}>
-          {costMix.map(c => {
-            const pct = total > 0 ? c.monthly / total : 0
-            return (
-              <div key={c.category} className="flex items-center" style={{ gap: '0.75rem' }}>
-                <span className="text-sm text-[var(--color-text)] capitalize" style={{ minWidth: '7rem' }}>{c.category}</span>
-                <div style={{ flex: 1, height: '0.625rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
-                  <div style={{ width: `${Math.max(2, pct * 100)}%`, height: '100%', background: 'var(--color-brand)' }} />
-                </div>
-                <span className="text-xs text-[var(--color-text-muted)]" style={{ width: '5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                  {formatNative(c.monthly, 'NZD')}
-                </span>
-                <span className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ width: '3rem', textAlign: 'right' }}>
-                  {Math.round(pct * 100)}%
-                </span>
-              </div>
-            )
-          })}
         </div>
       </div>
     </Card>
@@ -1345,39 +1594,259 @@ function PipelineFunnelCard({ funnel, open, formatNative }: {
   open: { value: number; count: number }
   formatNative: (n: number, currency: string) => string
 }) {
-  // Drop closed-lost stages (already filtered server-side).
   const stages = funnel.filter(s => s.count > 0 || !s.isClosedWon)
-  if (stages.length === 0) return null
-  const maxValue = Math.max(...stages.map(s => s.value), 1)
+  if (stages.length === 0) {
+    return (
+      <Card>
+        <div className="p-4 sm:p-6">
+          <SubSectionHeader title="Pipeline funnel" />
+          <EmptyHint>No open deals yet. Add deals on /pipeline to see the funnel light up.</EmptyHint>
+        </div>
+      </Card>
+    )
+  }
+  // Compact formatter for the chart Y-axis.
+  const compactFmt = (v: number): string => {
+    if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k`
+    return Math.round(v).toString()
+  }
   return (
     <Card>
       <div className="p-4 sm:p-6">
-        <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
-            Pipeline → cash funnel
-          </div>
-          <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-            {formatNative(open.value, 'NZD')} open across {open.count} deals
-          </div>
-        </div>
-        <div className="grid" style={{ gap: '0.375rem' }}>
+        <SubSectionHeader
+          title="Pipeline funnel"
+          meta={`${formatNative(open.value, 'NZD')} open · ${open.count} deal${open.count === 1 ? '' : 's'}`}
+        />
+        <BarChart
+          data={stages.map(s => ({
+            label: s.stage,
+            value: s.value,
+            tone: s.isClosedWon ? 'positive' : 'neutral',
+          }))}
+          height={220}
+          variant="pill"
+          tone="neutral"
+          formatValue={compactFmt}
+          ariaLabel="Pipeline funnel by stage"
+        />
+        {/* Per-stage count grid for quick scan. */}
+        <div className="grid" style={{
+          gridTemplateColumns: 'repeat(auto-fit, minmax(7rem, 1fr))',
+          gap: 'var(--space-3)',
+          marginTop: 'var(--space-4)',
+        }}>
           {stages.map(s => (
-            <div key={s.stage} className="flex items-center" style={{ gap: '0.75rem' }}>
-              <span className="text-sm text-[var(--color-text)]" style={{ minWidth: '9rem' }}>
+            <div key={s.stage} style={{
+              padding: '0.5rem 0.625rem',
+              background: 'var(--color-bg-secondary)',
+              borderRadius: 'var(--radius-md)',
+            }}>
+              <div className="text-[0.625rem] text-[var(--color-text-subtle)] truncate" style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                 {s.stage}
-                {s.isClosedWon && !/won/i.test(s.stage) && <span className="text-[0.625rem] text-[var(--color-brand)] ml-1">won</span>}
-              </span>
-              <div style={{ flex: 1, height: '0.5rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
-                <div style={{ width: `${(s.value / maxValue) * 100}%`, height: '100%', background: s.isClosedWon ? 'var(--color-brand-dark)' : 'var(--color-brand-light)' }} />
               </div>
-              <span className="text-xs text-[var(--color-text-muted)]" style={{ width: '6rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                {formatNative(s.value, 'NZD')}
-              </span>
-              <span className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ width: '2.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+              <div className="text-sm font-semibold text-[var(--color-text)]" style={{ marginTop: '0.125rem', fontVariantNumeric: 'tabular-nums' }}>
                 {s.count}
-              </span>
+              </div>
+              <div className="text-[0.625rem] text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {formatNative(s.value, 'NZD')}
+              </div>
             </div>
           ))}
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+// ─── Sales velocity + YoY + Tax summary helpers ───────────────────────
+
+function SalesVelocityCard({ salesVelocity, primaryCurrency, toCur }: {
+  salesVelocity: SummaryResponse['salesVelocity']
+  primaryCurrency: string
+  toCur: (n: number, fromCurrency: string) => string
+}) {
+  return (
+    <Card>
+      <div className="p-4 sm:p-6">
+        <SubSectionHeader title="Sales velocity" meta="Deals signed across rolling windows." />
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '1.25rem' }}>
+          <MetricBlock label="Last 30 days" value={`${salesVelocity.last30Days.count} deal${salesVelocity.last30Days.count === 1 ? '' : 's'}`} sub={toCur(salesVelocity.last30Days.value, primaryCurrency)} />
+          <MetricBlock label="Last 60 days" value={`${salesVelocity.last60Days.count} deal${salesVelocity.last60Days.count === 1 ? '' : 's'}`} sub={toCur(salesVelocity.last60Days.value, primaryCurrency)} />
+          <MetricBlock label="Last 90 days" value={`${salesVelocity.last90Days.count} deal${salesVelocity.last90Days.count === 1 ? '' : 's'}`} sub={toCur(salesVelocity.last90Days.value, primaryCurrency)} />
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function YoyCard({ yoy, history, cur, toCur }: {
+  yoy: SummaryResponse['yoy']
+  history: Array<{ ym: string; total: number }>
+  cur: string
+  toCur: (n: number, fromCurrency: string) => string
+}) {
+  // Tiny sparkline of the last 6 months for context next to the YoY number.
+  const recent = history.slice(-6).map(h => ({ label: h.ym.slice(5), value: h.total }))
+  const deltaSign = yoy.deltaPct == null ? '' : yoy.deltaPct >= 0 ? '+' : ''
+  const deltaLabel = yoy.deltaPct == null ? 'n/a' : `${deltaSign}${Math.round(yoy.deltaPct * 100)}%`
+  const deltaTone: 'positive' | 'warning' | 'danger' | 'neutral' = yoy.deltaPct == null ? 'neutral'
+    : yoy.deltaPct > 0 ? 'positive'
+    : yoy.deltaPct > -0.1 ? 'warning'
+    : 'danger'
+  const deltaColour = deltaTone === 'positive' ? 'var(--color-brand-dark)'
+    : deltaTone === 'warning' ? '#9a3412'
+    : deltaTone === 'danger' ? '#991b1b'
+    : 'var(--color-text)'
+  return (
+    <Card>
+      <div className="p-4 sm:p-6">
+        <SubSectionHeader title="Year-over-year" meta="This month versus the same month last year." />
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: 'var(--space-4)' }}>
+          <div>
+            <div className="text-xs text-[var(--color-text-muted)]" style={{ fontWeight: 500 }}>This month so far</div>
+            <div style={{
+              fontSize: '1.75rem',
+              fontWeight: 700,
+              letterSpacing: '-0.01em',
+              color: 'var(--color-brand-dark)',
+              fontVariantNumeric: 'tabular-nums',
+              marginTop: '0.125rem',
+              lineHeight: 1.15,
+            }}>
+              {toCur(yoy.thisMonth, cur)}
+            </div>
+            <div className="text-[0.6875rem] text-[var(--color-text-subtle)] mt-0.5">Paid invoices, current calendar month</div>
+          </div>
+          <div>
+            <div className="text-xs text-[var(--color-text-muted)]" style={{ fontWeight: 500 }}>Same month last year</div>
+            <div style={{
+              fontSize: '1.375rem',
+              fontWeight: 700,
+              letterSpacing: '-0.01em',
+              color: 'var(--color-text)',
+              fontVariantNumeric: 'tabular-nums',
+              marginTop: '0.125rem',
+              lineHeight: 1.15,
+            }}>
+              {toCur(yoy.lastYearSameMonth, cur)}
+            </div>
+            <div className="text-[0.6875rem] text-[var(--color-text-subtle)] mt-0.5">{yoy.lastYearSameMonth === 0 ? 'No data, comparison not available' : 'For perspective'}</div>
+          </div>
+          <div>
+            <div className="text-xs text-[var(--color-text-muted)]" style={{ fontWeight: 500 }}>Delta</div>
+            <div style={{
+              fontSize: '1.375rem',
+              fontWeight: 700,
+              letterSpacing: '-0.01em',
+              color: deltaColour,
+              fontVariantNumeric: 'tabular-nums',
+              marginTop: '0.125rem',
+              lineHeight: 1.15,
+            }}>
+              {deltaLabel}
+            </div>
+            <div className="text-[0.6875rem] text-[var(--color-text-subtle)] mt-0.5">
+              {yoy.deltaPct == null ? 'No baseline' : yoy.deltaPct > 0 ? 'Growing year-on-year' : 'Down vs same month last year'}
+            </div>
+          </div>
+        </div>
+        {recent.length > 1 && (
+          <div style={{ marginTop: 'var(--space-4)' }}>
+            <BarChart
+              data={recent}
+              height={120}
+              variant="pill"
+              tone="positive"
+              showYAxis={false}
+              ariaLabel="Last 6 months revenue trend"
+            />
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+}
+
+function TaxSummaryCard({ taxes, reserves, primaryCurrency, toCur, formatNative }: {
+  taxes: SummaryResponse['taxes']
+  reserves: SummaryResponse['reserves']
+  primaryCurrency: string
+  toCur: (n: number, fromCurrency: string) => string
+  formatNative: (n: number, currency: string) => string
+}) {
+  // Reserve coverage for accrued tax. If they have set aside more than
+  // the corp-tax-owed YTD, this lands at 100%. Cap at 100 so the donut
+  // doesn't look stuck mid-loop.
+  const taxOwed = Math.max(0, taxes.corpTaxOwedYtd)
+  const reserved = Math.max(0, reserves.total)
+  const coveragePct = taxOwed > 0 ? Math.min(100, Math.round((reserved / taxOwed) * 100)) : reserved > 0 ? 100 : 0
+  const tone: 'positive' | 'warning' | 'danger' = coveragePct >= 80 ? 'positive' : coveragePct >= 40 ? 'warning' : 'danger'
+  const toneColour = tone === 'positive' ? '#5A824E' : tone === 'warning' ? '#fb923c' : '#f87171'
+  return (
+    <Card>
+      <div className="p-4 sm:p-6">
+        <SubSectionHeader
+          title="Tax owed and reserve progress"
+          meta={`NZ tax year ${new Date(taxes.taxYearStart).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })} · ${taxes.monthsIntoTaxYear} of 12 months elapsed`}
+        />
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(20rem, 1fr))', gap: 'var(--space-5)', alignItems: 'center' }}>
+          {/* Donut: how much of corp-tax-owed is already reserved. */}
+          <div className="grid" style={{ gridTemplateColumns: '8rem 1fr', gap: 'var(--space-3)', alignItems: 'center' }}>
+            <div style={{ width: '8rem', height: '8rem' }}>
+              <DonutChart
+                size={128}
+                segments={[
+                  { label: 'Reserved', value: coveragePct, colour: toneColour },
+                  { label: 'To reserve', value: Math.max(0, 100 - coveragePct), colour: 'var(--color-bg-tertiary)' },
+                ]}
+                centreLabel={<span className="text-[0.6875rem] uppercase tracking-wider text-[var(--color-text-subtle)]">Reserved</span>}
+                centreValue={
+                  <span className="text-lg font-bold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {coveragePct}%
+                  </span>
+                }
+                legend={false}
+                ariaLabel="Tax reserve coverage"
+              />
+            </div>
+            <div className="grid" style={{ gap: 'var(--space-3)' }}>
+              <MetricBlock
+                label="Corp tax accrued YTD"
+                value={toCur(taxes.corpTaxOwedYtd, primaryCurrency)}
+                sub={`28% of profit (${toCur(taxes.ytdProfit, primaryCurrency)})`}
+                compact
+                accent
+              />
+              <MetricBlock
+                label="Reserved so far"
+                value={formatNative(reserved, 'NZD')}
+                sub={taxOwed > 0 ? `${formatNative(Math.max(0, taxOwed - reserved), 'NZD')} still to set aside` : 'Up to date'}
+                compact
+              />
+            </div>
+          </div>
+
+          {/* Right side: tax-year revenue + GST + expenses block. */}
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))', gap: 'var(--space-4)' }}>
+            <MetricBlock
+              label="Tax-year revenue"
+              value={toCur(taxes.taxYearRevenue, primaryCurrency)}
+              sub="Paid invoices, current tax year"
+              compact
+            />
+            <MetricBlock
+              label="GST collected"
+              value={toCur(taxes.gstOwedYtd, primaryCurrency)}
+              sub="Tax on paid invoices"
+              compact
+            />
+            <MetricBlock
+              label="Expenses (approx)"
+              value={toCur(taxes.ytdExpensesApprox, primaryCurrency)}
+              sub="Recurring × months elapsed"
+              compact
+            />
+          </div>
         </div>
       </div>
     </Card>
@@ -1403,18 +1872,18 @@ function ProductivityCard({ revenuePerHour, hours, cashConversion, timeToPay, ou
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1.5rem' }}>
           <MetricBlock
             label="Revenue per logged hour"
-            value={revenuePerHour != null && hours > 0 ? formatNative(revenuePerHour, 'NZD') : '—'}
+            value={revenuePerHour != null && hours > 0 ? formatNative(revenuePerHour, 'NZD') : 'n/a'}
             sub={hours > 0 ? `${Math.round(hours)} hours logged last 90d` : 'Log hours to track this'}
             accent
           />
           <MetricBlock
             label="Cash conversion"
-            value={cashConversion.ratio != null ? `${Math.round(cashConversion.ratio * 100)}%` : '—'}
+            value={cashConversion.ratio != null ? `${Math.round(cashConversion.ratio * 100)}%` : 'n/a'}
             sub={`${formatNative(cashConversion.collected90d, 'NZD')} collected of ${formatNative(cashConversion.invoiced90d, 'NZD')} invoiced (90d)`}
           />
           <MetricBlock
             label="Time to pay"
-            value={timeToPay.count > 0 ? `${Math.round(timeToPay.avgDays)}d avg` : '—'}
+            value={timeToPay.count > 0 ? `${Math.round(timeToPay.avgDays)}d avg` : 'n/a'}
             sub={timeToPay.count > 0 ? `Range ${Math.round(timeToPay.minDays)} to ${Math.round(timeToPay.maxDays)} days across ${timeToPay.count} invoices` : 'No paid invoices in window'}
           />
           <MetricBlock
@@ -1424,7 +1893,7 @@ function ProductivityCard({ revenuePerHour, hours, cashConversion, timeToPay, ou
           />
           <MetricBlock
             label="Average deal"
-            value={dealStats.count > 0 ? formatNative(dealStats.avgValue, 'NZD') : '—'}
+            value={dealStats.count > 0 ? formatNative(dealStats.avgValue, 'NZD') : 'n/a'}
             sub={dealStats.count > 0 ? `${dealStats.count} won in 90d · ${Math.round(dealStats.avgCycleDays)}d avg cycle` : 'No won deals in 90d'}
           />
         </div>
@@ -1489,7 +1958,7 @@ function AnomaliesCard() {
       const r = await fetch(apiPath('/api/admin/cron/finance-anomaly-scan'), { method: 'POST' })
       const d = await r.json() as { inserted?: number; findingsRaw?: number; error?: string }
       if (r.ok) {
-        showToast(`Scan ran — ${d.inserted ?? 0} new ${d.inserted === 1 ? 'finding' : 'findings'} (${(d.findingsRaw ?? 0) - (d.inserted ?? 0)} deduped)`, 'success')
+        showToast(`Scan ran. ${d.inserted ?? 0} new ${d.inserted === 1 ? 'finding' : 'findings'} (${(d.findingsRaw ?? 0) - (d.inserted ?? 0)} deduped)`, 'success')
         await fetchAnomalies()
       } else {
         showToast(`Scan failed: ${d.error ?? 'unknown'}`, 'error')
@@ -1522,7 +1991,7 @@ function AnomaliesCard() {
       <div className="p-4 sm:p-6">
         <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
-            Anomalies — AI weekly + monthly scan
+            Anomalies (AI weekly and monthly scan)
           </div>
           <TahiButton size="sm" variant="secondary" loading={running} onClick={() => void runScan()}>
             Run scan now
@@ -1819,11 +2288,27 @@ function RecurringOutflowsCard({ formatNative }: {
   const activeCount = items.filter(c => c.active).length
   const staleCount = items.filter(c => c.active && !c.lastBankHit).length
 
+  // Strip metrics: monthly sum, annualised, single biggest commitment,
+  // and essential / discretionary split. All native-currency sums so this
+  // matches the existing display behaviour.
+  const monthlyTotal = items.filter(c => c.active).reduce((s, c) => s + monthlyEquivNative(c), 0)
+  const annualTotal = monthlyTotal * 12
+  const biggest = items.filter(c => c.active).reduce<CommitmentRow | null>((max, c) => {
+    const m = monthlyEquivNative(c)
+    if (!max) return c
+    return m > monthlyEquivNative(max) ? c : max
+  }, null)
+  const essentialSum = items.filter(c => c.active && !c.isDiscretionary).reduce((s, c) => s + monthlyEquivNative(c), 0)
+  const discretionarySum = items.filter(c => c.active && c.isDiscretionary).reduce((s, c) => s + monthlyEquivNative(c), 0)
+  const essentialPct = (essentialSum + discretionarySum) > 0
+    ? Math.round((essentialSum / (essentialSum + discretionarySum)) * 100)
+    : 0
+
   return (
     <>
       <Card>
         <div className="p-4 sm:p-6">
-          <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div className="flex items-baseline justify-between" style={{ marginBottom: '0.875rem', flexWrap: 'wrap', gap: '0.5rem' }}>
             <div>
               <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
                 Recurring outflows
@@ -1860,6 +2345,49 @@ function RecurringOutflowsCard({ formatNative }: {
               </TahiButton>
             </div>
           </div>
+
+          {/* Strip metrics that summarise the rows below. Renders only when
+              we have any active commitments so empty state stays clean. */}
+          {activeCount > 0 && (
+            <div
+              className="grid"
+              style={{
+                gridTemplateColumns: 'repeat(auto-fit, minmax(9rem, 1fr))',
+                gap: 'var(--space-3)',
+                padding: 'var(--space-3)',
+                background: 'var(--color-bg-secondary)',
+                borderRadius: 'var(--radius-md)',
+                marginBottom: 'var(--space-4)',
+              }}
+            >
+              <MetricBlock
+                label="Total monthly"
+                value={formatNative(monthlyTotal, 'NZD')}
+                sub="Active commitments"
+                compact
+                accent
+              />
+              <MetricBlock
+                label="Annualised"
+                value={formatNative(annualTotal, 'NZD')}
+                sub="12 mo run rate"
+                compact
+              />
+              <MetricBlock
+                label="Biggest line"
+                value={biggest ? formatNative(monthlyEquivNative(biggest), biggest.currency) : 'n/a'}
+                sub={biggest ? biggest.name : 'No active commitments'}
+                compact
+              />
+              <MetricBlock
+                label="Essential share"
+                value={`${essentialPct}%`}
+                sub={`${formatNative(essentialSum, 'NZD')} essential, ${formatNative(discretionarySum, 'NZD')} discretionary`}
+                compact
+              />
+            </div>
+          )}
+
           <DataTable
             rows={visible}
             getRowId={(r) => r.id}
@@ -1921,7 +2449,7 @@ function RecurringOutflowsCard({ formatNative }: {
                       {formatNative(r.lastBankHit.amount, r.lastBankHit.currency)}
                     </div>
                     <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-                      {r.lastBankHit.settledAt ? fmtRelative(r.lastBankHit.settledAt) : '—'}
+                      {r.lastBankHit.settledAt ? fmtRelative(r.lastBankHit.settledAt) : 'n/a'}
                     </div>
                   </div>
                 ) : r.active ? (
@@ -2184,7 +2712,7 @@ function RecurringOutflowsCard({ formatNative }: {
                 const tone = p.confidence === 'high' ? 'positive' : p.confidence === 'medium' ? 'brand' : p.confidence === 'low' ? 'warning' : 'neutral'
                 const changes: string[] = []
                 if (p.inferredBillingDay != null && p.inferredBillingDay !== p.currentBillingDay) {
-                  changes.push(`day ${p.currentBillingDay ?? '—'} → ${p.inferredBillingDay}`)
+                  changes.push(`day ${p.currentBillingDay ?? 'n/a'} -> ${p.inferredBillingDay}`)
                 }
                 if (p.inferredCadence && p.inferredCadence !== p.currentCadence) {
                   changes.push(`cadence ${p.currentCadence} → ${p.inferredCadence}`)
@@ -2194,7 +2722,7 @@ function RecurringOutflowsCard({ formatNative }: {
                     <div className="flex items-start justify-between" style={{ gap: '0.5rem' }}>
                       <div style={{ minWidth: 0 }}>
                         <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{p.name}</div>
-                        <div className="text-[0.6875rem]" style={{ color: 'var(--color-text-subtle)' }}>{p.vendor ?? '—'} · {p.matchCount} matches</div>
+                        <div className="text-[0.6875rem]" style={{ color: 'var(--color-text-subtle)' }}>{p.vendor ?? 'no vendor'} · {p.matchCount} matches</div>
                       </div>
                       <Badge tone={tone} variant="soft" size="sm">{p.confidence}</Badge>
                     </div>
@@ -2272,7 +2800,7 @@ function SpendImpactCard({ startingCash, burn, revenue, reserveTarget, formatNat
   // Net burn/month under this scenario. Negative = cash growing.
   const netBurnPerMonth = burn + spend - revenue
   // 12-month projection points. Always show 12 even if the spend duration
-  // is shorter — see what happens after the cost goes away.
+  // is shorter. See what happens after the cost goes away.
   const horizon = 12
   const projection: Array<{ month: number; cash: number; spendActive: boolean; belowTarget: boolean }> = []
   let cash = startingCash - upfront
@@ -2397,7 +2925,7 @@ function SpendImpactCard({ startingCash, burn, revenue, reserveTarget, formatNat
           />
         </div>
         <p className="text-xs text-[var(--color-text-muted)]" style={{ marginTop: '0.75rem', lineHeight: 1.5 }}>
-          {verdict.detail} Assumes revenue stays flat at {formatNative(revenue, 'NZD')}/mo and existing burn at {formatNative(burn, 'NZD')}/mo — adjust either in the reserve target card above for a different projection. <em>{label}</em>: this scenario.
+          {verdict.detail} Assumes revenue stays flat at {formatNative(revenue, 'NZD')}/mo and existing burn at {formatNative(burn, 'NZD')}/mo. Adjust either in the reserve target card above for a different projection. <em>{label}</em>: this scenario.
         </p>
       </div>
     </Card>
@@ -2423,7 +2951,6 @@ function RunwayTile({ label, sub, value, detail, tone }: {
         padding: '0.625rem 0.75rem',
         borderRadius: 'var(--radius-md)',
         background: 'var(--color-bg-secondary)',
-        borderLeft: 'none',
         position: 'relative',
         overflow: 'hidden',
       }}
@@ -2462,7 +2989,7 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
   // burnMode tracks whether the operator wants the auto-calculated burn
   // (sum of active commitments) or their hand-set value. Switching to
   // auto preserves the manual number in state so flipping back is
-  // friction-free — the input just blanks out visually.
+  // friction-free. The input just blanks out visually.
   const [burnMode, setBurnMode] = useState<'auto' | 'manual'>(
     config.monthlyBurnNzd != null && config.monthlyBurnNzd > 0 ? 'manual' : 'auto'
   )
@@ -2471,7 +2998,7 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
 
-  // Effective burn shown in the "Target amount" preview — recompute
+  // Effective burn shown in the "Target amount" preview. Recompute
   // here so the preview updates as the user types, before save lands.
   const previewBurn = burnMode === 'auto'
     ? config.autoBurnNzd
@@ -2481,7 +3008,7 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
   async function save() {
     setSaving(true)
     try {
-      // Auto mode persists as 0 — backend treats null/0 as "fall back
+      // Auto mode persists as 0. Backend treats null/0 as "fall back
       // to autoBurnNzd". Manual mode persists the typed number.
       const burnValue = burnMode === 'auto' ? '0' : (burn || '0')
       const writes: Array<{ key: string; value: string }> = [
@@ -2546,7 +3073,7 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem', gap: '0.5rem' }}>
               <label style={{ ...labelStyle, marginBottom: 0 }}>Monthly burn (NZD)</label>
-              <div role="group" aria-label="Burn calculation mode" style={{ display: 'inline-flex', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+              <div role="group" aria-label="Burn calculation mode" style={{ display: 'inline-flex', alignItems: 'stretch', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
                 <button
                   type="button"
                   onClick={() => { setBurnMode('auto'); setDirty(true) }}
@@ -2562,6 +3089,7 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
                 >
                   Auto
                 </button>
+                <span aria-hidden="true" style={{ width: '1px', background: 'var(--color-border)' }} />
                 <button
                   type="button"
                   onClick={() => { setBurnMode('manual'); setDirty(true) }}
@@ -2571,7 +3099,6 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
                     background: burnMode === 'manual' ? 'var(--color-brand-50)' : 'transparent',
                     color: burnMode === 'manual' ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
                     border: 'none',
-                    borderLeft: '1px solid var(--color-border)',
                     cursor: 'pointer',
                   }}
                   aria-pressed={burnMode === 'manual'}
@@ -2632,7 +3159,7 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
           <RunwayTile
             label="Worst case runway"
             sub={`All cash ÷ burn · zero revenue`}
-            value={config.grossRunwayMonths != null ? `${config.grossRunwayMonths.toFixed(1)} mo` : '—'}
+            value={config.grossRunwayMonths != null ? `${config.grossRunwayMonths.toFixed(1)} mo` : 'n/a'}
             detail={`${formatNative(config.totalCashNzd, 'NZD')} cash ÷ ${formatNative(previewBurn, 'NZD')}/mo`}
             tone={config.grossRunwayMonths == null ? 'neutral'
               : config.grossRunwayMonths >= config.targetMonths ? 'positive'
@@ -2704,17 +3231,19 @@ function ArBucket({ label, amount, cur, toCur, tone }: {
   )
 }
 
-function MetricBlock({ label, value, sub, accent = false }: { label: string; value: string; sub?: string; accent?: boolean }) {
+function MetricBlock({ label, value, sub, accent = false, compact = false }: { label: string; value: string; sub?: string; accent?: boolean; compact?: boolean }) {
+  const fontSize = compact ? '1.125rem' : accent ? '1.75rem' : '1.375rem'
   return (
     <div>
-      <div className="text-xs text-[var(--color-text-muted)]">{label}</div>
+      <div className="text-xs text-[var(--color-text-muted)]" style={{ fontWeight: 500 }}>{label}</div>
       <div style={{
-        fontSize: accent ? '1.75rem' : '1.375rem',
+        fontSize,
         fontWeight: 700,
         letterSpacing: '-0.01em',
         color: accent ? 'var(--color-brand-dark)' : 'var(--color-text)',
         fontVariantNumeric: 'tabular-nums',
         marginTop: '0.125rem',
+        lineHeight: 1.15,
       }}>
         {value}
       </div>
