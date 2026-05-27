@@ -972,19 +972,21 @@ function HeroCashCard({
           </Badge>
         </div>
 
-        <div className="grid" style={{ gridTemplateColumns: '6rem 1fr', gap: 'var(--space-4)', alignItems: 'center' }}>
-          {/* Mini donut: % of reserve target reached. Hard-coded to the
-              traffic-light tone so a glance reads as red / amber / green. */}
-          <div style={{ width: '6rem', height: '6rem' }}>
+        {/* Stack vertically: donut centred, then runway metrics. Side-by-
+            side felt cramped on mobile and felt off on desktop too — the
+            three pieces (donut, worst case, net burn) read better as a
+            single column at every breakpoint. */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 'var(--space-4)' }}>
+          <div style={{ alignSelf: 'center', width: '8.5rem', height: '8.5rem' }}>
             <DonutChart
-              size={96}
+              size={136}
               segments={[
                 { label: 'Reached', value: reservePct, colour: reserveTone === 'positive' ? '#5A824E' : reserveTone === 'warning' ? '#fb923c' : '#f87171' },
                 { label: 'Remaining', value: Math.max(0, 100 - reservePct), colour: 'var(--color-bg-tertiary)' },
               ]}
               centreLabel={<span className="text-[0.6875rem] uppercase tracking-wider text-[var(--color-text-subtle)]">Reserve</span>}
               centreValue={
-                <span className="text-base font-bold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                <span className="text-lg font-bold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
                   {reservePct}%
                 </span>
               }
@@ -992,7 +994,7 @@ function HeroCashCard({
               ariaLabel="Reserve target progress"
             />
           </div>
-          <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
             <MetricBlock
               label="Worst case runway"
               value={grossLabel}
