@@ -1,32 +1,27 @@
 import { ClerkSignUp } from '@/components/tahi/clerk-mount'
+import { AuthShell, tahiClerkAppearance } from '@/components/tahi/auth-shell'
+
+export const metadata = {
+  title: 'Create your account — Tahi Studio',
+  description: 'Get started with Tahi Studio.',
+}
 
 export default function SignUpPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg-secondary)]">
-      <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <div className="inline-flex items-center gap-2 mb-4">
-            <div
-              className="w-10 h-10 brand-gradient flex items-center justify-center"
-              style={{ borderRadius: 'var(--radius-leaf-sm)' }}
-            >
-              <span className="text-white font-bold text-lg">T</span>
-            </div>
-            <span className="text-xl font-bold text-[var(--color-text)]">Tahi Studio</span>
-          </div>
-          <p className="text-[var(--color-text-muted)] text-sm">Create your account</p>
-        </div>
-        <ClerkSignUp
-          appearance={{
-            elements: {
-              rootBox: 'w-full',
-              card: 'shadow-lg border border-[var(--color-border)] rounded-[var(--radius-card)]',
-              headerTitle: 'hidden',
-              headerSubtitle: 'hidden',
-            },
-          }}
-        />
-      </div>
-    </div>
+    <AuthShell
+      title="Create your account"
+      subtitle="A minute to set up. Everything in one place after that."
+      marketingHeadline="Run your studio from a single calm dashboard."
+      valueProps={[
+        { title: 'Win work faster', body: 'AI-drafted replies, discovery digests, and a pipeline that nudges itself.' },
+        { title: 'Stay across the money', body: 'Live cash, burn and runway across NZD, USD, GBP and beyond.' },
+        { title: 'Deliver with less friction', body: 'Requests, tasks, schedules and contracts wired together.' },
+      ]}
+      footerPrompt="Already have an account?"
+      footerLinkLabel="Sign in"
+      footerLinkHref="/sign-in"
+    >
+      <ClerkSignUp appearance={tahiClerkAppearance} />
+    </AuthShell>
   )
 }

@@ -4,15 +4,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useClerk } from '@clerk/nextjs'
 import { Loader2 } from 'lucide-react'
 
-interface AppearanceElements {
-  rootBox?: string
-  card?: string
-  headerTitle?: string
-  headerSubtitle?: string
-}
-
 interface ClerkMountProps {
-  appearance?: { elements?: AppearanceElements }
+  /** Clerk appearance config. Loosely typed because the underlying
+   *  Clerk Appearance type is large and version-specific; we pass it
+   *  through verbatim to clerk.mountSignIn / mountSignUp. */
+  appearance?: Record<string, unknown>
 }
 
 // ── ClerkSignIn ────────────────────────────────────────────────────────────────
