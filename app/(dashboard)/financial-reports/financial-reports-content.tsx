@@ -52,6 +52,11 @@ interface SummaryResponse {
     targetAmount: number
     targetBurn: number
     monthsOfRunway: number | null
+    totalCashNzd: number
+    grossRunwayMonths: number | null
+    netRunwayMonths: number | null
+    netMonthlyBurnNzd: number
+    monthlySurplusNzd: number
   }
   mrr: {
     retainer: number
@@ -178,7 +183,18 @@ export function FinancialReportsContent() {
   // switcher. Native amounts are still shown next to bank rows since
   // those are bank-of-truth-in-currency, but the headline + status
   // tiles + revenue card convert via the FX-rate context.
-  const { displayCurrency, toDisplay, format: formatDisplay, formatNative, exchangeRates, ratesLoaded } = useDisplayCurrency()
+  const { displayCurrency, toDisplay, format: formatDisplay, formatNative: formatNativeRaw, exchangeRates, ratesLoaded } = useDisplayCurrency()
+  // Smart formatter that respects the nav currency switcher:
+  //   - 'NZD' headline aggregates → convert via formatDisplay so the user sees
+  //     their chosen currency (USD, GBP, etc.) on burn, MRR, runway, etc.
+  //   - Genuinely native amounts (bank balances per currency, invoice billed
+  //     in GBP) → stay native via the raw formatter from context.
+  // This single shim is what makes every card on this page respect the
+  // switcher — children take this version as the `formatNative` prop.
+  const formatNative = useCallback((amount: number, currency: string): string => {
+    if (currency === 'NZD') return formatDisplay(amount)
+    return formatNativeRaw(amount, currency)
+  }, [formatDisplay, formatNativeRaw])
   const [data, setData] = useState<SummaryResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
@@ -319,9 +335,11 @@ export function FinancialReportsContent() {
       {/* Status strip — traffic lights per axis, plain-English label */}
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '0.875rem' }}>
         <StatusTile label="Cash runway" status={data.status.cash} hint={
-          data.reserveConfig.monthsOfRunway != null
-            ? `${data.reserveConfig.monthsOfRunway.toFixed(1)} months at ${formatNative(data.reserveConfig.targetBurn, 'NZD')}/mo burn · target ${data.reserveConfig.targetMonths}mo`
-            : 'Set monthly burn below to track this properly'
+          data.reserveConfig.netRunwayMonths == null && data.reserveConfig.monthlySurplusNzd >= 0
+            ? `Profitable: +${formatNative(Math.max(0, data.reserveConfig.monthlySurplusNzd), 'NZD')}/mo · ${data.reserveConfig.grossRunwayMonths != null ? `${data.reserveConfig.grossRunwayMonths.toFixed(1)} mo worst case` : 'set burn to track worst case'}`
+            : data.reserveConfig.grossRunwayMonths != null
+              ? `${data.reserveConfig.grossRunwayMonths.toFixed(1)} mo worst case · ${data.reserveConfig.netRunwayMonths != null ? `${data.reserveConfig.netRunwayMonths.toFixed(1)} mo at net burn` : 'no net burn'} · target ${data.reserveConfig.targetMonths}mo`
+              : 'Set monthly burn below to track this properly'
         } />
         <StatusTile label="MRR" status={data.status.mrr} hint={
           !data.mrr.configured
@@ -387,7 +405,7 @@ export function FinancialReportsContent() {
                   {fundedBanks.map(b => (
                     <tr key={b.currency}>
                       <td className="text-sm font-medium text-[var(--color-text)]" style={{ padding: '0.5rem 0.5rem' }}>{b.currency}</td>
-                      <td className="text-sm text-[var(--color-text)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatNative(b.available, b.currency)}</td>
+                      <td className="text-sm text-[var(--color-text)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatNativeRaw(b.available, b.currency)}</td>
                       <td className="text-sm text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{b.currency === cur ? '—' : toCur(b.available, b.currency)}</td>
                       <td style={{ padding: '0.5rem 0.5rem', textAlign: 'right' }}>
                         {b.sources.map(s => (
@@ -769,8 +787,8 @@ export function FinancialReportsContent() {
                     </div>
                     <div className="text-right">
                       <div className="text-sm font-semibold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {formatNative(r.accruedAmount, r.currency)}
-                        {r.targetAmount ? <span className="text-xs text-[var(--color-text-subtle)] font-normal"> / {formatNative(r.targetAmount, r.currency)}</span> : null}
+                        {formatNativeRaw(r.accruedAmount, r.currency)}
+                        {r.targetAmount ? <span className="text-xs text-[var(--color-text-subtle)] font-normal"> / {formatNativeRaw(r.targetAmount, r.currency)}</span> : null}
                       </div>
                       {pct != null && (
                         <div style={{
@@ -1765,6 +1783,35 @@ function RecurringOutflowsCard({ formatNative }: {
     } catch { await load() }
   }
 
+  // ── Auto-detect cadence (Airwallex matching) ─────────────────────
+  // Two-step UX: dry-run first → show preview → operator confirms apply.
+  const [detectPreview, setDetectPreview] = useState<Array<{ id: string; name: string; vendor: string | null; currentCadence: string; currentBillingDay: number | null; inferredBillingDay: number | null; inferredCadence: string | null; matchCount: number; confidence: string; reason: string }> | null>(null)
+  const [detecting, setDetecting] = useState(false)
+  async function runAutoDetect(apply: boolean) {
+    setDetecting(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/commitments/auto-detect-cadence'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apply }),
+      })
+      if (!res.ok) {
+        showToast('Auto-detect failed', 'error')
+        return
+      }
+      const json = await res.json() as { plans?: typeof detectPreview; applied?: number }
+      if (apply) {
+        showToast(`Updated ${json.applied ?? 0} commitments from bank history`, 'success')
+        setDetectPreview(null)
+        await load()
+      } else {
+        setDetectPreview(json.plans ?? [])
+      }
+    } finally {
+      setDetecting(false)
+    }
+  }
+
   const visible = showInactive ? items : items.filter(c => c.active)
   // Display totals stay in native-currency sum (same behaviour as before).
   // For accurate NZD totals, use the burn figure on the Reserves card.
@@ -1805,6 +1852,9 @@ function RecurringOutflowsCard({ formatNative }: {
               >
                 {showInactive ? 'Hide paused' : 'Show paused'}
               </button>
+              <TahiButton size="sm" variant="secondary" onClick={() => void runAutoDetect(false)} loading={detecting && !detectPreview}>
+                Auto-detect cadence
+              </TahiButton>
               <TahiButton size="sm" variant="primary" iconLeft={<Plus size={14} />} onClick={openCreate}>
                 Add commitment
               </TahiButton>
@@ -2115,6 +2165,65 @@ function RecurringOutflowsCard({ formatNative }: {
         onConfirm={handleDelete}
         onCancel={() => setConfirmDelete(null)}
       />
+
+      <SlideOver
+        open={!!detectPreview}
+        onClose={() => setDetectPreview(null)}
+        title="Auto-detect cadence"
+        subtitle="Inferred billing day + cadence from the last 180 days of Airwallex transactions"
+        maxWidth="34rem"
+      >
+        <SlideOver.Body>
+          {detectPreview && detectPreview.length === 0 ? (
+            <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+              No commitments to scan.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {detectPreview?.map(p => {
+                const tone = p.confidence === 'high' ? 'positive' : p.confidence === 'medium' ? 'brand' : p.confidence === 'low' ? 'warning' : 'neutral'
+                const changes: string[] = []
+                if (p.inferredBillingDay != null && p.inferredBillingDay !== p.currentBillingDay) {
+                  changes.push(`day ${p.currentBillingDay ?? '—'} → ${p.inferredBillingDay}`)
+                }
+                if (p.inferredCadence && p.inferredCadence !== p.currentCadence) {
+                  changes.push(`cadence ${p.currentCadence} → ${p.inferredCadence}`)
+                }
+                return (
+                  <div key={p.id} style={{ padding: '0.625rem 0.75rem', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-secondary)' }}>
+                    <div className="flex items-start justify-between" style={{ gap: '0.5rem' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{p.name}</div>
+                        <div className="text-[0.6875rem]" style={{ color: 'var(--color-text-subtle)' }}>{p.vendor ?? '—'} · {p.matchCount} matches</div>
+                      </div>
+                      <Badge tone={tone} variant="soft" size="sm">{p.confidence}</Badge>
+                    </div>
+                    {changes.length > 0 && (
+                      <div className="text-[0.75rem]" style={{ color: 'var(--color-text-muted)', marginTop: '0.25rem', fontVariantNumeric: 'tabular-nums' }}>
+                        {changes.join(' · ')}
+                      </div>
+                    )}
+                    <div className="text-[0.6875rem]" style={{ color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>{p.reason}</div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </SlideOver.Body>
+        <SlideOver.Footer>
+          <div style={{ flex: 1, fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+            Applies only to rows with high/medium confidence and no existing day set.
+          </div>
+          <TahiButton variant="ghost" onClick={() => setDetectPreview(null)}>Cancel</TahiButton>
+          <TahiButton
+            variant="primary"
+            disabled={detecting}
+            onClick={() => void runAutoDetect(true)}
+          >
+            {detecting ? 'Applying…' : 'Apply changes'}
+          </TahiButton>
+        </SlideOver.Footer>
+      </SlideOver>
     </>
   )
 }
@@ -2295,6 +2404,42 @@ function SpendImpactCard({ startingCash, burn, revenue, reserveTarget, formatNat
   )
 }
 
+/** Small tile used inside ReserveTargetCard to surface gross + net runway side by side. */
+function RunwayTile({ label, sub, value, detail, tone }: {
+  label: string
+  sub: string
+  value: string
+  detail: string
+  tone: 'positive' | 'warning' | 'danger' | 'neutral'
+}) {
+  const accent =
+    tone === 'positive' ? 'var(--color-brand)' :
+    tone === 'warning'  ? '#fb923c' :
+    tone === 'danger'   ? '#f87171' :
+                          'var(--color-text-subtle)'
+  return (
+    <div
+      style={{
+        padding: '0.625rem 0.75rem',
+        borderRadius: 'var(--radius-md)',
+        background: 'var(--color-bg-secondary)',
+        borderLeft: 'none',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      <div className="text-[0.6875rem] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-subtle)' }}>
+        {label}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginTop: '0.1875rem', fontVariantNumeric: 'tabular-nums' }}>
+        <div style={{ fontSize: '1.25rem', fontWeight: 700, color: accent, lineHeight: 1.1 }}>{value}</div>
+      </div>
+      <div className="text-[0.6875rem]" style={{ color: 'var(--color-text-muted)', marginTop: '0.1875rem' }}>{sub}</div>
+      <div className="text-[0.625rem]" style={{ color: 'var(--color-text-subtle)', marginTop: '0.125rem', fontVariantNumeric: 'tabular-nums' }}>{detail}</div>
+    </div>
+  )
+}
+
 function ReserveTargetCard({ config, formatNative, onSaved }: {
   config: {
     targetMonths: number
@@ -2303,6 +2448,11 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
     lastYearTaxOwed: number
     targetAmount: number
     monthsOfRunway: number | null
+    totalCashNzd: number
+    grossRunwayMonths: number | null
+    netRunwayMonths: number | null
+    netMonthlyBurnNzd: number
+    monthlySurplusNzd: number
   }
   formatNative: (amount: number, currency: string) => string
   onSaved: () => void
@@ -2478,11 +2628,34 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
             )}
           </div>
         </div>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '0.75rem', marginBottom: '0.75rem' }}>
+          <RunwayTile
+            label="Worst case runway"
+            sub={`All cash ÷ burn · zero revenue`}
+            value={config.grossRunwayMonths != null ? `${config.grossRunwayMonths.toFixed(1)} mo` : '—'}
+            detail={`${formatNative(config.totalCashNzd, 'NZD')} cash ÷ ${formatNative(previewBurn, 'NZD')}/mo`}
+            tone={config.grossRunwayMonths == null ? 'neutral'
+              : config.grossRunwayMonths >= config.targetMonths ? 'positive'
+              : config.grossRunwayMonths >= config.targetMonths / 2 ? 'warning' : 'danger'}
+          />
+          <RunwayTile
+            label={config.netRunwayMonths == null ? 'Cash position' : 'Net-burn runway'}
+            sub={config.netRunwayMonths == null ? 'Revenue exceeds burn' : 'At current burn vs revenue'}
+            value={config.netRunwayMonths == null
+              ? 'Profitable'
+              : config.netRunwayMonths > 999 ? '∞' : `${config.netRunwayMonths.toFixed(1)} mo`}
+            detail={config.netRunwayMonths == null
+              ? `+${formatNative(Math.max(0, config.monthlySurplusNzd), 'NZD')}/mo surplus`
+              : `${formatNative(config.totalCashNzd, 'NZD')} cash ÷ ${formatNative(config.netMonthlyBurnNzd, 'NZD')}/mo net`}
+            tone={config.netRunwayMonths == null ? 'positive'
+              : config.netRunwayMonths >= config.targetMonths ? 'positive'
+              : config.netRunwayMonths >= config.targetMonths / 2 ? 'warning' : 'danger'}
+          />
+        </div>
         <div className="flex items-center justify-between" style={{ gap: '0.75rem', flexWrap: 'wrap' }}>
           <div className="text-xs text-[var(--color-text-muted)]" style={{ lineHeight: 1.5 }}>
-            {config.monthsOfRunway != null
-              ? `Current runway: ${config.monthsOfRunway.toFixed(1)} months. ${config.monthsOfRunway >= config.targetMonths ? 'On target.' : config.monthsOfRunway >= config.targetMonths / 2 ? 'Below target, watch closely.' : 'Below half target — defer discretionary spend.'}`
-              : 'Set monthly burn to start tracking runway.'}
+            Worst case assumes income drops to zero. Net-burn is the real-world view that
+            counts incoming MRR against your monthly outflow.
           </div>
           <TahiButton onClick={() => void save()} loading={saving} disabled={!dirty} size="sm">
             Save reserve target

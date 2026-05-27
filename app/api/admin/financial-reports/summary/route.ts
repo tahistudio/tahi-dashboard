@@ -624,6 +624,25 @@ export async function GET(req: NextRequest) {
   const reserveTargetBurn = monthlyBurnNzd
     ?? (autoBurnNzd > 0 ? autoBurnNzd : (effectiveMonthlyRevenue > 0 ? effectiveMonthlyRevenue * 0.5 : 0))
   const reserveTargetAmount = reserveTargetBurn * reserveTargetMonths + lastYearTaxOwed
+
+  // ── Runway: two distinct concepts ─────────────────────────────────
+  // GROSS runway answers "if every client vanished today, how long
+  // does the cash last?" Used as the worst-case figure.
+  //   = total cash (multi-currency, NZD-equivalent) / total burn
+  // NET runway answers "at the current burn-vs-revenue gap, how long
+  // before reserves are gone?" Only meaningful when we're spending
+  // more than we earn — when net burn is 0 or negative we're profitable
+  // and the figure is null (UI shows "profitable" instead).
+  //   = total cash / max(0, burn − revenue)
+  // Both use total cash converted to NZD, not just the primary (NZD)
+  // pot, so a Tahi sitting on 5k GBP isn't underestimated to zero
+  // runway because of a thin NZD account.
+  const totalCashNzd = Array.from(balancesByCurrency.entries())
+    .reduce((sum, [cur, v]) => sum + toNzd(v.available, cur), 0)
+  const netMonthlyBurnNzd = Math.max(0, reserveTargetBurn - effectiveMonthlyRevenue)
+  const grossRunwayMonths = reserveTargetBurn > 0 ? totalCashNzd / reserveTargetBurn : null
+  const netRunwayMonths = netMonthlyBurnNzd > 0 ? totalCashNzd / netMonthlyBurnNzd : null
+  const monthlySurplusNzd = effectiveMonthlyRevenue - reserveTargetBurn  // positive = profitable
   const reserveTargetMonthsOfRunway = reserveTargetBurn > 0 ? primaryBalance / reserveTargetBurn : null
 
   // ── Status traffic lights ─────────────────────────────────────────
@@ -693,6 +712,12 @@ export async function GET(req: NextRequest) {
       targetAmount: reserveTargetAmount,
       targetBurn: reserveTargetBurn,    // effective burn after manual/auto/fallback
       monthsOfRunway: reserveTargetMonthsOfRunway,
+      // Runway breakdown — primary figures for the "how long do we last" question
+      totalCashNzd,                     // sum of bank balances across currencies, NZD-equivalent
+      grossRunwayMonths,                // worst case: zero revenue, all cash, all burn
+      netRunwayMonths,                  // current trajectory: cash / (burn − revenue). null = profitable
+      netMonthlyBurnNzd,                // max(0, burn − revenue). 0 = breakeven or better
+      monthlySurplusNzd,                // revenue − burn. Positive = profitable, negative = burning
     },
     mrr: {
       retainer: retainerMrr,
