@@ -1511,3 +1511,46 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   }
 }
 
+/* Cost mix donut + legend layout. On wide containers (>= 30rem) the donut
+   sits on the left at 10rem with the legend filling the remaining space.
+   Below 30rem we stack vertically so the legend isn't squeezed into a
+   10rem column on mobile (which caused row overflow). */
+.cost-mix-donut-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  align-items: start;
+  justify-items: center;
+}
+.cost-mix-donut {
+  width: 10rem;
+  height: 10rem;
+  flex-shrink: 0;
+}
+.cost-mix-legend {
+  width: 100%;
+  min-width: 0;
+}
+@media (min-width: 30rem) {
+  .cost-mix-donut-row {
+    grid-template-columns: 10rem 1fr;
+    align-items: center;
+    justify-items: start;
+  }
+}
+
+/* Mobile-only tuning for the Reports sticky section nav. The tabs are
+   centered on md+ but cramped on a 375px viewport, so on mobile we shrink
+   the padding + font and left-align so the leftmost tab is always visible.
+   A subtle fade on the right edge hints that the row scrolls. */
+@media (max-width: 47.99rem) {
+  .sticky-section-nav .h-scroll {
+    -webkit-mask-image: linear-gradient(to right, black calc(100% - 1.5rem), transparent);
+            mask-image: linear-gradient(to right, black calc(100% - 1.5rem), transparent);
+  }
+  .sticky-section-nav .h-scroll > div > button {
+    padding: var(--space-2) var(--space-3) !important;
+    font-size: 0.8125rem !important;
+  }
+}
+

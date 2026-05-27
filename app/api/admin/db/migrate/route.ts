@@ -827,6 +827,13 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0057',
+    description: 'Backfill deals.closed_at on Closed Won / Closed Lost deals where it is NULL. Without this, /financial-reports sales velocity ("deals signed in last 30/60/90 days") undercounts to zero because moving a deal to closed via the kanban only wrote the stage_id. Fix in deal PATCH handler now writes closed_at on stage change; this migration repairs existing rows by defaulting to updated_at as the close date proxy.',
+    statements: [
+      `UPDATE deals SET closed_at = COALESCE(closed_at, updated_at, created_at) WHERE closed_at IS NULL AND stage_id IN (SELECT id FROM pipeline_stages WHERE is_closed_won = 1 OR is_closed_lost = 1)`,
+    ],
+  },
+  {
     name: '0055',
     description: 'Phase H finance overhaul: Airwallex bank-of-truth tables (balances + transactions), reserves pots (tax + custom), multi-source reconciliation columns on invoices + expense_commitments. Stripe + Xero + Airwallex become three sources reconciled into one truth.',
     statements: [

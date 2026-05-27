@@ -19,7 +19,7 @@
 
 import * as React from 'react'
 import Link from 'next/link'
-import { LeafGlyph, TahiIconMark } from '@/components/tahi/tahi-glyphs'
+import { LeafGlyph, TahiStudioWordmark } from '@/components/tahi/tahi-glyphs'
 
 interface ValueProp {
   title: string
@@ -84,24 +84,13 @@ export function AuthShell({
               display: 'none',
               marginBottom: '2rem',
               textAlign: 'center',
+              color: 'var(--color-text)',
             }}
           >
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.625rem' }}>
-              <TahiIconMark size={36} variant="on-light" />
-              <span
-                style={{
-                  fontSize: '1.125rem',
-                  fontWeight: 700,
-                  letterSpacing: '-0.01em',
-                  color: 'var(--color-text)',
-                }}
-              >
-                Tahi Studio
-              </span>
-            </div>
+            <TahiStudioWordmark height={28} />
           </div>
 
-          <header style={{ marginBottom: '1.5rem' }}>
+          <header style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
             <h1
               style={{
                 fontSize: '1.5rem',
@@ -154,7 +143,9 @@ export function AuthShell({
       <style>{`
         @media (max-width: 56rem) {
           .tahi-auth-shell .tahi-auth-brand-panel {
-            display: none;
+            display: none !important;
+            width: 0 !important;
+            min-width: 0 !important;
           }
           .tahi-auth-shell .tahi-auth-mobile-brand {
             display: block !important;
@@ -196,18 +187,16 @@ function BrandPanel({ headline, valueProps }: { headline: string; valueProps: Va
       </div>
 
       {/* Top: brand lockup */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', position: 'relative', zIndex: 1 }}>
-        <TahiIconMark size={44} variant="on-light" />
-        <span
-          style={{
-            fontSize: '1.25rem',
-            fontWeight: 700,
-            letterSpacing: '-0.01em',
-            color: 'var(--color-brand-deep, #2A3626)',
-          }}
-        >
-          Tahi Studio
-        </span>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          position: 'relative',
+          zIndex: 1,
+          color: 'var(--color-brand-deep, #2A3626)',
+        }}
+      >
+        <TahiStudioWordmark height={32} />
       </div>
 
       {/* Middle: marketing headline + value props */}

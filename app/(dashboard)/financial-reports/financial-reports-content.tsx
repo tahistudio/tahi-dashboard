@@ -55,6 +55,8 @@ interface SummaryResponse {
     targetBurn: number
     monthsOfRunway: number | null
     totalCashNzd: number
+    unreservedTaxNzd: number
+    taxAdjustedCashNzd: number
     grossRunwayMonths: number | null
     netRunwayMonths: number | null
     netMonthlyBurnNzd: number
@@ -583,8 +585,8 @@ export function FinancialReportsContent() {
               <EmptyHint>Set custom_mrr on your active clients to see concentration risk.</EmptyHint>
             ) : (
               <>
-                <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))', gap: '1.5rem', alignItems: 'center' }}>
-                  <div className="flex justify-center">
+                <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))', gap: '1.5rem', alignItems: 'center', minWidth: 0 }}>
+                  <div className="flex justify-center" style={{ minWidth: 0 }}>
                     <DonutChart
                       size={180}
                       segments={data.clientConcentration.top.map(c => ({ label: c.name, value: c.mrr }))}
@@ -598,7 +600,7 @@ export function FinancialReportsContent() {
                       ariaLabel="MRR share by client"
                     />
                   </div>
-                  <div className="grid" style={{ gap: '0.5rem' }}>
+                  <div className="grid" style={{ gap: '0.5rem', minWidth: 0 }}>
                     <div className="flex items-baseline justify-between text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ marginBottom: '0.25rem' }}>
                       <span>If your top 3 leave</span>
                       <span style={{ color: data.clientConcentration.top3Share > 0.7 ? 'var(--color-warning)' : 'var(--color-text)', fontWeight: 600 }}>
@@ -609,7 +611,7 @@ export function FinancialReportsContent() {
                       const pct = data.clientConcentration.totalNamedMrr > 0 ? c.mrr / data.clientConcentration.totalNamedMrr : 0
                       const dot = CHART.categorical[i % CHART.categorical.length]
                       return (
-                        <div key={c.name} className="flex items-center" style={{ gap: '0.625rem' }}>
+                        <div key={c.name} className="flex items-center" style={{ gap: '0.625rem', minWidth: 0 }}>
                           <span style={{ width: '0.5rem', height: '0.5rem', borderRadius: '999px', background: dot, flexShrink: 0 }} />
                           <span className="text-sm text-[var(--color-text)] truncate" style={{ flex: 1, minWidth: 0 }}>{c.name}</span>
                           <span className="text-xs text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
@@ -981,13 +983,21 @@ function HeroCashCard({
             <MetricBlock
               label="Worst case runway"
               value={grossLabel}
-              sub={grossRunway != null ? 'All cash ÷ burn, no income' : 'Set burn to compute'}
+              sub={grossRunway != null
+                ? (reserveConfig.unreservedTaxNzd > 0
+                  ? `After ${formatNative(reserveConfig.unreservedTaxNzd, 'NZD')} tax set aside`
+                  : 'Tax-adjusted cash ÷ burn, no income')
+                : 'Set burn to compute'}
               compact
             />
             <MetricBlock
               label={netLabelTitle}
               value={netLabel}
-              sub={netRunway == null ? 'Revenue exceeds burn' : 'At current burn vs revenue'}
+              sub={netRunway == null
+                ? 'Revenue exceeds burn'
+                : (reserveConfig.unreservedTaxNzd > 0
+                  ? `After ${formatNative(reserveConfig.unreservedTaxNzd, 'NZD')} tax set aside`
+                  : 'At current burn vs revenue')}
               compact
             />
           </div>
@@ -1463,6 +1473,18 @@ function RevenueHistoryCard({ history, cur, toCur }: {
     if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k`
     return Math.round(v).toString()
   }
+  // Year-aware short label so the X axis reads chronologically across a
+  // year boundary (e.g. Jun 25, Jul 25 ... Mar 26, Apr 26). Stripping just
+  // the year produced "06, 07, ... 03, 04" which scans as scrambled even
+  // though the data is in date order.
+  const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const ymLabel = (ym: string): string => {
+    const [yStr, mStr] = ym.split('-')
+    const m = parseInt(mStr ?? '0', 10)
+    const y = parseInt(yStr ?? '0', 10)
+    if (!m || !y) return ym
+    return `${MONTHS_SHORT[m - 1]} ${String(y).slice(2)}`
+  }
   return (
     <Card>
       <div className="p-4 sm:p-6">
@@ -1471,7 +1493,7 @@ function RevenueHistoryCard({ history, cur, toCur }: {
           meta={history.length === 12 ? `Peak ${toCur(maxValue, cur)}` : `${history.length} month${history.length === 1 ? '' : 's'} of data`}
         />
         <BarChart
-          data={history.map(h => ({ label: h.ym.slice(5), value: h.total }))}
+          data={history.map(h => ({ label: ymLabel(h.ym), value: h.total }))}
           height={200}
           variant="pill"
           tone="positive"
@@ -1509,16 +1531,18 @@ function CostMixCard({ costMix, spendSplit, formatNative }: {
           title="Cost mix and split"
           meta={`${formatNative(total, 'NZD')}/mo recurring · ${formatNative(splitTotal * 12, 'NZD')}/yr`}
         />
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(20rem, 1fr))', gap: 'var(--space-5)', alignItems: 'start' }}>
-          {/* Left: donut + legend by category */}
-          <div className="grid" style={{ gridTemplateColumns: '10rem 1fr', gap: 'var(--space-3)', alignItems: 'center' }}>
-            <div style={{ width: '10rem', height: '10rem' }}>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(20rem, 1fr))', gap: 'var(--space-5)', alignItems: 'start', minWidth: 0 }}>
+          {/* Left: donut + legend by category. Donut + legend stack when
+              the container is narrower than ~22rem (mobile portrait) so the
+              legend isn't squeezed into 10rem of width. */}
+          <div className="cost-mix-donut-row" style={{ minWidth: 0 }}>
+            <div className="cost-mix-donut">
               <DonutChart
-                size={160}
+                size={140}
                 segments={costMix.map(c => ({ label: c.category, value: c.monthly }))}
                 centreLabel={<span className="text-[0.6875rem] uppercase tracking-wider text-[var(--color-text-subtle)]">Monthly</span>}
                 centreValue={
-                  <span className="text-base font-bold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  <span className="text-sm font-bold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
                     {formatNative(total, 'NZD')}
                   </span>
                 }
@@ -1526,12 +1550,12 @@ function CostMixCard({ costMix, spendSplit, formatNative }: {
                 ariaLabel="Cost mix by category"
               />
             </div>
-            <div className="grid" style={{ gap: '0.4375rem' }}>
+            <div className="grid cost-mix-legend" style={{ gap: '0.4375rem', minWidth: 0 }}>
               {costMix.map((c, i) => {
                 const pct = total > 0 ? c.monthly / total : 0
                 const dot = CHART.categorical[i % CHART.categorical.length]
                 return (
-                  <div key={c.category} className="flex items-center" style={{ gap: '0.5rem' }}>
+                  <div key={c.category} className="flex items-center" style={{ gap: '0.5rem', minWidth: 0 }}>
                     <span style={{ width: '0.5rem', height: '0.5rem', borderRadius: '999px', background: dot, flexShrink: 0 }} />
                     <span className="text-xs text-[var(--color-text)] capitalize truncate" style={{ flex: 1, minWidth: 0 }}>{c.category}</span>
                     <span className="text-xs text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
@@ -2976,6 +3000,8 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
     targetAmount: number
     monthsOfRunway: number | null
     totalCashNzd: number
+    unreservedTaxNzd: number
+    taxAdjustedCashNzd: number
     grossRunwayMonths: number | null
     netRunwayMonths: number | null
     netMonthlyBurnNzd: number
@@ -3158,9 +3184,11 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '0.75rem', marginBottom: '0.75rem' }}>
           <RunwayTile
             label="Worst case runway"
-            sub={`All cash ÷ burn · zero revenue`}
+            sub={`Tax-adjusted cash ÷ burn · zero revenue`}
             value={config.grossRunwayMonths != null ? `${config.grossRunwayMonths.toFixed(1)} mo` : 'n/a'}
-            detail={`${formatNative(config.totalCashNzd, 'NZD')} cash ÷ ${formatNative(previewBurn, 'NZD')}/mo`}
+            detail={config.unreservedTaxNzd > 0
+              ? `${formatNative(config.taxAdjustedCashNzd, 'NZD')} after setting aside ${formatNative(config.unreservedTaxNzd, 'NZD')} tax ÷ ${formatNative(previewBurn, 'NZD')}/mo`
+              : `${formatNative(config.taxAdjustedCashNzd, 'NZD')} cash ÷ ${formatNative(previewBurn, 'NZD')}/mo`}
             tone={config.grossRunwayMonths == null ? 'neutral'
               : config.grossRunwayMonths >= config.targetMonths ? 'positive'
               : config.grossRunwayMonths >= config.targetMonths / 2 ? 'warning' : 'danger'}
@@ -3173,7 +3201,9 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
               : config.netRunwayMonths > 999 ? '∞' : `${config.netRunwayMonths.toFixed(1)} mo`}
             detail={config.netRunwayMonths == null
               ? `+${formatNative(Math.max(0, config.monthlySurplusNzd), 'NZD')}/mo surplus`
-              : `${formatNative(config.totalCashNzd, 'NZD')} cash ÷ ${formatNative(config.netMonthlyBurnNzd, 'NZD')}/mo net`}
+              : config.unreservedTaxNzd > 0
+                ? `${formatNative(config.taxAdjustedCashNzd, 'NZD')} after ${formatNative(config.unreservedTaxNzd, 'NZD')} tax ÷ ${formatNative(config.netMonthlyBurnNzd, 'NZD')}/mo net`
+                : `${formatNative(config.taxAdjustedCashNzd, 'NZD')} cash ÷ ${formatNative(config.netMonthlyBurnNzd, 'NZD')}/mo net`}
             tone={config.netRunwayMonths == null ? 'positive'
               : config.netRunwayMonths >= config.targetMonths ? 'positive'
               : config.netRunwayMonths >= config.targetMonths / 2 ? 'warning' : 'danger'}

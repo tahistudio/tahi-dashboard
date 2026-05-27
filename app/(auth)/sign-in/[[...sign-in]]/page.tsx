@@ -11,11 +11,11 @@ export default function SignInPage() {
     <AuthShell
       title="Welcome back"
       subtitle="Sign in to pick up where you left off."
-      marketingHeadline="One dashboard. Every part of your studio."
+      marketingHeadline="Everything for your project, in one place."
       valueProps={[
-        { title: 'Sales pipeline that actually moves', body: 'Discovery calls, proposals, and contracts in one trail.' },
-        { title: 'Finance you can read at a glance', body: 'Cash, MRR, burn and runway live in NZD or your chosen currency.' },
-        { title: 'Client work without the busywork', body: 'Requests, files and messages all in their right place.' },
+        { title: 'Send requests without long email chains', body: 'Spin up a brief in a minute and the team picks it up from there.' },
+        { title: 'See exactly where things are at', body: 'Track each request, what is next, and when to expect it.' },
+        { title: 'Files, invoices and messages together', body: 'One calm space to chat with the Tahi team and find what you need.' },
       ]}
       footerPrompt="New to Tahi?"
       footerLinkLabel="Create an account"

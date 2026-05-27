@@ -487,8 +487,20 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.stageId !== undefined && body.stageId !== existing.stageId) {
     const [[oldStage], [newStage]] = await Promise.all([
       database.select({ name: schema.pipelineStages.name }).from(schema.pipelineStages).where(eq(schema.pipelineStages.id, existing.stageId)).limit(1),
-      database.select({ name: schema.pipelineStages.name }).from(schema.pipelineStages).where(eq(schema.pipelineStages.id, body.stageId)).limit(1),
+      database.select({ name: schema.pipelineStages.name, isClosedWon: schema.pipelineStages.isClosedWon, isClosedLost: schema.pipelineStages.isClosedLost }).from(schema.pipelineStages).where(eq(schema.pipelineStages.id, body.stageId)).limit(1),
     ])
+
+    // Auto-set closed_at when the new stage is a closed stage and the
+    // deal doesn't already have a close timestamp. Without this, sales
+    // velocity ("deals signed in last 30/60/90 days") under-counts
+    // because moving a deal to "Closed Won" via the kanban only wrote
+    // the stage_id, leaving closed_at NULL.
+    if ((newStage?.isClosedWon || newStage?.isClosedLost) && !existing.closedAt) {
+      await database
+        .update(schema.deals)
+        .set({ closedAt: now })
+        .where(eq(schema.deals.id, id))
+    }
     // How long was the deal in the previous stage? Look at the last
     // stage_change activity (or deal creation) to compute dwell time.
     let daysInPrevStage: number | null = null

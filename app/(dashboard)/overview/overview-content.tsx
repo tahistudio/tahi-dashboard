@@ -1674,10 +1674,13 @@ function ReviewOutreachBanner() {
 
 interface FocusCall {
   id: string
-  orgName: string | null
   title: string
   scheduledAt: string
   durationMinutes: number
+  withName: string | null
+  withSubtitle: string | null
+  meetingUrl: string | null
+  parentHref: string | null
 }
 
 interface FocusDeal {
@@ -1700,7 +1703,7 @@ function TodayFocusStrip() {
 
   useEffect(() => {
     Promise.all([
-      fetch(apiPath('/api/admin/calls?status=scheduled&limit=1'))
+      fetch(apiPath('/api/admin/discovery-calls/upcoming?limit=1&includePast=1'))
         .then(r => (r.ok ? r.json() as Promise<{ calls: FocusCall[] }> : { calls: [] }))
         .catch(() => ({ calls: [] as FocusCall[] })),
       fetch(apiPath('/api/admin/deals?limit=100'))
@@ -1739,14 +1742,14 @@ function TodayFocusStrip() {
           {loading
             ? 'Loading...'
             : call
-              ? call.title
+              ? (call.withName ? `Next call with ${call.withName}` : call.title)
               : 'No calls scheduled'}
         </FeatureCard.Title>
         <FeatureCard.Description>
           {loading
             ? ' '
             : call
-              ? `${call.orgName ? `${call.orgName} · ` : ''}${new Date(call.scheduledAt).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })} at ${new Date(call.scheduledAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })} (${call.durationMinutes}min)`
+              ? `${call.withSubtitle ? `${call.withSubtitle} · ` : ''}${new Date(call.scheduledAt).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })} at ${new Date(call.scheduledAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })} (${call.durationMinutes}min)`
               : 'Schedule a call from the calls page when one comes up.'}
         </FeatureCard.Description>
       </FeatureCard>

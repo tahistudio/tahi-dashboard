@@ -11,11 +11,11 @@ export default function SignUpPage() {
     <AuthShell
       title="Create your account"
       subtitle="A minute to set up. Everything in one place after that."
-      marketingHeadline="Run your studio from a single calm dashboard."
+      marketingHeadline="Everything for your project, in one place."
       valueProps={[
-        { title: 'Win work faster', body: 'AI-drafted replies, discovery digests, and a pipeline that nudges itself.' },
-        { title: 'Stay across the money', body: 'Live cash, burn and runway across NZD, USD, GBP and beyond.' },
-        { title: 'Deliver with less friction', body: 'Requests, tasks, schedules and contracts wired together.' },
+        { title: 'Send requests without long email chains', body: 'Spin up a brief in a minute and the team picks it up from there.' },
+        { title: 'See exactly where things are at', body: 'Track each request, what is next, and when to expect it.' },
+        { title: 'Files, invoices and messages together', body: 'One calm space to chat with the Tahi team and find what you need.' },
       ]}
       footerPrompt="Already have an account?"
       footerLinkLabel="Sign in"

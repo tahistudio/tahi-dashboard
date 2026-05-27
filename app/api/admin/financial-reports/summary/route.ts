@@ -639,9 +639,21 @@ export async function GET(req: NextRequest) {
   // runway because of a thin NZD account.
   const totalCashNzd = Array.from(balancesByCurrency.entries())
     .reduce((sum, [cur, v]) => sum + toNzd(v.available, cur), 0)
+  // Tax-honest cash for runway. The corp tax YTD figure is an accrued
+  // liability the operator hasn't necessarily ring-fenced in a reserve pot
+  // yet. Subtract the unreserved portion from total cash so runway doesn't
+  // flatter the picture by spending money that's earmarked for IRD.
+  const taxReserveAccruedNzd = reserves
+    .filter(r => r.category === 'tax')
+    .reduce((sum, r) => sum + toNzd(r.accruedAmount, r.currency ?? 'NZD'), 0)
+  const unreservedTaxNzd = Math.max(0, corpTaxOwedYtd - taxReserveAccruedNzd)
+  const taxAdjustedCashNzd = Math.max(0, totalCashNzd - unreservedTaxNzd)
   const netMonthlyBurnNzd = Math.max(0, reserveTargetBurn - effectiveMonthlyRevenue)
-  const grossRunwayMonths = reserveTargetBurn > 0 ? totalCashNzd / reserveTargetBurn : null
-  const netRunwayMonths = netMonthlyBurnNzd > 0 ? totalCashNzd / netMonthlyBurnNzd : null
+  // Runway uses the tax-adjusted cash so the figure reflects what's
+  // actually safe to draw down on. Worst case still divides by burn; net
+  // burn still divides by burn minus revenue.
+  const grossRunwayMonths = reserveTargetBurn > 0 ? taxAdjustedCashNzd / reserveTargetBurn : null
+  const netRunwayMonths = netMonthlyBurnNzd > 0 ? taxAdjustedCashNzd / netMonthlyBurnNzd : null
   const monthlySurplusNzd = effectiveMonthlyRevenue - reserveTargetBurn  // positive = profitable
   const reserveTargetMonthsOfRunway = reserveTargetBurn > 0 ? primaryBalance / reserveTargetBurn : null
 
@@ -712,10 +724,16 @@ export async function GET(req: NextRequest) {
       targetAmount: reserveTargetAmount,
       targetBurn: reserveTargetBurn,    // effective burn after manual/auto/fallback
       monthsOfRunway: reserveTargetMonthsOfRunway,
-      // Runway breakdown — primary figures for the "how long do we last" question
+      // Runway breakdown — primary figures for the "how long do we last" question.
+      // totalCashNzd is the raw bank cash; taxAdjustedCashNzd subtracts
+      // unreservedTaxNzd (corp tax YTD not yet ring-fenced in a reserve pot)
+      // so the runway figures are honest about money already earmarked
+      // for IRD. Runway figures use the tax-adjusted figure.
       totalCashNzd,                     // sum of bank balances across currencies, NZD-equivalent
-      grossRunwayMonths,                // worst case: zero revenue, all cash, all burn
-      netRunwayMonths,                  // current trajectory: cash / (burn − revenue). null = profitable
+      unreservedTaxNzd,                 // corp tax YTD that isn't covered by a tax reserve pot yet
+      taxAdjustedCashNzd,               // totalCashNzd minus unreservedTaxNzd
+      grossRunwayMonths,                // worst case: zero revenue, tax-adjusted cash, all burn
+      netRunwayMonths,                  // current trajectory: tax-adjusted cash / (burn minus revenue). null = profitable
       netMonthlyBurnNzd,                // max(0, burn − revenue). 0 = breakeven or better
       monthlySurplusNzd,                // revenue − burn. Positive = profitable, negative = burning
     },
