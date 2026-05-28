@@ -1524,6 +1524,30 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_publish_history_cluster ON publish_history(cluster_slug)`,
     ],
   },
+  {
+    name: '0063',
+    description: 'Phase I · Slice 6.5 — blog backfill audit log. Creates blog_backfill_log (one row per Webflow item touched per backfill run) so the dashboard can list recent runs, show per-item status + fieldsWritten, and resume failed items without re-touching the ones that landed. Strictly additive.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS blog_backfill_log (
+        id text PRIMARY KEY NOT NULL,
+        webflow_item_id text NOT NULL,
+        post_url text NOT NULL,
+        post_title text,
+        run_id text NOT NULL,
+        status text NOT NULL,
+        fields_written text,
+        error_message text,
+        faqs_generated integer,
+        takeaways_generated integer,
+        schema_chars_written integer,
+        duration_ms integer,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_blog_backfill_run ON blog_backfill_log(run_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_blog_backfill_status ON blog_backfill_log(status)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

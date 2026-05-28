@@ -13,6 +13,7 @@ import {
   RefreshCw, AlertTriangle, FileSearch, CheckCircle2, XCircle, HelpCircle,
   Lightbulb, FileEdit, Calendar, ExternalLink, ChevronDown, ChevronRight,
   Check, X, Eye, Sparkles, Link2, Trash2, Send, Loader2, Clock,
+  Layers, History,
   type LucideIcon,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -748,6 +749,13 @@ function HealthTab({ onToast }: HealthTabProps) {
           }
         />
       </Card>
+
+      {/* Backfill card — Phase I · Slice 6.5. Sits under the health
+          DataTable because the two surfaces are closely related (both
+          touch the live blog post inventory). Staged edits only — the
+          card is explicit about that so Liam knows to batch-publish from
+          the Webflow Editor after spot-checking. */}
+      <BackfillCard onToast={onToast} />
     </div>
   )
 }
@@ -3707,5 +3715,529 @@ function SchedulePublishedTable({ rows }: { rows: ScheduleTableRow[] }) {
       columns={columns}
       getRowId={r => r.key}
     />
+  )
+}
+
+// ── Backfill card (Phase I · Slice 6.5) ───────────────────────────────────────
+//
+// Adds FAQ + schema + key takeaways + AI prompt to existing Tahi blog
+// posts. Staged edits only — Liam batch-publishes from Webflow Editor
+// after spot-checking.
+
+interface BackfillRunSummary {
+  runId: string
+  startedAt: string
+  finishedAt: string
+  total: number
+  succeeded: number
+  failed: number
+  skipped: number
+  totalDurationMs: number
+  sampleFailures: Array<{ id: string; url: string; error: string | null }>
+}
+
+interface BackfillItemRow {
+  id: string
+  webflowItemId: string
+  postUrl: string
+  postTitle: string | null
+  status: string
+  fieldsWritten: string[]
+  errorMessage: string | null
+  faqsGenerated: number | null
+  takeawaysGenerated: number | null
+  schemaCharsWritten: number | null
+  durationMs: number | null
+  createdAt: string
+}
+
+interface BackfillProcessResponse {
+  processed: number
+  succeeded: number
+  failed: number
+  skipped: number
+  items: Array<{
+    id: string
+    slug?: string
+    status: 'success' | 'failed' | 'skipped'
+    error?: string
+    fieldsWritten: string[]
+  }>
+  continueFromIndex?: number
+  completed: boolean
+}
+
+interface BackfillCardProps {
+  onToast: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void
+}
+
+function backfillStatusTone(status: string): BadgeTone {
+  switch (status) {
+    case 'success': return 'positive'
+    case 'failed':  return 'danger'
+    case 'skipped': return 'neutral'
+    default:        return 'neutral'
+  }
+}
+
+function BackfillCard({ onToast }: BackfillCardProps) {
+  const [runs, setRuns] = useState<BackfillRunSummary[]>([])
+  const [runsLoading, setRunsLoading] = useState(true)
+  const [running, setRunning] = useState(false)
+  // Progress state for the live run. Resets between runs.
+  const [progressDone, setProgressDone] = useState(0)
+  const [progressTotal, setProgressTotal] = useState(0)
+  const [progressLast, setProgressLast] = useState<string>('')
+  const [progressErrors, setProgressErrors] = useState(0)
+  // Cancel flag — set true to break the batch loop.
+  const [cancelRequested, setCancelRequested] = useState(false)
+  // Drill-down drawer state.
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailRunId, setDetailRunId] = useState<string | null>(null)
+  const [detailItems, setDetailItems] = useState<BackfillItemRow[]>([])
+
+  const fetchRuns = useCallback(async () => {
+    setRunsLoading(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/content/backfill/runs'))
+      if (!res.ok) throw new Error('Failed')
+      const json = await res.json() as { runs: BackfillRunSummary[] }
+      setRuns(json.runs ?? [])
+    } catch {
+      setRuns([])
+    } finally {
+      setRunsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchRuns() }, [fetchRuns])
+
+  const runBackfill = useCallback(async (mode: 'all' | 'missing') => {
+    setRunning(true)
+    setCancelRequested(false)
+    setProgressDone(0)
+    setProgressTotal(0)
+    setProgressLast('')
+    setProgressErrors(0)
+    let totalSucceeded = 0
+    let totalFailed = 0
+    let totalSkipped = 0
+    try {
+      // 1) Allocate the runId + get the list of webflowIds to walk.
+      const startRes = await fetch(apiPath('/api/admin/content/backfill/start'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      })
+      if (!startRes.ok) {
+        const json = await startRes.json().catch(() => ({})) as { error?: string }
+        throw new Error(json.error ?? `Start failed (${startRes.status})`)
+      }
+      const start = await startRes.json() as {
+        runId: string
+        totalToProcess: number
+        webflowIds: string[]
+      }
+      setProgressTotal(start.totalToProcess)
+      if (start.totalToProcess === 0) {
+        onToast(
+          mode === 'missing'
+            ? 'No posts left to backfill — every post already has FAQ #1.'
+            : 'No posts found in the Webflow collection.',
+          'info',
+        )
+        return
+      }
+
+      // 2) Walk batches until completed=true or cancelled.
+      let continueFromIndex: number | undefined = undefined
+      let iterations = 0
+      while (true) {
+        if (cancelRequested) {
+          onToast('Backfill cancelled.', 'warning')
+          break
+        }
+        if (iterations++ > 200) {
+          onToast('Backfill hit the batch iteration safety cap; stopping.', 'warning')
+          break
+        }
+        const res = await fetch(apiPath('/api/admin/content/backfill/process'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            runId: start.runId,
+            webflowIds: start.webflowIds,
+            continueFromIndex,
+            batchSize: 5,
+          }),
+        })
+        if (!res.ok) {
+          const text = await res.text().catch(() => '')
+          throw new Error(text || `Process failed (${res.status})`)
+        }
+        const json = await res.json() as BackfillProcessResponse
+        totalSucceeded += json.succeeded
+        totalFailed += json.failed
+        totalSkipped += json.skipped
+        setProgressDone(prev => prev + json.processed)
+        setProgressErrors(prev => prev + json.failed)
+        const last = json.items[json.items.length - 1]
+        if (last) {
+          setProgressLast(last.slug ?? last.id)
+        }
+        if (json.completed || json.continueFromIndex == null) break
+        continueFromIndex = json.continueFromIndex
+        // Polite pause between batches — Webflow + Anthropic both prefer
+        // us under their per-minute caps.
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+      if (!cancelRequested) {
+        if (totalFailed === 0) {
+          onToast(
+            `Backfill complete. ${totalSucceeded} succeeded, ${totalSkipped} skipped.`,
+            'success',
+          )
+        } else {
+          onToast(
+            `Backfill done with ${totalFailed} errors. ${totalSucceeded} succeeded, ${totalSkipped} skipped.`,
+            'warning',
+          )
+        }
+      }
+      await fetchRuns()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'unknown error'
+      onToast(`Backfill failed: ${message}`, 'error')
+    } finally {
+      setRunning(false)
+      setCancelRequested(false)
+    }
+  }, [cancelRequested, fetchRuns, onToast])
+
+  const openLastRunDetails = useCallback(async () => {
+    const latest = runs[0]
+    if (!latest) {
+      onToast('No backfill runs yet — kick one off first.', 'info')
+      return
+    }
+    setDetailRunId(latest.runId)
+    setDetailOpen(true)
+    setDetailLoading(true)
+    setDetailItems([])
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/backfill/runs/${latest.runId}`))
+      if (!res.ok) throw new Error('Failed to load run details')
+      const json = await res.json() as { items: BackfillItemRow[] }
+      setDetailItems(json.items ?? [])
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Load failed', 'error')
+    } finally {
+      setDetailLoading(false)
+    }
+  }, [onToast, runs])
+
+  const latestRun = runs[0]
+  const progressPct = progressTotal > 0
+    ? Math.min(100, Math.round((progressDone / progressTotal) * 100))
+    : 0
+
+  return (
+    <>
+      <Card padding="md">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          {/* Heading row */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: '1rem',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: '1 1 22rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Layers size={16} aria-hidden="true" style={{ color: 'var(--color-brand)' }} />
+                <h3 style={{
+                  fontSize: '0.9375rem',
+                  fontWeight: 600,
+                  color: 'var(--color-text)',
+                  margin: 0,
+                }}>
+                  Backfill existing posts
+                </h3>
+              </div>
+              <p style={{
+                fontSize: '0.8125rem',
+                color: 'var(--color-text-muted)',
+                margin: 0,
+                lineHeight: 1.5,
+              }}>
+                Add FAQs, key takeaways, AI summary prompt, JSON-LD schema, and hreflang to existing Tahi blog posts. Lands as <strong>staged edits in Webflow</strong> — publish from the Webflow Editor after spot-checking.
+              </p>
+            </div>
+          </div>
+
+          {/* Last run strip — shows when there's a prior run + we're not
+              currently mid-run. Hidden during a run so the progress bar
+              takes the spotlight. */}
+          {!running && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.5rem',
+                flexWrap: 'wrap',
+                padding: '0.625rem 0.75rem',
+                borderRadius: '0.5rem',
+                background: 'var(--color-bg-secondary)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                <History size={13} aria-hidden="true" />
+                {runsLoading ? (
+                  <span>Loading last run...</span>
+                ) : latestRun ? (
+                  <span>
+                    Last run: <strong style={{ color: 'var(--color-text)' }}>{latestRun.succeeded}</strong> succeeded
+                    {latestRun.failed > 0 && (
+                      <> / <strong style={{ color: 'var(--color-danger, #dc2626)' }}>{latestRun.failed}</strong> failed</>
+                    )}
+                    {latestRun.skipped > 0 && (
+                      <> / {latestRun.skipped} skipped</>
+                    )}
+                    {' '}— {fmtRelative(latestRun.finishedAt)}
+                  </span>
+                ) : (
+                  <span>No backfill runs yet.</span>
+                )}
+              </div>
+              {latestRun && (
+                <button
+                  type="button"
+                  onClick={() => void openLastRunDetails()}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    fontSize: '0.75rem',
+                    fontWeight: 500,
+                    color: 'var(--color-brand)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                  }}
+                >
+                  View details
+                  <ChevronRight size={12} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Progress strip — only while running. Shows X / Y + last
+              processed slug + error count + cancel. */}
+          {running && (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem',
+                padding: '0.75rem',
+                borderRadius: '0.5rem',
+                background: 'var(--color-bg-secondary)',
+              }}
+            >
+              <div style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: '0.5rem',
+                fontSize: '0.75rem',
+                color: 'var(--color-text-muted)',
+                flexWrap: 'wrap',
+              }}>
+                <span style={{ color: 'var(--color-text)', fontWeight: 600 }}>
+                  {progressDone} of {progressTotal} posts ({progressPct}%)
+                </span>
+                {progressErrors > 0 && (
+                  <span style={{ color: 'var(--color-danger, #dc2626)' }}>
+                    {progressErrors} error{progressErrors === 1 ? '' : 's'}
+                  </span>
+                )}
+              </div>
+              <div style={{
+                width: '100%',
+                height: 6,
+                borderRadius: 999,
+                background: 'var(--color-bg-tertiary)',
+                overflow: 'hidden',
+              }}>
+                <div
+                  style={{
+                    width: `${progressPct}%`,
+                    height: '100%',
+                    background: 'var(--color-brand)',
+                    transition: 'width 250ms ease',
+                  }}
+                  aria-hidden="true"
+                />
+              </div>
+              {progressLast && (
+                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
+                  Last processed: <span style={{ fontFamily: 'var(--font-mono, monospace)' }}>{progressLast}</span>
+                </div>
+              )}
+              <div>
+                <TahiButton
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setCancelRequested(true)}
+                  disabled={cancelRequested}
+                  iconLeft={<X className="w-3.5 h-3.5" />}
+                >
+                  {cancelRequested ? 'Cancelling...' : 'Cancel after current batch'}
+                </TahiButton>
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <TahiButton
+              size="sm"
+              loading={running}
+              onClick={() => void runBackfill('all')}
+              iconLeft={!running ? <Sparkles className="w-3.5 h-3.5" /> : undefined}
+            >
+              {running ? 'Backfilling...' : 'Backfill all posts'}
+            </TahiButton>
+            <TahiButton
+              size="sm"
+              variant="secondary"
+              disabled={running}
+              onClick={() => void runBackfill('missing')}
+              iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
+            >
+              Backfill missing only
+            </TahiButton>
+            {!running && latestRun && (
+              <TahiButton
+                size="sm"
+                variant="secondary"
+                onClick={() => void openLastRunDetails()}
+                iconLeft={<Eye className="w-3.5 h-3.5" />}
+              >
+                View last run
+              </TahiButton>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      {/* Per-run drill-down drawer */}
+      <SlideOver
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        icon={<Layers className="w-4 h-4" />}
+        title="Backfill run details"
+        subtitle={detailRunId ? `Run ${detailRunId.slice(0, 8)}` : undefined}
+        maxWidth="38rem"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '0 1rem 1rem' }}>
+          {detailLoading ? (
+            <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', padding: '1rem 0' }}>
+              Loading...
+            </div>
+          ) : detailItems.length === 0 ? (
+            <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', padding: '1rem 0' }}>
+              No rows recorded for this run.
+            </div>
+          ) : (
+            <ul style={{
+              listStyle: 'none',
+              margin: 0,
+              padding: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.5rem',
+            }}>
+              {detailItems.map(item => (
+                <li
+                  key={item.id}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.375rem',
+                    padding: '0.625rem 0.75rem',
+                    borderRadius: '0.5rem',
+                    background: 'var(--color-bg-secondary)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <a
+                      href={item.postUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        fontSize: '0.8125rem',
+                        fontWeight: 500,
+                        color: 'var(--color-text)',
+                        textDecoration: 'none',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                        maxWidth: '100%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {item.postTitle ?? shortUrl(item.postUrl)}
+                      <ExternalLink size={11} aria-hidden="true" style={{ color: 'var(--color-text-subtle)' }} />
+                    </a>
+                    <Badge tone={backfillStatusTone(item.status)} variant="soft" size="sm" leader="dot">
+                      {item.status}
+                    </Badge>
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'flex', flexWrap: 'wrap', gap: '0.625rem' }}>
+                    {item.faqsGenerated != null && <span>{item.faqsGenerated} FAQs</span>}
+                    {item.takeawaysGenerated != null && item.takeawaysGenerated > 0 && (
+                      <span>{item.takeawaysGenerated} takeaways</span>
+                    )}
+                    {item.schemaCharsWritten != null && item.schemaCharsWritten > 0 && (
+                      <span>{Math.round(item.schemaCharsWritten / 100) / 10}k schema chars</span>
+                    )}
+                    {item.durationMs != null && <span>{Math.round(item.durationMs / 100) / 10}s</span>}
+                  </div>
+                  {item.errorMessage && (
+                    <div style={{
+                      fontSize: '0.75rem',
+                      color: 'var(--color-danger, #dc2626)',
+                      fontFamily: 'var(--font-mono, monospace)',
+                      wordBreak: 'break-word',
+                    }}>
+                      {item.errorMessage}
+                    </div>
+                  )}
+                  {item.fieldsWritten.length > 0 && (
+                    <div style={{
+                      fontSize: '0.6875rem',
+                      color: 'var(--color-text-subtle)',
+                      fontFamily: 'var(--font-mono, monospace)',
+                    }}>
+                      Wrote: {item.fieldsWritten.join(', ')}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </SlideOver>
+    </>
   )
 }

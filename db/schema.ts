@@ -2805,3 +2805,39 @@ export const publishHistory = sqliteTable('publish_history', {
   index('idx_publish_history_cluster').on(table.clusterSlug),
 ])
 
+/**
+ * Blog backfill log — Phase I · Slice 6.5. One row per item we touch
+ * during a backfill run. Lets the UI show per-item status + lets us
+ * resume failed runs without re-touching items already patched.
+ *
+ * runId groups every row from a single run so the dashboard can list
+ * recent runs with their summary. fieldsWritten is a JSON array of CMS
+ * slugs we successfully PATCH'd so a partial-success row still tells
+ * us exactly what landed.
+ *
+ * status:
+ *   success — every field patched cleanly
+ *   failed  — Anthropic call, Webflow PATCH, or pre-flight read failed
+ *   skipped — item filtered out (e.g. already has FAQ #1 in `missing` mode)
+ */
+export const blogBackfillLog = sqliteTable('blog_backfill_log', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  webflowItemId: text('webflow_item_id').notNull(),
+  postUrl: text('post_url').notNull(),
+  postTitle: text('post_title'),
+  runId: text('run_id').notNull(),
+  // success | failed | skipped
+  status: text('status').notNull(),
+  // JSON array of CMS slugs we wrote, e.g. ["faq-question-1","schema",...]
+  fieldsWritten: text('fields_written'),
+  errorMessage: text('error_message'),
+  faqsGenerated: integer('faqs_generated'),
+  takeawaysGenerated: integer('takeaways_generated'),
+  schemaCharsWritten: integer('schema_chars_written'),
+  durationMs: integer('duration_ms'),
+  ...timestamps,
+}, (table) => [
+  index('idx_blog_backfill_run').on(table.runId),
+  index('idx_blog_backfill_status').on(table.status),
+])
+
