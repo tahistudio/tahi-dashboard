@@ -106,6 +106,13 @@ const CRONS: CronDef[] = [
     endpoint: '/api/admin/cron/link-engine-scan',
     schedule: 'Weekly Mon 09:00 UK (disabled by default)',
   },
+  {
+    cron: 'round-table-advance',
+    label: 'Round table orchestrator',
+    description: 'Hand-cranks the round-table drafting pipeline forward by one stage per draft (oldest first, up to 3 drafts per tick). Picks up any draft in a non-terminal status (queued, researching, strategising, headline_lab, drafting, reviewing, editing, signing_off, covering). Drafts continue until ready_for_publish, failed, or cost_capped. Safe to run frequently — each stage has its own cost cap check.',
+    endpoint: '/api/admin/cron/round-table-advance',
+    schedule: 'Every 5 min (disabled by default)',
+  },
 ]
 
 export async function GET(req: NextRequest) {
