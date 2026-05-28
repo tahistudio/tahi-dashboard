@@ -38,8 +38,8 @@ import {
   getGoogleAccessToken, GoogleNotConnectedError,
   runGa4Report, searchAnalytics,
 } from '@/lib/google'
-import { DEFAULT_CLUSTERS } from '@/app/api/admin/content/clusters/seed/route'
-import { isoWeekLabel } from '@/app/api/admin/content/ideas/route'
+import { DEFAULT_CLUSTERS } from '@/lib/content-clusters'
+import { isoWeekLabel } from '@/lib/iso-week'
 
 export const dynamic = 'force-dynamic'
 

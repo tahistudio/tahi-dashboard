@@ -279,5 +279,6 @@ export async function POST(req: NextRequest) {
   })
 }
 
-// Re-export the suggestion shape so the cron + tests can import it.
-export type { LinkSuggestion }
+// Note: `LinkSuggestion` is exported from `lib/link-analyzer` directly.
+// We cannot re-export non-route symbols from a Next.js route file —
+// `next build` rejects it.

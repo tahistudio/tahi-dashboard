@@ -24,18 +24,9 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, desc, sql } from 'drizzle-orm'
 
-export const dynamic = 'force-dynamic'
+import { isoWeekLabel } from '@/lib/iso-week'
 
-/** ISO week label like 2026-W22. Matches the format the cron writes. */
-export function isoWeekLabel(date = new Date()): string {
-  // Copy + roll to Thursday in current week (ISO week-of-Thursday rule).
-  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
-  const dayNum = d.getUTCDay() || 7
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum)
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
-  const weekNum = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
-  return `${d.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`
-}
+export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   const { orgId } = await getRequestAuth(req)
