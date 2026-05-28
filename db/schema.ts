@@ -2565,3 +2565,96 @@ export const shareSectionViews = sqliteTable('share_section_views', {
   index('idx_share_section_views_section').on(table.sectionId),
 ])
 
+// ============================================================
+// CONTENT ENGINE (Phase I) — content clusters, ideas, blog health
+// ============================================================
+//
+// Slice 0 puts the three tables in place. Population comes later:
+//   - content_clusters : seeded via a future settings endpoint or
+//     hand-inserted in Slice 1.
+//   - content_ideas    : populated weekly by the Monday cron in Slice 1.
+//   - blog_health      : one row per public URL on tahi.studio. Refreshed
+//     by the manual scan endpoint in Slice 0 (POST /api/admin/content/
+//     health/scan); future Slice 0.5 wires a weekly cron.
+
+/**
+ * Content clusters — the topical pillars (the "8 from WORKFLOWS Phase I"):
+ * each pillar has a slug + name + description. Ideas hang off a cluster
+ * so we can balance topic coverage week-over-week.
+ */
+export const contentClusters = sqliteTable('content_clusters', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
+  slug: text('slug').notNull().unique(),
+  description: text('description'),
+  // active | paused | archived
+  status: text('status').notNull().default('active'),
+  ...timestamps,
+})
+
+/**
+ * Content ideas — agent-proposed weekly slate. `signalSources` is a JSON
+ * payload describing which signal feeds contributed (e.g. GSC near-miss
+ * queries, GA4 traffic decay, competitor gaps); `sourceSignal` is the
+ * human-readable single-line summary surfaced in the UI. `liamOpinion`
+ * + `liamAnswers` capture Liam's notes during the weekly review.
+ */
+export const contentIdeas = sqliteTable('content_ideas', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  clusterId: text('cluster_id').references(() => contentClusters.id),
+  title: text('title').notNull(),
+  angle: text('angle'),
+  targetKeyword: text('target_keyword'),
+  sourceSignal: text('source_signal'),
+  signalSources: text('signal_sources'),
+  recommendedWordCount: integer('recommended_word_count'),
+  rationale: text('rationale'),
+  // 'Liam' | 'Staci' — author classification hint
+  brand: text('brand'),
+  // 0-100, agent-generated
+  score: integer('score'),
+  // proposed | approved | rejected | drafted | scheduled | published
+  status: text('status').notNull().default('proposed'),
+  // ISO week label, e.g. "2026-W22"
+  weekLabel: text('week_label'),
+  liamOpinion: text('liam_opinion'),
+  // JSON: [{q, a}]
+  liamAnswers: text('liam_answers'),
+  ...timestamps,
+}, (table) => [
+  index('idx_content_ideas_status').on(table.status),
+  index('idx_content_ideas_week').on(table.weekLabel),
+])
+
+/**
+ * Blog health — one row per URL on tahi.studio. The URL is the primary
+ * key; scans overwrite the row so this is always the LATEST snapshot.
+ * `raw` keeps the full GSC URL Inspection response for debugging /
+ * future field promotion. `source` records where we discovered the URL
+ * (sitemap | webflow_collection | manual) so we can audit drift.
+ */
+export const blogHealth = sqliteTable('blog_health', {
+  url: text('url').primaryKey(),
+  lastCheckedAt: text('last_checked_at').notNull(),
+  // PASS | PARTIAL | FAIL | NEUTRAL | UNKNOWN
+  indexStatus: text('index_status'),
+  coverageState: text('coverage_state'),
+  pageFetchState: text('page_fetch_state'),
+  robotsTxtState: text('robots_txt_state'),
+  indexingState: text('indexing_state'),
+  userCanonical: text('user_canonical'),
+  googleCanonical: text('google_canonical'),
+  // Populated by Slice 6 — internal-link audit.
+  inboundInternalLinks: integer('inbound_internal_links').default(0),
+  // Optional — populated when we crawl the page body.
+  wordCount: integer('word_count'),
+  // JSON dump of full GSC response for debugging.
+  raw: text('raw'),
+  // sitemap | webflow_collection | manual
+  source: text('source').notNull().default('sitemap'),
+  ...timestamps,
+}, (table) => [
+  index('idx_blog_health_status').on(table.indexStatus),
+  index('idx_blog_health_checked').on(table.lastCheckedAt),
+])
+
