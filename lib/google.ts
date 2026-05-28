@@ -294,6 +294,68 @@ export interface GscUrlInspection {
   raw: unknown
 }
 
+/** A Search Console property the OAuth account can see, plus the
+ *  permission level Google reports for it. URL Inspection requires
+ *  `siteOwner` or `siteFullUser`. `siteRestrictedUser` is read-only on
+ *  Search Analytics only — inspecting will 403. */
+export interface GscSite {
+  siteUrl: string
+  permissionLevel: 'siteOwner' | 'siteFullUser' | 'siteRestrictedUser' | 'siteUnverifiedUser' | string
+}
+
+/** List every Search Console property the OAuth account has access to.
+ *  Used to auto-discover the right `siteUrl` for URL Inspection so we
+ *  don't hardcode a property identifier that may not match what's
+ *  registered in GSC. */
+export async function listGscSites(accessToken: string): Promise<GscSite[]> {
+  const res = await fetch('https://www.googleapis.com/webmasters/v3/sites', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Search Console sites.list failed: ${res.status} ${body.slice(0, 300)}`)
+  }
+  const data = await res.json() as { siteEntry?: Array<{ siteUrl: string; permissionLevel?: string }> }
+  return (data.siteEntry ?? []).map(s => ({
+    siteUrl: s.siteUrl,
+    permissionLevel: (s.permissionLevel as GscSite['permissionLevel']) ?? 'siteUnverifiedUser',
+  }))
+}
+
+/** Given a target URL we want to inspect (e.g. https://www.tahi.studio/blog/foo)
+ *  and the list of properties the account owns, pick the property identifier
+ *  to send as `siteUrl`. Preference order:
+ *    1. Exact URL-prefix property that's a prefix of the target
+ *       (longest first), where permission allows inspection
+ *    2. Matching Domain property (`sc-domain:<host>` or any parent domain)
+ *    3. null if no usable match exists */
+export function resolveGscPropertyForUrl(
+  targetUrl: string,
+  sites: GscSite[],
+): GscSite | null {
+  let host: string
+  try { host = new URL(targetUrl).hostname } catch { return null }
+
+  const canInspect = (p: string) => p === 'siteOwner' || p === 'siteFullUser'
+  const usable = sites.filter(s => canInspect(s.permissionLevel))
+
+  // 1. URL-prefix properties, longest match first.
+  const prefixMatches = usable
+    .filter(s => !s.siteUrl.startsWith('sc-domain:') && targetUrl.startsWith(s.siteUrl))
+    .sort((a, b) => b.siteUrl.length - a.siteUrl.length)
+  if (prefixMatches[0]) return prefixMatches[0]
+
+  // 2. Domain properties. sc-domain:tahi.studio covers any subdomain.
+  const domainMatches = usable.filter(s => {
+    if (!s.siteUrl.startsWith('sc-domain:')) return false
+    const domain = s.siteUrl.slice('sc-domain:'.length)
+    return host === domain || host.endsWith(`.${domain}`)
+  })
+  if (domainMatches[0]) return domainMatches[0]
+
+  return null
+}
+
 /** Inspect a single URL's index status in Search Console. Verbatim wrapper
  *  around the URL Inspection API — the foundation for the indexing audit. */
 export async function inspectUrl(

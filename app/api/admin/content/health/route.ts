@@ -14,16 +14,17 @@
  *       robotsTxtState, indexingState, userCanonical, googleCanonical,
  *       inboundInternalLinks, wordCount, source
  *     }>,
- *     summary: {
- *       total: number,
- *       byStatus: { PASS, PARTIAL, FAIL, NEUTRAL, UNKNOWN, NULL: number },
- *       lastScanAt: string | null,
- *     }
+ *     aggregate: {
+ *       total, indexed, notIndexed, partial, unknown, lastScanAt
+ *     },
+ *     lastError: string | null    // most recent per-URL error message,
+ *                                 // surfaced when every row is errored
+ *                                 // so the UI can show a real diagnostic
+ *                                 // instead of "no data".
  *   }
  *
- * `raw` is intentionally NOT returned — it can be large and the UI
- * doesn't render it. Fetch on-demand for debugging via a future
- * /api/admin/content/health/[url] route if needed.
+ * `raw` is mostly NOT returned, but we DO peek at it to pull out the
+ * latest error message for the diagnostic banner.
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -47,7 +48,22 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const database = await db()
-  const rows = await database
+  type HealthRowFull = {
+    url: string
+    lastCheckedAt: string
+    indexStatus: string | null
+    coverageState: string | null
+    pageFetchState: string | null
+    robotsTxtState: string | null
+    indexingState: string | null
+    userCanonical: string | null
+    googleCanonical: string | null
+    inboundInternalLinks: number | null
+    wordCount: number | null
+    source: string
+    raw: string | null
+  }
+  const allRows: HealthRowFull[] = await database
     .select({
       url: schema.blogHealth.url,
       lastCheckedAt: schema.blogHealth.lastCheckedAt,
@@ -61,48 +77,66 @@ export async function GET(req: NextRequest) {
       inboundInternalLinks: schema.blogHealth.inboundInternalLinks,
       wordCount: schema.blogHealth.wordCount,
       source: schema.blogHealth.source,
+      raw: schema.blogHealth.raw,
     })
     .from(schema.blogHealth)
-    .catch(() => [] as Array<{
-      url: string
-      lastCheckedAt: string
-      indexStatus: string | null
-      coverageState: string | null
-      pageFetchState: string | null
-      robotsTxtState: string | null
-      indexingState: string | null
-      userCanonical: string | null
-      googleCanonical: string | null
-      inboundInternalLinks: number | null
-      wordCount: number | null
-      source: string
-    }>)
+    .catch(() => [] as HealthRowFull[])
 
   // Sort: status rank (broken first) then URL alpha
-  rows.sort((a, b) => {
+  allRows.sort((a, b) => {
     const ra = STATUS_RANK[a.indexStatus ?? ''] ?? 99
     const rb = STATUS_RANK[b.indexStatus ?? ''] ?? 99
     if (ra !== rb) return ra - rb
     return a.url.localeCompare(b.url)
   })
 
-  // Summary aggregate
-  const byStatus: Record<string, number> = { PASS: 0, PARTIAL: 0, FAIL: 0, NEUTRAL: 0, UNKNOWN: 0, NULL: 0 }
+  // Aggregate. Buckets match the HealthAggregate shape the Health tab UI
+  // reads (`data.aggregate.{indexed,notIndexed,partial,unknown,lastScanAt}`).
+  let indexed = 0
+  let notIndexed = 0
+  let partial = 0
+  let unknown = 0
   let lastScanAt: string | null = null
-  for (const r of rows) {
-    const key = r.indexStatus && byStatus[r.indexStatus] !== undefined ? r.indexStatus : (r.indexStatus ? 'UNKNOWN' : 'NULL')
-    byStatus[key] = (byStatus[key] ?? 0) + 1
+  let lastError: string | null = null
+  let lastErrorAt: string | null = null
+  for (const r of allRows) {
+    switch (r.indexStatus) {
+      case 'PASS': indexed++; break
+      case 'FAIL': notIndexed++; break
+      case 'PARTIAL':
+      case 'NEUTRAL': partial++; break
+      default: unknown++
+    }
     if (r.lastCheckedAt && (!lastScanAt || r.lastCheckedAt > lastScanAt)) {
       lastScanAt = r.lastCheckedAt
     }
+    // Pull the most-recent per-URL error from `raw` so the UI can show a
+    // real diagnostic when every row failed. The scan route stores
+    // {error, siteUrl} JSON for error rows; harmless on success rows.
+    if (r.indexStatus == null && r.raw && (!lastErrorAt || r.lastCheckedAt > lastErrorAt)) {
+      try {
+        const parsed = JSON.parse(r.raw) as { error?: string }
+        if (parsed?.error) {
+          lastError = parsed.error
+          lastErrorAt = r.lastCheckedAt
+        }
+      } catch { /* ignore unparseable raw */ }
+    }
   }
+
+  // Strip `raw` from the wire response — large + UI doesn't render it.
+  const rows = allRows.map(({ raw: _raw, ...rest }) => rest)
 
   return NextResponse.json({
     rows,
-    summary: {
-      total: rows.length,
-      byStatus,
+    aggregate: {
+      total: allRows.length,
+      indexed,
+      notIndexed,
+      partial,
+      unknown,
       lastScanAt,
     },
+    lastError,
   })
 }

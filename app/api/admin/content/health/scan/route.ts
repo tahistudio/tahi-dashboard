@@ -32,12 +32,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
-import { getGoogleAccessToken, inspectUrl, GoogleNotConnectedError } from '@/lib/google'
+import {
+  getGoogleAccessToken,
+  inspectUrl,
+  listGscSites,
+  resolveGscPropertyForUrl,
+  GoogleNotConnectedError,
+} from '@/lib/google'
 
 export const dynamic = 'force-dynamic'
 
-const SITE_URL = 'https://www.tahi.studio/'
 const SITEMAP_URL = 'https://www.tahi.studio/sitemap.xml'
+const PROBE_URL = 'https://www.tahi.studio/'
 
 const BATCH_SIZE = 20
 const TIME_BUDGET_MS = 25_000
@@ -101,6 +107,33 @@ export async function POST(req: NextRequest) {
     }, { status })
   }
 
+  // Resolve which Search Console property to inspect against. The OAuth
+  // account must own (or have full-user access to) a property that covers
+  // tahi.studio. Without this we hit the dreaded 403 on every URL.
+  let sites
+  try {
+    sites = await listGscSites(tokens.accessToken)
+  } catch (err) {
+    return NextResponse.json({
+      error: 'Failed to list Search Console properties',
+      detail: err instanceof Error ? err.message : String(err),
+      connectedAs: tokens.email,
+    }, { status: 502 })
+  }
+  const property = resolveGscPropertyForUrl(PROBE_URL, sites)
+  if (!property) {
+    const visible = sites.map(s => ({ siteUrl: s.siteUrl, permissionLevel: s.permissionLevel }))
+    return NextResponse.json({
+      error: 'No matching Search Console property',
+      detail: tokens.email
+        ? `The Google account ${tokens.email} doesn't have Owner or Full User access to any property covering tahi.studio. Add it in Search Console at search.google.com/search-console/users, or register sc-domain:tahi.studio as a Domain property and grant access to this account.`
+        : `The connected Google account doesn't have Owner or Full User access to any property covering tahi.studio.`,
+      connectedAs: tokens.email,
+      availableProperties: visible,
+    }, { status: 412 })
+  }
+  const siteUrl = property.siteUrl
+
   let scanned = 0
   let completed = 0
   let indexed = 0
@@ -118,7 +151,7 @@ export async function POST(req: NextRequest) {
 
     const results = await Promise.all(batch.map(async (url) => {
       try {
-        const r = await inspectUrl(tokens.accessToken, url, SITE_URL)
+        const r = await inspectUrl(tokens.accessToken, url, siteUrl)
         return { url, ok: true as const, r }
       } catch (err) {
         return {
@@ -130,38 +163,56 @@ export async function POST(req: NextRequest) {
     }))
 
     // Persist sequentially per batch — D1 can't take large parallel
-    // upsert storms cleanly.
+    // upsert storms cleanly. Even on per-URL error we upsert a row with
+    // indexStatus=null and the error message stored in `raw`, so the
+    // Health tab populates instead of staying in the first-scan empty
+    // state when GSC is unhappy.
     const nowIso = new Date().toISOString()
     for (const res of results) {
       scanned++
+      const rowBase = {
+        url: res.url,
+        lastCheckedAt: nowIso,
+        source: 'sitemap' as const,
+        updatedAt: nowIso,
+      }
+      const row = !res.ok
+        ? {
+            ...rowBase,
+            indexStatus: null,
+            coverageState: null,
+            pageFetchState: null,
+            robotsTxtState: null,
+            indexingState: null,
+            userCanonical: null,
+            googleCanonical: null,
+            raw: JSON.stringify({ error: res.error, siteUrl }),
+          }
+        : {
+            ...rowBase,
+            indexStatus: res.r.indexStatus ?? null,
+            coverageState: res.r.coverageState ?? null,
+            pageFetchState: res.r.pageFetchState ?? null,
+            robotsTxtState: res.r.robotsTxtState ?? null,
+            indexingState: res.r.indexingState ?? null,
+            userCanonical: res.r.userCanonical ?? null,
+            googleCanonical: res.r.googleCanonical ?? null,
+            raw: JSON.stringify(res.r.raw ?? null),
+          }
       if (!res.ok) {
         errors++
         errorDetails.push({ url: res.url, error: res.error })
-        continue
+      } else {
+        completed++
+        if (res.r.indexStatus === 'PASS') indexed++
+        else if (res.r.indexStatus === 'PARTIAL' || res.r.indexStatus === 'FAIL' || res.r.indexStatus === 'NEUTRAL') notIndexed++
       }
-      completed++
-      if (res.r.indexStatus === 'PASS') indexed++
-      else if (res.r.indexStatus === 'PARTIAL' || res.r.indexStatus === 'FAIL' || res.r.indexStatus === 'NEUTRAL') notIndexed++
 
       const existing = await database
         .select({ url: schema.blogHealth.url })
         .from(schema.blogHealth)
         .where(eq(schema.blogHealth.url, res.url))
         .limit(1)
-      const row = {
-        url: res.url,
-        lastCheckedAt: nowIso,
-        indexStatus: res.r.indexStatus ?? null,
-        coverageState: res.r.coverageState ?? null,
-        pageFetchState: res.r.pageFetchState ?? null,
-        robotsTxtState: res.r.robotsTxtState ?? null,
-        indexingState: res.r.indexingState ?? null,
-        userCanonical: res.r.userCanonical ?? null,
-        googleCanonical: res.r.googleCanonical ?? null,
-        raw: JSON.stringify(res.r.raw ?? null),
-        source: 'sitemap' as const,
-        updatedAt: nowIso,
-      }
       if (existing.length > 0) {
         await database.update(schema.blogHealth).set(row).where(eq(schema.blogHealth.url, res.url))
       } else {
@@ -179,6 +230,8 @@ export async function POST(req: NextRequest) {
     errorDetails: errorDetails.slice(0, 50),
     continueFromIndex,
     totalUrls,
+    siteUrlUsed: siteUrl,
+    connectedAs: tokens.email,
     completedAt: new Date().toISOString(),
   })
 }

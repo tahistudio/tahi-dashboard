@@ -59,6 +59,7 @@ interface HealthAggregate {
 interface HealthResponse {
   rows: HealthRow[]
   aggregate: HealthAggregate
+  lastError?: string | null
 }
 
 interface ScanResponse {
@@ -70,6 +71,15 @@ interface ScanResponse {
   errorDetails: Array<{ url: string; error: string }>
   completedAt: string
   continueFromIndex?: number
+  siteUrlUsed?: string
+  connectedAs?: string | null
+}
+
+interface ScanError412 {
+  error: string
+  detail?: string
+  connectedAs?: string | null
+  availableProperties?: Array<{ siteUrl: string; permissionLevel: string }>
 }
 
 type TabId = 'health' | 'ideas' | 'drafts' | 'links' | 'schedule'
@@ -380,6 +390,18 @@ function HealthTab({ onToast }: HealthTabProps) {
           body: JSON.stringify(continueFromIndex != null ? { continueFromIndex } : {}),
         })
         if (!res.ok) {
+          // 412 is the structured "Search Console not connected / wrong
+          // property" response from the scan route. Pull the diagnostic
+          // out so the toast tells Liam exactly what to fix in GSC
+          // instead of a raw error blob.
+          if (res.status === 412) {
+            const body = (await res.json().catch(() => null)) as ScanError412 | null
+            const detail = body?.detail ?? body?.error ?? 'Search Console property not found'
+            const visible = body?.availableProperties?.length
+              ? ` Visible properties on ${body.connectedAs ?? 'the connected account'}: ${body.availableProperties.map(p => `${p.siteUrl} (${p.permissionLevel})`).join(', ')}.`
+              : ''
+            throw new Error(`${detail}${visible}`)
+          }
           const text = await res.text().catch(() => '')
           throw new Error(text || `Scan failed (${res.status})`)
         }
@@ -414,6 +436,13 @@ function HealthTab({ onToast }: HealthTabProps) {
     lastScanAt: null,
   }
   const rows = data?.rows ?? []
+  // Persistent diagnostic. Surfaces when a scan has run but produced
+  // zero indexed rows AND we have an error message captured from the
+  // most-recent error row's `raw`. Survives page refresh, unlike
+  // lastScanErrors which is in-session only.
+  const persistentDiagnostic = aggregate.lastScanAt && aggregate.indexed === 0 && aggregate.unknown > 0
+    ? (data?.lastError ?? 'Scan ran but every URL failed. Check Settings → Integrations and confirm the connected Google account has Owner or Full User access to a Search Console property covering tahi.studio.')
+    : null
 
   // ── Column defs. URL truncates to fit, lastCheckedAt sorts on the
   // raw ISO string. Default sort prioritises FAIL → PASS so the
@@ -644,6 +673,45 @@ function HealthTab({ onToast }: HealthTabProps) {
             sub="Not yet checked"
           />
         </KPIStrip>
+      )}
+
+      {/* Persistent diagnostic. Survives refresh — surfaces when the
+          most recent stored snapshot has zero indexed rows, pulling the
+          captured error message from the GET response so Liam knows
+          what to fix without re-running the scan. */}
+      {persistentDiagnostic && (
+        <Card
+          padding="md"
+          style={{
+            borderColor: 'var(--color-warning)',
+            background: 'var(--color-warning-bg)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.625rem' }}>
+            <AlertTriangle
+              size={16}
+              aria-hidden="true"
+              style={{ color: 'var(--color-warning-text, #8A5A12)', flexShrink: 0, marginTop: '0.125rem' }}
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: 0 }}>
+              <span style={{
+                fontSize: '0.8125rem',
+                fontWeight: 600,
+                color: 'var(--color-warning-text, #8A5A12)',
+              }}>
+                Search Console connection isn&apos;t returning data
+              </span>
+              <span style={{
+                fontSize: '0.8125rem',
+                color: 'var(--color-text-muted)',
+                lineHeight: 1.5,
+                wordBreak: 'break-word',
+              }}>
+                {persistentDiagnostic}
+              </span>
+            </div>
+          </div>
+        </Card>
       )}
 
       {/* Error banner. Only renders when the most recent scan reported
