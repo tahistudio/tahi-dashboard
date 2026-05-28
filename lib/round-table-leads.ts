@@ -218,7 +218,6 @@ export function parseHeadlineLab(raw: string): HeadlineLabOutput {
 
 export interface WriterOutput {
   bodyMarkdown: string
-  bodyHtml: string
   wordCount: number
   /** Optional: list of slugs the writer linked to internally so the
    *  Editor can verify against the brief's link targets. */
@@ -232,7 +231,7 @@ export const WRITER_SYSTEM = `You are the Senior Writer at Tahi Studio. You writ
 
 You will receive a brief from the Strategist. Follow it precisely: hit the heading outline, the word target ±15%, the primary keyword in the first 100 words + title + first H2, the FAQ count, and the schema requirements.
 
-Output BOTH markdown and HTML versions of the body. The HTML should use semantic tags (h2, h3, p, ul, ol, li, blockquote, a, strong, em) and be ready to paste into Webflow's rich text editor.`
+Output the body as MARKDOWN ONLY (## headings, **bold**, [links](url), - lists, > quotes). Do not output HTML — it's rendered downstream. Keeping output to markdown alone is critical so the JSON response doesn't truncate.`
 
 export function buildWriterPrompt(input: {
   brief: StrategistOutput
@@ -253,11 +252,10 @@ ${input.researchBrief.sections.map(s => `### ${s.question}\n${s.content}\n\nCita
 ## Tahi brand voice
 ${input.brandDocs ?? '(use Liam voice: direct, concrete, no em dashes, no "let\'s explore", short paragraphs, opinionated, specific)'}
 ${variantNote}
-Respond JSON only:
+Respond JSON only (markdown body, NOT html):
 
 {
   "bodyMarkdown": "full markdown body",
-  "bodyHtml": "full HTML body ready for Webflow",
   "wordCount": number,
   "internalLinksUsed": ["slug-1", "slug-2"],
   "outboundLinksUsed": ["https://...", "https://..."]
@@ -266,10 +264,9 @@ Respond JSON only:
 
 export function parseWriter(raw: string): WriterOutput {
   const parsed = JSON.parse(raw) as Partial<WriterOutput>
-  if (!parsed.bodyMarkdown || !parsed.bodyHtml) throw new Error('Writer missing body')
+  if (!parsed.bodyMarkdown) throw new Error('Writer missing body')
   return {
     bodyMarkdown: parsed.bodyMarkdown,
-    bodyHtml: parsed.bodyHtml,
     wordCount: parsed.wordCount ?? estimateWords(parsed.bodyMarkdown),
     internalLinksUsed: parsed.internalLinksUsed ?? [],
     outboundLinksUsed: parsed.outboundLinksUsed ?? [],
@@ -284,7 +281,6 @@ function estimateWords(text: string): number {
 
 export interface EditorOutput {
   bodyMarkdown: string
-  bodyHtml: string
   /** Summary of what changed vs the previous revision. Used in the
    *  Conflicts UI to explain the editor's reasoning. */
   changesSummary: string
@@ -314,7 +310,9 @@ Veto rules:
 - If anti_ai, tahi_voice, brand_tone, or citations returned hard_fail, you MUST address those issues before returning.
 - If unable to resolve a hard_fail in this pass, set weightedScore to the post-fix estimate and explain in changesSummary which veto needs another revision.
 
-Never use em dashes. Preserve the writer's voice — you're polishing, not rewriting from scratch.`
+Never use em dashes. Preserve the writer's voice — you're polishing, not rewriting from scratch.
+
+Output the edited body as MARKDOWN ONLY. Do not output HTML — it's rendered downstream. This keeps the JSON response from truncating on a long article.`
 
 export function buildEditorPrompt(input: {
   brief: StrategistOutput
@@ -338,11 +336,10 @@ Summary: ${r.critique.summary}
 Strengths: ${r.critique.strengths.join('; ')}
 Issues: ${r.critique.issues.map(i => `[${i.severity}] ${i.description}${i.suggestedFix ? ' → ' + i.suggestedFix : ''}`).join(' | ')}`).join('\n\n')}
 
-Respond JSON only:
+Respond JSON only (markdown body, NOT html):
 
 {
   "bodyMarkdown": "edited markdown",
-  "bodyHtml": "edited HTML",
   "changesSummary": "what you changed and why",
   "conflictResolutions": [
     { "reviewerA": "...", "reviewerB": "...", "topic": "...", "picked": "a|b|compromise", "reasoning": "..." }
@@ -353,10 +350,9 @@ Respond JSON only:
 
 export function parseEditor(raw: string): EditorOutput {
   const parsed = JSON.parse(raw) as Partial<EditorOutput>
-  if (!parsed.bodyMarkdown || !parsed.bodyHtml) throw new Error('Editor missing body')
+  if (!parsed.bodyMarkdown) throw new Error('Editor missing body')
   return {
     bodyMarkdown: parsed.bodyMarkdown,
-    bodyHtml: parsed.bodyHtml,
     changesSummary: parsed.changesSummary ?? '',
     conflictResolutions: parsed.conflictResolutions ?? [],
     weightedScore: typeof parsed.weightedScore === 'number' ? parsed.weightedScore : 0,

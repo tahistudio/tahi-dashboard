@@ -1669,6 +1669,13 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_ai_cost_log_created ON ai_cost_log(created_at)`,
     ],
   },
+  {
+    name: '0065',
+    description: 'Phase I · Slice 9 — round-table concurrency lock. Adds stage_locked_at to content_drafts so overlapping cron ticks + front-end polls cannot run the same pipeline stage twice (which double-inserted reviewer rows during live testing). Idempotent ALTER; runner swallows "duplicate column name".',
+    statements: [
+      `ALTER TABLE content_drafts ADD COLUMN stage_locked_at text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

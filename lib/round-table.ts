@@ -34,6 +34,7 @@ import { getDraftSpendCents, recordCost, DRAFT_COST_CAP_CENTS, ESTIMATED_STAGE_C
 import { buildResearchBrief, isPerplexityConfigured } from '@/lib/perplexity'
 import { generateCover, isReplicateConfigured } from '@/lib/replicate'
 import { validateDraftLinks } from '@/lib/link-validator'
+import { markdownToHtml } from '@/lib/markdown-render'
 import {
   REVIEWERS,
   DEFAULT_VOICE_WEIGHTS,
@@ -93,6 +94,28 @@ export async function runStage(database: Database, draftId: string): Promise<Sta
   const draft = await loadDraft(database, draftId)
   if (!draft) throw new Error(`Draft ${draftId} not found`)
 
+  // Concurrency guard. If another runStage call claimed this draft in the
+  // last 90s, bail — otherwise overlapping cron ticks + front-end polls
+  // run the same stage twice and double-insert reviewer rows. Best-effort
+  // (read-check-set, not a true mutex), which covers the realistic
+  // cron-plus-poll overlap window.
+  if (draft.stageLockedAt) {
+    const lockedMs = Date.parse(draft.stageLockedAt)
+    if (!Number.isNaN(lockedMs) && Date.now() - lockedMs < 90_000) {
+      const spentNow = await getDraftSpendCents(database, draftId)
+      return {
+        nextStatus: draft.status as DraftStatus,
+        costCentsThisStage: 0,
+        totalCostCents: spentNow,
+        message: 'Stage already in progress (locked); skipping concurrent run.',
+      }
+    }
+  }
+  // Claim the lock.
+  await database.update(schema.contentDrafts)
+    .set({ stageLockedAt: new Date().toISOString() })
+    .where(eq(schema.contentDrafts.id, draftId))
+
   // Hard cap check before doing any work
   const spent = await getDraftSpendCents(database, draftId)
   if (spent >= DRAFT_COST_CAP_CENTS) {
@@ -129,12 +152,12 @@ export async function runStage(database: Database, draftId: string): Promise<Sta
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    if (err instanceof CostCapExceededError) {
-      await setStatus(database, draftId, 'cost_capped', message)
-      return { nextStatus: 'cost_capped', costCentsThisStage: 0, totalCostCents: spent, message }
-    }
-    await setStatus(database, draftId, 'failed', message)
-    return { nextStatus: 'failed', costCentsThisStage: 0, totalCostCents: spent, message }
+    const terminal = err instanceof CostCapExceededError ? 'cost_capped' : 'failed'
+    // Clear the lock on terminal failure so a retry can re-claim cleanly.
+    await database.update(schema.contentDrafts)
+      .set({ status: terminal, errorMessage: message, stageLockedAt: null })
+      .where(eq(schema.contentDrafts.id, draftId))
+    return { nextStatus: terminal, costCentsThisStage: 0, totalCostCents: spent, message }
   }
 }
 
@@ -233,11 +256,15 @@ async function stageDraft(database: Database, draft: DraftRow): Promise<StageRes
 
   const { result, costCents } = await claudeJson({
     database, scope: 'draft', scopeId: draft.id, stage: 'writer',
-    model: 'claude-sonnet-4-6', maxTokens: 6000,
+    model: 'claude-sonnet-4-6', maxTokens: 8000,
     systemPrompt: WRITER_SYSTEM,
     userPrompt: buildWriterPrompt({ brief, researchBrief: research }),
     parse: parseWriter,
   })
+
+  // Render HTML from the markdown the writer produced (markdown-only
+  // output keeps the JSON from truncating on long articles).
+  const writerHtml = markdownToHtml(result.bodyMarkdown)
 
   // Store revision 1
   await database.insert(schema.draftRevisions).values({
@@ -245,13 +272,13 @@ async function stageDraft(database: Database, draft: DraftRow): Promise<StageRes
     draftId: draft.id,
     revisionNumber: 1,
     source: 'writer_initial',
-    bodyHtml: result.bodyHtml,
+    bodyHtml: writerHtml,
     bodyMarkdown: result.bodyMarkdown,
     wordCount: result.wordCount,
     reason: 'first draft from writer',
   })
   await database.update(schema.contentDrafts).set({
-    bodyHtml: result.bodyHtml,
+    bodyHtml: writerHtml,
     bodyMarkdown: result.bodyMarkdown,
   }).where(eq(schema.contentDrafts.id, draft.id))
 
@@ -359,17 +386,21 @@ async function stageEdit(database: Database, draft: DraftRow): Promise<StageResu
       eq(schema.draftReviews.revisionNumber, latestRev),
     ))
 
-  const reviewsForEditor = reviews
-    .filter(r => r.critique != null)
-    .map(r => ({
-      reviewerKey: r.reviewerKey as ReviewerKey,
-      weight: parseFloat(r.weight ?? '1'),
-      critique: JSON.parse(r.critique ?? '{}') as ReviewerCritique,
-    }))
+  // Dedupe by reviewerKey (keep the last critique per reviewer). Belt
+  // and braces against any double-insert that slipped past the lock.
+  const byReviewer = new Map<string, typeof reviews[number]>()
+  for (const r of reviews) {
+    if (r.critique != null) byReviewer.set(r.reviewerKey, r)
+  }
+  const reviewsForEditor = Array.from(byReviewer.values()).map(r => ({
+    reviewerKey: r.reviewerKey as ReviewerKey,
+    weight: parseFloat(r.weight ?? '1'),
+    critique: JSON.parse(r.critique ?? '{}') as ReviewerCritique,
+  }))
 
   const { result, costCents } = await claudeJson({
     database, scope: 'draft', scopeId: draft.id, stage: 'editor',
-    model: 'claude-opus-4-7', maxTokens: 6500,
+    model: 'claude-opus-4-7', maxTokens: 8000,
     systemPrompt: EDITOR_SYSTEM,
     userPrompt: buildEditorPrompt({
       brief,
@@ -380,6 +411,9 @@ async function stageEdit(database: Database, draft: DraftRow): Promise<StageResu
     parse: parseEditor,
   })
 
+  // Render HTML from the editor's markdown.
+  const editedHtml = markdownToHtml(result.bodyMarkdown)
+
   // Store the new revision
   const nextRev = latestRev + 1
   await database.insert(schema.draftRevisions).values({
@@ -387,13 +421,13 @@ async function stageEdit(database: Database, draft: DraftRow): Promise<StageResu
     draftId: draft.id,
     revisionNumber: nextRev,
     source: 'editor_merge',
-    bodyHtml: result.bodyHtml,
+    bodyHtml: editedHtml,
     bodyMarkdown: result.bodyMarkdown,
     wordCount: estimateWordCount(result.bodyMarkdown),
     reason: result.changesSummary,
   })
   await database.update(schema.contentDrafts).set({
-    bodyHtml: result.bodyHtml,
+    bodyHtml: editedHtml,
     bodyMarkdown: result.bodyMarkdown,
     contentScore: result.weightedScore,
   }).where(eq(schema.contentDrafts.id, draft.id))
@@ -502,6 +536,7 @@ interface DraftRow {
   researchSummary: string | null
   scoreBreakdown: string | null
   contentScore: number | null
+  stageLockedAt: string | null
 }
 
 async function loadDraft(database: Database, id: string): Promise<DraftRow | null> {
@@ -518,6 +553,7 @@ async function loadDraft(database: Database, id: string): Promise<DraftRow | nul
       researchSummary: schema.contentDrafts.researchSummary,
       scoreBreakdown: schema.contentDrafts.scoreBreakdown,
       contentScore: schema.contentDrafts.contentScore,
+      stageLockedAt: schema.contentDrafts.stageLockedAt,
     })
     .from(schema.contentDrafts)
     .where(eq(schema.contentDrafts.id, id))
@@ -585,7 +621,11 @@ async function setStatus(database: Database, draftId: string, status: DraftStatu
 }
 
 async function advance(database: Database, draftId: string, next: DraftStatus, cents: number, message?: string): Promise<StageResult> {
-  await setStatus(database, draftId, next)
+  // Clear the concurrency lock as we transition to the next stage so the
+  // next runStage call (cron or poll) can claim it cleanly.
+  await database.update(schema.contentDrafts)
+    .set({ status: next, errorMessage: null, stageLockedAt: null })
+    .where(eq(schema.contentDrafts.id, draftId))
   const total = await getDraftSpendCents(database, draftId)
   return { nextStatus: next, costCentsThisStage: cents, totalCostCents: total, message }
 }

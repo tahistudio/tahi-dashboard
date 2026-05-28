@@ -2722,6 +2722,11 @@ export const contentDrafts = sqliteTable('content_drafts', {
   publishedAt: text('published_at'),
   // Public URL of the published post (e.g. https://www.tahi.studio/blog/<slug>)
   publishUrl: text('publish_url'),
+  // Round-table concurrency lock (Slice 9). Set to ISO now when a stage
+  // starts running; cleared when it finishes. runStage refuses to act if
+  // this is set + recent (<90s), so overlapping cron + front-end polls
+  // can't run the same stage twice and double-insert reviews.
+  stageLockedAt: text('stage_locked_at'),
   ...timestamps,
 }, (table) => [
   index('idx_content_drafts_idea').on(table.ideaId),
