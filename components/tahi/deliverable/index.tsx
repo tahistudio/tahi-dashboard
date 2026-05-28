@@ -367,14 +367,16 @@ export function CoverPage({
         boxShadow: '0 16px 48px rgba(31, 44, 26, 0.24)',
       }}
     >
-      {/* Top brand mark — full TahiStudio wordmark + icon on the dark hero */}
+      {/* Top brand mark — full Tahi Studio wordmark on the dark hero.
+          Brand rule: the icon mark is never paired with separate
+          "Tahi Studio" text. Use the wordmark SVG alone. */}
       <div
         style={{
           position: 'relative',
           padding: 'clamp(1.25rem, 4vw, 2.5rem) clamp(1.25rem, 4vw, 3rem) 0',
         }}
       >
-        <BrandMark size="md" variant="white" layout="full" />
+        <BrandMark size="md" variant="white" layout="wordmark" />
       </div>
 
       {/* Center stack */}
