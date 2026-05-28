@@ -13,7 +13,7 @@ import {
   RefreshCw, AlertTriangle, FileSearch, CheckCircle2, XCircle, HelpCircle,
   Lightbulb, FileEdit, Calendar, ExternalLink, ChevronDown, ChevronRight,
   Check, X, Eye, Sparkles, Link2, Trash2, Send, Loader2, Clock,
-  Layers, History,
+  Layers, History, Plus,
   type LucideIcon,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -947,6 +947,66 @@ function IdeasTab({ onToast }: IdeasTabProps) {
   const [drawerAnswers, setDrawerAnswers] = useState<string[]>([])
   const [drawerSaving, setDrawerSaving] = useState(false)
   const [actionInFlight, setActionInFlight] = useState<string | null>(null)
+  // Manual idea drawer state
+  const [manualOpen, setManualOpen] = useState(false)
+  const [manualTitle, setManualTitle] = useState('')
+  const [manualAngle, setManualAngle] = useState('')
+  const [manualKeyword, setManualKeyword] = useState('')
+  const [manualCluster, setManualCluster] = useState('')
+  const [manualNotes, setManualNotes] = useState('')
+  const [manualSaving, setManualSaving] = useState(false)
+  const [manualDuplicates, setManualDuplicates] = useState<Array<{
+    source: 'existing_idea' | 'published_post'
+    title: string
+    slug?: string
+    similarity: number
+  }>>([])
+
+  function resetManualForm() {
+    setManualTitle(''); setManualAngle(''); setManualKeyword(''); setManualCluster('')
+    setManualNotes(''); setManualDuplicates([])
+  }
+
+  async function saveManualIdea(force: boolean) {
+    setManualSaving(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/content/ideas/manual'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: manualTitle.trim(),
+          angle: manualAngle.trim() || undefined,
+          targetKeyword: manualKeyword.trim() || undefined,
+          clusterId: manualCluster || undefined,
+          rationale: manualNotes.trim() || undefined,
+          force,
+        }),
+      })
+      const json = await res.json() as {
+        idea?: { id: string; title: string }
+        duplicates?: typeof manualDuplicates
+        message?: string
+        error?: string
+      }
+      if (!res.ok) {
+        onToast(json.error ?? 'Failed to create idea', 'error')
+        return
+      }
+      if (json.duplicates && json.duplicates.length > 0 && !json.idea) {
+        setManualDuplicates(json.duplicates)
+        onToast(`${json.duplicates.length} potential duplicate(s) found — review below`, 'warning')
+        return
+      }
+      onToast(`Idea created: ${json.idea?.title ?? manualTitle.trim()}`, 'success')
+      setManualOpen(false)
+      resetManualForm()
+      await fetchAll()
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Failed', 'error')
+    } finally {
+      setManualSaving(false)
+    }
+  }
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -1164,14 +1224,24 @@ function IdeasTab({ onToast }: IdeasTabProps) {
             {counts.rejected ?? 0} rejected
           </Badge>
         </div>
-        <TahiButton
-          size="sm"
-          loading={running}
-          onClick={() => { void runIdeationNow() }}
-          iconLeft={!running ? <Sparkles className="w-3.5 h-3.5" /> : undefined}
-        >
-          {running ? 'Generating...' : 'Run ideation now'}
-        </TahiButton>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <TahiButton
+            size="sm"
+            variant="secondary"
+            onClick={() => { resetManualForm(); setManualOpen(true) }}
+            iconLeft={<Plus className="w-3.5 h-3.5" />}
+          >
+            New idea
+          </TahiButton>
+          <TahiButton
+            size="sm"
+            loading={running}
+            onClick={() => { void runIdeationNow() }}
+            iconLeft={!running ? <Sparkles className="w-3.5 h-3.5" /> : undefined}
+          >
+            {running ? 'Generating...' : 'Run ideation now'}
+          </TahiButton>
+        </div>
       </div>
 
       {/* Cluster filter chips. Multi-select. */}
@@ -1575,6 +1645,169 @@ function IdeasTab({ onToast }: IdeasTabProps) {
             >
               Approve
             </TahiButton>
+          </SlideOver.Footer>
+        </SlideOver>
+      )}
+
+      {/* Manual idea creation drawer */}
+      {manualOpen && (
+        <SlideOver
+          open={manualOpen}
+          onClose={() => { setManualOpen(false); resetManualForm() }}
+          title="New idea"
+          subtitle="Add your own — runs through the round table just like cron-generated ideas"
+          icon={<Plus size={15} />}
+          maxWidth="34rem"
+        >
+          <SlideOver.Body>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+              <div>
+                <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text)', margin: '0 0 0.375rem' }}>
+                  Working title
+                </p>
+                <input
+                  type="text"
+                  value={manualTitle}
+                  onChange={e => setManualTitle(e.target.value)}
+                  placeholder="e.g. Why your Webflow site keeps breaking on launch day"
+                  style={{
+                    width: '100%', padding: '0.5rem 0.75rem',
+                    fontSize: '0.875rem', borderRadius: '0.375rem',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                  }}
+                />
+                <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', margin: '0.25rem 0 0' }}>
+                  The Headline Lab will polish this later — don&apos;t overthink it.
+                </p>
+              </div>
+
+              <div>
+                <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text)', margin: '0 0 0.375rem' }}>
+                  Angle (optional)
+                </p>
+                <Textarea
+                  rows={2}
+                  value={manualAngle}
+                  onChange={e => setManualAngle(e.target.value)}
+                  placeholder="What's the unique take? What's the hill you'd die on with this post?"
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.625rem' }}>
+                <div>
+                  <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text)', margin: '0 0 0.375rem' }}>
+                    Target keyword
+                  </p>
+                  <input
+                    type="text"
+                    value={manualKeyword}
+                    onChange={e => setManualKeyword(e.target.value)}
+                    placeholder="webflow site speed"
+                    style={{
+                      width: '100%', padding: '0.5rem 0.75rem',
+                      fontSize: '0.875rem', borderRadius: '0.375rem',
+                      border: '1px solid var(--color-border)',
+                      background: 'var(--color-bg)',
+                    }}
+                  />
+                </div>
+                <div>
+                  <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text)', margin: '0 0 0.375rem' }}>
+                    Cluster
+                  </p>
+                  <select
+                    value={manualCluster}
+                    onChange={e => setManualCluster(e.target.value)}
+                    style={{
+                      width: '100%', padding: '0.5rem 0.75rem',
+                      fontSize: '0.875rem', borderRadius: '0.375rem',
+                      border: '1px solid var(--color-border)',
+                      background: 'var(--color-bg)',
+                    }}
+                  >
+                    <option value="">No cluster</option>
+                    {clusters.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text)', margin: '0 0 0.375rem' }}>
+                  Notes / rationale (optional)
+                </p>
+                <Textarea
+                  rows={2}
+                  value={manualNotes}
+                  onChange={e => setManualNotes(e.target.value)}
+                  placeholder="Why this matters now. Source signal. Sales context. Anything the Strategist should know."
+                />
+              </div>
+
+              {manualDuplicates.length > 0 && (
+                <Card
+                  padding="md"
+                  style={{
+                    borderColor: 'var(--color-warning)',
+                    background: 'var(--color-warning-bg)',
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4375rem' }}>
+                      <AlertTriangle size={14} aria-hidden="true" style={{ color: 'var(--color-warning-text, #8A5A12)' }} />
+                      <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-warning-text, #8A5A12)' }}>
+                        {manualDuplicates.length} potential duplicate{manualDuplicates.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    <ul style={{ margin: 0, padding: '0 0 0 1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      {manualDuplicates.map((d, i) => (
+                        <li key={i} style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>
+                          <span style={{ fontWeight: 500 }}>{d.title}</span>
+                          <span style={{ color: 'var(--color-text-subtle)', marginLeft: '0.375rem' }}>
+                            ({Math.round(d.similarity * 100)}% similar · {d.source === 'published_post' ? 'published' : 'existing idea'})
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: '0.125rem 0 0' }}>
+                      If your idea is genuinely different, click <strong>Create anyway</strong>.
+                    </p>
+                  </div>
+                </Card>
+              )}
+            </div>
+          </SlideOver.Body>
+          <SlideOver.Footer>
+            <TahiButton
+              size="sm"
+              variant="secondary"
+              onClick={() => { setManualOpen(false); resetManualForm() }}
+              disabled={manualSaving}
+            >
+              Cancel
+            </TahiButton>
+            {manualDuplicates.length > 0 ? (
+              <TahiButton
+                size="sm"
+                loading={manualSaving}
+                onClick={() => { void saveManualIdea(true) }}
+                disabled={!manualTitle.trim()}
+              >
+                Create anyway
+              </TahiButton>
+            ) : (
+              <TahiButton
+                size="sm"
+                loading={manualSaving}
+                onClick={() => { void saveManualIdea(false) }}
+                disabled={!manualTitle.trim()}
+                iconLeft={<Plus className="w-3.5 h-3.5" />}
+              >
+                Create idea
+              </TahiButton>
+            )}
           </SlideOver.Footer>
         </SlideOver>
       )}
@@ -2151,7 +2384,34 @@ function draftStatusLabel(status: string): string {
 }
 
 function isInProgress(status: string): boolean {
-  return ['queued', 'researching', 'drafting', 'reviewing', 'finalising'].includes(status)
+  return [
+    'queued', 'researching', 'drafting', 'reviewing', 'finalising',
+    // Round-table (Slice 9) statuses
+    'strategising', 'headline_lab', 'editing', 'signing_off', 'covering',
+  ].includes(status)
+}
+
+/** Map any draft status (legacy + round-table) to one of the 7 UI
+ *  buckets the DraftsTab renders. Keeps the existing layout working
+ *  even as the pipeline expands. */
+function mapToBucket(status: string): 'researching' | 'drafting' | 'reviewing' | 'finalising' | 'queued' | 'ready' | 'failed' {
+  switch (status) {
+    case 'queued': return 'queued'
+    case 'researching': return 'researching'
+    case 'strategising': return 'researching'  // still pre-write
+    case 'headline_lab': return 'researching'
+    case 'drafting': return 'drafting'
+    case 'reviewing': return 'reviewing'
+    case 'editing': return 'reviewing'
+    case 'signing_off': return 'finalising'
+    case 'covering': return 'finalising'
+    case 'finalising': return 'finalising'
+    case 'ready': return 'ready'
+    case 'ready_for_publish': return 'ready'
+    case 'failed': return 'failed'
+    case 'cost_capped': return 'failed'
+    default: return 'queued'
+  }
 }
 
 function parseScoreBreakdown(json: string | null): ScoreBreakdownShape | null {
@@ -2263,14 +2523,18 @@ function DraftsTab({ onToast }: DraftsTabProps) {
   const drafts = useMemo(() => data?.drafts ?? [], [data])
   const counts = data?.counts ?? { ready: 0, failed: 0, total: 0 }
 
-  // Group by status so the in-progress section sits above ready / failed.
+  // Group by status. Maps both legacy statuses (researching, drafting,
+  // reviewing, finalising, ready) AND new round-table statuses
+  // (strategising, headline_lab, editing, signing_off, covering,
+  // ready_for_publish, cost_capped) into the same UI buckets so the
+  // existing layout keeps working as the pipeline expands.
   const byStatus = useMemo(() => {
     const groups: Record<string, DraftRow[]> = {
       researching: [], drafting: [], reviewing: [], finalising: [],
       queued: [], ready: [], failed: [],
     }
     for (const d of drafts) {
-      const key = groups[d.status] ? d.status : 'queued'
+      const key = mapToBucket(d.status)
       groups[key].push(d)
     }
     return groups
