@@ -436,21 +436,6 @@ function buildCitations(
   }))
 }
 
-function buildSpeakable(input: SchemaInput): object {
-  // Slice 5's publish template injects #tldr and #key-takeaways anchor
-  // ids around the takeaways block + first paragraph. Until then the
-  // xpath still resolves to a partial set (title only), which is fine.
-  return {
-    '@type': 'SpeakableSpecification',
-    '@id': `${input.url}#speakable`,
-    xpath: [
-      "//*[@id='tldr']/*",
-      "//*[@id='key-takeaways']/*",
-      '/html/head/title',
-    ],
-  }
-}
-
 function buildBreadcrumbs(input: SchemaInput): object {
   return {
     '@type': 'BreadcrumbList',
@@ -500,7 +485,11 @@ export function buildBlogSchemaAdditions(input: SchemaInput): SchemaOutput {
   const citations = buildCitations(input.citations)
   if (citations.length > 0) blocks.push(...citations)
 
-  blocks.push(buildSpeakable(input))
+  // SpeakableSpecification removed: it pointed xpath at #tldr /
+  // #key-takeaways anchors the Webflow template never injects, so every
+  // post failed schema.org with 3 "no matches found" errors. speakable is
+  // a pending-namespace feature with marginal payoff — dropping it is the
+  // clean fix. Re-add only if the template gains stable, real anchors.
   blocks.push(buildBreadcrumbs(input))
 
   const payload = {

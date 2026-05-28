@@ -51,6 +51,8 @@ export interface BackfillPostInput {
 export interface BackfillPostOutput {
   /** 4-6 FAQs. Each answer is ~40-60 words. */
   faqs: Array<{ q: string; a: string }>
+  /** Topic-specific heading that frames the FAQ block. */
+  faqSectionHeading: string
   /** 3-5 bullets wrapped in a single <ul>. Ready to drop into the
    *  Key Takeaways CMS field. */
   keyTakeawaysHtml: string
@@ -133,6 +135,7 @@ OUTPUT SCHEMA (strict)
   "faqs": [
     { "q": "Question phrased as a real reader would type it", "a": "40-60 word answer in Tahi's UK B2B voice, factual, no marketing fluff" }
   ],
+  "faqSectionHeading": "Topic-specific heading that frames the FAQ block, e.g. 'Common questions about Webflow security' (4-8 words, not just 'FAQs')",
   "keyTakeaways": [
     "3-5 punchy single-sentence bullets",
     "Each should land one concrete idea from the post",
@@ -143,6 +146,7 @@ OUTPUT SCHEMA (strict)
 
 RULES
 1. faqs: exactly 4-6 entries. Every question MUST be answerable from the post body. No questions about things the post doesn't cover.
+1b. faqSectionHeading: a short, topic-specific heading framing the FAQs (4-8 words). Never generic like "FAQs" or "Frequently asked questions".
 2. keyTakeaways: exactly 3-5 entries. Each one is a complete sentence ending in a full stop. No leading bullets, no markdown.
 3. aiSummaryPrompt: must reference the topic specifically, not generically. Bad: "Summarize this article in 3 bullets." Good: "Summarize this guide for a Head of Marketing evaluating Webflow vs WordPress for an enterprise rebrand, focusing on migration risk + total cost of ownership over 3 years."
 4. UK English throughout (colour, organise, centre). NO em or en dashes. Use commas, colons, or full stops.
@@ -170,6 +174,7 @@ function buildUserMessage(input: BackfillPostInput): string {
 
 interface SonnetOutput {
   faqs: Array<{ q: string; a: string }>
+  faqSectionHeading: string
   keyTakeaways: string[]
   aiSummaryPrompt: string
 }
@@ -238,8 +243,12 @@ async function callSonnet(input: BackfillPostInput): Promise<SonnetOutput> {
     throw new Error('Sonnet returned an empty aiSummaryPrompt')
   }
 
+  const faqSectionHeading = asString(parsed.faqSectionHeading).trim()
+    || 'Frequently asked questions'
+
   return {
     faqs: faqsTrimmed,
+    faqSectionHeading,
     keyTakeaways: takeawaysTrimmed,
     aiSummaryPrompt,
   }
@@ -332,6 +341,7 @@ export async function backfillPostFields(input: BackfillPostInput): Promise<Back
 
   return {
     faqs: generated.faqs,
+    faqSectionHeading: generated.faqSectionHeading,
     keyTakeawaysHtml,
     aiSummaryPrompt: generated.aiSummaryPrompt,
     schemaJsonLd: jsonLdString,
@@ -353,6 +363,7 @@ export function buildWebflowPatchPayload(out: BackfillPostOutput): Record<string
   const payload: Record<string, unknown> = {
     'key-takeaways': out.keyTakeawaysHtml,
     'ai-prompt': out.aiSummaryPrompt,
+    'faq-section-heading': out.faqSectionHeading,
     schema: out.schemaJsonLd,
     'hreflang-block': out.hreflangBlock,
   }
