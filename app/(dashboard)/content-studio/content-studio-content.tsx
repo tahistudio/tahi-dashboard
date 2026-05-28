@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   RefreshCw, AlertTriangle, FileSearch, CheckCircle2, XCircle, HelpCircle,
   Lightbulb, FileEdit, Calendar, ExternalLink, ChevronDown, ChevronRight,
-  Check, X, Eye, Sparkles,
+  Check, X, Eye, Sparkles, Link2, Trash2, Send, Loader2,
   type LucideIcon,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -71,7 +71,7 @@ interface ScanResponse {
   continueFromIndex?: number
 }
 
-type TabId = 'health' | 'ideas' | 'drafts' | 'schedule'
+type TabId = 'health' | 'ideas' | 'drafts' | 'links' | 'schedule'
 
 interface TabDef {
   id: TabId
@@ -104,10 +104,17 @@ const TABS: readonly TabDef[] = [
     comingDescription: 'Write and edit posts in the same surface, with AI assistance and structured briefs.',
   },
   {
+    id: 'links',
+    label: 'Links',
+    icon: Link2,
+    slice: 6,
+    comingDescription: 'Patch suggestions for adding inbound internal links to fresh posts. Each is a diff you approve before it touches Webflow.',
+  },
+  {
     id: 'schedule',
     label: 'Schedule',
     icon: Calendar,
-    slice: 3,
+    slice: 5,
     comingDescription: 'Plan publishing cadence across the blog, glossary and case studies.',
   },
 ] as const
@@ -304,7 +311,9 @@ export function ContentStudioContent() {
       >
         {activeTab === 'health' && <HealthTab onToast={showToast} />}
         {activeTab === 'ideas' && <IdeasTab onToast={showToast} />}
-        {activeTab !== 'health' && activeTab !== 'ideas' && (
+        {activeTab === 'drafts' && <DraftsTab onToast={showToast} />}
+        {activeTab === 'links' && <LinksTab onToast={showToast} />}
+        {activeTab !== 'health' && activeTab !== 'ideas' && activeTab !== 'drafts' && activeTab !== 'links' && (
           <ComingSoonTab tab={TABS.find(t => t.id === activeTab)!} />
         )}
       </div>
@@ -1491,6 +1500,1464 @@ function IdeasTab({ onToast }: IdeasTabProps) {
             </TahiButton>
           </SlideOver.Footer>
         </SlideOver>
+      )}
+    </div>
+  )
+}
+
+// ── Links tab (Phase I Slice 6) ───────────────────────────────────────────────
+
+interface LinkSuggestionRow {
+  id: string
+  sourceWebflowId: string
+  sourceUrl: string
+  sourceTitle: string | null
+  matchPhrase: string
+  contextBefore: string | null
+  contextAfter: string | null
+  proposedAnchorText: string
+  justification: string | null
+  confidence: number
+  status: string
+  appliedAt: string | null
+  createdAt: string
+}
+
+interface LinkTargetGroup {
+  targetUrl: string
+  targetTitle: string | null
+  targetPublishedAt: string | null
+  inboundLinkCount: number
+  suggestions: LinkSuggestionRow[]
+}
+
+interface LinkSuggestionsResponse {
+  targets: LinkTargetGroup[]
+  totals: { pending: number; approved: number; applied: number; rejected: number }
+}
+
+function confidenceBadgeTone(score: number): BadgeTone {
+  if (score >= 70) return 'positive'
+  if (score >= 40) return 'warning'
+  return 'danger'
+}
+
+function shortenForDiff(s: string | null, max = 120): string {
+  if (!s) return ''
+  const collapsed = s.replace(/\s+/g, ' ').trim()
+  if (collapsed.length <= max) return collapsed
+  return `...${collapsed.slice(-max)}`
+}
+
+function shortenAfterForDiff(s: string | null, max = 120): string {
+  if (!s) return ''
+  const collapsed = s.replace(/\s+/g, ' ').trim()
+  if (collapsed.length <= max) return collapsed
+  return `${collapsed.slice(0, max)}...`
+}
+
+interface LinksTabProps {
+  onToast: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void
+}
+
+function LinksTab({ onToast }: LinksTabProps) {
+  const [data, setData] = useState<LinkSuggestionsResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [scanning, setScanning] = useState(false)
+  const [actionInFlight, setActionInFlight] = useState<string | null>(null)
+  const [expandedTargets, setExpandedTargets] = useState<Set<string>>(new Set())
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/content/links/suggestions'))
+      if (!res.ok) throw new Error('Failed')
+      const json = await res.json() as LinkSuggestionsResponse
+      setData(json)
+      // Expand the first target by default so Liam doesn't land on a
+      // collapsed list with nothing visible.
+      if (json.targets.length > 0) {
+        setExpandedTargets(prev => prev.size === 0 ? new Set([json.targets[0].targetUrl]) : prev)
+      }
+    } catch {
+      setData(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchAll() }, [fetchAll])
+
+  async function runScan() {
+    setScanning(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/content/links/scan'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const json = await res.json() as {
+        targetsScanned?: number
+        suggestionsCreated?: number
+        error?: string
+        detail?: string
+      }
+      if (!res.ok) {
+        onToast(json.error ?? json.detail ?? 'Scan failed', 'error')
+        return
+      }
+      onToast(
+        `${json.suggestionsCreated ?? 0} suggestion${json.suggestionsCreated === 1 ? '' : 's'} from ${json.targetsScanned ?? 0} target${json.targetsScanned === 1 ? '' : 's'}`,
+        'success',
+      )
+      await fetchAll()
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Scan failed', 'error')
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  async function applyOne(id: string) {
+    setActionInFlight(id)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/links/${id}/apply`), {
+        method: 'POST',
+      })
+      const json = await res.json() as { error?: string; detail?: string }
+      if (!res.ok) {
+        if (res.status === 409) {
+          onToast(json.detail ?? 'Source body has drifted, re-scan to refresh', 'warning')
+        } else {
+          onToast(json.error ?? json.detail ?? 'Apply failed', 'error')
+        }
+        return
+      }
+      onToast('Patch staged in Webflow', 'success')
+      await fetchAll()
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Apply failed', 'error')
+    } finally {
+      setActionInFlight(null)
+    }
+  }
+
+  async function rejectOne(id: string) {
+    setActionInFlight(id)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/links/${id}/reject`), {
+        method: 'POST',
+      })
+      const json = await res.json() as { error?: string }
+      if (!res.ok) {
+        onToast(json.error ?? 'Reject failed', 'error')
+        return
+      }
+      onToast('Rejected', 'info')
+      await fetchAll()
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Reject failed', 'error')
+    } finally {
+      setActionInFlight(null)
+    }
+  }
+
+  function toggleTarget(url: string) {
+    setExpandedTargets(prev => {
+      const next = new Set(prev)
+      if (next.has(url)) next.delete(url)
+      else next.add(url)
+      return next
+    })
+  }
+
+  const targets = data?.targets ?? []
+  const totals = data?.totals ?? { pending: 0, approved: 0, applied: 0, rejected: 0 }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+      {/* Header strip */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '0.75rem',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', maxWidth: '52rem', lineHeight: 1.5 }}>
+            Patches suggested for posts published in the last 14 days. Each is a diff you approve before it touches Webflow. Applied edits land as staged Webflow changes, never auto-publish.
+          </span>
+        </div>
+        <TahiButton
+          size="sm"
+          loading={scanning}
+          onClick={() => { void runScan() }}
+          iconLeft={!scanning ? <RefreshCw className="w-3.5 h-3.5" /> : undefined}
+        >
+          {scanning ? 'Scanning...' : 'Scan now'}
+        </TahiButton>
+      </div>
+
+      {/* Totals row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap' }}>
+        <Badge tone="neutral" variant="soft" size="sm" leader={false}>
+          {totals.pending} pending
+        </Badge>
+        <Badge tone="positive" variant="soft" size="sm" leader={false}>
+          {totals.applied} applied
+        </Badge>
+        <Badge tone="danger" variant="soft" size="sm" leader={false}>
+          {totals.rejected} rejected
+        </Badge>
+      </div>
+
+      {/* Body */}
+      {loading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {[0, 1, 2].map(i => (
+            <div
+              key={i}
+              className="animate-pulse"
+              style={{
+                height: '8rem',
+                background: 'var(--color-bg-secondary)',
+                borderRadius: 'var(--radius-card)',
+              }}
+            />
+          ))}
+        </div>
+      ) : targets.length === 0 ? (
+        <Card padding="lg">
+          <EmptyState
+            icon={<Link2 className="w-6 h-6" />}
+            title="No link patches yet"
+            description="Scan to look for posts published in the last 14 days that could use more inbound links. Each suggestion shows the exact diff before anything is patched."
+            action={
+              <TahiButton
+                size="sm"
+                loading={scanning}
+                onClick={() => { void runScan() }}
+                iconLeft={!scanning ? <RefreshCw className="w-3.5 h-3.5" /> : undefined}
+              >
+                {scanning ? 'Scanning...' : 'Scan now'}
+              </TahiButton>
+            }
+          />
+        </Card>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {targets.map(group => {
+            const expanded = expandedTargets.has(group.targetUrl)
+            return (
+              <Card key={group.targetUrl} padding="none">
+                {/* Target header */}
+                <button
+                  type="button"
+                  onClick={() => toggleTarget(group.targetUrl)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.75rem',
+                    width: '100%',
+                    padding: '0.875rem 1rem',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                  aria-expanded={expanded}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0, flex: 1 }}>
+                    {expanded
+                      ? <ChevronDown size={14} aria-hidden="true" />
+                      : <ChevronRight size={14} aria-hidden="true" />}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem', minWidth: 0 }}>
+                      <span style={{
+                        fontSize: '0.875rem',
+                        fontWeight: 600,
+                        color: 'var(--color-text)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {group.targetTitle ?? shortUrl(group.targetUrl)}
+                      </span>
+                      <a
+                        href={group.targetUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.25rem',
+                          fontSize: '0.6875rem',
+                          color: 'var(--color-text-subtle)',
+                          textDecoration: 'none',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {shortUrl(group.targetUrl)}
+                        <ExternalLink size={10} aria-hidden="true" />
+                      </a>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexShrink: 0 }}>
+                    <Badge tone="neutral" variant="soft" size="sm" leader={false}>
+                      {group.inboundLinkCount} inbound
+                    </Badge>
+                    <Badge tone="brand" variant="soft" size="sm" leader={false}>
+                      {group.suggestions.length} suggestion{group.suggestions.length === 1 ? '' : 's'}
+                    </Badge>
+                  </div>
+                </button>
+
+                {/* Suggestion list */}
+                {expanded && (
+                  <div
+                    style={{
+                      borderTop: '1px solid var(--color-border-subtle)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                    }}
+                  >
+                    {group.suggestions.map((s, idx) => {
+                      const busy = actionInFlight === s.id
+                      const isPending = s.status === 'pending'
+                      return (
+                        <div
+                          key={s.id}
+                          style={{
+                            padding: '0.875rem 1rem',
+                            borderTop: idx === 0 ? 'none' : '1px solid var(--color-border-subtle)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.5rem',
+                          }}
+                        >
+                          {/* Source row */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', minWidth: 0 }}>
+                              <span style={{
+                                fontSize: '0.8125rem',
+                                fontWeight: 500,
+                                color: 'var(--color-text)',
+                              }}>
+                                {s.sourceTitle ?? shortUrl(s.sourceUrl)}
+                              </span>
+                              <a
+                                href={s.sourceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  color: 'var(--color-text-subtle)',
+                                  textDecoration: 'none',
+                                }}
+                                aria-label="Open source post"
+                              >
+                                <ExternalLink size={11} aria-hidden="true" />
+                              </a>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                              <Badge tone={confidenceBadgeTone(s.confidence)} variant="soft" size="sm" leader="dot">
+                                {s.confidence}/100
+                              </Badge>
+                              {!isPending && (
+                                <Badge
+                                  tone={s.status === 'applied' ? 'positive' : s.status === 'rejected' ? 'danger' : 'neutral'}
+                                  variant="soft"
+                                  size="sm"
+                                  leader={false}
+                                >
+                                  {s.status}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Diff preview */}
+                          <div
+                            style={{
+                              background: 'var(--color-bg-secondary)',
+                              borderRadius: '0.5rem',
+                              padding: '0.625rem 0.75rem',
+                              fontSize: '0.75rem',
+                              lineHeight: 1.5,
+                              fontFamily: 'var(--font-mono, monospace)',
+                              color: 'var(--color-text-muted)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.375rem',
+                            }}
+                          >
+                            <div>
+                              <span style={{ color: 'var(--color-text-subtle)' }}>Currently:</span>{' '}
+                              {shortenForDiff(s.contextBefore)}
+                              <span style={{
+                                background: 'var(--color-bg)',
+                                color: 'var(--color-text)',
+                                padding: '0.0625rem 0.25rem',
+                                borderRadius: '3px',
+                                fontWeight: 600,
+                              }}>
+                                {s.matchPhrase}
+                              </span>
+                              {shortenAfterForDiff(s.contextAfter)}
+                            </div>
+                            <div>
+                              <span style={{ color: 'var(--color-text-subtle)' }}>Proposed:</span>{' '}
+                              {shortenForDiff(s.contextBefore)}
+                              <span style={{
+                                background: 'var(--color-brand-100)',
+                                color: 'var(--color-brand-dark)',
+                                padding: '0.0625rem 0.25rem',
+                                borderRadius: '3px',
+                                fontWeight: 600,
+                              }}>
+                                &lt;a&gt;{s.proposedAnchorText}&lt;/a&gt;
+                              </span>
+                              {shortenAfterForDiff(s.contextAfter)}
+                            </div>
+                          </div>
+
+                          {/* Justification */}
+                          {s.justification && (
+                            <p style={{
+                              margin: 0,
+                              fontSize: '0.75rem',
+                              color: 'var(--color-text-subtle)',
+                              fontStyle: 'italic',
+                            }}>
+                              {s.justification}
+                            </p>
+                          )}
+
+                          {/* Actions */}
+                          {isPending && (
+                            <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
+                              <TahiButton
+                                size="sm"
+                                onClick={() => { void applyOne(s.id) }}
+                                loading={busy}
+                                iconLeft={!busy ? <Check className="w-3.5 h-3.5" /> : undefined}
+                              >
+                                Apply
+                              </TahiButton>
+                              <TahiButton
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => { void rejectOne(s.id) }}
+                                disabled={busy}
+                                iconLeft={<X className="w-3.5 h-3.5" />}
+                              >
+                                Reject
+                              </TahiButton>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </Card>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Drafts tab (Phase I Slice 2) ──────────────────────────────────────────────
+
+interface DraftRow {
+  id: string
+  ideaId: string
+  status: string
+  title: string | null
+  contentScore: number | null
+  scoreBreakdown: string | null
+  coverSvgUrl: string | null
+  coverTemplate: string | null
+  authorSlug: string | null
+  mainCategorySlug: string | null
+  postType: string | null
+  errorMessage: string | null
+  createdAt: string
+  updatedAt: string
+  ideaTitle: string | null
+  ideaBrand: string | null
+  ideaStatus: string | null
+  ideaTargetKeyword: string | null
+  ideaRecommendedWordCount: number | null
+  clusterName: string | null
+  clusterSlug: string | null
+}
+
+interface DraftsResponse {
+  drafts: DraftRow[]
+  counts: Record<string, number>
+}
+
+interface DraftDetail {
+  draft: DraftRow & {
+    researchSummary: string | null
+    validatedCitations: string | null
+    bodyMarkdown: string | null
+    bodyHtml: string | null
+    metaTitle: string | null
+    metaDescription: string | null
+    postExcerpt: string | null
+    shortenedName: string | null
+    summary: string | null
+    keyTakeaways: string | null
+    faqsJson: string | null
+    otherCategorySlugs: string | null
+    salesNotes: string | null
+    readabilityNotes: string | null
+    schemaJsonLd: string | null
+    hreflangBlock: string | null
+  }
+  idea: IdeaRow | null
+  cluster: ClusterRow | null
+}
+
+interface ScoreBreakdownShape {
+  aeo: number
+  voice: number
+  readability: number
+  seo: number
+  linksOk: boolean
+}
+
+const DRAFT_STAGE_ORDER: ReadonlyArray<{ key: string; label: string }> = [
+  { key: 'queued', label: 'Queued' },
+  { key: 'researching', label: 'Researching' },
+  { key: 'drafting', label: 'Drafting' },
+  { key: 'reviewing', label: 'Reviewing' },
+  { key: 'finalising', label: 'Finalising' },
+  { key: 'ready', label: 'Ready' },
+]
+
+function draftStatusTone(status: string): BadgeTone {
+  switch (status) {
+    case 'ready':       return 'positive'
+    case 'failed':      return 'danger'
+    case 'finalising':  return 'info'
+    case 'reviewing':   return 'info'
+    case 'drafting':    return 'teal'
+    case 'researching': return 'teal'
+    case 'queued':      return 'neutral'
+    default:            return 'neutral'
+  }
+}
+
+function draftStatusLabel(status: string): string {
+  switch (status) {
+    case 'queued':      return 'Queued'
+    case 'researching': return 'Researching'
+    case 'drafting':    return 'Drafting'
+    case 'reviewing':   return 'Reviewing'
+    case 'finalising':  return 'Finalising'
+    case 'ready':       return 'Ready'
+    case 'failed':      return 'Failed'
+    default:            return status
+  }
+}
+
+function isInProgress(status: string): boolean {
+  return ['queued', 'researching', 'drafting', 'reviewing', 'finalising'].includes(status)
+}
+
+function parseScoreBreakdown(json: string | null): ScoreBreakdownShape | null {
+  if (!json) return null
+  try {
+    const parsed = JSON.parse(json)
+    if (!parsed || typeof parsed !== 'object') return null
+    return {
+      aeo: Number(parsed.aeo ?? 0),
+      voice: Number(parsed.voice ?? 0),
+      readability: Number(parsed.readability ?? 0),
+      seo: Number(parsed.seo ?? 0),
+      linksOk: parsed.linksOk === true,
+    }
+  } catch {
+    return null
+  }
+}
+
+interface DraftsTabProps {
+  onToast: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void
+}
+
+function DraftsTab({ onToast }: DraftsTabProps) {
+  const [data, setData] = useState<DraftsResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [activeDetail, setActiveDetail] = useState<DraftDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [discarding, setDiscarding] = useState(false)
+  const [retrying, setRetrying] = useState<string | null>(null)
+
+  const fetchDrafts = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/content/drafts?status=all&limit=100'))
+      if (!res.ok) throw new Error('Failed')
+      const json = await res.json() as DraftsResponse
+      setData(json)
+    } catch {
+      setData(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchDrafts() }, [fetchDrafts])
+
+  // Soft poll while anything's in-flight. 6s is gentle on the API + the
+  // user's bandwidth, and matches the rough lower-bound of a Sonnet call.
+  useEffect(() => {
+    if (!data) return
+    const anyInProgress = data.drafts.some(d => isInProgress(d.status))
+    if (!anyInProgress) return
+    const t = setInterval(() => { void fetchDrafts() }, 6000)
+    return () => clearInterval(t)
+  }, [data, fetchDrafts])
+
+  async function openDetail(draftId: string) {
+    setDetailLoading(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}`))
+      if (!res.ok) throw new Error('Failed to load draft')
+      const json = await res.json() as DraftDetail
+      setActiveDetail(json)
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Failed to load draft', 'error')
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  async function discardDraft(draftId: string) {
+    setDiscarding(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}`), { method: 'DELETE' })
+      if (!res.ok) throw new Error('Failed to discard')
+      onToast('Draft discarded. Idea returned to Approved.', 'info')
+      setActiveDetail(null)
+      await fetchDrafts()
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Failed to discard', 'error')
+    } finally {
+      setDiscarding(false)
+    }
+  }
+
+  async function retryDraft(ideaId: string) {
+    setRetrying(ideaId)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/ideas/${ideaId}/draft`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: true }),
+      })
+      const json = await res.json().catch(() => ({})) as { error?: string }
+      if (!res.ok) {
+        onToast(json.error ?? 'Re-draft failed', 'error')
+        return
+      }
+      onToast('Re-drafting started', 'success')
+      await fetchDrafts()
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Re-draft failed', 'error')
+    } finally {
+      setRetrying(null)
+    }
+  }
+
+  const drafts = useMemo(() => data?.drafts ?? [], [data])
+  const counts = data?.counts ?? { ready: 0, failed: 0, total: 0 }
+
+  // Group by status so the in-progress section sits above ready / failed.
+  const byStatus = useMemo(() => {
+    const groups: Record<string, DraftRow[]> = {
+      researching: [], drafting: [], reviewing: [], finalising: [],
+      queued: [], ready: [], failed: [],
+    }
+    for (const d of drafts) {
+      const key = groups[d.status] ? d.status : 'queued'
+      groups[key].push(d)
+    }
+    return groups
+  }, [drafts])
+
+  const inProgressDrafts = [
+    ...byStatus.queued, ...byStatus.researching, ...byStatus.drafting,
+    ...byStatus.reviewing, ...byStatus.finalising,
+  ]
+  const readyDrafts = byStatus.ready
+  const failedDrafts = byStatus.failed
+
+  if (!loading && drafts.length === 0) {
+    return (
+      <Card padding="lg">
+        <EmptyState
+          icon={<FileEdit className="w-6 h-6" />}
+          title="No drafts yet"
+          description="Approve an idea in the Ideas tab to kick off the drafting pipeline. The agent will research, write, review, and score the post — you sign off at the end."
+        />
+      </Card>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+      {/* Header strip — count badges */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '0.75rem',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <Badge tone="positive" variant="soft" size="sm" leader={false}>
+            {counts.ready ?? 0} ready
+          </Badge>
+          <Badge tone="info" variant="soft" size="sm" leader={false}>
+            {inProgressDrafts.length} in progress
+          </Badge>
+          <Badge tone="danger" variant="soft" size="sm" leader={false}>
+            {counts.failed ?? 0} failed
+          </Badge>
+        </div>
+        <TahiButton
+          size="sm"
+          variant="secondary"
+          onClick={() => { void fetchDrafts() }}
+          iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
+        >
+          Refresh
+        </TahiButton>
+      </div>
+
+      {loading && (
+        <div
+          className="grid"
+          style={{
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 20rem), 1fr))',
+            gap: '0.875rem',
+          }}
+        >
+          {[0, 1, 2].map(i => (
+            <div
+              key={i}
+              className="animate-pulse"
+              style={{
+                height: '12rem',
+                background: 'var(--color-bg-secondary)',
+                borderRadius: 'var(--radius-card)',
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {!loading && inProgressDrafts.length > 0 && (
+        <DraftsSection
+          title="In progress"
+          drafts={inProgressDrafts}
+          onOpen={d => { void openDetail(d.id) }}
+          onRetry={null}
+          retryingIdeaId={retrying}
+        />
+      )}
+
+      {!loading && readyDrafts.length > 0 && (
+        <DraftsSection
+          title="Ready for review"
+          drafts={readyDrafts}
+          onOpen={d => { void openDetail(d.id) }}
+          onRetry={null}
+          retryingIdeaId={retrying}
+        />
+      )}
+
+      {!loading && failedDrafts.length > 0 && (
+        <DraftsSection
+          title="Failed"
+          drafts={failedDrafts}
+          onOpen={d => { void openDetail(d.id) }}
+          onRetry={ideaId => { void retryDraft(ideaId) }}
+          retryingIdeaId={retrying}
+        />
+      )}
+
+      {/* Detail drawer */}
+      {activeDetail && (
+        <DraftDetailDrawer
+          detail={activeDetail}
+          onClose={() => setActiveDetail(null)}
+          onDiscard={() => { void discardDraft(activeDetail.draft.id) }}
+          discarding={discarding}
+        />
+      )}
+
+      {detailLoading && !activeDetail && (
+        <Card padding="md">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Loading draft...
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ── Drafts section block ─────────────────────────────────────────────────────
+
+interface DraftsSectionProps {
+  title: string
+  drafts: DraftRow[]
+  onOpen: (d: DraftRow) => void
+  onRetry: ((ideaId: string) => void) | null
+  retryingIdeaId: string | null
+}
+
+function DraftsSection({ title, drafts, onOpen, onRetry, retryingIdeaId }: DraftsSectionProps) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      <h2 style={{
+        margin: 0,
+        fontSize: '0.75rem',
+        fontWeight: 600,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        color: 'var(--color-text-subtle)',
+      }}>
+        {title}
+      </h2>
+      <div
+        className="grid"
+        style={{
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 22rem), 1fr))',
+          gap: '0.875rem',
+        }}
+      >
+        {drafts.map(d => (
+          <DraftCard
+            key={d.id}
+            draft={d}
+            onOpen={() => onOpen(d)}
+            onRetry={onRetry ? () => onRetry(d.ideaId) : null}
+            retrying={retryingIdeaId === d.ideaId}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Draft card ───────────────────────────────────────────────────────────────
+
+interface DraftCardProps {
+  draft: DraftRow
+  onOpen: () => void
+  onRetry: (() => void) | null
+  retrying: boolean
+}
+
+function DraftCard({ draft, onOpen, onRetry, retrying }: DraftCardProps) {
+  const isReady = draft.status === 'ready'
+  const isFailed = draft.status === 'failed'
+  const breakdown = parseScoreBreakdown(draft.scoreBreakdown)
+  const currentStageIndex = DRAFT_STAGE_ORDER.findIndex(s => s.key === draft.status)
+
+  return (
+    <Card padding="md" style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+      {/* Status + cluster */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '0.1875rem 0.5rem',
+            fontSize: '0.6875rem',
+            fontWeight: 600,
+            borderRadius: '999px',
+            background: 'var(--color-bg-secondary)',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          {draft.clusterName ?? 'Unclustered'}
+        </span>
+        <Badge tone={draftStatusTone(draft.status)} variant="soft" size="sm" leader={isInProgress(draft.status) ? 'dot' : false}>
+          {draftStatusLabel(draft.status)}
+        </Badge>
+      </div>
+
+      {/* Title */}
+      <h3
+        style={{
+          fontSize: '0.9375rem',
+          fontWeight: 600,
+          color: 'var(--color-text)',
+          lineHeight: 1.35,
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+          margin: 0,
+        }}
+        title={draft.title ?? draft.ideaTitle ?? 'Untitled draft'}
+      >
+        {draft.title ?? draft.ideaTitle ?? 'Untitled draft'}
+      </h3>
+
+      {/* Progress stepper */}
+      {!isFailed && !isReady && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'wrap' }}>
+          {DRAFT_STAGE_ORDER.map((stage, i) => {
+            const done = i < currentStageIndex
+            const active = i === currentStageIndex
+            return (
+              <div key={stage.key} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <span
+                  style={{
+                    width: '0.5rem',
+                    height: '0.5rem',
+                    borderRadius: '50%',
+                    background: done ? 'var(--color-brand)' : active ? 'var(--color-brand-light)' : 'var(--color-border)',
+                    boxShadow: active ? '0 0 0 3px var(--color-brand-50)' : undefined,
+                    transition: 'background 200ms ease',
+                  }}
+                />
+                {i < DRAFT_STAGE_ORDER.length - 1 && (
+                  <span style={{
+                    width: '0.875rem',
+                    height: '1px',
+                    background: done ? 'var(--color-brand)' : 'var(--color-border)',
+                  }} />
+                )}
+              </div>
+            )
+          })}
+          <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginLeft: '0.375rem' }}>
+            {DRAFT_STAGE_ORDER[currentStageIndex]?.label ?? draft.status}
+          </span>
+        </div>
+      )}
+
+      {/* Ready: score */}
+      {isReady && breakdown && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.5rem 0.625rem',
+            background: 'var(--color-bg-secondary)',
+            borderRadius: '0.5rem',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ fontSize: '0.625rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-subtle)' }}>
+              Score
+            </span>
+            <span style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text)', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+              {draft.contentScore ?? 0}
+            </span>
+          </div>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
+            <ScoreBar label="AEO" value={breakdown.aeo} max={25} />
+            <ScoreBar label="Voice" value={breakdown.voice} max={25} />
+            <ScoreBar label="Read" value={breakdown.readability} max={20} />
+            <ScoreBar label="SEO" value={breakdown.seo} max={20} />
+          </div>
+        </div>
+      )}
+
+      {/* Failed: error */}
+      {isFailed && draft.errorMessage && (
+        <p style={{
+          margin: 0,
+          fontSize: '0.75rem',
+          color: 'var(--color-danger-text, #8B2D2D)',
+          background: 'var(--color-danger-bg, #fef2f2)',
+          padding: '0.5rem 0.625rem',
+          borderRadius: '0.5rem',
+          lineHeight: 1.45,
+        }}>
+          {draft.errorMessage}
+        </p>
+      )}
+
+      {/* Meta row */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem', fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
+        {draft.ideaTargetKeyword && (
+          <span style={{ background: 'var(--color-bg-secondary)', padding: '0.125rem 0.4375rem', borderRadius: '4px' }}>
+            {draft.ideaTargetKeyword}
+          </span>
+        )}
+        {draft.ideaBrand && (
+          <span
+            style={{
+              background: draft.ideaBrand === 'Staci' ? '#fce7f3' : '#dcefd8',
+              color: draft.ideaBrand === 'Staci' ? '#9d174d' : '#425F39',
+              padding: '0.125rem 0.4375rem',
+              borderRadius: '4px',
+              fontWeight: 600,
+            }}
+          >
+            {draft.ideaBrand}
+          </span>
+        )}
+        {draft.postType && (
+          <span style={{ background: 'var(--color-bg-secondary)', padding: '0.125rem 0.4375rem', borderRadius: '4px' }}>
+            {draft.postType}
+          </span>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: '0.375rem', marginTop: 'auto', paddingTop: '0.375rem', flexWrap: 'wrap' }}>
+        <TahiButton
+          size="sm"
+          onClick={onOpen}
+          iconLeft={<Eye className="w-3.5 h-3.5" />}
+          style={{ flex: '1 1 auto' }}
+          variant={isReady ? 'primary' : 'secondary'}
+        >
+          {isReady ? 'Review' : 'View'}
+        </TahiButton>
+        {onRetry && (
+          <TahiButton
+            size="sm"
+            variant="secondary"
+            onClick={onRetry}
+            loading={retrying}
+            iconLeft={!retrying ? <RefreshCw className="w-3.5 h-3.5" /> : undefined}
+          >
+            Retry
+          </TahiButton>
+        )}
+      </div>
+    </Card>
+  )
+}
+
+function ScoreBar({ label, value, max }: { label: string; value: number; max: number }) {
+  const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+      <span style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', minWidth: '2rem' }}>
+        {label}
+      </span>
+      <div style={{ flex: 1, height: '0.25rem', background: 'var(--color-border-subtle)', borderRadius: '999px', overflow: 'hidden' }}>
+        <div
+          style={{
+            width: `${pct}%`,
+            height: '100%',
+            background: 'var(--color-brand)',
+            transition: 'width 250ms ease',
+          }}
+        />
+      </div>
+      <span style={{ fontSize: '0.625rem', color: 'var(--color-text-muted)', minWidth: '2.25rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+        {value}/{max}
+      </span>
+    </div>
+  )
+}
+
+// ── Detail drawer ────────────────────────────────────────────────────────────
+
+interface DraftDetailDrawerProps {
+  detail: DraftDetail
+  onClose: () => void
+  onDiscard: () => void
+  discarding: boolean
+}
+
+function DraftDetailDrawer({ detail, onClose, onDiscard, discarding }: DraftDetailDrawerProps) {
+  const { draft, idea, cluster } = detail
+  const breakdown = parseScoreBreakdown(draft.scoreBreakdown)
+  const faqs = (() => {
+    if (!draft.faqsJson) return []
+    try {
+      const parsed = JSON.parse(draft.faqsJson) as Array<{ q: string; a: string }>
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  })()
+
+  const validatedCitations = (() => {
+    if (!draft.validatedCitations) return []
+    try {
+      const parsed = JSON.parse(draft.validatedCitations) as Array<{ url: string }>
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  })()
+
+  const [showSchema, setShowSchema] = useState(false)
+  const [showSales, setShowSales] = useState(false)
+  const [showReadability, setShowReadability] = useState(false)
+
+  const isReady = draft.status === 'ready'
+
+  return (
+    <SlideOver
+      open={true}
+      onClose={onClose}
+      title={draft.title ?? draft.ideaTitle ?? 'Draft'}
+      subtitle={cluster?.name ?? 'Unclustered'}
+      icon={<FileEdit size={15} />}
+      maxWidth="56rem"
+    >
+      <SlideOver.Body>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* Status + score */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', flexWrap: 'wrap' }}>
+            <Badge tone={draftStatusTone(draft.status)} variant="soft" size="md" leader={isInProgress(draft.status) ? 'dot' : false}>
+              {draftStatusLabel(draft.status)}
+            </Badge>
+            {isReady && (
+              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+                Content score
+                <strong style={{ marginLeft: '0.25rem', color: 'var(--color-text)', fontSize: '1rem' }}>
+                  {draft.contentScore ?? 0}
+                </strong>
+                / 100
+              </span>
+            )}
+          </div>
+
+          {/* Score breakdown bars */}
+          {isReady && breakdown && (
+            <div style={{
+              padding: '0.875rem 1rem',
+              background: 'var(--color-bg-secondary)',
+              borderRadius: '0.625rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.5rem',
+            }}>
+              <p style={{ margin: 0, fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-subtle)' }}>
+                Score breakdown
+              </p>
+              <ScoreBar label="AEO" value={breakdown.aeo} max={25} />
+              <ScoreBar label="Voice" value={breakdown.voice} max={25} />
+              <ScoreBar label="Readability" value={breakdown.readability} max={20} />
+              <ScoreBar label="SEO" value={breakdown.seo} max={20} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
+                Links integrity:
+                {breakdown.linksOk ? (
+                  <span style={{ color: 'var(--color-success)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <Check className="w-3 h-3" />
+                    All sourced from allowlists
+                  </span>
+                ) : (
+                  <span style={{ color: 'var(--color-danger)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <X className="w-3 h-3" />
+                    Some links may be invented
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Meta strip */}
+          {draft.metaTitle && (
+            <DraftField label="SEO title">
+              {draft.metaTitle}
+            </DraftField>
+          )}
+          {draft.metaDescription && (
+            <DraftField label="Meta description">
+              {draft.metaDescription}
+            </DraftField>
+          )}
+
+          {/* Cover */}
+          {draft.coverSvgUrl && (
+            <div>
+              <p style={{ fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-subtle)', margin: '0 0 0.375rem' }}>
+                Cover ({draft.coverTemplate ?? 'template'})
+              </p>
+              { /* SVG cover is served via the dashboard proxy route. next/image
+                   doesn't help here (SVG, dashboard origin); raw <img> is fine. */ }
+              { /* eslint-disable-next-line @next/next/no-img-element */ }
+              <img
+                src={draft.coverSvgUrl}
+                alt={`${draft.title ?? 'draft'} cover`}
+                style={{
+                  width: '100%',
+                  maxWidth: '32rem',
+                  height: 'auto',
+                  borderRadius: '0.5rem',
+                  border: '1px solid var(--color-border-subtle)',
+                  display: 'block',
+                }}
+              />
+            </div>
+          )}
+
+          {/* Key takeaways */}
+          {draft.keyTakeaways && (
+            <div>
+              <p style={{ fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-subtle)', margin: '0 0 0.375rem' }}>
+                Key takeaways
+              </p>
+              <div
+                style={{
+                  fontSize: '0.875rem',
+                  color: 'var(--color-text)',
+                  lineHeight: 1.55,
+                  padding: '0.625rem 0.875rem',
+                  background: 'var(--color-bg-secondary)',
+                  borderRadius: '0.5rem',
+                }}
+                dangerouslySetInnerHTML={{ __html: draft.keyTakeaways }}
+              />
+            </div>
+          )}
+
+          {/* Body preview */}
+          {draft.bodyHtml && (
+            <div>
+              <p style={{ fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-subtle)', margin: '0 0 0.375rem' }}>
+                Body preview
+              </p>
+              <div
+                style={{
+                  fontSize: '0.875rem',
+                  color: 'var(--color-text)',
+                  lineHeight: 1.6,
+                  padding: '0.875rem 1rem',
+                  background: 'var(--color-bg-secondary)',
+                  borderRadius: '0.5rem',
+                  maxHeight: '32rem',
+                  overflowY: 'auto',
+                }}
+                dangerouslySetInnerHTML={{ __html: draft.bodyHtml }}
+              />
+            </div>
+          )}
+
+          {/* FAQs */}
+          {faqs.length > 0 && (
+            <div>
+              <p style={{ fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-subtle)', margin: '0 0 0.5rem' }}>
+                FAQs ({faqs.length})
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+                {faqs.map((f, i) => (
+                  <div key={i} style={{ padding: '0.625rem 0.875rem', background: 'var(--color-bg-secondary)', borderRadius: '0.5rem' }}>
+                    <p style={{ margin: '0 0 0.25rem', fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>
+                      {f.q}
+                    </p>
+                    <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                      {f.a}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Citations */}
+          {validatedCitations.length > 0 && (
+            <div>
+              <p style={{ fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-subtle)', margin: '0 0 0.375rem' }}>
+                Validated external citations ({validatedCitations.length})
+              </p>
+              <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                {validatedCitations.map((c, i) => (
+                  <li key={i} style={{ fontSize: '0.75rem' }}>
+                    <a
+                      href={c.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        color: 'var(--color-text-muted)',
+                        textDecoration: 'none',
+                        wordBreak: 'break-all',
+                      }}
+                    >
+                      {c.url}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Reviewer notes (collapsed) */}
+          {draft.salesNotes && (
+            <CollapsibleNote
+              label="Sales reviewer notes"
+              open={showSales}
+              onToggle={() => setShowSales(v => !v)}
+              text={draft.salesNotes}
+            />
+          )}
+          {draft.readabilityNotes && (
+            <CollapsibleNote
+              label="Readability reviewer notes"
+              open={showReadability}
+              onToggle={() => setShowReadability(v => !v)}
+              text={draft.readabilityNotes}
+            />
+          )}
+
+          {/* JSON-LD schema (collapsed) */}
+          {draft.schemaJsonLd && (
+            <CollapsibleNote
+              label="Schema JSON-LD"
+              open={showSchema}
+              onToggle={() => setShowSchema(v => !v)}
+              text={draft.schemaJsonLd}
+              mono
+            />
+          )}
+
+          {/* Error */}
+          {draft.status === 'failed' && draft.errorMessage && (
+            <div
+              style={{
+                padding: '0.625rem 0.875rem',
+                background: 'var(--color-danger-bg, #fef2f2)',
+                borderRadius: '0.5rem',
+                fontSize: '0.8125rem',
+                color: 'var(--color-danger-text, #8B2D2D)',
+              }}
+            >
+              <p style={{ margin: '0 0 0.25rem', fontWeight: 600 }}>Drafting failed</p>
+              <p style={{ margin: 0, lineHeight: 1.5 }}>{draft.errorMessage}</p>
+            </div>
+          )}
+
+          {/* Linked idea reference at the bottom */}
+          {idea && (
+            <div style={{
+              padding: '0.625rem 0.875rem',
+              background: 'var(--color-bg-secondary)',
+              borderRadius: '0.5rem',
+              fontSize: '0.75rem',
+              color: 'var(--color-text-muted)',
+              lineHeight: 1.5,
+            }}>
+              From idea: <strong style={{ color: 'var(--color-text)' }}>{idea.title}</strong>
+              {idea.targetKeyword && <span> · target keyword: <code>{idea.targetKeyword}</code></span>}
+              {idea.recommendedWordCount && <span> · {idea.recommendedWordCount.toLocaleString()} words</span>}
+            </div>
+          )}
+        </div>
+      </SlideOver.Body>
+      <SlideOver.Footer>
+        <TahiButton variant="secondary" size="sm" onClick={onClose}>
+          Close
+        </TahiButton>
+        <div style={{ flex: 1 }} />
+        <TahiButton
+          size="sm"
+          variant="secondary"
+          onClick={onDiscard}
+          loading={discarding}
+          iconLeft={!discarding ? <Trash2 className="w-3.5 h-3.5" /> : undefined}
+        >
+          Discard
+        </TahiButton>
+        <TahiButton
+          size="sm"
+          disabled
+          iconLeft={<Send className="w-3.5 h-3.5" />}
+          title="Schedule lands in Slice 5"
+        >
+          Schedule (Slice 5)
+        </TahiButton>
+      </SlideOver.Footer>
+    </SlideOver>
+  )
+}
+
+function DraftField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p style={{ fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-subtle)', margin: '0 0 0.25rem' }}>
+        {label}
+      </p>
+      <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--color-text)', lineHeight: 1.5 }}>
+        {children}
+      </p>
+    </div>
+  )
+}
+
+function CollapsibleNote({ label, open, onToggle, text, mono }: {
+  label: string
+  open: boolean
+  onToggle: () => void
+  text: string
+  mono?: boolean
+}) {
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.375rem',
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          fontSize: '0.6875rem',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+          color: 'var(--color-text-subtle)',
+        }}
+        aria-expanded={open}
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {label}
+      </button>
+      {open && (
+        <pre
+          style={{
+            margin: '0.375rem 0 0',
+            padding: '0.625rem 0.875rem',
+            background: 'var(--color-bg-secondary)',
+            borderRadius: '0.5rem',
+            fontSize: mono ? '0.6875rem' : '0.8125rem',
+            color: 'var(--color-text)',
+            lineHeight: 1.5,
+            fontFamily: mono ? 'var(--font-mono, monospace)' : 'inherit',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            maxHeight: '20rem',
+            overflowY: 'auto',
+          }}
+        >
+          {text}
+        </pre>
       )}
     </div>
   )

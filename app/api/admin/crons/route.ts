@@ -92,6 +92,20 @@ const CRONS: CronDef[] = [
     endpoint: '/api/admin/cron/ideation',
     schedule: 'Weekly Mon 08:00 UK (disabled by default)',
   },
+  {
+    cron: 'draft-approved-ideas',
+    label: 'Content drafting',
+    description: 'Picks up approved content ideas without a draft and runs the multi-agent drafting pipeline (researcher, writer, sales + readability reviewers, EIC). Disabled by default — flip content.draftingEnabled to true in settings once you trust the loop. Max 1-3 drafts per tick to keep token spend predictable.',
+    endpoint: '/api/admin/cron/draft-approved-ideas',
+    schedule: 'Hourly (disabled by default)',
+  },
+  {
+    cron: 'link-engine-scan',
+    label: 'Internal link engine',
+    description: 'Scans every blog post published in the last 14 days, finds phrases in older posts where an inbound link to the fresh post would land naturally, drops the patches into /content-studio Links tab for Liam to approve. Disabled by default — toggle on via content.linkEngineEnabled setting.',
+    endpoint: '/api/admin/cron/link-engine-scan',
+    schedule: 'Weekly Mon 09:00 UK (disabled by default)',
+  },
 ]
 
 export async function GET(req: NextRequest) {

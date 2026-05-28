@@ -130,6 +130,70 @@ export async function loadAiContext(keys: AiContextKey[]): Promise<string> {
   ].join('\n')
 }
 
+/** Load the raw text of each requested context doc as a map keyed by
+ *  context key. Missing settings or empty docs map to an empty string.
+ *  Used by the blog drafting pipeline which needs each doc as its own
+ *  ephemeral system block (rather than the combined block loadAiContext
+ *  returns). Same 5-minute cache. */
+export async function loadAiContextDocs(
+  keys: AiContextKey[],
+): Promise<Record<AiContextKey, string>> {
+  const result: Record<AiContextKey, string> = {
+    icp: '', brandDna: '', tone: '',
+    liamVoice: '', aiTells: '', services: '',
+  }
+  if (keys.length === 0) return result
+
+  const database = await db()
+  const settingKeys = keys.map(k => SETTING_KEY_BY_CONTEXT[k])
+  const settingRows = await database
+    .select({ key: schema.settings.key, value: schema.settings.value })
+    .from(schema.settings)
+    .where(inArray(schema.settings.key, settingKeys))
+
+  const docIdByContext = new Map<AiContextKey, string>()
+  for (const row of settingRows) {
+    const contextKey = keys.find(k => SETTING_KEY_BY_CONTEXT[k] === row.key)
+    if (contextKey && row.value?.trim()) {
+      docIdByContext.set(contextKey, row.value.trim())
+    }
+  }
+  if (docIdByContext.size === 0) return result
+
+  const now = Date.now()
+  const docIds = Array.from(docIdByContext.values())
+  const cold = docIds.filter(id => {
+    const c = cache.get(`doc:${id}`)
+    return !c || c.expiresAt < now
+  })
+  if (cold.length > 0) {
+    const docs = await database
+      .select({ id: schema.docPages.id, contentText: schema.docPages.contentText })
+      .from(schema.docPages)
+      .where(inArray(schema.docPages.id, cold))
+    for (const d of docs) {
+      if (d.contentText) {
+        cache.set(`doc:${d.id}`, { text: d.contentText, expiresAt: now + CACHE_TTL_MS })
+      }
+    }
+    for (const id of cold) {
+      if (!cache.has(`doc:${id}`) || cache.get(`doc:${id}`)!.expiresAt < now) {
+        cache.set(`doc:${id}`, { text: '', expiresAt: now + CACHE_TTL_MS })
+      }
+    }
+  }
+
+  for (const key of keys) {
+    const docId = docIdByContext.get(key)
+    if (!docId) continue
+    const cached = cache.get(`doc:${docId}`)
+    if (cached?.text) {
+      result[key] = cached.text
+    }
+  }
+  return result
+}
+
 /** Get the resolved doc id for a single context key, no caching. Used
  *  by the settings UI to render the current selection. */
 export async function getAiContextDocId(key: AiContextKey): Promise<string | null> {
