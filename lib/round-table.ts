@@ -266,11 +266,14 @@ async function stageDraft(database: Database, draft: DraftRow): Promise<StageRes
   // output keeps the JSON from truncating on long articles).
   const writerHtml = markdownToHtml(result.bodyMarkdown)
 
-  // Store revision 1
+  // Compute the next revision number rather than hardcoding 1, so a
+  // re-drafted draft (e.g. after retry) doesn't pile multiple rows at
+  // revision 1 and confuse latestRevisionNumber.
+  const writerRev = (await latestRevisionNumber(database, draft.id)) + 1
   await database.insert(schema.draftRevisions).values({
     id: crypto.randomUUID(),
     draftId: draft.id,
-    revisionNumber: 1,
+    revisionNumber: writerRev,
     source: 'writer_initial',
     bodyHtml: writerHtml,
     bodyMarkdown: result.bodyMarkdown,
@@ -609,7 +612,7 @@ async function latestRevisionNumber(database: Database, draftId: string): Promis
     .select({ n: schema.draftRevisions.revisionNumber })
     .from(schema.draftRevisions)
     .where(eq(schema.draftRevisions.draftId, draftId))
-  if (rows.length === 0) return 1
+  if (rows.length === 0) return 0
   return Math.max(...rows.map(r => r.n))
 }
 

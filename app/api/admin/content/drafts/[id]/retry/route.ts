@@ -57,9 +57,21 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     ))
   }
 
+  // Wipe prior pipeline artefacts so the re-run starts clean instead of
+  // piling revisions + reviews on top of the failed attempt. (Conflicts +
+  // variants cascade from these but we clear them explicitly too.)
+  await database.delete(schema.draftReviews).where(eq(schema.draftReviews.draftId, id))
+  await database.delete(schema.draftRevisions).where(eq(schema.draftRevisions.draftId, id))
+  await database.delete(schema.editorOverrides).where(eq(schema.editorOverrides.draftId, id))
+  await database.delete(schema.draftVariants).where(eq(schema.draftVariants.draftId, id))
+
   await database.update(schema.contentDrafts).set({
     status: 'queued',
     errorMessage: null,
+    stageLockedAt: null,
+    bodyHtml: null,
+    bodyMarkdown: null,
+    contentScore: null,
   }).where(eq(schema.contentDrafts.id, id))
 
   return NextResponse.json({
