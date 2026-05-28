@@ -85,7 +85,8 @@ export async function claudeJson<T>(options: ClaudeCallOptions<T>): Promise<{ re
     const res = await client.messages.create({
       model: options.model,
       max_tokens: options.maxTokens ?? 2000,
-      temperature: 0.4,
+      // Sonnet 4.6 + Opus 4.7 deprecate temperature; defaults work fine
+      // for our JSON-structured prompts.
       system: options.systemPrompt,
       messages,
     })
