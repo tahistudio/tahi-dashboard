@@ -588,6 +588,10 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
     const takeawaysHtml = structured.keyTakeaways.length > 0
       ? `<ul>${structured.keyTakeaways.map(t => `<li>${escapeHtmlText(t)}</li>`).join('')}</ul>`
       : null
+    // Stash the FAQ section heading in scoreBreakdown (no migration).
+    let sb: Record<string, unknown> = {}
+    try { sb = JSON.parse(reloaded?.scoreBreakdown ?? draft.scoreBreakdown ?? '{}') } catch { /* keep empty */ }
+    sb.faqHeading = structured.faqSectionHeading
     await database.update(schema.contentDrafts).set({
       bodyHtml: cleanHtml,
       bodyMarkdown: structured.bodyMarkdownClean,
@@ -599,6 +603,7 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
       metaTitle: structured.metaTitle || reloaded?.metaTitle || null,
       metaDescription: structured.metaDescription || reloaded?.metaDescription || null,
       authorSlug: 'liam',
+      scoreBreakdown: JSON.stringify(sb),
     }).where(eq(schema.contentDrafts.id, draft.id))
   } catch (err) {
     // Non-fatal — the body still publishes, just without the field split.

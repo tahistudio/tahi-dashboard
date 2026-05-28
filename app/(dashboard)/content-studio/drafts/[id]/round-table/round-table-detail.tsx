@@ -177,6 +177,26 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
     await fetchSnapshot()
   }
 
+  async function regenerateCover(mode: 'flux' | 'svg') {
+    setPublishing(`cover-${mode}`)
+    setPublishMsg(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}/regenerate-cover`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      })
+      const json = await res.json() as { mode?: string; mocked?: boolean; error?: string }
+      if (!res.ok) { setPublishMsg(`Cover regen failed: ${json.error ?? ''}`); return }
+      setPublishMsg(json.mocked ? 'Cover is mocked (no REPLICATE_API_TOKEN set).' : `New ${json.mode?.toUpperCase()} cover generated.`)
+      await fetchSnapshot()
+    } catch (err) {
+      setPublishMsg(`Cover regen failed: ${err instanceof Error ? err.message : 'error'}`)
+    } finally {
+      setPublishing(null)
+    }
+  }
+
   async function restructure() {
     setPublishing('restructure')
     setPublishMsg(null)
@@ -680,15 +700,29 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
           )}
 
           <article className="rt-article" style={{ maxHeight: '52rem', overflowY: 'auto', padding: '1.5rem 1.25rem 2rem' }}>
-            {/* Cover */}
-            {draft.coverSvgUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={draft.coverSvgUrl}
-                alt={draft.title ?? 'Cover'}
-                style={{ width: '100%', borderRadius: '0.75rem', marginBottom: '1.5rem', display: 'block' }}
-              />
-            )}
+            {/* Cover + regenerate controls */}
+            <div style={{ marginBottom: '1.5rem' }}>
+              {draft.coverSvgUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={draft.coverSvgUrl}
+                  alt={draft.title ?? 'Cover'}
+                  style={{ width: '100%', borderRadius: '0.75rem', display: 'block' }}
+                />
+              ) : (
+                <div style={{ width: '100%', aspectRatio: '864 / 500', borderRadius: '0.75rem', background: 'var(--color-bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-subtle)', fontSize: '0.8125rem' }}>
+                  No cover yet
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '0.375rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                <TahiButton size="sm" variant="secondary" loading={publishing === 'cover-flux'} onClick={() => { void regenerateCover('flux') }} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+                  Regenerate (Flux)
+                </TahiButton>
+                <TahiButton size="sm" variant="secondary" loading={publishing === 'cover-svg'} onClick={() => { void regenerateCover('svg') }}>
+                  Try SVG cover
+                </TahiButton>
+              </div>
+            </div>
             {/* Title + byline */}
             <h1 style={{ fontSize: '1.875rem', fontWeight: 800, lineHeight: 1.2, color: 'var(--color-text)', margin: '0 0 0.5rem', maxWidth: '44rem' }}>
               {draft.title ?? idea?.title ?? 'Untitled'}

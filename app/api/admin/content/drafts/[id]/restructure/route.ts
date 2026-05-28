@@ -46,6 +46,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       metaTitle: schema.contentDrafts.metaTitle,
       metaDescription: schema.contentDrafts.metaDescription,
       bodyMarkdown: schema.contentDrafts.bodyMarkdown,
+      scoreBreakdown: schema.contentDrafts.scoreBreakdown,
     })
     .from(schema.contentDrafts)
     .where(eq(schema.contentDrafts.id, id))
@@ -89,6 +90,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     ? `<ul>${structured.keyTakeaways.map(t => `<li>${escapeHtmlText(t)}</li>`).join('')}</ul>`
     : null
   const now = new Date().toISOString()
+  let sb: Record<string, unknown> = {}
+  try { sb = JSON.parse(draft.scoreBreakdown ?? '{}') } catch { /* keep empty */ }
+  sb.faqHeading = structured.faqSectionHeading
   await database.update(schema.contentDrafts).set({
     bodyHtml: cleanHtml,
     bodyMarkdown: structured.bodyMarkdownClean,
@@ -99,6 +103,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     shortenedName: structured.shortenedName || null,
     metaTitle: structured.metaTitle || draft.metaTitle || null,
     metaDescription: structured.metaDescription || draft.metaDescription || null,
+    scoreBreakdown: JSON.stringify(sb),
     updatedAt: now,
   }).where(eq(schema.contentDrafts.id, id))
 

@@ -242,6 +242,14 @@ export async function POST(
     }
   })()
 
+  // FAQ section heading stashed in scoreBreakdown by the structurer.
+  const faqHeading = (() => {
+    try {
+      const sb = JSON.parse(draft.scoreBreakdown ?? '{}') as { faqHeading?: string }
+      return sb.faqHeading ?? ''
+    } catch { return '' }
+  })()
+
   // 5) Build the fieldData payload
   const slug = slugify(draft.shortenedName ?? draft.title ?? draft.id)
   const publishUrl = `${TAHI_BLOG_BASE}/${slug}`
@@ -251,6 +259,10 @@ export async function POST(
     'post-body': draft.bodyHtml ?? '',
     'summary-2': draft.summary ?? draft.postExcerpt ?? '',
     'key-takeaways': draft.keyTakeaways ?? '',
+    // FAQ section heading — slug assumed 'faq-section-heading' (Webflow's
+    // auto-slug for "FAQ section heading"). Verify via field-audit; easy
+    // to change here if Webflow used a different slug.
+    'faq-section-heading': faqHeading,
     schema: draft.schemaJsonLd ?? '',
     'hreflang-block': draft.hreflangBlock ?? '',
     'meta-title': draft.metaTitle ?? draft.title ?? '',

@@ -50,19 +50,26 @@ interface FluxOptions {
   timeoutMs?: number
 }
 
+// Tuned to the hand-designed reference covers: deep forest base, brand
+// green diamond gradient, abstract flat editorial illustration, gold +
+// Webflow-blue + cream accents, generous negative space, and absolutely
+// no text (Flux can't render clean type — text is the #1 failure mode).
 const BRAND_PROMPT_PREFIX = [
-  'Flat illustration style,',
-  'limited palette using #5A824E (Tahi green), #f0f7ee (soft cream), #121A0F (deep forest),',
-  'organic leaf-like shapes,',
-  'editorial blog cover composition,',
-  'no text, no faces, no logos, no UI mockups,',
+  'Minimal flat vector editorial illustration for a premium blog cover.',
+  'Deep forest green background (#2A3626) with a soft diamond-shaped radial gradient glow in sage and brand greens (#7AAB6B, #5A824E, #425F39).',
+  'A single clean abstract scene built from simple geometric shapes (rounded cards, browser frame, soft rounded rectangles, circles, gentle arcs).',
+  'Accent sparingly with warm gold (#D2A838), Webflow blue (#146EF5), and off-white cream (#E3E6E2).',
+  'Calm, considered, lots of negative space, balanced asymmetric composition, subtle depth.',
+  'Strictly NO text, NO words, NO letters, NO numbers, NO logos, NO UI screenshots, NO faces, NO people.',
+  'Style: modern SaaS brand illustration, flat 2D, crisp edges, no gradients on shapes beyond the background glow.',
 ].join(' ')
 
 const NEGATIVE_PROMPT = [
-  'text, words, letters, logos, watermarks, signatures,',
-  'photorealistic, photograph,',
-  'low quality, blurry, distorted,',
-  'overly busy composition,',
+  'text, words, letters, numbers, typography, captions, labels, watermark, signature, logo,',
+  'photorealistic, photograph, 3d render, realistic,',
+  'faces, people, hands,',
+  'cluttered, busy, noisy, low quality, blurry, distorted, jpeg artifacts,',
+  'ui mockup, screenshot, dashboard,',
 ].join(' ')
 
 /** Submit a Flux image generation prediction and poll until ready.

@@ -376,6 +376,10 @@ export interface StructuredDraft {
    *  have their own Webflow fields. Markdown. */
   bodyMarkdownClean: string
   faqs: Array<{ q: string; a: string }>     // up to 6
+  /** A short heading that frames the FAQ block, topic-specific (e.g.
+   *  "Common questions about Webflow security"). Maps to the FAQ section
+   *  heading CMS field. */
+  faqSectionHeading: string
   keyTakeaways: string[]                     // 3-5 bullet strings
   metaTitle: string                          // <= 60 chars
   metaDescription: string                    // 145-160 chars
@@ -389,6 +393,7 @@ export const STRUCTURE_SYSTEM = `You are a CMS structuring assistant. You take a
 Rules:
 - bodyMarkdownClean: the full article body, but REMOVE any "FAQ"/"Frequently asked questions" section and any "Key takeaways" section — those go in their own fields. Keep everything else verbatim (headings, paragraphs, links, lists). Do not rewrite.
 - faqs: extract 4-6 Q/A pairs. If the article had an FAQ section, use those. If not, derive sensible ones from the content. Keep answers to 1-3 sentences.
+- faqSectionHeading: a short, topic-specific heading that frames the FAQ block (e.g. "Common questions about Webflow security", not just "FAQs"). 4-8 words.
 - keyTakeaways: 3-5 punchy one-line takeaways.
 - metaTitle <= 60 chars, metaDescription 145-160 chars, summary 1-2 sentences, postExcerpt a short teaser, shortenedName a short card label.
 - Never use em dashes.`
@@ -411,6 +416,7 @@ Respond JSON only:
 {
   "bodyMarkdownClean": "article body with FAQ + key-takeaways sections removed, everything else verbatim",
   "faqs": [{ "q": "...", "a": "..." }],
+  "faqSectionHeading": "topic-specific FAQ heading, 4-8 words",
   "keyTakeaways": ["...", "..."],
   "metaTitle": "<= 60 chars",
   "metaDescription": "145-160 chars",
@@ -426,6 +432,7 @@ export function parseStructure(raw: string): StructuredDraft {
   return {
     bodyMarkdownClean: parsed.bodyMarkdownClean,
     faqs: (parsed.faqs ?? []).filter(f => f.q && f.a).slice(0, 6),
+    faqSectionHeading: (parsed.faqSectionHeading ?? 'Frequently asked questions').slice(0, 90),
     keyTakeaways: (parsed.keyTakeaways ?? []).filter(Boolean).slice(0, 5),
     metaTitle: (parsed.metaTitle ?? '').slice(0, 60),
     metaDescription: (parsed.metaDescription ?? '').slice(0, 200),
