@@ -947,6 +947,7 @@ function IdeasTab({ onToast }: IdeasTabProps) {
   const [drawerAnswers, setDrawerAnswers] = useState<string[]>([])
   const [drawerSaving, setDrawerSaving] = useState(false)
   const [actionInFlight, setActionInFlight] = useState<string | null>(null)
+  const [roundTableInFlight, setRoundTableInFlight] = useState<string | null>(null)
   // Manual idea drawer state
   const [manualOpen, setManualOpen] = useState(false)
   const [manualTitle, setManualTitle] = useState('')
@@ -965,6 +966,29 @@ function IdeasTab({ onToast }: IdeasTabProps) {
   function resetManualForm() {
     setManualTitle(''); setManualAngle(''); setManualKeyword(''); setManualCluster('')
     setManualNotes(''); setManualDuplicates([])
+  }
+
+  async function runRoundTable(ideaId: string) {
+    setRoundTableInFlight(ideaId)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/ideas/${ideaId}/round-table`), {
+        method: 'POST',
+      })
+      const json = await res.json() as { draftId?: string; status?: string; error?: string }
+      if (!res.ok) {
+        onToast(json.error ?? 'Round table failed to start', 'error')
+        return
+      }
+      onToast(`Round table started — pipeline at ${json.status}. Opening detail...`, 'success')
+      // Navigate to the round-table detail page
+      if (typeof window !== 'undefined' && json.draftId) {
+        window.location.href = `/dashboard/content-studio/drafts/${json.draftId}/round-table`
+      }
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Failed', 'error')
+    } finally {
+      setRoundTableInFlight(null)
+    }
   }
 
   async function saveManualIdea(force: boolean) {
@@ -1463,8 +1487,14 @@ function IdeasTab({ onToast }: IdeasTabProps) {
                 {/* Actions */}
                 <div style={{ display: 'flex', gap: '0.375rem', marginTop: 'auto', paddingTop: '0.375rem', flexWrap: 'wrap' }}>
                   {isApproved ? (
-                    <TahiButton size="sm" variant="secondary" disabled style={{ flex: '1 1 auto' }}>
-                      Drafting next
+                    <TahiButton
+                      size="sm"
+                      onClick={() => { void runRoundTable(idea.id) }}
+                      loading={roundTableInFlight === idea.id}
+                      iconLeft={roundTableInFlight !== idea.id ? <Layers className="w-3.5 h-3.5" /> : undefined}
+                      style={{ flex: '1 1 auto' }}
+                    >
+                      {roundTableInFlight === idea.id ? 'Starting...' : 'Run round table'}
                     </TahiButton>
                   ) : isRejected ? (
                     <TahiButton
@@ -2882,6 +2912,15 @@ function DraftCard({ draft, onOpen, onRetry, retrying }: DraftCardProps) {
         >
           {isReady ? 'Review' : 'View'}
         </TahiButton>
+        <a
+          href={`/dashboard/content-studio/drafts/${draft.id}/round-table`}
+          style={{ textDecoration: 'none' }}
+          title="Open round table detail (reviewers, conflicts, revisions)"
+        >
+          <TahiButton size="sm" variant="secondary" iconLeft={<Layers className="w-3.5 h-3.5" />}>
+            Round table
+          </TahiButton>
+        </a>
         {onRetry && (
           <TahiButton
             size="sm"
