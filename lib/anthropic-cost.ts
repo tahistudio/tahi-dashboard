@@ -82,25 +82,52 @@ export async function claudeJson<T>(options: ClaudeCallOptions<T>): Promise<{ re
     const messages = [
       { role: 'user' as const, content: options.userPrompt + (extraReminder ?? '') },
     ]
-    const res = await client.messages.create({
-      model: options.model,
-      max_tokens: options.maxTokens ?? 2000,
-      // Sonnet 4.6 + Opus 4.7 deprecate temperature; defaults work fine
-      // for our JSON-structured prompts.
-      system: options.systemPrompt,
-      messages,
-    })
-    const raw = res.content
-      .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
-      .map(b => b.text)
-      .join('')
-      .trim()
-    return {
-      raw,
-      usage: {
-        input: res.usage.input_tokens,
-        output: res.usage.output_tokens,
-      },
+    // Retry on 429 (org output-tokens-per-minute rate limit) with
+    // exponential backoff + jitter. Low Anthropic tiers cap at 8k output
+    // TPM, which 20+ parallel reviewers blow through; backoff lets them
+    // drain over a couple minutes instead of hard-failing.
+    let attempt = 0
+    const maxAttempts = 5
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      try {
+        const res = await client.messages.create({
+          model: options.model,
+          max_tokens: options.maxTokens ?? 2000,
+          // Sonnet 4.6 + Opus 4.7 deprecate temperature; defaults work fine
+          // for our JSON-structured prompts.
+          system: options.systemPrompt,
+          messages,
+        })
+        const raw = res.content
+          .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
+          .map(b => b.text)
+          .join('')
+          .trim()
+        return {
+          raw,
+          usage: {
+            input: res.usage.input_tokens,
+            output: res.usage.output_tokens,
+          },
+        }
+      } catch (err) {
+        const status = (err as { status?: number })?.status
+        const isRateLimit = status === 429
+        const isOverloaded = status === 529
+        if ((isRateLimit || isOverloaded) && attempt < maxAttempts) {
+          // Honour Retry-After header if present, else exponential backoff.
+          const retryAfter = Number((err as { headers?: Record<string, string> })?.headers?.['retry-after'])
+          const backoffMs = Number.isFinite(retryAfter) && retryAfter > 0
+            ? retryAfter * 1000
+            : Math.min(30_000, 2_000 * 2 ** attempt)
+          const jitter = Math.floor(Math.random() * 1_000)
+          await new Promise(r => setTimeout(r, backoffMs + jitter))
+          attempt++
+          continue
+        }
+        throw err
+      }
     }
   }
 

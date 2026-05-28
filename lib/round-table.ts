@@ -321,22 +321,44 @@ async function stageReview(database: Database, draft: DraftRow): Promise<StageRe
     validatedLinks,
   }
 
-  // Run reviewers in chunks of 8 parallel calls. Lower than the full 23
-  // to stay inside Anthropic's burst-rate guidance and Cloudflare's
-  // simultaneous-connection budget. Three chunks ≈ 18-25s total which
-  // fits inside the worker request budget.
-  let totalCents = 0
-  const CHUNK_SIZE = 8
+  // Resumable reviewing. Low Anthropic tiers cap output at 8k tokens/min,
+  // so 23 reviewers can't all run in one worker request without 429s +
+  // blowing the wall-clock budget. We instead run only the reviewers that
+  // don't yet have a row for this revision, time-boxed per call, in small
+  // chunks. If reviewers remain when the budget is hit, we leave status
+  // at 'reviewing' (clearing the lock) so the next advance/cron call
+  // resumes. Only once all 23 are in do we advance to 'editing'.
+  const doneRows = await database
+    .select({ reviewerKey: schema.draftReviews.reviewerKey })
+    .from(schema.draftReviews)
+    .where(and(
+      eq(schema.draftReviews.draftId, draft.id),
+      eq(schema.draftReviews.revisionNumber, latestRev),
+    ))
+  const doneKeys = new Set(doneRows.map(r => r.reviewerKey))
+  const remaining = REVIEWERS.filter(r => !doneKeys.has(r.key))
 
-  for (let i = 0; i < REVIEWERS.length; i += CHUNK_SIZE) {
-    const chunk = REVIEWERS.slice(i, i + CHUNK_SIZE)
+  let totalCents = 0
+  const CHUNK_SIZE = 3
+  const INTER_CHUNK_MS = 4_000
+  const REVIEW_BUDGET_MS = 90_000  // per-call wall-clock budget for this stage
+  const t0 = Date.now()
+  let processedThisCall = 0
+
+  for (let i = 0; i < remaining.length; i += CHUNK_SIZE) {
+    if (Date.now() - t0 > REVIEW_BUDGET_MS) break
+    if (i > 0) await new Promise(r => setTimeout(r, INTER_CHUNK_MS))
+    const chunk = remaining.slice(i, i + CHUNK_SIZE)
     await Promise.all(chunk.map(async (reviewer) => {
       const start = Date.now()
       try {
         const weight = reviewerCtx.brief.voiceWeights[reviewer.key] ?? reviewer.defaultWeight
         const { result, costCents } = await claudeJson({
           database, scope: 'draft', scopeId: draft.id, stage: reviewer.key,
-          model: reviewer.model, maxTokens: 1500,
+          // 2500: enough headroom that a thorough critique (strengths +
+          // issues + details) doesn't truncate, without ballooning the
+          // per-minute output budget on a low tier.
+          model: reviewer.model, maxTokens: 2500,
           systemPrompt: reviewer.systemPrompt,
           userPrompt: reviewer.buildUserPrompt(reviewerCtx),
           parse: (raw: string) => JSON.parse(raw) as ReviewerCritique,
@@ -371,9 +393,27 @@ async function stageReview(database: Database, draft: DraftRow): Promise<StageRe
         })
       }
     }))
+    processedThisCall += chunk.length
   }
 
-  return advance(database, draft.id, 'editing', totalCents)
+  // How many reviewers are done now (across all calls)?
+  const totalDone = doneKeys.size + processedThisCall
+  if (totalDone >= REVIEWERS.length) {
+    return advance(database, draft.id, 'editing', totalCents)
+  }
+
+  // More reviewers remain. Stay at 'reviewing', clear the lock so the next
+  // advance/cron tick resumes from here.
+  await database.update(schema.contentDrafts)
+    .set({ stageLockedAt: null })
+    .where(eq(schema.contentDrafts.id, draft.id))
+  const total = await getDraftSpendCents(database, draft.id)
+  return {
+    nextStatus: 'reviewing',
+    costCentsThisStage: totalCents,
+    totalCostCents: total,
+    message: `Reviewed ${totalDone}/${REVIEWERS.length}; resuming next tick.`,
+  }
 }
 
 async function stageEdit(database: Database, draft: DraftRow): Promise<StageResult> {
