@@ -9,6 +9,8 @@
  * Scopes:
  *   - calendar.events.readonly  (sync upcoming + past meetings)
  *   - drive.readonly            (pull "Notes by Gemini" docs)
+ *   - analytics.readonly        (GA4 Data API — for /content-studio ideation)
+ *   - webmasters.readonly       (Search Console — query gaps + index coverage)
  *   - userinfo.email            (display connected account)
  *
  * Required env vars (set in Webflow Cloud or wrangler):
@@ -25,6 +27,8 @@ export const dynamic = 'force-dynamic'
 const SCOPES = [
   'https://www.googleapis.com/auth/calendar.events.readonly',
   'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/analytics.readonly',
+  'https://www.googleapis.com/auth/webmasters.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
 ]
 

@@ -271,3 +271,173 @@ export async function exportDriveDocAsText(
   }
   return await res.text()
 }
+
+// ── Search Console ────────────────────────────────────────────────────────
+//
+// Two endpoints we'll use most:
+//   1. URL Inspection API — index status of a single URL (the foundation of
+//      the indexing audit in Phase I Slice 0)
+//   2. Search Analytics — query × page performance (page-2 query gaps,
+//      decay detection)
+
+export type GscIndexStatus = 'PASS' | 'PARTIAL' | 'FAIL' | 'NEUTRAL' | 'UNKNOWN'
+
+export interface GscUrlInspection {
+  coverageState: string      // human-readable: "Submitted and indexed", "Discovered - currently not indexed", etc
+  indexStatus: GscIndexStatus
+  lastCrawlTime: string | null
+  pageFetchState: string | null  // "SUCCESSFUL", "SOFT_404", "BLOCKED_ROBOTS_TXT", etc
+  robotsTxtState: string | null
+  indexingState: string | null   // "INDEXING_ALLOWED", "BLOCKED_BY_META_TAG", etc
+  userCanonical: string | null
+  googleCanonical: string | null
+  raw: unknown
+}
+
+/** Inspect a single URL's index status in Search Console. Verbatim wrapper
+ *  around the URL Inspection API — the foundation for the indexing audit. */
+export async function inspectUrl(
+  accessToken: string,
+  inspectionUrl: string,
+  siteUrl: string,
+): Promise<GscUrlInspection> {
+  const res = await fetch(
+    'https://searchconsole.googleapis.com/v1/urlInspection/index:inspect',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        inspectionUrl,
+        siteUrl,
+        languageCode: 'en-GB',
+      }),
+    },
+  )
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`URL inspection failed: ${res.status} ${body.slice(0, 300)}`)
+  }
+  const data = await res.json() as {
+    inspectionResult?: {
+      indexStatusResult?: {
+        verdict?: GscIndexStatus
+        coverageState?: string
+        lastCrawlTime?: string
+        pageFetchState?: string
+        robotsTxtState?: string
+        indexingState?: string
+        userCanonical?: string
+        googleCanonical?: string
+      }
+    }
+  }
+  const r = data.inspectionResult?.indexStatusResult
+  return {
+    coverageState: r?.coverageState ?? 'Unknown',
+    indexStatus: r?.verdict ?? 'UNKNOWN',
+    lastCrawlTime: r?.lastCrawlTime ?? null,
+    pageFetchState: r?.pageFetchState ?? null,
+    robotsTxtState: r?.robotsTxtState ?? null,
+    indexingState: r?.indexingState ?? null,
+    userCanonical: r?.userCanonical ?? null,
+    googleCanonical: r?.googleCanonical ?? null,
+    raw: data,
+  }
+}
+
+export interface GscRow {
+  keys: string[]
+  clicks: number
+  impressions: number
+  ctr: number
+  position: number
+}
+
+/** Pull aggregated GSC Search Analytics data. Dimensions can be any of:
+ *  ['query', 'page', 'country', 'device', 'searchAppearance', 'date'] */
+export async function searchAnalytics(
+  accessToken: string,
+  siteUrl: string,
+  input: {
+    startDate: string      // YYYY-MM-DD
+    endDate: string
+    dimensions?: Array<'query' | 'page' | 'country' | 'device' | 'date'>
+    rowLimit?: number      // max 25,000
+    dimensionFilterGroups?: Array<{
+      filters: Array<{ dimension: string; operator: string; expression: string }>
+    }>
+  },
+): Promise<GscRow[]> {
+  const res = await fetch(
+    `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        startDate: input.startDate,
+        endDate: input.endDate,
+        dimensions: input.dimensions ?? ['query', 'page'],
+        rowLimit: input.rowLimit ?? 1000,
+        dimensionFilterGroups: input.dimensionFilterGroups,
+      }),
+    },
+  )
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Search Analytics failed: ${res.status} ${body.slice(0, 300)}`)
+  }
+  const data = await res.json() as { rows?: GscRow[] }
+  return data.rows ?? []
+}
+
+// ── GA4 Data API ──────────────────────────────────────────────────────────
+
+export interface Ga4Row {
+  dimensionValues: Array<{ value: string }>
+  metricValues: Array<{ value: string }>
+}
+
+/** Run a GA4 report. Pass dimensions + metrics by their API names
+ *  ('pagePath', 'pageTitle', 'sessions', 'screenPageViews', etc). */
+export async function runGa4Report(
+  accessToken: string,
+  propertyId: string,
+  input: {
+    startDate: string      // YYYY-MM-DD or 'NdaysAgo'
+    endDate: string
+    dimensions: string[]
+    metrics: string[]
+    limit?: number
+    orderBys?: Array<{ metric?: { metricName: string }; dimension?: { dimensionName: string }; desc?: boolean }>
+  },
+): Promise<Ga4Row[]> {
+  const res = await fetch(
+    `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        dateRanges: [{ startDate: input.startDate, endDate: input.endDate }],
+        dimensions: input.dimensions.map(name => ({ name })),
+        metrics: input.metrics.map(name => ({ name })),
+        limit: String(input.limit ?? 1000),
+        orderBys: input.orderBys,
+      }),
+    },
+  )
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`GA4 report failed: ${res.status} ${body.slice(0, 300)}`)
+  }
+  const data = await res.json() as { rows?: Ga4Row[] }
+  return data.rows ?? []
+}
