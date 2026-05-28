@@ -77,7 +77,7 @@ export async function POST(
     }, { status: 502 })
   }
 
-  const bodyHtml = (item.fieldData.body as string | undefined) ?? ''
+  const bodyHtml = (item.fieldData['post-body'] as string | undefined) ?? ''
   if (!bodyHtml) {
     return NextResponse.json({
       error: 'Source body has drifted',
@@ -110,7 +110,7 @@ export async function POST(
 
   try {
     await patchCollectionItem(BLOG_POSTS_COLLECTION_ID, row.sourceWebflowId, {
-      body: patched,
+      'post-body': patched,
     })
   } catch (err) {
     console.error('Webflow patchCollectionItem failed in apply', err)

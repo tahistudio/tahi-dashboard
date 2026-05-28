@@ -122,7 +122,7 @@ async function processOne(
     postUrl = `https://www.tahi.studio/blog/${slug}`
     title = (f['meta-title'] ?? f.name ?? '').trim()
 
-    if (!title || !f.body) {
+    if (!title || !f['post-body']) {
       // Missing fields we can't run without — log as skipped, don't
       // burn an Anthropic call.
       const logRow = {
@@ -149,8 +149,8 @@ async function processOne(
       webflowItemId: itemId,
       postUrl,
       title,
-      bodyHtml: f.body,
-      metaDescription: (f['meta-description'] ?? f['post-excerpt'] ?? f.summary ?? null),
+      bodyHtml: f['post-body'],
+      metaDescription: (f['meta-description-2'] ?? f['post-description'] ?? f['summary-2'] ?? null),
       publishedAt: f['published-on'] ?? null,
       authorName: authorName(f.author),
       mainCategoryName: categoryName(f['main-category']),

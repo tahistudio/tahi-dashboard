@@ -101,10 +101,10 @@ async function listAllPosts(): Promise<CmsPost[]> {
         url: postUrlFromSlug(slug),
         title: readField<string>(it, 'name') ?? slug,
         slug,
-        bodyHtml: readField<string>(it, 'body') ?? '',
+        bodyHtml: readField<string>(it, 'post-body') ?? '',
         publishedAt: it.lastPublished ?? readField<string>(it, 'published-on') ?? null,
         metaTitle: readField<string>(it, 'meta-title'),
-        metaDescription: readField<string>(it, 'meta-description'),
+        metaDescription: readField<string>(it, 'meta-description-2'),
       })
     }
     if (items.length < WEBFLOW_PAGE_SIZE) break

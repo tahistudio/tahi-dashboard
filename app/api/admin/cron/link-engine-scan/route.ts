@@ -69,10 +69,10 @@ async function listAllPosts(): Promise<CmsPost[]> {
         webflowId: it.id,
         url: `https://www.tahi.studio/blog/${slug}`,
         title: readField(it, 'name') ?? slug,
-        bodyHtml: readField(it, 'body') ?? '',
+        bodyHtml: readField(it, 'post-body') ?? '',
         publishedAt: it.lastPublished ?? readField(it, 'published-on') ?? null,
         metaTitle: readField(it, 'meta-title'),
-        metaDescription: readField(it, 'meta-description'),
+        metaDescription: readField(it, 'meta-description-2'),
       })
     }
     if (items.length < WEBFLOW_PAGE_SIZE) break

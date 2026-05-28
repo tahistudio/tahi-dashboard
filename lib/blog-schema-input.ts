@@ -14,20 +14,27 @@ import {
   type SchemaInput,
 } from '@/lib/blog-schema'
 
+// Webflow CMS slugs — these are the actual field IDs as registered on
+// the live Blog Posts collection (685941c739fa006940c9b4de). The `-2`
+// suffixes are leftover from Webflow's "you can't delete a field with
+// data" rename behaviour; that's why meta-description, summary and
+// thumbnail-image all have `-2` siblings. Do NOT use the bare names —
+// they don't exist on the collection any more.
 export interface BlogPostFields {
   name?: string
   slug?: string
   'meta-title'?: string
-  'meta-description'?: string
+  'meta-description-2'?: string
   'main-image'?: { url?: string; alt?: string; fileId?: string; width?: number; height?: number }
-  body?: string
-  'post-excerpt'?: string
-  summary?: string
+  'thumbnail-image-2'?: { url?: string; alt?: string; fileId?: string; width?: number; height?: number }
+  'post-body'?: string
+  'post-description'?: string
+  'summary-2'?: string
   'main-category'?: { name?: string } | string
   'other-categories'?: Array<{ name?: string } | string>
   author?: { name?: string; jobTitle?: string; linkedIn?: string; bio?: string; image?: { url?: string } } | string
   'key-takeaways'?: string
-  'ai-summary-prompt'?: string
+  'ai-prompt'?: string
   'faq-question-1'?: string
   'faq-answer-1'?: string
   'faq-question-2'?: string
@@ -113,11 +120,11 @@ export function buildSchemaInputForPost(
   f: BlogPostFields,
   postUrl: string,
 ): SchemaInput {
-  const bodyHtml = f.body ?? ''
+  const bodyHtml = f['post-body'] ?? ''
   const bodyMarkdown = htmlToPseudoMarkdown(bodyHtml)
 
   const title = (f['meta-title'] ?? f.name ?? '').trim()
-  const metaDescription = (f['meta-description'] ?? f['post-excerpt'] ?? f.summary ?? '').trim()
+  const metaDescription = (f['meta-description-2'] ?? f['post-description'] ?? f['summary-2'] ?? '').trim()
   const main = categoryName(f['main-category'])
   const others = otherCategoryNames(f['other-categories'])
   const categories = Array.from(new Set([main, ...others])).filter(Boolean)
