@@ -40,7 +40,6 @@ import {
   type ReviewerKey,
   type ReviewerCritique,
   type ReviewerContext,
-  type FunnelIntent,
 } from '@/lib/round-table-reviewers'
 import {
   STRATEGIST_SYSTEM,
