@@ -32,25 +32,340 @@ export async function GET(req: NextRequest) {
   const now = Date.now()
   const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString()
 
-  // Add take-home settings keys to the SELECT so they're in settingsMap.
-  // ── Operator-configured reserve target ────────────────────────────
+  // ── Pre-compute every date window the SQL needs ───────────────────
+  // Hoisted up here so they can be referenced inside the single
+  // Promise.all batch below. Keeps the giant batch readable + avoids
+  // recomputing `new Date()` in twelve places.
+  const nowDate = new Date()
+  const quarterStartMonth = Math.floor(nowDate.getMonth() / 3) * 3
+  const quarterStart = new Date(nowDate.getFullYear(), quarterStartMonth, 1).toISOString()
+  const quarterEnd = new Date(nowDate.getFullYear(), quarterStartMonth + 3, 1)
+  const quarterDaysElapsed = Math.max(1, Math.ceil((nowDate.getTime() - new Date(quarterStart).getTime()) / 86400_000))
+  const quarterDaysTotal = Math.ceil((quarterEnd.getTime() - new Date(quarterStart).getTime()) / 86400_000)
+  const monthsRemaining = 11 - nowDate.getMonth()
+  const monthStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1).toISOString()
+  const thisMonthStart = monthStart
+  const sameMonthLastYearStart = new Date(nowDate.getFullYear() - 1, nowDate.getMonth(), 1).toISOString()
+  const sameMonthLastYearEnd = new Date(nowDate.getFullYear() - 1, nowDate.getMonth() + 1, 1).toISOString()
+  // NZ tax year: April 1 → March 31.
+  const monthsThisYear = nowDate.getMonth() + 1
+  const taxYearStartYear = nowDate.getMonth() >= 3 ? nowDate.getFullYear() : nowDate.getFullYear() - 1
+  const taxYearStart = new Date(taxYearStartYear, 3, 1).toISOString()
+  const monthsIntoTaxYear = Math.min(12, Math.max(1,
+    (nowDate.getFullYear() - taxYearStartYear) * 12 + (nowDate.getMonth() - 3) + 1,
+  ))
+  void monthsThisYear  // retained for parity, not used in response
+
+  // ── ONE big parallel fetch ────────────────────────────────────────
+  // Every query below is independent — no result feeds the next query's
+  // SQL. Synchronous post-processing happens after the Promise.all so
+  // results stay in scope. Cuts ~25 sequential D1 round-trips (~600ms-
+  // 1.4s on Workers→D1) down to a single round-trip wave (~80-150ms).
+  const [
+    settingsRows,
+    airwallexBalances,
+    xeroBankBalances,
+    reserves,
+    retainerRowsByClient,
+    fxRows,
+    projects,
+    ytdRows,
+    signedRows,
+    outstandingRows,
+    overdueRows,
+    quarterInvoiceRows,
+    trailingProjectInvoices,
+    wonThisMonthRows,
+    churnedThisMonthRows,
+    arRows,
+    commitmentRows,
+    taxYearInvoiceRows,
+    gstInvoiceRows,
+    thisMonthInvoices,
+    lastYearMonthInvoices,
+    monthlyRevenueRawRows,
+    pipelineFunnelRows,
+    outstandingWorkRows,
+    winRateRows,
+    dealStatsRows,
+    ttpRows,
+    cashConvInvoices,
+    hoursRows,
+    pipelineOpenRows,
+    recentInvoices,
+    recentDeals,
+  ] = await Promise.all([
+    // settings — drives reserve target + take-home figures
+    database.all<{ key: string; value: string }>(sql`
+      SELECT key, value FROM settings
+      WHERE key IN (
+        'finance.reserveTargetMonths',
+        'finance.monthlyBurnNzd',
+        'finance.lastYearTaxOwed',
+        'finance.quarterlyTargetNzd',
+        'finance.liamTakeHomeAnnual',
+        'finance.staciTakeHomeAnnual',
+        'finance.takeHomeTargetEach'
+      )
+    `),
+    // bank balances
+    database.select().from(schema.airwallexBalances),
+    database.select().from(schema.xeroBankBalances),
+    // reserves
+    database.select().from(schema.reserves).where(eq(schema.reserves.active, true)),
+    // retainer MRR rows
+    database.all<{ id: string; name: string; mrr: number | null; currency: string | null }>(sql`
+      SELECT id, name, custom_mrr AS mrr,
+             COALESCE(NULLIF(custom_mrr_currency, 'NZD'), preferred_currency, 'NZD') AS currency
+      FROM organisations
+      WHERE status = 'active'
+        AND custom_mrr IS NOT NULL
+        AND custom_mrr > 0
+    `),
+    // FX rates
+    database.all<{ currency: string; rateToUsd: number }>(sql`
+      SELECT currency, rate_to_usd AS rateToUsd FROM exchange_rates
+    `),
+    // active projects
+    database
+      .select({
+        id: schema.projects.id,
+        priceUsd: schema.projects.priceUsd,
+        startDate: schema.projects.startDate,
+        expectedDelivery: schema.projects.expectedDelivery,
+        deliveredAt: schema.projects.deliveredAt,
+        status: schema.projects.status,
+      })
+      .from(schema.projects)
+      .where(eq(schema.projects.status, 'active')),
+    // YTD invoices
+    database.all<{ amount: number; currency: string }>(sql`
+      SELECT total_usd AS amount, currency
+      FROM invoices
+      WHERE paid_at IS NOT NULL
+        AND paid_at >= ${yearStart}
+    `),
+    // signed deals last 90 days
+    database.all<{ id: string; value: number; closedAt: string | null }>(sql`
+      SELECT d.id AS id, COALESCE(d.value_nzd, d.value, 0) AS value, d.closed_at AS closedAt
+      FROM deals d
+      INNER JOIN pipeline_stages s ON d.stage_id = s.id
+      WHERE s.is_closed_won = 1
+        AND d.closed_at IS NOT NULL
+        AND d.closed_at > datetime('now', '-90 days')
+    `),
+    // outstanding AR — sent
+    database
+      .select({ totalUsd: schema.invoices.totalUsd, dueDate: schema.invoices.dueDate })
+      .from(schema.invoices)
+      .where(eq(schema.invoices.status, 'sent')),
+    // outstanding AR — overdue
+    database
+      .select({ totalUsd: schema.invoices.totalUsd })
+      .from(schema.invoices)
+      .where(eq(schema.invoices.status, 'overdue')),
+    // quarter-to-date invoices
+    database.all<{ amount: number; currency: string }>(sql`
+      SELECT total_usd AS amount, currency
+      FROM invoices
+      WHERE paid_at IS NOT NULL AND paid_at >= ${quarterStart}
+    `),
+    // trailing 5-mo project (non-retainer) invoices
+    database.all<{ amount: number; currency: string }>(sql`
+      SELECT i.total_usd AS amount, i.currency AS currency
+      FROM invoices i
+      LEFT JOIN organisations o ON o.id = i.org_id
+      WHERE i.paid_at IS NOT NULL
+        AND i.paid_at > datetime('now', '-150 days')
+        AND (o.custom_mrr IS NULL OR o.custom_mrr = 0)
+    `),
+    // new MRR this month from won deals
+    database.all<{ total: number | null; cnt: number }>(sql`
+      SELECT
+        COALESCE(SUM(d.monthly_value_nzd), 0) AS total,
+        COUNT(*) AS cnt
+      FROM deals d
+      INNER JOIN pipeline_stages s ON d.stage_id = s.id
+      WHERE s.is_closed_won = 1
+        AND d.closed_at IS NOT NULL
+        AND d.closed_at >= ${monthStart}
+        AND d.monthly_value_nzd > 0
+    `),
+    // churned subscriptions this month
+    database.all<{ cnt: number }>(sql`
+      SELECT COUNT(*) AS cnt
+      FROM subscriptions
+      WHERE cancelled_at IS NOT NULL
+        AND cancelled_at >= ${monthStart}
+    `),
+    // AR aging raw rows
+    database.all<{ totalUsd: number | null; currency: string; dueDate: string | null }>(sql`
+      SELECT total_usd AS totalUsd, currency, due_date AS dueDate
+      FROM invoices
+      WHERE status IN ('sent', 'overdue') AND paid_at IS NULL
+    `),
+    // expense commitments
+    database.all<{
+      category: string
+      amount: number
+      currency: string
+      cadence: string
+      isDiscretionary: number | null
+    }>(sql`
+      SELECT category, amount, currency, cadence, is_discretionary AS isDiscretionary
+      FROM expense_commitments
+      WHERE active = 1
+        AND (start_date IS NULL OR start_date <= datetime('now'))
+        AND (end_date IS NULL OR end_date >= ${taxYearStart})
+    `),
+    // tax-year revenue invoices
+    database.all<{ amount: number; currency: string }>(sql`
+      SELECT total_usd AS amount, currency
+      FROM invoices
+      WHERE paid_at IS NOT NULL AND paid_at >= ${taxYearStart}
+    `),
+    // NZ-domiciled GST-able invoices this tax year
+    database.all<{ amount: number; currency: string }>(sql`
+      SELECT total_usd AS amount, currency
+      FROM invoices
+      WHERE paid_at IS NOT NULL
+        AND paid_at >= ${taxYearStart}
+        AND currency = 'NZD'
+    `),
+    // this month invoices (YoY current side)
+    database.all<{ amount: number; currency: string }>(sql`
+      SELECT total_usd AS amount, currency
+      FROM invoices
+      WHERE paid_at IS NOT NULL AND paid_at >= ${thisMonthStart}
+    `),
+    // same month last year (YoY comparison side)
+    database.all<{ amount: number; currency: string }>(sql`
+      SELECT total_usd AS amount, currency
+      FROM invoices
+      WHERE paid_at IS NOT NULL
+        AND paid_at >= ${sameMonthLastYearStart}
+        AND paid_at < ${sameMonthLastYearEnd}
+    `),
+    // 12-month revenue history (raw rows, bucketed in JS)
+    database.all<{ ym: string; amount: number; currency: string }>(sql`
+      SELECT strftime('%Y-%m', paid_at) AS ym, total_usd AS amount, currency
+      FROM invoices
+      WHERE paid_at IS NOT NULL
+        AND paid_at > datetime('now', '-13 months')
+    `),
+    // pipeline funnel
+    database.all<{ stageName: string; position: number; isClosedWon: number; isClosedLost: number; cnt: number; value: number | null }>(sql`
+      SELECT s.name AS stageName,
+             s.position,
+             s.is_closed_won AS isClosedWon,
+             s.is_closed_lost AS isClosedLost,
+             COUNT(d.id) AS cnt,
+             COALESCE(SUM(d.value_nzd), 0) AS value
+      FROM pipeline_stages s
+      LEFT JOIN deals d ON d.stage_id = s.id
+        AND (s.is_closed_lost IS NULL OR s.is_closed_lost = 0)
+      GROUP BY s.id
+      ORDER BY s.position ASC
+    `),
+    // outstanding work value (won deals with future engagement_end_date)
+    database.all<{ total: number | null; cnt: number }>(sql`
+      SELECT
+        COALESCE(SUM(
+          d.monthly_value_nzd * MAX(0, (CAST((julianday(d.engagement_end_date) - julianday('now')) / 30.0 AS REAL)))
+        ), 0) AS total,
+        COUNT(*) AS cnt
+      FROM deals d
+      INNER JOIN pipeline_stages s ON d.stage_id = s.id
+      WHERE s.is_closed_won = 1
+        AND d.monthly_value_nzd > 0
+        AND d.engagement_end_date IS NOT NULL
+        AND d.engagement_end_date > datetime('now')
+    `),
+    // win rate by source
+    database.all<{ source: string | null; wonCnt: number; lostCnt: number }>(sql`
+      SELECT
+        d.source AS source,
+        SUM(CASE WHEN s.is_closed_won = 1 THEN 1 ELSE 0 END) AS wonCnt,
+        SUM(CASE WHEN s.is_closed_lost = 1 THEN 1 ELSE 0 END) AS lostCnt
+      FROM deals d
+      INNER JOIN pipeline_stages s ON d.stage_id = s.id
+      WHERE (s.is_closed_won = 1 OR s.is_closed_lost = 1)
+        AND d.closed_at IS NOT NULL
+        AND d.closed_at > datetime('now', '-180 days')
+      GROUP BY d.source
+      ORDER BY wonCnt DESC
+    `),
+    // deal stats (90d won)
+    database.all<{ avgValue: number | null; avgCycle: number | null; cnt: number }>(sql`
+      SELECT
+        AVG(COALESCE(d.value_nzd, d.value, 0)) AS avgValue,
+        AVG(CAST((julianday(d.closed_at) - julianday(d.created_at)) AS REAL)) AS avgCycle,
+        COUNT(*) AS cnt
+      FROM deals d
+      INNER JOIN pipeline_stages s ON d.stage_id = s.id
+      WHERE s.is_closed_won = 1
+        AND d.closed_at IS NOT NULL
+        AND d.closed_at > datetime('now', '-90 days')
+    `),
+    // time to pay (90d)
+    database.all<{ avgDays: number | null; minDays: number | null; maxDays: number | null; cnt: number }>(sql`
+      SELECT
+        AVG(CAST((julianday(paid_at) - julianday(due_date)) AS REAL)) AS avgDays,
+        MIN(CAST((julianday(paid_at) - julianday(due_date)) AS REAL)) AS minDays,
+        MAX(CAST((julianday(paid_at) - julianday(due_date)) AS REAL)) AS maxDays,
+        COUNT(*) AS cnt
+      FROM invoices
+      WHERE paid_at IS NOT NULL
+        AND due_date IS NOT NULL
+        AND paid_at > datetime('now', '-90 days')
+    `),
+    // cash conversion (90d) — raw invoices bucketed in JS
+    database.all<{ amount: number; currency: string; createdAt: string | null; paidAt: string | null }>(sql`
+      SELECT total_usd AS amount, currency, created_at AS createdAt, paid_at AS paidAt
+      FROM invoices
+      WHERE created_at > datetime('now', '-90 days') OR paid_at > datetime('now', '-90 days')
+    `),
+    // hours logged (90d)
+    database.all<{ totalHours: number | null }>(sql`
+      SELECT COALESCE(SUM(hours), 0) AS totalHours
+      FROM time_entries
+      WHERE date > date('now', '-90 days')
+    `),
+    // open pipeline value
+    database.all<{ value: number | null; cnt: number }>(sql`
+      SELECT COALESCE(SUM(d.value_nzd), 0) AS value, COUNT(*) AS cnt
+      FROM deals d
+      INNER JOIN pipeline_stages s ON d.stage_id = s.id
+      WHERE (s.is_closed_won IS NULL OR s.is_closed_won = 0)
+        AND (s.is_closed_lost IS NULL OR s.is_closed_lost = 0)
+    `),
+    // recent activity — paid invoices
+    database.all<{ id: string; totalUsd: number | null; paidAt: string | null; orgName: string | null }>(sql`
+      SELECT i.id, i.total_usd AS totalUsd, i.paid_at AS paidAt, o.name AS orgName
+      FROM invoices i
+      LEFT JOIN organisations o ON i.org_id = o.id
+      WHERE i.paid_at IS NOT NULL
+      ORDER BY i.paid_at DESC
+      LIMIT 5
+    `),
+    // recent activity — won deals
+    database.all<{ id: string; title: string; value: number; closedAt: string | null; orgName: string | null }>(sql`
+      SELECT d.id, d.title, COALESCE(d.value_nzd, d.value, 0) AS value, d.closed_at AS closedAt, o.name AS orgName
+      FROM deals d
+      INNER JOIN pipeline_stages s ON d.stage_id = s.id
+      LEFT JOIN organisations o ON d.org_id = o.id
+      WHERE s.is_closed_won = 1 AND d.closed_at IS NOT NULL
+      ORDER BY d.closed_at DESC
+      LIMIT 5
+    `),
+  ])
+
+  // ── Settings post-processing ──────────────────────────────────────
   // Three settings drive the cash traffic-light:
   //   finance.reserveTargetMonths  — months of burn to keep buffered (default 4)
   //   finance.monthlyBurnNzd       — operator's stated monthly burn (defaults to MRR if unset)
   //   finance.lastYearTaxOwed      — flat extra reserve for prior-year tax (default 0)
   // All three editable from the page settings card.
-  const settingsRows = await database.all<{ key: string; value: string }>(sql`
-    SELECT key, value FROM settings
-    WHERE key IN (
-      'finance.reserveTargetMonths',
-      'finance.monthlyBurnNzd',
-      'finance.lastYearTaxOwed',
-      'finance.quarterlyTargetNzd',
-      'finance.liamTakeHomeAnnual',
-      'finance.staciTakeHomeAnnual',
-      'finance.takeHomeTargetEach'
-    )
-  `)
   const settingsMap = new Map(settingsRows.map(r => [r.key, r.value]))
   const reserveTargetMonths = Math.max(1, Math.min(24, parseFloat(settingsMap.get('finance.reserveTargetMonths') ?? '4')))
   const monthlyBurnNzd = parseFloat(settingsMap.get('finance.monthlyBurnNzd') ?? '0') || null
@@ -63,11 +378,7 @@ export async function GET(req: NextRequest) {
   const staciTakeHome = parseFloat(settingsMap.get('finance.staciTakeHomeAnnual') ?? '52000') || 52000
   const takeHomeTargetEach = parseFloat(settingsMap.get('finance.takeHomeTargetEach') ?? '74000') || 74000
 
-  // ── Bank balances (Airwallex first, Xero fallback) ────────────────
-  const [airwallexBalances, xeroBankBalances] = await Promise.all([
-    database.select().from(schema.airwallexBalances),
-    database.select().from(schema.xeroBankBalances),
-  ])
+  // ── Bank balances aggregation (Airwallex first, Xero fallback) ────
 
   const balancesByCurrency = new Map<string, { available: number; total: number; sources: string[] }>()
   for (const b of airwallexBalances) {
@@ -99,13 +410,17 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── Reserves ──────────────────────────────────────────────────────
-  const reserves = await database
-    .select()
-    .from(schema.reserves)
-    .where(eq(schema.reserves.active, true))
-
+  // ── Reserves total ────────────────────────────────────────────────
   const reservesTotal = reserves.reduce((sum, r) => sum + r.accruedAmount, 0)
+
+  // ── FX rate map + toNzd helper ────────────────────────────────────
+  // Convert each native amount to NZD via the exchange_rates table.
+  // Uses lib/currency.ts toNzd which does: amount / rateToUsd[currency] × rateToUsd[NZD].
+  // (Earlier inline version had the formula inverted — symptom was an
+  // inflated MRR because NZD-defaulted-but-actually-GBP/USD amounts were
+  // being summed at face value.)
+  const rateMap = buildRateMap(fxRows.map(r => ({ currency: r.currency, rateToUsd: Number(r.rateToUsd) })))
+  const toNzd = (amount: number, currency: string): number => toNzdHelper(amount, currency, rateMap)
 
   // ── MRR: retainers + projects (amortised over duration) ───────────
   // Retainer MRR = SUM of organisations.custom_mrr across active clients,
@@ -118,24 +433,6 @@ export async function GET(req: NextRequest) {
   // but most clients had preferred_currency already set to USD/GBP from
   // the New Deal dialog — fall back to that so the page is honest
   // without making Liam touch 20 client records.
-  const retainerRowsByClient = await database.all<{ id: string; name: string; mrr: number | null; currency: string | null }>(sql`
-    SELECT id, name, custom_mrr AS mrr,
-           COALESCE(NULLIF(custom_mrr_currency, 'NZD'), preferred_currency, 'NZD') AS currency
-    FROM organisations
-    WHERE status = 'active'
-      AND custom_mrr IS NOT NULL
-      AND custom_mrr > 0
-  `)
-  // Convert each native amount to NZD via the exchange_rates table.
-  // Uses lib/currency.ts toNzd which does: amount / rateToUsd[currency] × rateToUsd[NZD].
-  // (Earlier inline version had the formula inverted — symptom was an
-  // inflated MRR because NZD-defaulted-but-actually-GBP/USD amounts were
-  // being summed at face value.)
-  const fxRows = await database.all<{ currency: string; rateToUsd: number }>(sql`
-    SELECT currency, rate_to_usd AS rateToUsd FROM exchange_rates
-  `)
-  const rateMap = buildRateMap(fxRows.map(r => ({ currency: r.currency, rateToUsd: Number(r.rateToUsd) })))
-  const toNzd = (amount: number, currency: string): number => toNzdHelper(amount, currency, rateMap)
   const retainerMrr = retainerRowsByClient.reduce(
     (sum, r) => sum + toNzd(Number(r.mrr ?? 0), r.currency ?? 'NZD'),
     0,
@@ -162,18 +459,6 @@ export async function GET(req: NextRequest) {
   // Project MRR = sum over active projects of (price / months active).
   // Active = (startDate ≤ now AND expectedDelivery ≥ now) OR no
   // expectedDelivery (treat as ongoing, default 4-month amortisation).
-  const projects = await database
-    .select({
-      id: schema.projects.id,
-      priceUsd: schema.projects.priceUsd,
-      startDate: schema.projects.startDate,
-      expectedDelivery: schema.projects.expectedDelivery,
-      deliveredAt: schema.projects.deliveredAt,
-      status: schema.projects.status,
-    })
-    .from(schema.projects)
-    .where(eq(schema.projects.status, 'active'))
-
   let projectMrr = 0
   for (const p of projects) {
     if (!p.priceUsd || p.priceUsd <= 0) continue
@@ -196,12 +481,6 @@ export async function GET(req: NextRequest) {
   // amount in `currency`. Pull (amount, currency) per row and convert
   // each individually so a £3,125 invoice doesn't get counted as $3,125
   // NZD.
-  const ytdRows = await database.all<{ amount: number; currency: string }>(sql`
-    SELECT total_usd AS amount, currency
-    FROM invoices
-    WHERE paid_at IS NOT NULL
-      AND paid_at >= ${yearStart}
-  `)
   const ytdRevenue = ytdRows.reduce(
     (sum, r) => sum + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'),
     0,
@@ -210,53 +489,22 @@ export async function GET(req: NextRequest) {
 
   // ── Sales velocity (deals signed in trailing windows) ─────────────
   // "Signed" = deal on a closed-won pipeline stage with a closed_at in
-  // the trailing window. Raw SQL because we need the stage join.
-  const signedRows = await database.all<{ id: string; value: number; closedAt: string | null }>(sql`
-    SELECT d.id AS id, COALESCE(d.value_nzd, d.value, 0) AS value, d.closed_at AS closedAt
-    FROM deals d
-    INNER JOIN pipeline_stages s ON d.stage_id = s.id
-    WHERE s.is_closed_won = 1
-      AND d.closed_at IS NOT NULL
-      AND d.closed_at > datetime('now', '-90 days')
-  `)
-
+  // the trailing window. Bucketed in JS from a single 90-day fetch.
   const signed30 = signedRows.filter(d => d.closedAt && Date.now() - new Date(d.closedAt).getTime() < 30 * 86400_000)
   const signed60 = signedRows.filter(d => d.closedAt && Date.now() - new Date(d.closedAt).getTime() < 60 * 86400_000)
   const signed90 = signedRows
 
-  // ── Outstanding AR ────────────────────────────────────────────────
-  const outstandingRows = await database
-    .select({ totalUsd: schema.invoices.totalUsd, dueDate: schema.invoices.dueDate })
-    .from(schema.invoices)
-    .where(eq(schema.invoices.status, 'sent'))
-  const overdueRows = await database
-    .select({ totalUsd: schema.invoices.totalUsd })
-    .from(schema.invoices)
-    .where(eq(schema.invoices.status, 'overdue'))
+  // ── Outstanding AR totals ─────────────────────────────────────────
   const outstandingAr = outstandingRows.reduce((s, r) => s + (r.totalUsd ?? 0), 0)
               + overdueRows.reduce((s, r) => s + (r.totalUsd ?? 0), 0)
 
   // ── Tier 3 derivatives ────────────────────────────────────────────
   // Quarter-to-date revenue + projection. Quarter starts Jan/Apr/Jul/Oct.
-  const nowDate = new Date()
-  const quarterStartMonth = Math.floor(nowDate.getMonth() / 3) * 3
-  const quarterStart = new Date(nowDate.getFullYear(), quarterStartMonth, 1).toISOString()
-  const quarterEnd = new Date(nowDate.getFullYear(), quarterStartMonth + 3, 1)
-  const quarterDaysElapsed = Math.max(1, Math.ceil((nowDate.getTime() - new Date(quarterStart).getTime()) / 86400_000))
-  const quarterDaysTotal = Math.ceil((quarterEnd.getTime() - new Date(quarterStart).getTime()) / 86400_000)
-
-  const quarterInvoiceRows = await database.all<{ amount: number; currency: string }>(sql`
-    SELECT total_usd AS amount, currency
-    FROM invoices
-    WHERE paid_at IS NOT NULL AND paid_at >= ${quarterStart}
-  `)
+  // Date constants (nowDate, quarterStart, etc.) are hoisted above the
+  // Promise.all so the SQL can reference them.
   const quarterRevenueRows = [{ total: quarterInvoiceRows.reduce((s, r) => s + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'), 0) }]
   const quarterToDate = Number(quarterRevenueRows[0]?.total ?? 0)
   const quarterRunRate = quarterDaysElapsed > 0 ? (quarterToDate / quarterDaysElapsed) * quarterDaysTotal : 0
-
-  // Year-end projection. We finalise this in the response builder once
-  // ytdRevenue + effectiveMonthlyRevenue are computed (further down).
-  const monthsRemaining = 11 - nowDate.getMonth()  // Dec → 0, Nov → 1 …
 
   // ── Trailing 5-month project revenue ──────────────────────────────
   // "Project" here = work that isn't a retainer. invoices.project_id is
@@ -266,14 +514,6 @@ export async function GET(req: NextRequest) {
   // excluded; one-off/project clients get included. Convert to NZD via
   // the invoice's own currency so a £3,125 deliverable doesn't get
   // counted as $3,125 NZD.
-  const trailingProjectInvoices = await database.all<{ amount: number; currency: string }>(sql`
-    SELECT i.total_usd AS amount, i.currency AS currency
-    FROM invoices i
-    LEFT JOIN organisations o ON o.id = i.org_id
-    WHERE i.paid_at IS NOT NULL
-      AND i.paid_at > datetime('now', '-150 days')
-      AND (o.custom_mrr IS NULL OR o.custom_mrr = 0)
-  `)
   const trailingProjectTotalNzd = trailingProjectInvoices.reduce(
     (sum, r) => sum + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'),
     0,
@@ -285,24 +525,6 @@ export async function GET(req: NextRequest) {
   const effectiveMonthlyRevenue = retainerMrr + trailing5moProjectRevenue
 
   // ── Net new MRR this month (won this month - churned this month) ──
-  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
-  const wonThisMonthRows = await database.all<{ total: number | null; cnt: number }>(sql`
-    SELECT
-      COALESCE(SUM(d.monthly_value_nzd), 0) AS total,
-      COUNT(*) AS cnt
-    FROM deals d
-    INNER JOIN pipeline_stages s ON d.stage_id = s.id
-    WHERE s.is_closed_won = 1
-      AND d.closed_at IS NOT NULL
-      AND d.closed_at >= ${monthStart}
-      AND d.monthly_value_nzd > 0
-  `)
-  const churnedThisMonthRows = await database.all<{ cnt: number }>(sql`
-    SELECT COUNT(*) AS cnt
-    FROM subscriptions
-    WHERE cancelled_at IS NOT NULL
-      AND cancelled_at >= ${monthStart}
-  `)
   const newMrrThisMonth = Number(wonThisMonthRows[0]?.total ?? 0)
   const wonDealsThisMonth = Number(wonThisMonthRows[0]?.cnt ?? 0)
   const churnedClientsThisMonth = Number(churnedThisMonthRows[0]?.cnt ?? 0)
@@ -325,11 +547,6 @@ export async function GET(req: NextRequest) {
   // Outstanding invoices (sent + overdue) grouped by days since due.
   // Convert each amount to NZD via its native currency so a £1,250
   // invoice doesn't show as $1,250 NZD in the bucket.
-  const arRows = await database.all<{ totalUsd: number | null; currency: string; dueDate: string | null }>(sql`
-    SELECT total_usd AS totalUsd, currency, due_date AS dueDate
-    FROM invoices
-    WHERE status IN ('sent', 'overdue') AND paid_at IS NULL
-  `)
   const arAging = { current: 0, days30: 0, days60: 0, days90: 0, days90plus: 0 }
   for (const r of arRows) {
     const amt = toNzd(Number(r.totalUsd ?? 0), r.currency ?? 'NZD')
@@ -342,18 +559,6 @@ export async function GET(req: NextRequest) {
     else arAging.days90plus += amt
   }
 
-  // ── GST + Corp tax (NZ tax year: Apr 1 → Mar 31) ──────────────────
-  // NZ tax year != calendar year. Tax year starts April 1. If we're
-  // currently before April, the active tax year started Apr 1 of the
-  // previous calendar year.
-  const monthsThisYear = new Date().getMonth() + 1
-  const taxYearStartYear = new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1
-  const taxYearStart = new Date(taxYearStartYear, 3, 1).toISOString()  // April 1
-  // Months elapsed within the NZ tax year (capped at 12).
-  const monthsIntoTaxYear = Math.min(12, Math.max(1,
-    (new Date().getFullYear() - taxYearStartYear) * 12 + (new Date().getMonth() - 3) + 1,
-  ))
-
   // ── Expense commitments aggregation (currency + cadence aware) ────
   // SQL CASE-on-cadence does the cadence normalisation, but SQLite can't
   // do FX conversion. Pull raw rows once, convert in JS via toNzd, then
@@ -361,19 +566,6 @@ export async function GET(req: NextRequest) {
   // This was the source of the Tax card showing NZ$25,151 expenses on
   // 2 months elapsed — the prior version summed raw amounts ignoring
   // both currency and cadence, then multiplied by months.
-  const commitmentRows = await database.all<{
-    category: string
-    amount: number
-    currency: string
-    cadence: string
-    isDiscretionary: number | null
-  }>(sql`
-    SELECT category, amount, currency, cadence, is_discretionary AS isDiscretionary
-    FROM expense_commitments
-    WHERE active = 1
-      AND (start_date IS NULL OR start_date <= datetime('now'))
-      AND (end_date IS NULL OR end_date >= ${taxYearStart})
-  `)
   function cadenceToMonthly(cadence: string, amount: number): number {
     switch (cadence) {
       case 'monthly': return amount
@@ -403,11 +595,10 @@ export async function GET(req: NextRequest) {
   const discretionaryMonthly = commitmentMonthlyNzd.filter(r => r.isDiscretionary).reduce((s, r) => s + r.monthlyNzd, 0)
   const essentialMonthly = totalMonthlyBurnNzd - discretionaryMonthly
 
-  const taxYearInvoiceRows = await database.all<{ amount: number; currency: string }>(sql`
-    SELECT total_usd AS amount, currency
-    FROM invoices
-    WHERE paid_at IS NOT NULL AND paid_at >= ${taxYearStart}
-  `)
+  // ── GST + Corp tax (NZ tax year: Apr 1 → Mar 31) ──────────────────
+  // NZ tax year != calendar year. Tax year starts April 1. If we're
+  // currently before April, the active tax year started Apr 1 of the
+  // previous calendar year. Date constants hoisted above Promise.all.
   const taxYearRevenueRows = [{ total: taxYearInvoiceRows.reduce((s, r) => s + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'), 0) }]
   const taxYearRevenue = Number(taxYearRevenueRows[0]?.total ?? 0)
 
@@ -417,13 +608,6 @@ export async function GET(req: NextRequest) {
   // 15% of NZD-billed invoices (NZ clients) for the tax year.
   // This is an estimate — Liam should still verify against Xero GST
   // return for the period, but it stops the field being a useless 0.
-  const gstInvoiceRows = await database.all<{ amount: number; currency: string }>(sql`
-    SELECT total_usd AS amount, currency
-    FROM invoices
-    WHERE paid_at IS NOT NULL
-      AND paid_at >= ${taxYearStart}
-      AND currency = 'NZD'
-  `)
   const gstableRevenueNzd = gstInvoiceRows.reduce(
     (s, r) => s + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'),
     0,
@@ -445,22 +629,7 @@ export async function GET(req: NextRequest) {
   const ytdExpensesApprox = taxYearExpensesApprox
 
   // ── YoY comparison (same calendar month last year vs this) ───────
-  const thisMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
-  const sameMonthLastYearStart = new Date(new Date().getFullYear() - 1, new Date().getMonth(), 1).toISOString()
-  const sameMonthLastYearEnd = new Date(new Date().getFullYear() - 1, new Date().getMonth() + 1, 1).toISOString()
-  const thisMonthInvoices = await database.all<{ amount: number; currency: string }>(sql`
-    SELECT total_usd AS amount, currency
-    FROM invoices
-    WHERE paid_at IS NOT NULL AND paid_at >= ${thisMonthStart}
-  `)
   const thisMonthRevenueRows = [{ total: thisMonthInvoices.reduce((s, r) => s + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'), 0) }]
-  const lastYearMonthInvoices = await database.all<{ amount: number; currency: string }>(sql`
-    SELECT total_usd AS amount, currency
-    FROM invoices
-    WHERE paid_at IS NOT NULL
-      AND paid_at >= ${sameMonthLastYearStart}
-      AND paid_at < ${sameMonthLastYearEnd}
-  `)
   const yoyThisMonth = Number(thisMonthRevenueRows[0]?.total ?? 0)
   const lastYearMonthTotalNzd = lastYearMonthInvoices.reduce((s, r) => s + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'), 0)
   const yoyLastYear = lastYearMonthTotalNzd
@@ -470,12 +639,6 @@ export async function GET(req: NextRequest) {
   // 12-month revenue history grouped by month (for stacked area chart).
   // Pull raw rows + ym so we can convert each invoice individually then
   // re-aggregate per month — SQL SUM ignores the currency column.
-  const monthlyRevenueRawRows = await database.all<{ ym: string; amount: number; currency: string }>(sql`
-    SELECT strftime('%Y-%m', paid_at) AS ym, total_usd AS amount, currency
-    FROM invoices
-    WHERE paid_at IS NOT NULL
-      AND paid_at > datetime('now', '-13 months')
-  `)
   const monthlyRevenueMap = new Map<string, number>()
   for (const row of monthlyRevenueRawRows) {
     const ymKey = row.ym
@@ -486,87 +649,9 @@ export async function GET(req: NextRequest) {
     .map(([ym, total]) => ({ ym, total }))
     .sort((a, b) => a.ym.localeCompare(b.ym))
 
-  // Pipeline → cash funnel: open deals grouped by stage with value sum.
-  // Closed-won shows separately as "signed".
-  const pipelineFunnelRows = await database.all<{ stageName: string; position: number; isClosedWon: number; isClosedLost: number; cnt: number; value: number | null }>(sql`
-    SELECT s.name AS stageName,
-           s.position,
-           s.is_closed_won AS isClosedWon,
-           s.is_closed_lost AS isClosedLost,
-           COUNT(d.id) AS cnt,
-           COALESCE(SUM(d.value_nzd), 0) AS value
-    FROM pipeline_stages s
-    LEFT JOIN deals d ON d.stage_id = s.id
-      AND (s.is_closed_lost IS NULL OR s.is_closed_lost = 0)
-    GROUP BY s.id
-    ORDER BY s.position ASC
-  `)
-
-  // Outstanding work value — sum of (monthly × months remaining) for
-  // active won deals with engagement_end_date in the future.
-  const outstandingWorkRows = await database.all<{ total: number | null; cnt: number }>(sql`
-    SELECT
-      COALESCE(SUM(
-        d.monthly_value_nzd * MAX(0, (CAST((julianday(d.engagement_end_date) - julianday('now')) / 30.0 AS REAL)))
-      ), 0) AS total,
-      COUNT(*) AS cnt
-    FROM deals d
-    INNER JOIN pipeline_stages s ON d.stage_id = s.id
-    WHERE s.is_closed_won = 1
-      AND d.monthly_value_nzd > 0
-      AND d.engagement_end_date IS NOT NULL
-      AND d.engagement_end_date > datetime('now')
-  `)
-
-  // Win rate by source — looking at closed deals last 180 days.
-  const winRateRows = await database.all<{ source: string | null; wonCnt: number; lostCnt: number }>(sql`
-    SELECT
-      d.source AS source,
-      SUM(CASE WHEN s.is_closed_won = 1 THEN 1 ELSE 0 END) AS wonCnt,
-      SUM(CASE WHEN s.is_closed_lost = 1 THEN 1 ELSE 0 END) AS lostCnt
-    FROM deals d
-    INNER JOIN pipeline_stages s ON d.stage_id = s.id
-    WHERE (s.is_closed_won = 1 OR s.is_closed_lost = 1)
-      AND d.closed_at IS NOT NULL
-      AND d.closed_at > datetime('now', '-180 days')
-    GROUP BY d.source
-    ORDER BY wonCnt DESC
-  `)
-
-  // Average deal size + cycle length (last 90 days won deals).
-  const dealStatsRows = await database.all<{ avgValue: number | null; avgCycle: number | null; cnt: number }>(sql`
-    SELECT
-      AVG(COALESCE(d.value_nzd, d.value, 0)) AS avgValue,
-      AVG(CAST((julianday(d.closed_at) - julianday(d.created_at)) AS REAL)) AS avgCycle,
-      COUNT(*) AS cnt
-    FROM deals d
-    INNER JOIN pipeline_stages s ON d.stage_id = s.id
-    WHERE s.is_closed_won = 1
-      AND d.closed_at IS NOT NULL
-      AND d.closed_at > datetime('now', '-90 days')
-  `)
-
-  // Time-to-pay distribution (invoices paid in last 90 days).
-  const ttpRows = await database.all<{ avgDays: number | null; minDays: number | null; maxDays: number | null; cnt: number }>(sql`
-    SELECT
-      AVG(CAST((julianday(paid_at) - julianday(due_date)) AS REAL)) AS avgDays,
-      MIN(CAST((julianday(paid_at) - julianday(due_date)) AS REAL)) AS minDays,
-      MAX(CAST((julianday(paid_at) - julianday(due_date)) AS REAL)) AS maxDays,
-      COUNT(*) AS cnt
-    FROM invoices
-    WHERE paid_at IS NOT NULL
-      AND due_date IS NOT NULL
-      AND paid_at > datetime('now', '-90 days')
-  `)
-
   // Cash conversion ratio (last 90 days): collected ÷ invoiced.
   // Pull invoices once + bucket in JS so we can convert each row's
   // amount via its native currency.
-  const cashConvInvoices = await database.all<{ amount: number; currency: string; createdAt: string | null; paidAt: string | null }>(sql`
-    SELECT total_usd AS amount, currency, created_at AS createdAt, paid_at AS paidAt
-    FROM invoices
-    WHERE created_at > datetime('now', '-90 days') OR paid_at > datetime('now', '-90 days')
-  `)
   const ninetyDaysAgoMs = Date.now() - 90 * 86400_000
   let invoiced90 = 0
   let collected90 = 0
@@ -578,41 +663,8 @@ export async function GET(req: NextRequest) {
 
   // Hours logged + cost. Profit per logged hour = (revenue ÷ hours) once
   // we know revenue per client; for now compute the agency-wide number.
-  const hoursRows = await database.all<{ totalHours: number | null }>(sql`
-    SELECT COALESCE(SUM(hours), 0) AS totalHours
-    FROM time_entries
-    WHERE date > date('now', '-90 days')
-  `)
   const hoursLast90d = Number(hoursRows[0]?.totalHours ?? 0)
   const revenuePerHour = hoursLast90d > 0 ? collected90 / hoursLast90d : null
-
-  // Outstanding deal pipeline value (open deals).
-  const pipelineOpenRows = await database.all<{ value: number | null; cnt: number }>(sql`
-    SELECT COALESCE(SUM(d.value_nzd), 0) AS value, COUNT(*) AS cnt
-    FROM deals d
-    INNER JOIN pipeline_stages s ON d.stage_id = s.id
-    WHERE (s.is_closed_won IS NULL OR s.is_closed_won = 0)
-      AND (s.is_closed_lost IS NULL OR s.is_closed_lost = 0)
-  `)
-
-  // ── Recent activity feed (last 5 paid invoices / new deals) ──────
-  const recentInvoices = await database.all<{ id: string; totalUsd: number | null; paidAt: string | null; orgName: string | null }>(sql`
-    SELECT i.id, i.total_usd AS totalUsd, i.paid_at AS paidAt, o.name AS orgName
-    FROM invoices i
-    LEFT JOIN organisations o ON i.org_id = o.id
-    WHERE i.paid_at IS NOT NULL
-    ORDER BY i.paid_at DESC
-    LIMIT 5
-  `)
-  const recentDeals = await database.all<{ id: string; title: string; value: number; closedAt: string | null; orgName: string | null }>(sql`
-    SELECT d.id, d.title, COALESCE(d.value_nzd, d.value, 0) AS value, d.closed_at AS closedAt, o.name AS orgName
-    FROM deals d
-    INNER JOIN pipeline_stages s ON d.stage_id = s.id
-    LEFT JOIN organisations o ON d.org_id = o.id
-    WHERE s.is_closed_won = 1 AND d.closed_at IS NOT NULL
-    ORDER BY d.closed_at DESC
-    LIMIT 5
-  `)
 
   // ── Disposable cash math ──────────────────────────────────────────
   // Primary currency for the headline number: prefer NZD if present,
