@@ -418,8 +418,8 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
               </p>
             </div>
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              <TahiButton size="sm" variant="secondary" loading={publishing === 'restructure'} onClick={() => { void restructure() }} title="Re-split body into Webflow fields (use after edits, or on older drafts)">
-                Re-structure
+              <TahiButton size="sm" variant="secondary" loading={publishing === 'restructure'} onClick={() => { void restructure() }} title="Re-split fields, strip fabricated links, re-run the 200 link gate + schema validation">
+                Validate &amp; recheck
               </TahiButton>
               <TahiButton size="sm" variant="secondary" loading={publishing === 'draft'} onClick={() => { void publishToWebflow('draft') }}>
                 Save as draft

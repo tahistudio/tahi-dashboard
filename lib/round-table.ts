@@ -606,6 +606,22 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
       authorSlug: 'liam',
       scoreBreakdown: JSON.stringify(sb),
     }).where(eq(schema.contentDrafts.id, draft.id))
+
+    // Write the final, sanitised body as a new revision so the preview's
+    // latest revision == what ships == what the link gate checks. Without
+    // this the preview keeps showing the editor's pre-sanitise revision
+    // (with the stripped-out fabricated links still visible).
+    const finalRev = (await latestRevisionNumber(database, draft.id)) + 1
+    await database.insert(schema.draftRevisions).values({
+      id: crypto.randomUUID(),
+      draftId: draft.id,
+      revisionNumber: finalRev,
+      source: 'structured_final',
+      bodyHtml: cleanHtml,
+      bodyMarkdown: structured.bodyMarkdownClean,
+      wordCount: estimateWordCount(structured.bodyMarkdownClean),
+      reason: 'Final body: FAQ/takeaways split out, fabricated links stripped',
+    })
   } catch (err) {
     // Non-fatal — the body still publishes, just without the field split.
     console.error('Structuring failed', err)

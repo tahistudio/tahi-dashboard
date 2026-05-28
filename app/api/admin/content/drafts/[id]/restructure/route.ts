@@ -108,6 +108,27 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     updatedAt: now,
   }).where(eq(schema.contentDrafts.id, id))
 
+  // Write the final sanitised body as a new revision so the preview shows
+  // exactly what ships + what the link gate checked (not a stale earlier
+  // revision with fabricated links).
+  const revs = await database
+    .select({ n: schema.draftRevisions.revisionNumber })
+    .from(schema.draftRevisions)
+    .where(eq(schema.draftRevisions.draftId, id))
+  const finalRev = revs.length === 0 ? 1 : Math.max(...revs.map(r => r.n)) + 1
+  await database.insert(schema.draftRevisions).values({
+    id: crypto.randomUUID(),
+    draftId: id,
+    revisionNumber: finalRev,
+    source: 'structured_final',
+    bodyHtml: cleanHtml,
+    bodyMarkdown: structured.bodyMarkdownClean,
+    wordCount: structured.bodyMarkdownClean.split(/\s+/).filter(Boolean).length,
+    reason: 'Final body: FAQ/takeaways split out, fabricated links stripped',
+    createdAt: now,
+    updatedAt: now,
+  })
+
   // Close the category + schema + hreflang gaps and run the final link
   // gate (HTTP-check every link for 200).
   let finalize
