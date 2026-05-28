@@ -208,9 +208,102 @@ Triggered by Slice 3 (AI proposal draft) needing a trustworthy pricing engine.
 
 **Status: not started.** Needs Liam in the room — pricing intuition isn't AI-guessable.
 
-### Content + presence (low priority but written down)
+### Phase I · Content Engine (`/content-studio`) — spec locked 2026-05-28
 
-Liam's stated goal (2026-05-24): 1 newsletter / month + 1 LinkedIn post / day. Real value, not noise. Dashboard can help by surfacing patterns from the lead/customer data (common pain points, tech-stack distribution, etc.) as content prompts. Build as a "Content Studio" surface once the sales loop is locked.
+**Goal:** drive Tahi traffic from ~1k/mo today to 10k+/mo within 12-18 months. Mechanism: agent-driven blog research, drafting, multi-reviewer QA, schema-rich publish, internal-link patching, and citation tracking — all inside the dashboard so Liam reviews in one place. Replaces the n8n-style flow Liam built for Giant Group with a Tahi-specific, dashboard-native version.
+
+**Why this, why now:** traffic going down. 57 existing posts, many not indexed. 119 glossary entries under-linked. Need volume + structure + topical authority. AI engine citation (Claude, ChatGPT, Perplexity, Google AI Overviews) is the emerging traffic source — current SchemaFlow setup misses ~50% of the AEO playbook.
+
+**Signal sources (Slice 1 ideation cron, Monday 08:00 UK):**
+- Google Analytics 4 (top + decaying pages, last 30d) — OAuth via existing Google integration with new `analytics.readonly` scope
+- Google Search Console (page-2 query gaps, last 90d) — OAuth with new `webmasters.readonly` scope
+- SE Ranking (keyword gaps + competitor visibility) — existing MCP / API
+- Matomo (Tahi's own analytics) — existing
+- Tahi sitemap inventory (live fetch + parse for interlinking)
+- LinkedIn engagement (Tahi's posts via Buffer, last 7d after first 4-week backfill)
+- Competitor blog RSS — 14 tracked Webflow agencies: Flowninja, Flowout, Finsweet, N4, Videsigns, Bro Works, Nikolai Bain, Refokus, Edgar Allan, Studio Lumio, Wonderlab, Goodish, Webstacks, Made by Shape
+- Timothy Ricks YouTube transcripts (RSS + transcript fetch)
+- Webflow news / changelog RSS
+
+**Topical clusters (8 seeded):**
+1. Enterprise Webflow
+2. Migration (WordPress / Framer / headless to Webflow)
+3. Design-to-dev handoff
+4. Webflow agencies + Partner Program
+5. Performance + SEO
+6. Product-led / Experience (Calculator, Nodeo, internal lessons — Tahi's E-E-A-T signal)
+7. Sustainable web (Tahi's unique angle — sub-cluster: carbon-aware design, low-carbon hosting, page weight)
+8. NZ + AU regional (geo play with `hreflang="en-NZ"` and `en-AU`)
+
+**Webflow CMS fields (verified via API 2026-05-28, collection id `685941c739fa006940c9b4de`):**
+- Existing: Name, Slug, Meta Title, Meta Description, Main Image, Thumbnail Image, Shortened name, Post Excerpt, Summary, Body, Featured?, Main Category, Other Categories, Author, Schema
+- Added 2026-05-28 for the content engine: Key Takeaways (rich text), Related blog posts (multi-ref), AI Summary Prompt (plain text), FAQ Question/Answer #1-6 (12 discrete fields — plain text Q, rich text A)
+- 30 fields total of 60 available
+- Schema field carries the agent-generated JSON-LD additions layered on top of the existing SchemaFlow output (FAQPage + HowTo conditional + about + mentions + citation + speakable + richer Person)
+
+**Multi-agent drafting pipeline:**
+Researcher (with Anthropic web search) → Brand Voice Writer (uses Tahi tone-of-voice from Docs Hub) → 2 parallel reviewers (Sales + Readability — Marketing reviewer cut per audit feedback, overlapped too much with Sales) → Editor-in-Chief Opus signs off with a content score 0-100 against the Tahi rubric (AEO + voice + readability + SEO + link integrity).
+
+**Author auto-classifier:** design-topic posts → Staci; everything else → Liam.
+
+**Quality bars (locked from AEO/SEO audit 2026-05-28):**
+- Word count by intent: definition 1,100-1,300 · how-to 1,800-2,200 · opinion 900-1,400 · comparison 2,400-3,000
+- External links: 3-5 per 1,000 words, all dofollow to authority sources. Strict 200-status validation (no 301/302/403/404).
+- Internal links from each new post: 6-10 outbound
+- Internal links TO each new post within 7d: minimum 3, target 5-8, lifetime ceiling 15
+- Title: 52-58 chars, under 580px desktop
+- Meta description: 140-155 chars
+- H2 count: 5-8, each opens with a 1-2 sentence direct answer (highest-leverage AEO change)
+- FAQ block: 4-6 questions, 40-60 words per answer, wrapped in FAQPage JSON-LD
+- Schema types per post: Article (or BlogPosting via SchemaFlow) + FAQPage + BreadcrumbList + Person + Organization + about + mentions + citation + speakable. HowTo conditional.
+- Refresh trigger: GSC impressions drop >25% MoM for 2 consecutive months → auto-flag for refresh
+
+**Liam-in-the-loop:**
+- Triage 6-8 fresh ideas every Monday in `/content-studio` (yes/no/maybe → pick ~3-4 to run)
+- Answer 2-3 targeted questions per accepted opinion/how-to post + free-form opinion paragraph (definition + comparison posts skip the questions to save time)
+- Review the agent draft + content score + cover before publish (single sign-off, not a 4-person panel)
+- Approve internal-link patches per old post (Slice 6 link engine surfaces these as a diff)
+
+**Publish controls:**
+- Now / Custom Date / Auto
+- Auto: 2 days after the last scheduled post, snap to next Mon-Wed-Fri at 09:00 UK, max 3/week
+- 14-day topical cooldown — no two posts on overlapping query clusters within 14d (anti-cannibalisation)
+- IndexNow ping on publish (Bing + Yandex) + GSC submit-URL via API (Google)
+
+**SVG cover generator:**
+- 864×500 viewBox locked to Tahi dark-green base + diamond gradient overlay
+- 5 hand-built scene templates (illustrated focal icon / stacked UI cards / agency-list / pricing comparison / abstract pattern) — Claude picks template + parameterised palette + accents
+- Brand logos fetched live from simpleicons.org, mirrored to R2 on first fetch (avoid rate limit)
+- Per-cover "Flag to Staci" button — sends in-dashboard notification with image preview if Liam wants Staci to rework. Otherwise Liam approves solo.
+
+**Slice plan (locked 2026-05-28):**
+
+| # | Slice | Why this order |
+|---|---|---|
+| 0 | Indexing audit + remediation | Fix the actual problem first. GSC API + sitemap diff + IndexNow + GSC submit-URL. |
+| 1 | Ideation + cluster map | `content_ideas` + `content_clusters` tables, `/content-studio` surface, Monday cron with full signal mix |
+| 2 | Drafting pipeline (lean) | 2 reviewers + EIC, link 200-validation, author classifier |
+| 3 | Structured data layer | Agent-generated JSON-LD additions written to the new `Schema` field, layered on top of SchemaFlow's BlogPosting backbone. hreflang for UK/NZ/US on the same content. |
+| 4 | SVG cover generator | 5 templates + Simple Icons mirrored to R2 + flag-to-Staci |
+| 5 | Publish + schedule + cooldown | Now / Custom / Auto Mon-Wed-Fri 09:00 UK, IndexNow + GSC submit on publish |
+| 6 | Internal link engine | Patch old posts on Monday with 2-link cap per post per week, prioritise glossary↔blog linking |
+| 6.5 | One-time backfill of all 57 existing posts | FAQ + Schema additions + 2-3 extra internal links per post |
+| 7 | Signal expansion | LinkedIn engagement (Buffer), competitor blog RSS, Timothy Ricks YouTube transcripts, Webflow news feed |
+| 8 | Citation tracker + quarterly refresh | Weekly probe of Perplexity / Claude / ChatGPT / AI Overviews + GSC-decay auto-flag |
+| 9 | LinkedIn auto-post (DEFERRED, logged) | Ship only when Liam commits to comment engagement in first 90min. LinkedIn-native standalone post + link in first comment pattern. |
+
+**Realistic traffic curve (locked 2026-05-28 from the audit):** 1.0-1.3k at month 1-2 (backfill ships, no big move yet), 1.5-2.0k at month 3, 2.5-4k at month 6, 4-7k at month 9, **6-10k at month 12 — cross 10k somewhere between month 12 and month 18 if cadence holds.** Cadence holds beat post quality optimisation in the late phases.
+
+**Prerequisites before Slice 0 starts:**
+- ✅ CMS fields added (verified via Webflow API 2026-05-28)
+- ⏳ Liam re-authorize Google with `analytics.readonly` + `webmasters.readonly` scopes (one-click in Settings → Integrations → Google once the route is ready)
+- ⏳ `WEBFLOW_TOKEN` wired into Webflow Cloud env (Liam has the token; I add the env var in Slice 0)
+
+**Status:** spec locked 2026-05-28. Ready to start Slice 0 next session.
+
+### Content + presence (older note, mostly superseded by Phase I)
+
+Earlier 2026-05-24 goal of "1 newsletter / month + 1 LinkedIn post / day" still stands as the supporting cadence around the Phase I blog engine. Newsletter mechanism + LinkedIn auto-post live as Slice 9 (logged, deferred until Phase I MVP is stable).
 
 ---
 
