@@ -27,6 +27,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, isNotNull } from 'drizzle-orm'
 import { embed, cosineSimilarity, isOpenAIConfigured } from '@/lib/openai'
+import { recordCost } from '@/lib/ai-cost'
 import { listCollectionItems } from '@/lib/webflow'
 import { isoWeekLabel } from '@/lib/iso-week'
 
@@ -122,6 +123,7 @@ async function detectDuplicates(
 
   const newText = angle ? `${title}. ${angle}` : title
   const newEmbedding = await embed(newText)
+  let embedTokens = newEmbedding.inputTokens
 
   // Existing ideas (not rejected)
   const ideas = await database
@@ -135,6 +137,7 @@ async function detectDuplicates(
 
   const ideaTexts = ideas.map(i => i.angle ? `${i.title}. ${i.angle}` : i.title)
   const ideaEmbeddings = await Promise.all(ideaTexts.map(t => embed(t)))
+  embedTokens += ideaEmbeddings.reduce((s, e) => s + e.inputTokens, 0)
 
   const matches: DuplicateMatch[] = []
   for (let i = 0; i < ideas.length; i++) {
@@ -159,6 +162,7 @@ async function detectDuplicates(
     })).filter(p => p.title)
     const postTexts = postTitles.map(p => p.summary ? `${p.title}. ${p.summary.slice(0, 200)}` : p.title)
     const postEmbeddings = await Promise.all(postTexts.map(t => embed(t)))
+    embedTokens += postEmbeddings.reduce((s, e) => s + e.inputTokens, 0)
     for (let i = 0; i < postTitles.length; i++) {
       const sim = cosineSimilarity(newEmbedding.vector, postEmbeddings[i].vector)
       if (sim >= DUPLICATE_SIMILARITY_THRESHOLD) {
@@ -175,6 +179,20 @@ async function detectDuplicates(
   }
 
   matches.sort((a, b) => b.similarity - a.similarity)
+
+  // Record cost — embedding calls aren't free at scale even though
+  // per-call cost is tiny. Logs to ai_cost_log for the spend dashboard.
+  try {
+    await recordCost(database, {
+      scope: 'ideation',
+      stage: 'duplicate_detection_embedding',
+      provider: 'openai',
+      model: 'text-embedding-3-small',
+      inputTokens: embedTokens,
+      note: `${ideas.length + (matches.filter(m => m.source === 'published_post').length)} comparisons`,
+    })
+  } catch { /* don't block on cost log failure */ }
+
   return matches.slice(0, 8)
 }
 
