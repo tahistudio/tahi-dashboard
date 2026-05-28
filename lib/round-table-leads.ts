@@ -1,0 +1,415 @@
+/**
+ * Round-table leads — Phase I · Slice 9.
+ *
+ * Strategist + Headline Lab + Editor + Sign-off. These are the leadership
+ * roles in the pipeline — they set the brief, frame the conversation,
+ * arbitrate conflicts, and gate the publish.
+ *
+ * Each lead exposes:
+ *   - systemPrompt (the role's persona + rubric)
+ *   - buildUserPrompt (per-call payload assembly)
+ *   - parse (JSON validator)
+ *
+ * Callable via lib/anthropic-cost.ts `claudeJson`.
+ */
+
+import type { ReviewerKey, FunnelIntent, ReviewerCritique } from '@/lib/round-table-reviewers'
+
+export interface ResearchBriefSection {
+  question: string
+  content: string
+  citations: Array<{ url: string }>
+}
+
+export interface ResearchBrief {
+  topic: string
+  angle: string | null
+  sections: ResearchBriefSection[]
+  allCitations: Array<{ url: string }>
+}
+
+// ── Strategist ────────────────────────────────────────────────────────────────
+
+export interface StrategistOutput {
+  intent: FunnelIntent
+  priority: 'standard' | 'high'           // 'high' = generate 2 variants
+  workingTitle: string
+  angle: string                           // one-liner of the unique angle
+  targetWordCount: number
+  primaryKeyword: string
+  secondaryKeywords: string[]
+  lsiTerms: string[]
+  schemaTypes: string[]
+  faqCount: number
+  headings: Array<{ level: 2 | 3; text: string; wordTarget: number; mustCover: string[] }>
+  internalLinkTargets: string[]
+  outboundCitationTargets: number
+  imageCount: number
+  voiceWeights: Partial<Record<ReviewerKey, number>>
+  /** Optional: brief explanation of why this angle vs others. Shows up
+   *  in the Conflicts UI later. */
+  rationale: string
+}
+
+export const STRATEGIST_SYSTEM = `You are the Senior Content Strategist at Tahi Studio, a 2-person Webflow agency (NZ + UK). You sit at the head of the round table. Your job is to read the research brief + the working title and set the per-article brief that all downstream roles (writer + 22 reviewers + editor + sign-off) will execute against.
+
+You decide:
+- The funnel intent (one of: tofu_educational, mofu_comparison, bofu_conversion, how_to, thought_leadership, listicle, case_study, refresh)
+- Whether this is "standard" (1 draft) or "high" priority (2 drafts in parallel, panel picks winner). High priority = high keyword opportunity OR strategically important for Tahi's positioning.
+- The target word count — informed by SERP analysis if provided, otherwise: tofu 1200-1500, mofu 2200-2800, bofu 800-1200, how-to 1500-2000, thought leadership 800-1200, listicle 1500-3000, case study 1200-1800.
+- The heading outline (H2 + H3) with per-heading word targets and "must cover" bullet points
+- Primary keyword + secondary keywords + LSI terms
+- Schema types (Article always, + FAQPage if FAQ section, + HowTo if step-by-step)
+- Voice weights — adjust the reviewer weights up/down for this article's specific needs
+
+You write a 'rationale' explaining the angle pick so Liam can see your reasoning.`
+
+export function buildStrategistPrompt(input: {
+  workingTitle: string
+  cluster: string
+  targetKeyword: string
+  researchBrief: ResearchBrief
+  serpAnalysis?: {
+    medianWordCount?: number
+    commonHeadings?: string[]
+    schemaTypes?: string[]
+  }
+  defaultVoiceWeights: Partial<Record<ReviewerKey, number>>
+}): string {
+  return `Working title: ${input.workingTitle}
+Cluster: ${input.cluster}
+Target keyword: ${input.targetKeyword}
+
+## SERP analysis
+${input.serpAnalysis
+  ? `Median word count of top 10: ${input.serpAnalysis.medianWordCount ?? 'unknown'}
+Common headings: ${(input.serpAnalysis.commonHeadings ?? []).join('; ') || 'unknown'}
+Schema types used: ${(input.serpAnalysis.schemaTypes ?? []).join(', ') || 'unknown'}`
+  : '(SERP analysis not yet wired — work from research brief alone)'}
+
+## Research brief (5 sections)
+${input.researchBrief.sections.map((s, i) => `### ${i + 1}. ${s.question}\n${s.content}`).join('\n\n')}
+
+## Default voice weights (override only when needed)
+${JSON.stringify(input.defaultVoiceWeights, null, 2)}
+
+Respond with ONE JSON object only, matching this shape (no markdown fences):
+
+{
+  "intent": "tofu_educational|mofu_comparison|bofu_conversion|how_to|thought_leadership|listicle|case_study|refresh",
+  "priority": "standard|high",
+  "workingTitle": "the refined title to draft against",
+  "angle": "one-sentence angle that differentiates this from the SERP",
+  "targetWordCount": number,
+  "primaryKeyword": "...",
+  "secondaryKeywords": ["...", "..."],
+  "lsiTerms": ["...", "..."],
+  "schemaTypes": ["Article", "FAQPage"],
+  "faqCount": number,
+  "headings": [
+    { "level": 2, "text": "...", "wordTarget": number, "mustCover": ["...", "..."] }
+  ],
+  "internalLinkTargets": ["slug-1", "slug-2"],
+  "outboundCitationTargets": number,
+  "imageCount": number,
+  "voiceWeights": { "seo_aeo": 1.5, "sales": 0.5, ... },
+  "rationale": "1-2 sentences why this angle"
+}`
+}
+
+export function parseStrategist(raw: string): StrategistOutput {
+  const parsed = JSON.parse(raw) as Partial<StrategistOutput>
+  if (!parsed.intent) throw new Error('Strategist missing intent')
+  if (!parsed.workingTitle) throw new Error('Strategist missing workingTitle')
+  if (!parsed.angle) throw new Error('Strategist missing angle')
+  if (typeof parsed.targetWordCount !== 'number') throw new Error('Strategist missing targetWordCount')
+  if (!Array.isArray(parsed.headings) || parsed.headings.length === 0) throw new Error('Strategist missing headings')
+  if (!parsed.primaryKeyword) throw new Error('Strategist missing primaryKeyword')
+  return {
+    intent: parsed.intent,
+    priority: parsed.priority ?? 'standard',
+    workingTitle: parsed.workingTitle,
+    angle: parsed.angle,
+    targetWordCount: parsed.targetWordCount,
+    primaryKeyword: parsed.primaryKeyword,
+    secondaryKeywords: parsed.secondaryKeywords ?? [],
+    lsiTerms: parsed.lsiTerms ?? [],
+    schemaTypes: parsed.schemaTypes ?? ['Article'],
+    faqCount: parsed.faqCount ?? 6,
+    headings: parsed.headings,
+    internalLinkTargets: parsed.internalLinkTargets ?? [],
+    outboundCitationTargets: parsed.outboundCitationTargets ?? 4,
+    imageCount: parsed.imageCount ?? 3,
+    voiceWeights: parsed.voiceWeights ?? {},
+    rationale: parsed.rationale ?? '',
+  }
+}
+
+// ── Headline Lab ─────────────────────────────────────────────────────────────
+
+export interface HeadlineLabOutput {
+  finalists: Array<{
+    title: string
+    metaTitle: string
+    metaDescription: string
+    pattern: 'number' | 'question' | 'contrarian' | 'how_to' | 'comparison' | 'definition'
+    seoScore: number       // 0-100
+    croScore: number
+    marketerScore: number
+    reasoning: string
+  }>
+  recommendation: number   // index into finalists
+}
+
+export const HEADLINE_LAB_SYSTEM = `You are the Headline Lab — three reviewers in one prompt working together: an SEO/AEO reviewer, a CRO/conversion expert, and a marketer.
+
+Together you produce 3 finalist titles for the draft. Each finalist must have:
+- Title (the H1) — 50-65 chars ideally
+- Meta title (what appears in SERP) — 50-60 chars
+- Meta description — 145-160 chars
+- One of 6 pattern types: number, question, contrarian, how_to, comparison, definition
+- Score from each of you (SEO, CRO, Marketer) 0-100
+- Reasoning
+
+You recommend ONE finalist (by index) and explain why.`
+
+export function buildHeadlineLabPrompt(input: {
+  workingTitle: string
+  angle: string
+  primaryKeyword: string
+  intent: FunnelIntent
+}): string {
+  return `Working title: ${input.workingTitle}
+Angle: ${input.angle}
+Primary keyword: ${input.primaryKeyword}
+Intent: ${input.intent}
+
+Produce 3 finalists using different patterns. Respond JSON only:
+
+{
+  "finalists": [
+    {
+      "title": "...",
+      "metaTitle": "...",
+      "metaDescription": "...",
+      "pattern": "number|question|contrarian|how_to|comparison|definition",
+      "seoScore": number,
+      "croScore": number,
+      "marketerScore": number,
+      "reasoning": "..."
+    }
+  ],
+  "recommendation": 0
+}`
+}
+
+export function parseHeadlineLab(raw: string): HeadlineLabOutput {
+  const parsed = JSON.parse(raw) as Partial<HeadlineLabOutput>
+  if (!Array.isArray(parsed.finalists) || parsed.finalists.length === 0) {
+    throw new Error('Headline Lab returned no finalists')
+  }
+  return {
+    finalists: parsed.finalists,
+    recommendation: typeof parsed.recommendation === 'number' ? parsed.recommendation : 0,
+  }
+}
+
+// ── Writer ───────────────────────────────────────────────────────────────────
+
+export interface WriterOutput {
+  bodyMarkdown: string
+  bodyHtml: string
+  wordCount: number
+  /** Optional: list of slugs the writer linked to internally so the
+   *  Editor can verify against the brief's link targets. */
+  internalLinksUsed: string[]
+  /** Optional: list of outbound URLs the writer cited so the validator
+   *  can HEAD-check them. */
+  outboundLinksUsed: string[]
+}
+
+export const WRITER_SYSTEM = `You are the Senior Writer at Tahi Studio. You write in Liam's voice — direct, opinionated, concrete, anti-corporate. You never use em dashes. You never write "Let's explore" or "In this article" or "In conclusion". You vary paragraph lengths. You use one-sentence paragraphs for emphasis. You back claims with specifics.
+
+You will receive a brief from the Strategist. Follow it precisely: hit the heading outline, the word target ±15%, the primary keyword in the first 100 words + title + first H2, the FAQ count, and the schema requirements.
+
+Output BOTH markdown and HTML versions of the body. The HTML should use semantic tags (h2, h3, p, ul, ol, li, blockquote, a, strong, em) and be ready to paste into Webflow's rich text editor.`
+
+export function buildWriterPrompt(input: {
+  brief: StrategistOutput
+  researchBrief: ResearchBrief
+  brandDocs?: string
+  variantLabel?: 'A' | 'B'
+  variantInstruction?: string  // for high-priority A/B: "approach this as a deep-dive" vs "approach as listicle"
+}): string {
+  const variantNote = input.variantLabel
+    ? `\nYou are writing VARIANT ${input.variantLabel}. ${input.variantInstruction ?? ''}\n`
+    : ''
+  return `## Strategist brief
+${JSON.stringify(input.brief, null, 2)}
+
+## Research brief (use facts + citations from here)
+${input.researchBrief.sections.map(s => `### ${s.question}\n${s.content}\n\nCitations: ${s.citations.map(c => c.url).join(', ')}`).join('\n\n')}
+
+## Tahi brand voice
+${input.brandDocs ?? '(use Liam voice: direct, concrete, no em dashes, no "let\'s explore", short paragraphs, opinionated, specific)'}
+${variantNote}
+Respond JSON only:
+
+{
+  "bodyMarkdown": "full markdown body",
+  "bodyHtml": "full HTML body ready for Webflow",
+  "wordCount": number,
+  "internalLinksUsed": ["slug-1", "slug-2"],
+  "outboundLinksUsed": ["https://...", "https://..."]
+}`
+}
+
+export function parseWriter(raw: string): WriterOutput {
+  const parsed = JSON.parse(raw) as Partial<WriterOutput>
+  if (!parsed.bodyMarkdown || !parsed.bodyHtml) throw new Error('Writer missing body')
+  return {
+    bodyMarkdown: parsed.bodyMarkdown,
+    bodyHtml: parsed.bodyHtml,
+    wordCount: parsed.wordCount ?? estimateWords(parsed.bodyMarkdown),
+    internalLinksUsed: parsed.internalLinksUsed ?? [],
+    outboundLinksUsed: parsed.outboundLinksUsed ?? [],
+  }
+}
+
+function estimateWords(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length
+}
+
+// ── Editor ───────────────────────────────────────────────────────────────────
+
+export interface EditorOutput {
+  bodyMarkdown: string
+  bodyHtml: string
+  /** Summary of what changed vs the previous revision. Used in the
+   *  Conflicts UI to explain the editor's reasoning. */
+  changesSummary: string
+  /** Conflict resolutions — pairs of reviewers whose advice disagreed
+   *  and the editor's pick. Liam can later override these in the
+   *  Conflicts review slide-over. */
+  conflictResolutions: Array<{
+    reviewerA: ReviewerKey
+    reviewerB: ReviewerKey
+    topic: string
+    picked: 'a' | 'b' | 'compromise'
+    reasoning: string
+  }>
+  /** Composite weighted score (0-100). Editor's own assessment after
+   *  applying all reviewer feedback. */
+  weightedScore: number
+}
+
+export const EDITOR_SYSTEM = `You are the Editor. You receive a draft + critiques from 23 reviewers, each with their voice weight set by the Strategist. Your job is to:
+
+1. Identify CONFLICTS — places where two reviewers gave opposing advice. For each, pick one (or a compromise) and log your reasoning.
+2. Apply the consensus + your conflict resolutions to produce a new revision.
+3. Compute a weighted composite score (sum of score * weight / sum of weights).
+4. Return the new body + a changes summary + the conflict log.
+
+Veto rules:
+- If anti_ai, tahi_voice, brand_tone, or citations returned hard_fail, you MUST address those issues before returning.
+- If unable to resolve a hard_fail in this pass, set weightedScore to the post-fix estimate and explain in changesSummary which veto needs another revision.
+
+Never use em dashes. Preserve the writer's voice — you're polishing, not rewriting from scratch.`
+
+export function buildEditorPrompt(input: {
+  brief: StrategistOutput
+  currentBodyMarkdown: string
+  currentBodyHtml: string
+  reviews: Array<{
+    reviewerKey: ReviewerKey
+    weight: number
+    critique: ReviewerCritique
+  }>
+}): string {
+  return `## Strategist brief (sticky)
+${JSON.stringify(input.brief, null, 2)}
+
+## Current draft (markdown)
+${input.currentBodyMarkdown.slice(0, 24000)}
+
+## Reviewer critiques
+${input.reviews.map(r => `### ${r.reviewerKey} (weight ${r.weight}, score ${r.critique.score}, verdict ${r.critique.verdict})
+Summary: ${r.critique.summary}
+Strengths: ${r.critique.strengths.join('; ')}
+Issues: ${r.critique.issues.map(i => `[${i.severity}] ${i.description}${i.suggestedFix ? ' → ' + i.suggestedFix : ''}`).join(' | ')}`).join('\n\n')}
+
+Respond JSON only:
+
+{
+  "bodyMarkdown": "edited markdown",
+  "bodyHtml": "edited HTML",
+  "changesSummary": "what you changed and why",
+  "conflictResolutions": [
+    { "reviewerA": "...", "reviewerB": "...", "topic": "...", "picked": "a|b|compromise", "reasoning": "..." }
+  ],
+  "weightedScore": number
+}`
+}
+
+export function parseEditor(raw: string): EditorOutput {
+  const parsed = JSON.parse(raw) as Partial<EditorOutput>
+  if (!parsed.bodyMarkdown || !parsed.bodyHtml) throw new Error('Editor missing body')
+  return {
+    bodyMarkdown: parsed.bodyMarkdown,
+    bodyHtml: parsed.bodyHtml,
+    changesSummary: parsed.changesSummary ?? '',
+    conflictResolutions: parsed.conflictResolutions ?? [],
+    weightedScore: typeof parsed.weightedScore === 'number' ? parsed.weightedScore : 0,
+  }
+}
+
+// ── Sign-off ─────────────────────────────────────────────────────────────────
+
+export interface SignOffOutput {
+  score: number              // 0-100
+  passes: boolean            // score >= 75
+  finalNotes: string
+  recommendCover: string     // one-line prompt for the cover generator
+  recommendPublishWindow: 'immediate' | 'next_mwf' | 'next_high_intent'
+}
+
+export const SIGN_OFF_SYSTEM = `You are the final Sign-off reviewer. You read the polished draft once more as a fresh-eye reader and rate it 0-100. You must hit 75 for the draft to be ready_for_publish.
+
+You also recommend:
+- A one-line prompt for the cover generator (flat illustration, brand colors)
+- A publish window: 'immediate' / 'next_mwf' / 'next_high_intent' (e.g. Tuesday for B2B engagement spikes)`
+
+export function buildSignOffPrompt(input: {
+  brief: StrategistOutput
+  bodyMarkdown: string
+  editorWeightedScore: number
+}): string {
+  return `Brief: ${JSON.stringify(input.brief, null, 2)}
+
+Editor's weighted score: ${input.editorWeightedScore}
+
+Body (markdown):
+${input.bodyMarkdown.slice(0, 22000)}
+
+Respond JSON only:
+
+{
+  "score": number,
+  "passes": boolean,
+  "finalNotes": "what you'd tell Liam before he publishes",
+  "recommendCover": "one-line cover image prompt",
+  "recommendPublishWindow": "immediate|next_mwf|next_high_intent"
+}`
+}
+
+export function parseSignOff(raw: string): SignOffOutput {
+  const parsed = JSON.parse(raw) as Partial<SignOffOutput>
+  if (typeof parsed.score !== 'number') throw new Error('Sign-off missing score')
+  return {
+    score: parsed.score,
+    passes: parsed.passes ?? (parsed.score >= 75),
+    finalNotes: parsed.finalNotes ?? '',
+    recommendCover: parsed.recommendCover ?? 'flat illustration of a leaf-shaped abstract composition',
+    recommendPublishWindow: parsed.recommendPublishWindow ?? 'next_mwf',
+  }
+}

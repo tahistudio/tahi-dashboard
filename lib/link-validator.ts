@@ -139,3 +139,27 @@ export async function validateExternalLinks(urls: string[]): Promise<ValidationR
 
   return { valid, invalid }
 }
+
+/** Extract every external href from a draft body's HTML. Filters
+ *  tahi.studio + non-http(s) + anchors. Used by the Citations reviewer
+ *  in Slice 9 to pull every outbound link before validation. */
+export function extractOutboundLinks(bodyHtml: string): string[] {
+  const seen = new Set<string>()
+  const re = /<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["'][^>]*>/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(bodyHtml)) !== null) {
+    const raw = m[1].trim()
+    if (!raw) continue
+    if (!/^https?:\/\//i.test(raw)) continue
+    if (isTahiDomain(raw)) continue
+    seen.add(raw)
+  }
+  return Array.from(seen)
+}
+
+/** Convenience for the Slice 9 pipeline: extract every outbound link
+ *  from a draft body and validate them in one call. */
+export async function validateDraftLinks(bodyHtml: string): Promise<ValidationResult> {
+  const urls = extractOutboundLinks(bodyHtml)
+  return validateExternalLinks(urls)
+}
