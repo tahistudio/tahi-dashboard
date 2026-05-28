@@ -299,7 +299,38 @@ Researcher (with Anthropic web search) → Brand Voice Writer (uses Tahi tone-of
 - ⏳ Liam re-authorize Google with `analytics.readonly` + `webmasters.readonly` scopes (one-click in Settings → Integrations → Google once the route is ready)
 - ⏳ `WEBFLOW_TOKEN` wired into Webflow Cloud env (Liam has the token; I add the env var in Slice 0)
 
-**Status:** spec locked 2026-05-28. Ready to start Slice 0 next session.
+**Status (2026-05-28, end of autonomous build session):**
+
+Shipped end-to-end (code + commit + push):
+- ✅ Slice 0 — indexing audit + /content-studio Health tab (migration 0059 applied)
+- ✅ Slice 1 — ideation engine + cluster map + Ideas tab (cron disabled by default)
+- ✅ Slice 2 — multi-agent drafting pipeline (Researcher → Writer → Sales + Readability → EIC Opus) + Drafts tab
+- ✅ Slice 3 — JSON-LD layer (Article + FAQPage + HowTo conditional + Organization + Person + about + mentions + citation + speakable + 4-level Breadcrumb) + hreflang generator
+- ✅ Slice 4 — SVG cover generator (5 scene templates spanning the 9 references, locked Tahi-green gradient base, Simple Icons mirrored to R2)
+- ✅ Slice 5 — publish controls (Now / Custom / Auto Mon-Wed-Fri 09:00 UK, 14-day topical cooldown warning) + Schedule tab + 15-min publish-scheduled cron
+- ✅ Slice 6 — internal link engine analyzer (suggests + Apply via Webflow patch, never auto-applies) + Links tab + weekly cron
+- ✅ Slice 6.5 — backfill 57 existing posts with FAQs + Key Takeaways + Schema + AI Prompt + hreflang (staged edits only, Liam batch-publishes)
+
+Pending migrations (queued, run after each deploy lands):
+- 0060 (content_drafts table, Slice 2)
+- 0061 (link_suggestions table, Slice 6)
+- 0062 (content_drafts cols + publish_history table, Slice 5)
+- 0063 (blog_backfill_log table, Slice 6.5)
+
+Not yet shipped (deferred / future slices):
+- Slice 7 — LinkedIn engagement + competitor RSS + Timothy Ricks YouTube transcripts + Webflow news feed signal expansion
+- Slice 8 — citation tracker + quarterly refresh engine
+- Slice 9 — LinkedIn auto-post (deferred until Liam commits to comment engagement)
+
+Action items for Liam's QA session:
+1. Wait for the Slice 5/6/6.5 deploy to land, then run migrations 0060/0061/0062/0063 (Claude can fire them via MCP once visible)
+2. Settings → Integrations → Google → confirm GA4 + GSC + Calendar + Drive scopes all show as connected
+3. Settings → Content engine signals → click "Auto-detect GA4 property" to populate the property ID + paste Matomo + SE Ranking keys
+4. /content-studio Health tab → click "Scan now" to seed blog_health with indexing status of all 57 posts
+5. /content-studio Health tab → "Backfill all 57" to populate FAQ + takeaways + schema across the back catalogue (staged edits in Webflow; spot-check 5-10 then batch-publish)
+6. /content-studio Ideas tab → click "Run ideation now" to fire the Monday cron manually + see what ideas surface for this week
+7. When an idea is approved, the drafting cron runs hourly (currently disabled — flip on via Settings → Content engine signals when ready)
+8. Add Webflow CMS field "Hreflang block" — Plain text long, slug `hreflang-block` — so the hreflang patches land properly
 
 ### Content + presence (older note, mostly superseded by Phase I)
 
