@@ -21,6 +21,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { claudeJson } from '@/lib/anthropic-cost'
+import { OPUS_MODEL } from '@/lib/ai-models'
 import { markdownToHtml } from '@/lib/markdown-render'
 import { LIAM_EDIT_SYSTEM, buildLiamEditPrompt, parseLiamEdit } from '@/lib/round-table-leads'
 
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   try {
     const out = await claudeJson({
       database, scope: 'draft', scopeId: id, stage: 'liam_edit',
-      model: 'claude-opus-4-7', maxTokens: 8000,
+      model: OPUS_MODEL, maxTokens: 8000,
       skipCostCap: true,  // manual edits are Liam-initiated; don't let the per-article cap block them
       systemPrompt: LIAM_EDIT_SYSTEM,
       userPrompt: buildLiamEditPrompt({ currentBodyMarkdown: draft.bodyMarkdown, instructions }),

@@ -27,10 +27,11 @@
  */
 
 import { buildBlogSchemaAdditions, buildHreflangBlock, detectPostType, extractEntities } from '@/lib/blog-schema'
+import { SONNET_MODEL } from '@/lib/ai-models'
 
 // ── Models + budgets ──────────────────────────────────────────────────────
 
-const MODEL = 'claude-sonnet-4-6'
+const MODEL = SONNET_MODEL
 const MAX_TOKENS = 3000
 const MAX_BODY_CHARS = 12_000
 

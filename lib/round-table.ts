@@ -30,6 +30,7 @@ import { and, eq } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { claudeJson, CostCapExceededError } from '@/lib/anthropic-cost'
+import { OPUS_MODEL, SONNET_MODEL } from '@/lib/ai-models'
 import { getDraftSpendCents, recordCost, DRAFT_COST_CAP_CENTS, ESTIMATED_STAGE_COSTS_CENTS } from '@/lib/ai-cost'
 import { buildResearchBrief, isPerplexityConfigured } from '@/lib/perplexity'
 import { generateCover, isReplicateConfigured } from '@/lib/replicate'
@@ -203,7 +204,7 @@ async function stageStrategise(database: Database, draft: DraftRow): Promise<Sta
 
   const { result, costCents } = await claudeJson({
     database, scope: 'draft', scopeId: draft.id, stage: 'strategist',
-    model: 'claude-opus-4-7', maxTokens: 3500,
+    model: OPUS_MODEL, maxTokens: 3500,
     systemPrompt: STRATEGIST_SYSTEM,
     userPrompt: buildStrategistPrompt({
       workingTitle: idea.title ?? 'Untitled',
@@ -235,7 +236,7 @@ async function stageHeadlineLab(database: Database, draft: DraftRow): Promise<St
 
   const { result, costCents } = await claudeJson({
     database, scope: 'draft', scopeId: draft.id, stage: 'headline_lab',
-    model: 'claude-sonnet-4-6', maxTokens: 1500,
+    model: SONNET_MODEL, maxTokens: 1500,
     systemPrompt: HEADLINE_LAB_SYSTEM,
     userPrompt: buildHeadlineLabPrompt({
       workingTitle: brief.workingTitle,
@@ -271,7 +272,7 @@ async function stageDraft(database: Database, draft: DraftRow): Promise<StageRes
 
   const { result, costCents } = await claudeJson({
     database, scope: 'draft', scopeId: draft.id, stage: 'writer',
-    model: 'claude-sonnet-4-6', maxTokens: 8000,
+    model: SONNET_MODEL, maxTokens: 8000,
     systemPrompt: WRITER_SYSTEM,
     userPrompt: buildWriterPrompt({ brief, researchBrief: research, blogContext: blogContextBlock }),
     parse: parseWriter,
@@ -458,7 +459,7 @@ async function stageEdit(database: Database, draft: DraftRow): Promise<StageResu
 
   const { result, costCents } = await claudeJson({
     database, scope: 'draft', scopeId: draft.id, stage: 'editor',
-    model: 'claude-opus-4-7', maxTokens: 8000,
+    model: OPUS_MODEL, maxTokens: 8000,
     systemPrompt: EDITOR_SYSTEM,
     userPrompt: buildEditorPrompt({
       brief,
@@ -530,7 +531,7 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
 
   const { result, costCents } = await claudeJson({
     database, scope: 'draft', scopeId: draft.id, stage: 'signoff',
-    model: 'claude-opus-4-7', maxTokens: 1500,
+    model: OPUS_MODEL, maxTokens: 1500,
     systemPrompt: SIGN_OFF_SYSTEM,
     userPrompt: buildSignOffPrompt({
       brief,
@@ -561,7 +562,7 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
     const bodyMd = reloaded?.bodyMarkdown ?? draft.bodyMarkdown ?? ''
     const { result: structured, costCents: sCents } = await claudeJson({
       database, scope: 'draft', scopeId: draft.id, stage: 'structuring',
-      model: 'claude-sonnet-4-6', maxTokens: 8000,
+      model: SONNET_MODEL, maxTokens: 8000,
       systemPrompt: STRUCTURE_SYSTEM,
       userPrompt: buildStructurePrompt({
         title: reloaded?.title ?? draft.title ?? '',

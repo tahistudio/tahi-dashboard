@@ -19,7 +19,11 @@ import { db } from '@/lib/db'
 
 type Database = Awaited<ReturnType<typeof db>>
 
-export type ClaudeModel = 'claude-opus-4-7' | 'claude-sonnet-4-6' | 'claude-haiku-4-5'
+// String, not a literal union — models come from lib/ai-models.ts which
+// is env-overridable, so a new published ID must be accepted without a
+// type change. Cost estimation degrades gracefully (0) for IDs not in
+// the rate card.
+export type ClaudeModel = string
 
 export interface ClaudeCallOptions<T> {
   database: Database

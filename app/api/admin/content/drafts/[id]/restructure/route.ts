@@ -20,6 +20,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { claudeJson } from '@/lib/anthropic-cost'
+import { SONNET_MODEL } from '@/lib/ai-models'
 import { markdownToHtml } from '@/lib/markdown-render'
 import { STRUCTURE_SYSTEM, buildStructurePrompt, parseStructure } from '@/lib/round-table-leads'
 import { loadBlogContext, linkableUrlSet, sanitizeInternalLinks } from '@/lib/blog-context'
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   try {
     out = await claudeJson({
       database, scope: 'draft', scopeId: id, stage: 'structuring',
-      model: 'claude-sonnet-4-6', maxTokens: 8000,
+      model: SONNET_MODEL, maxTokens: 8000,
       skipCostCap: true,
       systemPrompt: STRUCTURE_SYSTEM,
       userPrompt: buildStructurePrompt({
