@@ -2841,3 +2841,193 @@ export const blogBackfillLog = sqliteTable('blog_backfill_log', {
   index('idx_blog_backfill_status').on(table.status),
 ])
 
+/**
+ * Round-table drafting — Phase I · Slice 9.
+ *
+ * The single-prompt `lib/blog-writer.ts` is being replaced with a
+ * multi-stage panel: SERP analyst → researcher → strategist → headline
+ * lab → writer → 20+ reviewers → editor → sign-off. Each non-data stage
+ * gets a row in `draftReviews`. Revisions get a row in `draftRevisions`
+ * (immutable history of every body version). The editor's tie-breaking
+ * decisions get a row in `editorOverrides` so we can build a calibration
+ * loop where Liam side-with reviewers and the system learns weights over
+ * time.
+ *
+ * `draftVariants` holds the loser-drafts from high-priority articles
+ * where the writer produced 2 candidate angles in parallel.
+ *
+ * `postScorecards` is the morning-after-publish view: GSC indexing,
+ * GA4/Matomo sessions, SE Ranking position, conversion attribution.
+ * One row per published post, updated nightly by a cron.
+ *
+ * `aiCostLog` is per-stage cost tracking. Every Anthropic / OpenAI /
+ * Perplexity / Replicate call writes one row with model + tokens +
+ * estimated USD. Lets us enforce the per-article cap and aggregate
+ * spend by stage / reviewer / post.
+ */
+
+export const draftRevisions = sqliteTable('draft_revisions', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  draftId: text('draft_id').notNull().references(() => contentDrafts.id, { onDelete: 'cascade' }),
+  // 1-indexed per draft. Revision 1 is the writer's first output;
+  // editor-merged revisions are 2, 3, etc. Capped at 4 by the orchestrator.
+  revisionNumber: integer('revision_number').notNull(),
+  // writer_initial | editor_merge | writer_retry | editor_signoff
+  source: text('source').notNull(),
+  bodyHtml: text('body_html').notNull(),
+  bodyMarkdown: text('body_markdown'),
+  wordCount: integer('word_count'),
+  // Optional reason this revision was produced (e.g. "Anti-AI gate failed at 27%, rewrite")
+  reason: text('reason'),
+  ...timestamps,
+}, (table) => [
+  index('idx_draft_revisions_draft').on(table.draftId, table.revisionNumber),
+])
+
+export const draftReviews = sqliteTable('draft_reviews', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  draftId: text('draft_id').notNull().references(() => contentDrafts.id, { onDelete: 'cascade' }),
+  // Which revision this review was performed against (lets us see how
+  // reviewer opinions changed across rewrites).
+  revisionNumber: integer('revision_number').notNull(),
+  // strategist | headline_lab | writer | seo_aeo | sales | marketing |
+  // brand_tone | icp_reader | anti_ai | tahi_voice | originality |
+  // internal_links | accessibility | legal_risk | hook | closing_cta |
+  // pacing | citations | visual_layout | featured_snippet |
+  // voice_search | skim_test | counter_argument | unique_angle |
+  // mobile_reading | emotional_resonance | editor | signoff
+  reviewerKey: text('reviewer_key').notNull(),
+  // 0-100, reviewer's score for this revision. null for non-scoring
+  // reviewers (e.g. researcher).
+  score: integer('score'),
+  // 'pass' | 'soft_fail' | 'hard_fail' — hard_fail means veto-power
+  // reviewers blocked the revision; soft_fail = Editor can override.
+  verdict: text('verdict'),
+  // Concise reviewer summary for the conflict UI.
+  summary: text('summary'),
+  // JSON: structured critique payload specific to the reviewer.
+  // e.g. for SEO: { keywordDensity, missingHeadings, ... }
+  //      for Sales: { ctaStrength, pathToCallScore, suggestions: [...] }
+  critique: text('critique'),
+  // Voice weight applied to this reviewer when the editor merged.
+  // Strategist sets these based on funnel intent.
+  weight: text('weight'),  // stored as text JSON to allow fine-grained per-stage values
+  // Time taken so we can spot slow reviewers
+  durationMs: integer('duration_ms'),
+  ...timestamps,
+}, (table) => [
+  index('idx_draft_reviews_draft').on(table.draftId, table.revisionNumber),
+  index('idx_draft_reviews_reviewer').on(table.reviewerKey),
+  index('idx_draft_reviews_verdict').on(table.verdict),
+])
+
+export const editorOverrides = sqliteTable('editor_overrides', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  draftId: text('draft_id').notNull().references(() => contentDrafts.id, { onDelete: 'cascade' }),
+  // Two reviewers disagreed. Editor picked one. Liam can later side with
+  // the other in the conflicts UI; that override is logged here.
+  reviewerA: text('reviewer_a').notNull(),
+  reviewerB: text('reviewer_b').notNull(),
+  topic: text('topic'),                 // freeform e.g. "paragraph 4 retention"
+  editorPicked: text('editor_picked').notNull(),  // 'a' | 'b' | 'compromise'
+  editorReasoning: text('editor_reasoning'),
+  // Liam's override (null until reviewed)
+  liamSidedWith: text('liam_sided_with'),   // 'a' | 'b' | 'editor' | null
+  liamReasoning: text('liam_reasoning'),
+  reviewedAt: text('reviewed_at'),
+  ...timestamps,
+}, (table) => [
+  index('idx_editor_overrides_draft').on(table.draftId),
+  index('idx_editor_overrides_unreviewed').on(table.liamSidedWith),
+])
+
+export const draftVariants = sqliteTable('draft_variants', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  draftId: text('draft_id').notNull().references(() => contentDrafts.id, { onDelete: 'cascade' }),
+  // Variant index — strategist requests 2 for high-priority posts.
+  // 'A' / 'B' / 'C'. The winning variant's body lives on contentDrafts.
+  variantLabel: text('variant_label').notNull(),
+  angle: text('angle'),                 // strategist's one-liner for this angle
+  bodyHtml: text('body_html').notNull(),
+  bodyMarkdown: text('body_markdown'),
+  panelScore: integer('panel_score'),   // 0-100 mean across reviewers
+  selected: integer('selected', { mode: 'boolean' }).notNull().default(false),
+  editorReasoning: text('editor_reasoning'),
+  ...timestamps,
+}, (table) => [
+  index('idx_draft_variants_draft').on(table.draftId),
+])
+
+export const postScorecards = sqliteTable('post_scorecards', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // One row per published post — keyed on the Webflow item id so refreshes
+  // overwrite, not stack.
+  webflowItemId: text('webflow_item_id').notNull().unique(),
+  draftId: text('draft_id').references(() => contentDrafts.id, { onDelete: 'set null' }),
+  url: text('url').notNull(),
+  publishedAt: text('published_at').notNull(),
+  // GSC
+  gscIndexStatus: text('gsc_index_status'),    // PASS / PARTIAL / FAIL
+  gscFirstIndexedAt: text('gsc_first_indexed_at'),
+  gscImpressions7d: integer('gsc_impressions_7d'),
+  gscClicks7d: integer('gsc_clicks_7d'),
+  gscAvgPosition7d: integer('gsc_avg_position_7d'),  // x100 for 2dp precision
+  gscImpressions30d: integer('gsc_impressions_30d'),
+  gscClicks30d: integer('gsc_clicks_30d'),
+  gscAvgPosition30d: integer('gsc_avg_position_30d'),
+  // GA4
+  ga4Sessions7d: integer('ga4_sessions_7d'),
+  ga4Sessions30d: integer('ga4_sessions_30d'),
+  ga4AvgEngagementSec: integer('ga4_avg_engagement_sec'),
+  ga4ConversionEvents30d: integer('ga4_conversion_events_30d'),
+  // Matomo (optional, if key configured)
+  matomoVisits30d: integer('matomo_visits_30d'),
+  matomoAvgTimeSec: integer('matomo_avg_time_sec'),
+  // SE Ranking
+  seRankingTargetPos: integer('se_ranking_target_pos'),
+  seRankingTopKeywords: text('se_ranking_top_keywords'),   // JSON [{kw, pos}]
+  // Internal — links landed pointing here
+  inboundInternalLinks: integer('inbound_internal_links').notNull().default(0),
+  // Backlinks (manual or from Ahrefs/SE Ranking)
+  backlinks30d: integer('backlinks_30d').notNull().default(0),
+  // Editor's predictions at publish-time for accountability
+  predictedWordCount: integer('predicted_word_count'),
+  predictedRank30d: integer('predicted_rank_30d'),
+  predictedSessions30d: integer('predicted_sessions_30d'),
+  // Last refresh
+  lastRefreshedAt: text('last_refreshed_at'),
+  ...timestamps,
+}, (table) => [
+  index('idx_post_scorecards_published').on(table.publishedAt),
+])
+
+export const aiCostLog = sqliteTable('ai_cost_log', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // What did this call belong to? Most calls tie back to a draft. Some
+  // (ideation cron, backfill) tie to other surfaces — we'll use scope to
+  // group those.
+  scope: text('scope').notNull(),                  // 'draft' | 'ideation' | 'backfill' | 'links' | 'health'
+  scopeId: text('scope_id'),                       // draft.id / idea.id / runId etc
+  // What stage was this? Maps to draftReviews.reviewerKey for review
+  // calls, or 'researcher', 'cover_generator', 'embedding' etc.
+  stage: text('stage').notNull(),
+  // Provider + model
+  provider: text('provider').notNull(),            // 'anthropic' | 'openai' | 'perplexity' | 'replicate'
+  model: text('model').notNull(),
+  // Usage
+  inputTokens: integer('input_tokens'),
+  outputTokens: integer('output_tokens'),
+  // For non-token services (image gen, embeddings billed per call)
+  callUnits: integer('call_units'),
+  // Estimated USD cost. We compute this in-app per provider rate sheet
+  // so we don't have to wait for invoice reconciliation.
+  estimatedUsdCents: integer('estimated_usd_cents').notNull(),
+  // Optional friendly note
+  note: text('note'),
+  ...timestamps,
+}, (table) => [
+  index('idx_ai_cost_log_scope').on(table.scope, table.scopeId),
+  index('idx_ai_cost_log_stage').on(table.stage),
+  index('idx_ai_cost_log_created').on(table.createdAt),
+])
+
