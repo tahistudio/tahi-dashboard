@@ -20,6 +20,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     startWeek?: number | null
     endWeek?: number | null
     data?: unknown
+    themeMode?: 'light' | 'dark' | 'feature'
     position?: number
   }
 
@@ -33,6 +34,13 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.endWeek !== undefined) updates.endWeek = body.endWeek
   if (body.position !== undefined) updates.position = body.position
   if (body.data !== undefined) updates.data = body.data === null ? null : JSON.stringify(body.data)
+  if (body.themeMode !== undefined) {
+    const THEMES = ['light', 'dark', 'feature'] as const
+    if (!(THEMES as ReadonlyArray<string>).includes(body.themeMode)) {
+      return NextResponse.json({ error: `themeMode must be one of ${THEMES.join(', ')}` }, { status: 400 })
+    }
+    updates.themeMode = body.themeMode
+  }
 
   await database
     .update(schema.scheduleSections)

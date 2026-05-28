@@ -176,10 +176,67 @@ export function BrandMark({
 
 // ── Page chrome (leaf top-left + section number top-right) ────────────────
 
+/** Per-section surface treatment. Defaults to 'light' (cream paper).
+ *  'dark' inverts to dark-ink + light text. 'feature' uses the same glassy
+ *  gradient vocabulary as the cover so a single mid-document slide reads as
+ *  a hero panel. */
+export type PageChromeTheme = 'light' | 'dark' | 'feature'
+
+interface ChromePalette {
+  surface: string
+  border: string
+  chromeText: string
+  childText: string
+  shadow: string
+  brandVariant: 'dark' | 'white'
+}
+
+function paletteForTheme(theme: PageChromeTheme): ChromePalette {
+  if (theme === 'dark') {
+    return {
+      // Solid dark surface — sits between #1f2c1a (cover) and #2d3a26 (body
+      // text on light) so the dark slide reads as the same family without
+      // competing with the cover's depth.
+      surface: '#1f2c1a',
+      border: 'rgba(220, 239, 216, 0.18)',
+      chromeText: '#a8c89e',
+      childText: BRAND.surface,
+      shadow: '0 12px 32px rgba(31, 44, 26, 0.32)',
+      brandVariant: 'white',
+    }
+  }
+  if (theme === 'feature') {
+    // Mirror the cover's brand-glass gradient exactly so a featured slide
+    // reads as a "moment" in the same visual language as the hero.
+    const featureBackground = [
+      'radial-gradient(120% 80% at 85% -20%, rgba(147,201,138,0.22) 0%, transparent 55%)',
+      'radial-gradient(80% 60% at -10% 110%, rgba(122,170,114,0.16) 0%, transparent 50%)',
+      '#1f2c1a',
+    ].join(', ')
+    return {
+      surface: featureBackground,
+      border: 'rgba(220, 239, 216, 0.22)',
+      chromeText: '#a8c89e',
+      childText: BRAND.surface,
+      shadow: '0 16px 48px rgba(31, 44, 26, 0.24)',
+      brandVariant: 'white',
+    }
+  }
+  return {
+    surface: BRAND.surface,
+    border: BRAND.borderSubtle,
+    chromeText: BRAND.subtle,
+    childText: BRAND.ink,
+    shadow: '0 4px 16px rgba(31, 44, 26, 0.05)',
+    brandVariant: 'dark',
+  }
+}
+
 export function PageChrome({
   sectionNumber,
   sectionName,
   projectLabel,
+  theme = 'light',
   children,
 }: {
   /** "01" / "02" etc. Pass null to suppress the top-right label. */
@@ -188,8 +245,11 @@ export function PageChrome({
   sectionName?: string | null
   /** Project tagline shown in the footer, e.g. "Tevalis × Tahi Studio · build plan". */
   projectLabel?: string | null
+  /** Surface treatment. Defaults to 'light'. */
+  theme?: PageChromeTheme
   children: React.ReactNode
 }) {
+  const p = paletteForTheme(theme)
   return (
     <section
       style={{
@@ -197,15 +257,21 @@ export function PageChrome({
         width: 'calc(100% - clamp(1.5rem, 6vw, 3rem))',
         maxWidth: '76rem',
         margin: '0 auto',
-        background: BRAND.surface,
-        border: `1px solid ${BRAND.borderSubtle}`,
+        background: p.surface,
+        border: `1px solid ${p.border}`,
         borderRadius: '1rem',
-        boxShadow: '0 4px 16px rgba(31, 44, 26, 0.05)',
+        boxShadow: p.shadow,
         padding: 'clamp(1.25rem, 3vw, 2.5rem) clamp(1.25rem, 3vw, 2.25rem)',
         display: 'flex',
         flexDirection: 'column',
         gap: '1rem',
+        color: p.childText,
+        // Inversion: children should pick up the right text colour by
+        // default. Most renderers hardcode BRAND.ink / BRAND.body so we
+        // additionally expose this as a CSS var consumers can read.
+        ['--page-chrome-text' as string]: p.childText,
       }}
+      data-page-chrome-theme={theme}
     >
       {/* Top chrome */}
       <div
@@ -215,18 +281,18 @@ export function PageChrome({
           justifyContent: 'space-between',
           gap: '1rem',
           paddingBottom: '0.625rem',
-          borderBottom: `1px solid ${BRAND.borderSubtle}`,
+          borderBottom: `1px solid ${p.border}`,
         }}
       >
         {/* Inner section pages: icon-only, per the spec. Cover gets full
             wordmark; subsequent pages get just the leaf mark. */}
-        <BrandMark size="sm" layout="icon-only" />
+        <BrandMark size="sm" layout="icon-only" variant={p.brandVariant} />
         {(sectionNumber || sectionName) && (
           <span
             style={{
               fontSize: '0.6875rem',
               fontWeight: 600,
-              color: BRAND.subtle,
+              color: p.chromeText,
               textTransform: 'uppercase',
               letterSpacing: '0.08em',
             }}
@@ -249,9 +315,9 @@ export function PageChrome({
             justifyContent: 'space-between',
             gap: '1rem',
             paddingTop: '0.625rem',
-            borderTop: `1px solid ${BRAND.borderSubtle}`,
+            borderTop: `1px solid ${p.border}`,
             fontSize: '0.6875rem',
-            color: BRAND.subtle,
+            color: p.chromeText,
           }}
         >
           <span style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>

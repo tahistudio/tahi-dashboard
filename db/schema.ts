@@ -2072,6 +2072,13 @@ export const scheduleSections = sqliteTable('schedule_sections', {
   endWeek: integer('end_week'),
   // Type-specific JSON payload. See module-level docs for shape per type.
   data: text('data'),
+  // Per-slide surface treatment for the public viewer:
+  //   'light'   — cream surface, ink text (default)
+  //   'dark'    — inverted dark-ink surface with light text
+  //   'feature' — glassy gradient hero treatment, same vocabulary as the cover
+  // Cover slides ignore this column; the viewer always renders the cover with
+  // the feature gradient regardless of value.
+  themeMode: text('theme_mode').default('light'),
   // Display order.
   position: integer('position').notNull().default(0),
   ...timestamps,
@@ -2163,6 +2170,12 @@ export const proposalSections = sqliteTable('proposal_sections', {
   title: text('title'),
   subtitle: text('subtitle'),
   data: text('data'), // JSON
+  // Per-slide surface treatment for the public viewer:
+  //   'light'   — cream surface, ink text (default)
+  //   'dark'    — inverted dark-ink surface with light text
+  //   'feature' — glassy gradient hero treatment, same vocabulary as the cover
+  // The cover slide is always rendered in feature/brand-glass regardless of value.
+  themeMode: text('theme_mode').default('light'),
   position: integer('position').notNull().default(0),
   ...timestamps,
 }, (table) => [

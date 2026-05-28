@@ -17,6 +17,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     title?: string | null
     subtitle?: string | null
     data?: unknown
+    themeMode?: 'light' | 'dark' | 'feature'
     position?: number
   }
   const database = await db() as unknown as D1
@@ -26,6 +27,13 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.subtitle !== undefined) updates.subtitle = body.subtitle?.trim() ?? null
   if (body.position !== undefined) updates.position = body.position
   if (body.data !== undefined) updates.data = body.data === null ? null : JSON.stringify(body.data)
+  if (body.themeMode !== undefined) {
+    const THEMES = ['light', 'dark', 'feature'] as const
+    if (!(THEMES as ReadonlyArray<string>).includes(body.themeMode)) {
+      return NextResponse.json({ error: `themeMode must be one of ${THEMES.join(', ')}` }, { status: 400 })
+    }
+    updates.themeMode = body.themeMode
+  }
 
   await database.update(schema.proposalSections).set(updates)
     .where(and(eq(schema.proposalSections.id, sectionId), eq(schema.proposalSections.proposalId, proposalId)))

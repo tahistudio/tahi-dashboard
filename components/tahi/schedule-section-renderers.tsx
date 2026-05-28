@@ -37,6 +37,9 @@ export interface ScheduleSection {
   startWeek: number | null
   endWeek: number | null
   data: string | null              // JSON; type-specific
+  /** Per-slide surface treatment ('light' | 'dark' | 'feature'). Drives
+   *  PageChrome rendering in the public viewer. Defaults to 'light'. */
+  themeMode?: string | null
   position: number
   rows?: GanttRow[]                // populated for gantt sections by the API
 }

@@ -156,18 +156,35 @@ const builderShellStyle: React.CSSProperties = {
 
 // ─── Header / title / action toolbar ─────────────────────────────────────
 
+/**
+ * The sticky band that contains the rounded toolbar. Padded so the toolbar
+ * has breathing room from the page edges and reads as its own surface —
+ * not a flush nav strip.
+ *
+ * Callers should wrap their toolbar contents in a child element styled
+ * with `builderHeaderToolbar` so the rounded surface renders correctly.
+ */
 export const builderHeader: React.CSSProperties = {
   position: 'sticky',
   top: 0,
   zIndex: 20,
-  display: 'flex',
-  alignItems: 'center',
-  gap: '0.875rem',
   padding: '0.625rem 1rem',
   background: 'rgba(255,255,255,0.85)',
   backdropFilter: 'blur(12px)',
   WebkitBackdropFilter: 'blur(12px)',
-  borderBottom: '1px solid var(--color-border-subtle)',
+}
+
+/** Rounded inner surface — the actual visible toolbar bar. Sits inside
+ *  `builderHeader`. */
+export const builderHeaderToolbar: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.875rem',
+  padding: '0.4375rem 0.75rem',
+  background: 'var(--color-bg)',
+  border: '1px solid var(--color-border-subtle)',
+  borderRadius: 'var(--radius-lg, 0.875rem)',
+  boxShadow: '0 4px 12px -6px rgba(31, 44, 26, 0.08)',
 }
 
 export const builderTitleInput: React.CSSProperties = {
@@ -229,20 +246,29 @@ export const builderRail: React.CSSProperties = {
 /**
  * Single-rail layout — navigator + metadata in one combined right column.
  * Use with `builderGridSingleRail` for a 2-column shell (editor + rail).
+ *
+ * Note: the rail is NOT internally scrollable. It uses `alignSelf: start`
+ * + sticky positioning so it stays visible as the user scrolls the slide
+ * builder, but the rail itself renders at its natural height. If the
+ * section list grows long, the whole page scrolls. This matches Liam's
+ * directive that the rail visual track should disappear (no internal
+ * scrollbar / overflow rail).
  */
 export const builderGridSingleRail: React.CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'minmax(0, 1fr) 22rem',
   flex: 1,
   minHeight: 0,
+  alignItems: 'start',
 }
 
 export const builderRailWide: React.CSSProperties = {
   position: 'sticky',
   top: '3.625rem',
   alignSelf: 'start',
-  height: 'calc(100vh - 3.625rem)',
-  overflowY: 'auto',
+  // No fixed height + no overflow: the rail grows with its content. If it
+  // exceeds the viewport the whole page scrolls. This removes the visual
+  // rail track that was reading as a separate scrolling surface.
   borderLeft: '1px solid var(--color-border-subtle)',
   padding: '1.125rem 1rem',
   display: 'flex',
@@ -648,8 +674,14 @@ export function FieldGroup({ label, children }: { label: string; children: React
 
 /**
  * <BuilderEditorShell> - the framed container around an editor pane.
- * Centres a max-width column, places an eyebrow + kicker title, and
- * exposes optional move-up/move-down/delete buttons aligned to the right.
+ * Centres the column at a readable max-width (72rem), places an eyebrow +
+ * kicker title, and exposes optional move-up/move-down/delete buttons
+ * aligned to the right.
+ *
+ * The 72rem cap matches the proposal builder so both surfaces feel like
+ * one product. Wide content (gantt grids) is allowed to scroll horizontally
+ * within this cap via overflow on the renderer side; the editor column
+ * itself stays readable.
  */
 export function BuilderEditorShell({
   eyebrow,
@@ -663,11 +695,7 @@ export function BuilderEditorShell({
   actions?: React.ReactNode
 }) {
   return (
-    // Span the full builder-main column with no inner max — the column
-    // itself is already constrained by the sidebar + rail. Editors get
-    // the room they need (especially gantt grids + tables); the
-    // builderMain padding gives breathing room from the edges.
-    <div>
+    <div style={{ width: '100%', maxWidth: '72rem', margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
         <div>
           <div style={{ fontSize: '0.625rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>

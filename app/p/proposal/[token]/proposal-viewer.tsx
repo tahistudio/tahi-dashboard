@@ -30,7 +30,7 @@ import { useShareViewTracking } from '@/components/tahi/use-share-view-tracking'
 import { useSectionDwellTracking } from '@/components/tahi/use-section-dwell-tracking'
 import {
   BrandMark, CoverPage, PageChrome, AccentTitle, BRAND,
-  type MetadataCell,
+  type MetadataCell, type PageChromeTheme,
 } from '@/components/tahi/deliverable'
 import { ProposalSectionBlock } from './section-blocks'
 
@@ -54,7 +54,14 @@ interface PublicSection {
   title: string | null
   subtitle: string | null
   data: string | null
+  themeMode?: string | null
   position: number
+}
+
+/** Coerce the raw themeMode column into the strict PageChromeTheme union. */
+function normaliseTheme(value: string | null | undefined): PageChromeTheme {
+  if (value === 'dark' || value === 'feature') return value
+  return 'light'
 }
 
 interface PublicVariant {
@@ -397,11 +404,14 @@ export function ProposalViewer(props: ProposalViewerProps) {
 
       {/* Data-driven sections. Each one renders through the section
           dispatcher; PageChrome supplies the leaf top-left, page number
-          top-right and project-label footer per the deliverable system. */}
+          top-right and project-label footer per the deliverable system.
+          themeMode picks the surface treatment per section — light (default),
+          dark (inverted), or feature (cover-grade glassy gradient). */}
       {sections.map((section, i) => {
         pageCursor += 1
         const num = String(pageCursor).padStart(2, '0')
         const name = (section.subtitle ?? section.title ?? defaultSectionName(section.type)).toUpperCase()
+        const theme = normaliseTheme(section.themeMode)
         // i used only for stable React key in case position ties.
         return (
           <div key={`${section.id}-${i}`} ref={el => observeSection(el, section.id)}>
@@ -409,6 +419,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
               sectionNumber={num}
               sectionName={name}
               projectLabel={projectLabel}
+              theme={theme}
             >
               <ProposalSectionBlock section={section} />
             </PageChrome>

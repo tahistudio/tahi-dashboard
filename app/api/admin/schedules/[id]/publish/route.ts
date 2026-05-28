@@ -50,6 +50,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       startWeek: schema.scheduleSections.startWeek,
       endWeek: schema.scheduleSections.endWeek,
       data: schema.scheduleSections.data,
+      themeMode: schema.scheduleSections.themeMode,
       position: schema.scheduleSections.position,
     })
       .from(schema.scheduleSections)

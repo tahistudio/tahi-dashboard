@@ -834,6 +834,14 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0058',
+    description: 'Per-slide theme_mode on proposal_sections + schedule_sections. Cover is locked to brand-glass (feature) in code; non-cover slides choose light | dark | feature. The runner swallows "duplicate column name" errors so this is safe to re-run.',
+    statements: [
+      `ALTER TABLE proposal_sections ADD COLUMN theme_mode TEXT DEFAULT 'light'`,
+      `ALTER TABLE schedule_sections ADD COLUMN theme_mode TEXT DEFAULT 'light'`,
+    ],
+  },
+  {
     name: '0055',
     description: 'Phase H finance overhaul: Airwallex bank-of-truth tables (balances + transactions), reserves pots (tax + custom), multi-source reconciliation columns on invoices + expense_commitments. Stripe + Xero + Airwallex become three sources reconciled into one truth.',
     statements: [

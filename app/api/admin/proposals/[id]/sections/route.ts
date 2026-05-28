@@ -30,11 +30,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     title?: string | null
     subtitle?: string | null
     data?: unknown
+    themeMode?: 'light' | 'dark' | 'feature'
     position?: number
   }
   if (!body.type || !SECTION_TYPES.includes(body.type as typeof SECTION_TYPES[number])) {
     return NextResponse.json({ error: `type must be one of ${SECTION_TYPES.join(', ')}` }, { status: 400 })
   }
+  const THEMES = ['light', 'dark', 'feature'] as const
+  const themeMode = body.themeMode && (THEMES as ReadonlyArray<string>).includes(body.themeMode) ? body.themeMode : 'light'
 
   const database = await db() as unknown as D1
   let position = body.position
@@ -55,6 +58,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     title: body.title?.trim() ?? null,
     subtitle: body.subtitle?.trim() ?? null,
     data: body.data === undefined ? null : JSON.stringify(body.data),
+    themeMode,
     position,
     createdAt: now,
     updatedAt: now,

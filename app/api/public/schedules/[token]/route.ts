@@ -74,6 +74,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
           startWeek: number | null
           endWeek: number | null
           data: unknown
+          themeMode?: string | null
           position: number
         }>
         rows: Array<{
@@ -121,6 +122,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         startWeek: schema.scheduleSections.startWeek,
         endWeek: schema.scheduleSections.endWeek,
         data: schema.scheduleSections.data,
+        themeMode: schema.scheduleSections.themeMode,
         position: schema.scheduleSections.position,
       })
       .from(schema.scheduleSections)

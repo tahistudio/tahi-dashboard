@@ -19,6 +19,7 @@ interface SectionBody {
   endWeek?: number | null
   /** JSON-serialisable type-specific payload (see schema.ts docs). */
   data?: unknown
+  themeMode?: 'light' | 'dark' | 'feature'
   position?: number
 }
 
@@ -57,6 +58,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     position = (maxRow?.maxPos ?? -1) + 1
   }
 
+  const THEMES = ['light', 'dark', 'feature'] as const
+  const themeMode = body.themeMode && (THEMES as ReadonlyArray<string>).includes(body.themeMode) ? body.themeMode : 'light'
+
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
   await database.insert(schema.scheduleSections).values({
@@ -68,6 +72,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     startWeek: body.startWeek ?? null,
     endWeek: body.endWeek ?? null,
     data: body.data === undefined ? null : JSON.stringify(body.data),
+    themeMode,
     position,
     createdAt: now,
     updatedAt: now,

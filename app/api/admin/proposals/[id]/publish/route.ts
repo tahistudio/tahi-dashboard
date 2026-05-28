@@ -45,6 +45,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       title: schema.proposalSections.title,
       subtitle: schema.proposalSections.subtitle,
       data: schema.proposalSections.data,
+      themeMode: schema.proposalSections.themeMode,
       position: schema.proposalSections.position,
     })
       .from(schema.proposalSections)

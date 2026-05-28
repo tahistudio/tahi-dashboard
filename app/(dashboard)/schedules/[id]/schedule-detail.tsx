@@ -20,7 +20,7 @@ import { SectionRenderer, type ScheduleSection, type SectionType } from '@/compo
 import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
 import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
 import {
-  BuilderShell, builderHeader, builderTitleInput, builderGridSingleRail, builderRailWide, builderMain,
+  BuilderShell, builderHeader, builderHeaderToolbar, builderTitleInput, builderGridSingleRail, builderRailWide, builderMain,
   toolbarBtn, toolbarPrimary, railBtn, navAddBtn, metaInputStyle,
   BuilderMoreMenu, BuilderNavGroup, BuilderNavItem,
   RailSection, FieldGroup, SaveIndicator, BuilderEditorShell, statusPillStyle,
@@ -283,7 +283,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
     }
   }
 
-  async function patchSection(sectionId: string, changes: { title?: string | null; subtitle?: string | null; startWeek?: number | null; endWeek?: number | null; data?: unknown }) {
+  async function patchSection(sectionId: string, changes: { title?: string | null; subtitle?: string | null; startWeek?: number | null; endWeek?: number | null; data?: unknown; themeMode?: 'light' | 'dark' | 'feature' }) {
     setSections(prev => prev.map(s => {
       if (s.id !== sectionId) return s
       const next: ScheduleSection = { ...s }
@@ -292,6 +292,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       if (changes.startWeek !== undefined) next.startWeek = changes.startWeek
       if (changes.endWeek !== undefined) next.endWeek = changes.endWeek
       if (changes.data !== undefined) next.data = changes.data === null ? null : JSON.stringify(changes.data)
+      if (changes.themeMode !== undefined) next.themeMode = changes.themeMode
       return next
     }))
     try {
@@ -751,92 +752,95 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
 
   return (
     <BuilderShell className="schedule-builder">
-      {/* Sticky top bar: back link, inline title edit, status pill, save state, actions */}
+      {/* Sticky top band — wraps a rounded toolbar surface so it reads as an
+          intentional control panel rather than a flush nav strip. */}
       <header style={builderHeader}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', minWidth: 0, flex: 1 }}>
-          <Link
-            href="/schedules"
-            aria-label="All schedules"
-            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '2rem', height: '2rem', borderRadius: '0.5rem', color: 'var(--color-text-muted)', flexShrink: 0 }}
-            className="nav-item-hover"
-          >
-            <ArrowLeft size={16} />
-          </Link>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <input
-              type="text"
-              value={schedule.title}
-              onChange={e => setSchedule(p => p ? { ...p, title: e.target.value } : p)}
-              onBlur={e => trackSave(patchSchedule({ title: e.currentTarget.value || 'Untitled' }))}
-              placeholder="Untitled schedule"
-              style={builderTitleInput}
-            />
+        <div style={builderHeaderToolbar}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', minWidth: 0, flex: 1 }}>
+            <Link
+              href="/schedules"
+              aria-label="All schedules"
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '2rem', height: '2rem', borderRadius: '0.5rem', color: 'var(--color-text-muted)', flexShrink: 0 }}
+              className="nav-item-hover"
+            >
+              <ArrowLeft size={16} />
+            </Link>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <input
+                type="text"
+                value={schedule.title}
+                onChange={e => setSchedule(p => p ? { ...p, title: e.target.value } : p)}
+                onBlur={e => trackSave(patchSchedule({ title: e.currentTarget.value || 'Untitled' }))}
+                placeholder="Untitled schedule"
+                style={builderTitleInput}
+              />
+            </div>
+            <span style={statusPillStyle(STATUS_PALETTE[schedule.status])}>{schedule.status}</span>
+            <SaveIndicator savingCount={savingCount} lastSavedAt={lastSavedAt} />
           </div>
-          <span style={statusPillStyle(STATUS_PALETTE[schedule.status])}>{schedule.status}</span>
-          <SaveIndicator savingCount={savingCount} lastSavedAt={lastSavedAt} />
-        </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
-          {/* Publish button — visible once the schedule has been shared
-              (i.e. has a public token). Snapshots current state so the
-              live link reflects this exact moment. The save indicator
-              still says "saved" for every keystroke; "Published" is the
-              separate "ok now clients can see this" step. */}
-          {publicUrl && (
-            <button
-              onClick={() => trackSave(handlePublish())}
-              disabled={publishing}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+            {/* Publish button — visible once the schedule has been shared
+                (i.e. has a public token). Snapshots current state so the
+                live link reflects this exact moment. The save indicator
+                still says "saved" for every keystroke; "Published" is the
+                separate "ok now clients can see this" step. */}
+            {publicUrl && (
+              <button
+                onClick={() => trackSave(handlePublish())}
+                disabled={publishing}
+                className="inline-flex items-center"
+                style={toolbarBtn}
+                title={schedule.publishedAt
+                  ? `Last published ${new Date(schedule.publishedAt).toLocaleString()}`
+                  : 'Publish so the live link reflects current edits'}
+              >
+                <Upload size={13} />
+                {publishing ? 'Publishing' : (schedule.publishedAt ? 'Republish' : 'Publish')}
+              </button>
+            )}
+            {publicUrl ? (
+              <button
+                onClick={() => { void ensureContacts(); setShowEmail(true) }}
+                className="inline-flex items-center"
+                style={toolbarPrimary}
+                title="Email the public link to a client"
+              >
+                <Mail size={13} />
+                Email link
+              </button>
+            ) : (
+              <button
+                onClick={() => trackSave(handleShare())}
+                disabled={sharing}
+                className="inline-flex items-center"
+                style={toolbarPrimary}
+                title="Generate a public link"
+              >
+                <Share2 size={13} />
+                {sharing ? 'Generating' : 'Get public link'}
+              </button>
+            )}
+            <Link
+              href={`/preview/schedule/${scheduleId}`}
+              target="_blank"
+              rel="noreferrer"
               className="inline-flex items-center"
               style={toolbarBtn}
-              title={schedule.publishedAt
-                ? `Last published ${new Date(schedule.publishedAt).toLocaleString()}`
-                : 'Publish so the live link reflects current edits'}
             >
-              <Upload size={13} />
-              {publishing ? 'Publishing' : (schedule.publishedAt ? 'Republish' : 'Publish')}
-            </button>
-          )}
-          {publicUrl ? (
-            <button
-              onClick={() => { void ensureContacts(); setShowEmail(true) }}
-              className="inline-flex items-center"
-              style={toolbarPrimary}
-              title="Email the public link to a client"
-            >
-              <Mail size={13} />
-              Email link
-            </button>
-          ) : (
-            <button
-              onClick={() => trackSave(handleShare())}
-              disabled={sharing}
-              className="inline-flex items-center"
-              style={toolbarPrimary}
-              title="Generate a public link"
-            >
-              <Share2 size={13} />
-              {sharing ? 'Generating' : 'Get public link'}
-            </button>
-          )}
-          <Link
-            href={`/preview/schedule/${scheduleId}`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center"
-            style={toolbarBtn}
-          >
-            <Eye size={13} />
-            Preview
-          </Link>
-          <BuilderMoreMenu
-            open={moreMenuOpen}
-            onToggle={() => setMoreMenuOpen(v => !v)}
-            onClose={() => setMoreMenuOpen(false)}
-            items={[
-              { icon: <BookmarkPlus size={13} />, label: 'Save as template', onClick: () => setShowSaveTemplate(true) },
-              { icon: <Trash2 size={13} />, label: 'Delete schedule', danger: true, onClick: () => setShowDeleteConfirm(true) },
-            ]}
-          />
+              <Eye size={13} />
+              Preview
+            </Link>
+            <BuilderMoreMenu
+              open={moreMenuOpen}
+              onToggle={() => setMoreMenuOpen(v => !v)}
+              onClose={() => setMoreMenuOpen(false)}
+              items={[
+                { icon: <BookmarkPlus size={13} />, label: 'Save as template', onClick: () => setShowSaveTemplate(true) },
+                { icon: <Trash2 size={13} />, label: 'Delete schedule', danger: true, onClick: () => setShowDeleteConfirm(true) },
+              ]}
+            />
+          </div>
         </div>
       </header>
 
@@ -1006,7 +1010,7 @@ function SectionEditorPane(props: {
   isFirst: boolean
   isLast: boolean
   slideNumber: number
-  onPatch: (changes: { title?: string | null; subtitle?: string | null; startWeek?: number | null; endWeek?: number | null; data?: unknown }) => void
+  onPatch: (changes: { title?: string | null; subtitle?: string | null; startWeek?: number | null; endWeek?: number | null; data?: unknown; themeMode?: 'light' | 'dark' | 'feature' }) => void
   onMoveUp: () => void
   onMoveDown: () => void
   onDelete: () => void
@@ -1047,7 +1051,7 @@ function SectionEditorPane(props: {
       kicker={section.title || SECTION_LABEL[section.type]}
       actions={actions}
     >
-      {/* Title + eyebrow */}
+      {/* Title + eyebrow + slide theme */}
       <div style={{ display: 'grid', gap: '0.875rem', padding: '1.25rem 1.5rem', background: 'var(--color-bg)', border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-lg)', marginBottom: '1.25rem' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.625rem' }}>
           <FieldGroup label="Title">
@@ -1067,6 +1071,12 @@ function SectionEditorPane(props: {
             />
           </FieldGroup>
         </div>
+        <FieldGroup label="Slide theme">
+          <ScheduleSlideThemeSegmented
+            value={section.themeMode === 'dark' || section.themeMode === 'feature' ? section.themeMode : 'light'}
+            onChange={t => onPatch({ themeMode: t })}
+          />
+        </FieldGroup>
       </div>
 
       {/* Type-specific editor */}
@@ -1537,6 +1547,101 @@ function RowEditor({
           {saving ? 'Saving' : 'Save row'}
         </button>
       </div>
+    </div>
+  )
+}
+
+// ─── Slide theme segmented control ───────────────────────────────────────
+//
+// Three-way segmented control bound to schedule_sections.theme_mode. Matches
+// the proposal editor's <SlideThemeSegmented> so both surfaces feel like
+// one product. Cover slides ignore theme_mode (viewer always renders the
+// feature gradient), so the control is only rendered for non-cover sections.
+
+type SlideThemeValue = 'light' | 'dark' | 'feature'
+
+const SCHEDULE_SLIDE_THEMES: ReadonlyArray<{
+  value: SlideThemeValue
+  label: string
+  swatch: { background: string; border: string }
+}> = [
+  {
+    value: 'light',
+    label: 'Light',
+    swatch: { background: '#FFFFFF', border: '#d4e0d0' },
+  },
+  {
+    value: 'dark',
+    label: 'Dark',
+    swatch: { background: '#1f2c1a', border: '#2d3d2a' },
+  },
+  {
+    value: 'feature',
+    label: 'Feature',
+    swatch: { background: 'linear-gradient(135deg, #5A824E 0%, #1f2c1a 100%)', border: '#425F39' },
+  },
+]
+
+function ScheduleSlideThemeSegmented({
+  value,
+  onChange,
+}: {
+  value: SlideThemeValue
+  onChange: (v: SlideThemeValue) => void
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Slide theme"
+      style={{
+        display: 'inline-flex',
+        padding: '0.1875rem',
+        background: 'var(--color-bg-secondary)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: '999px',
+        gap: '0.125rem',
+      }}
+    >
+      {SCHEDULE_SLIDE_THEMES.map(t => {
+        const active = t.value === value
+        return (
+          <button
+            key={t.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(t.value)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4375rem',
+              padding: '0.3125rem 0.75rem',
+              fontSize: '0.75rem',
+              fontWeight: active ? 700 : 500,
+              color: active ? 'var(--color-text)' : 'var(--color-text-muted)',
+              background: active ? 'var(--color-bg)' : 'transparent',
+              border: active ? '1px solid var(--color-border-subtle)' : '1px solid transparent',
+              borderRadius: '999px',
+              cursor: 'pointer',
+              transition: 'background 160ms ease, color 160ms ease',
+              boxShadow: active ? '0 1px 3px rgba(31, 44, 26, 0.06)' : 'none',
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: '0.75rem',
+                height: '0.75rem',
+                borderRadius: '0 4px 0 4px',
+                background: t.swatch.background,
+                border: `1px solid ${t.swatch.border}`,
+                flexShrink: 0,
+              }}
+            />
+            {t.label}
+          </button>
+        )
+      })}
     </div>
   )
 }

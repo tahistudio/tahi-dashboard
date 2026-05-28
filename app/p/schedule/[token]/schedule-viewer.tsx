@@ -18,7 +18,7 @@ import { useEffect, useState } from 'react'
 import { type GanttRow } from '@/components/tahi/gantt-grid'
 import { SectionRenderer, type ScheduleSection } from '@/components/tahi/schedule-section-renderers'
 import {
-  BrandMark, CoverPage, PageChrome, type MetadataCell, BRAND,
+  BrandMark, CoverPage, PageChrome, type MetadataCell, type PageChromeTheme, BRAND,
 } from '@/components/tahi/deliverable'
 import { apiPath } from '@/lib/api'
 import { useShareViewTracking } from '@/components/tahi/use-share-view-tracking'
@@ -213,16 +213,20 @@ export function ScheduleViewer(props: ScheduleViewerProps) {
       {/* Sections — each wrapped in PageChrome for the leaf + page-number frame.
           Section number is 1-indexed against the section list. The outer
           <div ref> registers the section with IntersectionObserver so
-          dwell-time can be tracked per slide. */}
+          dwell-time can be tracked per slide. themeMode picks the surface
+          treatment per section. */}
       {sections.map((section, i) => {
         const num = String(i + 1).padStart(2, '0')
         const name = (section.subtitle ?? defaultSectionName(section.type)).toUpperCase()
+        const raw = section.themeMode
+        const theme: PageChromeTheme = raw === 'dark' || raw === 'feature' ? raw : 'light'
         return (
           <div key={section.id} ref={el => observeSection(el, section.id)}>
             <PageChrome
               sectionNumber={num}
               sectionName={name}
               projectLabel={projectLabel}
+              theme={theme}
             >
               <SectionRenderer
                 section={section}
