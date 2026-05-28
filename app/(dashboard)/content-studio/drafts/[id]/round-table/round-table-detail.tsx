@@ -113,6 +113,9 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   const [editInstructions, setEditInstructions] = useState('')
   const [editing, setEditing] = useState(false)
   const [editResult, setEditResult] = useState<{ changeLog: string[]; skipped: Array<{ instruction: string; reason: string }> } | null>(null)
+  const [publishing, setPublishing] = useState<string | null>(null)
+  const [scheduleDate, setScheduleDate] = useState('')
+  const [publishMsg, setPublishMsg] = useState<string | null>(null)
 
   const fetchSnapshot = useCallback(async () => {
     try {
@@ -165,6 +168,31 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   async function resume() {
     await fetch(apiPath(`/api/admin/content/drafts/${draftId}/resume`), { method: 'POST' }).catch(() => {})
     await fetchSnapshot()
+  }
+
+  async function publishToWebflow(mode: 'draft' | 'now' | 'auto' | 'custom', customDate?: string) {
+    setPublishing(mode)
+    setPublishMsg(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}/publish`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode, customDate }),
+      })
+      const json = await res.json() as { publishUrl?: string; webflowItemId?: string; scheduledFor?: string; publishedAt?: string | null; error?: string; detail?: string }
+      if (!res.ok) {
+        setPublishMsg(`Failed: ${json.error ?? ''}${json.detail ? ' — ' + json.detail : ''}`)
+        return
+      }
+      if (mode === 'draft') setPublishMsg(`Saved to Webflow as a draft (item ${json.webflowItemId}). Publish it from Webflow or here when ready.`)
+      else if (mode === 'now' || json.publishedAt) setPublishMsg(`Published live: ${json.publishUrl}`)
+      else setPublishMsg(`Scheduled for ${json.scheduledFor ? new Date(json.scheduledFor).toLocaleString() : 'next slot'} (staged in Webflow).`)
+      await fetchSnapshot()
+    } catch (err) {
+      setPublishMsg(`Failed: ${err instanceof Error ? err.message : 'error'}`)
+    } finally {
+      setPublishing(null)
+    }
   }
 
   async function applyEdits() {
@@ -296,6 +324,50 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
           <ChevronLeft size={14} aria-hidden="true" /> Back
         </Link>
       </div>
+
+      {/* Publish to Webflow — shown once the draft is ready. */}
+      {draft.status === 'ready_for_publish' && (
+        <Card padding="md" style={{ borderColor: 'var(--color-brand)', background: 'var(--color-brand-50)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.625rem' }}>
+            <div>
+              <p style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--color-brand-dark)', margin: 0 }}>
+                Ready for Webflow
+              </p>
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: '0.125rem 0 0' }}>
+                Body, FAQs, takeaways + meta are split into their CMS fields. Pick how it lands.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <TahiButton size="sm" variant="secondary" loading={publishing === 'draft'} onClick={() => { void publishToWebflow('draft') }}>
+                Save as draft
+              </TahiButton>
+              <input
+                type="datetime-local"
+                value={scheduleDate}
+                onChange={e => setScheduleDate(e.target.value)}
+                style={{ padding: '0.4rem 0.5rem', fontSize: '0.8125rem', borderRadius: '0.375rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}
+              />
+              <TahiButton
+                size="sm"
+                variant="secondary"
+                loading={publishing === 'custom'}
+                disabled={!scheduleDate}
+                onClick={() => { void publishToWebflow('custom', new Date(scheduleDate).toISOString()) }}
+              >
+                Schedule
+              </TahiButton>
+              <TahiButton size="sm" loading={publishing === 'now'} onClick={() => { void publishToWebflow('now') }}>
+                Publish now
+              </TahiButton>
+            </div>
+          </div>
+          {publishMsg && (
+            <p style={{ fontSize: '0.8125rem', color: 'var(--color-text)', margin: '0.625rem 0 0', wordBreak: 'break-word' }}>
+              {publishMsg}
+            </p>
+          )}
+        </Card>
+      )}
 
       {/* Stub service banner */}
       {stubServices.length > 0 && (

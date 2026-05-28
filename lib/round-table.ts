@@ -54,11 +54,14 @@ import {
   buildWriterPrompt,
   buildEditorPrompt,
   buildSignOffPrompt,
+  STRUCTURE_SYSTEM,
+  buildStructurePrompt,
   parseStrategist,
   parseHeadlineLab,
   parseWriter,
   parseEditor,
   parseSignOff,
+  parseStructure,
   type StrategistOutput,
 } from '@/lib/round-table-leads'
 
@@ -544,7 +547,51 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
     contentScore: result.score,
   }).where(eq(schema.contentDrafts.id, draft.id))
 
-  // Now generate the cover via Flux
+  // Structure the draft into discrete Webflow CMS fields so the publish
+  // step lands each piece in the right field (clean post-body without the
+  // FAQ/takeaways sections, separate FAQ pairs, key takeaways, meta). This
+  // is what makes "the Webflow draft work without issues".
+  let structureCents = 0
+  try {
+    const reloaded = await loadDraft(database, draft.id)
+    const bodyMd = reloaded?.bodyMarkdown ?? draft.bodyMarkdown ?? ''
+    const { result: structured, costCents: sCents } = await claudeJson({
+      database, scope: 'draft', scopeId: draft.id, stage: 'structuring',
+      model: 'claude-sonnet-4-6', maxTokens: 8000,
+      systemPrompt: STRUCTURE_SYSTEM,
+      userPrompt: buildStructurePrompt({
+        title: reloaded?.title ?? draft.title ?? '',
+        metaTitle: reloaded?.metaTitle ?? null,
+        metaDescription: reloaded?.metaDescription ?? null,
+        bodyMarkdown: bodyMd,
+      }),
+      parse: parseStructure,
+    })
+    structureCents = sCents
+    const cleanHtml = markdownToHtml(structured.bodyMarkdownClean)
+    const takeawaysHtml = structured.keyTakeaways.length > 0
+      ? `<ul>${structured.keyTakeaways.map(t => `<li>${escapeHtmlText(t)}</li>`).join('')}</ul>`
+      : null
+    await database.update(schema.contentDrafts).set({
+      bodyHtml: cleanHtml,
+      bodyMarkdown: structured.bodyMarkdownClean,
+      faqsJson: JSON.stringify(structured.faqs),
+      keyTakeaways: takeawaysHtml,
+      summary: structured.summary || null,
+      postExcerpt: structured.postExcerpt || null,
+      shortenedName: structured.shortenedName || null,
+      metaTitle: structured.metaTitle || reloaded?.metaTitle || null,
+      metaDescription: structured.metaDescription || reloaded?.metaDescription || null,
+      authorSlug: 'liam',
+    }).where(eq(schema.contentDrafts.id, draft.id))
+  } catch (err) {
+    // Non-fatal — the body still publishes, just without the field split.
+    console.error('Structuring failed', err)
+  }
+
+  // Cover generation. NOTE: Flux is being replaced by an SVG generator
+  // (covers are abstract on-brand illustrations, no text). Kept behind the
+  // stub for now; the SVG generator lands in a follow-up.
   let coverCents = 0
   try {
     const cover = await generateCover(result.recommendCover)
@@ -564,7 +611,11 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
     console.error('Cover generation failed', err)
   }
 
-  return advance(database, draft.id, 'ready_for_publish', costCents + coverCents)
+  return advance(database, draft.id, 'ready_for_publish', costCents + structureCents + coverCents)
+}
+
+function escapeHtmlText(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 async function stageReadyForPublish(database: Database, draft: DraftRow): Promise<StageResult> {

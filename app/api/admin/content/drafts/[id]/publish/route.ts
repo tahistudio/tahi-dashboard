@@ -83,10 +83,10 @@ export async function POST(
   }
 
   const body = (await req.json().catch(() => ({}))) as BodyShape
-  const mode = body.mode as PublishMode | undefined
-  if (!mode || !['now', 'custom', 'auto'].includes(mode)) {
+  const mode = body.mode as (PublishMode | 'draft') | undefined
+  if (!mode || !['now', 'custom', 'auto', 'draft'].includes(mode)) {
     return NextResponse.json(
-      { error: "mode must be one of 'now' | 'custom' | 'auto'" },
+      { error: "mode must be one of 'now' | 'custom' | 'auto' | 'draft'" },
       { status: 400 },
     )
   }
@@ -108,9 +108,11 @@ export async function POST(
   if (!draft) {
     return NextResponse.json({ error: 'Draft not found' }, { status: 404 })
   }
-  if (draft.status !== 'ready') {
+  // 'ready' = legacy Slice-2 drafts; 'ready_for_publish' = round-table
+  // (Slice 9) drafts. Both are publishable.
+  if (draft.status !== 'ready' && draft.status !== 'ready_for_publish') {
     return NextResponse.json(
-      { error: `Draft must be status='ready' to publish (current: ${draft.status})` },
+      { error: `Draft must be ready to publish (current: ${draft.status})` },
       { status: 409 },
     )
   }
@@ -140,7 +142,10 @@ export async function POST(
   const slotResult = (() => {
     try {
       return computeNextSlot({
-        mode,
+        // 'draft' mode just stages the item in Webflow with no schedule;
+        // compute a throwaway slot so the cooldown math still runs, but we
+        // never act on it below.
+        mode: mode === 'draft' ? 'auto' : mode,
         customDate: body.customDate,
         recentSlots: recentRows.map(r => r.publishedAt),
         newCluster: draft.mainCategorySlug ?? '',
@@ -272,16 +277,18 @@ export async function POST(
   // 6) Decide: publish-now vs schedule. 60-second slack window so a user
   // who picked "now" doesn't get pushed into the staged branch by clock
   // skew.
+  const isDraftMode = mode === 'draft'
   const scheduledForMs = Date.parse(slotResult.scheduledFor)
   const nowMs = Date.now()
-  const publishNow = scheduledForMs <= nowMs + 60_000
+  const publishNow = !isDraftMode && scheduledForMs <= nowMs + 60_000
 
   let webflowItemId: string
   let publishedAtIso: string | null = null
   try {
     const created = await createCollectionItem(collectionId, fieldData, {
       // Live publish: create the item un-drafted so the subsequent
-      // publish call promotes it cleanly. Scheduled: stage it.
+      // publish call promotes it cleanly. Scheduled + draft: stage it
+      // (isDraft true) so it sits in Webflow unpublished.
       isDraft: !publishNow,
     })
     webflowItemId = created.id
@@ -300,41 +307,47 @@ export async function POST(
     )
   }
 
-  // 7) Persist publish_history + draft updates
+  // 7) Persist. For draft mode we only record the Webflow item id (it's
+  // staged, unpublished, unscheduled) — no publish_history row, idea stays
+  // 'drafted'. For now/scheduled we write history + flip the idea.
   const nowIso = new Date().toISOString()
-  await database.insert(schema.publishHistory).values({
-    id: crypto.randomUUID(),
-    draftId: draft.id,
-    webflowItemId,
-    url: publishUrl,
-    title: draft.title ?? draft.shortenedName ?? 'Untitled',
-    clusterSlug: draft.mainCategorySlug ?? null,
-    targetKeyword: null,
-    publishedAt: publishNow ? (publishedAtIso ?? nowIso) : slotResult.scheduledFor,
-    createdAt: nowIso,
-    updatedAt: nowIso,
-  })
+  if (!isDraftMode) {
+    await database.insert(schema.publishHistory).values({
+      id: crypto.randomUUID(),
+      draftId: draft.id,
+      webflowItemId,
+      url: publishUrl,
+      title: draft.title ?? draft.shortenedName ?? 'Untitled',
+      clusterSlug: draft.mainCategorySlug ?? null,
+      targetKeyword: null,
+      publishedAt: publishNow ? (publishedAtIso ?? nowIso) : slotResult.scheduledFor,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+  }
 
   await database
     .update(schema.contentDrafts)
     .set({
       publishedWebflowItemId: webflowItemId,
-      scheduledFor: publishNow ? null : slotResult.scheduledFor,
+      scheduledFor: (publishNow || isDraftMode) ? null : slotResult.scheduledFor,
       publishedAt: publishedAtIso,
       publishUrl,
       updatedAt: nowIso,
     })
     .where(eq(schema.contentDrafts.id, draft.id))
 
-  // Flip the source idea to 'published' when we actually go live, or
-  // 'scheduled' when we don't yet. Idea status was 'drafted' coming in.
-  await database
-    .update(schema.contentIdeas)
-    .set({
-      status: publishNow ? 'published' : 'scheduled',
-      updatedAt: nowIso,
-    })
-    .where(eq(schema.contentIdeas.id, draft.ideaId))
+  // Flip the source idea: 'published' when live, 'scheduled' when dated,
+  // left as-is for a plain Webflow draft.
+  if (!isDraftMode) {
+    await database
+      .update(schema.contentIdeas)
+      .set({
+        status: publishNow ? 'published' : 'scheduled',
+        updatedAt: nowIso,
+      })
+      .where(eq(schema.contentIdeas.id, draft.ideaId))
+  }
 
   // 8) Best-effort IndexNow ping for live publishes. Never blocks the
   // happy path — IndexNow downtime / mis-config must not kill a publish.
