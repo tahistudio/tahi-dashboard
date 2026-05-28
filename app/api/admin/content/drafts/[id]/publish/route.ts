@@ -203,26 +203,27 @@ export async function POST(
     )
   }
 
+  // other-categories: main category FIRST, then any extras (deduped).
+  // If there are no extras it's just [main] — Liam's "repeat the main"
+  // rule — so the template's category block always renders something.
   const otherCategoryWebflowIds: string[] = (() => {
-    if (!draft.otherCategorySlugs) return []
-    try {
-      const parsed = JSON.parse(draft.otherCategorySlugs)
-      if (!Array.isArray(parsed)) return []
-      const ids: string[] = []
-      for (const raw of parsed) {
-        if (typeof raw !== 'string') continue
-        const slug = raw.toLowerCase()
-        const wfId =
-          refLookup.categoriesBySlug.get(slug)
-          ?? refLookup.categoriesByName.get(slug.replace(/-/g, ' '))
-        if (wfId && wfId !== mainCategoryWebflowId && !ids.includes(wfId)) {
-          ids.push(wfId)
+    const ids: string[] = mainCategoryWebflowId ? [mainCategoryWebflowId] : []
+    if (draft.otherCategorySlugs) {
+      try {
+        const parsed = JSON.parse(draft.otherCategorySlugs)
+        if (Array.isArray(parsed)) {
+          for (const raw of parsed) {
+            if (typeof raw !== 'string') continue
+            const slug = raw.toLowerCase()
+            const wfId =
+              refLookup.categoriesBySlug.get(slug)
+              ?? refLookup.categoriesByName.get(slug.replace(/-/g, ' '))
+            if (wfId && !ids.includes(wfId)) ids.push(wfId)
+          }
         }
-      }
-      return ids
-    } catch {
-      return []
+      } catch { /* keep [main] */ }
     }
+    return ids
   })()
 
   // 4) Parse FAQs into 6 discrete fields (Webflow CMS layout)
