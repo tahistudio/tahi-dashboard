@@ -53,6 +53,29 @@ interface ListResponse {
   }
 }
 
+export interface WebflowFieldDef {
+  id: string
+  slug: string
+  displayName: string
+  type: string
+  isRequired?: boolean
+}
+
+/** Fetch a collection's field DEFINITIONS (not item data). Authoritative
+ *  list of every CMS field + slug + type. Used to audit pipeline field
+ *  coverage. */
+export async function getCollectionSchema(collectionId: string): Promise<WebflowFieldDef[]> {
+  const res = await fetch(`${API}/collections/${collectionId}`, { headers: headers() })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`Webflow get collection failed: ${res.status} ${body.slice(0, 200)}`)
+  }
+  const data = await res.json() as { fields?: Array<{ id: string; slug: string; displayName: string; type: string; isRequired?: boolean }> }
+  return (data.fields ?? []).map(f => ({
+    id: f.id, slug: f.slug, displayName: f.displayName, type: f.type, isRequired: f.isRequired,
+  }))
+}
+
 /**
  * List items in a collection. Webflow caps pageSize at 100; for larger
  * collections the caller can paginate by calling repeatedly with

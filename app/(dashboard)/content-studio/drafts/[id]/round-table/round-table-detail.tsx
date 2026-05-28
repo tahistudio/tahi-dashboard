@@ -360,6 +360,15 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
               <TahiButton size="sm" variant="secondary" loading={publishing === 'draft'} onClick={() => { void publishToWebflow('draft') }}>
                 Save as draft
               </TahiButton>
+              <TahiButton
+                size="sm"
+                variant="secondary"
+                loading={publishing === 'auto'}
+                onClick={() => { void publishToWebflow('auto') }}
+                title="Next Mon/Wed/Fri 09:00 UK after everything already queued"
+              >
+                Auto-schedule
+              </TahiButton>
               <input
                 type="datetime-local"
                 value={scheduleDate}
@@ -373,7 +382,7 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
                 disabled={!scheduleDate}
                 onClick={() => { void publishToWebflow('custom', new Date(scheduleDate).toISOString()) }}
               >
-                Schedule
+                Set date
               </TahiButton>
               <TahiButton size="sm" loading={publishing === 'now'} onClick={() => { void publishToWebflow('now') }}>
                 Publish now
