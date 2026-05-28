@@ -2438,38 +2438,61 @@ interface ScoreBreakdownShape {
   linksOk: boolean
 }
 
+// Stage order includes both legacy (Slice 2) and round-table (Slice 9)
+// statuses. New round-table statuses sit alongside the legacy ones so
+// the progress stepper can render any draft's current position.
 const DRAFT_STAGE_ORDER: ReadonlyArray<{ key: string; label: string }> = [
   { key: 'queued', label: 'Queued' },
   { key: 'researching', label: 'Researching' },
+  { key: 'strategising', label: 'Strategising' },
+  { key: 'headline_lab', label: 'Headline lab' },
   { key: 'drafting', label: 'Drafting' },
   { key: 'reviewing', label: 'Reviewing' },
+  { key: 'editing', label: 'Editing' },
   { key: 'finalising', label: 'Finalising' },
+  { key: 'signing_off', label: 'Sign-off' },
+  { key: 'covering', label: 'Cover' },
   { key: 'ready', label: 'Ready' },
+  { key: 'ready_for_publish', label: 'Ready' },
 ]
 
 function draftStatusTone(status: string): BadgeTone {
   switch (status) {
-    case 'ready':       return 'positive'
-    case 'failed':      return 'danger'
-    case 'finalising':  return 'info'
-    case 'reviewing':   return 'info'
-    case 'drafting':    return 'teal'
-    case 'researching': return 'teal'
-    case 'queued':      return 'neutral'
-    default:            return 'neutral'
+    case 'ready':              return 'positive'
+    case 'ready_for_publish':  return 'positive'
+    case 'failed':             return 'danger'
+    case 'cost_capped':        return 'danger'
+    case 'finalising':         return 'info'
+    case 'reviewing':          return 'info'
+    case 'editing':            return 'info'
+    case 'signing_off':        return 'info'
+    case 'covering':           return 'info'
+    case 'drafting':           return 'teal'
+    case 'strategising':       return 'teal'
+    case 'headline_lab':       return 'teal'
+    case 'researching':        return 'teal'
+    case 'queued':             return 'neutral'
+    default:                   return 'neutral'
   }
 }
 
 function draftStatusLabel(status: string): string {
   switch (status) {
-    case 'queued':      return 'Queued'
-    case 'researching': return 'Researching'
-    case 'drafting':    return 'Drafting'
-    case 'reviewing':   return 'Reviewing'
-    case 'finalising':  return 'Finalising'
-    case 'ready':       return 'Ready'
-    case 'failed':      return 'Failed'
-    default:            return status
+    case 'queued':             return 'Queued'
+    case 'researching':        return 'Researching'
+    case 'strategising':       return 'Strategising'
+    case 'headline_lab':       return 'Headline lab'
+    case 'drafting':           return 'Drafting'
+    case 'reviewing':          return 'Reviewing (23)'
+    case 'editing':            return 'Editing'
+    case 'finalising':         return 'Finalising'
+    case 'signing_off':        return 'Sign-off'
+    case 'covering':           return 'Cover'
+    case 'ready':              return 'Ready'
+    case 'ready_for_publish':  return 'Ready'
+    case 'failed':             return 'Failed'
+    case 'cost_capped':        return 'Cost capped'
+    default:                   return status
   }
 }
 
