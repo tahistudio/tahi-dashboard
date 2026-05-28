@@ -22,6 +22,7 @@ import { eq } from 'drizzle-orm'
 import { claudeJson } from '@/lib/anthropic-cost'
 import { markdownToHtml } from '@/lib/markdown-render'
 import { STRUCTURE_SYSTEM, buildStructurePrompt, parseStructure } from '@/lib/round-table-leads'
+import { loadBlogContext, linkableUrlSet, sanitizeInternalLinks } from '@/lib/blog-context'
 
 export const dynamic = 'force-dynamic'
 
@@ -74,6 +75,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   }
 
   const structured = out.result
+  // Strip fabricated internal links against the live sitemap.
+  let removedLinks = 0
+  try {
+    const ctx = await loadBlogContext()
+    const sani = sanitizeInternalLinks(structured.bodyMarkdownClean, linkableUrlSet(ctx))
+    structured.bodyMarkdownClean = sani.markdown
+    removedLinks = sani.removed.length
+  } catch { /* leave links as-is if context unavailable */ }
   const cleanHtml = markdownToHtml(structured.bodyMarkdownClean)
   const takeawaysHtml = structured.keyTakeaways.length > 0
     ? `<ul>${structured.keyTakeaways.map(t => `<li>${escapeHtmlText(t)}</li>`).join('')}</ul>`
@@ -96,6 +105,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     faqCount: structured.faqs.length,
     takeawayCount: structured.keyTakeaways.length,
     metaTitle: structured.metaTitle,
+    fabricatedLinksRemoved: removedLinks,
     costCents: out.costCents,
   })
 }

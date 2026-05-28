@@ -35,7 +35,7 @@ import { buildResearchBrief, isPerplexityConfigured } from '@/lib/perplexity'
 import { generateCover, isReplicateConfigured } from '@/lib/replicate'
 import { validateDraftLinks } from '@/lib/link-validator'
 import { markdownToHtml } from '@/lib/markdown-render'
-import { loadBlogContext, renderBlogContextForPrompt } from '@/lib/blog-context'
+import { loadBlogContext, renderBlogContextForPrompt, linkableUrlSet, sanitizeInternalLinks } from '@/lib/blog-context'
 import {
   REVIEWERS,
   DEFAULT_VOICE_WEIGHTS,
@@ -82,7 +82,10 @@ export type DraftStatus =
   | 'failed'
 
 const MAX_EDIT_LOOPS = 3
-const SIGN_OFF_PASS_SCORE = 75
+// Whole-article sign-off bar. 85 = only genuinely good drafts pass; the
+// 3-revision cap above means a draft that can't reach it gets flagged to
+// Liam rather than looping forever.
+const SIGN_OFF_PASS_SCORE = 85
 
 export interface StageResult {
   nextStatus: DraftStatus
@@ -568,6 +571,18 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
       parse: parseStructure,
     })
     structureCents = sCents
+    // Strip any fabricated internal links before the body can reach
+    // Webflow — only links to genuinely live pages survive.
+    let cleanMarkdown = structured.bodyMarkdownClean
+    try {
+      const ctx = await loadBlogContext()
+      const sani = sanitizeInternalLinks(cleanMarkdown, linkableUrlSet(ctx))
+      cleanMarkdown = sani.markdown
+      if (sani.removed.length > 0) {
+        console.warn(`Stripped ${sani.removed.length} fabricated internal links from draft ${draft.id}`)
+      }
+    } catch { /* if context unavailable, leave links as-is */ }
+    structured.bodyMarkdownClean = cleanMarkdown
     const cleanHtml = markdownToHtml(structured.bodyMarkdownClean)
     const takeawaysHtml = structured.keyTakeaways.length > 0
       ? `<ul>${structured.keyTakeaways.map(t => `<li>${escapeHtmlText(t)}</li>`).join('')}</ul>`
