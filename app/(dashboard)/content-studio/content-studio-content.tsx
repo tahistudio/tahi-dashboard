@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   RefreshCw, AlertTriangle, FileSearch, CheckCircle2, XCircle, HelpCircle,
   Lightbulb, FileEdit, Calendar, ExternalLink, ChevronDown, ChevronRight,
-  Check, X, Eye, Sparkles, Link2, Trash2, Send, Loader2,
+  Check, X, Eye, Sparkles, Link2, Trash2, Send, Loader2, Clock,
   type LucideIcon,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -23,7 +23,7 @@ import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
 import { SlideOver } from '@/components/tahi/slide-over'
-import { Textarea } from '@/components/tahi/input'
+import { Input, Textarea } from '@/components/tahi/input'
 import { useToast } from '@/components/tahi/toast'
 import { apiPath } from '@/lib/api'
 
@@ -313,7 +313,8 @@ export function ContentStudioContent() {
         {activeTab === 'ideas' && <IdeasTab onToast={showToast} />}
         {activeTab === 'drafts' && <DraftsTab onToast={showToast} />}
         {activeTab === 'links' && <LinksTab onToast={showToast} />}
-        {activeTab !== 'health' && activeTab !== 'ideas' && activeTab !== 'drafts' && activeTab !== 'links' && (
+        {activeTab === 'schedule' && <ScheduleTab onToast={showToast} />}
+        {activeTab !== 'health' && activeTab !== 'ideas' && activeTab !== 'drafts' && activeTab !== 'links' && activeTab !== 'schedule' && (
           <ComingSoonTab tab={TABS.find(t => t.id === activeTab)!} />
         )}
       </div>
@@ -2593,6 +2594,7 @@ interface DraftDetailDrawerProps {
 function DraftDetailDrawer({ detail, onClose, onDiscard, discarding }: DraftDetailDrawerProps) {
   const { draft, idea, cluster } = detail
   const breakdown = parseScoreBreakdown(draft.scoreBreakdown)
+  const [publishOpen, setPublishOpen] = useState(false)
   const faqs = (() => {
     if (!draft.faqsJson) return []
     try {
@@ -2884,13 +2886,26 @@ function DraftDetailDrawer({ detail, onClose, onDiscard, discarding }: DraftDeta
         </TahiButton>
         <TahiButton
           size="sm"
-          disabled
           iconLeft={<Send className="w-3.5 h-3.5" />}
-          title="Schedule lands in Slice 5"
+          disabled={!isReady}
+          onClick={() => setPublishOpen(true)}
+          title={isReady ? 'Publish or schedule to Webflow' : 'Draft must be Ready to publish'}
         >
-          Schedule (Slice 5)
+          Schedule
         </TahiButton>
       </SlideOver.Footer>
+      {publishOpen && (
+        <PublishModal
+          draftId={draft.id}
+          title={draft.title ?? draft.ideaTitle ?? 'Draft'}
+          cluster={cluster?.name ?? null}
+          onClose={() => setPublishOpen(false)}
+          onPublished={() => {
+            setPublishOpen(false)
+            onClose()
+          }}
+        />
+      )}
     </SlideOver>
   )
 }
@@ -2960,5 +2975,737 @@ function CollapsibleNote({ label, open, onToggle, text, mono }: {
         </pre>
       )}
     </div>
+  )
+}
+
+// ── Publish modal + Schedule tab (Phase I Slice 5) ────────────────────────────
+
+interface CooldownConflict {
+  title?: string
+  publishedAt: string
+}
+
+interface AutoSlot {
+  scheduledFor: string
+  reason: string
+  cooldownConflicts?: CooldownConflict[]
+}
+
+interface ScheduleReadyDraft {
+  id: string
+  ideaId: string
+  title: string | null
+  mainCategorySlug: string | null
+  contentScore: number | null
+  coverSvgUrl: string | null
+  authorSlug: string | null
+  shortenedName: string | null
+  ideaTitle: string | null
+  clusterName: string | null
+  clusterSlug: string | null
+  autoSlot: AutoSlot
+}
+
+interface ScheduleScheduledDraft {
+  id: string
+  title: string | null
+  mainCategorySlug: string | null
+  scheduledFor: string | null
+  publishUrl: string | null
+  publishedWebflowItemId: string | null
+  clusterName: string | null
+  clusterSlug: string | null
+}
+
+interface PublishHistoryRow {
+  id: string
+  draftId: string | null
+  webflowItemId: string
+  url: string
+  title: string
+  clusterSlug: string | null
+  publishedAt: string
+  createdAt: string
+}
+
+interface ScheduleResponse {
+  readyDrafts: ScheduleReadyDraft[]
+  scheduledDrafts: ScheduleScheduledDraft[]
+  publishHistory: PublishHistoryRow[]
+  counts: { ready: number; scheduled: number; published: number }
+}
+
+interface PublishResponse {
+  webflowItemId: string
+  publishUrl: string
+  scheduledFor: string
+  publishedAt: string | null
+  reason?: string
+  cooldownConflicts?: CooldownConflict[]
+  error?: string
+  detail?: string
+}
+
+function fmtSlot(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Europe/London',
+  }) + ' UK'
+}
+
+// ── Publish modal ────────────────────────────────────────────────────────────
+
+interface PublishModalProps {
+  draftId: string
+  title: string
+  cluster: string | null
+  onClose: () => void
+  onPublished: (response: PublishResponse) => void
+}
+
+function PublishModal({ draftId, title, cluster, onClose, onPublished }: PublishModalProps) {
+  const { showToast } = useToast()
+  const [mode, setMode] = useState<'now' | 'custom' | 'auto'>('auto')
+  const [customDate, setCustomDate] = useState<string>('')
+  const [submitting, setSubmitting] = useState(false)
+
+  async function handleConfirm() {
+    if (mode === 'custom' && !customDate) {
+      showToast('Pick a date and time first', 'warning')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const body: { mode: string; customDate?: string } = { mode }
+      if (mode === 'custom') {
+        // datetime-local has no timezone. Treat as local time and convert.
+        body.customDate = new Date(customDate).toISOString()
+      }
+      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}/publish`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const json = await res.json().catch(() => ({})) as PublishResponse
+      if (!res.ok) {
+        showToast(json.error ?? json.detail ?? 'Publish failed', 'error')
+        return
+      }
+      if (json.publishedAt) {
+        showToast('Published live to Webflow', 'success')
+      } else {
+        showToast(`Scheduled for ${fmtSlot(json.scheduledFor)}`, 'success')
+      }
+      onPublished(json)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Publish failed', 'error')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="publish-modal-title"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 80,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(0,0,0,0.45)',
+        padding: '1rem',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget && !submitting) onClose() }}
+    >
+      <div
+        style={{
+          background: 'var(--color-bg)',
+          borderRadius: '0.75rem',
+          padding: '1.5rem',
+          width: '100%',
+          maxWidth: '32rem',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.18)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1rem',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+          <div style={{
+            width: '2.5rem',
+            height: '2.5rem',
+            borderRadius: 'var(--radius-leaf-sm)',
+            background: 'var(--color-brand-50)',
+            color: 'var(--color-brand)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Send className="w-4 h-4" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <h3 id="publish-modal-title" style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: 'var(--color-text)' }}>
+              Publish to Webflow
+            </h3>
+            <p style={{ margin: '0.25rem 0 0', fontSize: '0.8125rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+              {title}
+              {cluster && <span style={{ color: 'var(--color-text-subtle)' }}> · {cluster}</span>}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            style={{
+              padding: '0.25rem',
+              borderRadius: '0.375rem',
+              border: 'none',
+              background: 'none',
+              cursor: submitting ? 'not-allowed' : 'pointer',
+              color: 'var(--color-text-muted)',
+              flexShrink: 0,
+            }}
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <PublishModeOption
+            id="mode-now"
+            label="Publish now"
+            description="Push live immediately and ping IndexNow."
+            checked={mode === 'now'}
+            onSelect={() => setMode('now')}
+          />
+          <PublishModeOption
+            id="mode-auto"
+            label="Auto schedule"
+            description="Next Mon/Wed/Fri 09:00 UK, respecting the 3/week cap."
+            checked={mode === 'auto'}
+            onSelect={() => setMode('auto')}
+          />
+          <PublishModeOption
+            id="mode-custom"
+            label="Custom date"
+            description="Pick the exact go-live time. No snapping applied."
+            checked={mode === 'custom'}
+            onSelect={() => setMode('custom')}
+          >
+            {mode === 'custom' && (
+              <div style={{ marginTop: '0.5rem' }}>
+                <Input
+                  type="datetime-local"
+                  value={customDate}
+                  onChange={(e) => setCustomDate(e.target.value)}
+                />
+              </div>
+            )}
+          </PublishModeOption>
+        </div>
+
+        <div style={{
+          display: 'flex',
+          gap: '0.5rem',
+          justifyContent: 'flex-end',
+          marginTop: '0.5rem',
+        }}>
+          <TahiButton variant="secondary" size="sm" onClick={onClose} disabled={submitting}>
+            Cancel
+          </TahiButton>
+          <TahiButton
+            size="sm"
+            loading={submitting}
+            onClick={() => { void handleConfirm() }}
+            iconLeft={!submitting ? <Send className="w-3.5 h-3.5" /> : undefined}
+          >
+            Confirm
+          </TahiButton>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PublishModeOption({
+  id, label, description, checked, onSelect, children,
+}: {
+  id: string
+  label: string
+  description: string
+  checked: boolean
+  onSelect: () => void
+  children?: React.ReactNode
+}) {
+  return (
+    <label
+      htmlFor={id}
+      style={{
+        display: 'block',
+        padding: '0.75rem 0.875rem',
+        borderRadius: '0.5rem',
+        border: checked
+          ? '1px solid var(--color-brand)'
+          : '1px solid var(--color-border)',
+        background: checked ? 'var(--color-brand-50)' : 'var(--color-bg)',
+        cursor: 'pointer',
+        transition: 'background-color 150ms ease, border-color 150ms ease',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+        <input
+          id={id}
+          type="radio"
+          name="publish-mode"
+          checked={checked}
+          onChange={onSelect}
+          style={{ marginTop: '0.25rem' }}
+        />
+        <div style={{ flex: 1 }}>
+          <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
+            {label}
+          </p>
+          <p style={{ margin: '0.125rem 0 0', fontSize: '0.75rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+            {description}
+          </p>
+          {children}
+        </div>
+      </div>
+    </label>
+  )
+}
+
+// ── Schedule tab ─────────────────────────────────────────────────────────────
+
+interface ScheduleTabProps {
+  onToast: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void
+}
+
+function ScheduleTab({ onToast }: ScheduleTabProps) {
+  const [data, setData] = useState<ScheduleResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [activeDraft, setActiveDraft] = useState<ScheduleReadyDraft | null>(null)
+
+  const fetchSchedule = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/content/schedule'))
+      if (!res.ok) throw new Error('Failed')
+      const json = await res.json() as ScheduleResponse
+      setData(json)
+    } catch {
+      setData(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchSchedule() }, [fetchSchedule])
+
+  const readyDrafts = data?.readyDrafts ?? []
+  const counts = data?.counts ?? { ready: 0, scheduled: 0, published: 0 }
+
+  // Merge scheduled-but-not-yet-published into the history table view so
+  // Liam sees them in chronological order. Already-published rows come
+  // from publish_history; scheduled-pending rows come from the drafts
+  // table. Pulling scheduledDrafts + history out of `data` inside the
+  // memo keeps the dep array stable (raw response object) so we avoid a
+  // new array on every render.
+  const combinedHistory = useMemo(() => {
+    const scheduledDrafts = data?.scheduledDrafts ?? []
+    const history = data?.publishHistory ?? []
+    const rows: Array<{
+      key: string
+      title: string
+      url: string | null
+      cluster: string | null
+      publishedAt: string
+      status: 'scheduled' | 'published'
+    }> = []
+    const seenWebflowIds = new Set<string>()
+    for (const s of scheduledDrafts) {
+      if (!s.scheduledFor) continue
+      if (s.publishedWebflowItemId) seenWebflowIds.add(s.publishedWebflowItemId)
+      rows.push({
+        key: `scheduled:${s.id}`,
+        title: s.title ?? 'Untitled',
+        url: s.publishUrl,
+        cluster: s.clusterName ?? s.clusterSlug ?? null,
+        publishedAt: s.scheduledFor,
+        status: 'scheduled',
+      })
+    }
+    for (const h of history) {
+      // Skip rows that duplicate a still-scheduled draft (shouldn't happen
+      // in practice but defensive — the scheduled drafts table also has a
+      // publish_history row).
+      if (seenWebflowIds.has(h.webflowItemId)) continue
+      rows.push({
+        key: `published:${h.id}`,
+        title: h.title,
+        url: h.url,
+        cluster: h.clusterSlug,
+        publishedAt: h.publishedAt,
+        status: Date.parse(h.publishedAt) > Date.now() ? 'scheduled' : 'published',
+      })
+    }
+    rows.sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
+    return rows
+  }, [data])
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      {/* Header strip */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '0.75rem',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <Badge tone="positive" variant="soft" size="sm" leader={false}>
+            {counts.ready} ready
+          </Badge>
+          <Badge tone="info" variant="soft" size="sm" leader={false}>
+            {counts.scheduled} scheduled
+          </Badge>
+          <Badge tone="neutral" variant="soft" size="sm" leader={false}>
+            {counts.published} published
+          </Badge>
+        </div>
+        <TahiButton
+          size="sm"
+          variant="secondary"
+          onClick={() => { void fetchSchedule() }}
+          iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
+        >
+          Refresh
+        </TahiButton>
+      </div>
+
+      {/* Ready to publish */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        <h2 style={{
+          margin: 0,
+          fontSize: '0.75rem',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+          color: 'var(--color-text-subtle)',
+        }}>
+          Ready to publish
+        </h2>
+
+        {loading && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {[0, 1].map(i => (
+              <div
+                key={i}
+                className="animate-pulse"
+                style={{
+                  height: '5rem',
+                  background: 'var(--color-bg-secondary)',
+                  borderRadius: 'var(--radius-card)',
+                }}
+              />
+            ))}
+          </div>
+        )}
+
+        {!loading && readyDrafts.length === 0 && (
+          <Card padding="lg">
+            <EmptyState
+              icon={<FileEdit className="w-6 h-6" />}
+              title="No ready drafts"
+              description="Get a draft to the Ready stage in the Drafts tab and it'll appear here for scheduling."
+            />
+          </Card>
+        )}
+
+        {!loading && readyDrafts.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {readyDrafts.map(d => (
+              <ScheduleReadyCard
+                key={d.id}
+                draft={d}
+                onPublishNow={() => publishDraft(d, 'now', undefined, fetchSchedule, onToast)}
+                onAuto={() => publishDraft(d, 'auto', undefined, fetchSchedule, onToast)}
+                onCustom={() => setActiveDraft(d)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Scheduled / Published table */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        <h2 style={{
+          margin: 0,
+          fontSize: '0.75rem',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+          color: 'var(--color-text-subtle)',
+        }}>
+          Scheduled and published
+        </h2>
+
+        {!loading && combinedHistory.length === 0 ? (
+          <Card padding="lg">
+            <EmptyState
+              icon={<Calendar className="w-6 h-6" />}
+              title="No publishes yet"
+              description="Publishing a draft will land it here."
+            />
+          </Card>
+        ) : (
+          <Card padding="none">
+            <SchedulePublishedTable rows={combinedHistory} />
+          </Card>
+        )}
+      </div>
+
+      {/* Custom date modal */}
+      {activeDraft && (
+        <PublishModal
+          draftId={activeDraft.id}
+          title={activeDraft.title ?? activeDraft.ideaTitle ?? 'Draft'}
+          cluster={activeDraft.clusterName ?? null}
+          onClose={() => setActiveDraft(null)}
+          onPublished={() => {
+            setActiveDraft(null)
+            void fetchSchedule()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+async function publishDraft(
+  draft: ScheduleReadyDraft,
+  mode: 'now' | 'auto',
+  customDate: string | undefined,
+  refresh: () => Promise<void>,
+  onToast: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void,
+) {
+  try {
+    const body: { mode: string; customDate?: string } = { mode }
+    if (customDate) body.customDate = customDate
+    const res = await fetch(apiPath(`/api/admin/content/drafts/${draft.id}/publish`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json().catch(() => ({})) as PublishResponse
+    if (!res.ok) {
+      onToast(json.error ?? json.detail ?? 'Publish failed', 'error')
+      return
+    }
+    if (json.publishedAt) {
+      onToast('Published live to Webflow', 'success')
+    } else {
+      onToast(`Scheduled for ${fmtSlot(json.scheduledFor)}`, 'success')
+    }
+    await refresh()
+  } catch (err) {
+    onToast(err instanceof Error ? err.message : 'Publish failed', 'error')
+  }
+}
+
+// ── Schedule ready-card ──────────────────────────────────────────────────────
+
+interface ScheduleReadyCardProps {
+  draft: ScheduleReadyDraft
+  onPublishNow: () => void
+  onAuto: () => void
+  onCustom: () => void
+}
+
+function ScheduleReadyCard({ draft, onPublishNow, onAuto, onCustom }: ScheduleReadyCardProps) {
+  const slot = draft.autoSlot
+  const conflicts = slot.cooldownConflicts ?? []
+  return (
+    <Card padding="md">
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: '14rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.25rem' }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '0.1875rem 0.5rem',
+              fontSize: '0.6875rem',
+              fontWeight: 600,
+              borderRadius: '999px',
+              background: 'var(--color-bg-secondary)',
+              color: 'var(--color-text-muted)',
+            }}>
+              {draft.clusterName ?? 'Unclustered'}
+            </span>
+            {typeof draft.contentScore === 'number' && (
+              <span style={{
+                fontSize: '0.6875rem',
+                color: 'var(--color-text-muted)',
+                fontWeight: 500,
+              }}>
+                score {draft.contentScore} / 100
+              </span>
+            )}
+          </div>
+          <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600, color: 'var(--color-text)', lineHeight: 1.35 }}>
+            {draft.title ?? draft.ideaTitle ?? 'Untitled'}
+          </h3>
+          <p style={{
+            margin: '0.375rem 0 0',
+            fontSize: '0.75rem',
+            color: 'var(--color-text-muted)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.25rem',
+          }}>
+            <Clock className="w-3 h-3" />
+            Next auto slot: <strong style={{ color: 'var(--color-text)', fontWeight: 600 }}>{fmtSlot(slot.scheduledFor)}</strong>
+          </p>
+          {conflicts.length > 0 && (
+            <p style={{
+              margin: '0.375rem 0 0',
+              fontSize: '0.6875rem',
+              color: 'var(--color-warning)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+            }}>
+              <AlertTriangle className="w-3 h-3" />
+              Cooldown: {conflicts.length} same-cluster post{conflicts.length === 1 ? '' : 's'} in the last 14 days
+            </p>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
+          <TahiButton size="sm" variant="secondary" onClick={onPublishNow}>
+            Publish now
+          </TahiButton>
+          <TahiButton size="sm" variant="secondary" onClick={onCustom}>
+            Custom date
+          </TahiButton>
+          <TahiButton size="sm" onClick={onAuto} iconLeft={<Send className="w-3.5 h-3.5" />}>
+            Auto
+          </TahiButton>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+// ── Scheduled / Published table ──────────────────────────────────────────────
+
+interface ScheduleTableRow {
+  key: string
+  title: string
+  url: string | null
+  cluster: string | null
+  publishedAt: string
+  status: 'scheduled' | 'published'
+}
+
+function SchedulePublishedTable({ rows }: { rows: ScheduleTableRow[] }) {
+  const columns: DataTableColumn<ScheduleTableRow>[] = useMemo(() => ([
+    {
+      key: 'title',
+      header: 'Title',
+      sortable: true,
+      sortValue: r => r.title.toLowerCase(),
+      minWidth: '16rem',
+      render: r => (
+        <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>
+          {r.title}
+        </span>
+      ),
+    },
+    {
+      key: 'cluster',
+      header: 'Cluster',
+      sortable: true,
+      sortValue: r => (r.cluster ?? '').toLowerCase(),
+      minWidth: '10rem',
+      render: r => (
+        <Badge tone="neutral" variant="soft" size="sm" leader={false}>
+          {r.cluster ?? 'Unclustered'}
+        </Badge>
+      ),
+    },
+    {
+      key: 'publishedAt',
+      header: 'When',
+      sortable: true,
+      sortValue: r => r.publishedAt,
+      minWidth: '11rem',
+      render: r => (
+        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+          {fmtSlot(r.publishedAt)}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      sortValue: r => r.status,
+      minWidth: '7rem',
+      render: r => (
+        <Badge
+          tone={r.status === 'published' ? 'positive' : 'info'}
+          variant="soft"
+          size="sm"
+          leader="dot"
+        >
+          {r.status === 'published' ? 'Published' : 'Scheduled'}
+        </Badge>
+      ),
+    },
+    {
+      key: 'url',
+      header: '',
+      minWidth: '3rem',
+      render: r => r.url ? (
+        <a
+          href={r.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.25rem',
+            color: 'var(--color-text-muted)',
+            fontSize: '0.75rem',
+            textDecoration: 'none',
+          }}
+        >
+          <ExternalLink className="w-3 h-3" />
+        </a>
+      ) : null,
+    },
+  ]), [])
+
+  return (
+    <DataTable
+      rows={rows}
+      columns={columns}
+      getRowId={r => r.key}
+    />
   )
 }

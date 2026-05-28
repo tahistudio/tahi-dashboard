@@ -2711,10 +2711,22 @@ export const contentDrafts = sqliteTable('content_drafts', {
   hreflangBlock: text('hreflang_block'),
   // Error info (populated when status='failed')
   errorMessage: text('error_message'),
+  // Publishing — Slice 5
+  // Set once the draft has been pushed to Webflow (live or staged).
+  publishedWebflowItemId: text('published_webflow_item_id'),
+  // When Liam picked "auto" or "custom", scheduledFor is the ISO datetime
+  // the publish cron will flip the staged item live. When mode='now' the
+  // pipeline publishes immediately and leaves scheduledFor null.
+  scheduledFor: text('scheduled_for'),
+  // When the item actually went live. Null while staged-pending-schedule.
+  publishedAt: text('published_at'),
+  // Public URL of the published post (e.g. https://www.tahi.studio/blog/<slug>)
+  publishUrl: text('publish_url'),
   ...timestamps,
 }, (table) => [
   index('idx_content_drafts_idea').on(table.ideaId),
   index('idx_content_drafts_status').on(table.status),
+  index('idx_content_drafts_scheduled').on(table.scheduledFor),
 ])
 
 /**
@@ -2760,5 +2772,36 @@ export const linkSuggestions = sqliteTable('link_suggestions', {
   index('idx_link_suggestions_status').on(table.status),
   index('idx_link_suggestions_target').on(table.targetUrl),
   index('idx_link_suggestions_source').on(table.sourceWebflowId),
+])
+
+/**
+ * Publish history — Phase I · Slice 5. One row per publish (live or
+ * scheduled). Used by the publish-scheduler to enforce two rules:
+ *   1. Max 3 posts per rolling 7-day window
+ *   2. 14-day topical cooldown — no two posts on the same cluster within
+ *      14 days of each other (warning to UI, never blocks)
+ *
+ * Rows stay forever — every successful publish creates one and we never
+ * delete. That's also how /content-studio's Scheduled / Published table
+ * gets its data without re-querying Webflow.
+ *
+ * draftId is nullable because future manual publishes (Webflow-direct,
+ * outside the dashboard) might still want to land here via a sync job.
+ */
+export const publishHistory = sqliteTable('publish_history', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  draftId: text('draft_id').references(() => contentDrafts.id, { onDelete: 'set null' }),
+  webflowItemId: text('webflow_item_id').notNull(),
+  url: text('url').notNull(),
+  title: text('title').notNull(),
+  clusterSlug: text('cluster_slug'),
+  targetKeyword: text('target_keyword'),
+  // ISO datetime the post is (or was) scheduled to go live. For mode='now'
+  // this equals createdAt.
+  publishedAt: text('published_at').notNull(),
+  ...timestamps,
+}, (table) => [
+  index('idx_publish_history_published').on(table.publishedAt),
+  index('idx_publish_history_cluster').on(table.clusterSlug),
 ])
 

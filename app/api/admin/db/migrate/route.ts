@@ -1499,6 +1499,31 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_content_drafts_status ON content_drafts(status)`,
     ],
   },
+  {
+    name: '0062',
+    description: 'Phase I · Slice 5 — publish controls. Adds publishedWebflowItemId / scheduledFor / publishedAt / publishUrl to content_drafts (idempotent ALTERs; the runner treats "duplicate column name" as already-applied). Creates publish_history table — one row per publish (live or scheduled) — used by the publish-scheduler to enforce max 3/week + 14-day topical cooldown and to feed /content-studio Schedule tab.',
+    statements: [
+      `ALTER TABLE content_drafts ADD COLUMN published_webflow_item_id text`,
+      `ALTER TABLE content_drafts ADD COLUMN scheduled_for text`,
+      `ALTER TABLE content_drafts ADD COLUMN published_at text`,
+      `ALTER TABLE content_drafts ADD COLUMN publish_url text`,
+      `CREATE INDEX IF NOT EXISTS idx_content_drafts_scheduled ON content_drafts(scheduled_for)`,
+      `CREATE TABLE IF NOT EXISTS publish_history (
+        id text PRIMARY KEY NOT NULL,
+        draft_id text REFERENCES content_drafts(id) ON DELETE SET NULL,
+        webflow_item_id text NOT NULL,
+        url text NOT NULL,
+        title text NOT NULL,
+        cluster_slug text,
+        target_keyword text,
+        published_at text NOT NULL,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_publish_history_published ON publish_history(published_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_publish_history_cluster ON publish_history(cluster_slug)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
