@@ -36,6 +36,7 @@ import { generateCover, isReplicateConfigured } from '@/lib/replicate'
 import { validateDraftLinks } from '@/lib/link-validator'
 import { markdownToHtml } from '@/lib/markdown-render'
 import { loadBlogContext, renderBlogContextForPrompt, linkableUrlSet, sanitizeInternalLinks } from '@/lib/blog-context'
+import { finalizeWebflowFields } from '@/lib/blog-finalize'
 import {
   REVIEWERS,
   DEFAULT_VOICE_WEIGHTS,
@@ -602,6 +603,14 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
   } catch (err) {
     // Non-fatal — the body still publishes, just without the field split.
     console.error('Structuring failed', err)
+  }
+
+  // Close the remaining Webflow field gaps: map category, generate +
+  // validate JSON-LD schema, build hreflang. Non-fatal.
+  try {
+    await finalizeWebflowFields(database, draft.id)
+  } catch (err) {
+    console.error('finalizeWebflowFields failed', err)
   }
 
   // Cover generation. NOTE: Flux is being replaced by an SVG generator

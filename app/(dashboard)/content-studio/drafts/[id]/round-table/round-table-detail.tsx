@@ -18,7 +18,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  RefreshCw, ChevronLeft, AlertTriangle, XCircle, Play, Pause, FileText, ListChecks,
+  RefreshCw, ChevronLeft, AlertTriangle, XCircle, CheckCircle2, Play, Pause, FileText, ListChecks,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
@@ -65,6 +65,13 @@ interface DraftSnapshot {
     headings?: Array<{ level: number; text: string; wordTarget?: number }>
   } | null
   voiceWeights: Record<string, number>
+  linkCheck: {
+    total: number
+    okCount: number
+    deadCount: number
+    dead: Array<{ url: string; status: number | null; reason: string }>
+    checkedAt: string
+  } | null
   revisions: Array<{
     revisionNumber: number
     source: string
@@ -264,7 +271,7 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
     )
   }
 
-  const { draft, idea, brief, revisions, reviewsByRevision, conflicts, spendCents, services } = data
+  const { draft, idea, brief, revisions, reviewsByRevision, conflicts, spendCents, services, linkCheck } = data
   const stubServices = Object.entries(services).filter(([, ok]) => !ok).map(([k]) => k)
   const revsAvailable = revisions.map(r => r.revisionNumber).sort((a, b) => a - b)
   const selectedReviews = reviewsByRevision[String(selectedRevision)] ?? []
@@ -558,6 +565,38 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
               />
             ))}
           </div>
+        </Card>
+      )}
+
+      {/* Link check — final 200 gate. Surfaces any dead internal/external
+          links so none ship. */}
+      {linkCheck && (
+        <Card
+          padding="md"
+          style={linkCheck.deadCount > 0
+            ? { borderColor: 'var(--color-danger)', background: 'var(--color-danger-bg, #fef2f2)' }
+            : undefined}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {linkCheck.deadCount > 0
+              ? <XCircle size={15} aria-hidden="true" style={{ color: 'var(--color-danger)' }} />
+              : <CheckCircle2 size={15} aria-hidden="true" style={{ color: 'var(--color-success, #4ade80)' }} />}
+            <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>
+              Link check — {linkCheck.okCount}/{linkCheck.total} live
+              {linkCheck.deadCount > 0 ? `, ${linkCheck.deadCount} DEAD` : ' (all 200)'}
+            </span>
+          </div>
+          {linkCheck.deadCount > 0 && (
+            <ul style={{ margin: '0.5rem 0 0', padding: '0 0 0 1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              {linkCheck.dead.map((d, i) => (
+                <li key={i} style={{ fontSize: '0.8125rem', color: 'var(--color-text)', wordBreak: 'break-all' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--color-danger)' }}>{d.status ?? 'ERR'}</span>{' '}
+                  <a href={d.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-text-muted)' }}>{d.url}</a>
+                  <span style={{ color: 'var(--color-text-subtle)' }}> — {d.reason}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       )}
 

@@ -23,6 +23,7 @@ import { claudeJson } from '@/lib/anthropic-cost'
 import { markdownToHtml } from '@/lib/markdown-render'
 import { STRUCTURE_SYSTEM, buildStructurePrompt, parseStructure } from '@/lib/round-table-leads'
 import { loadBlogContext, linkableUrlSet, sanitizeInternalLinks } from '@/lib/blog-context'
+import { finalizeWebflowFields } from '@/lib/blog-finalize'
 
 export const dynamic = 'force-dynamic'
 
@@ -101,11 +102,24 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     updatedAt: now,
   }).where(eq(schema.contentDrafts.id, id))
 
+  // Close the category + schema + hreflang gaps and run the final link
+  // gate (HTTP-check every link for 200).
+  let finalize
+  try {
+    finalize = await finalizeWebflowFields(database, id)
+  } catch (err) {
+    console.error('finalizeWebflowFields failed in restructure', err)
+  }
+
   return NextResponse.json({
     faqCount: structured.faqs.length,
     takeawayCount: structured.keyTakeaways.length,
     metaTitle: structured.metaTitle,
     fabricatedLinksRemoved: removedLinks,
+    category: finalize?.mainCategorySlug ?? null,
+    schemaValid: finalize?.schemaValid ?? null,
+    schemaErrors: finalize?.schemaErrors ?? [],
+    deadLinks: finalize?.linkCheck.dead ?? [],
     costCents: out.costCents,
   })
 }

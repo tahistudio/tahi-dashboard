@@ -163,3 +163,51 @@ export async function validateDraftLinks(bodyHtml: string): Promise<ValidationRe
   const urls = extractOutboundLinks(bodyHtml)
   return validateExternalLinks(urls)
 }
+
+const TAHI_ORIGIN = 'https://www.tahi.studio'
+
+export interface AllLinksResult {
+  total: number
+  okCount: number
+  deadCount: number
+  ok: ValidatedLink[]
+  dead: InvalidLink[]    // 404 / 401 / 403 / 3xx / timeout / network
+}
+
+/** FINAL link gate. Extracts EVERY link from the body — internal
+ *  (relative /slug or absolute tahi.studio) AND external — resolves
+ *  relative links to absolute, and HTTP-checks each for a strict 200.
+ *  Anything else (404/401/403/redirect/timeout) is flagged dead.
+ *
+ *  This is the "no dead links ship" guarantee Liam asked for. Runs on the
+ *  FINAL body right before ready_for_publish. */
+export async function validateAllLinks(bodyHtml: string): Promise<AllLinksResult> {
+  const seen = new Set<string>()
+  const re = /<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["'][^>]*>/gi
+  const urls: string[] = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(bodyHtml)) !== null) {
+    let raw = m[1].trim()
+    if (!raw) continue
+    if (raw.startsWith('#') || /^(mailto:|tel:)/i.test(raw)) continue
+    // Resolve relative internal links to absolute against tahi.studio.
+    if (raw.startsWith('/')) raw = `${TAHI_ORIGIN}${raw.replace(/\/+$/, '')}`
+    if (!/^https?:\/\//i.test(raw)) continue
+    if (seen.has(raw)) continue
+    seen.add(raw)
+    urls.push(raw)
+  }
+
+  const ok: ValidatedLink[] = []
+  const dead: InvalidLink[] = []
+  for (let i = 0; i < urls.length; i += BATCH_SIZE) {
+    const batch = urls.slice(i, i + BATCH_SIZE)
+    const results = await Promise.all(batch.map(checkOne))
+    for (const r of results) {
+      if ('reason' in r) dead.push(r)
+      else ok.push(r)
+    }
+  }
+
+  return { total: urls.length, okCount: ok.length, deadCount: dead.length, ok, dead }
+}

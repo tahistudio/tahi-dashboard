@@ -110,14 +110,16 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     .from(schema.draftVariants)
     .where(eq(schema.draftVariants.draftId, id))
 
-  // Pull brief + voice weights out of scoreBreakdown JSON
+  // Pull brief + voice weights + link-check out of scoreBreakdown JSON
   let brief: unknown = null
   let voiceWeights: Record<string, number> = {}
+  let linkCheck: unknown = null
   if (draft.scoreBreakdown) {
     try {
-      const parsed = JSON.parse(draft.scoreBreakdown) as { brief?: unknown; voiceWeights?: Record<string, number> }
+      const parsed = JSON.parse(draft.scoreBreakdown) as { brief?: unknown; voiceWeights?: Record<string, number>; linkCheck?: unknown }
       brief = parsed.brief ?? null
       voiceWeights = parsed.voiceWeights ?? {}
+      linkCheck = parsed.linkCheck ?? null
     } catch { /* keep defaults */ }
   }
 
@@ -146,6 +148,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     idea: idea ?? null,
     brief,
     voiceWeights,
+    linkCheck,
     revisions: revisions.map(r => ({
       revisionNumber: r.revisionNumber,
       source: r.source,
