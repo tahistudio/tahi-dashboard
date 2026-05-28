@@ -43,7 +43,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { getCollectionItem, patchCollectionItem } from '@/lib/webflow'
+import { getCollectionItem, patchCollectionItem, loadBlogReferenceLookups } from '@/lib/webflow'
 import {
   backfillPostFields,
   buildWebflowPatchPayload,
@@ -143,6 +143,24 @@ async function processOne(
       }
     }
 
+    // Resolve the category reference ID -> human name (Webflow returns
+    // refs as bare ids; schema needs the name, not "687d1abb..."). And
+    // pull the real post image so the Article ImageObject isn't empty.
+    let mainCategoryName = categoryName(f['main-category'])
+    try {
+      const refs = await loadBlogReferenceLookups()
+      const raw = f['main-category']
+      const catId = typeof raw === 'string' ? raw : null
+      if (catId && refs.categoryNameById.has(catId)) {
+        mainCategoryName = refs.categoryNameById.get(catId) ?? mainCategoryName
+      }
+    } catch { /* fall back to whatever categoryName returned */ }
+    const mainImg = f['main-image']
+    const thumbImg = f['thumbnail-image-2']
+    const imageUrl = (typeof mainImg === 'object' && mainImg?.url)
+      ? mainImg.url
+      : (typeof thumbImg === 'object' && thumbImg?.url ? thumbImg.url : null)
+
     // 2) Run the orchestrator. Generates FAQs / takeaways / AI prompt
     //    via Sonnet + builds the schema + hreflang via pure helpers.
     const input: BackfillPostInput = {
@@ -153,7 +171,8 @@ async function processOne(
       metaDescription: (f['meta-description-2'] ?? f['post-description'] ?? f['summary-2'] ?? null),
       publishedAt: f['published-on'] ?? null,
       authorName: authorName(f.author),
-      mainCategoryName: categoryName(f['main-category']),
+      mainCategoryName,
+      imageUrl,
     }
     const out = await backfillPostFields(input)
     const payload = buildWebflowPatchPayload(out)

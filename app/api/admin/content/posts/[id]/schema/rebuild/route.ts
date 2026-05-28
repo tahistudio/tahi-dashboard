@@ -22,7 +22,7 @@
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
-import { getCollectionItem, patchCollectionItem } from '@/lib/webflow'
+import { getCollectionItem, patchCollectionItem, loadBlogReferenceLookups } from '@/lib/webflow'
 import { buildBlogSchemaAdditions, buildHreflangBlock } from '@/lib/blog-schema'
 import {
   buildSchemaInputForPost,
@@ -52,7 +52,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     const slug = f.slug ?? ''
     const postUrl = `https://www.tahi.studio/blog/${slug}`
 
-    const input = buildSchemaInputForPost(f, postUrl)
+    const refs = await loadBlogReferenceLookups().catch(() => null)
+    const input = buildSchemaInputForPost(f, postUrl, refs?.categoryNameById)
     const { jsonLdString } = buildBlogSchemaAdditions(input)
     const hreflang = buildHreflangBlock(postUrl)
 

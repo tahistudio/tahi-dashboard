@@ -119,13 +119,20 @@ function htmlToPseudoMarkdown(html: string): string {
 export function buildSchemaInputForPost(
   f: BlogPostFields,
   postUrl: string,
+  /** Optional id -> category-name map. Webflow returns reference fields as
+   *  bare item ids; pass this (from loadBlogReferenceLookups) so the
+   *  schema gets the real category name instead of "687d1abb...". */
+  categoryNameById?: Map<string, string>,
 ): SchemaInput {
   const bodyHtml = f['post-body'] ?? ''
   const bodyMarkdown = htmlToPseudoMarkdown(bodyHtml)
 
   const title = (f['meta-title'] ?? f.name ?? '').trim()
   const metaDescription = (f['meta-description-2'] ?? f['post-description'] ?? f['summary-2'] ?? '').trim()
-  const main = categoryName(f['main-category'])
+  const rawCat = f['main-category']
+  const main = (typeof rawCat === 'string' && categoryNameById?.get(rawCat))
+    ? (categoryNameById.get(rawCat) as string)
+    : categoryName(rawCat)
   const others = otherCategoryNames(f['other-categories'])
   const categories = Array.from(new Set([main, ...others])).filter(Boolean)
 

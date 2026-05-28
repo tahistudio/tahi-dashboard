@@ -46,6 +46,9 @@ export interface BackfillPostInput {
   publishedAt: string | null
   authorName: string | null
   mainCategoryName: string | null
+  /** Existing post image URL — passed into the Article schema so the
+   *  ImageObject isn't empty (Google requires a real image). */
+  imageUrl: string | null
 }
 
 export interface BackfillPostOutput {
@@ -324,7 +327,7 @@ export async function backfillPostFields(input: BackfillPostInput): Promise<Back
     authorLinkedIn: null,
     authorBio: null,
     authorImage: null,
-    imageUrl: '',
+    imageUrl: input.imageUrl ?? '',
     mainCategory,
     categories: [mainCategory],
     wordCount,

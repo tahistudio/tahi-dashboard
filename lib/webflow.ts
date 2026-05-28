@@ -301,6 +301,8 @@ export interface WebflowReferenceLookup {
   authorsByNamePart: Map<string, string>      // 'liam' / 'miller' / 'liam miller' -> item id
   categoriesBySlug: Map<string, string>       // 'enterprise-webflow' -> item id
   categoriesByName: Map<string, string>       // lower-case display name -> item id
+  categoryNameById: Map<string, string>       // item id -> display name (for schema)
+  categorySlugById: Map<string, string>       // item id -> slug
 }
 
 let cachedReferenceLookups: WebflowReferenceLookup | null = null
@@ -339,10 +341,12 @@ export async function loadBlogReferenceLookups(): Promise<WebflowReferenceLookup
 
   const categoriesBySlug = new Map<string, string>()
   const categoriesByName = new Map<string, string>()
+  const categoryNameById = new Map<string, string>()
+  const categorySlugById = new Map<string, string>()
   for (const item of categoryItems.items) {
     const fd = item.fieldData as { slug?: string; name?: string }
-    if (fd.slug) categoriesBySlug.set(fd.slug.toLowerCase(), item.id)
-    if (fd.name) categoriesByName.set(fd.name.trim().toLowerCase(), item.id)
+    if (fd.slug) { categoriesBySlug.set(fd.slug.toLowerCase(), item.id); categorySlugById.set(item.id, fd.slug) }
+    if (fd.name) { categoriesByName.set(fd.name.trim().toLowerCase(), item.id); categoryNameById.set(item.id, fd.name.trim()) }
   }
 
   cachedReferenceLookups = {
@@ -350,6 +354,8 @@ export async function loadBlogReferenceLookups(): Promise<WebflowReferenceLookup
     authorsByNamePart,
     categoriesBySlug,
     categoriesByName,
+    categoryNameById,
+    categorySlugById,
   }
   return cachedReferenceLookups
 }

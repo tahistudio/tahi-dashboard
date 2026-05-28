@@ -304,23 +304,20 @@ function detectHowToSteps(bodyMarkdown: string): HowToStep[] {
 
 // ─── graph builders ─────────────────────────────────────────────────────────
 
-function buildArticle(input: SchemaInput): object {
+function buildArticle(
+  input: SchemaInput,
+  refs: { mentionIds: string[]; aboutIds: string[]; citationIds: string[] },
+): object {
   const categories = input.categories && input.categories.length > 0
     ? input.categories
     : [input.mainCategory]
-  return {
+  const article: Record<string, unknown> = {
     '@type': 'Article',
     '@id': `${input.url}#article`,
     mainEntityOfPage: { '@type': 'WebPage', '@id': input.url },
     headline: input.title,
     description: input.metaDescription,
     abstract: input.metaDescription,
-    image: {
-      '@type': 'ImageObject',
-      url: input.imageUrl,
-      ...(input.imageWidth ? { width: input.imageWidth } : {}),
-      ...(input.imageHeight ? { height: input.imageHeight } : {}),
-    },
     datePublished: input.publishedAt,
     dateModified: input.updatedAt,
     author: { '@id': `${input.url}#author` },
@@ -336,6 +333,21 @@ function buildArticle(input: SchemaInput): object {
     wordCount: input.wordCount,
     timeRequired: timeRequiredIso(input.wordCount),
   }
+  // Only emit image if we actually have a URL — an empty ImageObject url
+  // fails Google's Article rich-results requirement.
+  if (input.imageUrl && input.imageUrl.trim()) {
+    article.image = {
+      '@type': 'ImageObject',
+      url: input.imageUrl,
+      ...(input.imageWidth ? { width: input.imageWidth } : {}),
+      ...(input.imageHeight ? { height: input.imageHeight } : {}),
+    }
+  }
+  // Wire entity references so Google connects them to the Article.
+  if (refs.aboutIds.length > 0) article.about = refs.aboutIds.map(id => ({ '@id': id }))
+  if (refs.mentionIds.length > 0) article.mentions = refs.mentionIds.map(id => ({ '@id': id }))
+  if (refs.citationIds.length > 0) article.citation = refs.citationIds.map(id => ({ '@id': id }))
+  return article
 }
 
 function buildFaqPage(input: SchemaInput): object | null {
@@ -410,30 +422,55 @@ function buildPerson(input: SchemaInput): object {
   }
 }
 
-function buildMentions(mentions: string[] | undefined): object[] {
-  if (!mentions || mentions.length === 0) return []
-  return mentions.map(name => ({
-    '@type': 'Thing',
-    name,
-    ...(BRAND_URLS[name] ? { url: BRAND_URLS[name], sameAs: BRAND_URLS[name] } : {}),
-  }))
+function slugFragment(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
 }
 
-function buildAbout(aboutEntities: string[] | undefined): object[] {
-  if (!aboutEntities || aboutEntities.length === 0) return []
-  return aboutEntities.map(name => ({ '@type': 'Thing', name }))
+/** Each node carries an @id so the Article can reference it via
+ *  mentions/about/citation (otherwise the nodes float orphaned and Google
+ *  ignores them). Returns the nodes + their @ids for wiring. */
+function buildMentions(mentions: string[] | undefined, baseUrl: string): { nodes: object[]; ids: string[] } {
+  if (!mentions || mentions.length === 0) return { nodes: [], ids: [] }
+  const ids: string[] = []
+  const nodes = mentions.map(name => {
+    const id = BRAND_URLS[name] ?? `${baseUrl}#mention-${slugFragment(name)}`
+    ids.push(id)
+    return {
+      '@type': 'Thing',
+      '@id': id,
+      name,
+      ...(BRAND_URLS[name] ? { url: BRAND_URLS[name], sameAs: BRAND_URLS[name] } : {}),
+    }
+  })
+  return { nodes, ids }
+}
+
+function buildAbout(aboutEntities: string[] | undefined, baseUrl: string): { nodes: object[]; ids: string[] } {
+  if (!aboutEntities || aboutEntities.length === 0) return { nodes: [], ids: [] }
+  const ids: string[] = []
+  const nodes = aboutEntities.map(name => {
+    const id = `${baseUrl}#about-${slugFragment(name)}`
+    ids.push(id)
+    return { '@type': 'Thing', '@id': id, name }
+  })
+  return { nodes, ids }
 }
 
 function buildCitations(
   citations: Array<{ url: string; title?: string }> | undefined,
-): object[] {
-  if (!citations || citations.length === 0) return []
-  return citations.map(c => ({
-    '@type': 'WebPage',
-    '@id': c.url,
-    url: c.url,
-    ...(c.title ? { name: c.title } : {}),
-  }))
+): { nodes: object[]; ids: string[] } {
+  if (!citations || citations.length === 0) return { nodes: [], ids: [] }
+  const ids: string[] = []
+  const nodes = citations.map(c => {
+    ids.push(c.url)
+    return {
+      '@type': 'WebPage',
+      '@id': c.url,
+      url: c.url,
+      ...(c.title ? { name: c.title } : {}),
+    }
+  })
+  return { nodes, ids }
 }
 
 function buildBreadcrumbs(input: SchemaInput): object {
@@ -465,7 +502,17 @@ function buildBreadcrumbs(input: SchemaInput): object {
 export function buildBlogSchemaAdditions(input: SchemaInput): SchemaOutput {
   const blocks: object[] = []
 
-  blocks.push(buildArticle(input))
+  // Build entity nodes first so we can wire their @ids into the Article's
+  // about / mentions / citation arrays.
+  const mentions = buildMentions(input.mentions, input.url)
+  const about = buildAbout(input.aboutEntities, input.url)
+  const citations = buildCitations(input.citations)
+
+  blocks.push(buildArticle(input, {
+    mentionIds: mentions.ids,
+    aboutIds: about.ids,
+    citationIds: citations.ids,
+  }))
 
   const faq = buildFaqPage(input)
   if (faq) blocks.push(faq)
@@ -476,14 +523,9 @@ export function buildBlogSchemaAdditions(input: SchemaInput): SchemaOutput {
   blocks.push(buildOrganization())
   blocks.push(buildPerson(input))
 
-  const mentions = buildMentions(input.mentions)
-  if (mentions.length > 0) blocks.push(...mentions)
-
-  const about = buildAbout(input.aboutEntities)
-  if (about.length > 0) blocks.push(...about)
-
-  const citations = buildCitations(input.citations)
-  if (citations.length > 0) blocks.push(...citations)
+  if (mentions.nodes.length > 0) blocks.push(...mentions.nodes)
+  if (about.nodes.length > 0) blocks.push(...about.nodes)
+  if (citations.nodes.length > 0) blocks.push(...citations.nodes)
 
   // SpeakableSpecification removed: it pointed xpath at #tldr /
   // #key-takeaways anchors the Webflow template never injects, so every

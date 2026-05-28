@@ -34,6 +34,7 @@ import {
   getCollectionItem,
   listCollectionItems,
   patchCollectionItem,
+  loadBlogReferenceLookups,
 } from '@/lib/webflow'
 import { buildBlogSchemaAdditions, buildHreflangBlock } from '@/lib/blog-schema'
 import {
@@ -81,7 +82,8 @@ async function rebuildOne(id: string): Promise<ItemResult> {
     const slug = f.slug ?? ''
     const postUrl = `https://www.tahi.studio/blog/${slug}`
 
-    const input = buildSchemaInputForPost(f, postUrl)
+    const refs = await loadBlogReferenceLookups().catch(() => null)
+    const input = buildSchemaInputForPost(f, postUrl, refs?.categoryNameById)
     const { jsonLdString } = buildBlogSchemaAdditions(input)
     const hreflang = buildHreflangBlock(postUrl)
 
