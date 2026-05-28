@@ -237,6 +237,9 @@ export function buildWriterPrompt(input: {
   brief: StrategistOutput
   researchBrief: ResearchBrief
   brandDocs?: string
+  /** Pre-rendered blog context block (slugs + recent posts + linking
+   *  rules) from lib/blog-context.ts. */
+  blogContext?: string
   variantLabel?: 'A' | 'B'
   variantInstruction?: string  // for high-priority A/B: "approach this as a deep-dive" vs "approach as listicle"
 }): string {
@@ -248,6 +251,13 @@ ${JSON.stringify(input.brief, null, 2)}
 
 ## Research brief (use facts + citations from here)
 ${input.researchBrief.sections.map(s => `### ${s.question}\n${s.content}\n\nCitations: ${s.citations.map(c => c.url).join(', ')}`).join('\n\n')}
+
+${input.blogContext ?? ''}
+
+## Sourcing rules (STRICT)
+- When you state a statistic, study finding, or factual claim drawn from the research brief, INLINE-LINK the specific phrase to the source URL using [phrase](url) right where the claim appears. Do not dump sources in a list at the end.
+- Only cite URLs that appear in the research brief above.
+- Internal links to other Tahi posts use the relative /slug form per the linking rules.
 
 ## Tahi brand voice
 ${input.brandDocs ?? '(use Liam voice: direct, concrete, no em dashes, no "let\'s explore", short paragraphs, opinionated, specific)'}
@@ -356,6 +366,58 @@ export function parseEditor(raw: string): EditorOutput {
     changesSummary: parsed.changesSummary ?? '',
     conflictResolutions: parsed.conflictResolutions ?? [],
     weightedScore: typeof parsed.weightedScore === 'number' ? parsed.weightedScore : 0,
+  }
+}
+
+// ── Liam's manual edit pass (guardrailed) ─────────────────────────────────────
+
+export interface LiamEditOutput {
+  bodyMarkdown: string
+  /** Bullet list of exactly what changed, so Liam can verify the model
+   *  didn't touch anything he didn't ask for. */
+  changeLog: string[]
+  /** True if the model judged any instruction too ambiguous/risky to apply
+   *  without guessing — surfaced to Liam rather than guessed at. */
+  skipped: Array<{ instruction: string; reason: string }>
+}
+
+export const LIAM_EDIT_SYSTEM = `You are a precise copy editor applying Liam's specific, hand-written change requests to a finished blog draft. This is a surgical pass, NOT a rewrite.
+
+HARD GUARDRAILS (follow exactly):
+- Apply ONLY the changes Liam asks for. Change nothing else.
+- Preserve every sentence, heading, link, and paragraph he did not mention, verbatim.
+- Do not "improve", reword, re-order, or restructure anything outside his instructions.
+- Do not change the title, headings, or links unless explicitly told to.
+- Never use em dashes. Match the surrounding voice when you add or alter text.
+- If an instruction is ambiguous or would require guessing at his intent, DO NOT guess — add it to "skipped" with a short reason and leave that part of the draft untouched.
+- Return the FULL body markdown (the unchanged parts included, verbatim) plus a changeLog listing each edit you made.`
+
+export function buildLiamEditPrompt(input: {
+  currentBodyMarkdown: string
+  instructions: string
+}): string {
+  return `## Current draft (markdown) — preserve everything except what the instructions below change
+${input.currentBodyMarkdown}
+
+## Liam's edit instructions (apply ONLY these)
+${input.instructions}
+
+Respond JSON only:
+
+{
+  "bodyMarkdown": "the FULL body with only the requested edits applied, everything else verbatim",
+  "changeLog": ["edit 1 you made", "edit 2 you made"],
+  "skipped": [{ "instruction": "...", "reason": "why you didn't apply it" }]
+}`
+}
+
+export function parseLiamEdit(raw: string): LiamEditOutput {
+  const parsed = JSON.parse(raw) as Partial<LiamEditOutput>
+  if (!parsed.bodyMarkdown) throw new Error('Liam edit missing body')
+  return {
+    bodyMarkdown: parsed.bodyMarkdown,
+    changeLog: parsed.changeLog ?? [],
+    skipped: parsed.skipped ?? [],
   }
 }
 

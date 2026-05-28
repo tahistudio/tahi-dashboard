@@ -35,6 +35,7 @@ import { buildResearchBrief, isPerplexityConfigured } from '@/lib/perplexity'
 import { generateCover, isReplicateConfigured } from '@/lib/replicate'
 import { validateDraftLinks } from '@/lib/link-validator'
 import { markdownToHtml } from '@/lib/markdown-render'
+import { loadBlogContext, renderBlogContextForPrompt } from '@/lib/blog-context'
 import {
   REVIEWERS,
   DEFAULT_VOICE_WEIGHTS,
@@ -254,11 +255,18 @@ async function stageDraft(database: Database, draft: DraftRow): Promise<StageRes
   if (!brief) throw new Error('Brief not found')
   const research = JSON.parse(draft.researchSummary ?? '{}') as Awaited<ReturnType<typeof buildResearchBrief>>
 
+  // Pull live blog context (slugs + recent posts) so the writer links
+  // accurately, relatively (/slug), and knows what we've already covered.
+  let blogContextBlock = ''
+  try {
+    blogContextBlock = renderBlogContextForPrompt(await loadBlogContext())
+  } catch { /* non-fatal — writer falls back to no internal-link list */ }
+
   const { result, costCents } = await claudeJson({
     database, scope: 'draft', scopeId: draft.id, stage: 'writer',
     model: 'claude-sonnet-4-6', maxTokens: 8000,
     systemPrompt: WRITER_SYSTEM,
-    userPrompt: buildWriterPrompt({ brief, researchBrief: research }),
+    userPrompt: buildWriterPrompt({ brief, researchBrief: research, blogContext: blogContextBlock }),
     parse: parseWriter,
   })
 

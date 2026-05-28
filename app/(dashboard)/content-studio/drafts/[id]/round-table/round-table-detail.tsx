@@ -109,6 +109,10 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   const [advancing, setAdvancing] = useState(false)
   const [selectedRevision, setSelectedRevision] = useState<number>(1)
   const [overrideInFlight, setOverrideInFlight] = useState<string | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editInstructions, setEditInstructions] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [editResult, setEditResult] = useState<{ changeLog: string[]; skipped: Array<{ instruction: string; reason: string }> } | null>(null)
 
   const fetchSnapshot = useCallback(async () => {
     try {
@@ -161,6 +165,28 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   async function resume() {
     await fetch(apiPath(`/api/admin/content/drafts/${draftId}/resume`), { method: 'POST' }).catch(() => {})
     await fetchSnapshot()
+  }
+
+  async function applyEdits() {
+    if (!editInstructions.trim()) return
+    setEditing(true)
+    setEditResult(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}/suggest-edits`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instructions: editInstructions.trim() }),
+      })
+      const json = await res.json() as { changeLog?: string[]; skipped?: Array<{ instruction: string; reason: string }>; error?: string }
+      if (!res.ok) { setEditResult({ changeLog: [], skipped: [{ instruction: 'request', reason: json.error ?? 'failed' }] }); return }
+      setEditResult({ changeLog: json.changeLog ?? [], skipped: json.skipped ?? [] })
+      setEditInstructions('')
+      await fetchSnapshot()
+    } catch {
+      setEditResult({ changeLog: [], skipped: [{ instruction: 'request', reason: 'network error' }] })
+    } finally {
+      setEditing(false)
+    }
   }
 
   async function sideWith(conflictId: string, side: 'a' | 'b' | 'editor', reasoning: string) {
@@ -432,6 +458,68 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
               />
             ))}
           </div>
+        </Card>
+      )}
+
+      {/* Suggest edits — guardrailed manual pass. Available once there's
+          a body to edit. */}
+      {currentRev && currentRev.bodyHtml && (
+        <Card padding="md">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+            <p style={{ fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-subtle)', margin: 0 }}>
+              Suggest edits
+            </p>
+            <TahiButton size="sm" variant={editOpen ? 'secondary' : 'primary'} onClick={() => setEditOpen(v => !v)}>
+              {editOpen ? 'Close' : 'Suggest edits'}
+            </TahiButton>
+          </div>
+          {editOpen && (
+            <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+              <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.5 }}>
+                Give specific instructions. The editor applies <strong>only</strong> what you ask, leaves everything else verbatim, and returns a changelog. Anything ambiguous it skips rather than guessing.
+              </p>
+              <textarea
+                rows={4}
+                value={editInstructions}
+                onChange={e => setEditInstructions(e.target.value)}
+                placeholder={'e.g.\n- Cut the 3rd paragraph under "What we skip"\n- Make the intro one sentence punchier\n- Change "we never" to "we rarely" in the pricing section'}
+                style={{
+                  width: '100%', padding: '0.625rem 0.75rem', fontSize: '0.875rem',
+                  borderRadius: '0.5rem', border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)', resize: 'vertical', lineHeight: 1.5,
+                }}
+              />
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <TahiButton size="sm" loading={editing} onClick={() => { void applyEdits() }} disabled={!editInstructions.trim()}>
+                  {editing ? 'Applying...' : 'Apply edits'}
+                </TahiButton>
+              </div>
+              {editResult && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {editResult.changeLog.length > 0 && (
+                    <div style={{ padding: '0.625rem 0.75rem', background: 'var(--color-brand-50)', borderRadius: '0.5rem' }}>
+                      <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-brand-dark)', margin: '0 0 0.375rem' }}>
+                        Applied ({editResult.changeLog.length})
+                      </p>
+                      <ul style={{ margin: 0, padding: '0 0 0 1rem', fontSize: '0.8125rem', color: 'var(--color-text)' }}>
+                        {editResult.changeLog.map((c, i) => <li key={i} style={{ marginBottom: '0.2rem' }}>{c}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {editResult.skipped.length > 0 && (
+                    <div style={{ padding: '0.625rem 0.75rem', background: 'var(--color-warning-bg)', borderRadius: '0.5rem' }}>
+                      <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-warning-text, #8A5A12)', margin: '0 0 0.375rem' }}>
+                        Skipped (ambiguous — left untouched)
+                      </p>
+                      <ul style={{ margin: 0, padding: '0 0 0 1rem', fontSize: '0.8125rem', color: 'var(--color-text)' }}>
+                        {editResult.skipped.map((s, i) => <li key={i} style={{ marginBottom: '0.2rem' }}><strong>{s.instruction}</strong>: {s.reason}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </Card>
       )}
 
