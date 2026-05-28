@@ -2727,6 +2727,11 @@ export const contentDrafts = sqliteTable('content_drafts', {
   // this is set + recent (<90s), so overlapping cron + front-end polls
   // can't run the same stage twice and double-insert reviews.
   stageLockedAt: text('stage_locked_at'),
+  // Pause/resume (Slice 9). When Liam pauses a draft mid-pipeline we move
+  // status -> 'paused' and stash the stage it was at here. Resume restores
+  // status to this value so the orchestrator picks up exactly where it
+  // left off (no re-running completed stages). Cron skips 'paused' drafts.
+  pausedFromStatus: text('paused_from_status'),
   ...timestamps,
 }, (table) => [
   index('idx_content_drafts_idea').on(table.ideaId),

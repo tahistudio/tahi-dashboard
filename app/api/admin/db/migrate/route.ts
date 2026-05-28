@@ -1676,6 +1676,13 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE content_drafts ADD COLUMN stage_locked_at text`,
     ],
   },
+  {
+    name: '0066',
+    description: 'Phase I · Slice 9 — pause/resume. Adds paused_from_status to content_drafts so a paused draft remembers which stage to resume at. Idempotent ALTER.',
+    statements: [
+      `ALTER TABLE content_drafts ADD COLUMN paused_from_status text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

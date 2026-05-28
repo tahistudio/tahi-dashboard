@@ -18,7 +18,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  RefreshCw, ChevronLeft, AlertTriangle, XCircle, Play,
+  RefreshCw, ChevronLeft, AlertTriangle, XCircle, Play, Pause, FileText, ListChecks,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
@@ -35,11 +35,14 @@ interface DraftSnapshot {
     id: string
     ideaId: string
     status: string
+    pausedFromStatus: string | null
     title: string | null
     metaTitle: string | null
     metaDescription: string | null
     bodyHtml: string | null
     bodyMarkdown: string | null
+    keyTakeaways: string | null
+    faqsJson: string | null
     contentScore: number | null
     coverSvgUrl: string | null
     errorMessage: string | null
@@ -97,7 +100,7 @@ interface DraftSnapshot {
   services: { perplexity: boolean; replicate: boolean; openai: boolean; anthropic: boolean }
 }
 
-const TERMINAL_STATUSES = new Set(['ready_for_publish', 'failed', 'cost_capped'])
+const TERMINAL_STATUSES = new Set(['ready_for_publish', 'failed', 'cost_capped', 'paused'])
 
 export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   const router = useRouter()
@@ -148,6 +151,16 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
     } finally {
       setAdvancing(false)
     }
+  }
+
+  async function pause() {
+    await fetch(apiPath(`/api/admin/content/drafts/${draftId}/pause`), { method: 'POST' }).catch(() => {})
+    await fetchSnapshot()
+  }
+
+  async function resume() {
+    await fetch(apiPath(`/api/admin/content/drafts/${draftId}/resume`), { method: 'POST' }).catch(() => {})
+    await fetchSnapshot()
   }
 
   async function sideWith(conflictId: string, side: 'a' | 'b' | 'editor', reasoning: string) {
@@ -216,15 +229,33 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
         <Badge tone="neutral" variant="soft" size="sm" leader={false}>
           ${(spendCents / 100).toFixed(2)} / $10.00 cost cap
         </Badge>
-        {inFlight ? (
+        {draft.status === 'paused' ? (
           <TahiButton
             size="sm"
-            loading={advancing}
-            onClick={() => { void advance() }}
-            iconLeft={!advancing ? <Play className="w-3.5 h-3.5" /> : undefined}
+            onClick={() => { void resume() }}
+            iconLeft={<Play className="w-3.5 h-3.5" />}
           >
-            {advancing ? 'Advancing...' : 'Advance pipeline (3 steps)'}
+            Resume{draft.pausedFromStatus ? ` (${prettyStatus(draft.pausedFromStatus)})` : ''}
           </TahiButton>
+        ) : inFlight ? (
+          <>
+            <TahiButton
+              size="sm"
+              loading={advancing}
+              onClick={() => { void advance() }}
+              iconLeft={!advancing ? <Play className="w-3.5 h-3.5" /> : undefined}
+            >
+              {advancing ? 'Advancing...' : 'Advance pipeline (3 steps)'}
+            </TahiButton>
+            <TahiButton
+              size="sm"
+              variant="secondary"
+              onClick={() => { void pause() }}
+              iconLeft={<Pause className="w-3.5 h-3.5" />}
+            >
+              Pause
+            </TahiButton>
+          </>
         ) : (
           <TahiButton
             size="sm"
@@ -404,40 +435,129 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
         </Card>
       )}
 
-      {/* Body preview */}
+      {/* Article preview — rendered like a real blog post */}
       {currentRev && currentRev.bodyHtml && (
-        <Card padding="md">
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '0.625rem' }}>
-            <p style={{ fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-subtle)', margin: 0 }}>
-              Body — revision {currentRev.revisionNumber}
+        <Card padding="none">
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0.875rem 1.25rem 0' }}>
+            <p style={{ fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-subtle)', margin: 0, display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+              <FileText size={12} aria-hidden="true" /> Article preview — revision {currentRev.revisionNumber}
             </p>
             <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
               {currentRev.wordCount?.toLocaleString() ?? '?'} words · {currentRev.source}
             </span>
           </div>
           {currentRev.reason && (
-            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: '0 0 0.625rem', fontStyle: 'italic' }}>
+            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: '0.375rem 1.25rem 0', fontStyle: 'italic' }}>
               {currentRev.reason}
             </p>
           )}
-          <div
-            className="prose prose-sm"
-            style={{
-              fontSize: '0.875rem',
-              lineHeight: 1.6,
-              color: 'var(--color-text)',
-              maxHeight: '40rem',
-              overflowY: 'auto',
-              padding: '0.75rem',
-              background: 'var(--color-bg)',
-              borderRadius: '0.5rem',
-              border: '1px solid var(--color-border-subtle)',
-            }}
-            dangerouslySetInnerHTML={{ __html: currentRev.bodyHtml }}
-          />
+
+          <article className="rt-article" style={{ maxHeight: '52rem', overflowY: 'auto', padding: '1.5rem 1.25rem 2rem' }}>
+            {/* Cover */}
+            {draft.coverSvgUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={draft.coverSvgUrl}
+                alt={draft.title ?? 'Cover'}
+                style={{ width: '100%', borderRadius: '0.75rem', marginBottom: '1.5rem', display: 'block' }}
+              />
+            )}
+            {/* Title + byline */}
+            <h1 style={{ fontSize: '1.875rem', fontWeight: 800, lineHeight: 1.2, color: 'var(--color-text)', margin: '0 0 0.5rem', maxWidth: '44rem' }}>
+              {draft.title ?? idea?.title ?? 'Untitled'}
+            </h1>
+            {draft.metaDescription && (
+              <p style={{ fontSize: '1.0625rem', lineHeight: 1.5, color: 'var(--color-text-muted)', margin: '0 0 1rem', maxWidth: '44rem' }}>
+                {draft.metaDescription}
+              </p>
+            )}
+            <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', margin: '0 0 1.5rem' }}>
+              By Liam, Co-founder · Tahi Studio
+            </p>
+            <div style={{ height: '1px', background: 'var(--color-border-subtle)', margin: '0 0 1.5rem', maxWidth: '44rem' }} />
+
+            {/* Body */}
+            <div
+              className="rt-article-body"
+              style={{ maxWidth: '44rem' }}
+              dangerouslySetInnerHTML={{ __html: currentRev.bodyHtml }}
+            />
+
+            {/* Key takeaways (if present as a separate field) */}
+            {draft.keyTakeaways && (
+              <section style={{ maxWidth: '44rem', marginTop: '2rem', padding: '1rem 1.25rem', background: 'var(--color-brand-50)', borderRadius: 'var(--radius-leaf, 0 16px 0 16px)' }}>
+                <h3 style={{ fontSize: '0.8125rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-brand-dark)', margin: '0 0 0.625rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+                  <ListChecks size={14} aria-hidden="true" /> Key takeaways
+                </h3>
+                <div className="rt-article-body" dangerouslySetInnerHTML={{ __html: draft.keyTakeaways }} />
+              </section>
+            )}
+
+            {/* FAQs (if present) */}
+            <FaqSection faqsJson={draft.faqsJson} />
+          </article>
         </Card>
       )}
+
+      {/* Scoped article styles. Gives the raw body HTML real heading
+          hierarchy + spacing so it reads like a published post, not a
+          flat blob. */}
+      <style>{`
+        .rt-article-body { font-size: 1rem; line-height: 1.7; color: var(--color-text); }
+        .rt-article-body h2 { font-size: 1.5rem; font-weight: 700; line-height: 1.3; margin: 2rem 0 0.75rem; color: var(--color-text); }
+        .rt-article-body h3 { font-size: 1.1875rem; font-weight: 700; line-height: 1.35; margin: 1.5rem 0 0.5rem; color: var(--color-text); }
+        .rt-article-body p { margin: 0 0 1.1rem; }
+        .rt-article-body ul, .rt-article-body ol { margin: 0 0 1.1rem; padding-left: 1.5rem; }
+        .rt-article-body li { margin: 0 0 0.4rem; }
+        .rt-article-body a { color: var(--color-brand); text-decoration: underline; text-underline-offset: 2px; }
+        .rt-article-body blockquote { margin: 1.25rem 0; padding: 0.5rem 0 0.5rem 1rem; border-left: 3px solid var(--color-brand); color: var(--color-text-muted); font-style: italic; }
+        .rt-article-body strong { font-weight: 700; color: var(--color-text); }
+        .rt-article-body code { background: var(--color-bg-secondary); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.875em; }
+        .rt-article-body hr { border: none; border-top: 1px solid var(--color-border-subtle); margin: 2rem 0; }
+      `}</style>
     </div>
+  )
+}
+
+/** Renders FAQs from the draft's faqsJson field as a Q/A list. faqsJson
+ *  is expected to be a JSON array of { q, a } (or { question, answer }). */
+function FaqSection({ faqsJson }: { faqsJson: string | null }) {
+  if (!faqsJson) return null
+  let faqs: Array<{ q?: string; a?: string; question?: string; answer?: string }> = []
+  try {
+    const parsed = JSON.parse(faqsJson)
+    if (Array.isArray(parsed)) faqs = parsed
+  } catch { return null }
+  const normalised = faqs
+    .map(f => ({ q: f.q ?? f.question ?? '', a: f.a ?? f.answer ?? '' }))
+    .filter(f => f.q && f.a)
+  if (normalised.length === 0) return null
+
+  return (
+    <section style={{ maxWidth: '44rem', marginTop: '2rem' }}>
+      <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text)', margin: '0 0 1rem' }}>
+        Frequently asked questions
+      </h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        {normalised.map((f, i) => (
+          <div
+            key={i}
+            style={{
+              padding: '0.875rem 1rem',
+              background: 'var(--color-bg-secondary)',
+              borderRadius: '0.625rem',
+            }}
+          >
+            <p style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-text)', margin: '0 0 0.375rem' }}>
+              {f.q}
+            </p>
+            <p style={{ fontSize: '0.9375rem', lineHeight: 1.6, color: 'var(--color-text-muted)', margin: 0 }}>
+              {f.a}
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -535,6 +655,7 @@ function ConflictRow({ conflict, inFlight, onSide }: ConflictRowProps) {
 function statusTone(status: string): BadgeTone {
   if (status === 'ready_for_publish' || status === 'ready') return 'positive'
   if (status === 'failed' || status === 'cost_capped') return 'danger'
+  if (status === 'paused') return 'warning'
   return 'info'
 }
 
@@ -553,6 +674,7 @@ function prettyStatus(status: string): string {
     ready: 'Ready',
     failed: 'Failed',
     cost_capped: 'Cost cap reached',
+    paused: 'Paused',
   }
   return map[status] ?? status
 }
