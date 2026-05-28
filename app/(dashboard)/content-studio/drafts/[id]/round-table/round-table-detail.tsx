@@ -123,6 +123,7 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   const [publishing, setPublishing] = useState<string | null>(null)
   const [scheduleDate, setScheduleDate] = useState('')
   const [publishMsg, setPublishMsg] = useState<string | null>(null)
+  const [coverUrlInput, setCoverUrlInput] = useState('')
 
   const fetchSnapshot = useCallback(async () => {
     try {
@@ -175,6 +176,42 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   async function resume() {
     await fetch(apiPath(`/api/admin/content/drafts/${draftId}/resume`), { method: 'POST' }).catch(() => {})
     await fetchSnapshot()
+  }
+
+  async function sendToStaci() {
+    setPublishing('staci')
+    setPublishMsg(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}/send-to-staci`), { method: 'POST' })
+      const json = await res.json() as { sent?: boolean; error?: string }
+      setPublishMsg(json.sent ? 'Cover brief sent to Staci on Slack.' : `Slack send failed: ${json.error ?? ''}`)
+    } catch (err) {
+      setPublishMsg(`Slack send failed: ${err instanceof Error ? err.message : 'error'}`)
+    } finally {
+      setPublishing(null)
+    }
+  }
+
+  async function setCoverUrl() {
+    const url = coverUrlInput.trim()
+    if (!url) return
+    setPublishing('setcover')
+    setPublishMsg(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}/set-cover`), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coverUrl: url }),
+      })
+      const json = await res.json() as { coverUrl?: string; error?: string }
+      if (!res.ok) { setPublishMsg(`Set cover failed: ${json.error ?? ''}`); return }
+      setCoverUrlInput('')
+      setPublishMsg('Cover updated.')
+      await fetchSnapshot()
+    } catch (err) {
+      setPublishMsg(`Set cover failed: ${err instanceof Error ? err.message : 'error'}`)
+    } finally {
+      setPublishing(null)
+    }
   }
 
   async function regenerateCover(mode: 'flux' | 'svg') {
@@ -715,11 +752,26 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
                 </div>
               )}
               <div style={{ display: 'flex', gap: '0.375rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                <TahiButton size="sm" loading={publishing === 'staci'} onClick={() => { void sendToStaci() }}>
+                  Send to Staci
+                </TahiButton>
                 <TahiButton size="sm" variant="secondary" loading={publishing === 'cover-flux'} onClick={() => { void regenerateCover('flux') }} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
                   Regenerate (Flux)
                 </TahiButton>
                 <TahiButton size="sm" variant="secondary" loading={publishing === 'cover-svg'} onClick={() => { void regenerateCover('svg') }}>
-                  Try SVG cover
+                  Try SVG
+                </TahiButton>
+              </div>
+              <div style={{ display: 'flex', gap: '0.375rem', marginTop: '0.375rem' }}>
+                <input
+                  type="text"
+                  value={coverUrlInput}
+                  onChange={e => setCoverUrlInput(e.target.value)}
+                  placeholder="Paste finished cover image URL (after Staci)"
+                  style={{ flex: 1, padding: '0.4rem 0.5rem', fontSize: '0.8125rem', borderRadius: '0.375rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}
+                />
+                <TahiButton size="sm" variant="secondary" loading={publishing === 'setcover'} disabled={!coverUrlInput.trim()} onClick={() => { void setCoverUrl() }}>
+                  Set cover
                 </TahiButton>
               </div>
             </div>
