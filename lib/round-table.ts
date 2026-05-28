@@ -106,16 +106,20 @@ export async function runStage(database: Database, draftId: string): Promise<Sta
     }
   }
 
+  // Status convention: each value names the CURRENT stage (the one we're
+  // about to run, or the one that's running). When a stage finishes,
+  // `advance()` sets status to the NEXT stage name. So when status is
+  // 'strategising', that means "research is done, Strategist is next".
   try {
     switch (draft.status) {
       case 'queued':            return await stageResearch(database, draft)
-      case 'researching':       return await stageStrategise(database, draft)
-      case 'strategising':      return await stageHeadlineLab(database, draft)
-      case 'headline_lab':      return await stageDraft(database, draft)
-      case 'drafting':          return await stageReview(database, draft)
-      case 'reviewing':         return await stageEdit(database, draft)
-      case 'editing':           return await stageReviewOrSignOff(database, draft)
-      case 'signing_off':       return await stageCover(database, draft)
+      case 'researching':       return await stageResearch(database, draft)      // resume if interrupted
+      case 'strategising':      return await stageStrategise(database, draft)
+      case 'headline_lab':      return await stageHeadlineLab(database, draft)
+      case 'drafting':          return await stageDraft(database, draft)
+      case 'reviewing':         return await stageReview(database, draft)
+      case 'editing':           return await stageEdit(database, draft)
+      case 'signing_off':       return await stageCover(database, draft)         // sign-off + cover combined
       case 'covering':          return await stageReadyForPublish(database, draft)
       case 'ready_for_publish': return { nextStatus: 'ready_for_publish', costCentsThisStage: 0, totalCostCents: spent, message: 'Already ready.' }
       case 'cost_capped':       return { nextStatus: 'cost_capped', costCentsThisStage: 0, totalCostCents: spent, message: 'Cost cap reached.' }
