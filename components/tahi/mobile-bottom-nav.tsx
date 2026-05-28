@@ -20,7 +20,7 @@ import {
   LayoutDashboard, Inbox, MessageSquare, FileText, Users, FolderOpen,
   Menu, X, CheckSquare, TrendingUp, Star, CreditCard, Clock, BarChart2,
   Gauge, UserCog, FileSignature, BookOpen, ShoppingBag, Calendar,
-  Megaphone, UserPlus, Share2, Phone,
+  Megaphone, UserPlus, Share2, Phone, PenLine,
 } from 'lucide-react'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { SidebarUserCard } from '@/components/tahi/sidebar-user-card'
@@ -79,9 +79,10 @@ const ADMIN_DRAWER: DrawerNavGroup[] = [
   {
     group: 'Marketing',
     items: [
-      { label: 'Social',        href: '/social',        icon: Share2 },
-      { label: 'Reviews',       href: '/reviews',       icon: Star },
-      { label: 'Announcements', href: '/announcements', icon: Megaphone },
+      { label: 'Content studio', href: '/content-studio', icon: PenLine },
+      { label: 'Social',         href: '/social',         icon: Share2 },
+      { label: 'Reviews',        href: '/reviews',        icon: Star },
+      { label: 'Announcements',  href: '/announcements',  icon: Megaphone },
     ],
   },
   {
