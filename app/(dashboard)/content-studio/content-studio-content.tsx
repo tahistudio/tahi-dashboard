@@ -2984,26 +2984,33 @@ function DraftCard({ draft, onOpen, onRetry, retrying }: DraftCardProps) {
         )}
       </div>
 
-      {/* Actions */}
+      {/* Actions. "Review" / "View" opens the readable round-table page
+          (article-styled preview + reviewers + publish). The old SlideOver
+          raw-body view is kept behind the small "Raw" button for quick peeks. */}
       <div style={{ display: 'flex', gap: '0.375rem', marginTop: 'auto', paddingTop: '0.375rem', flexWrap: 'wrap' }}>
-        <TahiButton
-          size="sm"
-          onClick={onOpen}
-          iconLeft={<Eye className="w-3.5 h-3.5" />}
-          style={{ flex: '1 1 auto' }}
-          variant={isReady ? 'primary' : 'secondary'}
-        >
-          {isReady ? 'Review' : 'View'}
-        </TahiButton>
         <a
           href={`/dashboard/content-studio/drafts/${draft.id}/round-table`}
-          style={{ textDecoration: 'none' }}
-          title="Open round table detail (reviewers, conflicts, revisions)"
+          style={{ textDecoration: 'none', flex: '1 1 auto' }}
+          title="Open the article + reviewers + publish controls"
         >
-          <TahiButton size="sm" variant="secondary" iconLeft={<Layers className="w-3.5 h-3.5" />}>
-            Round table
+          <TahiButton
+            size="sm"
+            iconLeft={<Layers className="w-3.5 h-3.5" />}
+            style={{ width: '100%' }}
+            variant={isReady ? 'primary' : 'secondary'}
+          >
+            {isReady ? 'Review' : 'View'}
           </TahiButton>
         </a>
+        <TahiButton
+          size="sm"
+          variant="secondary"
+          onClick={onOpen}
+          iconLeft={<Eye className="w-3.5 h-3.5" />}
+          title="Quick raw preview"
+        >
+          Raw
+        </TahiButton>
         {onRetry && (
           <TahiButton
             size="sm"

@@ -170,6 +170,22 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
     await fetchSnapshot()
   }
 
+  async function restructure() {
+    setPublishing('restructure')
+    setPublishMsg(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}/restructure`), { method: 'POST' })
+      const json = await res.json() as { faqCount?: number; takeawayCount?: number; error?: string }
+      if (!res.ok) { setPublishMsg(`Restructure failed: ${json.error ?? ''}`); return }
+      setPublishMsg(`Restructured: ${json.faqCount ?? 0} FAQs + ${json.takeawayCount ?? 0} takeaways split into their own fields.`)
+      await fetchSnapshot()
+    } catch (err) {
+      setPublishMsg(`Restructure failed: ${err instanceof Error ? err.message : 'error'}`)
+    } finally {
+      setPublishing(null)
+    }
+  }
+
   async function publishToWebflow(mode: 'draft' | 'now' | 'auto' | 'custom', customDate?: string) {
     setPublishing(mode)
     setPublishMsg(null)
@@ -338,6 +354,9 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
               </p>
             </div>
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <TahiButton size="sm" variant="secondary" loading={publishing === 'restructure'} onClick={() => { void restructure() }} title="Re-split body into Webflow fields (use after edits, or on older drafts)">
+                Re-structure
+              </TahiButton>
               <TahiButton size="sm" variant="secondary" loading={publishing === 'draft'} onClick={() => { void publishToWebflow('draft') }}>
                 Save as draft
               </TahiButton>
