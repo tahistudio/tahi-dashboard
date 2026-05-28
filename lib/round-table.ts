@@ -291,52 +291,57 @@ async function stageReview(database: Database, draft: DraftRow): Promise<StageRe
     validatedLinks,
   }
 
-  // Run all reviewers in parallel. Each writes its own draft_reviews row.
+  // Run reviewers in chunks of 8 parallel calls. Lower than the full 23
+  // to stay inside Anthropic's burst-rate guidance and Cloudflare's
+  // simultaneous-connection budget. Three chunks ≈ 18-25s total which
+  // fits inside the worker request budget.
   let totalCents = 0
-  const reviewerResults: Array<{ key: ReviewerKey; critique: ReviewerCritique; weight: number }> = []
+  const CHUNK_SIZE = 8
 
-  await Promise.all(REVIEWERS.map(async (reviewer) => {
-    const start = Date.now()
-    try {
-      const weight = reviewerCtx.brief.voiceWeights[reviewer.key] ?? reviewer.defaultWeight
-      const { result, costCents } = await claudeJson({
-        database, scope: 'draft', scopeId: draft.id, stage: reviewer.key,
-        model: reviewer.model, maxTokens: 1500,
-        systemPrompt: reviewer.systemPrompt,
-        userPrompt: reviewer.buildUserPrompt(reviewerCtx),
-        parse: (raw: string) => JSON.parse(raw) as ReviewerCritique,
-      })
-      totalCents += costCents
-      reviewerResults.push({ key: reviewer.key, critique: result, weight })
-      await database.insert(schema.draftReviews).values({
-        id: crypto.randomUUID(),
-        draftId: draft.id,
-        revisionNumber: latestRev,
-        reviewerKey: reviewer.key,
-        score: result.score,
-        verdict: result.verdict,
-        summary: result.summary,
-        critique: JSON.stringify(result),
-        weight: String(weight),
-        durationMs: Date.now() - start,
-      })
-    } catch (err) {
-      // Don't fail the whole stage if one reviewer errors — log it and
-      // continue with the others.
-      await database.insert(schema.draftReviews).values({
-        id: crypto.randomUUID(),
-        draftId: draft.id,
-        revisionNumber: latestRev,
-        reviewerKey: reviewer.key,
-        score: null,
-        verdict: 'soft_fail',
-        summary: `Reviewer errored: ${err instanceof Error ? err.message.slice(0, 200) : 'unknown'}`,
-        critique: null,
-        weight: String(reviewer.defaultWeight),
-        durationMs: Date.now() - start,
-      })
-    }
-  }))
+  for (let i = 0; i < REVIEWERS.length; i += CHUNK_SIZE) {
+    const chunk = REVIEWERS.slice(i, i + CHUNK_SIZE)
+    await Promise.all(chunk.map(async (reviewer) => {
+      const start = Date.now()
+      try {
+        const weight = reviewerCtx.brief.voiceWeights[reviewer.key] ?? reviewer.defaultWeight
+        const { result, costCents } = await claudeJson({
+          database, scope: 'draft', scopeId: draft.id, stage: reviewer.key,
+          model: reviewer.model, maxTokens: 1500,
+          systemPrompt: reviewer.systemPrompt,
+          userPrompt: reviewer.buildUserPrompt(reviewerCtx),
+          parse: (raw: string) => JSON.parse(raw) as ReviewerCritique,
+        })
+        totalCents += costCents
+        await database.insert(schema.draftReviews).values({
+          id: crypto.randomUUID(),
+          draftId: draft.id,
+          revisionNumber: latestRev,
+          reviewerKey: reviewer.key,
+          score: result.score,
+          verdict: result.verdict,
+          summary: result.summary,
+          critique: JSON.stringify(result),
+          weight: String(weight),
+          durationMs: Date.now() - start,
+        })
+      } catch (err) {
+        // Don't fail the whole stage if one reviewer errors — log it and
+        // continue with the others.
+        await database.insert(schema.draftReviews).values({
+          id: crypto.randomUUID(),
+          draftId: draft.id,
+          revisionNumber: latestRev,
+          reviewerKey: reviewer.key,
+          score: null,
+          verdict: 'soft_fail',
+          summary: `Reviewer errored: ${err instanceof Error ? err.message.slice(0, 200) : 'unknown'}`,
+          critique: null,
+          weight: String(reviewer.defaultWeight),
+          durationMs: Date.now() - start,
+        })
+      }
+    }))
+  }
 
   return advance(database, draft.id, 'editing', totalCents)
 }
