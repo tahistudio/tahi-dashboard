@@ -85,6 +85,13 @@ const CRONS: CronDef[] = [
     endpoint: '/api/admin/cron/finance-anomaly-scan',
     schedule: 'Weekly Mon 07:00 NZT + Monthly 1st',
   },
+  {
+    cron: 'ideation',
+    label: 'Content ideation',
+    description: 'Pulls GA4 + GSC + sitemap signals, asks Sonnet for 6-8 content ideas, drops them into /content-studio Ideas tab for triage. Disabled by default — toggle on in Settings → Content engine signals.',
+    endpoint: '/api/admin/cron/ideation',
+    schedule: 'Weekly Mon 08:00 UK (disabled by default)',
+  },
 ]
 
 export async function GET(req: NextRequest) {

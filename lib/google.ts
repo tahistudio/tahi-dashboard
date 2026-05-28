@@ -396,6 +396,50 @@ export async function searchAnalytics(
   return data.rows ?? []
 }
 
+/** List the GA4 properties this Google account has access to. Used to
+ *  auto-discover Tahi's property ID without making Liam paste it.
+ *  Returns an array of { accountId, accountName, propertyId, propertyName, websiteUrl? }. */
+export interface Ga4Property {
+  accountId: string
+  accountName: string
+  propertyId: string        // numeric, e.g. "123456789"
+  propertyName: string
+  displayName: string
+}
+
+export async function listGa4Properties(accessToken: string): Promise<Ga4Property[]> {
+  const res = await fetch(
+    'https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200',
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  )
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`GA4 accountSummaries failed: ${res.status} ${body.slice(0, 300)}`)
+  }
+  const data = await res.json() as {
+    accountSummaries?: Array<{
+      account?: string
+      displayName?: string
+      propertySummaries?: Array<{ property?: string; displayName?: string }>
+    }>
+  }
+  const out: Ga4Property[] = []
+  for (const acc of data.accountSummaries ?? []) {
+    const accountId = (acc.account ?? '').replace(/^accounts\//, '')
+    for (const prop of acc.propertySummaries ?? []) {
+      const propertyId = (prop.property ?? '').replace(/^properties\//, '')
+      out.push({
+        accountId,
+        accountName: acc.displayName ?? accountId,
+        propertyId,
+        propertyName: prop.displayName ?? propertyId,
+        displayName: `${acc.displayName ?? accountId} / ${prop.displayName ?? propertyId}`,
+      })
+    }
+  }
+  return out
+}
+
 // ── GA4 Data API ──────────────────────────────────────────────────────────
 
 export interface Ga4Row {

@@ -8,7 +8,7 @@ import {
   FileText, Plus, Trash2, GripVertical, ChevronDown, ChevronUp,
   Webhook, Loader2, User, Palette, ToggleLeft,
   Target, ClipboardList, Pencil, Sparkles, Share2, Heart, MessageCircle,
-  PiggyBank,
+  PiggyBank, Lightbulb, Eye, EyeOff,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -433,6 +433,15 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
 
           {/* AI cost dashboard */}
           {isAdmin && <AiCostSection />}
+
+          {/* Content engine signals (Phase I Slice 1) */}
+          {isAdmin && (
+            <ContentEngineSignalsSection
+              settings={settings}
+              onSave={saveSetting}
+              savingKey={savingKey}
+            />
+          )}
 
           {/* Google Calendar Booking (admin only) - T87 */}
           {isAdmin && <BookingLinkSection settings={settings} onSave={saveSetting} savingKey={savingKey} />}
@@ -4468,6 +4477,341 @@ function ReservesSection() {
           onCancel={() => setConfirmDelete(null)}
         />
       )}
+    </section>
+  )
+}
+
+// ── Content engine signals (Phase I Slice 1) ────────────────────────────
+// Surfaces the four signal sources (GA4 / GSC via Google / Matomo /
+// SE Ranking) and the ideation cron toggle + weekly target. The cron
+// itself lives at /api/admin/cron/ideation; this section configures it.
+// Read-only display of the resolved GA4 property + "Auto-detect" button
+// that calls discover-ga4 and saves the result in one click.
+
+interface Ga4Property {
+  accountId: string
+  accountName: string
+  propertyId: string
+  propertyName: string
+  displayName: string
+}
+
+function ContentEngineSignalsSection({
+  settings,
+  onSave,
+  savingKey,
+}: {
+  settings: Record<string, string | null>
+  onSave: (key: string, value: string) => Promise<void>
+  savingKey: string | null
+}) {
+  const { showToast } = useToast()
+  const [discoveredProps, setDiscoveredProps] = useState<Ga4Property[] | null>(null)
+  const [discoverLoading, setDiscoverLoading] = useState(false)
+  const [showMatomoToken, setShowMatomoToken] = useState(false)
+  const [showSeRankingKey, setShowSeRankingKey] = useState(false)
+
+  const ga4PropertyId = settings['content.ga4PropertyId'] ?? ''
+  const matomoUrl = settings['content.matomoUrl'] ?? ''
+  const matomoToken = settings['content.matomoToken'] ?? ''
+  const seRankingKey = settings['content.seRankingApiKey'] ?? ''
+  const ideationEnabled = settings['content.ideationEnabled'] === 'true'
+  const weeklyTarget = settings['content.weeklyIdeaTarget'] ?? '7'
+
+  async function discoverGa4() {
+    setDiscoverLoading(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/integrations/google/discover-ga4'), {
+        method: 'POST',
+      })
+      const data = await res.json() as {
+        properties?: Ga4Property[]
+        autoPersisted?: boolean
+        ga4PropertyId?: string | null
+        error?: string
+      }
+      if (!res.ok) {
+        showToast(data.error ?? 'GA4 discovery failed', 'error')
+        return
+      }
+      const props = data.properties ?? []
+      if (props.length === 0) {
+        showToast('No GA4 properties found on this Google account', 'warning')
+        setDiscoveredProps([])
+      } else if (data.autoPersisted) {
+        showToast(`Saved: ${props[0].displayName}`, 'success')
+        setDiscoveredProps(null)
+        await onSave('content.ga4PropertyId', props[0].propertyId)
+      } else {
+        setDiscoveredProps(props)
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'GA4 discovery failed', 'error')
+    } finally {
+      setDiscoverLoading(false)
+    }
+  }
+
+  async function pickGa4Property(propertyId: string) {
+    await onSave('content.ga4PropertyId', propertyId)
+    setDiscoveredProps(null)
+  }
+
+  // Single-property display: prefer the friendly displayName if we just
+  // discovered, fall back to "Property #<id>" otherwise.
+  const ga4Display = ga4PropertyId
+    ? (discoveredProps?.find(p => p.propertyId === ga4PropertyId)?.displayName ?? `Property ${ga4PropertyId}`)
+    : null
+
+  async function toggleIdeation() {
+    await onSave('content.ideationEnabled', ideationEnabled ? 'false' : 'true')
+  }
+
+  return (
+    <section id="content-engine-signals">
+      <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
+        <Lightbulb className="w-5 h-5" aria-hidden="true" />
+        Content engine signals
+      </h2>
+
+      <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 space-y-5">
+        <p className="text-xs text-[var(--color-text-muted)]" style={{ lineHeight: 1.5 }}>
+          Wire the signal sources for the weekly content ideation cron (Phase I Slice 1). The cron pulls GA4 + GSC + Matomo + SE Ranking every Monday at 08:00 UK, sends them to Claude Sonnet, and drops 6-8 fresh ideas into <strong>Content studio → Ideas</strong> for triage. Disabled by default — flip the toggle below when you&apos;re ready.
+        </p>
+
+        {/* GA4 property — read-only display + Auto-detect button */}
+        <div
+          style={{
+            background: 'var(--color-bg-secondary)',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '1rem',
+          }}
+        >
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-[var(--color-text)]">GA4 property</p>
+              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                Powers the top-pages + decaying-pages signal. Requires the analytics.readonly scope on your Google connection.
+              </p>
+            </div>
+            <TahiButton
+              size="sm"
+              variant="secondary"
+              loading={discoverLoading}
+              onClick={() => { void discoverGa4() }}
+              iconLeft={!discoverLoading ? <RefreshCw className="w-3.5 h-3.5" /> : undefined}
+            >
+              {discoverLoading ? 'Detecting...' : 'Auto-detect from Google'}
+            </TahiButton>
+          </div>
+
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            {ga4PropertyId ? (
+              <>
+                <Badge tone="positive" variant="soft" size="sm">Wired</Badge>
+                <span className="text-sm text-[var(--color-text)] font-mono">{ga4Display}</span>
+              </>
+            ) : (
+              <Badge tone="warning" variant="soft" size="sm">Not set</Badge>
+            )}
+          </div>
+
+          {discoveredProps && discoveredProps.length > 1 && (
+            <div
+              className="mt-3"
+              style={{
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                padding: '0.75rem',
+              }}
+            >
+              <p className="text-xs font-semibold text-[var(--color-text)] mb-2">
+                Multiple GA4 properties found. Pick the one for tahi.studio:
+              </p>
+              <div className="space-y-1.5">
+                {discoveredProps.map(p => (
+                  <button
+                    key={p.propertyId}
+                    type="button"
+                    onClick={() => { void pickGa4Property(p.propertyId) }}
+                    className="w-full text-left flex items-center justify-between gap-2 px-3 py-2 rounded transition-colors"
+                    style={{
+                      background: p.propertyId === ga4PropertyId ? 'var(--color-brand-50)' : 'transparent',
+                      border: `1px solid ${p.propertyId === ga4PropertyId ? 'var(--color-brand)' : 'var(--color-border-subtle)'}`,
+                      cursor: 'pointer',
+                      fontSize: '0.8125rem',
+                      color: 'var(--color-text)',
+                    }}
+                    onMouseEnter={e => {
+                      if (p.propertyId !== ga4PropertyId) {
+                        e.currentTarget.style.background = 'var(--color-bg-secondary)'
+                      }
+                    }}
+                    onMouseLeave={e => {
+                      if (p.propertyId !== ga4PropertyId) {
+                        e.currentTarget.style.background = 'transparent'
+                      }
+                    }}
+                  >
+                    <span className="truncate">{p.displayName}</span>
+                    <span className="text-xs text-[var(--color-text-subtle)] font-mono">{p.propertyId}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Matomo URL + token */}
+        <div
+          style={{
+            background: 'var(--color-bg-secondary)',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '1rem',
+          }}
+        >
+          <p className="text-sm font-semibold text-[var(--color-text)]">Matomo</p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5 mb-3">
+            Optional — second analytics source used as a sanity check vs GA4.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1-5)' }}>
+              <span className="text-xs font-semibold text-[var(--color-text)]">Matomo URL</span>
+              <Input
+                type="url"
+                value={matomoUrl}
+                onChange={e => { void onSave('content.matomoUrl', e.target.value) }}
+                placeholder="https://analytics.tahi.studio"
+                disabled={savingKey === 'content.matomoUrl'}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1-5)' }}>
+              <span className="text-xs font-semibold text-[var(--color-text)]">Auth token</span>
+              <Input
+                type={showMatomoToken ? 'text' : 'password'}
+                value={matomoToken}
+                onChange={e => { void onSave('content.matomoToken', e.target.value) }}
+                placeholder="token_auth value"
+                disabled={savingKey === 'content.matomoToken'}
+                trailingIcon={
+                  <button
+                    type="button"
+                    onClick={() => setShowMatomoToken(v => !v)}
+                    aria-label={showMatomoToken ? 'Hide token' : 'Show token'}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--color-text-subtle)',
+                      display: 'flex',
+                    }}
+                  >
+                    {showMatomoToken ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                }
+              />
+            </label>
+          </div>
+        </div>
+
+        {/* SE Ranking API key */}
+        <div
+          style={{
+            background: 'var(--color-bg-secondary)',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '1rem',
+          }}
+        >
+          <p className="text-sm font-semibold text-[var(--color-text)]">SE Ranking</p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5 mb-3">
+            Optional — competitor keyword gaps. Persisted now, signal wired in Slice 7.
+          </p>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1-5)', maxWidth: '32rem' }}>
+            <span className="text-xs font-semibold text-[var(--color-text)]">API key</span>
+            <Input
+              type={showSeRankingKey ? 'text' : 'password'}
+              value={seRankingKey}
+              onChange={e => { void onSave('content.seRankingApiKey', e.target.value) }}
+              placeholder="SE Ranking API key"
+              disabled={savingKey === 'content.seRankingApiKey'}
+              trailingIcon={
+                <button
+                  type="button"
+                  onClick={() => setShowSeRankingKey(v => !v)}
+                  aria-label={showSeRankingKey ? 'Hide key' : 'Show key'}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--color-text-subtle)',
+                    display: 'flex',
+                  }}
+                >
+                  {showSeRankingKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              }
+            />
+          </label>
+        </div>
+
+        {/* Cron enable + weekly target */}
+        <div
+          style={{
+            background: 'var(--color-bg-secondary)',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '1rem',
+          }}
+        >
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-[var(--color-text)]">Weekly ideation cron</p>
+              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                Runs Mondays 08:00 UK. Manual &quot;Run now&quot; in Content studio works regardless of this toggle.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => { void toggleIdeation() }}
+              role="switch"
+              aria-checked={ideationEnabled}
+              aria-label="Toggle ideation cron"
+              disabled={savingKey === 'content.ideationEnabled'}
+              className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] flex-shrink-0"
+              style={{
+                background: ideationEnabled ? 'var(--color-brand)' : 'var(--color-border)',
+                cursor: 'pointer',
+                border: 'none',
+              }}
+            >
+              <span
+                className="inline-block h-4 w-4 rounded-full bg-white transition-transform"
+                style={{
+                  transform: ideationEnabled ? 'translateX(1.375rem)' : 'translateX(0.25rem)',
+                }}
+              />
+            </button>
+          </div>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1-5)', maxWidth: '12rem' }}>
+            <span className="text-xs font-semibold text-[var(--color-text)]">Weekly idea target</span>
+            <Input
+              type="number"
+              min={3}
+              max={12}
+              value={weeklyTarget}
+              onChange={e => { void onSave('content.weeklyIdeaTarget', e.target.value) }}
+              placeholder="7"
+              disabled={savingKey === 'content.weeklyIdeaTarget'}
+            />
+          </label>
+        </div>
+      </div>
     </section>
   )
 }

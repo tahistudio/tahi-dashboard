@@ -14,6 +14,17 @@ Format:
 
 ---
 
+## Phase I Slice 1 — Ideation engine (2026-05-27)
+
+- [x] PI-S1.1 — [FE/BE] **Ideation cron + signals + Ideas tab.** Settings → Content engine signals section (GA4 auto-detect, Matomo url/token, SE Ranking key, cron toggle, weekly target). New routes: `POST /api/admin/integrations/google/discover-ga4`, `POST /api/admin/cron/ideation` (Sonnet w/ structured JSON output, gracefully skips missing signals, master toggle defaults off, ?force=1 bypass), `POST /api/admin/content/clusters/seed` (idempotent 8 default clusters), `GET /api/admin/content/clusters`, `GET /api/admin/content/ideas` (status + week filters with isoWeekLabel helper), `PATCH /api/admin/content/ideas/[id]` (approve/reject/notes). `/content-studio` Ideas tab: cluster filter chips, card grid with approve/reject/details, SlideOver detail drawer with 2-3 targeted questions (skipped for definition + comparison posts). Honours `?tab=ideas` from notifications. Cron registered in `/api/admin/crons`. type-check + lint zero errors. — [FE/BE] 2026-05-27
+
+## Up next (QA / UIUX)
+
+- [ ] PI-S1.QA — [QA] **Live smoke test of Slice 1.** Hit Settings → Content engine signals on prod, click Auto-detect GA4 (post-Google reauth with analytics.readonly scope), set ideationEnabled=true. Then `/content-studio?tab=ideas` → Run ideation now. Verify ideas land in the cluster grid, approve / reject / details drawer work, week label is correct. Confirm SlideOver footer Save Notes / Approve / Reject buttons all save.
+- [ ] PI-S1.UIUX — [UIUX] **Spacing + colour review** of Ideas tab card grid + SlideOver. Confirm cluster pill colours read against dark mode + brand pill (Liam/Staci) palette aligns with rest of dashboard.
+
+---
+
 ## Newly raised in this session (2026-05-21)
 
 - [ ] T735 — [FE] **Voice note playback fix.** `app/(dashboard)/messages/messages-content.tsx:95` `VoiceNotePlayer` animates a progress bar instead of decoding the recorded blob. Recording (MediaRecorder) and R2 upload work; only the player UI is fake. Replace with `<audio>` element pointing at the R2 file URL from the message's voiceNote ref. Optional follow-up: wavesurfer.js for visualisation. — [FE]
