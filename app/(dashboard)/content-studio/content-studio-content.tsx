@@ -255,6 +255,8 @@ export function ContentStudioContent() {
         subtitle="Tahi's blog engine. Health, ideas, drafts and schedule in one surface."
       />
 
+      <SpendStrip />
+
       {/* Tab nav. State-driven so each tab renders its own content
           instead of jumping to anchors. Matches the client-detail tab
           pattern: bordered bottom, brand pill for the active tab,
@@ -329,6 +331,64 @@ export function ContentStudioContent() {
           <ComingSoonTab tab={TABS.find(t => t.id === activeTab)!} />
         )}
       </div>
+    </div>
+  )
+}
+
+// ── Spend strip (top of page) ────────────────────────────────────────────────
+
+interface SpendData {
+  totals: { day: number; week: number; month: number; allTime: number }
+  byProvider: Record<string, number>
+}
+
+function SpendStrip() {
+  const [data, setData] = useState<SpendData | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(apiPath('/api/admin/content/spend'))
+      .then(r => r.ok ? r.json() as Promise<SpendData> : null)
+      .then(j => { if (!cancelled) setData(j) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  if (!data) return null
+
+  const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`
+  const providers = Object.entries(data.byProvider).filter(([, v]) => v > 0)
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '0.625rem',
+        padding: '0.5rem 0.75rem',
+        background: 'var(--color-bg-secondary)',
+        borderRadius: '0.5rem',
+        fontSize: '0.75rem',
+      }}
+    >
+      <span style={{ color: 'var(--color-text-subtle)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.6875rem' }}>
+        AI spend
+      </span>
+      <span style={{ color: 'var(--color-text-muted)' }}>
+        Today <strong style={{ color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>{fmt(data.totals.day)}</strong>
+      </span>
+      <span style={{ color: 'var(--color-text-muted)' }}>
+        Week <strong style={{ color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>{fmt(data.totals.week)}</strong>
+      </span>
+      <span style={{ color: 'var(--color-text-muted)' }}>
+        Month <strong style={{ color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>{fmt(data.totals.month)}</strong>
+      </span>
+      {providers.length > 0 && (
+        <span style={{ color: 'var(--color-text-subtle)', marginLeft: 'auto' }}>
+          {providers.map(([p, v]) => `${p} ${fmt(v)}`).join(' · ')}
+        </span>
+      )}
     </div>
   )
 }
