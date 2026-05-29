@@ -46,6 +46,7 @@ interface DraftSnapshot {
     contentScore: number | null
     coverSvgUrl: string | null
     errorMessage: string | null
+    stageLockedAt: string | null
     createdAt: string
     updatedAt: string
   }
@@ -153,21 +154,26 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
     return () => clearInterval(t)
   }, [data, fetchSnapshot])
 
-  // Auto-tick: when a draft is in a live (non-terminal, non-paused) status
-  // and we're not currently advancing, fire the next advance call. Each
-  // advance returns in <= 25s and walks up to 3 stages, so the loop drains
-  // the pipeline without manual clicks. `paused` is in TERMINAL_STATUSES so
-  // Liam's pause button still stops it cleanly.
+  // Auto-tick: only fire the next advance when the PRIOR stage is
+  // genuinely done. The server encodes that two ways:
+  //   1. status — non-terminal, non-paused (next stage hasn't run yet)
+  //   2. stageLockedAt — null or > 90s old (matches the server's lock TTL;
+  //      a fresh lock means runStage is mid-flight in another tab/cron)
+  // We also skip when errorMessage is set — that needs human triage, not
+  // a hot-loop retry. `paused` is in TERMINAL_STATUSES so the pause button
+  // stops the loop cleanly.
   useEffect(() => {
     if (!data) return
     if (TERMINAL_STATUSES.has(data.draft.status)) return
     if (advancing) return
+    if (data.draft.errorMessage) return
+    const lockedAt = data.draft.stageLockedAt ? Date.parse(data.draft.stageLockedAt) : NaN
+    const lockFresh = !Number.isNaN(lockedAt) && Date.now() - lockedAt < 90_000
+    if (lockFresh) return
     const t = setTimeout(() => { void advance() }, 800)
     return () => clearTimeout(t)
-    // We deliberately only watch status + advancing — re-running every
-    // snapshot refresh would double-fire.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.draft.status, advancing])
+  }, [data?.draft.status, data?.draft.stageLockedAt, data?.draft.errorMessage, advancing])
 
   async function advance() {
     setAdvancing(true)

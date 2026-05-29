@@ -142,6 +142,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       contentScore: draft.contentScore,
       coverSvgUrl: draft.coverSvgUrl,
       errorMessage: draft.errorMessage,
+      stageLockedAt: draft.stageLockedAt,
       createdAt: draft.createdAt,
       updatedAt: draft.updatedAt,
     },
