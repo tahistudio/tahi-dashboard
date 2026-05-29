@@ -270,6 +270,53 @@ export async function syncSiteIndex(
   return result
 }
 
+/** Upsert a single page into the site index — fetch, summarise, embed.
+ *  Called from the publish route + scheduled-publish cron at the moment
+ *  a post goes live, so the new URL is immediately available to the
+ *  next publish's glossary auto-link, related-posts, and back-link
+ *  candidate lookup. The weekly cron handles the rest of the catalogue.
+ *
+ *  Returns { ok, fresh, error?, summary?, title? } so callers can log. */
+export async function upsertSiteIndexEntry(
+  database: DrizzleDB,
+  url: string,
+): Promise<{ ok: boolean; fresh: boolean; title?: string | null; summary?: string | null; error?: string }> {
+  const relativeUrl = toRelative(url)
+  if (!relativeUrl) return { ok: false, fresh: false, error: 'Not a tahi.studio URL' }
+
+  const page = await fetchPage(url)
+  if (!page.ok) return { ok: false, fresh: false, error: 'page fetch failed' }
+  const contentHash = await sha256Hex(page.bodyText)
+  const summary = await summarisePage(database, url, page.title, page.bodyText)
+  const embedding = await safeEmbed(`${page.title ?? ''}\n${summary}`)
+  const type = classifyUrl(relativeUrl)
+  const now = new Date().toISOString()
+
+  const [prev] = await database
+    .select({ id: schema.siteIndex.id })
+    .from(schema.siteIndex)
+    .where(eq(schema.siteIndex.url, url))
+    .limit(1)
+
+  if (prev) {
+    await database.update(schema.siteIndex).set({
+      type, title: page.title, summary, contentHash,
+      lastSeenAt: now, summarisedAt: summary ? now : null,
+      isActive: 1, embedding, updatedAt: now,
+    }).where(eq(schema.siteIndex.id, prev.id))
+    return { ok: true, fresh: false, title: page.title, summary }
+  }
+  await database.insert(schema.siteIndex).values({
+    id: crypto.randomUUID(),
+    url, relativeUrl, type,
+    title: page.title, summary, contentHash,
+    lastSeenAt: now, summarisedAt: summary ? now : null,
+    isActive: 1, embedding,
+    createdAt: now, updatedAt: now,
+  })
+  return { ok: true, fresh: true, title: page.title, summary }
+}
+
 /** Find the top-N most semantically related LIVE blog posts to a given
  *  article text. Used at publish to populate Webflow's related-blog-posts
  *  multi-reference + by the back-link cron to find candidate old posts.

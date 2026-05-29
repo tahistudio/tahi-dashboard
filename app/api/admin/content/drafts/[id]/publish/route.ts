@@ -412,6 +412,17 @@ export async function POST(
       } catch (err) {
         console.error('back-link enqueue failed', err)
       }
+
+      // Seed this just-published post into site_index immediately so
+      // the NEXT publish's glossary auto-link, related-posts, and
+      // back-link discovery can already see it. Weekly cron handles
+      // the rest of the catalogue. Best-effort — non-blocking.
+      try {
+        const { upsertSiteIndexEntry } = await import('@/lib/site-index')
+        void upsertSiteIndexEntry(database, publishUrl)
+      } catch (err) {
+        console.error('site-index upsert (publish) failed', err)
+      }
     }
   }
 

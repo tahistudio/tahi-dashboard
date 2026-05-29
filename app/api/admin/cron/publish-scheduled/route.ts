@@ -128,6 +128,17 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         console.error('back-link enqueue (scheduled) failed', err)
       }
+
+      // Seed this just-flipped-live post into site_index so the next
+      // publish's glossary/related/back-link discovery already has it.
+      try {
+        if (row.publishUrl) {
+          const { upsertSiteIndexEntry } = await import('@/lib/site-index')
+          void upsertSiteIndexEntry(realDb, row.publishUrl)
+        }
+      } catch (err) {
+        console.error('site-index upsert (scheduled) failed', err)
+      }
       await realDb
         .update(schema.contentIdeas)
         .set({ status: 'published', updatedAt: publishedAtIso })
