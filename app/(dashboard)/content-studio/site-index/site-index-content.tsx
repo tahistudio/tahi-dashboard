@@ -1,9 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { RefreshCw, ExternalLink } from 'lucide-react'
+import { RefreshCw } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Badge } from '@/components/tahi/badge'
+import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
 import { apiPath } from '@/lib/api'
 
 interface SiteIndexRow {
@@ -86,6 +87,48 @@ export function SiteIndexContent() {
     return ordered
   }, [rows])
 
+  const columns: ReadonlyArray<DataTableColumn<SiteIndexRow>> = useMemo(() => [
+    {
+      key: 'relativeUrl',
+      header: 'URL',
+      sortable: true,
+      width: '18rem',
+      link: { href: r => r.url },
+      render: r => r.relativeUrl,
+    },
+    {
+      key: 'type',
+      header: 'Type',
+      sortable: true,
+      width: '7rem',
+      render: r => <Badge tone="neutral" variant="soft" size="sm" leader={false}>{r.type}</Badge>,
+    },
+    {
+      key: 'title',
+      header: 'Title',
+      sortable: true,
+      width: '20rem',
+      render: r => r.title ?? <span style={{ color: 'var(--color-text-muted)' }}>—</span>,
+    },
+    {
+      key: 'summary',
+      header: 'Summary',
+      width: '32rem',
+      wrap: true,
+      render: r => r.summary
+        ? <span style={{ color: 'var(--color-text-muted)', lineHeight: 1.4 }}>{r.summary}</span>
+        : <span style={{ color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>(not summarised)</span>,
+    },
+    {
+      key: 'lastSeenAt',
+      header: 'Last seen',
+      sortable: true,
+      width: '11rem',
+      muted: true,
+      render: r => r.lastSeenAt ? new Date(r.lastSeenAt).toLocaleString() : '—',
+    },
+  ], [])
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '0.75rem', gap: '1rem', flexWrap: 'wrap' }}>
@@ -133,86 +176,23 @@ export function SiteIndexContent() {
         ))}
       </div>
 
-      {loading ? (
-        <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--color-text-muted)' }}>Loading…</div>
-      ) : filtered.length === 0 ? (
-        <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-          No rows yet. Click <strong>Run sync now</strong> to populate from tahi.studio/sitemap.xml.
-        </div>
-      ) : (
-        <div style={{
-          background: 'var(--color-bg)',
-          border: '1px solid var(--color-border)',
-          borderRadius: '0 16px 0 16px',
-          // Allow both axes to scroll: horizontal on narrow viewports
-          // (the table has fixed-ish column widths) and vertical when
-          // the catalogue grows past the viewport.
-          overflowX: 'auto',
-          overflowY: 'auto',
-          maxHeight: 'calc(100vh - 18rem)',
-        }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem', minWidth: '64rem' }}>
-            <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-              <tr style={{ background: 'var(--color-bg-secondary)', textAlign: 'left' }}>
-                <th style={th}>URL</th>
-                <th style={th}>Type</th>
-                <th style={th}>Title</th>
-                <th style={th}>Summary</th>
-                <th style={th}>Last seen</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(row => (
-                <tr key={row.id} style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
-                  <td style={td}>
-                    <a
-                      href={row.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ color: 'var(--color-brand-dark)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
-                    >
-                      {row.relativeUrl}
-                      <ExternalLink size={12} aria-hidden="true" />
-                    </a>
-                  </td>
-                  <td style={td}>
-                    <Badge tone="neutral" variant="soft" size="sm" leader={false}>{row.type}</Badge>
-                  </td>
-                  <td style={{ ...td, maxWidth: '18rem' }}>
-                    <div style={{ color: 'var(--color-text)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {row.title ?? '—'}
-                    </div>
-                  </td>
-                  <td style={{ ...td, maxWidth: '30rem' }}>
-                    <div style={{ color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
-                      {row.summary ?? <span style={{ fontStyle: 'italic' }}>(not summarised)</span>}
-                    </div>
-                  </td>
-                  <td style={{ ...td, whiteSpace: 'nowrap', color: 'var(--color-text-muted)' }}>
-                    {row.lastSeenAt ? new Date(row.lastSeenAt).toLocaleString() : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        columns={columns}
+        rows={filtered}
+        getRowId={r => r.id}
+        loading={loading}
+        defaultSort={{ key: 'lastSeenAt', dir: 'desc' }}
+        defaultPageSize={50}
+        density="compact"
+        ariaLabel="Site index"
+        empty={
+          <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+            No rows yet. Click <strong>Run sync now</strong> to populate from tahi.studio/sitemap.xml.
+          </div>
+        }
+      />
     </div>
   )
-}
-
-const th: React.CSSProperties = {
-  padding: '0.625rem 0.875rem',
-  fontWeight: 600,
-  color: 'var(--color-text-muted)',
-  fontSize: '0.75rem',
-  textTransform: 'uppercase',
-  letterSpacing: '0.04em',
-}
-
-const td: React.CSSProperties = {
-  padding: '0.625rem 0.875rem',
-  verticalAlign: 'top',
 }
 
 function chipStyle(active: boolean): React.CSSProperties {
