@@ -165,7 +165,7 @@ export async function syncSiteIndex(
   // 2) Load existing rows for all URLs we just pulled. D1 caps SQL
   //    variables per query around 100, so we chunk the IN clause.
   const CHUNK = 80
-  const existing: Array<{ id: string; url: string; contentHash: string | null }> = []
+  const existing: Array<{ id: string; url: string; contentHash: string | null; lastSeenAt: string | null }> = []
   for (let i = 0; i < urls.length; i += CHUNK) {
     const slice = urls.slice(i, i + CHUNK)
     const rows = await database
@@ -173,12 +173,17 @@ export async function syncSiteIndex(
         id: schema.siteIndex.id,
         url: schema.siteIndex.url,
         contentHash: schema.siteIndex.contentHash,
+        lastSeenAt: schema.siteIndex.lastSeenAt,
       })
       .from(schema.siteIndex)
       .where(inArray(schema.siteIndex.url, slice))
     existing.push(...rows)
   }
   const existingByUrl = new Map(existing.map(r => [r.url, r]))
+  // Re-fetch threshold — if a URL was last seen within this window we
+  // skip the page fetch + hash entirely and just bump lastSeenAt later.
+  // 6 days fits the weekly cron cadence.
+  const STALE_AFTER_MS = 6 * 86_400_000
 
   // 3) For each URL: fetch, hash, decide insert/update/skip.
   const now = new Date().toISOString()
@@ -186,6 +191,21 @@ export async function syncSiteIndex(
     if (Date.now() - t0 > budgetMs) break
     const relativeUrl = toRelative(url)
     if (!relativeUrl) continue
+
+    // Skip path: existing row, recently seen → just mark lastSeenAt
+    // without re-fetching. Lets the sync drain hundreds of URLs per
+    // tick instead of being throttled by per-URL page fetches.
+    const prevQuick = existingByUrl.get(url)
+    if (prevQuick && prevQuick.lastSeenAt) {
+      const ageMs = Date.now() - Date.parse(prevQuick.lastSeenAt)
+      if (!Number.isNaN(ageMs) && ageMs < STALE_AFTER_MS) {
+        await database.update(schema.siteIndex).set({
+          lastSeenAt: now, isActive: 1, updatedAt: now,
+        }).where(eq(schema.siteIndex.id, prevQuick.id))
+        result.unchangedRows++
+        continue
+      }
+    }
 
     const page = await fetchPage(url)
     if (!page.ok) { result.errors++; continue }
