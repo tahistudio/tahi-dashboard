@@ -13,7 +13,7 @@ import {
   RefreshCw, AlertTriangle, FileSearch, CheckCircle2, XCircle, HelpCircle,
   Lightbulb, FileEdit, Calendar, ExternalLink, ChevronDown, ChevronRight,
   Check, X, Eye, Sparkles, Link2, Trash2, Send, Loader2, Clock,
-  Layers, History, Plus, Database,
+  Layers, History, Plus, Database, Search,
   type LucideIcon,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -22,6 +22,7 @@ import { Card } from '@/components/tahi/card'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
 import { SiteIndexContent } from './site-index/site-index-content'
+import { AuditsContent } from './audits/audits-content'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
 import { SlideOver } from '@/components/tahi/slide-over'
@@ -83,7 +84,7 @@ interface ScanError412 {
   availableProperties?: Array<{ siteUrl: string; permissionLevel: string }>
 }
 
-type TabId = 'health' | 'ideas' | 'drafts' | 'links' | 'schedule' | 'site-index'
+type TabId = 'health' | 'ideas' | 'drafts' | 'links' | 'schedule' | 'site-index' | 'audits'
 
 interface TabDef {
   id: TabId
@@ -135,6 +136,13 @@ const TABS: readonly TabDef[] = [
     icon: Database,
     slice: 3,
     comingDescription: 'Every live URL on tahi.studio with a Haiku one-line summary + embedding. Feeds the writer\'s internal-linking context, glossary auto-link, related-posts at publish, and back-link discovery.',
+  },
+  {
+    id: 'audits',
+    label: 'Audits',
+    icon: Search,
+    slice: 3,
+    comingDescription: 'Run the 23-reviewer round-table on existing published posts to score them + see critiques. Nothing in Webflow is changed until you choose to apply improvements.',
   },
 ] as const
 
@@ -336,7 +344,8 @@ export function ContentStudioContent() {
         {activeTab === 'links' && <LinksTab onToast={showToast} />}
         {activeTab === 'schedule' && <ScheduleTab onToast={showToast} />}
         {activeTab === 'site-index' && <SiteIndexContent />}
-        {activeTab !== 'health' && activeTab !== 'ideas' && activeTab !== 'drafts' && activeTab !== 'links' && activeTab !== 'schedule' && activeTab !== 'site-index' && (
+        {activeTab === 'audits' && <AuditsContent />}
+        {activeTab !== 'health' && activeTab !== 'ideas' && activeTab !== 'drafts' && activeTab !== 'links' && activeTab !== 'schedule' && activeTab !== 'site-index' && activeTab !== 'audits' && (
           <ComingSoonTab tab={TABS.find(t => t.id === activeTab)!} />
         )}
       </div>

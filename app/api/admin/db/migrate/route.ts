@@ -1775,6 +1775,14 @@ const MIGRATIONS: Migration[] = [
           'active', strftime('%Y-%m-%dT%H:%M:%SZ','now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'))`,
     ],
   },
+  {
+    name: '0072',
+    description: 'Legacy audit shadow drafts: add origin_source + audit_target_webflow_id to content_drafts so we can mark a draft as an evaluation of an existing published post (no writer, no headline, no cover, no publish). status="audited" terminal lands the score + critiques as the output.',
+    statements: [
+      `ALTER TABLE content_drafts ADD COLUMN origin_source text`,
+      `ALTER TABLE content_drafts ADD COLUMN audit_target_webflow_id text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

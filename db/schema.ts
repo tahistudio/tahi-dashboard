@@ -2732,6 +2732,18 @@ export const contentDrafts = sqliteTable('content_drafts', {
   // status to this value so the orchestrator picks up exactly where it
   // left off (no re-running completed stages). Cron skips 'paused' drafts.
   pausedFromStatus: text('paused_from_status'),
+  // 'legacy_audit' = a shadow draft created to evaluate an existing
+  // published post (not a new piece of content). Audit drafts skip the
+  // writer + headline + cover + structuring stages — they just run the
+  // strategist (legacy mode) → reviewers → editor → sign-off → land at
+  // status='audited' with the score + critiques as the output. They are
+  // never published; Liam picks "Apply improvements" on the audit later
+  // to PATCH Webflow with a revised body.
+  // null = a normal new-content draft.
+  originSource: text('origin_source'),
+  // The Webflow CMS item id this audit shadow draft targets. Only set
+  // when originSource='legacy_audit'.
+  auditTargetWebflowId: text('audit_target_webflow_id'),
   ...timestamps,
 }, (table) => [
   index('idx_content_drafts_idea').on(table.ideaId),

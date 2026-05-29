@@ -81,6 +81,7 @@ export type DraftStatus =
   | 'signing_off'
   | 'covering'
   | 'ready_for_publish'
+  | 'audited'              // legacy audit shadow drafts terminate here with score + critiques
   | 'cost_capped'
   | 'failed'
 
@@ -163,6 +164,7 @@ export async function runStage(database: Database, draftId: string): Promise<Sta
       case 'signing_off':       return await stageCover(database, draft)         // sign-off + cover combined
       case 'covering':          return await stageReadyForPublish(database, draft)
       case 'ready_for_publish': return { nextStatus: 'ready_for_publish', costCentsThisStage: 0, totalCostCents: spent, message: 'Already ready.' }
+      case 'audited':           return { nextStatus: 'audited', costCentsThisStage: 0, totalCostCents: spent, message: 'Audit complete. Score + critiques are stashed; pick Apply improvements to PATCH Webflow.' }
       case 'cost_capped':       return { nextStatus: 'cost_capped', costCentsThisStage: 0, totalCostCents: spent, message: 'Cost cap reached.' }
       case 'failed':            return { nextStatus: 'failed', costCentsThisStage: 0, totalCostCents: spent, message: 'Draft failed.' }
       default:
@@ -259,6 +261,12 @@ async function stageStrategise(database: Database, draft: DraftRow): Promise<Sta
     authorSlug: result.author,
     scoreBreakdown: JSON.stringify({ brief: result, voiceWeights: effectiveWeights }),
   }).where(eq(schema.contentDrafts.id, draft.id))
+
+  // Legacy audits skip the human brief gate + the headline lab + the
+  // writer — the body already exists. Jump straight to reviewing.
+  if (isAudit(draft)) {
+    return advance(database, draft.id, 'reviewing', costCents)
+  }
 
   // Pause for human brief approval instead of auto-advancing to the
   // headline lab. The auto-tick respects awaiting_brief_approval as
@@ -639,6 +647,31 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
     parse: parseSignOff,
   })
 
+  // Legacy audits land at 'audited' regardless of score — the score IS
+  // the output of an audit. No "fail" path; the critiques explain what
+  // the score reflects. No structuring + no cover generation either:
+  // Webflow already has the post live, we're just evaluating it.
+  if (isAudit(draft)) {
+    let sbAudit: Record<string, unknown> = {}
+    try { sbAudit = JSON.parse(draft.scoreBreakdown ?? '{}') } catch { /* empty */ }
+    sbAudit.signoffNotes = result.finalNotes
+    sbAudit.signoffScore = result.score
+    sbAudit.recommendCover = result.recommendCover  // surfaced if Liam applies improvements + wants a cover refresh later
+    await database.update(schema.contentDrafts).set({
+      status: 'audited',
+      contentScore: result.score,
+      scoreBreakdown: JSON.stringify(sbAudit),
+      stageLockedAt: null,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(schema.contentDrafts.id, draft.id))
+    return {
+      nextStatus: 'audited',
+      costCentsThisStage: costCents,
+      totalCostCents: await getDraftSpendCents(database, draft.id),
+      message: `Audit complete. Score ${result.score}/100.`,
+    }
+  }
+
   // If sign-off fails, mark as failed for Liam to review manually
   if (result.score < SIGN_OFF_PASS_SCORE) {
     await setStatus(database, draft.id, 'failed',
@@ -817,6 +850,12 @@ interface DraftRow {
   contentScore: number | null
   stageLockedAt: string | null
   authorSlug: string | null
+  originSource: string | null
+  auditTargetWebflowId: string | null
+}
+
+function isAudit(draft: DraftRow): boolean {
+  return draft.originSource === 'legacy_audit'
 }
 
 async function loadDraft(database: Database, id: string): Promise<DraftRow | null> {
@@ -835,6 +874,8 @@ async function loadDraft(database: Database, id: string): Promise<DraftRow | nul
       contentScore: schema.contentDrafts.contentScore,
       stageLockedAt: schema.contentDrafts.stageLockedAt,
       authorSlug: schema.contentDrafts.authorSlug,
+      originSource: schema.contentDrafts.originSource,
+      auditTargetWebflowId: schema.contentDrafts.auditTargetWebflowId,
     })
     .from(schema.contentDrafts)
     .where(eq(schema.contentDrafts.id, id))
@@ -928,6 +969,7 @@ function estimateRemainingCents(currentStatus: DraftStatus): number {
     signing_off: ['flux_cover'],
     covering: [],
     ready_for_publish: [],
+    audited: [],
     cost_capped: [],
     failed: [],
   }

@@ -114,7 +114,8 @@ interface DraftSnapshot {
 
 // 'awaiting_brief_approval' is a human gate — listed here so the
 // auto-tick stops and waits for the Approve / Reject buttons.
-const TERMINAL_STATUSES = new Set(['ready_for_publish', 'failed', 'cost_capped', 'paused', 'awaiting_brief_approval'])
+// 'audited' is the terminal status for legacy audit shadow drafts.
+const TERMINAL_STATUSES = new Set(['ready_for_publish', 'failed', 'cost_capped', 'paused', 'awaiting_brief_approval', 'audited'])
 
 export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   const router = useRouter()
@@ -1309,7 +1310,7 @@ function ConflictRow({ conflict, inFlight, onSide }: ConflictRowProps) {
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function statusTone(status: string): BadgeTone {
-  if (status === 'ready_for_publish' || status === 'ready') return 'positive'
+  if (status === 'ready_for_publish' || status === 'ready' || status === 'audited') return 'positive'
   if (status === 'failed' || status === 'cost_capped') return 'danger'
   if (status === 'paused' || status === 'awaiting_brief_approval') return 'warning'
   return 'info'
@@ -1329,6 +1330,7 @@ function prettyStatus(status: string): string {
     covering: 'Generating cover',
     ready_for_publish: 'Ready for publish',
     ready: 'Ready',
+    audited: 'Audited',
     failed: 'Failed',
     cost_capped: 'Cost cap reached',
     paused: 'Paused',
