@@ -18,7 +18,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  RefreshCw, ChevronLeft, AlertTriangle, XCircle, CheckCircle2, Play, Pause, FileText, ListChecks,
+  RefreshCw, ChevronLeft, AlertTriangle, XCircle, CheckCircle2, Play, Pause, FileText, ListChecks, RotateCcw,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
@@ -115,6 +115,8 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   const [data, setData] = useState<DraftSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [advancing, setAdvancing] = useState(false)
+  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false)
+  const [restarting, setRestarting] = useState(false)
   const [selectedRevision, setSelectedRevision] = useState<number>(1)
   const [overrideInFlight, setOverrideInFlight] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
@@ -193,6 +195,24 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   async function pause() {
     await fetch(apiPath(`/api/admin/content/drafts/${draftId}/pause`), { method: 'POST' }).catch(() => {})
     await fetchSnapshot()
+  }
+
+  async function restartFromScratch() {
+    setRestarting(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}/restart`), { method: 'POST' })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        alert(j.error ?? 'Failed to restart draft')
+        return
+      }
+      setRestartConfirmOpen(false)
+      await fetchSnapshot()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to restart draft')
+    } finally {
+      setRestarting(false)
+    }
   }
 
   async function resume() {
@@ -422,10 +442,65 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
             Refresh
           </TahiButton>
         )}
-        <Link href="/content-studio" style={{ marginLeft: 'auto', fontSize: '0.8125rem', color: 'var(--color-text-muted)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+        <TahiButton
+          size="sm"
+          variant="ghost"
+          onClick={() => setRestartConfirmOpen(true)}
+          iconLeft={<RotateCcw className="w-3.5 h-3.5" />}
+          style={{ marginLeft: 'auto', color: 'var(--color-danger)' }}
+        >
+          Restart from scratch
+        </TahiButton>
+        <Link href="/content-studio" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
           <ChevronLeft size={14} aria-hidden="true" /> Back
         </Link>
       </div>
+
+      {restartConfirmOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="restart-confirm-title"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 50,
+            background: 'rgba(18, 26, 15, 0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '1rem',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget && !restarting) setRestartConfirmOpen(false) }}
+        >
+          <div style={{
+            background: 'var(--color-bg)', border: '1px solid var(--color-border)',
+            borderRadius: '0 16px 0 16px', padding: '1.5rem', maxWidth: '28rem', width: '100%',
+            boxShadow: '0 20px 60px -10px rgba(18, 26, 15, 0.25)',
+          }}>
+            <h2 id="restart-confirm-title" style={{ fontSize: '1.0625rem', fontWeight: 600, color: 'var(--color-text)', marginBottom: '0.5rem' }}>
+              Restart from scratch?
+            </h2>
+            <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', lineHeight: 1.55, marginBottom: '1.25rem' }}>
+              This wipes every pipeline output (research, body, FAQs, reviews, cover, schema, score) and resets the draft to <strong>queued</strong>. The idea and draft id stay intact. This cannot be undone.
+            </p>
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <TahiButton
+                size="sm"
+                variant="secondary"
+                onClick={() => setRestartConfirmOpen(false)}
+                disabled={restarting}
+              >
+                Cancel
+              </TahiButton>
+              <TahiButton
+                size="sm"
+                onClick={() => { void restartFromScratch() }}
+                loading={restarting}
+                style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)' }}
+              >
+                Yes, restart
+              </TahiButton>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Publish to Webflow — shown once the draft is ready. */}
       {draft.status === 'ready_for_publish' && (
