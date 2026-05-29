@@ -36,6 +36,7 @@ export async function GET(req: NextRequest) {
       new_request: config.channel_new_request ?? '',
       status_change: config.channel_status_change ?? '',
       overdue: config.channel_overdue ?? '',
+      covers: config.channel_covers ?? '',
     },
   })
 }
@@ -52,16 +53,27 @@ export async function PUT(req: NextRequest) {
   }
 
   const body = await req.json() as {
-    channels?: { new_request?: string; status_change?: string; overdue?: string }
+    channels?: { new_request?: string; status_change?: string; overdue?: string; covers?: string }
   }
 
   const database = await db()
   const now = new Date().toISOString()
 
+  // Merge into existing config so unspecified keys aren't wiped.
+  const existingRow = await database
+    .select({ config: schema.integrations.config })
+    .from(schema.integrations)
+    .where(eq(schema.integrations.service, 'slack'))
+    .limit(1)
+  let existingConfig: Record<string, string> = {}
+  try { existingConfig = JSON.parse(existingRow[0]?.config ?? '{}') as Record<string, string> } catch { /* empty */ }
+
   const config = JSON.stringify({
-    channel_new_request: body.channels?.new_request ?? '',
-    channel_status_change: body.channels?.status_change ?? '',
-    channel_overdue: body.channels?.overdue ?? '',
+    ...existingConfig,
+    ...(body.channels?.new_request !== undefined && { channel_new_request: body.channels.new_request }),
+    ...(body.channels?.status_change !== undefined && { channel_status_change: body.channels.status_change }),
+    ...(body.channels?.overdue !== undefined && { channel_overdue: body.channels.overdue }),
+    ...(body.channels?.covers !== undefined && { channel_covers: body.channels.covers }),
   })
 
   const existing = await database
