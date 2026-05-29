@@ -388,9 +388,14 @@ async function stageReview(database: Database, draft: DraftRow): Promise<StageRe
   const remaining = REVIEWERS.filter(r => !doneKeys.has(r.key))
 
   let totalCents = 0
-  const CHUNK_SIZE = 3
-  const INTER_CHUNK_MS = 4_000
-  const REVIEW_BUDGET_MS = 90_000  // per-call wall-clock budget for this stage
+  // Tahi is on the upgraded Anthropic tier (1000 RPM, 450K input tokens/min
+  // Sonnet) as of 2026-05-29. Old throttling (CHUNK_SIZE 3 + 4s inter-chunk)
+  // was tuned for the previous tier and bottlenecked the pipeline. Now we
+  // can run 8 reviewers per chunk with a 500ms breather, which drains all 23
+  // in 3 chunks (≈30-50s) instead of stretching across multiple ticks.
+  const CHUNK_SIZE = 8
+  const INTER_CHUNK_MS = 500
+  const REVIEW_BUDGET_MS = 120_000  // per-call wall-clock budget for this stage
   const t0 = Date.now()
   let processedThisCall = 0
 
