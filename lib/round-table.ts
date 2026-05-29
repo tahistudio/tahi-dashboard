@@ -388,6 +388,8 @@ async function stageReview(database: Database, draft: DraftRow): Promise<StageRe
       secondaryKeywords: brief.secondaryKeywords,
       schemaTypes: brief.schemaTypes,
       voiceWeights: getVoiceWeights(draft),
+      contentBucket: brief.contentBucket,
+      author: brief.author,
     },
     validatedLinks,
   }
@@ -731,8 +733,9 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
       shortenedName: structured.shortenedName || null,
       metaTitle: structured.metaTitle || reloaded?.metaTitle || null,
       metaDescription: structured.metaDescription || reloaded?.metaDescription || null,
-      authorSlug: 'liam',
-      scoreBreakdown: JSON.stringify(sb),
+      // Don't overwrite authorSlug here — strategist already set it
+      // based on the topic. Keep whatever the strategist picked.
+      scoreBreakdown: JSON.stringify({ ...sb, aiPrompt: structured.aiPrompt }),
     }).where(eq(schema.contentDrafts.id, draft.id))
 
     // Write the final, sanitised body as a new revision so the preview's

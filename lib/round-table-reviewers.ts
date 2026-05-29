@@ -103,6 +103,12 @@ export interface ReviewerContext {
     secondaryKeywords: string[]
     schemaTypes: string[]
     voiceWeights: Partial<Record<ReviewerKey, number>>
+    /** 'generic' | 'novel' | 'data' per Tahi's 70/20/10 mix. Reviewers
+     *  calibrate by bucket — originality is stricter on novel, looser
+     *  on generic (definitional / comparison). */
+    contentBucket?: 'generic' | 'novel' | 'data'
+    /** Author byline picked by the strategist — for voice-aware critique. */
+    author?: 'liam' | 'staci'
   }
   /** Optional brand voice docs — only passed to reviewers that need them
    *  to keep token cost down. */
@@ -136,6 +142,12 @@ const COMMON_OUTPUT_CONTRACT = `Respond with ONE JSON object only (no markdown f
 }`
 
 function commonPrelude(ctx: ReviewerContext): string {
+  const bucket = ctx.brief.contentBucket ?? 'generic'
+  const bucketLine = bucket === 'novel'
+    ? 'Content bucket: NOVEL (opinion / contrarian / deep-research) — originality bar is HIGH, generic safety is BAD.'
+    : bucket === 'data'
+      ? 'Content bucket: DATA (proprietary scrape-and-analyse) — accuracy + methodology bar is HIGH, numbers must be verifiable.'
+      : 'Content bucket: GENERIC (comparison / news / how-to / definitional) — clarity + completeness bar is HIGH, opinion is not required.'
   return `# Draft to review
 
 Title: ${ctx.title}
@@ -144,6 +156,8 @@ Target keyword: ${ctx.brief.primaryKeyword}
 Secondary keywords: ${ctx.brief.secondaryKeywords.join(', ') || 'none'}
 Funnel intent: ${ctx.brief.intent}
 Target word count: ${ctx.brief.targetWordCount}
+${bucketLine}
+Author byline: ${ctx.brief.author ?? 'liam'}
 
 ## Body (markdown)
 
@@ -338,23 +352,45 @@ ${ctx.brandDocs ?? '(use general Liam voice cues from system prompt)'}
   },
   {
     key: 'originality',
-    displayName: 'Originality vs SERP',
+    displayName: 'Originality + Information Gain',
     model: 'claude-sonnet-4-6',
-    vetoCapable: false,
-    defaultWeight: 1.0,
-    systemPrompt: `You are an originality reviewer. You check whether this draft says something genuinely new vs just rehashing what already ranks in the top 10 for the target keyword.
+    // VETO-capable. This is the single most load-bearing reviewer for
+    // surviving Google's information-gain ranking signal (US20200349181A1,
+    // weighted heavily from the March 2026 spam update). A draft that
+    // just rehashes the SERP gets a hard_fail here.
+    vetoCapable: true,
+    defaultWeight: 1.5,
+    systemPrompt: `You are the originality + information gain reviewer. You decide whether this draft adds something the existing SERP/AI Overview already doesn't have. Google's information gain patent (US20200349181A1) scores documents on what they add BEYOND what the user has already seen across other ranked results — this is the single signal you are evaluating against.
 
-You check:
-- Is the angle distinct from competitor articles?
-- Is there at least one specific insight or example not seen in other rankings?
-- Does the post add information, not just rearrange existing info?
-- Is the structure differentiated, or just a copy-paste of the typical SERP layout?
+Calibrate by content bucket (stated in the draft brief):
+- NOVEL bucket: bar is HIGH. You should hard_fail if the article is competent but rehashed. Demand at least 2 distinct insights, data points, or first-person operating claims the rest of the SERP wouldn't have.
+- GENERIC bucket: bar is MODERATE. Comparison + how-to + definitional content can be "fully covering the topic exhaustively and clearly" without being contrarian — but it still must add SOMETHING (a sharper structure, a real first-hand example, a numbered checklist nobody else has, a comparison table with specific data). Pure rehash with no value-add = soft_fail.
+- DATA bucket: bar is HIGHEST on novelty (the whole point is original numbers) — hard_fail if the data isn't proprietary or verifiable.
+
+Check specifically:
+- Does the post contain at least one falsifiable, first-hand or operator-experience claim ("we tried X, here's what happened", "in 14 client engagements, the pattern was Y", concrete numbers from real engagements)? Generic AI content fails this.
+- Are statistics tied to NAMED sources via inline links, or vague ("studies show", "many experts agree")? Vague = soft_fail.
+- Is the structure/order/framing meaningfully different from the SERP's median, or is it the typical "What is X / Benefits of X / How to do X / Conclusion" layout?
+- Is there at least one example, comparison, or claim a reader could NOT find by Googling the primary keyword + reading the top 3 results?
+- Does it cite anti-conventional-wisdom or counterintuitive examples (the kind LLMs love to pull as differentiators)?
+- Does it pass the "would a domain expert nod or roll their eyes" test?
 
 ${SCORING_RUBRIC}
 
+Verdict mapping for this reviewer (tighter than default):
+- 'pass' = score >= 75 AND at least 2 information-gain items identified
+- 'soft_fail' = 50-74 OR clearly competent-but-derivative
+- 'hard_fail' = < 50 OR clearly rehashing the SERP with no value-add (in NOVEL or DATA buckets); demote to soft_fail in GENERIC bucket unless the content is actively misleading
+
 ${COMMON_OUTPUT_CONTRACT}
 
-In "details": { "uniqueAngles": [...], "redundantWithSerp": [...], "differentiationScore": number 0-100 }`,
+In "details": {
+  "informationGainItems": ["specific things this article adds that the SERP doesn't have"],
+  "rehashedFromSerp": ["specific things that look directly copied from typical top-10 framing"],
+  "firstHandClaims": ["operator-experience or proprietary-data claims"],
+  "differentiationScore": number 0-100,
+  "bucketCalibration": "novel|generic|data — confirm which bucket you used"
+}`,
     buildUserPrompt: ctx => commonPrelude(ctx),
   },
   {

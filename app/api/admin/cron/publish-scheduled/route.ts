@@ -110,6 +110,24 @@ export async function POST(req: NextRequest) {
           updatedAt: publishedAtIso,
         })
         .where(eq(schema.contentDrafts.id, row.id))
+
+      // Enqueue back-link job now that the post is genuinely LIVE.
+      try {
+        const slug = (row.publishUrl ?? '').split('/').pop() ?? ''
+        if (slug && row.publishUrl) {
+          await realDb.insert(schema.backlinkQueue).values({
+            id: crypto.randomUUID(),
+            newPostUrl: row.publishUrl,
+            newPostSlug: slug,
+            newPostWebflowId: row.webflowItemId,
+            status: 'queued',
+            attempts: 0,
+            createdAt: publishedAtIso,
+          })
+        }
+      } catch (err) {
+        console.error('back-link enqueue (scheduled) failed', err)
+      }
       await realDb
         .update(schema.contentIdeas)
         .set({ status: 'published', updatedAt: publishedAtIso })

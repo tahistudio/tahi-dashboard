@@ -14,9 +14,10 @@
 
 import { schema } from '@/db/d1'
 import { db } from '@/lib/db'
-import { eq, inArray } from 'drizzle-orm'
+import { eq, inArray, and } from 'drizzle-orm'
 import { claudeJson } from '@/lib/anthropic-cost'
 import { HAIKU_MODEL } from '@/lib/ai-models'
+import { embed, cosineSimilarity } from '@/lib/openai'
 
 type DrizzleDB = Awaited<ReturnType<typeof db>>
 
@@ -92,6 +93,15 @@ async function fetchPage(url: string): Promise<{ ok: boolean; title: string | nu
   } catch {
     return { ok: false, title: null, bodyText: '' }
   }
+}
+
+async function safeEmbed(text: string): Promise<string | null> {
+  const t = text.trim()
+  if (!t) return null
+  try {
+    const r = await embed(t.slice(0, 4000))
+    return JSON.stringify(r.vector)
+  } catch { return null }
 }
 
 async function summarisePage(
@@ -179,8 +189,9 @@ export async function syncSiteIndex(
     const type = classifyUrl(relativeUrl)
 
     if (!prev) {
-      // New URL — fetch summary and insert.
+      // New URL — fetch summary + embedding, insert.
       const summary = await summarisePage(database, url, page.title, page.bodyText)
+      const embedding = await safeEmbed(`${page.title ?? ''}\n${summary}`)
       await database.insert(schema.siteIndex).values({
         id: crypto.randomUUID(),
         url, relativeUrl, type,
@@ -189,17 +200,21 @@ export async function syncSiteIndex(
         lastSeenAt: now,
         summarisedAt: summary ? now : null,
         isActive: 1,
+        embedding,
         createdAt: now, updatedAt: now,
       })
       result.newRows++
     } else if (prev.contentHash !== contentHash) {
-      // Changed — re-summarise.
+      // Changed — re-summarise + re-embed.
       const summary = await summarisePage(database, url, page.title, page.bodyText)
+      const embedding = await safeEmbed(`${page.title ?? ''}\n${summary}`)
       await database.update(schema.siteIndex).set({
         type, title: page.title, summary, contentHash,
         lastSeenAt: now,
         summarisedAt: summary ? now : null,
-        isActive: 1, updatedAt: now,
+        isActive: 1,
+        embedding,
+        updatedAt: now,
       }).where(eq(schema.siteIndex.id, prev.id))
       result.changedRows++
     } else {
@@ -226,4 +241,65 @@ export async function syncSiteIndex(
   }
 
   return result
+}
+
+/** Find the top-N most semantically related LIVE blog posts to a given
+ *  article text. Used at publish to populate Webflow's related-blog-posts
+ *  multi-reference + by the back-link cron to find candidate old posts.
+ *
+ *  Returns matches sorted by similarity DESC. `excludeRelativeUrl` skips
+ *  the article itself if it's already in the site index.
+ *
+ *  Threshold default 0.50 (loose) — caller can raise it for stricter
+ *  back-link discovery (we use 0.72 there). */
+export async function findRelatedBlogPosts(
+  database: DrizzleDB,
+  articleText: string,
+  options: {
+    topN?: number
+    minSimilarity?: number
+    excludeRelativeUrl?: string
+  } = {},
+): Promise<Array<{ url: string; relativeUrl: string; title: string | null; summary: string | null; similarity: number }>> {
+  const topN = options.topN ?? 3
+  const threshold = options.minSimilarity ?? 0.5
+
+  const t = articleText.trim()
+  if (!t) return []
+
+  let articleEmbedding: number[]
+  try {
+    const r = await embed(t.slice(0, 4000))
+    articleEmbedding = r.vector
+  } catch { return [] }
+  if (!articleEmbedding || articleEmbedding.length === 0) return []
+
+  const rows = await database
+    .select({
+      url: schema.siteIndex.url,
+      relativeUrl: schema.siteIndex.relativeUrl,
+      title: schema.siteIndex.title,
+      summary: schema.siteIndex.summary,
+      embedding: schema.siteIndex.embedding,
+    })
+    .from(schema.siteIndex)
+    .where(and(
+      eq(schema.siteIndex.isActive, 1),
+      eq(schema.siteIndex.type, 'blog'),
+    ))
+
+  const scored: Array<{ url: string; relativeUrl: string; title: string | null; summary: string | null; similarity: number }> = []
+  for (const row of rows) {
+    if (options.excludeRelativeUrl && row.relativeUrl === options.excludeRelativeUrl) continue
+    if (!row.embedding) continue
+    let vec: number[]
+    try { vec = JSON.parse(row.embedding) as number[] } catch { continue }
+    if (!Array.isArray(vec) || vec.length !== articleEmbedding.length) continue
+    const sim = cosineSimilarity(articleEmbedding, vec)
+    if (sim < threshold) continue
+    scored.push({ url: row.url, relativeUrl: row.relativeUrl, title: row.title, summary: row.summary, similarity: sim })
+  }
+
+  scored.sort((a, b) => b.similarity - a.similarity)
+  return scored.slice(0, topN)
 }

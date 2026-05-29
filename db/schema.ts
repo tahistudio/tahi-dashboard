@@ -3069,10 +3069,56 @@ export const siteIndex = sqliteTable('site_index', {
   // Set true when a sitemap pull no longer returns this URL. Excluded
   // from writer context but kept as a tombstone.
   isActive: integer('is_active').notNull().default(1),
+  // text-embedding-3-small vector as JSON [number, ...]. Computed when
+  // summary changes. Used by related-posts at publish + back-link cron.
+  embedding: text('embedding'),
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => [
   index('idx_site_index_type').on(table.type),
   index('idx_site_index_active').on(table.isActive),
 ])
+
+/**
+ * Back-link queue. Every time a new blog post actually goes LIVE on
+ * tahi.studio (publish-now or scheduled-flip), an entry is added. The
+ * back-link cron drains the queue: for each new post, finds the top
+ * old posts where the new one is contextually relevant (embedding
+ * similarity >= 0.72), and inserts an inline contextual link in each.
+ *
+ * Spam guards prevent any single old post becoming a link farm:
+ *  - 5 old posts max get a link from any one new post
+ *  - 8 system-added back-links lifetime per old post
+ *  - 30-day cooldown between system back-links on the same old post
+ *  - similarity threshold 0.72
+ */
+export const backlinkQueue = sqliteTable('backlink_queue', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // The newly published post (target of incoming back-links).
+  newPostUrl: text('new_post_url').notNull(),
+  newPostSlug: text('new_post_slug').notNull(),
+  newPostWebflowId: text('new_post_webflow_id'),
+  // 'queued' | 'processing' | 'done' | 'failed'
+  status: text('status').notNull().default('queued'),
+  attempts: integer('attempts').notNull().default(0),
+  // JSON [{ oldPostUrl, oldPostWebflowId, similarity, linkedAt }]
+  applied: text('applied'),
+  errorMessage: text('error_message'),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  processedAt: text('processed_at'),
+}, (table) => [
+  index('idx_backlink_queue_status').on(table.status),
+])
+
+/**
+ * Per-old-post back-link count + last-applied timestamp. Used by the
+ * cron to enforce the lifetime cap (max 8) + cooldown (30 days).
+ */
+export const backlinkStats = sqliteTable('backlink_stats', {
+  postUrl: text('post_url').primaryKey(),
+  postWebflowId: text('post_webflow_id'),
+  totalApplied: integer('total_applied').notNull().default(0),
+  lastAppliedAt: text('last_applied_at'),
+  updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+})
 

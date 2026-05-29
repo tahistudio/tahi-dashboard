@@ -262,12 +262,13 @@ export async function POST(
     }
   })()
 
-  // FAQ section heading stashed in scoreBreakdown by the structurer.
-  const faqHeading = (() => {
+  // FAQ section heading + purpose-written aiPrompt stashed in
+  // scoreBreakdown by the structurer.
+  const { faqHeading, aiPrompt } = (() => {
     try {
-      const sb = JSON.parse(draft.scoreBreakdown ?? '{}') as { faqHeading?: string }
-      return sb.faqHeading ?? ''
-    } catch { return '' }
+      const sb = JSON.parse(draft.scoreBreakdown ?? '{}') as { faqHeading?: string; aiPrompt?: string }
+      return { faqHeading: sb.faqHeading ?? '', aiPrompt: sb.aiPrompt ?? '' }
+    } catch { return { faqHeading: '', aiPrompt: '' } }
   })()
 
   // 5) Build the fieldData payload
@@ -289,8 +290,45 @@ export async function POST(
     'meta-description-2': draft.metaDescription ?? '',
     'post-description': draft.postExcerpt ?? '',
     'shortened-name': draft.shortenedName ?? '',
-    'ai-prompt': draft.summary ?? draft.metaDescription ?? '',
-    'related-blog-posts': [] as string[],
+    // Purpose-written by the structurer — "ask AI about this post" prompt
+    // tailored to this article's angle. Falls back to summary only if the
+    // structurer didn't produce one (legacy drafts).
+    'ai-prompt': aiPrompt || draft.summary || draft.metaDescription || '',
+    'related-blog-posts': await (async () => {
+      try {
+        const { findRelatedBlogPosts } = await import('@/lib/site-index')
+        const { listCollectionItems } = await import('@/lib/webflow')
+        const related = await findRelatedBlogPosts(database, [
+          draft.title ?? '', draft.summary ?? '', (draft.bodyMarkdown ?? '').slice(0, 3000),
+        ].join('\n'), {
+          topN: 3, minSimilarity: 0.5,
+          excludeRelativeUrl: `/blog/${slug}`,
+        })
+        if (related.length === 0) return [] as string[]
+        // Resolve relative URLs -> Webflow item IDs by paging the Blog Posts
+        // collection and matching slugs. Bounded to 5 pages of 100 = 500 posts.
+        const wantSlugs = new Set(related.map(r => r.relativeUrl.replace(/^\/blog\//, '')))
+        const slugToId = new Map<string, string>()
+        let offset = 0
+        for (let i = 0; i < 5; i++) {
+          const { items, total } = await listCollectionItems(collectionId, { limit: 100, offset })
+          for (const it of items) {
+            const s = (it.fieldData?.slug as string | undefined) ?? ''
+            if (s && wantSlugs.has(s)) slugToId.set(s, it.id)
+          }
+          if (slugToId.size >= wantSlugs.size) break
+          if (items.length < 100) break
+          offset += items.length
+          if (offset >= total) break
+        }
+        return related
+          .map(r => slugToId.get(r.relativeUrl.replace(/^\/blog\//, '')))
+          .filter((x): x is string => !!x)
+      } catch (err) {
+        console.error('related-blog-posts lookup failed', err)
+        return [] as string[]
+      }
+    })(),
     'main-image': draft.coverSvgUrl ?? '',
     'thumbnail-image-2': draft.coverSvgUrl ?? '',
     featured: false,
@@ -356,6 +394,25 @@ export async function POST(
       createdAt: nowIso,
       updatedAt: nowIso,
     })
+
+    // Enqueue back-link job, but ONLY when the post is actually LIVE now.
+    // Scheduled posts (publishNow=false) will be enqueued by the
+    // publish-scheduled cron when it flips them live.
+    if (publishNow) {
+      try {
+        await database.insert(schema.backlinkQueue).values({
+          id: crypto.randomUUID(),
+          newPostUrl: publishUrl,
+          newPostSlug: slug,
+          newPostWebflowId: webflowItemId,
+          status: 'queued',
+          attempts: 0,
+          createdAt: nowIso,
+        })
+      } catch (err) {
+        console.error('back-link enqueue failed', err)
+      }
+    }
   }
 
   await database

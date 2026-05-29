@@ -347,6 +347,18 @@ function buildArticle(
   if (refs.aboutIds.length > 0) article.about = refs.aboutIds.map(id => ({ '@id': id }))
   if (refs.mentionIds.length > 0) article.mentions = refs.mentionIds.map(id => ({ '@id': id }))
   if (refs.citationIds.length > 0) article.citation = refs.citationIds.map(id => ({ '@id': id }))
+  // SpeakableSpecification — AEO + voice search signal. Targets the
+  // article's intro section + the key-takeaways block. AI Overviews,
+  // ChatGPT/Perplexity citations, and Google Assistant pull extractable
+  // content from these explicitly-marked regions disproportionately.
+  // CSS-selector form is what the spec recommends + what Google's voice
+  // search guidelines reference. Tahi blog template renders the meta
+  // description as <p class="post-meta-description"> and the key
+  // takeaways list as <ul class="post-key-takeaways"> in <main>.
+  article.speakable = {
+    '@type': 'SpeakableSpecification',
+    cssSelector: ['.post-meta-description', '.post-key-takeaways'],
+  }
   return article
 }
 

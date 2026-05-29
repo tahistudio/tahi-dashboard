@@ -1716,6 +1716,39 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_site_index_active ON site_index (is_active)`,
     ],
   },
+  {
+    name: '0069',
+    description: 'site_index embedding column. text-embedding-3-small vector as JSON stored on each row. Computed when summary changes; used by related-posts at publish + back-link cron + future semantic search. Idempotent ALTER (errors if already present are silently skipped by the migration runner).',
+    statements: [
+      `ALTER TABLE site_index ADD COLUMN embedding text`,
+    ],
+  },
+  {
+    name: '0070',
+    description: 'Back-link queue + stats. Every published post is enqueued for the back-link cron, which finds the top old posts whose similarity to the new post >= 0.72 and inserts an inline contextual link in each. backlink_stats tracks the lifetime cap (max 8) + 30-day cooldown per old post so no post becomes a link farm.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS backlink_queue (
+        id text PRIMARY KEY NOT NULL,
+        new_post_url text NOT NULL,
+        new_post_slug text NOT NULL,
+        new_post_webflow_id text,
+        status text DEFAULT 'queued' NOT NULL,
+        attempts integer DEFAULT 0 NOT NULL,
+        applied text,
+        error_message text,
+        created_at text NOT NULL,
+        processed_at text
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_backlink_queue_status ON backlink_queue (status)`,
+      `CREATE TABLE IF NOT EXISTS backlink_stats (
+        post_url text PRIMARY KEY NOT NULL,
+        post_webflow_id text,
+        total_applied integer DEFAULT 0 NOT NULL,
+        last_applied_at text,
+        updated_at text NOT NULL
+      )`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

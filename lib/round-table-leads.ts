@@ -426,6 +426,11 @@ export interface StructuredDraft {
   summary: string                            // 1-2 sentence post summary
   postExcerpt: string                        // short teaser
   shortenedName: string                      // short label for cards/nav
+  /** Purpose-written "what to ask AI about this post" prompt. Lands in
+   *  the Webflow `ai-prompt` field. NOT a duplicate of the summary —
+   *  framed as a curiosity-driving question or instruction the reader
+   *  could paste into ChatGPT/Claude to dig deeper on this topic. */
+  aiPrompt: string
 }
 
 export const STRUCTURE_SYSTEM = `You are a CMS structuring assistant. You take a finished blog article (markdown) and split it into the discrete fields a Webflow Blog Posts collection expects, so each piece lands in the right CMS field and the post renders correctly.
@@ -436,6 +441,7 @@ Rules:
 - faqSectionHeading: a short, topic-specific heading that frames the FAQ block (e.g. "Common questions about Webflow security", not just "FAQs"). 4-8 words.
 - keyTakeaways: 3-5 punchy one-line takeaways.
 - metaTitle <= 60 chars, metaDescription 145-160 chars, summary 1-2 sentences, postExcerpt a short teaser, shortenedName a short card label.
+- aiPrompt: a 1-2 sentence prompt the reader could paste into ChatGPT/Claude/Perplexity to dig deeper on this specific article's topic. NOT a duplicate of the summary. Frame as a curiosity-driving question or instruction. Example: "Compare Tahi's approach to enterprise Webflow governance with how three other top Webflow agencies handle SOC 2 readiness for their clients." Make it specific to THIS article's angle.
 - Never use em dashes.`
 
 export function buildStructurePrompt(input: {
@@ -462,7 +468,8 @@ Respond JSON only:
   "metaDescription": "145-160 chars",
   "summary": "1-2 sentences",
   "postExcerpt": "short teaser",
-  "shortenedName": "short label"
+  "shortenedName": "short label",
+  "aiPrompt": "1-2 sentence purpose-written 'ask AI about this' prompt, specific to this article"
 }`
 }
 
@@ -479,6 +486,7 @@ export function parseStructure(raw: string): StructuredDraft {
     summary: parsed.summary ?? '',
     postExcerpt: parsed.postExcerpt ?? '',
     shortenedName: parsed.shortenedName ?? '',
+    aiPrompt: parsed.aiPrompt ?? '',
   }
 }
 
