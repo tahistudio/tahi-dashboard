@@ -13,7 +13,7 @@ import {
   RefreshCw, AlertTriangle, FileSearch, CheckCircle2, XCircle, HelpCircle,
   Lightbulb, FileEdit, Calendar, ExternalLink, ChevronDown, ChevronRight,
   Check, X, Eye, Sparkles, Link2, Trash2, Send, Loader2, Clock,
-  Layers, History, Plus,
+  Layers, History, Plus, Database,
   type LucideIcon,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -21,6 +21,7 @@ import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
+import { SiteIndexContent } from './site-index/site-index-content'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
 import { SlideOver } from '@/components/tahi/slide-over'
@@ -82,7 +83,7 @@ interface ScanError412 {
   availableProperties?: Array<{ siteUrl: string; permissionLevel: string }>
 }
 
-type TabId = 'health' | 'ideas' | 'drafts' | 'links' | 'schedule'
+type TabId = 'health' | 'ideas' | 'drafts' | 'links' | 'schedule' | 'site-index'
 
 interface TabDef {
   id: TabId
@@ -127,6 +128,13 @@ const TABS: readonly TabDef[] = [
     icon: Calendar,
     slice: 5,
     comingDescription: 'Plan publishing cadence across the blog, glossary and case studies.',
+  },
+  {
+    id: 'site-index',
+    label: 'Site index',
+    icon: Database,
+    slice: 3,
+    comingDescription: 'Every live URL on tahi.studio with a Haiku one-line summary + embedding. Feeds the writer\'s internal-linking context, glossary auto-link, related-posts at publish, and back-link discovery.',
   },
 ] as const
 
@@ -327,7 +335,8 @@ export function ContentStudioContent() {
         {activeTab === 'drafts' && <DraftsTab onToast={showToast} />}
         {activeTab === 'links' && <LinksTab onToast={showToast} />}
         {activeTab === 'schedule' && <ScheduleTab onToast={showToast} />}
-        {activeTab !== 'health' && activeTab !== 'ideas' && activeTab !== 'drafts' && activeTab !== 'links' && activeTab !== 'schedule' && (
+        {activeTab === 'site-index' && <SiteIndexContent />}
+        {activeTab !== 'health' && activeTab !== 'ideas' && activeTab !== 'drafts' && activeTab !== 'links' && activeTab !== 'schedule' && activeTab !== 'site-index' && (
           <ComingSoonTab tab={TABS.find(t => t.id === activeTab)!} />
         )}
       </div>

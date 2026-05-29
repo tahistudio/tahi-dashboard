@@ -1,8 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { RefreshCw, ExternalLink, ChevronLeft } from 'lucide-react'
-import Link from 'next/link'
+import { RefreshCw, ExternalLink } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Badge } from '@/components/tahi/badge'
 import { apiPath } from '@/lib/api'
@@ -88,27 +87,19 @@ export function SiteIndexContent() {
   }, [rows])
 
   return (
-    <div style={{ maxWidth: '88rem', margin: '0 auto', padding: '1.5rem' }}>
+    <div>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '0.75rem', gap: '1rem', flexWrap: 'wrap' }}>
-        <div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--color-text)', marginBottom: '0.25rem' }}>Site index</h1>
-          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', maxWidth: '52rem' }}>
-            Every live URL on tahi.studio with a Haiku one-line summary + embedding. Feeds the round-table writer&apos;s internal-linking context, glossary auto-link at publish, related-posts at publish, and back-link cron candidate retrieval. Synced weekly; new blog posts seed at publish time.
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <TahiButton
-            size="sm"
-            onClick={() => { void runSync() }}
-            loading={syncing}
-            iconLeft={!syncing ? <RefreshCw className="w-3.5 h-3.5" /> : undefined}
-          >
-            {syncing ? 'Syncing…' : 'Run sync now'}
-          </TahiButton>
-          <Link href="/content-studio" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-            <ChevronLeft size={14} aria-hidden="true" /> Back
-          </Link>
-        </div>
+        <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', maxWidth: '52rem', margin: 0 }}>
+          Every live URL on tahi.studio with a Haiku one-line summary + embedding. Feeds the round-table writer&apos;s internal-linking context, glossary auto-link at publish, related-posts at publish, and back-link cron candidate retrieval. Synced weekly; new blog posts seed at publish time.
+        </p>
+        <TahiButton
+          size="sm"
+          onClick={() => { void runSync() }}
+          loading={syncing}
+          iconLeft={!syncing ? <RefreshCw className="w-3.5 h-3.5" /> : undefined}
+        >
+          {syncing ? 'Syncing…' : 'Run sync now'}
+        </TahiButton>
       </div>
 
       {counts && (
