@@ -36,7 +36,7 @@ import { buildResearchBrief, isPerplexityConfigured } from '@/lib/perplexity'
 import { generateCover, isReplicateConfigured } from '@/lib/replicate'
 import { validateDraftLinks } from '@/lib/link-validator'
 import { markdownToHtml } from '@/lib/markdown-render'
-import { loadBlogContext, renderBlogContextForPrompt, linkableUrlSet, sanitizeInternalLinks } from '@/lib/blog-context'
+import { loadBlogContext, renderBlogContextForPrompt, linkableUrlSet, sanitizeInternalLinks, sanitizeCompetitorLinks } from '@/lib/blog-context'
 import { finalizeWebflowFields } from '@/lib/blog-finalize'
 import {
   REVIEWERS,
@@ -180,12 +180,22 @@ async function stageResearch(database: Database, draft: DraftRow): Promise<Stage
   const topic = idea.title ?? 'Webflow agency content'
   const brief = await buildResearchBrief(topic, idea.angle ?? undefined)
 
+  // Drop competitor-agency citations before they reach the writer.
+  // Perplexity loves citing big well-known agency posts; we don't want
+  // those becoming our writer's authoritative source (or worse, ending
+  // up linked in the body). Products + official docs + standards stay.
+  const { filterOutCompetitors } = await import('./blog-competitor-domains')
+  const filtered = filterOutCompetitors(brief.allCitations)
+  brief.allCitations = filtered.kept
+
   // Cost record for Perplexity (estimate via usage)
   const cents = await recordCost(database, {
     scope: 'draft', scopeId: draft.id, stage: 'perplexity_research',
     provider: 'perplexity', model: 'sonar-pro',
     inputTokens: brief.totalUsage.inputTokens, outputTokens: brief.totalUsage.outputTokens,
-    note: brief.mocked ? 'mocked (no PERPLEXITY_API_KEY)' : `${brief.allCitations.length} citations`,
+    note: brief.mocked
+      ? 'mocked (no PERPLEXITY_API_KEY)'
+      : `${brief.allCitations.length} citations${filtered.dropped.length > 0 ? ` (${filtered.dropped.length} competitor agencies stripped)` : ''}`,
   })
 
   await database.update(schema.contentDrafts).set({
@@ -584,6 +594,13 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
         console.warn(`Stripped ${sani.removed.length} fabricated internal links from draft ${draft.id}`)
       }
     } catch { /* if context unavailable, leave links as-is */ }
+    // Also strip links to competitor agencies. Text is preserved, only
+    // the link wrapper is removed so we don't send readers off to a rival.
+    const compSani = sanitizeCompetitorLinks(cleanMarkdown)
+    cleanMarkdown = compSani.markdown
+    if (compSani.removed.length > 0) {
+      console.warn(`Stripped ${compSani.removed.length} competitor-agency links from draft ${draft.id}`)
+    }
     structured.bodyMarkdownClean = cleanMarkdown
     const cleanHtml = markdownToHtml(structured.bodyMarkdownClean)
     const takeawaysHtml = structured.keyTakeaways.length > 0

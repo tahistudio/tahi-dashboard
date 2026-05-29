@@ -239,3 +239,22 @@ export function sanitizeInternalLinks(markdown: string, valid: Set<string>): Lin
 
   return { markdown: out, removed, normalised }
 }
+
+import { isCompetitorAgency } from './blog-competitor-domains'
+
+/** Strips links to competitor agencies from the body. Text is preserved
+ *  (the citation still makes sense in-prose), just the [text](url) wrapper
+ *  is removed so readers don't get sent to a competitor. Mirrors the
+ *  fabricated-internal-link strategy: unlink, log, move on. */
+export function sanitizeCompetitorLinks(markdown: string): { markdown: string; removed: Array<{ text: string; url: string }> } {
+  const removed: Array<{ text: string; url: string }> = []
+  const out = markdown.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (full, text: string, url: string) => {
+    if (!/^https?:\/\//i.test(url)) return full  // relative / internal — handled elsewhere
+    if (isCompetitorAgency(url)) {
+      removed.push({ text, url })
+      return text
+    }
+    return full
+  })
+  return { markdown: out, removed }
+}

@@ -257,6 +257,7 @@ ${input.blogContext ?? ''}
 ## Sourcing rules (STRICT)
 - When you state a statistic, study finding, or factual claim drawn from the research brief, INLINE-LINK the specific phrase to the source URL using [phrase](url) right where the claim appears. Do not dump sources in a list at the end.
 - Only cite URLs that appear in the research brief above.
+- DO NOT link to other Webflow agencies, design studios, or development agencies. Tahi Studio is itself a Webflow agency, so linking to competitors sends our readers to their site. If you'd otherwise cite an agency post, instead link to the underlying PRODUCT (Webflow, Figma, Stripe, Vercel, etc.), the official documentation, a standards body (w3.org, web.dev), or a research/news outlet (Nielsen Norman, A List Apart, Smashing Magazine, news sites). If you can't find a non-agency source, drop the link and state the claim plainly without one — that's better than sending the reader to a competitor.
 - Internal links to other Tahi posts use the relative /slug form per the linking rules.
 
 ## Tahi brand voice
