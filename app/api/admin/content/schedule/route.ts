@@ -26,7 +26,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
 import { computeNextSlot } from '@/lib/publish-scheduler'
 
 export const dynamic = 'force-dynamic'
@@ -74,7 +74,9 @@ export async function GET(req: NextRequest) {
     .leftJoin(schema.contentIdeas, eq(schema.contentDrafts.ideaId, schema.contentIdeas.id))
     .leftJoin(schema.contentClusters, eq(schema.contentIdeas.clusterId, schema.contentClusters.id))
     .where(and(
-      eq(schema.contentDrafts.status, 'ready'),
+      // 'ready' = legacy Slice-2 drafts; 'ready_for_publish' = round-table
+      // (Slice 9) drafts. Both are publishable + belong here.
+      inArray(schema.contentDrafts.status, ['ready', 'ready_for_publish']),
       isNull(schema.contentDrafts.publishedWebflowItemId),
     ))
     .orderBy(desc(schema.contentDrafts.updatedAt))
@@ -135,7 +137,9 @@ export async function GET(req: NextRequest) {
     .select({ count: sql<number>`COUNT(*)` })
     .from(schema.contentDrafts)
     .where(and(
-      eq(schema.contentDrafts.status, 'ready'),
+      // 'ready' = legacy Slice-2 drafts; 'ready_for_publish' = round-table
+      // (Slice 9) drafts. Both are publishable + belong here.
+      inArray(schema.contentDrafts.status, ['ready', 'ready_for_publish']),
       isNull(schema.contentDrafts.publishedWebflowItemId),
     ))
 

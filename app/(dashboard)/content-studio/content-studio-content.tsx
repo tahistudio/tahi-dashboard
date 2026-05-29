@@ -2842,7 +2842,10 @@ interface DraftCardProps {
 }
 
 function DraftCard({ draft, onOpen, onRetry, retrying }: DraftCardProps) {
-  const isReady = draft.status === 'ready'
+  // 'ready' = legacy Slice-2 drafts; 'ready_for_publish' = round-table
+  // (Slice 9) drafts. Both are publishable, both should surface in
+  // the Schedule "ready to go" lane.
+  const isReady = draft.status === 'ready' || draft.status === 'ready_for_publish'
   const isFailed = draft.status === 'failed'
   const breakdown = parseScoreBreakdown(draft.scoreBreakdown)
   const currentStageIndex = DRAFT_STAGE_ORDER.findIndex(s => s.key === draft.status)
@@ -3097,7 +3100,10 @@ function DraftDetailDrawer({ detail, onClose, onDiscard, discarding }: DraftDeta
   const [showSales, setShowSales] = useState(false)
   const [showReadability, setShowReadability] = useState(false)
 
-  const isReady = draft.status === 'ready'
+  // 'ready' = legacy Slice-2 drafts; 'ready_for_publish' = round-table
+  // (Slice 9) drafts. Both are publishable, both should surface in
+  // the Schedule "ready to go" lane.
+  const isReady = draft.status === 'ready' || draft.status === 'ready_for_publish'
 
   return (
     <SlideOver
