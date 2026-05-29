@@ -1,14 +1,18 @@
 /**
- * Default topical clusters for Tahi's content engine (WORKFLOWS Phase I).
+ * Default topical clusters for Tahi's content engine.
  *
- * Lives in lib/ not in the route file because Next.js 15 App Router only
- * permits HTTP-method exports + a small set of config exports from route
- * handlers — exporting non-route constants from `route.ts` is a hard
- * build error (`next build` rejects it even though `tsc` does not).
+ * Consolidated 2026-05-29 from 8 → 5 clusters: niched-down per Liam +
+ * expert SEO review. Old clusters that already have ideas/drafts
+ * attached aren't deleted by the seed endpoint (INSERT OR IGNORE on
+ * slug). New ideas should use this set.
  *
- * Consumers:
- *   - app/api/admin/content/clusters/seed/route.ts  — the seed endpoint
- *   - app/api/admin/cron/ideation/route.ts          — auto-seed on first run
+ * Cluster rationale + interlinking strategy lives in the "SEO and AEO
+ * Strategy" Docs Hub page; if that diverges from this file, the doc is
+ * the source of truth for human readers — this file is the source of
+ * truth for the AI pipeline.
+ *
+ * Tag (not a cluster): NZ + AU regional. Applied to relevant pieces
+ * for local SEO; doesn't deserve cluster depth at current volume.
  */
 
 export interface ClusterSeed {
@@ -21,41 +25,26 @@ export const DEFAULT_CLUSTERS: ClusterSeed[] = [
   {
     name: 'Enterprise Webflow',
     slug: 'enterprise-webflow',
-    description: 'Large-org Webflow builds, governance, multi-locale, security reviews, integrations with enterprise stacks.',
+    description: 'Large-org Webflow builds, governance, multi-locale, security reviews, integrations with enterprise stacks. Includes Webflow migrations from WordPress / Framer / headless / bespoke — same buyer, same pain.',
   },
   {
-    name: 'Migration',
-    slug: 'migration',
-    description: 'Moving from WordPress, Framer, headless CMSes, and bespoke builds onto Webflow. Content modelling + redirect strategy.',
+    name: 'Performance + SEO + AEO + Sustainability',
+    slug: 'performance-seo-aeo',
+    description: 'Core Web Vitals on Webflow, image strategy, JS hygiene, schema/structured data, AEO + answer-engine optimisation, voice search, llms.txt, low-carbon hosting, page weight, green hosting. Sustainability is the differentiated angle that makes this cluster non-generic.',
   },
   {
-    name: 'Design-to-dev handoff',
-    slug: 'design-to-dev',
-    description: 'Figma-to-Webflow workflows, design tokens, component-level handoff, QA loops that scale across designers and developers.',
+    name: 'Design + Build Quality',
+    slug: 'design-build-quality',
+    description: "Staci-authored. Design-to-dev workflows (Figma to Webflow), design tokens, component-level handoff, QA loops, product-led experience patterns, brand-voice in the build. Tahi's craft differentiation lane.",
   },
   {
-    name: 'Webflow agencies + Partner Program',
-    slug: 'webflow-agencies',
-    description: 'Running, pricing, and scaling a Webflow agency. Partner-program mechanics, lead routing, agency tooling.',
+    name: 'Webflow Custom Engineering',
+    slug: 'webflow-custom-engineering',
+    description: 'Webflow Cloud, Webflow Apps, integrations, product-on-Webflow, onboarding-on-Webflow, custom dashboards, embedded AI in Webflow, headless patterns. Highest commercial intent + lowest SERP competition — likely highest near-term traffic ROI.',
   },
   {
-    name: 'Performance + SEO',
-    slug: 'performance-seo',
-    description: 'Core Web Vitals on Webflow, image strategy, JS hygiene, SEO fundamentals, AEO and answer-engine optimisation.',
-  },
-  {
-    name: 'Product-led + Experience',
-    slug: 'product-led',
-    description: "Tahi's own product surface area: Calculator, Nodeo, internal case studies. The E-E-A-T signal lane.",
-  },
-  {
-    name: 'Sustainable web',
-    slug: 'sustainable-web',
-    description: 'Tahi-unique angle. Carbon-aware design, low-carbon hosting, page weight, the climate impact of marketing sites.',
-  },
-  {
-    name: 'NZ + AU regional',
-    slug: 'nz-au-regional',
-    description: 'Geo play. New Zealand + Australia market briefs, hreflang en-NZ + en-AU, regional brand comparisons.',
+    name: 'Agency Operations',
+    slug: 'agency-operations',
+    description: 'Running, pricing, and scaling a Webflow agency. Partner-program mechanics, productised services, retainers, pricing models, lead routing, agency tooling. Meta audience (other founders + agency staff); Premium Partner status gives authority here.',
   },
 ]

@@ -162,15 +162,22 @@ export async function syncSiteIndex(
 
   if (urls.length === 0) return result
 
-  // 2) Load existing rows for all URLs we just pulled.
-  const existing = await database
-    .select({
-      id: schema.siteIndex.id,
-      url: schema.siteIndex.url,
-      contentHash: schema.siteIndex.contentHash,
-    })
-    .from(schema.siteIndex)
-    .where(inArray(schema.siteIndex.url, urls))
+  // 2) Load existing rows for all URLs we just pulled. D1 caps SQL
+  //    variables per query around 100, so we chunk the IN clause.
+  const CHUNK = 80
+  const existing: Array<{ id: string; url: string; contentHash: string | null }> = []
+  for (let i = 0; i < urls.length; i += CHUNK) {
+    const slice = urls.slice(i, i + CHUNK)
+    const rows = await database
+      .select({
+        id: schema.siteIndex.id,
+        url: schema.siteIndex.url,
+        contentHash: schema.siteIndex.contentHash,
+      })
+      .from(schema.siteIndex)
+      .where(inArray(schema.siteIndex.url, slice))
+    existing.push(...rows)
+  }
   const existingByUrl = new Map(existing.map(r => [r.url, r]))
 
   // 3) For each URL: fetch, hash, decide insert/update/skip.

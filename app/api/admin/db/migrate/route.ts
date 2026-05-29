@@ -1749,6 +1749,32 @@ const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    name: '0071',
+    description: 'Cluster consolidation 2026-05-29: archive the 4 old clusters Liam consolidated (Migration, Sustainable web, Design-to-dev handoff, Product-led + Experience, NZ + AU regional) and rename "Performance + SEO" + "Webflow agencies + Partner Program" to their new names. Idempotent — only touches rows by exact slug match.',
+    statements: [
+      // Archive consolidated clusters.
+      `UPDATE content_clusters SET status='archived', updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE slug='migration' AND status != 'archived'`,
+      `UPDATE content_clusters SET status='archived', updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE slug='sustainable-web' AND status != 'archived'`,
+      `UPDATE content_clusters SET status='archived', updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE slug='design-to-dev' AND status != 'archived'`,
+      `UPDATE content_clusters SET status='archived', updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE slug='product-led' AND status != 'archived'`,
+      `UPDATE content_clusters SET status='archived', updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE slug='nz-au-regional' AND status != 'archived'`,
+      // Rename + retarget Performance + SEO to absorb sustainability.
+      `UPDATE content_clusters SET name='Performance + SEO + AEO + Sustainability', slug='performance-seo-aeo', description='Core Web Vitals on Webflow, image strategy, JS hygiene, schema/structured data, AEO + answer-engine optimisation, voice search, llms.txt, low-carbon hosting, page weight, green hosting. Sustainability is the differentiated angle that makes this cluster non-generic.', updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE slug='performance-seo'`,
+      // Rename Webflow agencies + Partner Program -> Agency Operations.
+      `UPDATE content_clusters SET name='Agency Operations', slug='agency-operations', description='Running, pricing, and scaling a Webflow agency. Partner-program mechanics, productised services, retainers, pricing models, lead routing, agency tooling. Meta audience (other founders + agency staff); Premium Partner status gives authority here.', updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE slug='webflow-agencies'`,
+      // Seed the two genuinely new clusters. Crypto.randomUUID isn't
+      // available in SQLite so we hex-pad an id via lower(hex(randomblob)).
+      `INSERT OR IGNORE INTO content_clusters (id, name, slug, description, status, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), 'Design + Build Quality', 'design-build-quality',
+          'Staci-authored. Design-to-dev workflows (Figma to Webflow), design tokens, component-level handoff, QA loops, product-led experience patterns, brand-voice in the build. Tahi craft differentiation lane.',
+          'active', strftime('%Y-%m-%dT%H:%M:%SZ','now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'))`,
+      `INSERT OR IGNORE INTO content_clusters (id, name, slug, description, status, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), 'Webflow Custom Engineering', 'webflow-custom-engineering',
+          'Webflow Cloud, Webflow Apps, integrations, product-on-Webflow, onboarding-on-Webflow, custom dashboards, embedded AI in Webflow, headless patterns. Highest commercial intent + lowest SERP competition.',
+          'active', strftime('%Y-%m-%dT%H:%M:%SZ','now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'))`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
