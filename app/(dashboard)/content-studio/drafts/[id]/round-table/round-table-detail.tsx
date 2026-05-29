@@ -61,9 +61,13 @@ interface DraftSnapshot {
     intent?: string
     targetWordCount?: number
     primaryKeyword?: string
+    secondaryKeywords?: string[]
     angle?: string
     rationale?: string
-    headings?: Array<{ level: number; text: string; wordTarget?: number }>
+    author?: 'liam' | 'staci'
+    contentBucket?: 'generic' | 'novel' | 'data'
+    workingTitle?: string
+    headings?: Array<{ level: number; text: string; wordTarget?: number; mustCover?: string[] }>
   } | null
   voiceWeights: Record<string, number>
   linkCheck: {
@@ -108,7 +112,9 @@ interface DraftSnapshot {
   services: { perplexity: boolean; replicate: boolean; openai: boolean; anthropic: boolean }
 }
 
-const TERMINAL_STATUSES = new Set(['ready_for_publish', 'failed', 'cost_capped', 'paused'])
+// 'awaiting_brief_approval' is a human gate — listed here so the
+// auto-tick stops and waits for the Approve / Reject buttons.
+const TERMINAL_STATUSES = new Set(['ready_for_publish', 'failed', 'cost_capped', 'paused', 'awaiting_brief_approval'])
 
 export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   const router = useRouter()
@@ -118,6 +124,10 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [forceApproving, setForceApproving] = useState(false)
+  const [approvingBrief, setApprovingBrief] = useState(false)
+  const [rejectingBrief, setRejectingBrief] = useState(false)
+  const [rejectFeedback, setRejectFeedback] = useState('')
+  const [rejectOpen, setRejectOpen] = useState(false)
   const [selectedRevision, setSelectedRevision] = useState<number>(1)
   const [overrideInFlight, setOverrideInFlight] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
@@ -196,6 +206,46 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   async function pause() {
     await fetch(apiPath(`/api/admin/content/drafts/${draftId}/pause`), { method: 'POST' }).catch(() => {})
     await fetchSnapshot()
+  }
+
+  async function approveBrief() {
+    setApprovingBrief(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}/approve-brief`), { method: 'POST' })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        alert(j.error ?? 'Failed to approve brief')
+        return
+      }
+      await fetchSnapshot()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to approve brief')
+    } finally {
+      setApprovingBrief(false)
+    }
+  }
+
+  async function rejectBrief() {
+    setRejectingBrief(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}/reject-brief`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback: rejectFeedback.trim() || undefined }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        alert(j.error ?? 'Failed to reject brief')
+        return
+      }
+      setRejectOpen(false)
+      setRejectFeedback('')
+      await fetchSnapshot()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to reject brief')
+    } finally {
+      setRejectingBrief(false)
+    }
   }
 
   async function forceApprove() {
@@ -487,6 +537,170 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
           <ChevronLeft size={14} aria-hidden="true" /> Back
         </Link>
       </div>
+
+      {draft.status === 'awaiting_brief_approval' && data.brief && (
+        <div style={{
+          background: 'var(--color-bg-secondary)',
+          border: '1px solid var(--color-border)',
+          borderRadius: '0 16px 0 16px',
+          padding: '1.25rem 1.5rem',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+            <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--color-brand)' }} />
+            <h2 style={{ fontSize: '0.9375rem', fontWeight: 600, color: 'var(--color-text)' }}>
+              Strategist brief — approve before writer runs
+            </h2>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem 1.5rem', marginBottom: '1rem', fontSize: '0.8125rem' }}>
+            {data.brief.workingTitle && (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <div style={{ color: 'var(--color-text-muted)', marginBottom: '0.125rem' }}>Working title</div>
+                <div style={{ color: 'var(--color-text)', fontWeight: 500 }}>{data.brief.workingTitle}</div>
+              </div>
+            )}
+            {data.brief.angle && (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <div style={{ color: 'var(--color-text-muted)', marginBottom: '0.125rem' }}>Angle</div>
+                <div style={{ color: 'var(--color-text)' }}>{data.brief.angle}</div>
+              </div>
+            )}
+            {data.brief.author && (
+              <div>
+                <div style={{ color: 'var(--color-text-muted)', marginBottom: '0.125rem' }}>Author</div>
+                <div style={{ color: 'var(--color-text)', textTransform: 'capitalize' }}>{data.brief.author}</div>
+              </div>
+            )}
+            {data.brief.contentBucket && (
+              <div>
+                <div style={{ color: 'var(--color-text-muted)', marginBottom: '0.125rem' }}>Bucket</div>
+                <div style={{ color: 'var(--color-text)', textTransform: 'capitalize' }}>{data.brief.contentBucket}</div>
+              </div>
+            )}
+            {data.brief.intent && (
+              <div>
+                <div style={{ color: 'var(--color-text-muted)', marginBottom: '0.125rem' }}>Intent</div>
+                <div style={{ color: 'var(--color-text)' }}>{data.brief.intent.replace(/_/g, ' ')}</div>
+              </div>
+            )}
+            {data.brief.targetWordCount && (
+              <div>
+                <div style={{ color: 'var(--color-text-muted)', marginBottom: '0.125rem' }}>Target words</div>
+                <div style={{ color: 'var(--color-text)' }}>{data.brief.targetWordCount}</div>
+              </div>
+            )}
+            {data.brief.primaryKeyword && (
+              <div>
+                <div style={{ color: 'var(--color-text-muted)', marginBottom: '0.125rem' }}>Primary keyword</div>
+                <div style={{ color: 'var(--color-text)' }}>{data.brief.primaryKeyword}</div>
+              </div>
+            )}
+            {data.brief.secondaryKeywords && data.brief.secondaryKeywords.length > 0 && (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <div style={{ color: 'var(--color-text-muted)', marginBottom: '0.125rem' }}>Secondary keywords</div>
+                <div style={{ color: 'var(--color-text)' }}>{data.brief.secondaryKeywords.join(', ')}</div>
+              </div>
+            )}
+            {data.brief.rationale && (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <div style={{ color: 'var(--color-text-muted)', marginBottom: '0.125rem' }}>Rationale</div>
+                <div style={{ color: 'var(--color-text)', fontStyle: 'italic' }}>{data.brief.rationale}</div>
+              </div>
+            )}
+          </div>
+          {data.brief.headings && data.brief.headings.length > 0 && (
+            <div style={{ marginBottom: '1.25rem' }}>
+              <div style={{ color: 'var(--color-text-muted)', marginBottom: '0.375rem', fontSize: '0.8125rem' }}>Outline</div>
+              <ol style={{ paddingLeft: '1.25rem', fontSize: '0.8125rem', color: 'var(--color-text)' }}>
+                {data.brief.headings.map((h, i) => (
+                  <li key={i} style={{ marginBottom: '0.25rem' }}>
+                    <strong>{h.text}</strong>
+                    {h.wordTarget ? <span style={{ color: 'var(--color-text-muted)' }}> ({h.wordTarget}w)</span> : null}
+                    {h.mustCover && h.mustCover.length > 0 ? (
+                      <ul style={{ paddingLeft: '1rem', marginTop: '0.125rem', color: 'var(--color-text-muted)' }}>
+                        {h.mustCover.map((m, j) => <li key={j}>{m}</li>)}
+                      </ul>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <TahiButton
+              size="sm"
+              onClick={() => { void approveBrief() }}
+              loading={approvingBrief}
+              iconLeft={!approvingBrief ? <CheckCircle2 className="w-3.5 h-3.5" /> : undefined}
+            >
+              Approve + start writer
+            </TahiButton>
+            <TahiButton
+              size="sm"
+              variant="secondary"
+              onClick={() => setRejectOpen(true)}
+              disabled={approvingBrief}
+            >
+              Reject + re-strategise
+            </TahiButton>
+          </div>
+        </div>
+      )}
+
+      {rejectOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 50,
+            background: 'rgba(18, 26, 15, 0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '1rem',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget && !rejectingBrief) setRejectOpen(false) }}
+        >
+          <div style={{
+            background: 'var(--color-bg)', border: '1px solid var(--color-border)',
+            borderRadius: '0 16px 0 16px', padding: '1.5rem', maxWidth: '32rem', width: '100%',
+          }}>
+            <h2 style={{ fontSize: '1.0625rem', fontWeight: 600, color: 'var(--color-text)', marginBottom: '0.5rem' }}>
+              Reject brief + re-strategise
+            </h2>
+            <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', lineHeight: 1.55, marginBottom: '1rem' }}>
+              Optionally tell the strategist what to change. The next pass will see your note and try to address it.
+            </p>
+            <textarea
+              value={rejectFeedback}
+              onChange={(e) => setRejectFeedback(e.target.value)}
+              placeholder="e.g. The angle is too generic — make it about Webflow Cloud specifically. Or: cut the word count by 30%. Or: switch to a Staci-voice piece."
+              rows={4}
+              style={{
+                width: '100%', padding: '0.625rem 0.75rem',
+                border: '1px solid var(--color-border)', borderRadius: '8px',
+                fontSize: '0.875rem', color: 'var(--color-text)',
+                background: 'var(--color-bg)', fontFamily: 'inherit',
+                marginBottom: '1rem', resize: 'vertical',
+              }}
+            />
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <TahiButton
+                size="sm"
+                variant="secondary"
+                onClick={() => setRejectOpen(false)}
+                disabled={rejectingBrief}
+              >
+                Cancel
+              </TahiButton>
+              <TahiButton
+                size="sm"
+                onClick={() => { void rejectBrief() }}
+                loading={rejectingBrief}
+              >
+                Send back to strategist
+              </TahiButton>
+            </div>
+          </div>
+        </div>
+      )}
 
       {restartConfirmOpen && (
         <div
@@ -1097,7 +1311,7 @@ function ConflictRow({ conflict, inFlight, onSide }: ConflictRowProps) {
 function statusTone(status: string): BadgeTone {
   if (status === 'ready_for_publish' || status === 'ready') return 'positive'
   if (status === 'failed' || status === 'cost_capped') return 'danger'
-  if (status === 'paused') return 'warning'
+  if (status === 'paused' || status === 'awaiting_brief_approval') return 'warning'
   return 'info'
 }
 
@@ -1106,6 +1320,7 @@ function prettyStatus(status: string): string {
     queued: 'Queued',
     researching: 'Researching',
     strategising: 'Strategising',
+    awaiting_brief_approval: 'Awaiting brief approval',
     headline_lab: 'Headline lab',
     drafting: 'Drafting',
     reviewing: 'Reviewing (23 reviewers)',

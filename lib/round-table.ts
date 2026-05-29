@@ -73,6 +73,7 @@ export type DraftStatus =
   | 'queued'
   | 'researching'
   | 'strategising'
+  | 'awaiting_brief_approval'   // human gate: Liam reviews the strategist brief before $4 of writer + 23 reviewers spend
   | 'headline_lab'
   | 'drafting'
   | 'reviewing'
@@ -151,6 +152,10 @@ export async function runStage(database: Database, draftId: string): Promise<Sta
       case 'queued':            return await stageResearch(database, draft)
       case 'researching':       return await stageResearch(database, draft)      // resume if interrupted
       case 'strategising':      return await stageStrategise(database, draft)
+      case 'awaiting_brief_approval':
+        // Human gate. Nothing to do until Liam approves/rejects via
+        // /api/admin/content/drafts/[id]/approve-brief | reject-brief.
+        return { nextStatus: 'awaiting_brief_approval', costCentsThisStage: 0, totalCostCents: spent, message: 'Awaiting brief approval (human gate).' }
       case 'headline_lab':      return await stageHeadlineLab(database, draft)
       case 'drafting':          return await stageDraft(database, draft)
       case 'reviewing':         return await stageReview(database, draft)
@@ -216,6 +221,17 @@ async function stageStrategise(database: Database, draft: DraftRow): Promise<Sta
   if (!idea) throw new Error('Idea not found')
   const research = JSON.parse(draft.researchSummary ?? '{}') as Awaited<ReturnType<typeof buildResearchBrief>>
 
+  // If the human rejected a previous brief, pull the note through so the
+  // re-strategist call addresses it. Cleared after consumption so we
+  // don't re-apply it on subsequent passes.
+  let rejectionFeedback: string | null = null
+  let sb: Record<string, unknown> = {}
+  try { sb = JSON.parse(draft.scoreBreakdown ?? '{}') } catch { /* keep empty */ }
+  if (typeof sb.briefRejectionNote === 'string' && sb.briefRejectionNote.trim()) {
+    rejectionFeedback = sb.briefRejectionNote
+    delete sb.briefRejectionNote
+  }
+
   const { result, costCents } = await claudeJson({
     database, scope: 'draft', scopeId: draft.id, stage: 'strategist',
     model: OPUS_MODEL, maxTokens: 3500,
@@ -226,6 +242,7 @@ async function stageStrategise(database: Database, draft: DraftRow): Promise<Sta
       targetKeyword: idea.targetKeyword ?? idea.title ?? '',
       researchBrief: research,
       defaultVoiceWeights: {},
+      rejectionFeedback,
     }),
     parse: parseStrategist,
   })
@@ -243,7 +260,12 @@ async function stageStrategise(database: Database, draft: DraftRow): Promise<Sta
     scoreBreakdown: JSON.stringify({ brief: result, voiceWeights: effectiveWeights }),
   }).where(eq(schema.contentDrafts.id, draft.id))
 
-  return advance(database, draft.id, 'headline_lab', costCents)
+  // Pause for human brief approval instead of auto-advancing to the
+  // headline lab. The auto-tick respects awaiting_brief_approval as
+  // terminal-ish (see TERMINAL_STATUSES in the detail UI), so the draft
+  // sits here until Liam clicks Approve (advances to headline_lab) or
+  // Reject (sends back to researching for a fresh strategist pass).
+  return advance(database, draft.id, 'awaiting_brief_approval', costCents)
 }
 
 async function stageHeadlineLab(database: Database, draft: DraftRow): Promise<StageResult> {
@@ -876,6 +898,7 @@ function estimateRemainingCents(currentStatus: DraftStatus): number {
     queued: ['perplexity_research', 'strategist', 'headline_lab', 'writer', 'reviewer_default', 'editor', 'signoff', 'flux_cover'],
     researching: ['strategist', 'headline_lab', 'writer', 'reviewer_default', 'editor', 'signoff', 'flux_cover'],
     strategising: ['headline_lab', 'writer', 'reviewer_default', 'editor', 'signoff', 'flux_cover'],
+    awaiting_brief_approval: ['headline_lab', 'writer', 'reviewer_default', 'editor', 'signoff', 'flux_cover'],
     headline_lab: ['writer', 'reviewer_default', 'editor', 'signoff', 'flux_cover'],
     drafting: ['reviewer_default', 'editor', 'signoff', 'flux_cover'],
     reviewing: ['editor', 'signoff', 'flux_cover'],

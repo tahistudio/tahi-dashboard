@@ -94,12 +94,18 @@ export function buildStrategistPrompt(input: {
     schemaTypes?: string[]
   }
   defaultVoiceWeights: Partial<Record<ReviewerKey, number>>
+  /** When a human rejected the previous brief, this is the feedback
+   *  note. Re-strategise should address the concern explicitly. */
+  rejectionFeedback?: string | null
 }): string {
   return `Working title: ${input.workingTitle}
 Cluster: ${input.cluster}
 Target keyword: ${input.targetKeyword}
 
-## SERP analysis
+${input.rejectionFeedback ? `## HUMAN FEEDBACK FROM PREVIOUS BRIEF (you must address this)
+${input.rejectionFeedback}
+
+` : ''}## SERP analysis
 ${input.serpAnalysis
   ? `Median word count of top 10: ${input.serpAnalysis.medianWordCount ?? 'unknown'}
 Common headings: ${(input.serpAnalysis.commonHeadings ?? []).join('; ') || 'unknown'}
