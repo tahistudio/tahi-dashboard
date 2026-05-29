@@ -598,8 +598,14 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
     return { nextStatus: 'failed', costCentsThisStage: costCents, totalCostCents: await getDraftSpendCents(database, draft.id) }
   }
 
+  // Stash the cover prompt in scoreBreakdown so the Slack handoff to
+  // Staci can use it without a fresh AI call.
+  let sbForCover: Record<string, unknown> = {}
+  try { sbForCover = JSON.parse(draft.scoreBreakdown ?? '{}') } catch { /* keep empty */ }
+  sbForCover.recommendCover = result.recommendCover
   await database.update(schema.contentDrafts).set({
     contentScore: result.score,
+    scoreBreakdown: JSON.stringify(sbForCover),
   }).where(eq(schema.contentDrafts.id, draft.id))
 
   // Structure the draft into discrete Webflow CMS fields so the publish
