@@ -144,10 +144,15 @@ export function SiteIndexContent() {
           background: 'var(--color-bg)',
           border: '1px solid var(--color-border)',
           borderRadius: '0 16px 0 16px',
-          overflow: 'hidden',
+          // Allow both axes to scroll: horizontal on narrow viewports
+          // (the table has fixed-ish column widths) and vertical when
+          // the catalogue grows past the viewport.
+          overflowX: 'auto',
+          overflowY: 'auto',
+          maxHeight: 'calc(100vh - 18rem)',
         }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
-            <thead>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem', minWidth: '64rem' }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
               <tr style={{ background: 'var(--color-bg-secondary)', textAlign: 'left' }}>
                 <th style={th}>URL</th>
                 <th style={th}>Type</th>
