@@ -153,6 +153,22 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
     return () => clearInterval(t)
   }, [data, fetchSnapshot])
 
+  // Auto-tick: when a draft is in a live (non-terminal, non-paused) status
+  // and we're not currently advancing, fire the next advance call. Each
+  // advance returns in <= 25s and walks up to 3 stages, so the loop drains
+  // the pipeline without manual clicks. `paused` is in TERMINAL_STATUSES so
+  // Liam's pause button still stops it cleanly.
+  useEffect(() => {
+    if (!data) return
+    if (TERMINAL_STATUSES.has(data.draft.status)) return
+    if (advancing) return
+    const t = setTimeout(() => { void advance() }, 800)
+    return () => clearTimeout(t)
+    // We deliberately only watch status + advancing — re-running every
+    // snapshot refresh would double-fire.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.draft.status, advancing])
+
   async function advance() {
     setAdvancing(true)
     try {
