@@ -100,7 +100,7 @@ export async function POST(
   const database = await db()
 
   // 1) Load draft
-  const [draft] = await database
+  let [draft] = await database
     .select()
     .from(schema.contentDrafts)
     .where(eq(schema.contentDrafts.id, id))
@@ -125,6 +125,25 @@ export async function POST(
       },
       { status: 409 },
     )
+  }
+
+  // Regenerate schema/hreflang/category against the FINAL state right
+  // before publishing. The cover image is usually set after the pipeline
+  // ran (Staci upload / regenerate), so the schema baked in at pipeline
+  // time would otherwise have an empty image. This guarantees the JSON-LD
+  // shipped to Webflow reflects the actual cover + body + category.
+  // Round-table drafts only — legacy 'ready' drafts already have schema.
+  if (draft.status === 'ready_for_publish') {
+    try {
+      const { finalizeWebflowFields } = await import('@/lib/blog-finalize')
+      await finalizeWebflowFields(database, id)
+      const [refreshed] = await database
+        .select().from(schema.contentDrafts)
+        .where(eq(schema.contentDrafts.id, id)).limit(1)
+      if (refreshed) draft = refreshed
+    } catch (err) {
+      console.error('Pre-publish finalize failed', err)
+    }
   }
 
   // 2) Compute the target slot. Pull recent publish_history for the

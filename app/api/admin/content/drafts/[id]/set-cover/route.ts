@@ -45,5 +45,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     updatedAt: new Date().toISOString(),
   }).where(eq(schema.contentDrafts.id, id))
 
+  // Regenerate the schema so the new cover lands in the Article image
+  // (the image is usually set after the pipeline ran). Best-effort.
+  try {
+    const { finalizeWebflowFields } = await import('@/lib/blog-finalize')
+    await finalizeWebflowFields(database, id)
+  } catch (err) {
+    console.error('finalize after set-cover failed', err)
+  }
+
   return NextResponse.json({ coverUrl })
 }
