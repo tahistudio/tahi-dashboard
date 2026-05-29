@@ -117,6 +117,7 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   const [advancing, setAdvancing] = useState(false)
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false)
   const [restarting, setRestarting] = useState(false)
+  const [forceApproving, setForceApproving] = useState(false)
   const [selectedRevision, setSelectedRevision] = useState<number>(1)
   const [overrideInFlight, setOverrideInFlight] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
@@ -195,6 +196,23 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   async function pause() {
     await fetch(apiPath(`/api/admin/content/drafts/${draftId}/pause`), { method: 'POST' }).catch(() => {})
     await fetchSnapshot()
+  }
+
+  async function forceApprove() {
+    setForceApproving(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}/force-approve`), { method: 'POST' })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        alert(j.error ?? 'Failed to force-approve')
+        return
+      }
+      await fetchSnapshot()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to force-approve')
+    } finally {
+      setForceApproving(false)
+    }
   }
 
   async function restartFromScratch() {
@@ -442,12 +460,26 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
             Refresh
           </TahiButton>
         )}
+        {draft.status === 'failed' && (draft.errorMessage?.includes('Sign-off score') ?? false) && (
+          <TahiButton
+            size="sm"
+            onClick={() => { void forceApprove() }}
+            loading={forceApproving}
+            iconLeft={!forceApproving ? <CheckCircle2 className="w-3.5 h-3.5" /> : undefined}
+            style={{ marginLeft: 'auto' }}
+          >
+            Force approve & continue
+          </TahiButton>
+        )}
         <TahiButton
           size="sm"
           variant="ghost"
           onClick={() => setRestartConfirmOpen(true)}
           iconLeft={<RotateCcw className="w-3.5 h-3.5" />}
-          style={{ marginLeft: 'auto', color: 'var(--color-danger)' }}
+          style={{
+            marginLeft: draft.status === 'failed' && (draft.errorMessage?.includes('Sign-off score') ?? false) ? undefined : 'auto',
+            color: 'var(--color-danger)',
+          }}
         >
           Restart from scratch
         </TahiButton>

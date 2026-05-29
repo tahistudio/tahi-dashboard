@@ -87,7 +87,11 @@ const MAX_EDIT_LOOPS = 3
 // Whole-article sign-off bar. 85 = only genuinely good drafts pass; the
 // 3-revision cap above means a draft that can't reach it gets flagged to
 // Liam rather than looping forever.
-const SIGN_OFF_PASS_SCORE = 85
+// Lowered 85 -> 78 on 2026-05-29. 85 is too tight — the first article hit
+// 86 by a hair and good 78-84s were getting rejected over single-criterion
+// concerns. The force-approve route is the escape hatch for borderline
+// cases the model over-penalises.
+const SIGN_OFF_PASS_SCORE = 78
 
 export interface StageResult {
   nextStatus: DraftStatus
