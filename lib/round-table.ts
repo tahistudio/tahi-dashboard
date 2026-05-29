@@ -693,6 +693,25 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
     if (compSani.removed.length > 0) {
       console.warn(`Stripped ${compSani.removed.length} competitor-agency links from draft ${draft.id}`)
     }
+    // Auto-link first-mention of every live glossary term to its term
+    // page. This is the Investopedia mechanic — over time every term
+    // page accumulates inbound internal PageRank from every article
+    // that mentions it. Source of truth is the site_index table.
+    try {
+      const glossaryRows = await database
+        .select({ url: schema.siteIndex.url, relativeUrl: schema.siteIndex.relativeUrl, title: schema.siteIndex.title })
+        .from(schema.siteIndex)
+        .where(and(eq(schema.siteIndex.isActive, 1), eq(schema.siteIndex.type, 'glossary')))
+      const glossaryTerms = glossaryRows
+        .filter(r => r.title)
+        .map(r => ({ term: r.title!, url: r.relativeUrl }))
+      const { autoLinkGlossary } = await import('@/lib/blog-context')
+      const glossLinked = autoLinkGlossary(cleanMarkdown, glossaryTerms)
+      cleanMarkdown = glossLinked.markdown
+      if (glossLinked.linked.length > 0) {
+        console.log(`Auto-linked ${glossLinked.linked.length} glossary terms in draft ${draft.id}`)
+      }
+    } catch { /* site_index empty / not migrated — skip */ }
     structured.bodyMarkdownClean = cleanMarkdown
     const cleanHtml = markdownToHtml(structured.bodyMarkdownClean)
     const takeawaysHtml = structured.keyTakeaways.length > 0

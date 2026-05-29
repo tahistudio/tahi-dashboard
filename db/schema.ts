@@ -3041,3 +3041,38 @@ export const aiCostLog = sqliteTable('ai_cost_log', {
   index('idx_ai_cost_log_created').on(table.createdAt),
 ])
 
+/**
+ * Live site index. Weekly cron pulls tahi.studio/sitemap.xml, diffs
+ * against this table, and Haiku-summarises any new or changed page.
+ * The round-table writer reads this as its "what exists on the site
+ * + what each page is about" context for internal linking.
+ *
+ * The glossary auto-link step at publish also walks this table for
+ * rows where type='glossary' to wrap first-mentions of any term in the
+ * body with [term](url).
+ */
+export const siteIndex = sqliteTable('site_index', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  url: text('url').notNull().unique(),               // absolute, e.g. https://www.tahi.studio/blog/x
+  relativeUrl: text('relative_url').notNull(),       // /blog/x — used for matching internal links
+  // 'blog' | 'glossary' | 'service' | 'work' | 'about' | 'contact' | 'page' | 'other'
+  type: text('type').notNull(),
+  title: text('title'),                              // <title> or H1 of the page
+  // Haiku one-line summary of what the page is about — used in writer prompt.
+  summary: text('summary'),
+  // SHA-256 of the page body. Cron only re-summarises when this changes.
+  contentHash: text('content_hash'),
+  // ISO. When did the sitemap last contain this URL?
+  lastSeenAt: text('last_seen_at').notNull(),
+  // ISO. When was the summary last computed?
+  summarisedAt: text('summarised_at'),
+  // Set true when a sitemap pull no longer returns this URL. Excluded
+  // from writer context but kept as a tombstone.
+  isActive: integer('is_active').notNull().default(1),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+}, (table) => [
+  index('idx_site_index_type').on(table.type),
+  index('idx_site_index_active').on(table.isActive),
+])
+

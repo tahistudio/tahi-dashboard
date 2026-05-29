@@ -43,7 +43,7 @@ export const RATE_CARD = {
 } as const
 
 export type Provider = keyof typeof RATE_CARD
-export type Scope = 'draft' | 'ideation' | 'backfill' | 'links' | 'health'
+export type Scope = 'draft' | 'ideation' | 'backfill' | 'links' | 'health' | 'site_index'
 
 export interface CostInput {
   scope: Scope

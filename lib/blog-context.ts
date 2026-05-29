@@ -19,6 +19,7 @@
 
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import { eq } from 'drizzle-orm'
 import { getBlogPostsCollectionId, listCollectionItems, type WebflowCollectionItem } from '@/lib/webflow'
 
 export type LinkKind = 'blog' | 'glossary' | 'pillar' | 'page'
@@ -27,6 +28,7 @@ export interface LinkablePage {
   relativeUrl: string          // '/blog/foo' | '/glossary/bar' | '/services' ...
   kind: LinkKind
   title: string                // best-effort label
+  summary?: string             // from site_index when available — one-liner of what the page is about
 }
 
 export interface BlogContextPost {
@@ -143,6 +145,28 @@ export async function loadBlogContext(force = false): Promise<BlogContext> {
     // No Webflow enrichment available — proceed with the health set.
   }
 
+  // 3) Enrich each linkable entry with a Haiku-summary from site_index
+  //    when present (built by /api/admin/cron/site-index-sync). Falls
+  //    back to no summary if site_index isn't populated yet.
+  try {
+    const siteRows = await database
+      .select({
+        relativeUrl: schema.siteIndex.relativeUrl,
+        title: schema.siteIndex.title,
+        summary: schema.siteIndex.summary,
+      })
+      .from(schema.siteIndex)
+      .where(eq(schema.siteIndex.isActive, 1))
+    const byRel = new Map(siteRows.map(r => [r.relativeUrl, r]))
+    for (const link of linkable) {
+      const idx = byRel.get(link.relativeUrl)
+      if (idx) {
+        if (idx.summary) link.summary = idx.summary
+        if (idx.title && link.title === titleFromPath(link.relativeUrl)) link.title = idx.title
+      }
+    }
+  } catch { /* site_index empty / not migrated yet — no enrichment */ }
+
   cached = { linkable, recent, loadedAt: new Date().toISOString() }
   cachedAt = Date.now()
   return cached
@@ -153,7 +177,7 @@ export async function loadBlogContext(force = false): Promise<BlogContext> {
 export function renderBlogContextForPrompt(ctx: BlogContext): string {
   const byKind = (kind: LinkKind) => ctx.linkable
     .filter(l => l.kind === kind)
-    .map(l => `- ${l.relativeUrl} — ${l.title}`)
+    .map(l => `- ${l.relativeUrl} — ${l.title}${l.summary ? `: ${l.summary}` : ''}`)
     .join('\n')
 
   const recentList = ctx.recent
@@ -241,6 +265,56 @@ export function sanitizeInternalLinks(markdown: string, valid: Set<string>): Lin
 }
 
 import { isCompetitorAgency } from './blog-competitor-domains'
+
+/** Auto-link first mention of every live glossary term in the body to
+ *  its glossary URL. The Investopedia / Stripe Docs / MDN mechanic:
+ *  the glossary becomes the internal-linking backbone, accumulating
+ *  PageRank from every article that mentions any term it covers.
+ *
+ *  Operates on MARKDOWN. Skips terms already linked (we won't double-
+ *  wrap) and skips matches inside existing [text](url) link text.
+ *  First-mention-only per term so we don't spam the body.
+ *
+ *  Returns the new markdown + the list of terms linked. */
+export function autoLinkGlossary(
+  markdown: string,
+  glossary: Array<{ term: string; url: string }>,
+): { markdown: string; linked: Array<{ term: string; url: string }> } {
+  if (glossary.length === 0) return { markdown, linked: [] }
+
+  // Sort by length DESC so multi-word terms ("Webflow CMS") win over
+  // single-word substrings ("Webflow") when both could match.
+  const sorted = [...glossary].sort((a, b) => b.term.length - a.term.length)
+
+  const linked: Array<{ term: string; url: string }> = []
+  let working = markdown
+
+  for (const { term, url } of sorted) {
+    if (!term.trim()) continue
+    // Escape regex special chars.
+    const safe = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    // Word-boundary, case-insensitive, FIRST match only.
+    // Negative-lookahead/lookbehind for ]( and ]( to avoid wrapping
+    // inside an existing markdown link target. The (?!\]) guards
+    // against [matching text](url) — the term inside link text.
+    const re = new RegExp(`(?<!\\[)(?<![A-Za-z0-9])(${safe})(?![A-Za-z0-9])(?!\\]\\()`, 'i')
+    const m = working.match(re)
+    if (!m) continue
+    // Don't wrap if the match is already inside a markdown link's URL.
+    // Simple check: any open '[' since the last ']' before the match?
+    const idx = m.index ?? -1
+    if (idx < 0) continue
+    const preceding = working.slice(0, idx)
+    const lastClose = preceding.lastIndexOf(']')
+    const lastOpen = preceding.lastIndexOf('[')
+    if (lastOpen > lastClose) continue  // we're inside [...] — skip
+    // Replace just that occurrence with the markdown link.
+    working = working.slice(0, idx) + `[${m[1]}](${url})` + working.slice(idx + m[1].length)
+    linked.push({ term, url })
+  }
+
+  return { markdown: working, linked }
+}
 
 /** Strips links to competitor agencies from the body. Text is preserved
  *  (the citation still makes sense in-prose), just the [text](url) wrapper

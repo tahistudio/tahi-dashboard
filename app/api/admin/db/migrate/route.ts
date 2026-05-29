@@ -1694,6 +1694,28 @@ const MIGRATIONS: Migration[] = [
         LIMIT 1`,
     ],
   },
+  {
+    name: '0068',
+    description: 'site_index: weekly sitemap-diff cache for tahi.studio. Stores url, type, title, Haiku-summary, contentHash so the writer has richer internal-linking context and the glossary auto-link step has a source of truth at publish time. Idempotent IF NOT EXISTS.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS site_index (
+        id text PRIMARY KEY NOT NULL,
+        url text NOT NULL UNIQUE,
+        relative_url text NOT NULL,
+        type text NOT NULL,
+        title text,
+        summary text,
+        content_hash text,
+        last_seen_at text NOT NULL,
+        summarised_at text,
+        is_active integer DEFAULT 1 NOT NULL,
+        created_at text NOT NULL,
+        updated_at text NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_site_index_type ON site_index (type)`,
+      `CREATE INDEX IF NOT EXISTS idx_site_index_active ON site_index (is_active)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
