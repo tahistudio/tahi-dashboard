@@ -267,6 +267,7 @@ Universal voice rules that apply to every Tahi article:
 - Vary paragraph lengths. Use one-sentence paragraphs for emphasis.
 - Back claims with specifics — numbers, names, dates, examples.
 - Never mention Tahi's team size. No "2-person agency", "small team", "co-founders", "just the two of us", or any equivalent. Articles need to age well as the team grows.
+- FAQ formatting: questions are PLAIN TEXT only — no markdown links, no inline formatting. The Webflow CMS field for the question is plain text. Answers CAN and SHOULD use inline links where citation or internal-linking is natural — they render as rich text. Example: Q "What is Webflow CMS?" (no links). A "Webflow CMS is a built-in [content management system](https://webflow.com/cms) with collections, references, and a visual editor."
 
 You will receive a brief from the Strategist. Follow it precisely: hit the heading outline, the word target ±15%, the primary keyword in the first 100 words + title + first H2, the FAQ count, and the schema requirements.
 
@@ -437,7 +438,7 @@ export const STRUCTURE_SYSTEM = `You are a CMS structuring assistant. You take a
 
 Rules:
 - bodyMarkdownClean: the full article body, but REMOVE any "FAQ"/"Frequently asked questions" section and any "Key takeaways" section — those go in their own fields. Keep everything else verbatim (headings, paragraphs, links, lists). Do not rewrite.
-- faqs: extract 4-6 Q/A pairs. If the article had an FAQ section, use those. If not, derive sensible ones from the content. Keep answers to 1-3 sentences.
+- faqs: extract 4-6 Q/A pairs. If the article had an FAQ section, use those. If not, derive sensible ones from the content. Keep answers to 1-3 sentences. Question text is PLAIN TEXT only — no markdown links, no inline formatting (the Webflow CMS field is plain text). Answers CAN preserve inline markdown links from the source body where they appear; the answer field renders as rich text. If a question in the source body contains a link, strip the link wrapper and keep only the text.
 - faqSectionHeading: a short, topic-specific heading that frames the FAQ block (e.g. "Common questions about Webflow security", not just "FAQs"). 4-8 words.
 - keyTakeaways: 3-5 punchy one-line takeaways.
 - metaTitle <= 60 chars, metaDescription 145-160 chars, summary 1-2 sentences, postExcerpt a short teaser, shortenedName a short card label.
@@ -473,12 +474,28 @@ Respond JSON only:
 }`
 }
 
+/** Strip markdown links from a string, keeping only the visible text.
+ *  Defensive guard for FAQ questions (Webflow plain-text field). Also
+ *  strips bare `<...>` HTML tags. */
+function stripMarkdownLinksAndTags(s: string): string {
+  return s
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')   // [text](url) -> text
+    .replace(/<[^>]+>/g, '')                    // strip stray HTML
+    .trim()
+}
+
 export function parseStructure(raw: string): StructuredDraft {
   const parsed = JSON.parse(raw) as Partial<StructuredDraft>
   if (!parsed.bodyMarkdownClean) throw new Error('Structuring missing bodyMarkdownClean')
   return {
     bodyMarkdownClean: parsed.bodyMarkdownClean,
-    faqs: (parsed.faqs ?? []).filter(f => f.q && f.a).slice(0, 6),
+    // FAQ questions land in a Webflow plain-text field. Strip any
+    // markdown link wrappers the model might leave in q. Answers keep
+    // their links (rich-text field).
+    faqs: (parsed.faqs ?? [])
+      .filter(f => f.q && f.a)
+      .slice(0, 6)
+      .map(f => ({ q: stripMarkdownLinksAndTags(f.q), a: f.a })),
     faqSectionHeading: (parsed.faqSectionHeading ?? 'Frequently asked questions').slice(0, 90),
     keyTakeaways: (parsed.keyTakeaways ?? []).filter(Boolean).slice(0, 5),
     metaTitle: (parsed.metaTitle ?? '').slice(0, 60),
