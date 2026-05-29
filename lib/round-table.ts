@@ -379,48 +379,84 @@ async function stageReview(database: Database, draft: DraftRow): Promise<StageRe
     if (Date.now() - t0 > REVIEW_BUDGET_MS) break
     if (i > 0) await new Promise(r => setTimeout(r, INTER_CHUNK_MS))
     const chunk = remaining.slice(i, i + CHUNK_SIZE)
+    // Per-reviewer block MUST NEVER throw. If it does, Promise.all
+    // rejects, the for-loop breaks, processedThisCall doesn't tick, and
+    // the next auto-tick re-runs the SAME reviewers — a $1+ leak per
+    // cycle. So every awaited call is wrapped in try/catch with a final
+    // never-throw fallback insert.
     await Promise.all(chunk.map(async (reviewer) => {
       const start = Date.now()
+
+      // Race guard: another tick might have just written this row.
+      try {
+        const existing = await database
+          .select({ id: schema.draftReviews.id })
+          .from(schema.draftReviews)
+          .where(and(
+            eq(schema.draftReviews.draftId, draft.id),
+            eq(schema.draftReviews.revisionNumber, latestRev),
+            eq(schema.draftReviews.reviewerKey, reviewer.key),
+          ))
+          .limit(1)
+        if (existing.length > 0) return
+      } catch { /* fall through; worst case we double-insert one row */ }
+
       try {
         const weight = reviewerCtx.brief.voiceWeights[reviewer.key] ?? reviewer.defaultWeight
         const { result, costCents } = await claudeJson({
           database, scope: 'draft', scopeId: draft.id, stage: reviewer.key,
-          // 2500: enough headroom that a thorough critique (strengths +
-          // issues + details) doesn't truncate, without ballooning the
-          // per-minute output budget on a low tier.
           model: reviewer.model, maxTokens: 2500,
           systemPrompt: reviewer.systemPrompt,
           userPrompt: reviewer.buildUserPrompt(reviewerCtx),
           parse: (raw: string) => JSON.parse(raw) as ReviewerCritique,
         })
         totalCents += costCents
-        await database.insert(schema.draftReviews).values({
-          id: crypto.randomUUID(),
-          draftId: draft.id,
-          revisionNumber: latestRev,
-          reviewerKey: reviewer.key,
-          score: result.score,
-          verdict: result.verdict,
-          summary: result.summary,
-          critique: JSON.stringify(result),
-          weight: String(weight),
-          durationMs: Date.now() - start,
-        })
+        try {
+          await database.insert(schema.draftReviews).values({
+            id: crypto.randomUUID(),
+            draftId: draft.id,
+            revisionNumber: latestRev,
+            reviewerKey: reviewer.key,
+            score: result.score,
+            verdict: result.verdict,
+            summary: result.summary,
+            critique: JSON.stringify(result),
+            weight: String(weight),
+            durationMs: Date.now() - start,
+          })
+          return
+        } catch (insertErr) {
+          // Success-path insert failed (rare). Fall through to soft-fail
+          // insert below so the row exists + we never retry.
+          console.error(`reviewer ${reviewer.key} success insert failed`, insertErr)
+        }
       } catch (err) {
-        // Don't fail the whole stage if one reviewer errors — log it and
-        // continue with the others.
-        await database.insert(schema.draftReviews).values({
-          id: crypto.randomUUID(),
-          draftId: draft.id,
-          revisionNumber: latestRev,
-          reviewerKey: reviewer.key,
-          score: null,
-          verdict: 'soft_fail',
-          summary: `Reviewer errored: ${err instanceof Error ? err.message.slice(0, 200) : 'unknown'}`,
-          critique: null,
-          weight: String(reviewer.defaultWeight),
-          durationMs: Date.now() - start,
-        })
+        console.warn(`reviewer ${reviewer.key} errored`,
+          err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200))
+      }
+
+      // Last-resort soft-fail row. Two attempts; if both fail we swallow
+      // so processedThisCall still ticks and the chunk loop moves on.
+      const softFailRow = {
+        id: crypto.randomUUID(),
+        draftId: draft.id,
+        revisionNumber: latestRev,
+        reviewerKey: reviewer.key,
+        score: null,
+        verdict: 'soft_fail' as const,
+        summary: 'Reviewer skipped (retry exhausted)',
+        critique: null,
+        weight: String(reviewer.defaultWeight),
+        durationMs: Date.now() - start,
+      }
+      try {
+        await database.insert(schema.draftReviews).values(softFailRow)
+      } catch (firstFail) {
+        try {
+          await database.insert(schema.draftReviews).values({ ...softFailRow, id: crypto.randomUUID() })
+        } catch (secondFail) {
+          console.error(`reviewer ${reviewer.key} double-failure; swallowing to avoid loop`, firstFail, secondFail)
+        }
       }
     }))
     processedThisCall += chunk.length
