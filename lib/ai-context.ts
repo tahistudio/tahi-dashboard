@@ -24,6 +24,7 @@ export type AiContextKey =
   | 'brandDna'
   | 'tone'
   | 'liamVoice'
+  | 'staciVoice'
   | 'aiTells'
   | 'services'
 
@@ -32,6 +33,7 @@ const SETTING_KEY_BY_CONTEXT: Record<AiContextKey, string> = {
   brandDna: 'ai.brandDnaDocId',
   tone: 'ai.toneDocId',
   liamVoice: 'ai.liamVoiceDocId',
+  staciVoice: 'ai.staciVoiceDocId',
   aiTells: 'ai.aiTellsDocId',
   services: 'ai.servicesDocId',
 }
@@ -41,6 +43,7 @@ const SECTION_LABEL_BY_CONTEXT: Record<AiContextKey, string> = {
   brandDna: 'BRAND DNA',
   tone: 'TONE OF VOICE',
   liamVoice: 'LIAM\'S PERSONAL VOICE',
+  staciVoice: 'STACI\'S PERSONAL VOICE',
   aiTells: 'AI WRITING TELLS (to AVOID)',
   services: 'SERVICES + PRICING',
 }
@@ -140,7 +143,7 @@ export async function loadAiContextDocs(
 ): Promise<Record<AiContextKey, string>> {
   const result: Record<AiContextKey, string> = {
     icp: '', brandDna: '', tone: '',
-    liamVoice: '', aiTells: '', services: '',
+    liamVoice: '', staciVoice: '', aiTells: '', services: '',
   }
   if (keys.length === 0) return result
 

@@ -33,6 +33,16 @@ export interface ResearchBrief {
 export interface StrategistOutput {
   intent: FunnelIntent
   priority: 'standard' | 'high'           // 'high' = generate 2 variants
+  /** Author byline — Liam for marketing/business/engineering/CEO-shaped
+   *  topics; Staci for design/creative/human-touch topics. Drives the
+   *  voice overlay the writer loads. */
+  author: 'liam' | 'staci'
+  /** Content bucket per Tahi's 70/20/10 mix:
+   *   generic  = comparison, news, how-to, definitional (~70%)
+   *   novel    = opinion, contrarian, deep-research takes (~20%)
+   *   data     = proprietary scrape-and-analyse pieces (~10%)
+   *  Reviewers calibrate by bucket (originality stricter on novel). */
+  contentBucket: 'generic' | 'novel' | 'data'
   workingTitle: string
   angle: string                           // one-liner of the unique angle
   targetWordCount: number
@@ -51,10 +61,15 @@ export interface StrategistOutput {
   rationale: string
 }
 
-export const STRATEGIST_SYSTEM = `You are the Senior Content Strategist at Tahi Studio, a 2-person Webflow agency (NZ + UK). You sit at the head of the round table. Your job is to read the research brief + the working title and set the per-article brief that all downstream roles (writer + 22 reviewers + editor + sign-off) will execute against.
+export const STRATEGIST_SYSTEM = `You are the Senior Content Strategist at Tahi Studio, a Webflow agency. You sit at the head of the round table. Your job is to read the research brief + the working title and set the per-article brief that all downstream roles (writer + 23 reviewers + editor + sign-off) will execute against.
 
 You decide:
 - The funnel intent (one of: tofu_educational, mofu_comparison, bofu_conversion, how_to, thought_leadership, listicle, case_study, refresh)
+- The AUTHOR ('liam' or 'staci'). Liam writes marketing, business, engineering, CEO-shaped, agency-ops, technical, and strategic topics. Staci is Creative Director — she writes design things, brand, craft, visual/UX, and anything with a strong human-touch / first-person creative angle. Pick based on the article's centre of gravity.
+- The contentBucket ('generic' | 'novel' | 'data') per Tahi's 70/20/10 mix:
+    generic  = comparison, news, how-to, definitional — the volume engine for AI Overview fan-out and long-tail search
+    novel    = opinion, contrarian take, strategic essay — the brand engine, drives editorial backlinks
+    data     = proprietary scrape-and-analyse piece with original numbers — the backlink engine, run rarely
 - Whether this is "standard" (1 draft) or "high" priority (2 drafts in parallel, panel picks winner). High priority = high keyword opportunity OR strategically important for Tahi's positioning.
 - The target word count — informed by SERP analysis if provided, otherwise: tofu 1200-1500, mofu 2200-2800, bofu 800-1200, how-to 1500-2000, thought leadership 800-1200, listicle 1500-3000, case study 1200-1800.
 - The heading outline (H2 + H3) with per-heading word targets and "must cover" bullet points
@@ -62,7 +77,11 @@ You decide:
 - Schema types (Article always, + FAQPage if FAQ section, + HowTo if step-by-step)
 - Voice weights — adjust the reviewer weights up/down for this article's specific needs
 
-You write a 'rationale' explaining the angle pick so Liam can see your reasoning.`
+You write a 'rationale' explaining the angle pick so Liam can see your reasoning.
+
+HARD RULES (apply to every brief and to anything you write into the brief):
+- NEVER mention Tahi's team size. No "2-person agency", "small team", "co-founders", "just the two of us", or any equivalent. Articles need to age well as the team grows.
+- The brief language is INTERNAL — the writer reads it. Don't write Tahi voice copy in the brief itself.`
 
 export function buildStrategistPrompt(input: {
   workingTitle: string
@@ -98,6 +117,8 @@ Respond with ONE JSON object only, matching this shape (no markdown fences):
 {
   "intent": "tofu_educational|mofu_comparison|bofu_conversion|how_to|thought_leadership|listicle|case_study|refresh",
   "priority": "standard|high",
+  "author": "liam|staci",
+  "contentBucket": "generic|novel|data",
   "workingTitle": "the refined title to draft against",
   "angle": "one-sentence angle that differentiates this from the SERP",
   "targetWordCount": number,
@@ -113,7 +134,7 @@ Respond with ONE JSON object only, matching this shape (no markdown fences):
   "outboundCitationTargets": number,
   "imageCount": number,
   "voiceWeights": { "seo_aeo": 1.5, "sales": 0.5, ... },
-  "rationale": "1-2 sentences why this angle"
+  "rationale": "1-2 sentences why this angle, why this author, why this bucket"
 }`
 }
 
@@ -125,9 +146,14 @@ export function parseStrategist(raw: string): StrategistOutput {
   if (typeof parsed.targetWordCount !== 'number') throw new Error('Strategist missing targetWordCount')
   if (!Array.isArray(parsed.headings) || parsed.headings.length === 0) throw new Error('Strategist missing headings')
   if (!parsed.primaryKeyword) throw new Error('Strategist missing primaryKeyword')
+  const author: 'liam' | 'staci' = parsed.author === 'staci' ? 'staci' : 'liam'
+  const contentBucket: 'generic' | 'novel' | 'data' =
+    parsed.contentBucket === 'novel' || parsed.contentBucket === 'data' ? parsed.contentBucket : 'generic'
   return {
     intent: parsed.intent,
     priority: parsed.priority ?? 'standard',
+    author,
+    contentBucket,
     workingTitle: parsed.workingTitle,
     angle: parsed.angle,
     targetWordCount: parsed.targetWordCount,
@@ -227,7 +253,14 @@ export interface WriterOutput {
   outboundLinksUsed: string[]
 }
 
-export const WRITER_SYSTEM = `You are the Senior Writer at Tahi Studio. You write in Liam's voice — direct, opinionated, concrete, anti-corporate. You never use em dashes. You never write "Let's explore" or "In this article" or "In conclusion". You vary paragraph lengths. You use one-sentence paragraphs for emphasis. You back claims with specifics.
+export const WRITER_SYSTEM = `You are the Senior Writer at Tahi Studio. You write in the Tahi tone of voice with a per-article author overlay — the strategist has picked Liam (marketing/business/engineering/CEO topics) or Staci (design/creative/human-touch topics) as the byline for this article. The Tahi tone of voice + the author's personal voice document + AI Writing Tells (anti-patterns to avoid) are loaded in the user prompt — read them carefully and write IN that voice.
+
+Universal voice rules that apply to every Tahi article:
+- Never use em dashes or en dashes. Use commas, parens, periods, or colons.
+- Never write "Let's explore", "In this article", "In conclusion", "delve into", "navigate the complexities of", "in today's fast-paced world", or any equivalent AI-tell phrase listed in the AI Writing Tells doc.
+- Vary paragraph lengths. Use one-sentence paragraphs for emphasis.
+- Back claims with specifics — numbers, names, dates, examples.
+- Never mention Tahi's team size. No "2-person agency", "small team", "co-founders", "just the two of us", or any equivalent. Articles need to age well as the team grows.
 
 You will receive a brief from the Strategist. Follow it precisely: hit the heading outline, the word target ±15%, the primary keyword in the first 100 words + title + first H2, the FAQ count, and the schema requirements.
 
@@ -260,8 +293,8 @@ ${input.blogContext ?? ''}
 - DO NOT link to other Webflow agencies, design studios, or development agencies. Tahi Studio is itself a Webflow agency, so linking to competitors sends our readers to their site. If you'd otherwise cite an agency post, instead link to the underlying PRODUCT (Webflow, Figma, Stripe, Vercel, etc.), the official documentation, a standards body (w3.org, web.dev), or a research/news outlet (Nielsen Norman, A List Apart, Smashing Magazine, news sites). If you can't find a non-agency source, drop the link and state the claim plainly without one — that's better than sending the reader to a competitor.
 - Internal links to other Tahi posts use the relative /slug form per the linking rules.
 
-## Tahi brand voice
-${input.brandDocs ?? '(use Liam voice: direct, concrete, no em dashes, no "let\'s explore", short paragraphs, opinionated, specific)'}
+## Voice — load and write in this voice
+${input.brandDocs ?? '(no Docs Hub context available — default to a tight, opinionated, no-em-dash voice; never mention team size)'}
 ${variantNote}
 Respond JSON only (markdown body, NOT html):
 

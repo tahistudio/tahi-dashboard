@@ -1683,6 +1683,17 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE content_drafts ADD COLUMN paused_from_status text`,
     ],
   },
+  {
+    name: '0067',
+    description: 'Blog voice overlay: seed ai.staciVoiceDocId so the writer can layer Staci\'s voice over the Tahi tone of voice for design/creative posts. Matches doc_pages.slug = staci-personal-voice. INSERT OR IGNORE so existing operator-picked value is preserved.',
+    statements: [
+      `INSERT OR IGNORE INTO settings (key, value, updated_at)
+        SELECT 'ai.staciVoiceDocId', id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        FROM doc_pages
+        WHERE slug = 'staci-personal-voice'
+        LIMIT 1`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

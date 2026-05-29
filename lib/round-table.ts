@@ -237,6 +237,9 @@ async function stageStrategise(database: Database, draft: DraftRow): Promise<Sta
     title: result.workingTitle,
     metaTitle: result.workingTitle,
     postType: result.intent,
+    // Persist the strategist's author pick so the writer, structuring step,
+    // schema generation, and Webflow publish payload all use the same byline.
+    authorSlug: result.author,
     scoreBreakdown: JSON.stringify({ brief: result, voiceWeights: effectiveWeights }),
   }).where(eq(schema.contentDrafts.id, draft.id))
 
@@ -284,11 +287,27 @@ async function stageDraft(database: Database, draft: DraftRow): Promise<StageRes
     blogContextBlock = renderBlogContextForPrompt(await loadBlogContext())
   } catch { /* non-fatal — writer falls back to no internal-link list */ }
 
+  // Load the voice stack from Docs Hub: Tahi tone of voice (base) +
+  // author-specific overlay (Liam or Staci per the strategist's pick) +
+  // AI Writing Tells (anti-patterns to avoid). Strategist persists the
+  // author choice to draft.authorSlug; default to liam if unset.
+  const author = (draft.authorSlug === 'staci' ? 'staci' : 'liam') as 'liam' | 'staci'
+  const { loadAiContextDocs } = await import('@/lib/ai-context')
+  const docs = await loadAiContextDocs([
+    'tone', author === 'staci' ? 'staciVoice' : 'liamVoice', 'aiTells',
+  ])
+  const brandDocs = [
+    docs.tone && `=== TAHI TONE OF VOICE (base layer — applies to every Tahi article) ===\n${docs.tone}`,
+    (author === 'staci' ? docs.staciVoice : docs.liamVoice) &&
+      `=== ${author === 'staci' ? 'STACI' : 'LIAM'}'S PERSONAL VOICE (overlay — write THIS article in this person's voice) ===\n${author === 'staci' ? docs.staciVoice : docs.liamVoice}`,
+    docs.aiTells && `=== AI WRITING TELLS (anti-patterns to AVOID — do not use these phrasings) ===\n${docs.aiTells}`,
+  ].filter(Boolean).join('\n\n')
+
   const { result, costCents } = await claudeJson({
     database, scope: 'draft', scopeId: draft.id, stage: 'writer',
     model: SONNET_MODEL, maxTokens: 8000,
     systemPrompt: WRITER_SYSTEM,
-    userPrompt: buildWriterPrompt({ brief, researchBrief: research, blogContext: blogContextBlock }),
+    userPrompt: buildWriterPrompt({ brief, researchBrief: research, blogContext: blogContextBlock, brandDocs }),
     parse: parseWriter,
   })
 
@@ -748,6 +767,7 @@ interface DraftRow {
   scoreBreakdown: string | null
   contentScore: number | null
   stageLockedAt: string | null
+  authorSlug: string | null
 }
 
 async function loadDraft(database: Database, id: string): Promise<DraftRow | null> {
@@ -765,6 +785,7 @@ async function loadDraft(database: Database, id: string): Promise<DraftRow | nul
       scoreBreakdown: schema.contentDrafts.scoreBreakdown,
       contentScore: schema.contentDrafts.contentScore,
       stageLockedAt: schema.contentDrafts.stageLockedAt,
+      authorSlug: schema.contentDrafts.authorSlug,
     })
     .from(schema.contentDrafts)
     .where(eq(schema.contentDrafts.id, id))
