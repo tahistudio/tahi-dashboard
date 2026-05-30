@@ -216,9 +216,14 @@ export async function POST(
     collectionId = await getBlogPostsCollectionId()
     refLookup = await loadBlogReferenceLookups()
   } catch (err) {
-    console.error('Webflow lookup failed', err)
+    const detail = err instanceof Error ? err.message : String(err)
+    console.error('Webflow lookup failed', detail)
     return NextResponse.json(
-      { error: 'Failed to resolve Webflow collections. Check WEBFLOW_TOKEN.' },
+      {
+        error: 'Failed to resolve Webflow collections. Check WEBFLOW_TOKEN.',
+        detail: detail.slice(0, 400),
+        diagnosticUrl: '/api/admin/content/webflow-status',
+      },
       { status: 503 },
     )
   }
