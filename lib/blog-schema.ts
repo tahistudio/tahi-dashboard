@@ -115,7 +115,7 @@ const AUTHOR_KNOWS_ABOUT: Record<string, string[]> = {
     'Web Performance',
     'Headless CMS',
   ],
-  'Staci Miller': [
+  'Staci Bonnie': [
     'Web Design',
     'Brand Identity',
     'Design Systems',
@@ -146,10 +146,10 @@ const TAHI_BLOG_ID = 'https://www.tahi.studio/blog'
 // broken or placeholder URLs. The TAHI_LOGO_URL env var also overrides the
 // default below.
 
-/** Set to the correct logo URL once Staci confirms it. Until then, omit
- *  the logo field entirely (better than shipping a wrong URL Google can't
- *  fetch). Env var override: TAHI_LOGO_URL. */
-const TAHI_LOGO_URL: string | null = null
+/** Square padded logo asset from Webflow (Apple touch icon). Used by
+ *  Google as the Organization.logo image. Env var TAHI_LOGO_URL
+ *  overrides this if set. */
+const TAHI_LOGO_URL: string | null = 'https://cdn.prod.website-files.com/68124c3b4cfbe0b7add051c7/684d9a3c28430b73ff22d3e1_Light%20Icon%20with%20Background%20Padding%20(1).png'
 
 const TAHI_FOUNDING_DATE = '2023-01-01'   // adjust if needed
 const TAHI_AREAS_SERVED = ['United Kingdom', 'New Zealand', 'United States', 'Australia']
@@ -169,19 +169,17 @@ interface AuthorProfile {
  *  is OMITTED from the schema, never emitted as a placeholder. */
 const AUTHOR_PROFILES: Record<string, AuthorProfile> = {
   'Liam Miller': {
-    jobTitle: 'Co-founder',
-    description: 'Co-founder of Tahi Studio. Enterprise Webflow specialist building production sites for B2B SaaS and enterprise teams.',
-    // imageUrl: 'https://...',
-    // linkedinUrl: 'https://www.linkedin.com/in/...',
-    // xUrl: 'https://x.com/...',
+    jobTitle: 'Co-Founder and CEO',
+    description: 'Co-Founder and CEO of Tahi Studio, a New Zealand Webflow agency. Builds production Webflow sites for B2B SaaS and enterprise marketing teams, with a focus on performance, design systems, and accessibility.',
+    imageUrl: 'https://cdn.prod.website-files.com/683b25a978bfb921944c89bf/69bb3724f39337cf91c1b06c_688dfab3c8e03e6e612141c7_Liam%2520Profile.png',
+    linkedinUrl: 'https://nz.linkedin.com/in/liammillerdev',
     nationality: 'New Zealand',
   },
-  'Staci Miller': {
-    jobTitle: 'Co-founder, Creative Director',
-    description: 'Co-founder and Creative Director at Tahi Studio. Designs brand systems and Webflow templates with a focus on craft, accessibility, and sustainable web.',
-    // imageUrl: 'https://...',
-    // linkedinUrl: 'https://www.linkedin.com/in/...',
-    // xUrl: 'https://x.com/...',
+  'Staci Bonnie': {
+    jobTitle: 'Co-Founder and Head of Design',
+    description: 'Co-Founder and Head of Design at Tahi Studio. Designs brand systems and Webflow templates for enterprise and SaaS clients, with a focus on craft, accessibility, and sustainable web.',
+    imageUrl: 'https://cdn.prod.website-files.com/683b25a978bfb921944c89bf/69bb3724f39337cf91c1b072_68a6de99797cec6da2544932_Staci%2520Profile%2520Image.png',
+    // linkedinUrl: TODO — paste Staci's LinkedIn here when confirmed.
     nationality: 'New Zealand',
   },
 }

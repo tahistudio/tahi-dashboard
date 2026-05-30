@@ -132,8 +132,11 @@ export async function finalizeWebflowFields(database: Database, draftId: string)
     bodyHtml,
     publishedAt: draft.publishedAt ?? now,
     updatedAt: now,
-    authorName: 'Liam Miller',
-    authorJobTitle: 'Co-founder',
+    // authorSlug is set by the strategist ('liam' | 'staci'). Map to the
+    // full name so blog-schema's AUTHOR_PROFILES lookup hits. Fallback
+    // is Liam if the slug is missing/unknown.
+    authorName: draft.authorSlug === 'staci' ? 'Staci Bonnie' : 'Liam Miller',
+    authorJobTitle: draft.authorSlug === 'staci' ? 'Co-Founder and Head of Design' : 'Co-Founder and CEO',
     imageUrl: draft.coverSvgUrl ?? `${TAHI_BLOG_BASE}`,
     mainCategory: clusterName || (mainCategorySlug ?? 'General'),
     wordCount: bodyMarkdown.split(/\s+/).filter(Boolean).length,
