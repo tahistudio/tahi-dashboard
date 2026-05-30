@@ -2550,11 +2550,15 @@ function parseScoreBreakdown(json: string | null): ScoreBreakdownShape | null {
   try {
     const parsed = JSON.parse(json)
     if (!parsed || typeof parsed !== 'object') return null
+    // Round-table pipeline persists bucketScores from per-reviewer
+    // aggregation. Older drafts may have the top-level keys (legacy
+    // scoring) — read either.
+    const b = (parsed.bucketScores && typeof parsed.bucketScores === 'object') ? parsed.bucketScores : parsed
     return {
-      aeo: Number(parsed.aeo ?? 0),
-      voice: Number(parsed.voice ?? 0),
-      readability: Number(parsed.readability ?? 0),
-      seo: Number(parsed.seo ?? 0),
+      aeo: Number(b.aeo ?? 0),
+      voice: Number(b.voice ?? 0),
+      readability: Number(b.readability ?? 0),
+      seo: Number(b.seo ?? 0),
       linksOk: parsed.linksOk === true,
     }
   } catch {

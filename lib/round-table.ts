@@ -595,6 +595,12 @@ async function stageEdit(database: Database, draft: DraftRow): Promise<StageResu
     bodyHtml: editedHtml,
     bodyMarkdown: result.bodyMarkdown,
     contentScore: result.weightedScore,
+    scoreBreakdown: JSON.stringify({
+      ...(() => {
+        try { return JSON.parse(draft.scoreBreakdown ?? '{}') } catch { return {} }
+      })(),
+      bucketScores: computeBucketScores(reviewsForEditor.map(r => ({ key: r.reviewerKey, score: r.critique.score }))),
+    }),
   }).where(eq(schema.contentDrafts.id, draft.id))
 
   // Log conflict resolutions
@@ -657,6 +663,23 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
     sbAudit.signoffNotes = result.finalNotes
     sbAudit.signoffScore = result.score
     sbAudit.recommendCover = result.recommendCover  // surfaced if Liam applies improvements + wants a cover refresh later
+    // Compute the 4-bucket display the Drafts list expects from the
+    // stored audit reviewer rows. Lazy: load latest revision's reviews.
+    try {
+      const auditRevs = await database
+        .select({ n: schema.draftRevisions.revisionNumber })
+        .from(schema.draftRevisions)
+        .where(eq(schema.draftRevisions.draftId, draft.id))
+      const auditLatestRev = auditRevs.length === 0 ? 1 : Math.max(...auditRevs.map(r => r.n))
+      const auditReviews = await database
+        .select({ reviewerKey: schema.draftReviews.reviewerKey, score: schema.draftReviews.score })
+        .from(schema.draftReviews)
+        .where(and(
+          eq(schema.draftReviews.draftId, draft.id),
+          eq(schema.draftReviews.revisionNumber, auditLatestRev),
+        ))
+      sbAudit.bucketScores = computeBucketScores(auditReviews.map(r => ({ key: r.reviewerKey, score: r.score })))
+    } catch { /* bucket scores best-effort */ }
     await database.update(schema.contentDrafts).set({
       status: 'audited',
       contentScore: result.score,
@@ -856,6 +879,34 @@ interface DraftRow {
 
 function isAudit(draft: DraftRow): boolean {
   return draft.originSource === 'legacy_audit'
+}
+
+/**
+ * Map the 23 reviewers into the 4 buckets the Drafts list UI displays
+ * (AEO 25 / Voice 25 / Read 20 / SEO 20 — sums to 90 in the v1 UI). The
+ * bucket score is the average of its reviewers' raw 0-100 scores, scaled
+ * to the bucket's max so it reads as "X out of 25" etc.
+ */
+function computeBucketScores(reviews: Array<{ key: string; score: number | null | undefined }>): { aeo: number; voice: number; readability: number; seo: number } {
+  const buckets: Record<'aeo' | 'voice' | 'readability' | 'seo', { keys: string[]; max: number }> = {
+    aeo:        { keys: ['seo_aeo', 'featured_snippet', 'voice_search', 'citations', 'internal_links'], max: 25 },
+    voice:      { keys: ['brand_tone', 'tahi_voice', 'anti_ai', 'hook', 'emotional_resonance'],         max: 25 },
+    readability:{ keys: ['pacing', 'skim_test', 'mobile_reading', 'visual_layout'],                     max: 20 },
+    seo:        { keys: ['originality', 'unique_angle', 'counter_argument', 'icp_reader'],              max: 20 },
+  }
+  const scoreByKey = new Map<string, number>()
+  for (const r of reviews) {
+    if (typeof r.score === 'number' && !Number.isNaN(r.score)) scoreByKey.set(r.key, r.score)
+  }
+  const out = { aeo: 0, voice: 0, readability: 0, seo: 0 }
+  for (const k of Object.keys(buckets) as Array<keyof typeof buckets>) {
+    const def = buckets[k]
+    const vals = def.keys.map(key => scoreByKey.get(key)).filter((v): v is number => typeof v === 'number')
+    if (vals.length === 0) continue
+    const avg = vals.reduce((s, v) => s + v, 0) / vals.length
+    out[k] = Math.round((avg / 100) * def.max)
+  }
+  return out
 }
 
 async function loadDraft(database: Database, id: string): Promise<DraftRow | null> {
