@@ -569,6 +569,25 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
             {improving ? 'Applying…' : 'Apply improvements'}
           </TahiButton>
         )}
+        {data.revisions.length > 0 && (
+          <>
+            <TahiButton
+              size="sm"
+              variant="ghost"
+              onClick={() => { void copyBody('markdown') }}
+              iconLeft={<FileText className="w-3.5 h-3.5" />}
+            >
+              {copiedFormat === 'markdown' ? 'Copied!' : 'Copy MD'}
+            </TahiButton>
+            <TahiButton
+              size="sm"
+              variant="ghost"
+              onClick={() => { void copyBody('html') }}
+            >
+              {copiedFormat === 'html' ? 'Copied!' : 'Copy HTML'}
+            </TahiButton>
+          </>
+        )}
         <TahiButton
           size="sm"
           variant="ghost"
