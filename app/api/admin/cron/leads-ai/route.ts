@@ -268,18 +268,29 @@ export async function POST(req: NextRequest) {
 
       // Smart-enrich gate: auto-trigger full Sonnet enrichment when
       // (a) the score crossed the threshold, (b) the lead hasn't been
-      // enriched yet, and (c) we still have budget today.
+      // enriched yet, (c) we still have daily budget, AND (d) we
+      // haven't already fired an enrichment this tick. Each enrichment
+      // is a Sonnet + web-search call that takes 15-30s; firing more
+      // than one inline blows the Worker's 30s CPU limit and the
+      // GH Actions runner sees curl(56) "connection dropped". The
+      // remaining qualifying leads get picked up on the next tick.
       let autoEnriched = false
+      const alreadyEnrichedThisTick = results.filter(r => r.autoEnriched).length
       const crossedAutoEnrich =
         settings.autoEnrichScoreThreshold > 0
         && score != null
         && score >= settings.autoEnrichScoreThreshold
         && !lead.enrichedAt
-        && enrichmentBudget - results.filter(r => r.autoEnriched).length > 0
+        && enrichmentBudget - alreadyEnrichedThisTick > 0
+        && alreadyEnrichedThisTick === 0  // hard cap: max 1 per tick
+        && Date.now() - startedAt < 18_000  // leave headroom for DB writes
       if (crossedAutoEnrich) {
         try {
-          // Call the existing enrich route in full mode. Internal call
-          // — uses the same admin auth bypass path as the cron itself.
+          // Bound the sub-call with AbortController so a hung Sonnet
+          // call can't take down the cron. 12s is enough for a normal
+          // enrichment + web search; longer ones get retried next tick.
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 12_000)
           const enrichRes = await fetch(
             new URL(`/api/admin/leads/${lead.id}/enrich`, req.url).toString(),
             {
@@ -289,8 +300,10 @@ export async function POST(req: NextRequest) {
                 ...(cronSecret ? { Authorization: `Bearer ${cronSecret}` } : {}),
                 Cookie: req.headers.get('cookie') ?? '',
               },
+              signal: controller.signal,
             },
           )
+          clearTimeout(timeoutId)
           if (enrichRes.ok) autoEnriched = true
         } catch {
           // best-effort — failure here doesn't fail the whole cron

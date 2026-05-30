@@ -115,7 +115,11 @@ jobs:
           CRON_SECRET: ${{ secrets.TAHI_CRON_SECRET }}
           TARGETS: ${{ steps.pick.outputs.targets }}
         run: |
-          set -e
+          # Intentionally NO `set -e` here. A single failing curl
+          # (e.g. exit 56 when the Worker hits its CPU limit mid-
+          # response) must not crash the whole workflow — every cron
+          # is idempotent and the next tick recovers. We log each
+          # failure as a ::warning:: and continue to the next target.
           if [ -z "$DASHBOARD_URL" ] || [ -z "$CRON_SECRET" ]; then
             echo "::error::Missing TAHI_DASHBOARD_URL or TAHI_CRON_SECRET"
             exit 1
@@ -126,6 +130,7 @@ jobs:
             */dashboard) root="$base/api/admin" ;;
             *)           root="$base/dashboard/api/admin" ;;
           esac
+          overall_status=0
           for target in $TARGETS; do
             # Most targets live under /cron/, but sync-* lives under
             # /integrations/google/.
@@ -135,10 +140,21 @@ jobs:
               *)                                    url="$root/cron/$target" ;;
             esac
             echo "POST $url"
+            # --max-time guards against Worker hangs; --retry on
+            # transient connection drops (curl 52/56) but not on
+            # actual HTTP errors (those are handled below).
             response=$(curl -sS -w "\n%{http_code}" -X POST \
+              --max-time 60 \
+              --retry 1 --retry-delay 2 --retry-connrefused \
               "$url" \
               -H "x-cron-secret: ${CRON_SECRET}" \
-              -H "Content-Type: application/json")
+              -H "Content-Type: application/json" 2>&1) || curl_exit=$?
+            curl_exit=${curl_exit:-0}
+            if [ "$curl_exit" -ne 0 ]; then
+              echo "::warning::$target curl failed (exit $curl_exit): $response"
+              # Non-zero curl is logged + continues; next tick handles it.
+              continue
+            fi
             body=$(echo "$response" | sed '$d')
             code=$(echo "$response" | tail -n1)
             echo "  HTTP $code"
@@ -148,3 +164,4 @@ jobs:
               echo "::warning::$target returned $code (continuing)"
             fi
           done
+          exit $overall_status
