@@ -323,9 +323,12 @@ let cachedReferenceLookups: WebflowReferenceLookup | null = null
 export async function loadBlogReferenceLookups(): Promise<WebflowReferenceLookup> {
   if (cachedReferenceLookups) return cachedReferenceLookups
 
-  const authorsCollectionId = await findCollectionId('Authors').catch(
-    () => findCollectionId('Author'),
-  )
+  // Tahi Studio site has "Team Members" instead of "Authors" — fall
+  // through the most common author-collection names in order.
+  const authorsCollectionId = await findCollectionId('Authors')
+    .catch(() => findCollectionId('Author'))
+    .catch(() => findCollectionId('Team Members'))
+    .catch(() => findCollectionId('Team'))
   const categoriesCollectionId = await findCollectionId('Categories').catch(
     () => findCollectionId('Category'),
   )
