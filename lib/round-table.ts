@@ -777,6 +777,16 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
       }
     } catch (err) { console.error('AI tell sanitize failed', err) }
 
+    // Strip any H1 the writer slipped in. The post title is the page's
+    // H1, set by the Webflow template — a body H1 would render a second
+    // H1 and break heading hierarchy. Downgrade leading H1s to H2 so we
+    // don't lose the content if the writer used H1 for a real section.
+    const h1Count = (cleanMarkdown.match(/^#\s/gm) ?? []).length
+    if (h1Count > 0) {
+      cleanMarkdown = cleanMarkdown.replace(/^#\s+/gm, '## ')
+      console.log(`Downgraded ${h1Count} H1 heading(s) to H2 in draft ${draft.id}`)
+    }
+
     // Auto-link first-mention of every live glossary term to its term
     // page. This is the Investopedia mechanic — over time every term
     // page accumulates inbound internal PageRank from every article

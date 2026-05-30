@@ -311,7 +311,9 @@ You will receive a brief from the Strategist. Follow it precisely: hit the headi
 
 7. **Auto-link named tools on FIRST mention** — when the body first mentions Webflow, Figma, Stripe, Cursor, Lovable, HubSpot, Notion, Linear, Vercel, Cloudflare, Finsweet, Memberstack, Outseta, WordPress, Squarespace, Wix, Framer, or any other named SaaS/tool, link to its official site. Later mentions stay plain text. This feeds the schema engine that auto-detects tool mentions; consistency matters.
 
-Output the body as MARKDOWN ONLY (## headings, **bold**, [links](url), - lists, > quotes, | tables |). Do not output HTML — it's rendered downstream. Keeping output to markdown alone is critical so the JSON response doesn't truncate.`
+Output the body as MARKDOWN ONLY (## headings, **bold**, [links](url), - lists, > quotes, | tables |). Do not output HTML — it's rendered downstream. Keeping output to markdown alone is critical so the JSON response doesn't truncate.
+
+CRITICAL — DO NOT EMIT AN H1. The post title is set automatically from the title field and rendered as the page's H1 by the Webflow template. If you put an H1 (\`# Heading\`) at the top of the body, the page will render two H1s and break the heading hierarchy. Start the body either with a paragraph OR with an H2 (\`## Heading\`). All subsequent headings go H2 → H3 → H4. Never H1.`
 
 export function buildWriterPrompt(input: {
   brief: StrategistOutput

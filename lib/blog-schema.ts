@@ -139,6 +139,60 @@ const TAHI_KNOWS_ABOUT = [
 const TAHI_ORG_ID = 'https://www.tahi.studio/#organization'
 const TAHI_BLOG_ID = 'https://www.tahi.studio/blog'
 
+// ─── Tahi org + author profiles ─────────────────────────────────────────────
+//
+// Edit these constants directly when the real URLs / bios are confirmed.
+// Each undefined / empty value is omitted from the schema so we never ship
+// broken or placeholder URLs. The TAHI_LOGO_URL env var also overrides the
+// default below.
+
+/** Set to the correct logo URL once Staci confirms it. Until then, omit
+ *  the logo field entirely (better than shipping a wrong URL Google can't
+ *  fetch). Env var override: TAHI_LOGO_URL. */
+const TAHI_LOGO_URL: string | null = null
+
+const TAHI_FOUNDING_DATE = '2023-01-01'   // adjust if needed
+const TAHI_AREAS_SERVED = ['United Kingdom', 'New Zealand', 'United States', 'Australia']
+const TAHI_LOCATION_CREATED = 'Wellington, New Zealand'
+const TAHI_CONTACT_EMAIL = 'business@tahi.studio'
+
+interface AuthorProfile {
+  jobTitle: string
+  description?: string
+  imageUrl?: string
+  linkedinUrl?: string
+  xUrl?: string
+  nationality?: string
+}
+
+/** Fill in real URLs as they're confirmed. Anything left blank / null
+ *  is OMITTED from the schema, never emitted as a placeholder. */
+const AUTHOR_PROFILES: Record<string, AuthorProfile> = {
+  'Liam Miller': {
+    jobTitle: 'Co-founder',
+    description: 'Co-founder of Tahi Studio. Enterprise Webflow specialist building production sites for B2B SaaS and enterprise teams.',
+    // imageUrl: 'https://...',
+    // linkedinUrl: 'https://www.linkedin.com/in/...',
+    // xUrl: 'https://x.com/...',
+    nationality: 'New Zealand',
+  },
+  'Staci Miller': {
+    jobTitle: 'Co-founder, Creative Director',
+    description: 'Co-founder and Creative Director at Tahi Studio. Designs brand systems and Webflow templates with a focus on craft, accessibility, and sustainable web.',
+    // imageUrl: 'https://...',
+    // linkedinUrl: 'https://www.linkedin.com/in/...',
+    // xUrl: 'https://x.com/...',
+    nationality: 'New Zealand',
+  },
+}
+
+/** A Webflow-served image URL (the only kind safe to ship in schema —
+ *  Replicate URLs expire). */
+function isWebflowImage(url: string | null | undefined): boolean {
+  if (!url) return false
+  return /(?:cdn\.prod\.website-files\.com|uploads-ssl\.webflow\.com|webflow\.com\/cdn|www\.tahi\.studio)/i.test(url)
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 function stripHtml(html: string): string {
@@ -333,15 +387,18 @@ function buildArticle(
     wordCount: input.wordCount,
     timeRequired: timeRequiredIso(input.wordCount),
   }
-  // Only emit image if we actually have a URL — an empty ImageObject url
-  // fails Google's Article rich-results requirement.
-  if (input.imageUrl && input.imageUrl.trim()) {
+  // Only emit image when the URL is a stable Webflow-hosted asset.
+  // Replicate URLs are temporary (used as cover staging) — shipping them
+  // to Google would 404 in days. We re-run the schema generator on the
+  // /cover/set hook + at publish so the final Webflow URL lands later.
+  if (isWebflowImage(input.imageUrl)) {
     article.image = {
       '@type': 'ImageObject',
       url: input.imageUrl,
       ...(input.imageWidth ? { width: input.imageWidth } : {}),
       ...(input.imageHeight ? { height: input.imageHeight } : {}),
     }
+    article.thumbnailUrl = input.imageUrl
   }
   // Wire entity references so Google connects them to the Article.
   if (refs.aboutIds.length > 0) article.about = refs.aboutIds.map(id => ({ '@id': id }))
@@ -360,6 +417,18 @@ function buildArticle(
     '@type': 'Audience',
     audienceType: 'Marketing directors, CMOs and product leaders at enterprise-scale companies evaluating Webflow',
   }
+  // Copyright + credit — minimum legal hygiene for content scrapers and
+  // training-data attribution.
+  const copyrightYear = (input.publishedAt || '').slice(0, 4) || String(new Date().getUTCFullYear())
+  article.copyrightHolder = { '@id': TAHI_ORG_ID }
+  article.copyrightYear = Number(copyrightYear)
+  article.copyrightNotice = `Copyright ${copyrightYear} Tahi Studio. All rights reserved.`
+  article.creditText = `${input.authorName} for Tahi Studio`
+  article.locationCreated = {
+    '@type': 'Place',
+    name: TAHI_LOCATION_CREATED,
+  }
+  article.url = input.url
   return article
 }
 
@@ -370,7 +439,7 @@ function buildArticle(
  * article page" vs "this is the homepage" when crawling.
  */
 function buildWebPage(input: SchemaInput): object {
-  return {
+  const page: Record<string, unknown> = {
     '@type': 'WebPage',
     '@id': input.url,
     url: input.url,
@@ -382,10 +451,12 @@ function buildWebPage(input: SchemaInput): object {
     inLanguage: 'en-GB',
     datePublished: input.publishedAt,
     dateModified: input.updatedAt,
-    primaryImageOfPage: input.imageUrl && input.imageUrl.trim()
-      ? { '@type': 'ImageObject', url: input.imageUrl }
-      : undefined,
+    lastReviewed: input.updatedAt,
   }
+  if (isWebflowImage(input.imageUrl)) {
+    page.primaryImageOfPage = { '@type': 'ImageObject', url: input.imageUrl }
+  }
+  return page
 }
 
 /**
@@ -476,39 +547,63 @@ function buildHowTo(input: SchemaInput): object | null {
 }
 
 function buildOrganization(): object {
-  return {
+  const logoUrl = process.env.TAHI_LOGO_URL || TAHI_LOGO_URL
+  const org: Record<string, unknown> = {
     '@type': 'Organization',
     '@id': TAHI_ORG_ID,
     name: 'Tahi Studio',
+    legalName: 'Tahi Studio Limited',
     url: 'https://www.tahi.studio/',
-    logo: {
-      '@type': 'ImageObject',
-      url: 'https://www.tahi.studio/logo.png',
-    },
+    foundingDate: TAHI_FOUNDING_DATE,
     sameAs: [
       'https://www.linkedin.com/company/tahi-studio',
       'https://x.com/tahistudio',
     ],
     knowsAbout: TAHI_KNOWS_ABOUT,
+    knowsLanguage: ['en'],
+    areaServed: TAHI_AREAS_SERVED.map(name => ({ '@type': 'Country', name })),
+    contactPoint: {
+      '@type': 'ContactPoint',
+      contactType: 'Business inquiries',
+      email: TAHI_CONTACT_EMAIL,
+      availableLanguage: ['English'],
+    },
   }
+  // Only emit logo when we have a real URL. Shipping a placeholder URL
+  // Google can't fetch is worse than omitting the field.
+  if (logoUrl && logoUrl.trim()) {
+    org.logo = { '@type': 'ImageObject', url: logoUrl }
+  }
+  return org
 }
 
 function buildPerson(input: SchemaInput): object {
+  // Pull from the static profile when the author is known. Caller-
+  // supplied input still wins so blog-finalize can override per-post.
+  const profile = AUTHOR_PROFILES[input.authorName]
   const sameAs: string[] = []
-  if (input.authorLinkedIn) sameAs.push(input.authorLinkedIn)
-  return {
+  if (profile?.linkedinUrl) sameAs.push(profile.linkedinUrl)
+  if (profile?.xUrl) sameAs.push(profile.xUrl)
+  if (input.authorLinkedIn && !sameAs.includes(input.authorLinkedIn)) sameAs.push(input.authorLinkedIn)
+
+  const description = input.authorBio ?? profile?.description
+  const imageUrl = input.authorImage ?? profile?.imageUrl
+  const jobTitle = input.authorJobTitle ?? profile?.jobTitle ?? 'Author'
+
+  const person: Record<string, unknown> = {
     '@type': 'Person',
     '@id': `${input.url}#author`,
     name: input.authorName,
-    jobTitle: input.authorJobTitle,
-    ...(input.authorBio ? { description: input.authorBio } : {}),
-    ...(input.authorImage
-      ? { image: { '@type': 'ImageObject', url: input.authorImage } }
-      : {}),
+    jobTitle,
     worksFor: { '@id': TAHI_ORG_ID },
-    ...(sameAs.length > 0 ? { sameAs } : {}),
     knowsAbout: AUTHOR_KNOWS_ABOUT[input.authorName] ?? TAHI_KNOWS_ABOUT,
+    knowsLanguage: ['en'],
   }
+  if (description) person.description = description
+  if (imageUrl) person.image = { '@type': 'ImageObject', url: imageUrl }
+  if (sameAs.length > 0) person.sameAs = sameAs
+  if (profile?.nationality) person.nationality = { '@type': 'Country', name: profile.nationality }
+  return person
 }
 
 function slugFragment(s: string): string {
