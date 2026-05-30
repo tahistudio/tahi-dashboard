@@ -353,7 +353,90 @@ function buildArticle(
   // "No matches found for expression" on every post. Restore once Liam
   // confirms the actual class names the template uses (or shifts to
   // xpath selectors that target the structural intro + takeaways).
+
+  // Audience — signals enterprise/B2B targeting to Google + AI engines.
+  // Helps disambiguate Tahi's content from SMB-focused agency posts.
+  article.audience = {
+    '@type': 'Audience',
+    audienceType: 'Marketing directors, CMOs and product leaders at enterprise-scale companies evaluating Webflow',
+  }
   return article
+}
+
+/**
+ * WebPage wrapper — the page the Article lives on. Adds `breadcrumb` +
+ * `mainEntity` cross-references so Google has a clean top-level entity
+ * for the URL. AI engines also use WebPage to disambiguate "this is the
+ * article page" vs "this is the homepage" when crawling.
+ */
+function buildWebPage(input: SchemaInput): object {
+  return {
+    '@type': 'WebPage',
+    '@id': input.url,
+    url: input.url,
+    name: input.title,
+    description: input.metaDescription,
+    isPartOf: { '@id': TAHI_BLOG_ID },
+    breadcrumb: { '@id': `${input.url}#breadcrumb` },
+    mainEntity: { '@id': `${input.url}#article` },
+    inLanguage: 'en-GB',
+    datePublished: input.publishedAt,
+    dateModified: input.updatedAt,
+    primaryImageOfPage: input.imageUrl && input.imageUrl.trim()
+      ? { '@type': 'ImageObject', url: input.imageUrl }
+      : undefined,
+  }
+}
+
+/**
+ * SoftwareApplication entities for named tools mentioned in the body.
+ * AI engines cite these when answering "What tools does X use?" queries
+ * because each is a clean structured entity tied to the article via
+ * `mentions`. Anchor list of well-known tools — extend over time.
+ */
+const KNOWN_TOOLS: Array<{ name: string; url: string; category: string }> = [
+  { name: 'Webflow', url: 'https://webflow.com', category: 'No-Code Web Builder' },
+  { name: 'Figma', url: 'https://figma.com', category: 'Design Tool' },
+  { name: 'Framer', url: 'https://framer.com', category: 'Web Builder' },
+  { name: 'WordPress', url: 'https://wordpress.org', category: 'CMS' },
+  { name: 'Squarespace', url: 'https://squarespace.com', category: 'Web Builder' },
+  { name: 'Wix', url: 'https://wix.com', category: 'Web Builder' },
+  { name: 'Stripe', url: 'https://stripe.com', category: 'Payments' },
+  { name: 'HubSpot', url: 'https://hubspot.com', category: 'CRM' },
+  { name: 'Notion', url: 'https://notion.so', category: 'Productivity' },
+  { name: 'Cursor', url: 'https://cursor.com', category: 'AI Code Editor' },
+  { name: 'Lovable', url: 'https://lovable.dev', category: 'AI Web Builder' },
+  { name: 'Linear', url: 'https://linear.app', category: 'Project Management' },
+  { name: 'Vercel', url: 'https://vercel.com', category: 'Hosting' },
+  { name: 'Cloudflare', url: 'https://cloudflare.com', category: 'CDN + Edge' },
+  { name: 'Finsweet', url: 'https://finsweet.com', category: 'Webflow Tools' },
+  { name: 'Memberstack', url: 'https://memberstack.com', category: 'Membership' },
+  { name: 'Outseta', url: 'https://outseta.com', category: 'SaaS Platform' },
+  { name: 'Webflow CMS', url: 'https://webflow.com/cms', category: 'CMS' },
+]
+
+function buildToolMentions(bodyMarkdown: string, baseUrl: string): { nodes: object[]; ids: string[] } {
+  const ids: string[] = []
+  const nodes: object[] = []
+  const seen = new Set<string>()
+  for (const tool of KNOWN_TOOLS) {
+    // Word-boundary match, case-sensitive (Webflow proper noun).
+    const re = new RegExp(`\\b${tool.name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`)
+    if (re.test(bodyMarkdown) && !seen.has(tool.name)) {
+      seen.add(tool.name)
+      const id = `${baseUrl}#tool-${tool.name.toLowerCase().replace(/\s+/g, '-')}`
+      ids.push(id)
+      nodes.push({
+        '@type': 'SoftwareApplication',
+        '@id': id,
+        name: tool.name,
+        url: tool.url,
+        applicationCategory: tool.category,
+        sameAs: tool.url,
+      })
+    }
+  }
+  return { nodes, ids }
 }
 
 function buildFaqPage(input: SchemaInput): object | null {
@@ -513,9 +596,16 @@ export function buildBlogSchemaAdditions(input: SchemaInput): SchemaOutput {
   const mentions = buildMentions(input.mentions, input.url)
   const about = buildAbout(input.aboutEntities, input.url)
   const citations = buildCitations(input.citations)
+  // Tool mentions — auto-detect named software from the body, emit
+  // SoftwareApplication entities + wire @ids into the Article's
+  // mentions[] so Google + AI engines treat each tool as a structured
+  // entity that this article references.
+  const tools = buildToolMentions(input.bodyMarkdown ?? '', input.url)
+  const combinedMentionIds = [...mentions.ids, ...tools.ids]
 
+  blocks.push(buildWebPage(input))
   blocks.push(buildArticle(input, {
-    mentionIds: mentions.ids,
+    mentionIds: combinedMentionIds,
     aboutIds: about.ids,
     citationIds: citations.ids,
   }))
@@ -532,6 +622,7 @@ export function buildBlogSchemaAdditions(input: SchemaInput): SchemaOutput {
   if (mentions.nodes.length > 0) blocks.push(...mentions.nodes)
   if (about.nodes.length > 0) blocks.push(...about.nodes)
   if (citations.nodes.length > 0) blocks.push(...citations.nodes)
+  if (tools.nodes.length > 0) blocks.push(...tools.nodes)
 
   // SpeakableSpecification removed: it pointed xpath at #tldr /
   // #key-takeaways anchors the Webflow template never injects, so every

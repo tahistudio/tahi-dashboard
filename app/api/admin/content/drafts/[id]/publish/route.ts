@@ -144,6 +144,24 @@ export async function POST(
     } catch (err) {
       console.error('Pre-publish finalize failed', err)
     }
+
+    // HARD GATE: validate the regenerated schema. Any error-severity
+    // issue blocks the publish. The goal is 0 errors on every post.
+    try {
+      const { validateJsonLd } = await import('@/lib/schema-validate')
+      const validation = validateJsonLd(draft.schemaJsonLd ?? '')
+      if (!validation.valid) {
+        return NextResponse.json({
+          error: 'Schema validation failed — fix before publishing.',
+          errorCount: validation.errors.length,
+          warningCount: validation.warnings.length,
+          errors: validation.errors,
+          warnings: validation.warnings,
+        }, { status: 422 })
+      }
+    } catch (err) {
+      console.error('Schema validation crashed (not blocking)', err)
+    }
   }
 
   // 2) Compute the target slot. Pull recent publish_history for the
