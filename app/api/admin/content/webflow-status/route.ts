@@ -70,17 +70,33 @@ export async function GET(req: NextRequest) {
     sitesPing = { ok: false, status: null, error: err instanceof Error ? err.message : String(err) }
   }
 
-  // 1b) For each site, dump every collection so we can see the actual
-  //     names + slugs the lookup is matching against.
-  const collectionsPerSite: Array<{
+  // 1b) For each site (cap 50, parallel), probe collections so we can
+  //     see which site actually has Blog Posts. Heuristic-only: we
+  //     short-circuit and only report sites whose name contains "tahi"
+  //     OR sites where probing succeeds and Blog Posts exists. The
+  //     full per-site collection probe ran sequentially before, which
+  //     timed the route out at 47 sites.
+  type SiteCollection = { id: string; displayName: string; slug: string; singularName: string }
+  type SiteCollectionResult = {
     siteId: string
     siteName: string
     ok: boolean
-    collections?: Array<{ id: string; displayName: string; slug: string; singularName: string }>
+    matchesTahi: boolean
+    hasBlogPosts: boolean
+    collections?: SiteCollection[]
     error?: string
-  }> = []
+  }
+  let collectionsPerSite: SiteCollectionResult[] = []
   if (sitesPing.ok && sitesPing.sites) {
-    for (const site of sitesPing.sites) {
+    const candidateSites = sitesPing.sites.filter(s => {
+      const name = `${s.displayName} ${s.shortName}`.toLowerCase()
+      return name.includes('tahi') || name.includes('blog')
+    })
+    // If nothing matches by name, fall back to probing first 10 sites
+    // so we still get useful output.
+    const targets = candidateSites.length > 0 ? candidateSites : sitesPing.sites.slice(0, 10)
+
+    collectionsPerSite = await Promise.all(targets.map(async (site): Promise<SiteCollectionResult> => {
       try {
         const res = await fetch(`https://api.webflow.com/v2/sites/${site.id}/collections`, {
           headers: {
@@ -92,34 +108,43 @@ export async function GET(req: NextRequest) {
         if (res.ok) {
           let parsed: { collections?: Array<{ id: string; displayName?: string; slug?: string; singularName?: string }> } = {}
           try { parsed = JSON.parse(txt) } catch { /* keep empty */ }
-          collectionsPerSite.push({
+          const collections: SiteCollection[] = (parsed.collections ?? []).map(c => ({
+            id: c.id,
+            displayName: c.displayName ?? '',
+            slug: c.slug ?? '',
+            singularName: c.singularName ?? '',
+          }))
+          const name = `${site.displayName} ${site.shortName}`.toLowerCase()
+          return {
             siteId: site.id,
             siteName: site.displayName || site.shortName,
             ok: true,
-            collections: (parsed.collections ?? []).map(c => ({
-              id: c.id,
-              displayName: c.displayName ?? '',
-              slug: c.slug ?? '',
-              singularName: c.singularName ?? '',
-            })),
-          })
-        } else {
-          collectionsPerSite.push({
-            siteId: site.id,
-            siteName: site.displayName || site.shortName,
-            ok: false,
-            error: `${res.status} ${txt.slice(0, 200)}`,
-          })
+            matchesTahi: name.includes('tahi'),
+            hasBlogPosts: collections.some(c =>
+              ['blog posts', 'blog post', 'posts', 'articles', 'blog'].includes(c.displayName.toLowerCase())
+            ),
+            collections,
+          }
         }
-      } catch (err) {
-        collectionsPerSite.push({
+        return {
           siteId: site.id,
           siteName: site.displayName || site.shortName,
           ok: false,
+          matchesTahi: false,
+          hasBlogPosts: false,
+          error: `${res.status} ${txt.slice(0, 200)}`,
+        }
+      } catch (err) {
+        return {
+          siteId: site.id,
+          siteName: site.displayName || site.shortName,
+          ok: false,
+          matchesTahi: false,
+          hasBlogPosts: false,
           error: err instanceof Error ? err.message : String(err),
-        })
+        }
       }
-    }
+    }))
   }
 
   // 2) Higher-level: try resolving the Blog Posts collection id.
