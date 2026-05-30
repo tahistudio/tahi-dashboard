@@ -25,13 +25,23 @@ export async function GET(req: NextRequest) {
 
   const token = process.env.WEBFLOW_TOKEN
   const collectionOverride = process.env.WEBFLOW_BLOG_COLLECTION_ID
+  const siteOverride = process.env.WEBFLOW_SITE_ID
   const tokenPresent = typeof token === 'string' && token.length > 0
   const tokenInfo = tokenPresent
     ? { present: true, length: token.length, prefix: token.slice(0, 6), suffix: token.slice(-4) }
     : { present: false }
 
-  // 1) Lowest-level: ping the sites endpoint with the token.
-  let sitesPing: { ok: boolean; status: number | null; body?: string; siteCount?: number; error?: string }
+  // 1) Lowest-level: ping the sites endpoint with the token + dump
+  //    every site we have access to. Helps when the token has multiple
+  //    sites and Blog Posts only lives on one of them.
+  let sitesPing: {
+    ok: boolean
+    status: number | null
+    body?: string
+    siteCount?: number
+    sites?: Array<{ id: string; displayName: string; shortName: string }>
+    error?: string
+  }
   try {
     const res = await fetch('https://api.webflow.com/v2/sites', {
       headers: {
@@ -41,14 +51,75 @@ export async function GET(req: NextRequest) {
     })
     const bodyText = await res.text()
     if (res.ok) {
-      let parsed: { sites?: Array<{ id: string; displayName?: string }> } = {}
+      let parsed: { sites?: Array<{ id: string; displayName?: string; shortName?: string }> } = {}
       try { parsed = JSON.parse(bodyText) } catch { /* keep empty */ }
-      sitesPing = { ok: true, status: res.status, siteCount: parsed.sites?.length ?? 0 }
+      sitesPing = {
+        ok: true,
+        status: res.status,
+        siteCount: parsed.sites?.length ?? 0,
+        sites: (parsed.sites ?? []).map(s => ({
+          id: s.id,
+          displayName: s.displayName ?? '',
+          shortName: s.shortName ?? '',
+        })),
+      }
     } else {
       sitesPing = { ok: false, status: res.status, body: bodyText.slice(0, 400) }
     }
   } catch (err) {
     sitesPing = { ok: false, status: null, error: err instanceof Error ? err.message : String(err) }
+  }
+
+  // 1b) For each site, dump every collection so we can see the actual
+  //     names + slugs the lookup is matching against.
+  const collectionsPerSite: Array<{
+    siteId: string
+    siteName: string
+    ok: boolean
+    collections?: Array<{ id: string; displayName: string; slug: string; singularName: string }>
+    error?: string
+  }> = []
+  if (sitesPing.ok && sitesPing.sites) {
+    for (const site of sitesPing.sites) {
+      try {
+        const res = await fetch(`https://api.webflow.com/v2/sites/${site.id}/collections`, {
+          headers: {
+            Authorization: `Bearer ${token ?? ''}`,
+            Accept: 'application/json',
+          },
+        })
+        const txt = await res.text()
+        if (res.ok) {
+          let parsed: { collections?: Array<{ id: string; displayName?: string; slug?: string; singularName?: string }> } = {}
+          try { parsed = JSON.parse(txt) } catch { /* keep empty */ }
+          collectionsPerSite.push({
+            siteId: site.id,
+            siteName: site.displayName || site.shortName,
+            ok: true,
+            collections: (parsed.collections ?? []).map(c => ({
+              id: c.id,
+              displayName: c.displayName ?? '',
+              slug: c.slug ?? '',
+              singularName: c.singularName ?? '',
+            })),
+          })
+        } else {
+          collectionsPerSite.push({
+            siteId: site.id,
+            siteName: site.displayName || site.shortName,
+            ok: false,
+            error: `${res.status} ${txt.slice(0, 200)}`,
+          })
+        }
+      } catch (err) {
+        collectionsPerSite.push({
+          siteId: site.id,
+          siteName: site.displayName || site.shortName,
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
   }
 
   // 2) Higher-level: try resolving the Blog Posts collection id.
@@ -78,8 +149,10 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     ok: allOk,
     token: tokenInfo,
+    siteOverride: siteOverride ? { present: true, value: siteOverride } : { present: false },
     collectionOverride: collectionOverride ? { present: true, value: collectionOverride } : { present: false },
     sitesPing,
+    collectionsPerSite,
     collectionPing,
     lookupPing,
     diagnostic: allOk

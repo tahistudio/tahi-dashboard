@@ -236,13 +236,26 @@ let cachedCollections: Map<string, string> | null = null  // displayName(lc) -> 
 
 async function getSiteId(): Promise<string> {
   if (cachedSiteId) return cachedSiteId
+  // Explicit override takes precedence — pins to the right site when
+  // the token has multiple sites on it (otherwise sites[0] can return
+  // the wrong one and the Blog Posts collection lookup fails).
+  const override = process.env.WEBFLOW_SITE_ID
+  if (override) {
+    cachedSiteId = override
+    return override
+  }
   const res = await fetch(`${API}/sites`, { headers: headers() })
   if (!res.ok) {
     const body = await res.text()
     throw new Error(`Webflow listSites failed: ${res.status} ${body.slice(0, 300)}`)
   }
   const data = await res.json() as { sites?: WebflowSiteSummary[] }
-  const first = data.sites?.[0]
+  if (!data.sites?.length) throw new Error('Webflow: token has no sites')
+  if (data.sites.length > 1) {
+    const names = data.sites.map(s => s.displayName ?? s.shortName ?? s.id).join(', ')
+    console.warn(`Webflow token has ${data.sites.length} sites (${names}). Using sites[0]. Set WEBFLOW_SITE_ID env var to pin a specific site.`)
+  }
+  const first = data.sites[0]
   if (!first?.id) throw new Error('Webflow: token has no sites')
   cachedSiteId = first.id
   return first.id
