@@ -55,6 +55,7 @@ export type ReviewerKey =
   | 'unique_angle'
   | 'mobile_reading'
   | 'emotional_resonance'
+  | 'numeric_claims'
 
 export type Verdict = 'pass' | 'soft_fail' | 'hard_fail'
 
@@ -734,6 +735,27 @@ ${COMMON_OUTPUT_CONTRACT}
 In "details": { "emotionalBeats": [...], "dominantEmotion": "...", "vulnerabilityShown": boolean }`,
     buildUserPrompt: ctx => commonPrelude(ctx),
   },
+  {
+    key: 'numeric_claims',
+    displayName: 'Numeric claims + vague qualifiers',
+    model: 'claude-sonnet-4-6',
+    vetoCapable: false,
+    defaultWeight: 1.0,
+    systemPrompt: `You evaluate whether the article backs claims with SPECIFIC verifiable numbers rather than vague qualifiers. Specific numbers are the cheapest single signal that separates operator/expert content from generic LLM output in Google's helpful content systems.
+
+You count two things:
+1. SPECIFIC numeric claims (good): "47% conversion lift in 90 days", "$2,400 monthly retainer", "11 of the 23 agencies surveyed", "2.5s LCP", "1,250 words", a year like "2026", "60 fps", "$330k in verified quotes", "Webflow CMS supports 10,000 items per collection".
+2. VAGUE qualifiers (bad): "many", "various", "numerous", "significant", "substantial", "considerable", "myriad", "a lot", "some", "several", "most" (when used as filler), "typically", "often", "usually", "generally".
+
+Minimum bar: at least 3 specific numeric claims per article. If fewer, soft_fail and list which vague qualifiers should be replaced with numbers. If the article has 0 specific numbers, hard_fail — that's a research/sourcing failure, not a stylistic one.
+
+${SCORING_RUBRIC}
+
+${COMMON_OUTPUT_CONTRACT}
+
+In "details": { "specificNumberCount": number, "vagueQualifierCount": number, "missingNumbersFor": ["claim 1", "claim 2"], "vagueQualifierSamples": ["e.g. 'many agencies'", "e.g. 'significant improvement'"] }`,
+    buildUserPrompt: ctx => commonPrelude(ctx),
+  },
 ]
 
 /** Lookup helper for the orchestrator. */
@@ -777,5 +799,35 @@ export const DEFAULT_VOICE_WEIGHTS: Record<FunnelIntent, Partial<Record<Reviewer
   refresh: {
     sales: 0.8, marketing: 1.0, seo_aeo: 1.5, brand_tone: 1.5, icp_reader: 1.0,
     anti_ai: 1.5, tahi_voice: 1.5, citations: 1.5, originality: 1.2,
+  },
+}
+
+/**
+ * Bucket-aware overlays applied AFTER the intent default. The 70/20/10
+ * mix (generic / novel / data) shifts which reviewers are strictest:
+ * originality stricter on novel, accessibility + legal_risk stricter on
+ * data (proprietary numbers must be defensible), numeric_claims +
+ * citations stricter on data. Strategist's explicit voiceWeights still
+ * override these — they're a sensible default per bucket.
+ */
+export const BUCKET_VOICE_WEIGHTS: Record<'generic' | 'novel' | 'data', Partial<Record<ReviewerKey, number>>> = {
+  generic: {
+    // Comparison / definitional / how-to — clarity + completeness over
+    // bombastic originality.
+    seo_aeo: 1.5, featured_snippet: 1.5, voice_search: 1.3,
+    citations: 1.3, internal_links: 1.3, originality: 1.0,
+    skim_test: 1.3, visual_layout: 1.3, numeric_claims: 1.2,
+  },
+  novel: {
+    // Opinion / contrarian / strategic — originality is the WHOLE point.
+    originality: 1.8, unique_angle: 1.5, counter_argument: 1.5,
+    anti_ai: 1.8, tahi_voice: 1.8, brand_tone: 1.5, hook: 1.5,
+    emotional_resonance: 1.3, numeric_claims: 1.0,
+  },
+  data: {
+    // Proprietary scrape-and-analyse — every number must be defensible.
+    citations: 1.8, legal_risk: 1.5, accessibility: 1.2,
+    originality: 1.5, numeric_claims: 1.8, internal_links: 1.0,
+    counter_argument: 1.3,
   },
 }

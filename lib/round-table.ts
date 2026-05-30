@@ -249,8 +249,16 @@ async function stageStrategise(database: Database, draft: DraftRow): Promise<Sta
     parse: parseStrategist,
   })
 
-  // Apply default weights for this intent, then layer Strategist overrides on top.
-  const effectiveWeights = { ...(DEFAULT_VOICE_WEIGHTS[result.intent] ?? {}), ...result.voiceWeights }
+  // Three layers, last wins: intent defaults < content-bucket overlay
+  // (generic/novel/data) < strategist's explicit per-article weights.
+  // Bucket overlays operationalise the 70/20/10 mix — originality is
+  // strict on novel, citations + numeric_claims strict on data, etc.
+  const { BUCKET_VOICE_WEIGHTS } = await import('@/lib/round-table-reviewers')
+  const effectiveWeights = {
+    ...(DEFAULT_VOICE_WEIGHTS[result.intent] ?? {}),
+    ...(BUCKET_VOICE_WEIGHTS[result.contentBucket] ?? {}),
+    ...result.voiceWeights,
+  }
 
   await database.update(schema.contentDrafts).set({
     title: result.workingTitle,
@@ -910,7 +918,7 @@ function computeBucketScores(reviews: Array<{ key: string; score: number | null 
     aeo:        { keys: ['seo_aeo', 'featured_snippet', 'voice_search', 'citations', 'internal_links'], max: 25 },
     voice:      { keys: ['brand_tone', 'tahi_voice', 'anti_ai', 'hook', 'emotional_resonance'],         max: 25 },
     readability:{ keys: ['pacing', 'skim_test', 'mobile_reading', 'visual_layout'],                     max: 20 },
-    seo:        { keys: ['originality', 'unique_angle', 'counter_argument', 'icp_reader'],              max: 20 },
+    seo:        { keys: ['originality', 'unique_angle', 'counter_argument', 'icp_reader', 'numeric_claims'], max: 20 },
   }
   const scoreByKey = new Map<string, number>()
   for (const r of reviews) {

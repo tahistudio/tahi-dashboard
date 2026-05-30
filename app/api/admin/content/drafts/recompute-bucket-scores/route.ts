@@ -22,7 +22,7 @@ const BUCKETS: Record<'aeo' | 'voice' | 'readability' | 'seo', { keys: string[];
   aeo:         { keys: ['seo_aeo', 'featured_snippet', 'voice_search', 'citations', 'internal_links'], max: 25 },
   voice:       { keys: ['brand_tone', 'tahi_voice', 'anti_ai', 'hook', 'emotional_resonance'],         max: 25 },
   readability: { keys: ['pacing', 'skim_test', 'mobile_reading', 'visual_layout'],                     max: 20 },
-  seo:         { keys: ['originality', 'unique_angle', 'counter_argument', 'icp_reader'],              max: 20 },
+  seo:         { keys: ['originality', 'unique_angle', 'counter_argument', 'icp_reader', 'numeric_claims'], max: 20 },
 }
 
 function computeBucketScores(reviews: Array<{ key: string; score: number | null | undefined }>): { aeo: number; voice: number; readability: number; seo: number } {
