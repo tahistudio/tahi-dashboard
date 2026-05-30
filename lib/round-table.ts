@@ -754,6 +754,19 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
     if (compSani.removed.length > 0) {
       console.warn(`Stripped ${compSani.removed.length} competitor-agency links from draft ${draft.id}`)
     }
+    // Deterministic AI-tell sanitizer — hard-blocks Tier 1 banned words
+    // (delve, leverage, robust, em-dash etc) that leaked past the
+    // probabilistic LLM reviewers. Catches what the writer + editor
+    // didn't. Source list = AI Writing Tells doc.
+    try {
+      const { sanitizeAiTells } = await import('@/lib/ai-tell-sanitizer')
+      const aiSani = sanitizeAiTells(cleanMarkdown)
+      cleanMarkdown = aiSani.markdown
+      if (aiSani.totalChanges > 0) {
+        console.log(`Stripped ${aiSani.totalChanges} AI tells from draft ${draft.id}: ${aiSani.stripped.length} pattern strips, ${aiSani.replacements.length} word swaps`)
+      }
+    } catch (err) { console.error('AI tell sanitize failed', err) }
+
     // Auto-link first-mention of every live glossary term to its term
     // page. This is the Investopedia mechanic — over time every term
     // page accumulates inbound internal PageRank from every article
