@@ -145,18 +145,27 @@ export async function POST(
       console.error('Pre-publish finalize failed', err)
     }
 
-    // HARD GATE: validate the regenerated schema. Any error-severity
-    // issue blocks the publish. The goal is 0 errors on every post.
+    // HARD GATE: validate the regenerated schema. Any error blocks
+    // both live publish and Save-as-Draft (we don't want to stage a
+    // broken Webflow item either). The UI surfaces the error list +
+    // offers Auto-fix that hits /repair-schema. Missing-image errors
+    // are tolerated at draft time because cover is backfilled at
+    // publish.
     try {
       const { validateJsonLd } = await import('@/lib/schema-validate')
       const validation = validateJsonLd(draft.schemaJsonLd ?? '')
-      if (!validation.valid) {
+      const isDraftMode = body.mode === 'draft'
+      const significantErrors = isDraftMode
+        ? validation.errors.filter(e => !/image/i.test(e.field) && !/image/i.test(e.message))
+        : validation.errors
+      if (significantErrors.length > 0) {
         return NextResponse.json({
-          error: 'Schema validation failed — fix before publishing.',
-          errorCount: validation.errors.length,
+          error: `Schema has ${significantErrors.length} validation error${significantErrors.length === 1 ? '' : 's'}. Click Auto-fix to repair.`,
+          errorCount: significantErrors.length,
           warningCount: validation.warnings.length,
-          errors: validation.errors,
+          errors: significantErrors,
           warnings: validation.warnings,
+          canAutoFix: true,
         }, { status: 422 })
       }
     } catch (err) {

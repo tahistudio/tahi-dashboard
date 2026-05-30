@@ -143,6 +143,8 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   const [scheduleDate, setScheduleDate] = useState('')
   const [publishMsg, setPublishMsg] = useState<string | null>(null)
   const [coverUrlInput, setCoverUrlInput] = useState('')
+  const [schemaErrors, setSchemaErrors] = useState<Array<{ severity: string; node: string; field: string; message: string }>>([])
+  const [repairing, setRepairing] = useState(false)
 
   const fetchSnapshot = useCallback(async () => {
     try {
@@ -400,15 +402,25 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   async function publishToWebflow(mode: 'draft' | 'now' | 'auto' | 'custom', customDate?: string) {
     setPublishing(mode)
     setPublishMsg(null)
+    setSchemaErrors([])
     try {
       const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}/publish`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode, customDate }),
       })
-      const json = await res.json() as { publishUrl?: string; webflowItemId?: string; scheduledFor?: string; publishedAt?: string | null; error?: string; detail?: string }
+      const json = await res.json() as {
+        publishUrl?: string; webflowItemId?: string; scheduledFor?: string; publishedAt?: string | null;
+        error?: string; detail?: string;
+        canAutoFix?: boolean; errors?: Array<{ severity: string; node: string; field: string; message: string }>;
+      }
       if (!res.ok) {
-        setPublishMsg(`Failed: ${json.error ?? ''}${json.detail ? ' — ' + json.detail : ''}`)
+        if (res.status === 422 && json.canAutoFix && Array.isArray(json.errors)) {
+          setSchemaErrors(json.errors)
+          setPublishMsg(json.error ?? 'Schema validation failed.')
+        } else {
+          setPublishMsg(`Failed: ${json.error ?? ''}${json.detail ? ' — ' + json.detail : ''}`)
+        }
         return
       }
       if (mode === 'draft') setPublishMsg(`Saved to Webflow as a draft (item ${json.webflowItemId}). Publish it from Webflow or here when ready.`)
@@ -419,6 +431,33 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
       setPublishMsg(`Failed: ${err instanceof Error ? err.message : 'error'}`)
     } finally {
       setPublishing(null)
+    }
+  }
+
+  async function repairSchema() {
+    setRepairing(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}/repair-schema`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      const json = await res.json() as {
+        ok?: boolean; errorsBefore?: number; errorsAfter?: number; fixed?: number;
+        remaining?: Array<{ severity: string; node: string; field: string; message: string }>;
+        message?: string;
+      }
+      if (json.ok) {
+        setSchemaErrors([])
+        setPublishMsg(`Schema repaired: fixed ${json.fixed ?? 0} error${json.fixed === 1 ? '' : 's'}. Try again.`)
+      } else {
+        setSchemaErrors(json.remaining ?? [])
+        setPublishMsg(json.message ?? `Auto-fix only partially worked — ${(json.remaining ?? []).length} error${(json.remaining ?? []).length === 1 ? '' : 's'} need a code fix.`)
+      }
+      await fetchSnapshot()
+    } catch (err) {
+      setPublishMsg(`Auto-fix failed: ${err instanceof Error ? err.message : 'error'}`)
+    } finally {
+      setRepairing(false)
     }
   }
 
@@ -867,6 +906,36 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
             <p style={{ fontSize: '0.8125rem', color: 'var(--color-text)', margin: '0.625rem 0 0', wordBreak: 'break-word' }}>
               {publishMsg}
             </p>
+          )}
+          {schemaErrors.length > 0 && (
+            <div
+              style={{
+                marginTop: '0.75rem',
+                padding: '0.875rem 1rem',
+                border: '1px solid var(--color-danger)',
+                borderRadius: 'var(--radius-leaf-sm)',
+                background: 'var(--color-danger-bg, #fef2f2)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                <strong style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>
+                  {schemaErrors.length} schema error{schemaErrors.length === 1 ? '' : 's'}
+                </strong>
+                <TahiButton size="sm" loading={repairing} onClick={() => { void repairSchema() }}>
+                  Auto-fix
+                </TahiButton>
+              </div>
+              <ul style={{ listStyle: 'disc', paddingLeft: '1.25rem', margin: 0, fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                {schemaErrors.slice(0, 8).map((e, i) => (
+                  <li key={i} style={{ marginBottom: '0.25rem' }}>
+                    <code style={{ fontSize: '0.6875rem', color: 'var(--color-text)' }}>{e.node}.{e.field}</code> — {e.message}
+                  </li>
+                ))}
+                {schemaErrors.length > 8 && (
+                  <li style={{ fontStyle: 'italic' }}>+ {schemaErrors.length - 8} more</li>
+                )}
+              </ul>
+            </div>
           )}
         </Card>
       )}
