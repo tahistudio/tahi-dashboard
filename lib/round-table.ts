@@ -26,7 +26,7 @@
  * status with an estimate of what completion would have cost.
  */
 
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { claudeJson, CostCapExceededError } from '@/lib/anthropic-cost'
@@ -664,21 +664,24 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
     sbAudit.signoffScore = result.score
     sbAudit.recommendCover = result.recommendCover  // surfaced if Liam applies improvements + wants a cover refresh later
     // Compute the 4-bucket display the Drafts list expects from the
-    // stored audit reviewer rows. Lazy: load latest revision's reviews.
+    // stored audit reviewer rows. Use the highest revisionNumber that
+    // actually has reviewer rows — the latest draft_revisions row may
+    // be a post-editor revision with zero reviews.
     try {
-      const auditRevs = await database
-        .select({ n: schema.draftRevisions.revisionNumber })
-        .from(schema.draftRevisions)
-        .where(eq(schema.draftRevisions.draftId, draft.id))
-      const auditLatestRev = auditRevs.length === 0 ? 1 : Math.max(...auditRevs.map(r => r.n))
-      const auditReviews = await database
-        .select({ reviewerKey: schema.draftReviews.reviewerKey, score: schema.draftReviews.score })
+      const [auditMaxRev] = await database
+        .select({ maxN: sql<number>`MAX(${schema.draftReviews.revisionNumber})` })
         .from(schema.draftReviews)
-        .where(and(
-          eq(schema.draftReviews.draftId, draft.id),
-          eq(schema.draftReviews.revisionNumber, auditLatestRev),
-        ))
-      sbAudit.bucketScores = computeBucketScores(auditReviews.map(r => ({ key: r.reviewerKey, score: r.score })))
+        .where(eq(schema.draftReviews.draftId, draft.id))
+      if (auditMaxRev?.maxN != null) {
+        const auditReviews = await database
+          .select({ reviewerKey: schema.draftReviews.reviewerKey, score: schema.draftReviews.score })
+          .from(schema.draftReviews)
+          .where(and(
+            eq(schema.draftReviews.draftId, draft.id),
+            eq(schema.draftReviews.revisionNumber, auditMaxRev.maxN),
+          ))
+        sbAudit.bucketScores = computeBucketScores(auditReviews.map(r => ({ key: r.reviewerKey, score: r.score })))
+      }
     } catch { /* bucket scores best-effort */ }
     await database.update(schema.contentDrafts).set({
       status: 'audited',

@@ -14,7 +14,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, desc, isNotNull } from 'drizzle-orm'
+import { eq, and, desc, isNotNull, sql } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
 
@@ -67,21 +67,25 @@ export async function POST(req: NextRequest) {
     const hasNonZero = existing && Object.values(existing).some(v => typeof v === 'number' && v > 0)
     if (hasNonZero) { skipped++; continue }
 
-    // Find latest revision
-    const revs = await database
-      .select({ n: schema.draftRevisions.revisionNumber })
-      .from(schema.draftRevisions)
-      .where(eq(schema.draftRevisions.draftId, d.id))
-      .orderBy(desc(schema.draftRevisions.revisionNumber))
-      .limit(1)
-    const latestRev = revs[0]?.n ?? 1
+    // Find the highest revision number that ACTUALLY has reviewer rows.
+    // The latest revision in draft_revisions is usually the editor's
+    // post-merge revision which has 0 reviewer rows (reviews were
+    // against the prior revision); querying draft_reviews directly
+    // for max(revisionNumber) gives us the revision the buckets should
+    // reflect.
+    const [maxRevRow] = await database
+      .select({ maxN: sql<number>`MAX(${schema.draftReviews.revisionNumber})` })
+      .from(schema.draftReviews)
+      .where(eq(schema.draftReviews.draftId, d.id))
+    const reviewRev = maxRevRow?.maxN ?? null
+    if (reviewRev == null) { skipped++; continue }
 
     const reviews = await database
       .select({ reviewerKey: schema.draftReviews.reviewerKey, score: schema.draftReviews.score })
       .from(schema.draftReviews)
       .where(and(
         eq(schema.draftReviews.draftId, d.id),
-        eq(schema.draftReviews.revisionNumber, latestRev),
+        eq(schema.draftReviews.revisionNumber, reviewRev),
       ))
     if (reviews.length === 0) { skipped++; continue }
 
