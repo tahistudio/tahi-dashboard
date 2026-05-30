@@ -338,10 +338,18 @@ export async function POST(
   }
   // FAQ Q/A 1-6. Missing slots stay empty so Webflow doesn't reject the
   // payload over required-but-empty fields.
+  //
+  // Questions are PLAIN TEXT (structurer's stripMarkdownLinksAndTags
+  // sanitiser already cleaned any link wrappers). Answers are RICH
+  // TEXT — convert any markdown the writer left (inline links,
+  // bold, italics) into HTML so Webflow's rich text field renders
+  // them as actual <a> tags + emphasis instead of literal
+  // "[text](url)" strings on the page.
+  const { markdownToHtml: mdToHtml } = await import('@/lib/markdown-render')
   for (let i = 1; i <= 6; i++) {
     const faq = faqs[i - 1]
     fieldData[`faq-question-${i}`] = faq?.q ?? ''
-    fieldData[`faq-answer-${i}`] = faq?.a ?? ''
+    fieldData[`faq-answer-${i}`] = faq?.a ? mdToHtml(faq.a) : ''
   }
 
   // 6) Decide: publish-now vs schedule. 60-second slack window so a user

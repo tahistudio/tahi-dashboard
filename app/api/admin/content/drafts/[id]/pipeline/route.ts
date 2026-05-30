@@ -143,6 +143,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       coverSvgUrl: draft.coverSvgUrl,
       errorMessage: draft.errorMessage,
       stageLockedAt: draft.stageLockedAt,
+      originSource: draft.originSource,
+      auditTargetWebflowId: draft.auditTargetWebflowId,
       createdAt: draft.createdAt,
       updatedAt: draft.updatedAt,
     },

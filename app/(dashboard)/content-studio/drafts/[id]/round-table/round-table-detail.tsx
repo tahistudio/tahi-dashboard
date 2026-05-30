@@ -18,7 +18,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  RefreshCw, ChevronLeft, AlertTriangle, XCircle, CheckCircle2, Play, Pause, FileText, ListChecks, RotateCcw,
+  RefreshCw, ChevronLeft, AlertTriangle, XCircle, CheckCircle2, Play, Pause, FileText, ListChecks, RotateCcw, Sparkles,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
@@ -47,6 +47,8 @@ interface DraftSnapshot {
     coverSvgUrl: string | null
     errorMessage: string | null
     stageLockedAt: string | null
+    originSource: string | null
+    auditTargetWebflowId: string | null
     createdAt: string
     updatedAt: string
   }
@@ -125,6 +127,8 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [forceApproving, setForceApproving] = useState(false)
+  const [improving, setImproving] = useState(false)
+  const [copiedFormat, setCopiedFormat] = useState<'markdown' | 'html' | null>(null)
   const [approvingBrief, setApprovingBrief] = useState(false)
   const [rejectingBrief, setRejectingBrief] = useState(false)
   const [rejectFeedback, setRejectFeedback] = useState('')
@@ -246,6 +250,38 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
       alert(err instanceof Error ? err.message : 'Failed to reject brief')
     } finally {
       setRejectingBrief(false)
+    }
+  }
+
+  async function applyImprovement() {
+    setImproving(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/audits/${draftId}/improve`), { method: 'POST' })
+      const j = await res.json().catch(() => ({})) as { ok?: boolean; error?: string; prevScore?: number; newScore?: number; delta?: number; newRevisionNumber?: number; costCents?: number }
+      if (!res.ok || !j.ok) {
+        alert(j.error ?? 'Failed to apply improvement')
+        return
+      }
+      await fetchSnapshot()
+      alert(`Improvement applied. Score ${j.prevScore} → ${j.newScore} (Δ ${j.delta && j.delta >= 0 ? '+' : ''}${j.delta}). New revision: ${j.newRevisionNumber}. Cost: $${((j.costCents ?? 0) / 100).toFixed(2)}.`)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to apply improvement')
+    } finally {
+      setImproving(false)
+    }
+  }
+
+  async function copyBody(format: 'markdown' | 'html') {
+    if (!data) return
+    const currentRev = data.revisions.find(r => r.revisionNumber === selectedRevision) ?? data.revisions[data.revisions.length - 1]
+    if (!currentRev) return
+    const text = format === 'markdown' ? (currentRev.bodyMarkdown ?? '') : currentRev.bodyHtml
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedFormat(format)
+      setTimeout(() => setCopiedFormat(null), 1500)
+    } catch {
+      alert('Copy failed — clipboard permission may be blocked.')
     }
   }
 
@@ -520,6 +556,17 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
             style={{ marginLeft: 'auto' }}
           >
             Force approve & continue
+          </TahiButton>
+        )}
+        {draft.status === 'audited' && draft.originSource === 'legacy_audit' && (
+          <TahiButton
+            size="sm"
+            onClick={() => { void applyImprovement() }}
+            loading={improving}
+            iconLeft={!improving ? <Sparkles className="w-3.5 h-3.5" /> : undefined}
+            style={{ marginLeft: 'auto' }}
+          >
+            {improving ? 'Applying…' : 'Apply improvements'}
           </TahiButton>
         )}
         <TahiButton
@@ -1132,6 +1179,25 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
               By Liam, Co-founder · Tahi Studio
             </p>
             <div style={{ height: '1px', background: 'var(--color-border-subtle)', margin: '0 0 1.5rem', maxWidth: '44rem' }} />
+
+            {/* Copy buttons — quick lift of body markdown or HTML to clipboard */}
+            <div style={{ display: 'flex', gap: '0.375rem', marginBottom: '1rem', maxWidth: '44rem', flexWrap: 'wrap' }}>
+              <TahiButton
+                size="sm"
+                variant="secondary"
+                onClick={() => { void copyBody('markdown') }}
+                iconLeft={<FileText className="w-3.5 h-3.5" />}
+              >
+                {copiedFormat === 'markdown' ? 'Copied!' : 'Copy markdown'}
+              </TahiButton>
+              <TahiButton
+                size="sm"
+                variant="secondary"
+                onClick={() => { void copyBody('html') }}
+              >
+                {copiedFormat === 'html' ? 'Copied!' : 'Copy HTML'}
+              </TahiButton>
+            </div>
 
             {/* Body */}
             <div
