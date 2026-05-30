@@ -59,9 +59,17 @@ export function validateJsonLd(jsonLdString: string): SchemaValidationResult {
     (severity === 'error' ? errors : warnings).push({ severity, node, field, message })
   }
 
+  // The generator wraps output in <script type="application/ld+json">
+  // for Webflow's CMS field. Strip the wrapper before parsing so the
+  // validator works on either raw JSON or the Webflow-ready string.
+  const stripped = jsonLdString
+    .replace(/<script[^>]*type=["']application\/ld\+json["'][^>]*>/i, '')
+    .replace(/<\/script>\s*$/i, '')
+    .trim()
+
   let parsed: unknown
   try {
-    parsed = JSON.parse(jsonLdString)
+    parsed = JSON.parse(stripped)
   } catch (err) {
     return {
       valid: false,
