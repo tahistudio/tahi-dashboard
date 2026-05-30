@@ -43,6 +43,19 @@ export interface StrategistOutput {
    *   data     = proprietary scrape-and-analyse pieces (~10%)
    *  Reviewers calibrate by bucket (originality stricter on novel). */
   contentBucket: 'generic' | 'novel' | 'data'
+  /** REQUIRED. The information-gain delta — what does THIS article add
+   *  that the top 10 SERP results for the target keyword DON'T already
+   *  cover? Three specific items. Writer must hit these; originality
+   *  reviewer verifies they're actually in the body. The single biggest
+   *  lever against Google's March 2026 information-gain ranking signal. */
+  whatsNetNew: string[]
+  /** OPTIONAL but heavily encouraged. A first-hand operator anecdote
+   *  the writer should weave in — one specific moment from a client
+   *  engagement, named where possible. LLMs can't synthesise these;
+   *  they're the strongest E-E-A-T signal a small agency can ship.
+   *  Permission considerations: only include if the client has agreed
+   *  to be referenced, OR anonymise to 'a UK fintech client' etc. */
+  operatorAnecdote?: string | null
   workingTitle: string
   angle: string                           // one-liner of the unique angle
   targetWordCount: number
@@ -64,6 +77,8 @@ export interface StrategistOutput {
 export const STRATEGIST_SYSTEM = `You are the Senior Content Strategist at Tahi Studio, a Webflow agency. You sit at the head of the round table. Your job is to read the research brief + the working title and set the per-article brief that all downstream roles (writer + 23 reviewers + editor + sign-off) will execute against.
 
 You decide:
+- whatsNetNew: REQUIRED. List THREE specific things THIS article will add that the top 10 SERP results for the target keyword don't already cover. Each must be a concrete claim, data point, framework, or insight — not a generic angle. Examples of acceptable items: "An actual cost breakdown across 5 Webflow agencies (figures Tahi gathered)", "Three specific failure modes from Tahi's enterprise migration work", "A diagram of the CMS structure that allows X". Examples of UNACCEPTABLE items: "A unique perspective", "Tahi's take", "More depth than competitors". The writer's prompt repeats these three back at them and the originality reviewer verifies they're in the body.
+- operatorAnecdote: OPTIONAL but heavily preferred. One first-hand operator moment from Tahi's client work, named where the client has been quoted publicly OR anonymised to 'a UK fintech client' / 'a NZ B2B SaaS' etc. Skip ONLY when the topic genuinely has no operator angle. LLMs can't synthesise these; they're the strongest E-E-A-T signal a small agency can ship. Never invent one.
 - The funnel intent (one of: tofu_educational, mofu_comparison, bofu_conversion, how_to, thought_leadership, listicle, case_study, refresh)
 - The AUTHOR ('liam' or 'staci'). Liam writes marketing, business, engineering, CEO-shaped, agency-ops, technical, and strategic topics. Staci is Creative Director — she writes design things, brand, craft, visual/UX, and anything with a strong human-touch / first-person creative angle. Pick based on the article's centre of gravity.
 - The contentBucket ('generic' | 'novel' | 'data') per Tahi's 70/20/10 mix:
@@ -125,6 +140,8 @@ Respond with ONE JSON object only, matching this shape (no markdown fences):
   "priority": "standard|high",
   "author": "liam|staci",
   "contentBucket": "generic|novel|data",
+  "whatsNetNew": ["specific net-new item 1 (concrete claim, data, or framework)", "specific net-new item 2", "specific net-new item 3"],
+  "operatorAnecdote": "optional: one first-hand client/operator moment Tahi can authentically write, anonymised if needed, or null if the topic has no operator angle",
   "workingTitle": "the refined title to draft against",
   "angle": "one-sentence angle that differentiates this from the SERP",
   "targetWordCount": number,
@@ -155,11 +172,18 @@ export function parseStrategist(raw: string): StrategistOutput {
   const author: 'liam' | 'staci' = parsed.author === 'staci' ? 'staci' : 'liam'
   const contentBucket: 'generic' | 'novel' | 'data' =
     parsed.contentBucket === 'novel' || parsed.contentBucket === 'data' ? parsed.contentBucket : 'generic'
+  const whatsNetNew = Array.isArray(parsed.whatsNetNew)
+    ? parsed.whatsNetNew.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).slice(0, 5)
+    : []
+  const operatorAnecdote = typeof parsed.operatorAnecdote === 'string' && parsed.operatorAnecdote.trim().length > 0
+    ? parsed.operatorAnecdote.trim() : null
   return {
     intent: parsed.intent,
     priority: parsed.priority ?? 'standard',
     author,
     contentBucket,
+    whatsNetNew,
+    operatorAnecdote,
     workingTitle: parsed.workingTitle,
     angle: parsed.angle,
     targetWordCount: parsed.targetWordCount,
@@ -271,7 +295,23 @@ Universal voice rules that apply to every Tahi article:
 
 You will receive a brief from the Strategist. Follow it precisely: hit the heading outline, the word target ±15%, the primary keyword in the first 100 words + title + first H2, the FAQ count, and the schema requirements.
 
-Output the body as MARKDOWN ONLY (## headings, **bold**, [links](url), - lists, > quotes). Do not output HTML — it's rendered downstream. Keeping output to markdown alone is critical so the JSON response doesn't truncate.`
+## AEO + ranking mandates (apply to EVERY article)
+
+1. **whatsNetNew** — the strategist's brief lists 3 specific things this article must add that the SERP doesn't. EACH must appear as a concrete claim or section in the body, not a vague gesture. The originality reviewer verifies this.
+
+2. **operatorAnecdote** — if the brief includes one, weave it into the body as a named (or anonymised) first-hand moment. Use phrasing like "In a recent Tahi engagement with a UK fintech client, X happened" or "When we rebuilt Glasswall on Webflow, the conversion lift was Y%". Never invent client details; only use what the brief gave you.
+
+3. **Specific numbers, not vague qualifiers** — at least 3 specific verifiable numbers per article. NOT "many agencies", "significant improvement", "various tools". USE "11 of the 23 agencies surveyed", "47% conversion lift in 90 days", "$2,400 monthly retainer". Source the numbers from the research brief.
+
+4. **Q-shaped H2s wherever the structure admits it** — write H2s as questions where natural, not statements. "What is Webflow CMS?" beats "Webflow CMS overview". Matches how AI Overviews fan out into sub-queries. (Not every H2 — but the body should have 2-4 question-shaped H2s.)
+
+5. **Comparison table where the topic admits one** — if the article compares 2+ options (platforms, agencies, pricing, approaches), produce a markdown table. AI engines extract 3x more from tables vs prose for comparison queries.
+
+6. **"Common mistakes" numbered list where applicable** — for how-to and educational posts, include a numbered "Common mistakes" or "What goes wrong" section. Disproportionately cited by AI engines for "How NOT to X" queries.
+
+7. **Auto-link named tools on FIRST mention** — when the body first mentions Webflow, Figma, Stripe, Cursor, Lovable, HubSpot, Notion, Linear, Vercel, Cloudflare, Finsweet, Memberstack, Outseta, WordPress, Squarespace, Wix, Framer, or any other named SaaS/tool, link to its official site. Later mentions stay plain text. This feeds the schema engine that auto-detects tool mentions; consistency matters.
+
+Output the body as MARKDOWN ONLY (## headings, **bold**, [links](url), - lists, > quotes, | tables |). Do not output HTML — it's rendered downstream. Keeping output to markdown alone is critical so the JSON response doesn't truncate.`
 
 export function buildWriterPrompt(input: {
   brief: StrategistOutput

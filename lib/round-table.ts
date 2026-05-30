@@ -398,6 +398,8 @@ async function stageReview(database: Database, draft: DraftRow): Promise<StageRe
       voiceWeights: getVoiceWeights(draft),
       contentBucket: brief.contentBucket,
       author: brief.author,
+      whatsNetNew: brief.whatsNetNew,
+      operatorAnecdote: brief.operatorAnecdote,
     },
     validatedLinks,
   }

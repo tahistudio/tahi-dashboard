@@ -109,6 +109,13 @@ export interface ReviewerContext {
     contentBucket?: 'generic' | 'novel' | 'data'
     /** Author byline picked by the strategist — for voice-aware critique. */
     author?: 'liam' | 'staci'
+    /** Three things the strategist promised this article would add that
+     *  the top-10 SERP doesn't. Originality reviewer verifies each is
+     *  in the body. */
+    whatsNetNew?: string[]
+    /** Optional operator anecdote the writer should weave in. Originality
+     *  + voice reviewers verify it appears when present. */
+    operatorAnecdote?: string | null
   }
   /** Optional brand voice docs — only passed to reviewers that need them
    *  to keep token cost down. */
@@ -158,6 +165,7 @@ Funnel intent: ${ctx.brief.intent}
 Target word count: ${ctx.brief.targetWordCount}
 ${bucketLine}
 Author byline: ${ctx.brief.author ?? 'liam'}
+${ctx.brief.whatsNetNew && ctx.brief.whatsNetNew.length > 0 ? `\nWhat's net-new this article must add (originality reviewer verifies each is in body):\n${ctx.brief.whatsNetNew.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}` : ''}${ctx.brief.operatorAnecdote ? `\nOperator anecdote the writer should weave in: ${ctx.brief.operatorAnecdote}` : ''}
 
 ## Body (markdown)
 
@@ -368,7 +376,8 @@ Calibrate by content bucket (stated in the draft brief):
 - DATA bucket: bar is HIGHEST on novelty (the whole point is original numbers) — hard_fail if the data isn't proprietary or verifiable.
 
 Check specifically:
-- Does the post contain at least one falsifiable, first-hand or operator-experience claim ("we tried X, here's what happened", "in 14 client engagements, the pattern was Y", concrete numbers from real engagements)? Generic AI content fails this.
+- whatsNetNew check: the strategist's brief declared THREE specific things this article must add that the top-10 SERP doesn't. Verify EACH appears as a concrete claim, section, or example in the body. If any are missing OR present only as a vague gesture, soft_fail and list the missing items. If all three are vague gestures, hard_fail. This is the single most load-bearing check against the March 2026 information-gain ranking signal.
+- Does the post contain at least one falsifiable, first-hand or operator-experience claim ("we tried X, here's what happened", "in 14 client engagements, the pattern was Y", concrete numbers from real engagements)? If the brief included an operatorAnecdote, verify it's been weaved in. Generic AI content fails this.
 - Are statistics tied to NAMED sources via inline links, or vague ("studies show", "many experts agree")? Vague = soft_fail.
 - Is the structure/order/framing meaningfully different from the SERP's median, or is it the typical "What is X / Benefits of X / How to do X / Conclusion" layout?
 - Is there at least one example, comparison, or claim a reader could NOT find by Googling the primary keyword + reading the top 3 results?
