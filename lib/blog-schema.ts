@@ -163,6 +163,9 @@ interface AuthorProfile {
   linkedinUrl?: string
   xUrl?: string
   nationality?: string
+  /** Legal / alternate name when the byline differs from it. Emitted as
+   *  schema.org `alternateName` so search engines connect the two. */
+  alternateName?: string
 }
 
 /** Fill in real URLs as they're confirmed. Anything left blank / null
@@ -181,6 +184,8 @@ const AUTHOR_PROFILES: Record<string, AuthorProfile> = {
     imageUrl: 'https://cdn.prod.website-files.com/683b25a978bfb921944c89bf/69bb3724f39337cf91c1b072_68a6de99797cec6da2544932_Staci%2520Profile%2520Image.png',
     // linkedinUrl: TODO — paste Staci's LinkedIn here when confirmed.
     nationality: 'New Zealand',
+    // Legal name is Staci Miller; professional byline is Staci Bonnie.
+    alternateName: 'Staci Miller',
   },
 }
 
@@ -601,6 +606,7 @@ function buildPerson(input: SchemaInput): object {
   if (imageUrl) person.image = { '@type': 'ImageObject', url: imageUrl }
   if (sameAs.length > 0) person.sameAs = sameAs
   if (profile?.nationality) person.nationality = { '@type': 'Country', name: profile.nationality }
+  if (profile?.alternateName) person.alternateName = profile.alternateName
   return person
 }
 

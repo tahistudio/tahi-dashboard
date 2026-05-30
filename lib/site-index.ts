@@ -148,14 +148,20 @@ export async function syncSiteIndex(
     unchangedRows: 0, deactivated: 0, errors: 0,
   }
 
-  // 1) Pull sitemap + filter to tahi.studio + cap.
+  // 1) Pull sitemap + filter to tahi.studio + dedupe + cap.
+  // Sitemaps can list the same URL twice (or once with and once without
+  // a trailing slash). Without dedupe, the same URL gets handled twice
+  // in the loop below and the second iteration triggers a UNIQUE error
+  // on site_index.url because existingByUrl was built before the first
+  // INSERT landed.
   let urls: string[]
   try {
     const res = await fetch(SITEMAP_URL, { headers: { 'User-Agent': 'TahiContentBot/1.0' } })
     if (!res.ok) throw new Error(`Sitemap ${res.status}`)
-    urls = parseSitemapXml(await res.text())
-      .filter(u => toRelative(u) !== null)
-      .slice(0, maxPages)
+    urls = Array.from(new Set(
+      parseSitemapXml(await res.text())
+        .filter(u => toRelative(u) !== null)
+    )).slice(0, maxPages)
   } catch (err) {
     throw new Error(`Sitemap fetch failed: ${err instanceof Error ? err.message : String(err)}`)
   }
@@ -219,17 +225,39 @@ export async function syncSiteIndex(
       // New URL — fetch summary + embedding, insert.
       const summary = await summarisePage(database, url, page.title, page.bodyText)
       const embedding = await safeEmbed(`${page.title ?? ''}\n${summary}`)
-      await database.insert(schema.siteIndex).values({
-        id: crypto.randomUUID(),
-        url, relativeUrl, type,
-        title: page.title,
-        summary, contentHash,
-        lastSeenAt: now,
-        summarisedAt: summary ? now : null,
-        isActive: 1,
-        embedding,
-        createdAt: now, updatedAt: now,
-      })
+      const newId = crypto.randomUUID()
+      try {
+        await database.insert(schema.siteIndex).values({
+          id: newId,
+          url, relativeUrl, type,
+          title: page.title,
+          summary, contentHash,
+          lastSeenAt: now,
+          summarisedAt: summary ? now : null,
+          isActive: 1,
+          embedding,
+          createdAt: now, updatedAt: now,
+        })
+        // Backstop: if a parallel writer raced us between the SELECT
+        // and INSERT (or the sitemap had a sneaky duplicate the dedupe
+        // above missed), fall through to update by URL instead of
+        // crashing the whole sync.
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (/UNIQUE/i.test(msg) && /url/i.test(msg)) {
+          await database.update(schema.siteIndex).set({
+            type, title: page.title, summary, contentHash,
+            lastSeenAt: now,
+            summarisedAt: summary ? now : null,
+            isActive: 1, embedding, updatedAt: now,
+          }).where(eq(schema.siteIndex.url, url))
+        } else {
+          throw err
+        }
+      }
+      // Update the in-memory map so subsequent iterations of this same
+      // sync don't re-hit the insert branch.
+      existingByUrl.set(url, { id: newId, url, contentHash, lastSeenAt: now })
       result.newRows++
     } else if (prev.contentHash !== contentHash) {
       // Changed — re-summarise + re-embed.
@@ -306,15 +334,30 @@ export async function upsertSiteIndexEntry(
     }).where(eq(schema.siteIndex.id, prev.id))
     return { ok: true, fresh: false, title: page.title, summary }
   }
-  await database.insert(schema.siteIndex).values({
-    id: crypto.randomUUID(),
-    url, relativeUrl, type,
-    title: page.title, summary, contentHash,
-    lastSeenAt: now, summarisedAt: summary ? now : null,
-    isActive: 1, embedding,
-    createdAt: now, updatedAt: now,
-  })
-  return { ok: true, fresh: true, title: page.title, summary }
+  try {
+    await database.insert(schema.siteIndex).values({
+      id: crypto.randomUUID(),
+      url, relativeUrl, type,
+      title: page.title, summary, contentHash,
+      lastSeenAt: now, summarisedAt: summary ? now : null,
+      isActive: 1, embedding,
+      createdAt: now, updatedAt: now,
+    })
+    return { ok: true, fresh: true, title: page.title, summary }
+  } catch (err) {
+    // Race with another writer: row appeared between our SELECT and
+    // INSERT. Update by URL instead of crashing.
+    const msg = err instanceof Error ? err.message : String(err)
+    if (/UNIQUE/i.test(msg) && /url/i.test(msg)) {
+      await database.update(schema.siteIndex).set({
+        type, title: page.title, summary, contentHash,
+        lastSeenAt: now, summarisedAt: summary ? now : null,
+        isActive: 1, embedding, updatedAt: now,
+      }).where(eq(schema.siteIndex.url, url))
+      return { ok: true, fresh: false, title: page.title, summary }
+    }
+    throw err
+  }
 }
 
 /** Find the top-N most semantically related LIVE blog posts to a given
