@@ -89,6 +89,27 @@ interface GeneratedEntry {
   stages: Array<{ name: string; costCents: number; notes?: string }>
 }
 
+interface UnderperformingItem {
+  itemId: string
+  slug: string
+  term: string
+  url: string
+  impressions30d: number
+  clicks30d: number
+  avgPosition30d: number | null
+  ctr: number
+  underperformanceScore: number
+  reason: string
+  indexStatus: string | null
+}
+
+interface UnderperformerRanking {
+  scanned: number
+  underperformers: UnderperformingItem[]
+  unindexedItems: UnderperformingItem[]
+  durationMs: number
+}
+
 interface AuditResult {
   term?: string
   definitionClarity: number
@@ -149,7 +170,6 @@ export function BackfillContent() {
   const [bulkRunning, setBulkRunning] = useState<ContentType | 'all' | null>(null)
   const [bulkProgress, setBulkProgress] = useState<{ processed: number; total: number } | null>(null)
   const [perItemRunning, setPerItemRunning] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [settings, setSettings] = useState<BackfillSettings>({ autoBackfillEnabled: false, autoRewriteBody: false, glossaryDefaultTier: 'schema', glossaryAutoPublish: false })
   const [newTermInput, setNewTermInput] = useState('')
   const [newTermAuthor, setNewTermAuthor] = useState<'liam' | 'staci' | 'auto'>('auto')
@@ -159,6 +179,10 @@ export function BackfillContent() {
   const [auditModalFor, setAuditModalFor] = useState<string | null>(null)
   const [auditResult, setAuditResult] = useState<AuditResult | null>(null)
   const [auditing, setAuditing] = useState(false)
+  const [underperformers, setUnderperformers] = useState<UnderperformerRanking | null>(null)
+  const [loadingUnderperformers, setLoadingUnderperformers] = useState(false)
+  const [agentRunning, setAgentRunning] = useState<string | null>(null)
+  const [agentResults, setAgentResults] = useState<Record<string, string>>({})
   const [rewriteBodyOnBulk, setRewriteBodyOnBulk] = useState(false)
   const [filterType, setFilterType] = useState<'all' | 'broken' | 'no-schema'>('broken')
 
@@ -360,6 +384,96 @@ export function BackfillContent() {
     }
   }
 
+  async function loadUnderperformers() {
+    setLoadingUnderperformers(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/content/glossary/boost-underperformers?topN=20'))
+      const json = await res.json() as UnderperformerRanking & { error?: string }
+      if (!res.ok) {
+        showToast(`Failed: ${json.error ?? 'unknown'}`, 'error')
+        return
+      }
+      setUnderperformers(json)
+    } catch (err) {
+      showToast(`Failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
+    } finally {
+      setLoadingUnderperformers(false)
+    }
+  }
+
+  async function rewriteUnderperformer(itemId: string, term: string) {
+    if (!confirm(`Run Tier 3 rewrite on "${term}"? Cost ~$0.30. Generates fresh content for review — does NOT publish yet.`)) return
+    setAgentRunning(`rewrite-${itemId}`)
+    try {
+      const res = await fetch(apiPath('/api/admin/content/glossary/generate'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ term, research: true }),
+      })
+      const json = await res.json() as GeneratedEntry & { error?: string }
+      if (!res.ok) {
+        showToast(`Generation failed: ${json.error ?? 'unknown'}`, 'error')
+        return
+      }
+      // Same as upgradeTerm: patch existing item with generated content.
+      const pubRes = await fetch(apiPath('/api/admin/content/glossary/publish'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...json, existingItemId: itemId }),
+      })
+      const pubJson = await pubRes.json() as { ok?: boolean; error?: string; patchedFields?: string[] }
+      if (!pubRes.ok) {
+        showToast(`Publish failed: ${pubJson.error ?? 'unknown'}`, 'error')
+        return
+      }
+      showToast(`Rewritten "${term}" — $${(json.totalCostCents / 100).toFixed(2)} · ${pubJson.patchedFields?.length ?? 0} fields patched`)
+      await loadUnderperformers()
+    } catch (err) {
+      showToast(`Failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
+    } finally {
+      setAgentRunning(null)
+    }
+  }
+
+  async function runAgent(key: 'content-gap-hunt' | 'indexing-reverser' | 'schema-watchdog' | 'post-scorecard-sync' | 'content-auto-backfill') {
+    setAgentRunning(key)
+    setAgentResults(prev => ({ ...prev, [key]: 'Running...' }))
+    try {
+      const path = key === 'post-scorecard-sync'
+        ? '/api/admin/cron/post-scorecard-sync'
+        : `/api/admin/cron/${key}`
+      const res = await fetch(apiPath(path), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const json = await res.json() as Record<string, unknown>
+      // Build a compact human summary from common response shapes.
+      const summary = json.error
+        ? `Failed: ${String(json.error).slice(0, 200)}`
+        : key === 'content-gap-hunt'
+          ? `Created ${json.ideasCreated ?? 0} new ideas (skipped ${json.ideasSkipped ?? 0} dupes)`
+          : key === 'indexing-reverser'
+            ? `Scanned ${json.scanned ?? 0} · ${json.unindexed ?? 0} unindexed · IndexNow ${json.indexNowStatus ?? 'unknown'}`
+            : key === 'schema-watchdog'
+              ? `Scanned ${json.totalScanned ?? 0} · ${json.issues && Array.isArray(json.issues) ? json.issues.length : 0} issues · ${json.autoFixed ?? 0} auto-fixed`
+              : key === 'post-scorecard-sync'
+                ? `Scanned ${json.scanned ?? 0} posts · ${json.updated ?? 0} updated · ${json.inserted ?? 0} new rows · ${json.errors ?? 0} errors`
+                : key === 'content-auto-backfill'
+                  ? `${json.processed ?? json.skipped ?? 'done'}`
+                  : JSON.stringify(json).slice(0, 200)
+      setAgentResults(prev => ({ ...prev, [key]: summary }))
+      if (res.ok) showToast(`${key}: ${summary}`)
+      else showToast(`${key} failed: ${summary}`, 'error')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'error'
+      setAgentResults(prev => ({ ...prev, [key]: `Error: ${msg.slice(0, 100)}` }))
+      showToast(`Failed: ${msg}`, 'error')
+    } finally {
+      setAgentRunning(null)
+    }
+  }
+
   async function saveSettings(next: BackfillSettings) {
     setSettings(next)
     try {
@@ -374,14 +488,6 @@ export function BackfillContent() {
     }
   }
 
-  function toggleExpand(id: string) {
-    setExpanded(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
 
   function filterItems(items: ItemAudit[]): ItemAudit[] {
     if (filterType === 'all') return items
@@ -624,6 +730,145 @@ export function BackfillContent() {
             </select>
           </div>
         </div>
+      </Card>
+
+      {/* Run agents on demand */}
+      <Card>
+        <div style={{ marginBottom: '0.75rem' }}>
+          <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: '0 0 0.25rem' }}>Run agents on demand</h2>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', margin: 0 }}>
+            These also run weekly via cron. Click to fire immediately. Each shows the last result inline.
+          </p>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))', gap: '0.625rem' }}>
+          {[
+            { key: 'content-gap-hunt', label: 'Content gap hunt', desc: 'Propose 8-15 new topic ideas → Ideas backlog', cost: '~$0.05' },
+            { key: 'indexing-reverser', label: 'Indexing reverser', desc: 'GSC URL Inspection + IndexNow ping unindexed', cost: '$0' },
+            { key: 'schema-watchdog', label: 'Schema watchdog', desc: 'Validate every page schema + auto-fix breakages', cost: '$0' },
+            { key: 'post-scorecard-sync', label: 'Refresh GSC + GA4 data', desc: 'Pull latest GSC + GA4 per published URL', cost: '$0' },
+            { key: 'content-auto-backfill', label: 'Auto-backfill broken schema', desc: 'Schema patches on items with missing/invalid markup', cost: '$0' },
+          ].map(a => {
+            const isRunning = agentRunning === a.key
+            const result = agentResults[a.key]
+            return (
+              <div key={a.key} style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-leaf-sm)', padding: '0.75rem', background: 'var(--color-bg)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.375rem', gap: '0.5rem' }}>
+                  <strong style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{a.label}</strong>
+                  <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>{a.cost}</span>
+                </div>
+                <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: '0 0 0.625rem' }}>{a.desc}</p>
+                <TahiButton
+                  size="sm"
+                  variant="secondary"
+                  loading={isRunning}
+                  disabled={!!agentRunning}
+                  onClick={() => { void runAgent(a.key as 'content-gap-hunt' | 'indexing-reverser' | 'schema-watchdog' | 'post-scorecard-sync' | 'content-auto-backfill') }}
+                  iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
+                >
+                  Run now
+                </TahiButton>
+                {result && (
+                  <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', margin: '0.5rem 0 0', fontFamily: 'monospace' }}>
+                    {result}
+                  </p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </Card>
+
+      {/* Boost underperformers */}
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem', gap: '1rem', flexWrap: 'wrap' }}>
+          <div>
+            <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: '0 0 0.25rem' }}>Boost underperforming glossary terms</h2>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', margin: 0, maxWidth: '70ch' }}>
+              Sorted by GSC impressions × (30 - position) so high-impression close-to-page-1 terms rise to the top. Click Rewrite to fire Tier 3 (~$0.30 each) — patches the existing Webflow item with fresh content.
+            </p>
+          </div>
+          <TahiButton size="sm" variant="secondary" loading={loadingUnderperformers} onClick={() => { void loadUnderperformers() }} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+            {underperformers ? 'Refresh' : 'Load list'}
+          </TahiButton>
+        </div>
+
+        {!underperformers && !loadingUnderperformers && (
+          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', margin: '0.625rem 0 0', fontStyle: 'italic' }}>
+            Click Load list to fetch the current underperformer ranking from post_scorecards. Run Refresh GSC + GA4 data above first if scorecards are stale.
+          </p>
+        )}
+
+        {underperformers && (
+          <>
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.75rem' }}>
+              <span>Scanned: <strong style={{ color: 'var(--color-text)' }}>{underperformers.scanned}</strong></span>
+              <span>Underperformers: <strong style={{ color: 'var(--color-text)' }}>{underperformers.underperformers.length}</strong></span>
+              <span>Unindexed: <strong style={{ color: 'var(--color-text)' }}>{underperformers.unindexedItems.length}</strong></span>
+            </div>
+
+            {underperformers.underperformers.length === 0 && underperformers.unindexedItems.length === 0 && (
+              <EmptyState
+                icon={<CheckCircle2 className="w-5 h-5" />}
+                title="No underperformers"
+                description="Either everything is ranking well, or post_scorecards needs a refresh."
+              />
+            )}
+
+            {underperformers.underperformers.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                {underperformers.underperformers.map(item => {
+                  const isRewriting = agentRunning === `rewrite-${item.itemId}`
+                  return (
+                    <div key={item.itemId} style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-leaf-sm)', padding: '0.625rem 0.875rem', background: 'var(--color-bg)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: '14rem' }}>
+                          <div style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>{item.term}</div>
+                          <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
+                            {item.impressions30d} imp · {item.clicks30d} clk · pos {item.avgPosition30d?.toFixed(1) ?? 'n/a'} · {(item.ctr * 100).toFixed(1)}% CTR
+                          </div>
+                          <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', marginTop: '0.125rem', fontStyle: 'italic' }}>
+                            {item.reason}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.375rem', alignItems: 'center' }}>
+                          <a href={item.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <Eye className="w-3 h-3" /> View
+                          </a>
+                          <TahiButton size="sm" loading={isRewriting} disabled={!!agentRunning} onClick={() => { void rewriteUnderperformer(item.itemId, item.term) }} iconLeft={<Sparkles className="w-3.5 h-3.5" />}>
+                            Rewrite
+                          </TahiButton>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {underperformers.unindexedItems.length > 0 && (
+              <div style={{ marginTop: '0.625rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.375rem' }}>
+                  <h3 style={{ fontSize: '0.875rem', fontWeight: 600, margin: 0 }}>Not currently indexed ({underperformers.unindexedItems.length})</h3>
+                  <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
+                    Run Indexing reverser above to ping IndexNow
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  {underperformers.unindexedItems.slice(0, 10).map(item => (
+                    <div key={item.itemId} style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', padding: '0.25rem 0.5rem' }}>
+                      <code>{item.slug}</code> — {item.reason}
+                    </div>
+                  ))}
+                  {underperformers.unindexedItems.length > 10 && (
+                    <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                      +{underperformers.unindexedItems.length - 10} more
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </Card>
 
       {/* Per-item lists */}
