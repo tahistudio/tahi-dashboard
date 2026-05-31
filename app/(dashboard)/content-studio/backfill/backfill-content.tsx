@@ -72,7 +72,7 @@ type ContentType = 'blog' | 'glossary'
 function healthScore(item: ItemAudit): { score: number; tone: 'positive' | 'warning' | 'danger' } {
   // 6 checks, weighted: schema-valid counts double because it gates AEO.
   let score = 0
-  let max = 7
+  const max = 7
   if (item.hasSchema && item.schemaValid === true) score += 2
   if (item.hasFaqSchema) score += 1
   if (item.hasAuthor) score += 1
