@@ -303,6 +303,23 @@ export async function getBlogPostsCollectionId(): Promise<string> {
   return await findCollectionId('Blog Posts')
 }
 
+/** Resolve the Glossaries collection id. Same shape as
+ *  getBlogPostsCollectionId — env override first, then discovery by name.
+ *  Verified collection on tahi.studio: 685a9dbfa89b5a7433b3747c. */
+export async function getGlossaryCollectionId(): Promise<string> {
+  const override = process.env.WEBFLOW_GLOSSARY_COLLECTION_ID
+  if (override) return override
+  return await findCollectionId('Glossaries').catch(() => findCollectionId('Glossary'))
+}
+
+/** Resolve the FAQs collection id. Used when glossary or blog FAQ
+ *  schema needs to reference a real Webflow FAQ item. */
+export async function getFaqsCollectionId(): Promise<string> {
+  const override = process.env.WEBFLOW_FAQ_COLLECTION_ID
+  if (override) return override
+  return await findCollectionId('FAQs').catch(() => findCollectionId('FAQ'))
+}
+
 /**
  * Authors + Categories collection lookup. Returns Maps keyed by slug
  * (lower-case) and — for authors — by lower-case name parts so the

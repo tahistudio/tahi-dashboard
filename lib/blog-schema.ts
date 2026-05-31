@@ -105,89 +105,17 @@ const KNOWN_BRANDS = Object.keys(BRAND_URLS)
  * Per-author `knowsAbout` lists. Falls back to a generic Tahi list when
  * the author isn't recognised.
  */
-const AUTHOR_KNOWS_ABOUT: Record<string, string[]> = {
-  'Liam Miller': [
-    'Enterprise Webflow',
-    'Webflow Development',
-    'B2B SaaS Websites',
-    'Webflow Migration',
-    'Design Systems',
-    'Web Performance',
-    'Headless CMS',
-  ],
-  'Staci Bonnie': [
-    'Web Design',
-    'Brand Identity',
-    'Design Systems',
-    'Webflow Design',
-    'UX Design',
-    'Accessibility',
-    'Sustainable Web Design',
-  ],
-}
+import { AUTHOR_KNOWS_ABOUT, TAHI_KNOWS_ABOUT } from '@/lib/blog-schema-shared'
 
-const TAHI_KNOWS_ABOUT = [
-  'Webflow',
-  'Enterprise Web Design',
-  'Design Systems',
-  'Webflow Migration',
-  'Web Accessibility',
-  'Sustainable Web',
-  'B2B SaaS Websites',
-]
+// Org constants + author profiles now live in blog-schema-shared.ts so
+// the glossary generator can reuse them without duplication.
+import {
+  TAHI_ORG_ID, TAHI_LOGO_URL_CONST, TAHI_FOUNDING_DATE, TAHI_AREAS_SERVED,
+  TAHI_LOCATION_CREATED, TAHI_CONTACT_EMAIL, AUTHOR_PROFILES,
+} from '@/lib/blog-schema-shared'
 
-const TAHI_ORG_ID = 'https://www.tahi.studio/#organization'
 const TAHI_BLOG_ID = 'https://www.tahi.studio/blog'
-
-// ─── Tahi org + author profiles ─────────────────────────────────────────────
-//
-// Edit these constants directly when the real URLs / bios are confirmed.
-// Each undefined / empty value is omitted from the schema so we never ship
-// broken or placeholder URLs. The TAHI_LOGO_URL env var also overrides the
-// default below.
-
-/** Square padded logo asset from Webflow (Apple touch icon). Used by
- *  Google as the Organization.logo image. Env var TAHI_LOGO_URL
- *  overrides this if set. */
-const TAHI_LOGO_URL: string | null = 'https://cdn.prod.website-files.com/68124c3b4cfbe0b7add051c7/684d9a3c28430b73ff22d3e1_Light%20Icon%20with%20Background%20Padding%20(1).png'
-
-const TAHI_FOUNDING_DATE = '2023-01-01'   // adjust if needed
-const TAHI_AREAS_SERVED = ['United Kingdom', 'New Zealand', 'United States', 'Australia']
-const TAHI_LOCATION_CREATED = 'Wellington, New Zealand'
-const TAHI_CONTACT_EMAIL = 'business@tahi.studio'
-
-interface AuthorProfile {
-  jobTitle: string
-  description?: string
-  imageUrl?: string
-  linkedinUrl?: string
-  xUrl?: string
-  nationality?: string
-  /** Legal / alternate name when the byline differs from it. Emitted as
-   *  schema.org `alternateName` so search engines connect the two. */
-  alternateName?: string
-}
-
-/** Fill in real URLs as they're confirmed. Anything left blank / null
- *  is OMITTED from the schema, never emitted as a placeholder. */
-const AUTHOR_PROFILES: Record<string, AuthorProfile> = {
-  'Liam Miller': {
-    jobTitle: 'Co-Founder and CEO',
-    description: 'Co-Founder and CEO of Tahi Studio, a New Zealand Webflow agency. Builds production Webflow sites for B2B SaaS and enterprise marketing teams, with a focus on performance, design systems, and accessibility.',
-    imageUrl: 'https://cdn.prod.website-files.com/683b25a978bfb921944c89bf/69bb3724f39337cf91c1b06c_688dfab3c8e03e6e612141c7_Liam%2520Profile.png',
-    linkedinUrl: 'https://nz.linkedin.com/in/liammillerdev',
-    nationality: 'New Zealand',
-  },
-  'Staci Bonnie': {
-    jobTitle: 'Co-Founder and Head of Design',
-    description: 'Co-Founder and Head of Design at Tahi Studio. Designs brand systems and Webflow templates for enterprise and SaaS clients, with a focus on craft, accessibility, and sustainable web.',
-    imageUrl: 'https://cdn.prod.website-files.com/683b25a978bfb921944c89bf/69bb3724f39337cf91c1b072_68a6de99797cec6da2544932_Staci%2520Profile%2520Image.png',
-    // linkedinUrl: TODO — paste Staci's LinkedIn here when confirmed.
-    nationality: 'New Zealand',
-    // Legal name is Staci Miller; professional byline is Staci Bonnie.
-    alternateName: 'Staci Miller',
-  },
-}
+const TAHI_LOGO_URL = TAHI_LOGO_URL_CONST
 
 /** A Webflow-served image URL (the only kind safe to ship in schema —
  *  Replicate URLs expire). */
