@@ -387,7 +387,7 @@ export function BackfillContent() {
   async function loadUnderperformers() {
     setLoadingUnderperformers(true)
     try {
-      const res = await fetch(apiPath('/api/admin/content/glossary/boost-underperformers?topN=20'))
+      const res = await fetch(apiPath('/api/admin/content/glossary/boost-underperformers?type=all&topN=30'))
       const json = await res.json() as UnderperformerRanking & { error?: string }
       if (!res.ok) {
         showToast(`Failed: ${json.error ?? 'unknown'}`, 'error')

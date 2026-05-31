@@ -29,8 +29,24 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { searchParams } = new URL(req.url)
   const topN = Math.max(1, Math.min(50, parseInt(searchParams.get('topN') ?? '20', 10) || 20))
+  const typeParam = searchParams.get('type')
+  const type: 'glossary' | 'blog' | 'all' = typeParam === 'blog' || typeParam === 'all' ? typeParam : 'glossary'
   const database = await db()
-  const result = await rankUnderperformingItems(database, 'glossary', topN)
+  if (type === 'all') {
+    const [glossary, blog] = await Promise.all([
+      rankUnderperformingItems(database, 'glossary', topN),
+      rankUnderperformingItems(database, 'blog', topN),
+    ])
+    return NextResponse.json({
+      scanned: glossary.scanned + blog.scanned,
+      underperformers: [...glossary.underperformers, ...blog.underperformers]
+        .sort((a, b) => b.underperformanceScore - a.underperformanceScore)
+        .slice(0, topN),
+      unindexedItems: [...glossary.unindexedItems, ...blog.unindexedItems],
+      durationMs: glossary.durationMs + blog.durationMs,
+    })
+  }
+  const result = await rankUnderperformingItems(database, type, topN)
   return NextResponse.json(result)
 }
 

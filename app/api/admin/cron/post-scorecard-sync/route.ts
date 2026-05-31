@@ -56,8 +56,8 @@ export async function POST(req: NextRequest) {
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = (await req.json().catch(() => ({}))) as SyncBody
-  const maxPosts = body.maxPosts ?? 50
-  const budgetMs = body.budgetMs ?? 25_000
+  const maxPosts = body.maxPosts ?? 200    // covers the full 145-URL site comfortably
+  const budgetMs = body.budgetMs ?? 22_000  // leave headroom inside Worker 30s limit
   const t0 = Date.now()
 
   const database = await db()
@@ -152,111 +152,113 @@ export async function POST(req: NextRequest) {
   const endDate = isoDaysAgo(1)
   const nowIso = new Date().toISOString()
 
-  for (const p of posts) {
-    if (Date.now() - t0 > budgetMs) break
-    if (!p.webflowItemId || !p.url) continue
-
+  // Pre-fetch GA4's 30d + 7d sessions report ONCE for the whole site
+  // (was running per-URL × 50 = 100 expensive GA4 calls). One report
+  // returns all pagePaths × sessions; we look up each URL in-memory.
+  const ga4Sessions30Map = new Map<string, number>()
+  const ga4Sessions7Map = new Map<string, number>()
+  if (ga4PropertyId) {
     try {
-      // GSC analytics — filter to this URL.
-      let gscRows7: Array<{ clicks: number; impressions: number; position: number }> = []
-      let gscRows30: Array<{ clicks: number; impressions: number; position: number }> = []
-      if (gscSiteUrl) {
+      const [r30, r7] = await Promise.all([
+        runGa4Report(accessToken, ga4PropertyId, {
+          startDate: startDate30, endDate, dimensions: ['pagePath'], metrics: ['sessions'],
+        }),
+        runGa4Report(accessToken, ga4PropertyId, {
+          startDate: startDate7, endDate, dimensions: ['pagePath'], metrics: ['sessions'],
+        }),
+      ])
+      for (const row of r30) {
+        const path = row.dimensionValues[0]?.value ?? ''
+        if (path) ga4Sessions30Map.set(path, Number(row.metricValues[0]?.value) || 0)
+      }
+      for (const row of r7) {
+        const path = row.dimensionValues[0]?.value ?? ''
+        if (path) ga4Sessions7Map.set(path, Number(row.metricValues[0]?.value) || 0)
+      }
+    } catch (err) { console.error('GA4 batched report failed', err) }
+  }
+
+  // Per-URL GSC work runs in parallel batches of 6 so 50 URLs drain
+  // in ~5-8 batches × 2-3s = under 25s budget. Each batch fires 3
+  // GSC calls × 6 URLs = 18 concurrent requests, well under the GSC
+  // 1200 req/min quota.
+  const CONCURRENCY = 6
+  for (let i = 0; i < posts.length; i += CONCURRENCY) {
+    if (Date.now() - t0 > budgetMs) break
+    const batch = posts.slice(i, i + CONCURRENCY).filter(p => p.webflowItemId && p.url)
+    await Promise.allSettled(batch.map(async p => {
+      try {
+        // GSC analytics + URL inspect in parallel.
         const filter = [{ filters: [{ dimension: 'page', operator: 'equals', expression: p.url }] }]
-        try {
-          gscRows7 = await searchAnalytics(accessToken, gscSiteUrl, {
-            startDate: startDate7, endDate, dimensions: ['date'], dimensionFilterGroups: filter,
-          })
-        } catch { /* keep empty */ }
-        try {
-          gscRows30 = await searchAnalytics(accessToken, gscSiteUrl, {
-            startDate: startDate30, endDate, dimensions: ['date'], dimensionFilterGroups: filter,
-          })
-        } catch { /* keep empty */ }
-      }
-      const sum7 = gscRows7.reduce((a, r) => ({
-        clicks: a.clicks + r.clicks, impressions: a.impressions + r.impressions,
-        position: a.position + r.position * r.impressions,
-      }), { clicks: 0, impressions: 0, position: 0 })
-      const sum30 = gscRows30.reduce((a, r) => ({
-        clicks: a.clicks + r.clicks, impressions: a.impressions + r.impressions,
-        position: a.position + r.position * r.impressions,
-      }), { clicks: 0, impressions: 0, position: 0 })
-      const avgPos7 = sum7.impressions > 0 ? Math.round((sum7.position / sum7.impressions) * 100) : null
-      const avgPos30 = sum30.impressions > 0 ? Math.round((sum30.position / sum30.impressions) * 100) : null
+        const [gscRows7, gscRows30, indexStatusResult] = await Promise.all([
+          gscSiteUrl
+            ? searchAnalytics(accessToken, gscSiteUrl, { startDate: startDate7, endDate, dimensions: ['date'], dimensionFilterGroups: filter }).catch(() => [])
+            : Promise.resolve([]),
+          gscSiteUrl
+            ? searchAnalytics(accessToken, gscSiteUrl, { startDate: startDate30, endDate, dimensions: ['date'], dimensionFilterGroups: filter }).catch(() => [])
+            : Promise.resolve([]),
+          gscSiteUrl
+            ? inspectUrl(accessToken, p.url, gscSiteUrl).catch(() => null)
+            : Promise.resolve(null),
+        ])
+        const sum7 = gscRows7.reduce((a, r) => ({
+          clicks: a.clicks + r.clicks, impressions: a.impressions + r.impressions,
+          position: a.position + r.position * r.impressions,
+        }), { clicks: 0, impressions: 0, position: 0 })
+        const sum30 = gscRows30.reduce((a, r) => ({
+          clicks: a.clicks + r.clicks, impressions: a.impressions + r.impressions,
+          position: a.position + r.position * r.impressions,
+        }), { clicks: 0, impressions: 0, position: 0 })
+        const avgPos7 = sum7.impressions > 0 ? Math.round((sum7.position / sum7.impressions) * 100) : null
+        const avgPos30 = sum30.impressions > 0 ? Math.round((sum30.position / sum30.impressions) * 100) : null
 
-      // URL indexing status.
-      let indexStatus: string | null = null
-      let firstIndexedAt: string | null = null
-      if (gscSiteUrl) {
-        try {
-          const ins = await inspectUrl(accessToken, p.url, gscSiteUrl)
-          indexStatus = ins.indexStatus ?? null
-          firstIndexedAt = ins.lastCrawlTime ?? null
-        } catch { /* skip */ }
-      }
+        // GA4 — pulled from the prefetched map.
+        const pagePath = (() => {
+          try { return new URL(p.url).pathname } catch { return '' }
+        })()
+        const ga4Sessions30 = pagePath ? (ga4Sessions30Map.get(pagePath) ?? 0) : null
+        const ga4Sessions7 = pagePath ? (ga4Sessions7Map.get(pagePath) ?? 0) : null
 
-      // GA4 sessions.
-      let ga4Sessions7: number | null = null
-      let ga4Sessions30: number | null = null
-      if (ga4PropertyId) {
-        try {
-          const pagePath = new URL(p.url).pathname
-          const rep30 = await runGa4Report(accessToken, ga4PropertyId, {
-            startDate: startDate30, endDate,
-            dimensions: ['pagePath'], metrics: ['sessions'],
+        // Upsert.
+        const [existing] = await database
+          .select({ id: schema.postScorecards.id })
+          .from(schema.postScorecards)
+          .where(eq(schema.postScorecards.webflowItemId, p.webflowItemId))
+          .limit(1)
+
+        const row = {
+          webflowItemId: p.webflowItemId,
+          draftId: p.draftId,
+          url: p.url,
+          publishedAt: p.publishedAt,
+          gscIndexStatus: indexStatusResult?.indexStatus ?? null,
+          gscFirstIndexedAt: indexStatusResult?.lastCrawlTime ?? null,
+          gscImpressions7d: sum7.impressions || null,
+          gscClicks7d: sum7.clicks || null,
+          gscAvgPosition7d: avgPos7,
+          gscImpressions30d: sum30.impressions || null,
+          gscClicks30d: sum30.clicks || null,
+          gscAvgPosition30d: avgPos30,
+          ga4Sessions7d: ga4Sessions7,
+          ga4Sessions30d: ga4Sessions30,
+          updatedAt: nowIso,
+        }
+        if (existing) {
+          await database.update(schema.postScorecards).set(row)
+            .where(eq(schema.postScorecards.id, existing.id))
+          updated++
+        } else {
+          await database.insert(schema.postScorecards).values({
+            id: crypto.randomUUID(),
+            createdAt: nowIso,
+            ...row,
           })
-          ga4Sessions30 = rep30
-            .filter(r => r.dimensionValues[0]?.value === pagePath)
-            .reduce((a, r) => a + (Number(r.metricValues[0]?.value) || 0), 0)
-          const rep7 = await runGa4Report(accessToken, ga4PropertyId, {
-            startDate: startDate7, endDate,
-            dimensions: ['pagePath'], metrics: ['sessions'],
-          })
-          ga4Sessions7 = rep7
-            .filter(r => r.dimensionValues[0]?.value === pagePath)
-            .reduce((a, r) => a + (Number(r.metricValues[0]?.value) || 0), 0)
-        } catch { /* skip */ }
+          inserted++
+        }
+      } catch (err) {
+        errors.push({ url: p.url, error: err instanceof Error ? err.message.slice(0, 120) : 'unknown' })
       }
-
-      // Upsert.
-      const [existing] = await database
-        .select({ id: schema.postScorecards.id })
-        .from(schema.postScorecards)
-        .where(eq(schema.postScorecards.webflowItemId, p.webflowItemId))
-        .limit(1)
-
-      const row = {
-        webflowItemId: p.webflowItemId,
-        draftId: p.draftId,
-        url: p.url,
-        publishedAt: p.publishedAt,
-        gscIndexStatus: indexStatus,
-        gscFirstIndexedAt: firstIndexedAt,
-        gscImpressions7d: sum7.impressions || null,
-        gscClicks7d: sum7.clicks || null,
-        gscAvgPosition7d: avgPos7,
-        gscImpressions30d: sum30.impressions || null,
-        gscClicks30d: sum30.clicks || null,
-        gscAvgPosition30d: avgPos30,
-        ga4Sessions7d: ga4Sessions7,
-        ga4Sessions30d: ga4Sessions30,
-        updatedAt: nowIso,
-      }
-      if (existing) {
-        await database.update(schema.postScorecards).set(row)
-          .where(eq(schema.postScorecards.id, existing.id))
-        updated++
-      } else {
-        await database.insert(schema.postScorecards).values({
-          id: crypto.randomUUID(),
-          createdAt: nowIso,
-          ...row,
-        })
-        inserted++
-      }
-    } catch (err) {
-      errors.push({ url: p.url, error: err instanceof Error ? err.message.slice(0, 120) : 'unknown' })
-    }
+    }))
   }
 
   return NextResponse.json({
