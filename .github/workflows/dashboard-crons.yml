@@ -60,6 +60,13 @@ on:
     # date-modified patches on any glossary/blog item whose schema
     # is missing or invalid. Gated by content.autoBackfillEnabled.
     - cron: '0 22 * * SUN'
+    # Content gap hunter (agent) — Sunday 19:00 UTC. Perplexity +
+    # Sonnet propose 8-15 new topic ideas, write to content_ideas
+    # for round-table pickup. ~$0.05/run.
+    - cron: '30 19 * * SUN'
+    # Schema watchdog (agent) — Sunday 23:00 UTC. Validates schema
+    # on every live URL + auto-fixes broken ones via backfill.
+    - cron: '0 23 * * SUN'
   # Manual trigger via the Actions UI — pick which cron to fire.
   workflow_dispatch:
     inputs:
@@ -79,6 +86,8 @@ on:
           - sync-airwallex
           - finance-anomaly-scan
           - content-auto-backfill
+          - content-gap-hunt
+          - schema-watchdog
 
 jobs:
   fire:
@@ -109,6 +118,8 @@ jobs:
               "0 18 * * *")                      targets="sync-airwallex" ;;
               "0 21 * * MON"|"0 21 1 * *")       targets="finance-anomaly-scan" ;;
               "0 22 * * SUN")                    targets="content-auto-backfill" ;;
+              "30 19 * * SUN")                   targets="content-gap-hunt" ;;
+              "0 23 * * SUN")                    targets="schema-watchdog" ;;
               *)                                 echo "::warning::Unknown schedule '$schedule'" ;;
             esac
           fi
