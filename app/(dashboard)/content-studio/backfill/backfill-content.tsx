@@ -65,6 +65,39 @@ interface CoverageResponse {
 interface BackfillSettings {
   autoBackfillEnabled: boolean
   autoRewriteBody: boolean
+  glossaryDefaultTier: 'schema' | 'audit' | 'full'
+  glossaryAutoPublish: boolean
+}
+
+interface GeneratedEntry {
+  term: string
+  alsoKnownAs: string[]
+  definition: string
+  bodyMarkdown: string
+  faqs: Array<{ question: string; answer: string }>
+  examples: string[]
+  commonMistakes: string[]
+  citations: Array<{ url: string; title?: string }>
+  relatedTerms: string[]
+  metaTitle: string
+  metaDescription: string
+  authorSlug: 'liam' | 'staci'
+  category: string
+  difficulty: 'beginner' | 'intermediate' | 'advanced'
+  totalCostCents: number
+  stages: Array<{ name: string; costCents: number; notes?: string }>
+}
+
+interface AuditResult {
+  term?: string
+  definitionClarity: number
+  snippetReadiness: number
+  citationRigor: number
+  structureCompleteness: number
+  aeoCitability: number
+  overall: number
+  improvements: string[]
+  costCents: number
 }
 
 type ContentType = 'blog' | 'glossary'
@@ -116,7 +149,15 @@ export function BackfillContent() {
   const [bulkProgress, setBulkProgress] = useState<{ processed: number; total: number } | null>(null)
   const [perItemRunning, setPerItemRunning] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [settings, setSettings] = useState<BackfillSettings>({ autoBackfillEnabled: false, autoRewriteBody: false })
+  const [settings, setSettings] = useState<BackfillSettings>({ autoBackfillEnabled: false, autoRewriteBody: false, glossaryDefaultTier: 'schema', glossaryAutoPublish: false })
+  const [newTermInput, setNewTermInput] = useState('')
+  const [newTermAuthor, setNewTermAuthor] = useState<'liam' | 'staci' | 'auto'>('auto')
+  const [newTermResearch, setNewTermResearch] = useState(true)
+  const [generating, setGenerating] = useState(false)
+  const [generatedPreview, setGeneratedPreview] = useState<GeneratedEntry | null>(null)
+  const [auditModalFor, setAuditModalFor] = useState<string | null>(null)
+  const [auditResult, setAuditResult] = useState<AuditResult | null>(null)
+  const [auditing, setAuditing] = useState(false)
   const [rewriteBodyOnBulk, setRewriteBodyOnBulk] = useState(false)
   const [filterType, setFilterType] = useState<'all' | 'broken' | 'no-schema'>('broken')
 
@@ -206,6 +247,115 @@ export function BackfillContent() {
     } finally {
       setBulkRunning(null)
       setBulkProgress(null)
+    }
+  }
+
+  async function generateNewTerm() {
+    if (!newTermInput.trim()) return
+    setGenerating(true)
+    setGeneratedPreview(null)
+    try {
+      const res = await fetch(apiPath('/api/admin/content/glossary/generate'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          term: newTermInput.trim(),
+          authorSlug: newTermAuthor === 'auto' ? undefined : newTermAuthor,
+          research: newTermResearch,
+        }),
+      })
+      const json = await res.json() as GeneratedEntry & { error?: string }
+      if (!res.ok) {
+        showToast(`Generation failed: ${json.error ?? 'unknown'}`, 'error')
+        return
+      }
+      setGeneratedPreview(json)
+      showToast(`Generated "${json.term}" — $${(json.totalCostCents / 100).toFixed(2)} spent. Review below + publish.`)
+    } catch (err) {
+      showToast(`Generation failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function publishGenerated(existingItemId?: string) {
+    if (!generatedPreview) return
+    try {
+      const res = await fetch(apiPath('/api/admin/content/glossary/publish'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...generatedPreview, existingItemId }),
+      })
+      const json = await res.json() as { ok?: boolean; mode?: string; itemId?: string; url?: string; error?: string; skippedFields?: string[] }
+      if (!res.ok) {
+        showToast(`Publish failed: ${json.error ?? 'unknown'}`, 'error')
+        return
+      }
+      const skipped = json.skippedFields?.length ?? 0
+      showToast(
+        `${json.mode === 'created' ? 'Created in Webflow' : 'Updated Webflow item'}: ${json.url ?? json.itemId}${skipped > 0 ? ` (${skipped} fields skipped — add to collection)` : ''}`,
+      )
+      setGeneratedPreview(null)
+      setNewTermInput('')
+      await fetchAudit()
+    } catch (err) {
+      showToast(`Publish failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
+    }
+  }
+
+  async function runAudit(itemId: string) {
+    setAuditing(true)
+    setAuditModalFor(itemId)
+    setAuditResult(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/content/glossary/${itemId}/audit`), { method: 'POST' })
+      const json = await res.json() as AuditResult & { error?: string }
+      if (!res.ok) {
+        showToast(`Audit failed: ${json.error ?? 'unknown'}`, 'error')
+        setAuditModalFor(null)
+        return
+      }
+      setAuditResult(json)
+    } catch (err) {
+      showToast(`Audit failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
+      setAuditModalFor(null)
+    } finally {
+      setAuditing(false)
+    }
+  }
+
+  async function upgradeTerm(itemId: string, itemName: string) {
+    if (!confirm(`Run full Tier 3 rewrite on "${itemName}"? Cost ~$0.30. This will REPLACE the body content.`)) return
+    setGenerating(true)
+    try {
+      // 1. Generate fresh content
+      const genRes = await fetch(apiPath('/api/admin/content/glossary/generate'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ term: itemName, research: true }),
+      })
+      const genJson = await genRes.json() as GeneratedEntry & { error?: string }
+      if (!genRes.ok) {
+        showToast(`Generation failed: ${genJson.error ?? 'unknown'}`, 'error')
+        return
+      }
+      // 2. Patch into existing item
+      const pubRes = await fetch(apiPath('/api/admin/content/glossary/publish'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...genJson, existingItemId: itemId }),
+      })
+      const pubJson = await pubRes.json() as { ok?: boolean; error?: string; patchedFields?: string[]; skippedFields?: string[] }
+      if (!pubRes.ok) {
+        showToast(`Publish failed: ${pubJson.error ?? 'unknown'}`, 'error')
+        return
+      }
+      showToast(`Upgraded "${itemName}" — $${(genJson.totalCostCents / 100).toFixed(2)} · ${pubJson.patchedFields?.length ?? 0} fields patched`)
+      await fetchAudit()
+    } catch (err) {
+      showToast(`Upgrade failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
+    } finally {
+      setGenerating(false)
     }
   }
 
@@ -339,6 +489,89 @@ export function BackfillContent() {
         )}
       </Card>
 
+      {/* Add new glossary term (Tier 3) */}
+      <Card>
+        <div style={{ marginBottom: '0.75rem' }}>
+          <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: '0 0 0.25rem' }}>Add a new glossary term</h2>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', margin: 0, maxWidth: '70ch' }}>
+            Tier 3 pipeline: Perplexity research → Sonnet writer → 5-Haiku reviewer panel → Sonnet editor (only when needed). ~$0.30 per term. Returns a preview for review before publishing to Webflow.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.5rem' }}>
+          <input
+            type="text"
+            placeholder='Term name e.g. "Schema markup"'
+            value={newTermInput}
+            onChange={e => setNewTermInput(e.target.value)}
+            disabled={generating}
+            style={{
+              flex: 1,
+              minWidth: '14rem',
+              fontSize: '0.875rem',
+              padding: '0.5rem 0.75rem',
+              border: '1px solid var(--color-border)',
+              borderRadius: '0.5rem',
+              background: 'var(--color-bg)',
+              color: 'var(--color-text)',
+            }}
+          />
+          <select
+            value={newTermAuthor}
+            onChange={e => setNewTermAuthor(e.target.value as 'liam' | 'staci' | 'auto')}
+            disabled={generating}
+            style={{ fontSize: '0.8125rem', padding: '0.5rem 0.75rem', border: '1px solid var(--color-border)', borderRadius: '0.5rem', background: 'var(--color-bg)' }}
+          >
+            <option value="auto">Author: Auto</option>
+            <option value="liam">Author: Liam</option>
+            <option value="staci">Author: Staci</option>
+          </select>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.8125rem' }}>
+            <input
+              type="checkbox"
+              checked={newTermResearch}
+              onChange={e => setNewTermResearch(e.target.checked)}
+              disabled={generating}
+            />
+            Perplexity research
+          </label>
+          <TahiButton size="sm" loading={generating} disabled={!newTermInput.trim() || generating} onClick={() => { void generateNewTerm() }} iconLeft={<Sparkles className="w-3.5 h-3.5" />}>
+            Generate
+          </TahiButton>
+        </div>
+        {generatedPreview && (
+          <div style={{ marginTop: '0.875rem', padding: '0.875rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-leaf-sm)', border: '1px solid var(--color-border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <div>
+                <strong style={{ fontSize: '0.9375rem' }}>{generatedPreview.term}</strong>
+                <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                  {generatedPreview.category} · {generatedPreview.difficulty} · author: {generatedPreview.authorSlug}
+                </span>
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                ${(generatedPreview.totalCostCents / 100).toFixed(2)} · {generatedPreview.stages.length} stages · {generatedPreview.faqs.length} FAQs · {generatedPreview.citations.length} citations
+              </div>
+            </div>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--color-text)', margin: '0 0 0.625rem' }}>
+              <strong>Definition:</strong> {generatedPreview.definition}
+            </p>
+            <details style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.625rem' }}>
+              <summary style={{ cursor: 'pointer' }}>Body preview ({generatedPreview.bodyMarkdown.split(/\s+/).length} words)</summary>
+              <pre style={{ whiteSpace: 'pre-wrap', maxHeight: '20rem', overflow: 'auto', padding: '0.5rem', background: 'var(--color-bg)', borderRadius: '0.25rem', marginTop: '0.375rem' }}>
+                {generatedPreview.bodyMarkdown}
+              </pre>
+            </details>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <TahiButton size="sm" onClick={() => { void publishGenerated() }}>
+                Publish to Webflow (as draft)
+              </TahiButton>
+              <TahiButton size="sm" variant="secondary" onClick={() => setGeneratedPreview(null)}>
+                Discard
+              </TahiButton>
+            </div>
+          </div>
+        )}
+      </Card>
+
       {/* Auto-backfill toggle */}
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
@@ -369,6 +602,25 @@ export function BackfillContent() {
               />
               Also auto-rewrite bodies
             </label>
+          </div>
+        </div>
+        <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--color-border-subtle)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
+            <div>
+              <h3 style={{ fontSize: '0.875rem', fontWeight: 600, margin: '0 0 0.25rem' }}>Glossary default tier</h3>
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: 0, maxWidth: '60ch' }}>
+                Schema-only ($0) for safe patches. Audit (~$0.01) adds a scorecard. Full rewrite (~$0.30) regenerates content via Tier 3 pipeline on items scoring under 60.
+              </p>
+            </div>
+            <select
+              value={settings.glossaryDefaultTier}
+              onChange={e => saveSettings({ ...settings, glossaryDefaultTier: e.target.value as 'schema' | 'audit' | 'full' })}
+              style={{ fontSize: '0.8125rem', padding: '0.375rem 0.625rem', border: '1px solid var(--color-border)', borderRadius: '0.5rem', background: 'var(--color-bg)' }}
+            >
+              <option value="schema">Schema only</option>
+              <option value="audit">Schema + audit</option>
+              <option value="full">Schema + audit + auto-rewrite low scorers</option>
+            </select>
           </div>
         </div>
       </Card>
@@ -407,6 +659,8 @@ export function BackfillContent() {
             perItemRunning={perItemRunning}
             onToggle={toggleExpand}
             onFix={(id, opts) => { void runSingleBackfill('glossary', id, opts) }}
+            onAudit={(id) => { void runAudit(id) }}
+            onUpgrade={(id, name) => { void upgradeTerm(id, name) }}
           />
           <div style={{ height: '0.75rem' }} />
           <SectionList
@@ -420,6 +674,76 @@ export function BackfillContent() {
           />
         </Card>
       )}
+
+      {/* Audit modal */}
+      {auditModalFor && (
+        <div
+          onClick={() => { setAuditModalFor(null); setAuditResult(null) }}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '1rem',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: 'var(--color-bg)', borderRadius: 'var(--radius-leaf-sm)',
+              padding: '1.5rem', maxWidth: '40rem', width: '100%', maxHeight: '85vh', overflow: 'auto',
+              border: '1px solid var(--color-border)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h2 style={{ fontSize: '1.125rem', fontWeight: 600, margin: 0 }}>
+                Audit: {auditResult?.term ?? '...'}
+              </h2>
+              <button onClick={() => { setAuditModalFor(null); setAuditResult(null) }} style={{ background: 'none', border: 'none', fontSize: '1.25rem', cursor: 'pointer', color: 'var(--color-text-muted)' }}>×</button>
+            </div>
+            {auditing && (
+              <div style={{ padding: '2rem', textAlign: 'center' }}>
+                <Loader2 className="w-5 h-5 animate-spin" style={{ display: 'inline-block', color: 'var(--color-text-muted)' }} />
+                <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', margin: '0.5rem 0 0' }}>Auditing with Haiku...</p>
+              </div>
+            )}
+            {auditResult && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.625rem', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '2rem', fontWeight: 600, color: auditResult.overall >= 75 ? 'var(--color-success)' : auditResult.overall >= 50 ? 'var(--color-warning)' : 'var(--color-danger)' }}>
+                    {auditResult.overall}
+                  </span>
+                  <span style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>overall · ${(auditResult.costCents / 100).toFixed(3)}</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
+                  {[
+                    { k: 'Definition clarity', v: auditResult.definitionClarity },
+                    { k: 'Snippet readiness', v: auditResult.snippetReadiness },
+                    { k: 'Citation rigor', v: auditResult.citationRigor },
+                    { k: 'Structure', v: auditResult.structureCompleteness },
+                    { k: 'AEO citability', v: auditResult.aeoCitability },
+                  ].map(d => (
+                    <div key={d.k} style={{ padding: '0.625rem', border: '1px solid var(--color-border-subtle)', borderRadius: '0.5rem' }}>
+                      <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', marginBottom: '0.125rem' }}>{d.k}</div>
+                      <div style={{ fontSize: '1.25rem', fontWeight: 600, color: d.v >= 75 ? 'var(--color-success)' : d.v >= 50 ? 'var(--color-warning)' : 'var(--color-danger)' }}>
+                        {d.v}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '0.875rem', fontWeight: 600, margin: '0 0 0.5rem' }}>Recommended improvements</h3>
+                  <ul style={{ fontSize: '0.8125rem', color: 'var(--color-text)', margin: 0, paddingLeft: '1.25rem' }}>
+                    {auditResult.improvements.map((imp, i) => (
+                      <li key={i} style={{ marginBottom: '0.375rem' }}>{imp}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'var(--color-bg-secondary)', borderRadius: '0.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                  Want to apply these automatically? Run a Tier 3 rewrite (~$0.30) from the per-item list.
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -432,9 +756,11 @@ interface SectionListProps {
   perItemRunning: string | null
   onToggle: (id: string) => void
   onFix: (id: string, opts: { rewriteBody?: boolean }) => void
+  onAudit?: (id: string) => void
+  onUpgrade?: (id: string, name: string) => void
 }
 
-function SectionList({ title, type, items, expanded, perItemRunning, onToggle, onFix }: SectionListProps) {
+function SectionList({ title, type, items, expanded, perItemRunning, onToggle, onFix, onAudit, onUpgrade }: SectionListProps) {
   if (items.length === 0) {
     return (
       <EmptyState
@@ -508,6 +834,16 @@ function SectionList({ title, type, items, expanded, perItemRunning, onToggle, o
                         onClick={() => onFix(item.id, { rewriteBody: true })}
                       >
                         Fix + strip AI tells from body
+                      </TahiButton>
+                    )}
+                    {type === 'glossary' && onAudit && (
+                      <TahiButton size="sm" variant="secondary" onClick={() => onAudit(item.id)}>
+                        Audit (~$0.01)
+                      </TahiButton>
+                    )}
+                    {type === 'glossary' && onUpgrade && (
+                      <TahiButton size="sm" variant="secondary" onClick={() => onUpgrade(item.id, item.name)}>
+                        Tier 3 rewrite (~$0.30)
                       </TahiButton>
                     )}
                     <a
