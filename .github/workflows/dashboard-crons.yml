@@ -56,6 +56,10 @@ on:
     # subscriptions creep, missing tax reserves, dry pipeline, etc.
     - cron: '0 21 * * MON'
     - cron: '0 21 1 * *'
+    # Content auto-backfill — Sunday 22:00 UTC. Re-runs schema +
+    # date-modified patches on any glossary/blog item whose schema
+    # is missing or invalid. Gated by content.autoBackfillEnabled.
+    - cron: '0 22 * * SUN'
   # Manual trigger via the Actions UI — pick which cron to fire.
   workflow_dispatch:
     inputs:
@@ -74,6 +78,7 @@ on:
           - sync-drive-transcripts
           - sync-airwallex
           - finance-anomaly-scan
+          - content-auto-backfill
 
 jobs:
   fire:
@@ -103,6 +108,7 @@ jobs:
               "0 19 * * MON")                    targets="affiliate-reactivation" ;;
               "0 18 * * *")                      targets="sync-airwallex" ;;
               "0 21 * * MON"|"0 21 1 * *")       targets="finance-anomaly-scan" ;;
+              "0 22 * * SUN")                    targets="content-auto-backfill" ;;
               *)                                 echo "::warning::Unknown schedule '$schedule'" ;;
             esac
           fi

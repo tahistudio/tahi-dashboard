@@ -23,6 +23,7 @@ import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
 import { SiteIndexContent } from './site-index/site-index-content'
 import { AuditsContent } from './audits/audits-content'
+import { BackfillContent } from './backfill/backfill-content'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
 import { SlideOver } from '@/components/tahi/slide-over'
@@ -84,7 +85,7 @@ interface ScanError412 {
   availableProperties?: Array<{ siteUrl: string; permissionLevel: string }>
 }
 
-type TabId = 'health' | 'ideas' | 'drafts' | 'links' | 'schedule' | 'site-index' | 'audits'
+type TabId = 'health' | 'backfill' | 'ideas' | 'drafts' | 'links' | 'schedule' | 'site-index' | 'audits'
 
 interface TabDef {
   id: TabId
@@ -99,6 +100,13 @@ const TABS: readonly TabDef[] = [
     id: 'health',
     label: 'Health',
     icon: FileSearch,
+    slice: 0,
+    comingDescription: '',
+  },
+  {
+    id: 'backfill',
+    label: 'Backfill',
+    icon: Sparkles,
     slice: 0,
     comingDescription: '',
   },
@@ -345,6 +353,7 @@ export function ContentStudioContent() {
         {activeTab === 'schedule' && <ScheduleTab onToast={showToast} />}
         {activeTab === 'site-index' && <SiteIndexContent />}
         {activeTab === 'audits' && <AuditsContent />}
+        {activeTab === 'backfill' && <BackfillContent />}
         {activeTab !== 'health' && activeTab !== 'ideas' && activeTab !== 'drafts' && activeTab !== 'links' && activeTab !== 'schedule' && activeTab !== 'site-index' && activeTab !== 'audits' && (
           <ComingSoonTab tab={TABS.find(t => t.id === activeTab)!} />
         )}

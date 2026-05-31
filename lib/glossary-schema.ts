@@ -50,10 +50,6 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-function slugFragment(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)
-}
-
 /** Extract H2-as-FAQ pairs from the body. Treats any H2 starting with a
  *  question word (What/How/Why/When/Is/Are/Does/Should/Can/Do) as an
  *  FAQ question; the paragraph(s) immediately following (up to the next
