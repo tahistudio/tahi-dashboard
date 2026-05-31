@@ -354,7 +354,7 @@ export function ContentStudioContent() {
         {activeTab === 'site-index' && <SiteIndexContent />}
         {activeTab === 'audits' && <AuditsContent />}
         {activeTab === 'backfill' && <BackfillContent />}
-        {activeTab !== 'health' && activeTab !== 'ideas' && activeTab !== 'drafts' && activeTab !== 'links' && activeTab !== 'schedule' && activeTab !== 'site-index' && activeTab !== 'audits' && (
+        {activeTab !== 'health' && activeTab !== 'ideas' && activeTab !== 'drafts' && activeTab !== 'links' && activeTab !== 'schedule' && activeTab !== 'site-index' && activeTab !== 'audits' && activeTab !== 'backfill' && (
           <ComingSoonTab tab={TABS.find(t => t.id === activeTab)!} />
         )}
       </div>

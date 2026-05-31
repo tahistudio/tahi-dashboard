@@ -401,8 +401,22 @@ export function BackfillContent() {
     }
   }
 
-  async function rewriteUnderperformer(itemId: string, term: string) {
-    if (!confirm(`Run Tier 3 rewrite on "${term}"? Cost ~$0.30. Generates fresh content for review — does NOT publish yet.`)) return
+  async function rewriteUnderperformer(itemId: string, term: string, url: string) {
+    const isBlog = url.includes('/blog/')
+    const isGlossary = url.includes('/resources/glossary/')
+    if (!isBlog && !isGlossary) {
+      showToast(`Can't rewrite: ${url} doesn't match a blog or glossary URL pattern`, 'error')
+      return
+    }
+    if (isBlog) {
+      // Blog rewrites belong in the round-table pipeline (different
+      // model, different reviewers, different output shape). Surface
+      // a clear "use that flow instead" message rather than silently
+      // failing.
+      showToast(`Blog rewrites need the round-table pipeline. Open ${url} → Audits tab → run audit + improve.`, 'error')
+      return
+    }
+    if (!confirm(`Run Tier 3 rewrite on glossary "${term}"? Cost ~$0.30. Patches the live Webflow item with fresh content + schema.`)) return
     setAgentRunning(`rewrite-${itemId}`)
     try {
       const res = await fetch(apiPath('/api/admin/content/glossary/generate'), {
@@ -415,18 +429,23 @@ export function BackfillContent() {
         showToast(`Generation failed: ${json.error ?? 'unknown'}`, 'error')
         return
       }
-      // Same as upgradeTerm: patch existing item with generated content.
       const pubRes = await fetch(apiPath('/api/admin/content/glossary/publish'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...json, existingItemId: itemId }),
       })
-      const pubJson = await pubRes.json() as { ok?: boolean; error?: string; patchedFields?: string[] }
+      const pubJson = await pubRes.json() as { ok?: boolean; error?: string; patchedFields?: string[]; skippedFields?: string[] }
       if (!pubRes.ok) {
         showToast(`Publish failed: ${pubJson.error ?? 'unknown'}`, 'error')
         return
       }
-      showToast(`Rewritten "${term}" — $${(json.totalCostCents / 100).toFixed(2)} · ${pubJson.patchedFields?.length ?? 0} fields patched`)
+      const patched = pubJson.patchedFields?.length ?? 0
+      const skipped = pubJson.skippedFields?.length ?? 0
+      if (patched === 0) {
+        showToast(`Generated but 0 fields patched — item likely not in glossary collection. Skipped: ${skipped}`, 'error')
+      } else {
+        showToast(`Rewritten "${term}" — $${(json.totalCostCents / 100).toFixed(2)} · ${patched} patched · ${skipped} skipped`)
+      }
       await loadUnderperformers()
     } catch (err) {
       showToast(`Failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
@@ -827,7 +846,12 @@ export function BackfillContent() {
                     <div key={item.itemId} style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-leaf-sm)', padding: '0.625rem 0.875rem', background: 'var(--color-bg)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
                         <div style={{ flex: 1, minWidth: '14rem' }}>
-                          <div style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)' }}>{item.term}</div>
+                          <div style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                            {item.term}
+                            <Badge tone={item.url.includes('/blog/') ? 'info' : 'brand'}>
+                              {item.url.includes('/blog/') ? 'blog' : 'glossary'}
+                            </Badge>
+                          </div>
                           <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
                             {item.impressions30d} imp · {item.clicks30d} clk · pos {item.avgPosition30d?.toFixed(1) ?? 'n/a'} · {(item.ctr * 100).toFixed(1)}% CTR
                           </div>
@@ -839,7 +863,7 @@ export function BackfillContent() {
                           <a href={item.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                             <Eye className="w-3 h-3" /> View
                           </a>
-                          <TahiButton size="sm" loading={isRewriting} disabled={!!agentRunning} onClick={() => { void rewriteUnderperformer(item.itemId, item.term) }} iconLeft={<Sparkles className="w-3.5 h-3.5" />}>
+                          <TahiButton size="sm" loading={isRewriting} disabled={!!agentRunning} onClick={() => { void rewriteUnderperformer(item.itemId, item.term, item.url) }} iconLeft={<Sparkles className="w-3.5 h-3.5" />}>
                             Rewrite
                           </TahiButton>
                         </div>
