@@ -18,6 +18,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import {
   getGlossaryCollectionId, createCollectionItem, patchCollectionItem,
+  loadBlogReferenceLookups,
 } from '@/lib/webflow'
 import { buildGlossarySchema } from '@/lib/glossary-schema'
 
@@ -92,20 +93,39 @@ export async function POST(req: NextRequest) {
   const url = `${TAHI_BASE}/resources/glossary/${slug}`
   const now = new Date().toISOString()
 
-  // Build complete body — definition headline + main body + examples
-  // + common-mistakes + citations as inline references.
+  // Main body — examples get inlined; common-mistakes + external-sources
+  // go to their own dedicated rich-text fields below (Webflow displays
+  // them as separate template sections).
   const bodyParts: string[] = [body.bodyMarkdown]
   if (body.examples && body.examples.length > 0) {
     bodyParts.push(`\n## Examples\n\n${body.examples.map(e => `- ${e}`).join('\n')}`)
   }
-  if (body.commonMistakes && body.commonMistakes.length > 0) {
-    bodyParts.push(`\n## Common mistakes\n\n${body.commonMistakes.map(m => `- ${m}`).join('\n')}`)
-  }
-  if (body.citations && body.citations.length > 0) {
-    bodyParts.push(`\n## Sources\n\n${body.citations.map(c => `- [${c.title ?? c.url}](${c.url})`).join('\n')}`)
-  }
   const fullMarkdown = bodyParts.join('\n')
   const fullHtml = markdownToHtml(fullMarkdown)
+  const commonMistakesHtml = body.commonMistakes && body.commonMistakes.length > 0
+    ? `<ul>${body.commonMistakes.map(m => `<li>${m}</li>`).join('')}</ul>`
+    : null
+  const externalSourcesHtml = body.citations && body.citations.length > 0
+    ? `<ul>${body.citations.map(c => `<li><a href="${c.url}">${c.title ?? c.url}</a></li>`).join('')}</ul>`
+    : null
+
+  // Resolve Webflow References (Team Members for author, Categories for
+  // primary-category). loadBlogReferenceLookups gives us the maps.
+  // Failures are tolerated — refs just won't be set.
+  let authorRefId: string | null = null
+  let primaryCategoryRefId: string | null = null
+  try {
+    const refs = await loadBlogReferenceLookups()
+    const authorName = body.authorSlug === 'staci' ? 'staci' : 'liam'
+    authorRefId = refs.authorsByNamePart.get(authorName)
+      ?? (authorName === 'staci' ? (refs.authorsByNamePart.get('bonnie') ?? null) : null)
+    if (body.category) {
+      const catKey = body.category.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+      primaryCategoryRefId = refs.categoriesBySlug.get(catKey)
+        ?? refs.categoriesByName.get(body.category.toLowerCase())
+        ?? null
+    }
+  } catch { /* refs unavailable — skip the reference fields */ }
 
   // Generate schema from the new content.
   const schemaResult = buildGlossarySchema({
@@ -120,28 +140,31 @@ export async function POST(req: NextRequest) {
     category: body.category ?? null,
   })
 
-  // Field payload. We try every common name for each piece of data and
-  // ignore "unknown field" errors on patch so this works on collections
-  // that only have a subset of the recommended fields.
+  // Field payload aligned with the actual Glossaries collection
+  // (verified via /inspect 2026-05-31, 19 fields). Per-field patch
+  // isolates "unknown field" errors so the script keeps working if
+  // any field is renamed later in Webflow.
   const baseFields: Record<string, unknown> = {
     name: body.term,
     slug,
     schema: schemaResult.jsonLdString,
+    body: fullHtml,                                  // rich text — the real body field
+    description: body.definition,                    // existing field (legacy items have this)
+    definition: body.definition,                     // new field Liam added
   }
-  // The body field name varies — try the most common candidates.
-  baseFields['post-body'] = fullHtml
-  baseFields['definition'] = body.definition       // short definition
-  baseFields['definition-short'] = body.definition  // alt name some collections use
   if (body.metaTitle) baseFields['meta-title'] = body.metaTitle
-  if (body.metaDescription) baseFields['meta-description'] = body.metaDescription
+  if (body.metaDescription) baseFields['meta-description-2'] = body.metaDescription
   if (body.alsoKnownAs && body.alsoKnownAs.length > 0) {
     baseFields['also-known-as'] = body.alsoKnownAs.join(', ')
   }
-  if (body.category) baseFields['category'] = body.category
   if (body.difficulty) baseFields['difficulty'] = body.difficulty
-  baseFields['author-slug'] = body.authorSlug ?? 'liam'
-  baseFields['last-updated'] = now
-  baseFields['published-date'] = now
+  if (commonMistakesHtml) baseFields['common-mistakes'] = commonMistakesHtml
+  if (externalSourcesHtml) baseFields['external-sources'] = externalSourcesHtml
+  // Resolved references (Webflow expects item IDs, not slugs).
+  if (authorRefId) baseFields['author'] = authorRefId
+  if (primaryCategoryRefId) baseFields['primary-category'] = primaryCategoryRefId
+  // No custom date fields — Webflow's built-in lastUpdated / lastPublished
+  // auto-bump on any patch and feed schema dates on next backfill.
 
   // Per-field patches isolate "unknown field" failures so the rest still
   // land. This lets us ship the script before Liam has added every
@@ -169,12 +192,14 @@ export async function POST(req: NextRequest) {
     })
   }
 
-  // New item — Webflow create-item is more sensitive to unknown fields,
-  // so we start with the minimum-viable set + patch the optional ones.
+  // New item — Webflow create requires the REQUIRED fields up front
+  // (verified via /inspect: name, slug, description, body). Then patch
+  // optional fields one-by-one.
   const minimalFields = {
     name: baseFields.name,
     slug: baseFields.slug,
-    'post-body': baseFields['post-body'],
+    description: baseFields.description,
+    body: baseFields.body,
   }
   let created
   try {
@@ -185,11 +210,12 @@ export async function POST(req: NextRequest) {
       detail: err instanceof Error ? err.message.slice(0, 400) : String(err),
     }, { status: 502 })
   }
-  patchedFields.push('name', 'slug', 'post-body')
+  patchedFields.push('name', 'slug', 'description', 'body')
 
-  // Now patch the rest one-by-one so unknown fields just skip.
+  // Patch the rest one-by-one so unknown fields just skip.
+  const minimalKeys = new Set(['name', 'slug', 'description', 'body'])
   for (const [k, v] of Object.entries(baseFields)) {
-    if (k === 'name' || k === 'slug' || k === 'post-body') continue
+    if (minimalKeys.has(k)) continue
     try {
       await patchCollectionItem(collectionId, created.id, { [k]: v })
       patchedFields.push(k)

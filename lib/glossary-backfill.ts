@@ -4,26 +4,33 @@
  * version is just a loop with rate-limiting.
  */
 
-import { getCollectionItem, patchCollectionItem } from '@/lib/webflow'
+import { getCollectionItem, patchCollectionItem, loadBlogReferenceLookups } from '@/lib/webflow'
 import { buildGlossarySchema, extractFaqsFromGlossaryBody } from '@/lib/glossary-schema'
 import { sanitizeAiTells } from '@/lib/ai-tell-sanitizer'
 import { validateJsonLd } from '@/lib/schema-validate'
 
 const TAHI_BASE = 'https://www.tahi.studio'
 
-interface BlogPostFields {
+/** Field shape verified via /glossary/inspect on 2026-05-31.
+ *  Actual collection has 19 fields — these are the ones we read. */
+interface GlossaryFields {
   name?: string
   slug?: string
   schema?: string
-  'post-body'?: string
-  definition?: string
-  body?: string
-  'rich-text'?: string
-  'last-updated'?: string
-  'date-modified'?: string
-  'author-slug'?: string
-  'post-author'?: string
-  category?: string
+  body?: string                   // rich text — the actual body (not post-body)
+  definition?: string             // 40-60 word snippet (new field, often blank on legacy items)
+  description?: string            // 1-sentence definition (existing, populated on legacy items)
+  'also-known-as'?: string
+  'primary-category'?: string     // Reference: Category item id
+  'related-categories'?: string[]
+  author?: string                 // Reference: Team Members item id
+  'related-terms'?: string[]
+  'related-posts'?: string[]
+  'common-mistakes'?: string
+  'external-sources'?: string
+  'meta-title'?: string
+  'meta-description-2'?: string
+  difficulty?: string
   [k: string]: unknown
 }
 
@@ -78,18 +85,22 @@ export async function backfillGlossaryItem(
   opts: GlossaryBackfillOptions = {},
 ): Promise<GlossaryBackfillResult> {
   const item = await getCollectionItem(collectionId, itemId)
-  const f = item.fieldData as BlogPostFields
+  const f = item.fieldData as GlossaryFields
   const slug = f.slug ?? ''
   const term = f.name ?? '(untitled)'
   const url = `${TAHI_BASE}/resources/glossary/${slug}`
 
-  // Body lives under a couple of possible field names; check the
-  // common ones in priority order.
-  const bodyHtml = f['post-body'] ?? f['definition'] ?? f['body'] ?? f['rich-text'] ?? ''
+  // Webflow's real field is `body` (rich text). The `definition` field
+  // exists separately but is blank on legacy items — fall through to
+  // `description` (single-sentence summary that legacy items DO have).
+  const bodyHtml = f.body ?? ''
   const bodyMarkdown = htmlToPseudoMarkdown(bodyHtml)
 
-  // Definition headline: first non-heading paragraph.
+  // Definition: explicit `definition` field wins; else `description`
+  // (legacy items); else the first substantive body paragraph.
   const definition = (() => {
+    if (f.definition && f.definition.trim().length > 30) return f.definition.trim().slice(0, 400)
+    if (f.description && f.description.trim().length > 30) return f.description.trim().slice(0, 400)
     const lines = bodyMarkdown.split('\n').map(l => l.trim()).filter(Boolean)
     for (const l of lines) {
       if (l.startsWith('#')) continue
@@ -99,9 +110,25 @@ export async function backfillGlossaryItem(
     return term
   })()
 
-  // Author resolution: explicit opt > existing field > Liam default.
-  const authorSlug: 'liam' | 'staci' = opts.authorSlug
-    ?? ((f['author-slug'] as string | undefined) === 'staci' ? 'staci' : 'liam')
+  // Author resolution: when explicit, use it. Otherwise try to map the
+  // existing `author` Reference (Team Members id) to a liam/staci slug.
+  // Falls back to liam.
+  let authorSlug: 'liam' | 'staci' = opts.authorSlug ?? 'liam'
+  if (!opts.authorSlug && f.author) {
+    try {
+      const refs = await loadBlogReferenceLookups()
+      const liamId = refs.authorsByNamePart.get('liam')
+      const staciId = refs.authorsByNamePart.get('staci')
+        ?? refs.authorsByNamePart.get('bonnie')
+      if (f.author === staciId) authorSlug = 'staci'
+      else if (f.author === liamId) authorSlug = 'liam'
+    } catch { /* keep default */ }
+  }
+
+  // Use Webflow's built-in item-level timestamps for schema dates.
+  // No custom date field patches needed.
+  const itemUpdatedAt = item.lastUpdated ?? item.lastPublished ?? new Date().toISOString()
+  const itemCreatedAt = item.createdOn ?? itemUpdatedAt
 
   const schemaBefore = f.schema ?? ''
   const validationBefore = validateJsonLd(schemaBefore)
@@ -121,13 +148,16 @@ export async function backfillGlossaryItem(
   }
   const bodyChanged = newBodyHtml !== bodyHtml
 
-  // Build fresh schema from current state.
+  // Build fresh schema from current state. Use Webflow's own timestamps
+  // so the schema reflects when the item was actually updated/created,
+  // not when this backfill ran.
   const { jsonLdString, faqCount } = buildGlossarySchema({
     url, term, definition,
     bodyMarkdown, bodyHtml: newBodyHtml,
-    updatedAt: new Date().toISOString(),
+    updatedAt: itemUpdatedAt,
+    publishedAt: itemCreatedAt,
     authorSlug,
-    category: (f.category as string | undefined) ?? null,
+    category: null,  // resolved via primary-category reference, not embedded in schema yet
   })
   const validationAfter = validateJsonLd(jsonLdString)
 
@@ -148,37 +178,29 @@ export async function backfillGlossaryItem(
       const msg = err instanceof Error ? err.message : String(err)
       skippedFields.push(`schema: ${msg.slice(0, 100)}`)
     }
-    // 2) date-modified — best effort, separate call to tolerate missing field.
-    try {
-      await patchCollectionItem(collectionId, itemId, {
-        'last-updated': new Date().toISOString(),
-      })
-      patchedFields.push('last-updated')
-    } catch {
+    // 2) Backfill the `definition` field from `description` when the new
+    //    field is blank — gives us the snippet-ready 40-60 word version
+    //    in the right place for future schema regens to read directly.
+    if (!f.definition && f.description) {
       try {
-        await patchCollectionItem(collectionId, itemId, {
-          'date-modified': new Date().toISOString(),
-        })
-        patchedFields.push('date-modified')
+        await patchCollectionItem(collectionId, itemId, { definition: f.description })
+        patchedFields.push('definition')
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        skippedFields.push(`date: ${msg.slice(0, 60)}`)
+        skippedFields.push(`definition: ${err instanceof Error ? err.message.slice(0, 60) : 'fail'}`)
       }
     }
-    // 3) Body rewrite, opt-in.
+    // 3) Body rewrite, opt-in. Webflow's real rich-text field is `body`.
     if (opts.rewriteBody && bodyChanged) {
-      const bodyField = f['post-body'] !== undefined ? 'post-body'
-        : f['definition'] !== undefined ? 'definition'
-        : f['body'] !== undefined ? 'body'
-        : 'rich-text'
       try {
-        await patchCollectionItem(collectionId, itemId, { [bodyField]: newBodyHtml })
-        patchedFields.push(bodyField)
+        await patchCollectionItem(collectionId, itemId, { body: newBodyHtml })
+        patchedFields.push('body')
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        skippedFields.push(`${bodyField}: ${msg.slice(0, 60)}`)
+        skippedFields.push(`body: ${err instanceof Error ? err.message.slice(0, 60) : 'fail'}`)
       }
     }
+    // Note: we no longer try to patch last-updated / date-modified —
+    // those fields don't exist on the collection. Webflow's built-in
+    // lastUpdated metadata auto-bumps on any patch.
   }
 
   return {
@@ -202,8 +224,8 @@ export async function backfillGlossaryItem(
  *  endpoint to count what's recoverable without running the full
  *  backfill. */
 export function previewFaqsFromGlossaryItem(item: { fieldData: Record<string, unknown> }): Array<{ question: string; answer: string }> {
-  const f = item.fieldData as BlogPostFields
-  const bodyHtml = f['post-body'] ?? f['definition'] ?? f['body'] ?? f['rich-text'] ?? ''
+  const f = item.fieldData as GlossaryFields
+  const bodyHtml = f.body ?? ''
   const bodyMarkdown = htmlToPseudoMarkdown(bodyHtml)
   return extractFaqsFromGlossaryBody(bodyMarkdown)
 }
