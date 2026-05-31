@@ -149,7 +149,7 @@ const COMMON_OUTPUT_CONTRACT = `Respond with ONE JSON object only (no markdown f
   "details": { ... reviewer-specific extras ... }
 }`
 
-function commonPrelude(ctx: ReviewerContext): string {
+export function commonPrelude(ctx: ReviewerContext): string {
   const bucket = ctx.brief.contentBucket ?? 'generic'
   const bucketLine = bucket === 'novel'
     ? 'Content bucket: NOVEL (opinion / contrarian / deep-research) — originality bar is HIGH, generic safety is BAD.'

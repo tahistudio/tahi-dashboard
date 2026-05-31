@@ -13,6 +13,10 @@
  * every call) and it propagates everywhere that imports OPUS_MODEL.
  */
 
-export const OPUS_MODEL = process.env.ANTHROPIC_OPUS_MODEL ?? 'claude-opus-4-7'
+// Opus 4.8 dropped 2026-05-28 with ~1-5% gains across coding/agentic
+// benchmarks, 4x fewer overlooked code flaws, AND same pricing as 4.7.
+// Plus a new Fast Mode at 1/3 cost (TBD: wire up at call sites that
+// don't need the full latency budget).
+export const OPUS_MODEL = process.env.ANTHROPIC_OPUS_MODEL ?? 'claude-opus-4-8'
 export const SONNET_MODEL = process.env.ANTHROPIC_SONNET_MODEL ?? 'claude-sonnet-4-6'
 export const HAIKU_MODEL = process.env.ANTHROPIC_HAIKU_MODEL ?? 'claude-haiku-4-5'

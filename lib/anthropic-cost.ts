@@ -43,6 +43,15 @@ export interface ClaudeCallOptions<T> {
   /** If true, skip the per-draft cost cap check (use for scoped='ideation'
    *  or 'backfill' which have their own budgets). */
   skipCostCap?: boolean
+  /** Static text blocks to prepend to the system prompt and mark for
+   *  prompt caching. Use for large, stable context (brand DNA, tone of
+   *  voice doc, AI-tells doc, research brief shared across N reviewers).
+   *  Each block ≥1024 tokens to qualify for the cache. When set, the
+   *  `systemPrompt` field becomes the FINAL system block (also cached
+   *  if >1024 tokens — Anthropic caches the longest matching prefix).
+   *  Cache TTL is 5min — call cadence must be inside that window for
+   *  hits to register. */
+  cachedSystemBlocks?: string[]
 }
 
 export class CostCapExceededError extends Error {
@@ -95,12 +104,25 @@ export async function claudeJson<T>(options: ClaudeCallOptions<T>): Promise<{ re
     // eslint-disable-next-line no-constant-condition
     while (true) {
       try {
+        // Build system as an array of text blocks when caching is on.
+        // Each cached block gets cache_control: ephemeral so Anthropic
+        // hashes + reuses it across calls in the next 5 minutes.
+        const systemValue = options.cachedSystemBlocks && options.cachedSystemBlocks.length > 0
+          ? [
+              ...options.cachedSystemBlocks.map(text => ({
+                type: 'text' as const,
+                text,
+                cache_control: { type: 'ephemeral' as const },
+              })),
+              { type: 'text' as const, text: options.systemPrompt },
+            ]
+          : options.systemPrompt
         const res = await client.messages.create({
           model: options.model,
           max_tokens: options.maxTokens ?? 2000,
           // Sonnet 4.6 + Opus 4.7 deprecate temperature; defaults work fine
           // for our JSON-structured prompts.
-          system: options.systemPrompt,
+          system: systemValue,
           messages,
         })
         const raw = res.content
@@ -108,10 +130,17 @@ export async function claudeJson<T>(options: ClaudeCallOptions<T>): Promise<{ re
           .map(b => b.text)
           .join('')
           .trim()
+        // Cache usage tokens come back as separate fields; total them
+        // into input so the cost log captures all input bytes Anthropic
+        // billed (cache reads are 0.1x, writes are 1.25x of base rate
+        // but Anthropic's `usage` already reports the dollar-equivalent
+        // counts — we just sum them).
+        const cacheCreateTokens = (res.usage as { cache_creation_input_tokens?: number }).cache_creation_input_tokens ?? 0
+        const cacheReadTokens = (res.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens ?? 0
         return {
           raw,
           usage: {
-            input: res.usage.input_tokens,
+            input: res.usage.input_tokens + cacheCreateTokens + cacheReadTokens,
             output: res.usage.output_tokens,
           },
         }

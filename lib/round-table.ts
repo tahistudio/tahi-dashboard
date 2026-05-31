@@ -469,11 +469,34 @@ async function stageReview(database: Database, draft: DraftRow): Promise<StageRe
 
       try {
         const weight = reviewerCtx.brief.voiceWeights[reviewer.key] ?? reviewer.defaultWeight
+        // Prompt caching: the commonPrelude (title + brief + body
+        // markdown, up to ~18k chars) is IDENTICAL across all 23
+        // reviewers within a tick. Lift it into a cached system block
+        // so reviewer 1 pays full cost + creates the cache, and
+        // reviewers 2-23 read it at 10% of full price. ~60% reduction
+        // on per-tick spend. The leftover (reviewer-specific extras
+        // like brand_tone's brand docs section) stays in the user
+        // prompt.
+        const { commonPrelude: getPrelude } = await import('@/lib/round-table-reviewers')
+        const prelude = getPrelude(reviewerCtx)
+        const fullUserPrompt = reviewer.buildUserPrompt(reviewerCtx)
+        const cachedBlocks: string[] = []
+        let userPrompt = fullUserPrompt
+        if (fullUserPrompt.startsWith(prelude)) {
+          cachedBlocks.push(prelude)
+          userPrompt = fullUserPrompt.slice(prelude.length).trimStart()
+          if (userPrompt.length === 0) {
+            // The whole user message was the prelude — leave a small
+            // trigger so Anthropic has something to respond to.
+            userPrompt = 'Return the critique JSON per your system prompt. The draft to review is in the cached context above.'
+          }
+        }
         const { result, costCents } = await claudeJson({
           database, scope: 'draft', scopeId: draft.id, stage: reviewer.key,
           model: reviewer.model, maxTokens: 2500,
           systemPrompt: reviewer.systemPrompt,
-          userPrompt: reviewer.buildUserPrompt(reviewerCtx),
+          userPrompt,
+          cachedSystemBlocks: cachedBlocks.length > 0 ? cachedBlocks : undefined,
           parse: (raw: string) => JSON.parse(raw) as ReviewerCritique,
         })
         totalCents += costCents

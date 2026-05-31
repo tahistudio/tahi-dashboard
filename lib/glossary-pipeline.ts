@@ -278,8 +278,12 @@ Write the glossary entry as JSON per the system prompt.`
   totalCostCents += writerResult.costCents
   stages.push({ name: 'writer', costCents: writerResult.costCents })
 
-  // 3) Reviewer panel (5 parallel Haiku calls).
+  // 3) Reviewer panel (5 parallel Haiku calls). The draft text is the
+  //    same across all 5 — bigger than 1024 tokens — so it's a perfect
+  //    cache target. First reviewer pays full price + creates the cache;
+  //    next 4 hit the 10% read tier. ~60% cost reduction on the panel.
   interface ReviewerOutput { score: number; fixSuggestion?: string }
+  const draftAsContext = `Entry to review:\n${JSON.stringify(draft, null, 2)}`
   const reviews = await Promise.allSettled(REVIEWER_PANEL.map(r =>
     claudeJson<ReviewerOutput>({
       database: opts.database,
@@ -287,8 +291,12 @@ Write the glossary entry as JSON per the system prompt.`
       scopeId: opts.scopeId,
       stage: `glossary_review_${r.key}`,
       model: HAIKU_MODEL,
+      // Reviewer-specific instructions stay in systemPrompt (varies per
+      // reviewer); the draft itself goes in the cached block (identical
+      // across the 5).
+      cachedSystemBlocks: [draftAsContext],
       systemPrompt: r.system,
-      userPrompt: `Entry to review:\n${JSON.stringify(draft, null, 2)}`,
+      userPrompt: 'Return the JSON critique per your system prompt. The entry to review is in the cached context above.',
       maxTokens: 512,
       parse: parseJsonLoose,
       skipCostCap: true,
