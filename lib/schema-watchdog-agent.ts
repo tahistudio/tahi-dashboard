@@ -54,7 +54,10 @@ const STALE_AFTER_MS = 14 * 86400_000   // 14 days = "should have been re-publis
 
 async function fetchLiveSchema(url: string): Promise<{ ok: boolean; schemaCount: number; error?: string }> {
   try {
-    const res = await fetch(url, { headers: { 'User-Agent': 'TahiSchemaWatchdog/1.0' }, signal: AbortSignal.timeout(8000) })
+    // 4s budget per fetch — schema watchdog has 140+ URLs to walk and
+    // a 25s Worker budget. 4s × 8 parallel = 4s per batch, easily inside
+    // budget for the per-URL HTTP work.
+    const res = await fetch(url, { headers: { 'User-Agent': 'TahiSchemaWatchdog/1.0' }, signal: AbortSignal.timeout(4000) })
     if (!res.ok) return { ok: false, schemaCount: 0, error: `HTTP ${res.status}` }
     const html = await res.text()
     const matches = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>/gi) ?? []
@@ -68,9 +71,11 @@ export interface RunOptions {
   /** When true, auto-run backfill on items with invalid schema. Default true.
    *  Set false for dry-run / preview. */
   autoFix?: boolean
-  /** Max items to scan per call. Default 200 (covers full site). */
+  /** Max items to scan per call. Default 40 — Worker has 25s budget and
+   *  each item is one live HTTP fetch + one schema validate. 40 items
+   *  in parallel batches of 8 = 5 batches × 4s = ~20s. */
   maxItems?: number
-  /** Hard budget ms. Default 25000 (Worker timeout). */
+  /** Hard budget ms. Default 22000 (leaves headroom inside Worker 30s). */
   budgetMs?: number
 }
 
@@ -80,8 +85,8 @@ export async function runSchemaWatchdog(
 ): Promise<WatchdogRunResult> {
   const t0 = Date.now()
   const autoFix = opts.autoFix !== false
-  const maxItems = opts.maxItems ?? 200
-  const budgetMs = opts.budgetMs ?? 25_000
+  const maxItems = opts.maxItems ?? 40
+  const budgetMs = opts.budgetMs ?? 22_000
 
   const issues: WatchdogIssue[] = []
   let totalScanned = 0

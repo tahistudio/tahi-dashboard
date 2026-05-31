@@ -34,6 +34,9 @@ import {
   inspectUrl,
   runGa4Report,
 } from '@/lib/google'
+import {
+  getBlogPostsCollectionId, getGlossaryCollectionId, listCollectionItems,
+} from '@/lib/webflow'
 
 export const dynamic = 'force-dynamic'
 
@@ -89,16 +92,57 @@ export async function POST(req: NextRequest) {
     .limit(1)
   const ga4PropertyId = ga4Row?.value ?? null
 
-  // Pull published posts to scorecard.
-  const posts = await database
-    .select({
-      webflowItemId: schema.publishHistory.webflowItemId,
-      draftId: schema.publishHistory.draftId,
-      url: schema.publishHistory.url,
-      publishedAt: schema.publishHistory.publishedAt,
-    })
-    .from(schema.publishHistory)
-    .limit(maxPosts)
+  // Pull ALL live Webflow blog + glossary URLs (NOT publish_history,
+  // which only has round-table pipeline output — misses legacy items).
+  interface PostTarget {
+    webflowItemId: string
+    draftId: string | null
+    url: string
+    publishedAt: string
+  }
+  const posts: PostTarget[] = []
+  try {
+    const blogCollectionId = await getBlogPostsCollectionId()
+    let offset = 0
+    while (posts.length < maxPosts) {
+      const page = await listCollectionItems(blogCollectionId, { offset, limit: 100 })
+      if (page.items.length === 0) break
+      for (const it of page.items) {
+        if (posts.length >= maxPosts) break
+        const slug = (it.fieldData.slug as string | undefined) ?? ''
+        if (!slug) continue
+        posts.push({
+          webflowItemId: it.id,
+          draftId: null,
+          url: `https://www.tahi.studio/blog/${slug}`,
+          publishedAt: it.lastPublished ?? it.createdOn ?? new Date().toISOString(),
+        })
+      }
+      if (page.items.length < 100) break
+      offset += page.items.length
+    }
+  } catch (err) { console.error('blog collection fetch failed', err) }
+  try {
+    const glossaryCollectionId = await getGlossaryCollectionId()
+    let offset = 0
+    while (posts.length < maxPosts) {
+      const page = await listCollectionItems(glossaryCollectionId, { offset, limit: 100 })
+      if (page.items.length === 0) break
+      for (const it of page.items) {
+        if (posts.length >= maxPosts) break
+        const slug = (it.fieldData.slug as string | undefined) ?? ''
+        if (!slug) continue
+        posts.push({
+          webflowItemId: it.id,
+          draftId: null,
+          url: `https://www.tahi.studio/resources/glossary/${slug}`,
+          publishedAt: it.lastPublished ?? it.createdOn ?? new Date().toISOString(),
+        })
+      }
+      if (page.items.length < 100) break
+      offset += page.items.length
+    }
+  } catch (err) { console.error('glossary collection fetch failed', err) }
 
   let updated = 0
   let inserted = 0

@@ -449,18 +449,23 @@ export function BackfillContent() {
       })
       const json = await res.json() as Record<string, unknown>
       // Build a compact human summary from common response shapes.
+      const errorsCount = Array.isArray(json.errors)
+        ? json.errors.length
+        : typeof json.errors === 'number' ? json.errors : 0
       const summary = json.error
         ? `Failed: ${String(json.error).slice(0, 200)}`
         : key === 'content-gap-hunt'
-          ? `Created ${json.ideasCreated ?? 0} new ideas (skipped ${json.ideasSkipped ?? 0} dupes)`
+          ? `Created ${json.ideasCreated ?? 0} new ideas · skipped ${json.ideasSkipped ?? 0} dupes · ${json.perplexityQueries ?? 0} research queries · ~$${(((json.totalCostCents ?? 0) as number) / 100).toFixed(3)}`
           : key === 'indexing-reverser'
-            ? `Scanned ${json.scanned ?? 0} · ${json.unindexed ?? 0} unindexed · IndexNow ${json.indexNowStatus ?? 'unknown'}`
+            ? `Scanned ${json.scanned ?? 0} · ${json.unindexed ?? 0} unindexed · IndexNow ${json.indexNowStatus ?? 'unknown'}${json.indexNowDetail ? ` (${String(json.indexNowDetail).slice(0, 120)})` : ''}`
             : key === 'schema-watchdog'
-              ? `Scanned ${json.totalScanned ?? 0} · ${json.issues && Array.isArray(json.issues) ? json.issues.length : 0} issues · ${json.autoFixed ?? 0} auto-fixed`
+              ? `Scanned ${json.totalScanned ?? 0} · ${Array.isArray(json.issues) ? json.issues.length : 0} issues · ${json.autoFixed ?? 0} auto-fixed`
               : key === 'post-scorecard-sync'
-                ? `Scanned ${json.scanned ?? 0} posts · ${json.updated ?? 0} updated · ${json.inserted ?? 0} new rows · ${json.errors ?? 0} errors`
+                ? `Scanned ${json.scanned ?? 0} URLs · ${json.updated ?? 0} updated · ${json.inserted ?? 0} new rows · ${errorsCount} errors`
                 : key === 'content-auto-backfill'
-                  ? `${json.processed ?? json.skipped ?? 'done'}`
+                  ? json.skipped
+                    ? `Skipped: ${String(json.skipped).slice(0, 120)}`
+                    : `Broken found: ${json.brokenFound ?? 0} · processed ${json.processed ?? 0} · patched ${json.patched ?? 0} · remaining ${json.remaining ?? 0}`
                   : JSON.stringify(json).slice(0, 200)
       setAgentResults(prev => ({ ...prev, [key]: summary }))
       if (res.ok) showToast(`${key}: ${summary}`)

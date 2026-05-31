@@ -111,40 +111,63 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 3) IndexNow ping for the unindexed batch. IndexNow accepts up to
-  //    10000 URLs per request — well within our cap.
+  // 3) IndexNow ping for the unindexed batch. Two pre-flight checks
+  //    so a misconfigured keyLocation doesn't surface as a scary
+  //    "error" — it surfaces as "skipped: setup incomplete" with a
+  //    direct fix-up note.
   let indexNowSubmitted = 0
   let indexNowStatus: 'ok' | 'skipped' | 'error' = 'ok'
   let indexNowDetail = ''
-  if (unindexedUrls.length > 0) {
+  if (unindexedUrls.length === 0) {
+    indexNowStatus = 'skipped'
+    indexNowDetail = 'No unindexed URLs to submit'
+  } else {
     const indexnowKey = process.env.INDEXNOW_KEY ?? ''
     if (!indexnowKey || indexnowKey === 'configure-indexnow-key') {
       indexNowStatus = 'skipped'
       indexNowDetail = 'INDEXNOW_KEY env not set'
     } else {
+      // Pre-flight: verify keyLocation file is fetchable. If it's not,
+      // IndexNow will reject the submission with HTTP 422 / Forbidden.
+      // Catch it here with a clear message rather than surfacing as
+      // a scary "error" downstream.
+      const keyLocationUrl = `${TAHI_BASE}/${indexnowKey}.txt`
+      let keyServed = false
       try {
-        const payload = {
-          host: 'www.tahi.studio',
-          key: indexnowKey,
-          keyLocation: `${TAHI_BASE}/${indexnowKey}.txt`,
-          urlList: unindexedUrls,
+        const probe = await fetch(keyLocationUrl, { signal: AbortSignal.timeout(5000) })
+        if (probe.ok) {
+          const probeText = await probe.text()
+          keyServed = probeText.trim() === indexnowKey
         }
-        const res = await fetch('https://api.indexnow.org/indexnow', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(8000),
-        })
-        if (res.ok || res.status === 202) {
-          indexNowSubmitted = unindexedUrls.length
-          indexNowDetail = `HTTP ${res.status}`
-        } else {
+      } catch { /* keyServed stays false */ }
+      if (!keyServed) {
+        indexNowStatus = 'skipped'
+        indexNowDetail = `keyLocation ${keyLocationUrl} not serving the key (Webflow doesn't allow .txt uploads at root; Cloudflare Worker route needs tahi.studio to be in your CF account). Submission skipped to avoid IndexNow rejection.`
+      } else {
+        try {
+          const payload = {
+            host: 'www.tahi.studio',
+            key: indexnowKey,
+            keyLocation: keyLocationUrl,
+            urlList: unindexedUrls,
+          }
+          const res = await fetch('https://api.indexnow.org/indexnow', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(8000),
+          })
+          if (res.ok || res.status === 202) {
+            indexNowSubmitted = unindexedUrls.length
+            indexNowDetail = `HTTP ${res.status} (${unindexedUrls.length} URLs submitted)`
+          } else {
+            indexNowStatus = 'error'
+            indexNowDetail = `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`
+          }
+        } catch (err) {
           indexNowStatus = 'error'
-          indexNowDetail = `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`
+          indexNowDetail = err instanceof Error ? err.message.slice(0, 200) : 'fetch failed'
         }
-      } catch (err) {
-        indexNowStatus = 'error'
-        indexNowDetail = err instanceof Error ? err.message.slice(0, 200) : 'fetch failed'
       }
     }
   }
@@ -160,6 +183,8 @@ export async function POST(req: NextRequest) {
     durationMs: Date.now() - t0,
     statuses: statuses.slice(0, 100),  // cap response size
   }
-  await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'indexing-reverser', indexNowStatus === 'error' ? 'error' : 'success', summary.durationMs, summary, null)
+  // 'skipped' is a healthy outcome (setup incomplete by design), not error.
+  const cronStatus = indexNowStatus === 'error' ? 'error' : 'success'
+  await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'indexing-reverser', cronStatus, summary.durationMs, summary, null)
   return NextResponse.json(summary)
 }
