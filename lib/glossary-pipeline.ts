@@ -22,6 +22,7 @@
 import { claudeJson } from '@/lib/anthropic-cost'
 import { SONNET_MODEL, HAIKU_MODEL } from '@/lib/ai-models'
 import { buildResearchBrief } from '@/lib/perplexity'
+import { fetchSeoSignals } from '@/lib/seo-signals'
 import type { db } from '@/lib/db'
 
 type Database = Awaited<ReturnType<typeof db>>
@@ -269,9 +270,7 @@ export async function generateGlossaryEntry(
   const stages: GenerateResult['stages'] = []
   let totalCostCents = 0
 
-  // 1) Research (Perplexity, free for our quota). buildResearchBrief
-  //    returns structured sections + citations; we flatten into a brief
-  //    string for the writer.
+  // 1a) Research (Perplexity).
   let researchBrief = ''
   if (opts.research !== false) {
     try {
@@ -283,12 +282,33 @@ export async function generateGlossaryEntry(
     }
   }
 
-  // 2) Writer (Sonnet).
+  // 1b) SEO signals (GSC + GA4 + SE Ranking). The writer + reviewers
+  //     see what's currently ranking, what queries this URL earns, and
+  //     what competitors look like — concrete competitive grounding.
+  let seoBrief = ''
+  try {
+    const signals = await fetchSeoSignals(opts.database, term, 'glossary')
+    seoBrief = signals.writerBrief
+    const noteParts: string[] = []
+    if (signals.gsc.available) noteParts.push(`GSC ${signals.gsc.impressions30d ?? 0}imp/${signals.gsc.clicks30d ?? 0}clk`)
+    if (signals.ga4.available) noteParts.push(`GA4 ${signals.ga4.sessions30d ?? 0}sess`)
+    if (signals.seRanking.available) noteParts.push(`SER vol${signals.seRanking.searchVolume ?? '?'}`)
+    stages.push({ name: 'seo_signals', costCents: 0, notes: noteParts.length > 0 ? noteParts.join(' · ') : 'sources unavailable' })
+  } catch (err) {
+    stages.push({ name: 'seo_signals', costCents: 0, notes: `skipped: ${err instanceof Error ? err.message.slice(0, 60) : 'fail'}` })
+  }
+
+  // 2) Writer (Sonnet). Cache the research + SEO briefs so the editor
+  //    pass + reviewers don't re-pay for them.
+  const cachedContext: string[] = []
+  if (seoBrief) cachedContext.push(seoBrief)
+  if (researchBrief) cachedContext.push(`# Research brief (use as ground-truth for facts + citations)\n\n${researchBrief.slice(0, 6000)}`)
+
   const writerUserPrompt = `Term: ${term}
 
-${researchBrief ? `Research brief (use as ground-truth for facts + citations):\n${researchBrief.slice(0, 6000)}\n\n` : ''}${opts.authorSlug ? `Forced author: ${opts.authorSlug}` : 'Pick the right author (liam or staci) based on the topic.'}
+${opts.authorSlug ? `Forced author: ${opts.authorSlug}` : 'Pick the right author (liam or staci) based on the topic.'}
 
-Write the glossary entry as JSON per the system prompt.`
+The SEO + research briefs are in the cached context above. Use the SEO brief's "top queries" verbatim as H2 headings where they make sense. Write the glossary entry as JSON per the system prompt.`
 
   const writerResult = await claudeJson<GeneratedGlossaryEntry>({
     database: opts.database,
@@ -298,6 +318,7 @@ Write the glossary entry as JSON per the system prompt.`
     model: SONNET_MODEL,
     systemPrompt: WRITER_SYSTEM,
     userPrompt: writerUserPrompt,
+    cachedSystemBlocks: cachedContext.length > 0 ? cachedContext : undefined,
     maxTokens: 4096,
     parse: parseJsonLoose,
     skipCostCap: true,

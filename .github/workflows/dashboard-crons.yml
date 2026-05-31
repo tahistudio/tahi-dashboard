@@ -67,6 +67,9 @@ on:
     # Schema watchdog (agent) — Sunday 23:00 UTC. Validates schema
     # on every live URL + auto-fixes broken ones via backfill.
     - cron: '0 23 * * SUN'
+    # Indexing reverser — Sunday 20:00 UTC. GSC URL Inspection for
+    # every live URL, IndexNow ping for unindexed ones.
+    - cron: '0 20 * * SUN'
   # Manual trigger via the Actions UI — pick which cron to fire.
   workflow_dispatch:
     inputs:
@@ -88,6 +91,7 @@ on:
           - content-auto-backfill
           - content-gap-hunt
           - schema-watchdog
+          - indexing-reverser
 
 jobs:
   fire:
@@ -120,6 +124,7 @@ jobs:
               "0 22 * * SUN")                    targets="content-auto-backfill" ;;
               "30 19 * * SUN")                   targets="content-gap-hunt" ;;
               "0 23 * * SUN")                    targets="schema-watchdog" ;;
+              "0 20 * * SUN")                    targets="indexing-reverser" ;;
               *)                                 echo "::warning::Unknown schedule '$schedule'" ;;
             esac
           fi
