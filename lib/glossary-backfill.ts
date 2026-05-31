@@ -18,8 +18,7 @@ interface GlossaryFields {
   slug?: string
   schema?: string
   body?: string                   // rich text — the actual body (not post-body)
-  definition?: string             // 40-60 word snippet (new field, often blank on legacy items)
-  description?: string            // 1-sentence definition (existing, populated on legacy items)
+  description?: string            // the 40-60 word snippet definition (single source — `definition` field was removed)
   'also-known-as'?: string
   'primary-category'?: string     // Reference: Category item id
   'related-categories'?: string[]
@@ -96,10 +95,10 @@ export async function backfillGlossaryItem(
   const bodyHtml = f.body ?? ''
   const bodyMarkdown = htmlToPseudoMarkdown(bodyHtml)
 
-  // Definition: explicit `definition` field wins; else `description`
-  // (legacy items); else the first substantive body paragraph.
+  // Definition comes from `description` (the snippet field). The old
+  // `definition` field was removed — description is the single source.
+  // Falls back to the first substantive body paragraph.
   const definition = (() => {
-    if (f.definition && f.definition.trim().length > 30) return f.definition.trim().slice(0, 400)
     if (f.description && f.description.trim().length > 30) return f.description.trim().slice(0, 400)
     const lines = bodyMarkdown.split('\n').map(l => l.trim()).filter(Boolean)
     for (const l of lines) {
@@ -178,18 +177,7 @@ export async function backfillGlossaryItem(
       const msg = err instanceof Error ? err.message : String(err)
       skippedFields.push(`schema: ${msg.slice(0, 100)}`)
     }
-    // 2) Backfill the `definition` field from `description` when the new
-    //    field is blank — gives us the snippet-ready 40-60 word version
-    //    in the right place for future schema regens to read directly.
-    if (!f.definition && f.description) {
-      try {
-        await patchCollectionItem(collectionId, itemId, { definition: f.description })
-        patchedFields.push('definition')
-      } catch (err) {
-        skippedFields.push(`definition: ${err instanceof Error ? err.message.slice(0, 60) : 'fail'}`)
-      }
-    }
-    // 3) Body rewrite, opt-in. Webflow's real rich-text field is `body`.
+    // 2) Body rewrite, opt-in. Webflow's real rich-text field is `body`.
     if (opts.rewriteBody && bodyChanged) {
       try {
         await patchCollectionItem(collectionId, itemId, { body: newBodyHtml })

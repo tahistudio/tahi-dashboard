@@ -149,8 +149,7 @@ export async function POST(req: NextRequest) {
     slug,
     schema: schemaResult.jsonLdString,
     body: fullHtml,                                  // rich text — the real body field
-    description: body.definition,                    // existing field (legacy items have this)
-    definition: body.definition,                     // new field Liam added
+    description: body.definition,                    // the 40-60 word snippet definition
   }
   if (body.metaTitle) baseFields['meta-title'] = body.metaTitle
   if (body.metaDescription) baseFields['meta-description-2'] = body.metaDescription
