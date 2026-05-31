@@ -923,7 +923,7 @@ function ComingSoonTab({ tab }: { tab: TabDef }) {
     <Card padding="lg">
       <EmptyState
         icon={<Icon className="w-6 h-6" />}
-        title={`Coming in Slice ${tab.slice}`}
+        title="Coming soon"
         description={tab.comingDescription}
       />
     </Card>
