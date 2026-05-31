@@ -15,8 +15,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import {
-  AlertTriangle, CheckCircle2, RefreshCw, Loader2, Sparkles, Eye, ExternalLink,
-  Settings as SettingsIcon, ChevronDown, ChevronRight,
+  CheckCircle2, RefreshCw, Loader2, Sparkles, Eye, ExternalLink,
+  Settings as SettingsIcon,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Card } from '@/components/tahi/card'
@@ -24,6 +24,7 @@ import { Badge } from '@/components/tahi/badge'
 import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { useToast } from '@/components/tahi/toast'
+import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
 import { apiPath } from '@/lib/api'
 
 interface ItemAudit {
@@ -651,25 +652,25 @@ export function BackfillContent() {
             </div>
           </div>
 
-          <SectionList
-            title={`Glossary terms (${glossaryItems.length})`}
+          <h3 style={{ fontSize: '0.875rem', fontWeight: 600, margin: '0.5rem 0', color: 'var(--color-text)' }}>
+            Glossary terms ({glossaryItems.length})
+          </h3>
+          <BackfillItemTable
             type="glossary"
             items={glossaryItems}
-            expanded={expanded}
             perItemRunning={perItemRunning}
-            onToggle={toggleExpand}
             onFix={(id, opts) => { void runSingleBackfill('glossary', id, opts) }}
             onAudit={(id) => { void runAudit(id) }}
             onUpgrade={(id, name) => { void upgradeTerm(id, name) }}
           />
-          <div style={{ height: '0.75rem' }} />
-          <SectionList
-            title={`Blog posts (${blogItems.length})`}
+          <div style={{ height: '1.25rem' }} />
+          <h3 style={{ fontSize: '0.875rem', fontWeight: 600, margin: '0.5rem 0', color: 'var(--color-text)' }}>
+            Blog posts ({blogItems.length})
+          </h3>
+          <BackfillItemTable
             type="blog"
             items={blogItems}
-            expanded={expanded}
             perItemRunning={perItemRunning}
-            onToggle={toggleExpand}
             onFix={(id, opts) => { void runSingleBackfill('blog', id, opts) }}
           />
         </Card>
@@ -748,124 +749,135 @@ export function BackfillContent() {
   )
 }
 
-interface SectionListProps {
-  title: string
+interface BackfillItemTableProps {
   type: ContentType
   items: ItemAudit[]
-  expanded: Set<string>
   perItemRunning: string | null
-  onToggle: (id: string) => void
   onFix: (id: string, opts: { rewriteBody?: boolean }) => void
   onAudit?: (id: string) => void
   onUpgrade?: (id: string, name: string) => void
 }
 
-function SectionList({ title, type, items, expanded, perItemRunning, onToggle, onFix, onAudit, onUpgrade }: SectionListProps) {
+function BackfillItemTable({ type, items, perItemRunning, onFix, onAudit, onUpgrade }: BackfillItemTableProps) {
   if (items.length === 0) {
     return (
       <EmptyState
         icon={<CheckCircle2 className="w-5 h-5" />}
-        title={`${title.split(' (')[0]}: all clean`}
+        title={`${type === 'glossary' ? 'Glossary' : 'Blog'} — all clean`}
         description="Every item passes the current health checks. Re-audit to re-check."
       />
     )
   }
   const baseUrl = type === 'glossary' ? 'https://www.tahi.studio/resources/glossary' : 'https://www.tahi.studio/blog'
+
+  const columns: DataTableColumn<ItemAudit>[] = [
+    {
+      key: 'name',
+      header: 'Item',
+      sortable: true,
+      sortValue: (r: ItemAudit) => r.name.toLowerCase(),
+      render: (r: ItemAudit) =><span style={{ fontSize: '0.8125rem', color: 'var(--color-text)', fontWeight: 500 }}>{r.name}</span>,
+    },
+    {
+      key: 'score',
+      header: 'Health',
+      sortable: true,
+      sortValue: (r: ItemAudit) => healthScore(r).score,
+      render: (r: ItemAudit) => {
+        const s = healthScore(r)
+        return <Badge tone={s.tone}>{s.score}%</Badge>
+      },
+      width: '6rem',
+    },
+    {
+      key: 'schema',
+      header: 'Schema',
+      render: (r: ItemAudit) => r.hasSchema && r.schemaValid
+        ? <Badge tone="positive">OK</Badge>
+        : r.hasSchema
+          ? <Badge tone="danger">{r.schemaErrors} errors</Badge>
+          : <Badge tone="warning">Missing</Badge>,
+      width: '7rem',
+    },
+    {
+      key: 'issues',
+      header: 'Missing',
+      render: (r: ItemAudit) => {
+        const missing: string[] = []
+        if (!r.hasFaqSchema) missing.push('FAQ')
+        if (!r.hasAuthor) missing.push('author')
+        if (!r.hasDateModified) missing.push('updated')
+        if (!r.hasRelatedRefs) missing.push('related')
+        if (!r.hasCategory) missing.push('category')
+        if (r.emDashes > 0) missing.push(`${r.emDashes}em-dashes`)
+        if (r.bannedWords > 0) missing.push(`${r.bannedWords}banned`)
+        if (missing.length === 0) return <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>—</span>
+        return (
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+            {missing.slice(0, 3).join(' · ')}{missing.length > 3 ? ` +${missing.length - 3}` : ''}
+          </span>
+        )
+      },
+    },
+  ]
+
   return (
-    <div>
-      <h3 style={{ fontSize: '0.875rem', fontWeight: 600, margin: '0 0 0.5rem', color: 'var(--color-text)' }}>{title}</h3>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-        {items.slice(0, 50).map(item => {
-          const isExpanded = expanded.has(item.id)
-          const isFixing = perItemRunning === item.id
-          const score = healthScore(item)
-          return (
-            <div
-              key={item.id}
-              style={{
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-leaf-sm)',
-                background: 'var(--color-bg)',
-              }}
-            >
-              <button
-                onClick={() => onToggle(item.id)}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: '0.75rem',
-                  padding: '0.625rem 0.875rem',
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                }}
+    <DataTable
+      columns={columns}
+      rows={items}
+      getRowId={r => r.id}
+      defaultPageSize={20}
+      paginate
+      density="compact"
+      ariaLabel={`${type} backfill items`}
+      defaultSort={{ key: 'score', dir: 'asc' }}
+      renderExpand={item => {
+        const isFixing = perItemRunning === item.id
+        return (
+          <div style={{ padding: '0.625rem 0', display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+            <MissingPills item={item} />
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <TahiButton
+                size="sm"
+                loading={isFixing}
+                onClick={() => onFix(item.id, {})}
+                iconLeft={<Sparkles className="w-3.5 h-3.5" />}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0, flex: 1 }}>
-                  {isExpanded ? <ChevronDown className="w-3.5 h-3.5" style={{ flexShrink: 0 }} /> : <ChevronRight className="w-3.5 h-3.5" style={{ flexShrink: 0 }} />}
-                  <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {item.name}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
-                  <Badge tone={score.tone}>{score.score}%</Badge>
-                  {score.score < 80 && <AlertTriangle className="w-3.5 h-3.5" style={{ color: 'var(--color-warning)' }} />}
-                </div>
-              </button>
-              {isExpanded && (
-                <div style={{ padding: '0 0.875rem 0.75rem 1.875rem', display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
-                  <MissingPills item={item} />
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <TahiButton
-                      size="sm"
-                      loading={isFixing}
-                      onClick={() => onFix(item.id, {})}
-                      iconLeft={<Sparkles className="w-3.5 h-3.5" />}
-                    >
-                      Fix schema
-                    </TahiButton>
-                    {item.emDashes + item.bannedWords > 0 && (
-                      <TahiButton
-                        size="sm"
-                        variant="secondary"
-                        loading={isFixing}
-                        onClick={() => onFix(item.id, { rewriteBody: true })}
-                      >
-                        Fix + strip AI tells from body
-                      </TahiButton>
-                    )}
-                    {type === 'glossary' && onAudit && (
-                      <TahiButton size="sm" variant="secondary" onClick={() => onAudit(item.id)}>
-                        Audit (~$0.01)
-                      </TahiButton>
-                    )}
-                    {type === 'glossary' && onUpgrade && (
-                      <TahiButton size="sm" variant="secondary" onClick={() => onUpgrade(item.id, item.name)}>
-                        Tier 3 rewrite (~$0.30)
-                      </TahiButton>
-                    )}
-                    <a
-                      href={`${baseUrl}/${item.slug}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
-                    >
-                      <Eye className="w-3 h-3" /> View live <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-                </div>
+                Fix schema
+              </TahiButton>
+              {item.emDashes + item.bannedWords > 0 && (
+                <TahiButton
+                  size="sm"
+                  variant="secondary"
+                  loading={isFixing}
+                  onClick={() => onFix(item.id, { rewriteBody: true })}
+                >
+                  Fix + strip AI tells
+                </TahiButton>
               )}
+              {type === 'glossary' && onAudit && (
+                <TahiButton size="sm" variant="secondary" onClick={() => onAudit(item.id)}>
+                  Audit (~$0.01)
+                </TahiButton>
+              )}
+              {type === 'glossary' && onUpgrade && (
+                <TahiButton size="sm" variant="secondary" onClick={() => onUpgrade(item.id, item.name)}>
+                  Tier 3 rewrite (~$0.30)
+                </TahiButton>
+              )}
+              <a
+                href={`${baseUrl}/${item.slug}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', marginLeft: 'auto' }}
+              >
+                <Eye className="w-3 h-3" /> View live <ExternalLink className="w-3 h-3" />
+              </a>
             </div>
-          )
-        })}
-        {items.length > 50 && (
-          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'center', margin: '0.25rem 0 0' }}>
-            Showing first 50 of {items.length}. Use bulk backfill to process all.
-          </p>
-        )}
-      </div>
-    </div>
+          </div>
+        )
+      }}
+    />
   )
 }
+

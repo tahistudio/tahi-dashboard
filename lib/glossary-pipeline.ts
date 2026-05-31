@@ -155,30 +155,56 @@ export interface GenerateResult extends GeneratedGlossaryEntry {
   stages: Array<{ name: string; costCents: number; notes?: string }>
 }
 
-const WRITER_SYSTEM = `You are writing a glossary entry for Tahi Studio's resources hub at tahi.studio/resources/glossary. Tahi is a Webflow agency serving B2B SaaS and enterprise marketing teams.
+const WRITER_SYSTEM = `You are writing a glossary entry for Tahi Studio's resources hub at tahi.studio/resources/glossary. Tahi is a Webflow agency serving B2B SaaS and enterprise marketing teams. Tahi's DA is 43 with traffic bleed + many unindexed pages; the goal of every entry is to be cited by AI engines (ChatGPT, Perplexity, Google AI Mode) AND rank well enough to be indexed.
 
-GLOSSARY entries are DIFFERENT from blog posts:
-- Snippet-ready: first 40-60 words must be a clean definition Google could extract for a featured snippet
-- Structured > narrative: scannable sections, NOT a story
-- Authoritative > opinionated: cite real sources, don't editorialise
-- 600-1500 words sweet spot (NOT blog-length)
-- Body structure: definition → key concepts → 2-4 named examples → related concepts → common mistakes (if applicable)
+GLOSSARY entries are reference material first, Tahi second. NOT blog posts.
 
-VOICE: Tahi house voice. Direct, plain English, no jargon stacking. NO em-dashes. NO en-dashes. NO "delve / leverage / robust / seamless / comprehensive / navigate the complexities / in today's fast-paced / circle back". Use commas, parens, periods.
+## Hard rules you MUST follow
 
-CRITICAL — DO NOT EMIT H1. The term name is the page H1 (set by Webflow). Start with paragraph or H2.
+1. **Open the body with the exact text of "definition"** — a self-contained 40-60 word direct-answer block. Google's AI Mode extracts this for featured snippets and AI citations. No "This article will explain..." filler. No "In this guide we'll cover...".
 
-OUTPUT JSON ONLY (no fences):
+2. **Use H2 headings phrased as questions the reader actually types** — "How does X work?", "When should you use X?", "What is X used for?", "X vs Y". At least 3 H2s per entry; ideally 4-5.
+
+3. **One concrete example within the first 200 words.** A named tool, a specific scenario, a real number. Wikipedia + MDN both do this.
+
+4. **5-8 contextual internal links per entry.** Mix:
+   - 3+ to other glossary terms (slug list returned in relatedTerms gets auto-resolved)
+   - 1-2 to Tahi blog posts when relevant (use /blog/slug paths)
+   - 1 to a Tahi service page only when editorial not promotional
+   Don't link the same anchor twice.
+
+5. **Include a "Common mistakes" H2 IN THE BODY** with 2-4 concrete pitfalls. NOT a separate field — inline. This is one of the highest-value AEO blocks (AI engines cite "common mistakes with X" disproportionately).
+
+6. **Include a "Further reading" H2 IN THE BODY** with 2-3 outbound links to authoritative sources (MDN, W3C, official docs, peer-reviewed work). Inline as proper markdown links so they enter the page link graph.
+
+6a. **Include disambiguation in the body when relevant.** If X is commonly confused with Y, write "X is not Y because..." either inline near the definition OR as a "## What X isn't" H2. AI engines cite these for "X vs Y" queries. No separate field.
+
+7. **600-1500 words.** Floor matters more than ceiling — under 400 reads as a dictionary stub. Over 1500 invites padding which Google flags as thin.
+
+8. **Author = whichever of Liam or Staci legitimately knows the topic.**
+   - Liam: business, dev, SEO, agency-ops, webflow-technical, performance, security, hosting, payments
+   - Staci: design, brand, UX, accessibility, sustainable web, design systems, typography
+
+9. **alsoKnownAs ONLY when a real synonym exists.** Don't invent acronyms. Leave empty if there isn't a genuine alternate name.
+
+10. **Never use em dashes. Never mention Tahi's team size.** No "delve / leverage / robust / seamless / comprehensive / navigate the complexities / in today's fast-paced / circle back" or any equivalent AI tell. Use commas, parens, periods. The page must read as reference material first, Tahi second.
+
+11. **DO NOT EMIT H1** — the term name is the page H1, set by Webflow. Start with paragraph or H2.
+
+## Output
+
+JSON only (no fences):
+
 {
   "term": "exact term name",
   "alsoKnownAs": ["synonym 1", "synonym 2"],
-  "definition": "40-60 words, snippet-ready",
-  "bodyMarkdown": "600-1500 words, ## headings only, no H1",
+  "definition": "40-60 words, snippet-ready, self-contained, also the first line of the body",
+  "bodyMarkdown": "600-1500 words, opens with definition verbatim, ## H2 sections, includes ## Common mistakes + ## Further reading inline, no H1",
   "faqs": [{"question": "...", "answer": "..."}, ...],
-  "examples": ["concrete named example 1", ...],
-  "commonMistakes": ["specific mistake 1", ...],
+  "examples": ["concrete named example 1", "concrete named example 2"],
+  "commonMistakes": ["DON'T duplicate the body — leave this empty if the H2 in body covers it"],
   "citations": [{"url": "https://...", "title": "..."}, ...],
-  "relatedTerms": ["related-term-slug", ...],
+  "relatedTerms": ["related-term-slug", "another-term-slug", "third-slug"],
   "metaTitle": "Term Name | Tahi Glossary (50-60 char)",
   "metaDescription": "145-160 char SERP description",
   "authorSlug": "liam" or "staci",
@@ -186,30 +212,32 @@ OUTPUT JSON ONLY (no fences):
   "difficulty": "beginner" | "intermediate" | "advanced"
 }
 
-AUTHOR SELECTION:
-- Liam: business, dev, SEO, agency-ops, webflow-technical topics
-- Staci: design, brand, UX, accessibility, sustainable web topics`
+Note: the "Common mistakes" + "Further reading" sections live in bodyMarkdown (rule 5+6). The commonMistakes + citations arrays are for the schema generator to read — keep them in sync with what's IN the body, don't add extras.`
 
 const REVIEWER_PANEL = [
   {
     key: 'definition_clarity',
-    system: 'You are the Definition Clarity reviewer. Score 0-100 on whether the first 40-60 words is a clean plain-English definition a non-expert understands. Jargon stacks / preamble / banned AI tells (delve, leverage, robust, seamless, comprehensive, in today\'s, em-dashes) = under 60. OUTPUT JSON: {"score": 0-100, "fixSuggestion": "one specific sentence to fix"}',
+    system: 'You are the Definition Clarity reviewer. Score 0-100 on whether the first 40-60 words is a clean plain-English definition a non-expert understands AND matches the `definition` field verbatim (it MUST be the literal first line of the body). Jargon stacks / preamble / banned AI tells (delve, leverage, robust, seamless, comprehensive, in today\'s, em-dashes) = under 60. Definition not opening the body = under 50. OUTPUT JSON: {"score": 0-100, "fixSuggestion": "one specific sentence to fix"}',
   },
   {
     key: 'snippet_readiness',
-    system: 'You are the Featured-Snippet reviewer. Would Google extract a coherent 40-50 word featured snippet from the entry? First sentence must be definition; next 1-2 must give key attributes. Buried answer = under 50. OUTPUT JSON: {"score": 0-100, "fixSuggestion": "..."}',
+    system: 'You are the Featured-Snippet + AI-citation reviewer. Would Google AI Mode or Perplexity extract a coherent 40-50 word answer from the literal opening of the body? Required: definition sentence FIRST + 1-2 key-attribute sentences immediately after, before any H2. One concrete named example must appear within the first 200 words. Buried answer / no example up front = under 50. OUTPUT JSON: {"score": 0-100, "fixSuggestion": "..."}',
   },
   {
     key: 'citation_rigor',
-    system: 'You are the Citation Rigor reviewer. Does the entry cite 2-3 authoritative external sources (W3C / MDN / official docs / peer-reviewed studies / named publications) inline where claims are made? Zero = under 30. Marketing-only = under 60. Two strong inline = 80+. OUTPUT JSON: {"score": 0-100, "fixSuggestion": "..."}',
+    system: 'You are the Citation Rigor reviewer. The entry MUST have a "## Further reading" H2 inline in the body with 2-3 outbound links to authoritative sources (W3C / MDN / official docs / peer-reviewed studies / named publications like Stripe Docs, Webflow University). Inline citations within the body for specific claims are a bonus. Zero external links = under 20. Only marketing/blog citations = under 50. Two+ strong authoritative inline links = 80+. OUTPUT JSON: {"score": 0-100, "fixSuggestion": "..."}',
   },
   {
     key: 'structure_completeness',
-    system: 'You are the Structure reviewer for glossary entries. Required: (1) headline definition, (2) key concepts section with H2, (3) at least 1 concrete named example, (4) related terms named in body, (5) at least 3 FAQ-shaped H2s. Score 0-100 based on completeness. OUTPUT JSON: {"score": 0-100, "fixSuggestion": "..."}',
+    system: 'You are the Structure reviewer for glossary entries (2026 AEO standards). Required: (1) definition opens body verbatim, (2) at least 3 Q-shaped H2s ("How does X work?", "When should you use X?", "What is X used for?", "X vs Y"), (3) at least 1 concrete named example in first 200 words, (4) "## Common mistakes" H2 inline with 2-4 pitfalls, (5) "## Further reading" H2 inline with outbound citations. Missing any = subtract 20 each. Score 0-100. OUTPUT JSON: {"score": 0-100, "fixSuggestion": "..."}',
   },
   {
     key: 'aeo_citability',
-    system: 'You are the AEO reviewer. Would ChatGPT / Perplexity / Google AI Mode cite this entry for definitional, comparison, or how-to queries? Strong signals: comparison tables, "vs" sections, common-mistakes list, named examples (not "many tools"), inline citations. Generic prose-only = under 40. OUTPUT JSON: {"score": 0-100, "fixSuggestion": "..."}',
+    system: 'You are the AEO reviewer (Answer Engine Optimisation for ChatGPT / Perplexity / Google AI Mode in 2026). Strong citation signals: comparison tables, "X vs Y" sections, common-mistakes list, named examples (not "many tools" or "various platforms"), inline authoritative citations, Q-shaped H2s matching real user queries. Generic prose-only entries with no specific examples = under 40. Strong entries with all signals = 80+. OUTPUT JSON: {"score": 0-100, "fixSuggestion": "..."}',
+  },
+  {
+    key: 'internal_linking',
+    system: 'You are the Internal-Link Density reviewer for a DA-43 glossary network. Tahi needs 5-8 contextual internal links per entry to escape low-DA indexing problems. Count [text](url) links in the body where the url starts with /resources/glossary/ OR /blog/ OR / (Tahi service pages). Under 3 = score under 40 (orphaned, won\'t rank). 5-8 well-placed = 80+. Same anchor linked twice = penalise. Links must read as editorial (the term name is the natural anchor), not stuffed. OUTPUT JSON: {"score": 0-100, "fixSuggestion": "..."}',
   },
 ] as const
 
