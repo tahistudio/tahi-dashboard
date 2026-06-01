@@ -314,9 +314,11 @@ export function SitemapContent() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', height: 'calc(100vh - 5rem)' }}>
-      {/* Responsive grid: 2 cols on tablet+, stacked on mobile. Inline so
-          the rule travels with the page and doesn't bleed elsewhere. */}
+    <div className="sitemap-page-root" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', height: 'calc(100vh - 5rem)' }}>
+      {/* Responsive: desktop = fixed-height 2-col, each pane scrolls
+          internally. Mobile = page flows naturally, tree capped + scrolls,
+          detail pane grows with content so the FULL doc is readable by
+          scrolling the page (not trapped in a tiny internal box). */}
       <style>{`
         .sitemap-main-grid {
           grid-template-columns: 1fr;
@@ -327,7 +329,10 @@ export function SitemapContent() {
           }
         }
         @media (max-width: 767px) {
-          .sitemap-tree-pane { max-height: 16rem; }
+          .sitemap-page-root { height: auto !important; }
+          .sitemap-main-grid { flex: none !important; min-height: 0; }
+          .sitemap-tree-pane { max-height: 15rem; }
+          .sitemap-detail-pane { overflow: visible !important; }
         }
       `}</style>
       <PageHeader
@@ -404,7 +409,7 @@ export function SitemapContent() {
         </Card>
 
         {/* Detail */}
-        <Card style={{ overflow: 'auto', padding: '1.25rem' }}>
+        <Card className="sitemap-detail-pane" style={{ overflow: 'auto', padding: '1.25rem' }}>
           {!selected ? (
             <EmptyState
               icon={<FileText className="w-5 h-5" />}
