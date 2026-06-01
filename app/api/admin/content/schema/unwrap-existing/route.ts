@@ -17,7 +17,7 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  listCollectionItems, patchCollectionItem,
+  listAllCollectionItems, patchCollectionItem,
   getBlogPostsCollectionId, getGlossaryCollectionId,
 } from '@/lib/webflow'
 
@@ -65,64 +65,57 @@ async function processCollection(
   let unwrapped = 0
   let failed = 0
   const samples: string[] = []
-  let offset = 0
 
-  // Pre-compute "needs patch" items per page, then patch in parallel
-  // batches of BATCH_CONCURRENCY. Webflow's API rate limit is 60
-  // req/min — at 6 patches per batch + 1s sleep we average ~36 req/min,
-  // safely under the cap. Throughput is ~6x what the old sequential
-  // 1.2s-per-item loop managed, so a full 145-URL site drains in 1-2
-  // ticks instead of needing 8-10.
-  while (Date.now() - t0 < budgetMs) {
-    const page = await listCollectionItems(collectionId, { offset, limit: 100 })
-    if (page.items.length === 0) break
+  // Use listAllCollectionItems so we ACTUALLY get every item, not just
+  // however many Webflow felt like returning on the first page (v2 API
+  // sometimes returns < requested page size even when more exist).
+  const allItems = await listAllCollectionItems(collectionId, { maxItems: 500 })
 
-    // First pass: figure out which items need patching (cheap, in-memory).
-    const toPatch: Array<{ id: string; slug: string; unwrapped: string }> = []
-    for (const it of page.items) {
-      scanned++
-      const f = it.fieldData as { schema?: string; slug?: string }
-      const result = stripWrapper(f.schema ?? '')
-      if (!result.changed) { alreadyClean++; continue }
-      toPatch.push({ id: it.id, slug: f.slug ?? it.id, unwrapped: result.unwrapped })
-    }
-
-    // Second pass: parallel-patch in batches with rate-limit pacing.
-    for (let i = 0; i < toPatch.length; i += BATCH_CONCURRENCY) {
-      if (Date.now() - t0 > budgetMs) break
-      const batch = toPatch.slice(i, i + BATCH_CONCURRENCY)
-      if (dryRun) {
-        for (const item of batch) {
-          unwrapped++
-          if (samples.length < 5) samples.push(item.slug)
-        }
-        continue
-      }
-      const results = await Promise.allSettled(batch.map(item =>
-        patchCollectionItem(collectionId, item.id, { schema: item.unwrapped })
-      ))
-      for (let j = 0; j < results.length; j++) {
-        const r = results[j]
-        const item = batch[j]
-        if (r.status === 'fulfilled') {
-          unwrapped++
-          if (samples.length < 5) samples.push(item.slug)
-        } else {
-          failed++
-          console.error('unwrap patch failed', item.slug, r.reason instanceof Error ? r.reason.message : r.reason)
-        }
-      }
-      // Sleep BETWEEN batches (not before the first one) so the next
-      // batch lands inside Webflow's rate-limit window without burning
-      // tick budget.
-      if (i + BATCH_CONCURRENCY < toPatch.length && Date.now() - t0 < budgetMs) {
-        await sleep(INTER_BATCH_MS)
-      }
-    }
-
-    if (page.items.length < 100) break
-    offset += page.items.length
+  // First pass: figure out which items need patching (cheap, in-memory).
+  const toPatch: Array<{ id: string; slug: string; unwrapped: string }> = []
+  for (const it of allItems) {
+    scanned++
+    const f = it.fieldData as { schema?: string; slug?: string }
+    const result = stripWrapper(f.schema ?? '')
+    if (!result.changed) { alreadyClean++; continue }
+    toPatch.push({ id: it.id, slug: f.slug ?? it.id, unwrapped: result.unwrapped })
   }
+
+  // Second pass: parallel-patch in batches with rate-limit pacing.
+  // 6 patches per batch + 1s sleep between = ~36 req/min, under Webflow's
+  // 60/min cap. Stops cleanly when budget exhausted; re-running picks
+  // up remaining items (alreadyClean items get skipped without burning
+  // a Webflow call).
+  for (let i = 0; i < toPatch.length; i += BATCH_CONCURRENCY) {
+    if (Date.now() - t0 > budgetMs) break
+    const batch = toPatch.slice(i, i + BATCH_CONCURRENCY)
+    if (dryRun) {
+      for (const item of batch) {
+        unwrapped++
+        if (samples.length < 5) samples.push(item.slug)
+      }
+      continue
+    }
+    const results = await Promise.allSettled(batch.map(item =>
+      patchCollectionItem(collectionId, item.id, { schema: item.unwrapped })
+    ))
+    for (let j = 0; j < results.length; j++) {
+      const r = results[j]
+      const item = batch[j]
+      if (r.status === 'fulfilled') {
+        unwrapped++
+        if (samples.length < 5) samples.push(item.slug)
+      } else {
+        failed++
+        console.error('unwrap patch failed', item.slug, r.reason instanceof Error ? r.reason.message : r.reason)
+      }
+    }
+    // Sleep BETWEEN batches (not before the first one).
+    if (i + BATCH_CONCURRENCY < toPatch.length && Date.now() - t0 < budgetMs) {
+      await sleep(INTER_BATCH_MS)
+    }
+  }
+
   return { scanned, alreadyClean, unwrapped, failed, samples }
 }
 

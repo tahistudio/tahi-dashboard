@@ -103,6 +103,36 @@ export async function listCollectionItems(
   }
 }
 
+/**
+ * List ALL items across pages. Webflow v2 doesn't always return 100
+ * per page even when you ask — the "break when length < 100" heuristic
+ * is unreliable. This helper paginates by `total` from the response
+ * envelope, or by "got nothing back" as a fallback.
+ *
+ * Optionally caps at `maxItems` so callers don't accidentally pull
+ * tens of thousands of rows.
+ */
+export async function listAllCollectionItems(
+  collectionId: string,
+  opts: { maxItems?: number; pageSize?: number } = {},
+): Promise<WebflowCollectionItem[]> {
+  const maxItems = opts.maxItems ?? 1000
+  const pageSize = Math.min(100, Math.max(1, opts.pageSize ?? 100))
+  const all: WebflowCollectionItem[] = []
+  let offset = 0
+  let knownTotal: number | null = null
+  while (all.length < maxItems) {
+    const page = await listCollectionItems(collectionId, { limit: pageSize, offset })
+    if (page.items.length === 0) break
+    all.push(...page.items)
+    if (knownTotal === null && page.total > 0) knownTotal = page.total
+    offset += page.items.length
+    // Stop when we've fetched everything Webflow says exists.
+    if (knownTotal !== null && all.length >= knownTotal) break
+  }
+  return all.slice(0, maxItems)
+}
+
 /** Fetch a single item by id. */
 export async function getCollectionItem(
   collectionId: string,
