@@ -164,9 +164,9 @@ const SEED: SeedNode[] = [
       { title: 'Webflow agency New Zealand', slug: 'webflow-agency-new-zealand', nodeType: 'page', status: 'idea', purpose: 'Geo landing. Low-difficulty, high-conversion local query. Local case studies + NZD pricing + NZ timezone.' },
       { title: 'Webflow agency Australia', slug: 'webflow-agency-australia', nodeType: 'page', status: 'idea' },
 
-      // ── Trust + Why ──────────────────────────────────────────────────
-      { title: 'Why Tahi', slug: 'why-tahi', nodeType: 'page', status: 'idea', purpose: 'ONE manifesto-style page. Sections inside, not separate URLs. Sales + Marketing + Competitive analyst all confirmed: neither competitor splits, splitting fragments authority. Wedges as sections: engineering-grade, carbon-negative, transparency, AI-native.' },
-      { title: 'Trust', slug: 'trust', nodeType: 'page', status: 'idea', purpose: 'Critical for enterprise procurement. Combines: security posture, DPA download, sub-processors, GDPR, accessibility commitment, handover policy (lock-in answer). Sales + CTO both flagged hard — procurement Ctrl-Fs for "DPA" / "SOC2".' },
+      // ── Why + Sustainability ─────────────────────────────────────────
+      { title: 'Why Tahi', slug: 'why-tahi', nodeType: 'page', status: 'idea', purpose: 'ONE manifesto-style page. Sections inside, not separate URLs. Wedges as sections: engineering-grade, transparency, AI-native, ops-on-tap.' },
+      { title: 'Sustainability', slug: 'sustainability', nodeType: 'page', status: 'idea', purpose: 'Folds carbon-negative donations + accessibility commitment + ethical AI use + charity partnerships + sustainable engineering practices (perf = energy efficiency). Shows the studio cares without making it a regulated-buyer trust play.' },
 
       // ── Newsletter ───────────────────────────────────────────────────
       { title: 'Newsletter', slug: 'newsletter', nodeType: 'page', status: 'idea', purpose: "Liam's engineering notes capture surface. Marketing flagged this as biggest demand-gen gap. Lead magnet: first 10 issues bundled PDF." },

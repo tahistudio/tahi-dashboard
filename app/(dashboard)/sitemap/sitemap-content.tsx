@@ -334,7 +334,7 @@ export function SitemapContent() {
         title="Sitemap"
         subtitle="Plan + document every page of the redesign. Long-lived planning library."
       >
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <TahiButton
             size="sm"
             variant="secondary"
@@ -577,6 +577,16 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetail
   const [reviewLoading, setReviewLoading] = useState(false)
   const [runningKey, setRunningKey] = useState<ReviewerKey | 'all' | null>(null)
   const [applyingAll, setApplyingAll] = useState(false)
+  // Spec mode = read-only doc (default, Staci-friendly).
+  // Edit mode = input fields (current view, for filling/editing).
+  // Persist preference per-session so toggling once sticks.
+  const [viewMode, setViewMode] = useState<'spec' | 'edit'>(() => {
+    if (typeof window === 'undefined') return 'spec'
+    return (localStorage.getItem('tahi-sitemap-view') as 'spec' | 'edit') ?? 'spec'
+  })
+  useEffect(() => {
+    try { localStorage.setItem('tahi-sitemap-view', viewMode) } catch { /* noop */ }
+  }, [viewMode])
 
   function applySuggestion(apply: SuggestionApply): boolean {
     const field = apply.field
@@ -716,21 +726,53 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetail
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: '14rem' }}>
-          <FieldText
-            label="Title"
-            value={node.title}
-            onSave={(v) => onPatch({ title: v })}
-            inputStyle={{ fontSize: '1.125rem', fontWeight: 600 }}
-          />
-          <div style={{ display: 'flex', gap: '0.375rem', alignItems: 'center', marginTop: '0.25rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+          {viewMode === 'edit' ? (
+            <FieldText
+              label="Title"
+              value={node.title}
+              onSave={(v) => onPatch({ title: v })}
+              inputStyle={{ fontSize: '1.125rem', fontWeight: 600 }}
+            />
+          ) : (
+            <h2 style={{ fontSize: '1.375rem', fontWeight: 700, margin: 0, lineHeight: 1.2 }}>{node.title}</h2>
+          )}
+          <div style={{ display: 'flex', gap: '0.375rem', alignItems: 'center', marginTop: '0.375rem', fontSize: '0.75rem', color: 'var(--color-text-muted)', flexWrap: 'wrap' }}>
             <span>{NODE_TYPE_LABEL[node.nodeType]}</span>
             <span>·</span>
-            <span>Updated {new Date(node.updatedAt).toLocaleString()}</span>
-            {saving && <Loader2 className="w-3 h-3 animate-spin" />}
-            {!saving && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.125rem' }}><Save className="w-3 h-3" /> Saved</span>}
+            <Badge tone={STATUS_TONE[node.status]}>{STATUS_LABEL[node.status]}</Badge>
+            {node.url && (<><span>·</span><a href={node.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-brand)', textDecoration: 'none' }}>{node.url.replace(/^https?:\/\//, '')}</a></>)}
+            {viewMode === 'edit' && (
+              <>
+                <span>·</span>
+                <span>Updated {new Date(node.updatedAt).toLocaleString()}</span>
+                {saving && <Loader2 className="w-3 h-3 animate-spin" />}
+                {!saving && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.125rem' }}><Save className="w-3 h-3" /> Saved</span>}
+              </>
+            )}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '0.375rem' }}>
+        <div style={{ display: 'flex', gap: '0.375rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* View-mode toggle */}
+          <div style={{ display: 'inline-flex', border: '1px solid var(--color-border)', borderRadius: '0.5rem', padding: '0.125rem', background: 'var(--color-bg-secondary)' }}>
+            <button
+              onClick={() => setViewMode('spec')}
+              style={{
+                border: 'none', padding: '0.25rem 0.625rem', fontSize: '0.75rem', fontWeight: 500, cursor: 'pointer', borderRadius: '0.375rem',
+                background: viewMode === 'spec' ? 'var(--color-bg)' : 'transparent',
+                color: viewMode === 'spec' ? 'var(--color-text)' : 'var(--color-text-muted)',
+                boxShadow: viewMode === 'spec' ? '0 1px 2px rgba(0,0,0,0.04)' : 'none',
+              }}
+            >Spec</button>
+            <button
+              onClick={() => setViewMode('edit')}
+              style={{
+                border: 'none', padding: '0.25rem 0.625rem', fontSize: '0.75rem', fontWeight: 500, cursor: 'pointer', borderRadius: '0.375rem',
+                background: viewMode === 'edit' ? 'var(--color-bg)' : 'transparent',
+                color: viewMode === 'edit' ? 'var(--color-text)' : 'var(--color-text-muted)',
+                boxShadow: viewMode === 'edit' ? '0 1px 2px rgba(0,0,0,0.04)' : 'none',
+              }}
+            >Edit</button>
+          </div>
           <TahiButton size="sm" variant="secondary" onClick={onDuplicate} iconLeft={<Copy className="w-3.5 h-3.5" />}>
             Duplicate
           </TahiButton>
@@ -740,65 +782,71 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetail
         </div>
       </div>
 
-      {/* Top metadata row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(13rem, 1fr))', gap: '0.875rem' }}>
-        <FieldSelect
-          label="Status"
-          value={node.status}
-          options={Object.keys(STATUS_LABEL).map(k => ({ value: k, label: STATUS_LABEL[k as SitemapNode['status']] }))}
-          onSave={(v) => onPatch({ status: v as SitemapNode['status'] })}
-        />
-        <FieldSelect
-          label="Positioning vertical"
-          value={node.positioningVertical ?? ''}
-          options={[{ value: '', label: '— None —' }, ...VERTICAL_OPTIONS.map(v => ({ value: v, label: v }))]}
-          onSave={(v) => onPatch({ positioningVertical: v || null })}
-        />
-        <FieldSelect
-          label="Node type"
-          value={node.nodeType}
-          options={[
-            { value: 'page', label: 'Page' },
-            { value: 'cms_collection', label: 'CMS collection' },
-            { value: 'section', label: 'Section (group)' },
-          ]}
-          onSave={(v) => onPatch({ nodeType: v as SitemapNode['nodeType'] })}
-        />
-      </div>
+      {viewMode === 'edit' ? (
+        <>
+          {/* Top metadata row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(13rem, 1fr))', gap: '0.875rem' }}>
+            <FieldSelect
+              label="Status"
+              value={node.status}
+              options={Object.keys(STATUS_LABEL).map(k => ({ value: k, label: STATUS_LABEL[k as SitemapNode['status']] }))}
+              onSave={(v) => onPatch({ status: v as SitemapNode['status'] })}
+            />
+            <FieldSelect
+              label="Positioning vertical"
+              value={node.positioningVertical ?? ''}
+              options={[{ value: '', label: '— None —' }, ...VERTICAL_OPTIONS.map(v => ({ value: v, label: v }))]}
+              onSave={(v) => onPatch({ positioningVertical: v || null })}
+            />
+            <FieldSelect
+              label="Node type"
+              value={node.nodeType}
+              options={[
+                { value: 'page', label: 'Page' },
+                { value: 'cms_collection', label: 'CMS collection' },
+                { value: 'section', label: 'Section (group)' },
+              ]}
+              onSave={(v) => onPatch({ nodeType: v as SitemapNode['nodeType'] })}
+            />
+          </div>
 
-      {/* URL row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(14rem, 1fr))', gap: '0.875rem' }}>
-        <FieldText label="Slug" value={node.slug ?? ''} onSave={(v) => onPatch({ slug: v || null })} placeholder="e.g. enterprise-webflow" />
-        <FieldText label="Live or target URL" value={node.url ?? ''} onSave={(v) => onPatch({ url: v || null })} placeholder="https://www.tahi.studio/..." />
-        <FieldText label="Target launch date" value={node.targetLaunchDate ?? ''} onSave={(v) => onPatch({ targetLaunchDate: v || null })} placeholder="YYYY-MM-DD" />
-      </div>
+          {/* URL row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(14rem, 1fr))', gap: '0.875rem' }}>
+            <FieldText label="Slug" value={node.slug ?? ''} onSave={(v) => onPatch({ slug: v || null })} placeholder="e.g. enterprise-webflow" />
+            <FieldText label="Live or target URL" value={node.url ?? ''} onSave={(v) => onPatch({ url: v || null })} placeholder="https://www.tahi.studio/..." />
+            <FieldText label="Target launch date" value={node.targetLaunchDate ?? ''} onSave={(v) => onPatch({ targetLaunchDate: v || null })} placeholder="YYYY-MM-DD" />
+          </div>
 
-      {/* Structured doc fields */}
-      <FieldTextArea label="Purpose" value={node.purpose ?? ''} onSave={(v) => onPatch({ purpose: v || null })} placeholder="Why does this page exist? 1-2 sentences." />
-      <FieldTextArea label="Target ICP audience" value={node.icpAudience ?? ''} onSave={(v) => onPatch({ icpAudience: v || null })} placeholder="Who is this page for? Be specific (e.g. 'CMO at a Series-B SaaS evaluating Webflow Enterprise')." />
+          {/* Structured doc fields */}
+          <FieldTextArea label="Purpose" value={node.purpose ?? ''} onSave={(v) => onPatch({ purpose: v || null })} placeholder="Why does this page exist? 1-2 sentences." />
+          <FieldTextArea label="Target ICP audience" value={node.icpAudience ?? ''} onSave={(v) => onPatch({ icpAudience: v || null })} placeholder="Who is this page for? Be specific (e.g. 'CMO at a Series-B SaaS evaluating Webflow Enterprise')." />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.875rem' }}>
-        <FieldText label="Primary keyword" value={node.primaryKeyword ?? ''} onSave={(v) => onPatch({ primaryKeyword: v || null })} placeholder="e.g. enterprise webflow agency" />
-        <FieldText label="AEO intent" value={node.aeoIntent ?? ''} onSave={(v) => onPatch({ aeoIntent: v || null })} placeholder="What question does this answer for an AI engine?" />
-      </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.875rem' }}>
+            <FieldText label="Primary keyword" value={node.primaryKeyword ?? ''} onSave={(v) => onPatch({ primaryKeyword: v || null })} placeholder="e.g. enterprise webflow agency" />
+            <FieldText label="AEO intent" value={node.aeoIntent ?? ''} onSave={(v) => onPatch({ aeoIntent: v || null })} placeholder="What question does this answer for an AI engine?" />
+          </div>
 
-      <FieldTextArea label="Success metric" value={node.successMetric ?? ''} onSave={(v) => onPatch({ successMetric: v || null })} placeholder="How do we know this page is working? (e.g. '5 demo bookings/month from organic')" />
-      <FieldTextArea label="Special features" value={node.specialFeatures ?? ''} onSave={(v) => onPatch({ specialFeatures: v || null })} placeholder="Distinctive interactions, integrations, animations — the things people don't see anywhere else." />
-      <FieldTextArea label="Content blocks needed (one per line)" value={node.contentBlocksNeeded ?? ''} onSave={(v) => onPatch({ contentBlocksNeeded: v || null })} placeholder="FAQs section&#10;Pricing comparison table&#10;Testimonial carousel&#10;3-step process diagram&#10;ROI calculator&#10;Hero with client logos&#10;Inline CTA after section 2" />
-      <FieldTextArea label="Design notes" value={node.designNotes ?? ''} onSave={(v) => onPatch({ designNotes: v || null })} placeholder="Staci's notes — visual direction, layout, components, references." />
-      <FieldTextArea label="Content notes" value={node.contentNotes ?? ''} onSave={(v) => onPatch({ contentNotes: v || null })} placeholder="Liam's notes — voice, key claims, what NOT to say, citations to pull in." />
+          <FieldTextArea label="Success metric" value={node.successMetric ?? ''} onSave={(v) => onPatch({ successMetric: v || null })} placeholder="How do we know this page is working? (e.g. '5 demo bookings/month from organic')" />
+          <FieldTextArea label="Special features" value={node.specialFeatures ?? ''} onSave={(v) => onPatch({ specialFeatures: v || null })} placeholder="Distinctive interactions, integrations, animations — the things people don't see anywhere else." />
+          <FieldTextArea label="Content blocks needed (one per line)" value={node.contentBlocksNeeded ?? ''} onSave={(v) => onPatch({ contentBlocksNeeded: v || null })} placeholder="FAQs section&#10;Pricing comparison table&#10;Testimonial carousel&#10;3-step process diagram&#10;ROI calculator&#10;Hero with client logos&#10;Inline CTA after section 2" />
+          <FieldTextArea label="Design notes" value={node.designNotes ?? ''} onSave={(v) => onPatch({ designNotes: v || null })} placeholder="Staci's notes — visual direction, layout, components, references." />
+          <FieldTextArea label="Content notes" value={node.contentNotes ?? ''} onSave={(v) => onPatch({ contentNotes: v || null })} placeholder="Liam's notes — voice, key claims, what NOT to say, citations to pull in." />
 
-      {/* Freeform Tiptap */}
-      <div>
-        <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 500, marginBottom: '0.375rem' }}>
-          Freeform notes
-        </label>
-        <TiptapDocEditor
-          content={node.bodyTiptap ?? ''}
-          onChange={(html) => onPatch({ bodyTiptap: html })}
-          placeholder="Anything else worth remembering. Slash commands work — type / for shortcuts."
-        />
-      </div>
+          {/* Freeform Tiptap */}
+          <div>
+            <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 500, marginBottom: '0.375rem' }}>
+              Freeform notes
+            </label>
+            <TiptapDocEditor
+              content={node.bodyTiptap ?? ''}
+              onChange={(html) => onPatch({ bodyTiptap: html })}
+              placeholder="Anything else worth remembering. Slash commands work — type / for shortcuts."
+            />
+          </div>
+        </>
+      ) : (
+        <SpecView node={node} />
+      )}
 
       {/* Sub-agent reviewer panel */}
       <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '1.25rem' }}>
@@ -1019,6 +1067,85 @@ interface FieldTextProps {
   onSave: (v: string) => void
   placeholder?: string
   inputStyle?: React.CSSProperties
+}
+
+// ── Spec view (read-only doc) ────────────────────────────────────────────
+
+function SpecView({ node }: { node: SitemapNode }) {
+  // Render any field that has content. Empty fields show as a greyed
+  // "Not yet specified" so Staci sees the gap without clutter.
+  function Section({ heading, value, multiline }: { heading: string; value: string | null; multiline?: boolean }) {
+    const has = !!(value && value.trim())
+    return (
+      <section style={{ marginBottom: '1.25rem' }}>
+        <h3 style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 0.375rem' }}>
+          {heading}
+        </h3>
+        {has ? (
+          <div style={{ fontSize: '0.9375rem', lineHeight: 1.6, color: 'var(--color-text)', whiteSpace: multiline ? 'pre-wrap' : 'normal' }}>
+            {value}
+          </div>
+        ) : (
+          <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>
+            Not yet specified
+          </div>
+        )}
+      </section>
+    )
+  }
+  // Tiptap body: render the JSON walked to plain text for spec view.
+  let bodyText = ''
+  if (node.bodyTiptap) {
+    try {
+      const doc = JSON.parse(node.bodyTiptap) as unknown
+      const out: string[] = []
+      function walk(n: unknown) {
+        if (!n || typeof n !== 'object') return
+        const x = n as { type?: string; text?: string; content?: unknown[] }
+        if (x.type === 'text' && typeof x.text === 'string') out.push(x.text)
+        if (Array.isArray(x.content)) {
+          for (const c of x.content) walk(c)
+          if (x.type === 'paragraph' || x.type === 'heading') out.push('\n')
+        }
+      }
+      walk(doc)
+      bodyText = out.join('').replace(/\n{3,}/g, '\n\n').trim()
+    } catch { /* ignore */ }
+  }
+  return (
+    <div style={{ paddingTop: '0.5rem' }}>
+      {/* Quick-facts bar — metadata stripe */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '0.75rem', padding: '0.75rem 1rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-leaf-sm)', marginBottom: '1.5rem' }}>
+        <SpecFact label="Vertical" value={node.positioningVertical} />
+        <SpecFact label="Slug" value={node.slug ? `/${node.slug}` : null} mono />
+        <SpecFact label="Primary keyword" value={node.primaryKeyword} />
+        <SpecFact label="Target launch" value={node.targetLaunchDate} />
+      </div>
+
+      <Section heading="Purpose" value={node.purpose} multiline />
+      <Section heading="Target ICP audience" value={node.icpAudience} multiline />
+      <Section heading="AEO intent" value={node.aeoIntent} multiline />
+      <Section heading="Success metric" value={node.successMetric} multiline />
+      <Section heading="Special features" value={node.specialFeatures} multiline />
+      <Section heading="Content blocks needed" value={node.contentBlocksNeeded} multiline />
+      <Section heading="Design notes" value={node.designNotes} multiline />
+      <Section heading="Content notes" value={node.contentNotes} multiline />
+      <Section heading="Freeform notes" value={bodyText || null} multiline />
+    </div>
+  )
+}
+
+function SpecFact({ label, value, mono }: { label: string; value: string | null; mono?: boolean }) {
+  return (
+    <div>
+      <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.125rem' }}>
+        {label}
+      </div>
+      <div style={{ fontSize: '0.8125rem', color: value ? 'var(--color-text)' : 'var(--color-text-subtle)', fontStyle: value ? 'normal' : 'italic', fontFamily: mono && value ? 'ui-monospace, SFMono-Regular, monospace' : undefined }}>
+        {value ?? 'Not set'}
+      </div>
+    </div>
+  )
 }
 
 function FieldText({ label, value, onSave, placeholder, inputStyle }: FieldTextProps) {
