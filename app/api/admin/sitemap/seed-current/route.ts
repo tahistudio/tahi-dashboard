@@ -56,18 +56,17 @@ const SEED: SeedNode[] = [
     status: 'idea',
     children: [
 
-      // ── Services (paid work only) ────────────────────────────────────
+      // ── Services (paid plans only — capabilities live in /will-it-webflow) ──
       {
         title: 'Services',
         slug: 'services',
         nodeType: 'section',
         status: 'idea',
+        purpose: 'Services = buy-able plans + tiers. Capabilities (web apps, integrations, custom CMS) live in /will-it-webflow showcase, not here.',
         children: [
           { title: 'Maintain (retainer)', slug: 'services/maintain', nodeType: 'page', positioningVertical: 'Operations', status: 'idea' },
           { title: 'Grow (retainer)', slug: 'services/grow', nodeType: 'page', positioningVertical: 'Operations', status: 'idea' },
-          { title: 'Migrate (project)', slug: 'services/migrate', nodeType: 'page', positioningVertical: 'Enterprise Custom Webflow', status: 'idea' },
-          { title: 'Web apps (Webflow Cloud)', slug: 'services/web-apps', nodeType: 'page', positioningVertical: 'Webflow Cloud', status: 'idea' },
-          { title: 'Integrate', slug: 'services/integrate', nodeType: 'page', positioningVertical: 'Product Integrations', status: 'idea' },
+          { title: 'Custom (project)', slug: 'services/custom', nodeType: 'page', positioningVertical: 'Enterprise Custom Webflow', status: 'idea', purpose: 'Custom-quoted project work — migrations, web apps, integrations, bespoke builds. Folds in the capabilities that used to be separate /services/* pages.' },
           { title: 'Add-ons (CMS)', slug: 'services/add-ons', nodeType: 'cms_collection', positioningVertical: 'Operations', status: 'idea' },
         ],
       },
@@ -76,7 +75,7 @@ const SEED: SeedNode[] = [
       { title: 'Enterprise', slug: 'enterprise', nodeType: 'page', positioningVertical: 'Enterprise Custom Webflow', status: 'idea' },
       { title: 'Pricing', slug: 'pricing', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'idea' },
       { title: 'Webflow project calculator', slug: 'webflow-project-calculator', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'idea' },
-      { title: 'Free site audit', slug: 'free-site-audit', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'idea' },
+      { title: 'Free audit', slug: 'free-audit', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'idea', purpose: 'Multi-faceted audit tool: paste URL → report on performance, AEO, schema, accessibility, Webflow-feasibility. Replaces the old /free-site-audit and /aeo/audit (consolidated to one URL).' },
       { title: 'Contact', slug: 'contact', nodeType: 'page', status: 'idea' },
 
       // ── Will It Webflow? (capability showcase) ───────────────────────
@@ -144,7 +143,7 @@ const SEED: SeedNode[] = [
           { title: 'AEO for Webflow', slug: 'aeo/for-webflow', nodeType: 'page', status: 'idea' },
           { title: 'AEO vs SEO', slug: 'aeo/vs-seo', nodeType: 'page', status: 'idea' },
           { title: 'AEO schema checklist', slug: 'aeo/schema-checklist', nodeType: 'page', status: 'idea' },
-          { title: 'AEO audit tool', slug: 'aeo/audit', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'idea' },
+          // /aeo/audit removed — consolidated into /free-audit (one multi-faceted tool, not two).
         ],
       },
 
@@ -161,12 +160,9 @@ const SEED: SeedNode[] = [
         ],
       },
 
-      // ── Geo cluster (root, flat) ─────────────────────────────────────
-      { title: 'Webflow agency New Zealand', slug: 'webflow-agency-new-zealand', nodeType: 'page', status: 'idea', purpose: 'Geo landing. Low-difficulty, high-conversion local query (SEO agent ranked #3 priority). Local case studies + NZD pricing + NZ timezone.' },
+      // ── Geo cluster (root, flat — country-level only) ────────────────
+      { title: 'Webflow agency New Zealand', slug: 'webflow-agency-new-zealand', nodeType: 'page', status: 'idea', purpose: 'Geo landing. Low-difficulty, high-conversion local query. Local case studies + NZD pricing + NZ timezone.' },
       { title: 'Webflow agency Australia', slug: 'webflow-agency-australia', nodeType: 'page', status: 'idea' },
-      { title: 'Webflow developer Auckland', slug: 'webflow-developer-auckland', nodeType: 'page', status: 'idea' },
-      { title: 'Webflow developer Sydney', slug: 'webflow-developer-sydney', nodeType: 'page', status: 'idea' },
-      { title: 'Webflow developer Melbourne', slug: 'webflow-developer-melbourne', nodeType: 'page', status: 'idea' },
 
       // ── Trust + Why ──────────────────────────────────────────────────
       { title: 'Why Tahi', slug: 'why-tahi', nodeType: 'page', status: 'idea', purpose: 'ONE manifesto-style page. Sections inside, not separate URLs. Sales + Marketing + Competitive analyst all confirmed: neither competitor splits, splitting fragments authority. Wedges as sections: engineering-grade, carbon-negative, transparency, AI-native.' },
@@ -182,9 +178,17 @@ const SEED: SeedNode[] = [
         nodeType: 'section',
         status: 'idea',
         children: [
-          { title: 'Liam Miller', slug: 'about/liam-miller', nodeType: 'page', status: 'idea', purpose: 'Person schema. Links to every Liam-authored article. E-E-A-T signal.' },
-          { title: 'Staci Bonnie', slug: 'about/staci-bonnie', nodeType: 'page', status: 'idea' },
-          { title: 'Team (CMS)', slug: 'about/team', nodeType: 'cms_collection', status: 'idea', purpose: 'For future hires + acts as author reference for all blog/glossary content.' },
+          {
+            title: 'Team (CMS)',
+            slug: 'about/team',
+            nodeType: 'cms_collection',
+            status: 'idea',
+            purpose: 'CMS listing every Tahi team member. Each member has a Person-schema profile page. Drives author E-E-A-T for blog + glossary content.',
+            children: [
+              { title: 'Liam Miller', slug: 'about/team/liam-miller', nodeType: 'page', status: 'idea', purpose: 'Person schema. Links to every Liam-authored article. E-E-A-T signal.' },
+              { title: 'Staci Bonnie', slug: 'about/team/staci-bonnie', nodeType: 'page', status: 'idea' },
+            ],
+          },
         ],
       },
       { title: 'Careers', slug: 'careers', nodeType: 'page', status: 'idea' },
