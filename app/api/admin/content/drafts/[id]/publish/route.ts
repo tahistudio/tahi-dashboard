@@ -117,14 +117,53 @@ export async function POST(
     )
   }
   if (draft.publishedWebflowItemId) {
-    return NextResponse.json(
-      {
-        error: 'Draft already published to Webflow',
-        webflowItemId: draft.publishedWebflowItemId,
-        publishUrl: draft.publishUrl,
-      },
-      { status: 409 },
-    )
+    // Probe Webflow to see if the item still exists. Liam can delete a
+    // Webflow item directly (e.g. to test auto-schedule, or because the
+    // draft was bad) — the dashboard's `publishedWebflowItemId` then
+    // points at nothing. Without this check, every subsequent publish
+    // attempt 409s with "Draft already published" even though Webflow
+    // has nothing.
+    try {
+      const { getCollectionItem, getBlogPostsCollectionId } = await import('@/lib/webflow')
+      const collectionId = await getBlogPostsCollectionId()
+      await getCollectionItem(collectionId, draft.publishedWebflowItemId)
+      // Item exists — the old "already published" 409 is correct.
+      return NextResponse.json(
+        {
+          error: 'Draft already published to Webflow',
+          webflowItemId: draft.publishedWebflowItemId,
+          publishUrl: draft.publishUrl,
+        },
+        { status: 409 },
+      )
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (/404|not found/i.test(msg)) {
+        // Webflow item is gone. Clear the stale id so the publish
+        // proceeds as a fresh create, and log the cleanup so the next
+        // sync doesn't try to find this item anywhere.
+        console.log(`Draft ${id}: cleared stale publishedWebflowItemId ${draft.publishedWebflowItemId} (Webflow returned 404)`)
+        await database.update(schema.contentDrafts).set({
+          publishedWebflowItemId: null,
+          publishUrl: null,
+          publishedAt: null,
+        }).where(eq(schema.contentDrafts.id, id))
+        draft.publishedWebflowItemId = null
+        draft.publishUrl = null
+      } else {
+        // Probe failed for some non-404 reason (auth, network). Bail
+        // with the original 409 + the underlying error so Liam isn't
+        // surprised by a republish on a still-live item.
+        return NextResponse.json(
+          {
+            error: 'Draft has publishedWebflowItemId but Webflow probe failed; not auto-clearing',
+            webflowItemId: draft.publishedWebflowItemId,
+            probeError: msg.slice(0, 300),
+          },
+          { status: 409 },
+        )
+      }
+    }
   }
 
   // Regenerate schema/hreflang/category against the FINAL state right
