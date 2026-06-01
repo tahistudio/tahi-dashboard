@@ -778,13 +778,11 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetail
         <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 500, marginBottom: '0.375rem' }}>
           Freeform notes
         </label>
-        <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-leaf-sm)', padding: '0.625rem', minHeight: '8rem', background: 'var(--color-bg)' }}>
-          <TiptapDocEditor
-            content={node.bodyTiptap ?? ''}
-            onChange={(html) => onPatch({ bodyTiptap: html })}
-            placeholder="Anything else worth remembering. Slash commands work — type / for shortcuts."
-          />
-        </div>
+        <TiptapDocEditor
+          content={node.bodyTiptap ?? ''}
+          onChange={(html) => onPatch({ bodyTiptap: html })}
+          placeholder="Anything else worth remembering. Slash commands work — type / for shortcuts."
+        />
       </div>
 
       {/* Sub-agent reviewer panel */}
