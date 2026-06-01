@@ -20,11 +20,15 @@ import {
   LayoutDashboard, Inbox, MessageSquare, FileText, Users, FolderOpen,
   Menu, X, CheckSquare, TrendingUp, Star, CreditCard, Clock, BarChart2,
   Gauge, UserCog, FileSignature, BookOpen, ShoppingBag, Calendar,
-  Megaphone, UserPlus, Share2, Phone, PenLine,
+  Megaphone, UserPlus, Share2, Phone, PenLine, Map,
 } from 'lucide-react'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { SidebarUserCard } from '@/components/tahi/sidebar-user-card'
 import { FocusTrap } from '@/components/tahi/focus-trap'
+import { useUser } from '@clerk/nextjs'
+
+// Mirrors the desktop sidebar gate so /sitemap stays Liam+Staci only.
+const SITEMAP_ALLOWLIST_EMAILS = new Set(['business@tahi.studio', 'staci@tahi.studio'])
 
 const ADMIN_BOTTOM = [
   { label: 'Overview', href: '/overview', icon: LayoutDashboard },
@@ -44,6 +48,8 @@ interface DrawerNavItem {
   label: string
   href: string
   icon: React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties; 'aria-hidden'?: boolean | 'true' | 'false' }>
+  /** Hidden unless current user's email is in this allowlist. */
+  emailAllowlist?: Set<string>
 }
 interface DrawerNavGroup {
   group: string
@@ -80,6 +86,7 @@ const ADMIN_DRAWER: DrawerNavGroup[] = [
     group: 'Marketing',
     items: [
       { label: 'Content studio', href: '/content-studio', icon: PenLine },
+      { label: 'Sitemap',        href: '/sitemap',        icon: Map, emailAllowlist: SITEMAP_ALLOWLIST_EMAILS },
       { label: 'Social',         href: '/social',         icon: Share2 },
       { label: 'Reviews',        href: '/reviews',        icon: Star },
       { label: 'Announcements',  href: '/announcements',  icon: Megaphone },
@@ -163,7 +170,16 @@ export function MobileBottomNav({ isAdmin = false }: MobileBottomNavProps) {
 
   const showAsAdmin = isAdmin && !isImpersonatingClient
   const bottomItems = showAsAdmin ? ADMIN_BOTTOM : CLIENT_BOTTOM
-  const drawerGroups = showAsAdmin ? ADMIN_DRAWER : CLIENT_DRAWER
+  const { user } = useUser()
+  const userEmail = user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? null
+  const drawerGroups = (showAsAdmin ? ADMIN_DRAWER : CLIENT_DRAWER)
+    .map(group => ({
+      ...group,
+      items: group.items.filter(item =>
+        !item.emailAllowlist || (userEmail !== null && item.emailAllowlist.has(userEmail)),
+      ),
+    }))
+    .filter(group => group.items.length > 0)
 
   // Close drawer on route change.
   useEffect(() => { setDrawerOpen(false) }, [pathname])

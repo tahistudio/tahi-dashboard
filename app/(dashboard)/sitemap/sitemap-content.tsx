@@ -315,6 +315,21 @@ export function SitemapContent() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', height: 'calc(100vh - 5rem)' }}>
+      {/* Responsive grid: 2 cols on tablet+, stacked on mobile. Inline so
+          the rule travels with the page and doesn't bleed elsewhere. */}
+      <style>{`
+        .sitemap-main-grid {
+          grid-template-columns: 1fr;
+        }
+        @media (min-width: 768px) {
+          .sitemap-main-grid {
+            grid-template-columns: minmax(18rem, 1fr) 2.4fr;
+          }
+        }
+        @media (max-width: 767px) {
+          .sitemap-tree-pane { max-height: 16rem; }
+        }
+      `}</style>
       <PageHeader
         title="Sitemap"
         subtitle="Plan + document every page of the redesign. Long-lived planning library."
@@ -358,9 +373,9 @@ export function SitemapContent() {
         />
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(18rem, 1fr) 2.4fr', gap: '1rem', flex: 1, minHeight: 0 }}>
+      <div className="sitemap-main-grid" style={{ display: 'grid', gap: '1rem', flex: 1, minHeight: 0 }}>
         {/* Tree */}
-        <Card style={{ overflow: 'auto', padding: '0.75rem' }}>
+        <Card className="sitemap-tree-pane" style={{ overflow: 'auto', padding: '0.75rem' }}>
           {loading ? (
             <div style={{ padding: '2rem', textAlign: 'center' }}>
               <Loader2 className="w-5 h-5 animate-spin" style={{ display: 'inline-block', color: 'var(--color-text-muted)' }} />
