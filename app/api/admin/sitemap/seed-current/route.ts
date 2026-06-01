@@ -54,6 +54,7 @@ const SEED: SeedNode[] = [
     url: 'https://www.tahi.studio/',
     nodeType: 'page',
     status: 'idea',
+    purpose: 'POSITIONING: "Embedded WebOps for product-led B2B SaaS." Tahi = Flow Ninja-style WebOps thesis + Webstacks-style SaaS product taste + engineering depth neither has (Webflow Cloud apps, custom integrations, Tahi Dashboard + Nodeo as proof). H1: "Embedded WebOps for product-led SaaS." Subhead: "We design, build and run the marketing site for B2B SaaS teams whose home page has to look as good as the product."',
     children: [
 
       // ── Services (paid plans only — capabilities live in /will-it-webflow) ──
@@ -62,20 +63,21 @@ const SEED: SeedNode[] = [
         slug: 'services',
         nodeType: 'section',
         status: 'idea',
-        purpose: 'Services = buy-able plans + tiers. Capabilities (web apps, integrations, custom CMS) live in /will-it-webflow showcase, not here.',
+        purpose: 'WebOps tiers + project work. Retainer-shaped (Maintain, Grow) for ongoing WebOps. Project-shaped (Custom, Web apps) for builds + migrations + Webflow Cloud apps. Capabilities (integrations, animations, calculators) live in /will-it-webflow showcase, not here.',
         children: [
-          { title: 'Maintain (retainer)', slug: 'services/maintain', nodeType: 'page', positioningVertical: 'Operations', status: 'idea' },
-          { title: 'Grow (retainer)', slug: 'services/grow', nodeType: 'page', positioningVertical: 'Operations', status: 'idea' },
-          { title: 'Custom (project)', slug: 'services/custom', nodeType: 'page', positioningVertical: 'Enterprise Custom Webflow', status: 'idea', purpose: 'Custom-quoted project work — migrations, web apps, integrations, bespoke builds. Folds in the capabilities that used to be separate /services/* pages.' },
+          { title: 'Maintain (retainer)', slug: 'services/maintain', nodeType: 'page', positioningVertical: 'Operations', status: 'idea', purpose: 'WebOps lite. Ongoing site care: hosting + monitoring + minor updates + SEO/AEO check-ins + perf. Entry retainer tier — likely $2–5k/mo range. For SaaS teams who have a Webflow site but no one to own it.' },
+          { title: 'Grow (retainer)', slug: 'services/grow', nodeType: 'page', positioningVertical: 'Operations', status: 'idea', purpose: 'Full embedded WebOps. We own the marketing site + the data stack (Matomo/GA4/GSC/AEO/Zapier) + ongoing build queue. Mid-tier — likely $5–12k/mo. The retainer where Physitrack/Champion-tier clients pay because their marketing team is small and ours is theirs.' },
+          { title: 'Custom (project)', slug: 'services/custom', nodeType: 'page', positioningVertical: 'Enterprise Custom Webflow', status: 'idea', purpose: 'Custom-quoted project work — site rebuilds, migrations, bespoke features. From $5,000.' },
+          { title: 'Web apps (Webflow Cloud)', slug: 'services/web-apps', nodeType: 'page', positioningVertical: 'Webflow Cloud', status: 'idea', purpose: 'Promoted to first-class service per CTO + senior strategist panel. Custom Webflow Cloud apps — customer dashboards, integrated tools, auth-gated portals. The thing Webstacks would subcontract. Tahi Dashboard + Nodeo as proof.' },
           { title: 'Add-ons (CMS)', slug: 'services/add-ons', nodeType: 'cms_collection', positioningVertical: 'Operations', status: 'idea' },
         ],
       },
 
       // ── Root-level positioning flags ─────────────────────────────────
-      { title: 'Enterprise', slug: 'enterprise', nodeType: 'page', positioningVertical: 'Enterprise Custom Webflow', status: 'idea' },
-      { title: 'Pricing', slug: 'pricing', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'idea' },
+      { title: 'Enterprise', slug: 'enterprise', nodeType: 'page', positioningVertical: 'Enterprise Custom Webflow', status: 'idea', purpose: 'Positioning flag for enterprise-scale buyers (Series B+ SaaS, 200+ employees US/UK, 50+ NZ/AU). Currently aspirational — no enterprise logo yet. Page is capability-led, not customer-led, until first logo lands.' },
+      { title: 'Pricing', slug: 'pricing', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'idea', purpose: 'Semi-transparent pricing (Flow Ninja model). Show retainer tiers up to ~$12k/mo transparently, then fourth tier "Enterprise — let\'s talk". Disarms Seed/Series A, doesn\'t repel Series B+ procurement.' },
       { title: 'Webflow project calculator', slug: 'webflow-project-calculator', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'idea' },
-      { title: 'Free audit', slug: 'free-audit', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'idea', purpose: 'Multi-faceted audit tool: paste URL → report on performance, AEO, schema, accessibility, Webflow-feasibility. Replaces the old /free-site-audit and /aeo/audit (consolidated to one URL).' },
+      { title: 'Free audit', slug: 'free-audit', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'idea', purpose: 'Multi-faceted audit tool: paste URL → report on performance, AEO, schema, accessibility, Webflow-feasibility. Consolidates /free-site-audit + /aeo/audit into one URL.' },
       { title: 'Contact', slug: 'contact', nodeType: 'page', status: 'idea' },
 
       // ── Will It Webflow? (capability showcase) ───────────────────────
@@ -110,9 +112,8 @@ const SEED: SeedNode[] = [
           { title: 'WordPress to Webflow', slug: 'migrate-to-webflow/from-wordpress', nodeType: 'page', positioningVertical: 'Enterprise Custom Webflow', status: 'idea' },
           { title: 'Framer to Webflow', slug: 'migrate-to-webflow/from-framer', nodeType: 'page', positioningVertical: 'Enterprise Custom Webflow', status: 'idea' },
           { title: 'Wix to Webflow', slug: 'migrate-to-webflow/from-wix', nodeType: 'page', positioningVertical: 'Enterprise Custom Webflow', status: 'idea' },
-          { title: 'Squarespace to Webflow', slug: 'migrate-to-webflow/from-squarespace', nodeType: 'page', positioningVertical: 'Enterprise Custom Webflow', status: 'idea' },
-          { title: 'Shopify to Webflow', slug: 'migrate-to-webflow/from-shopify', nodeType: 'page', positioningVertical: 'Enterprise Custom Webflow', status: 'idea' },
           { title: 'Custom build to Webflow', slug: 'migrate-to-webflow/from-custom-build', nodeType: 'page', positioningVertical: 'Enterprise Custom Webflow', status: 'idea' },
+          // Dropped: /from-squarespace (SMB intent, wrong ICP), /from-shopify (e-comm intent, wrong ICP)
         ],
       },
 
@@ -126,8 +127,8 @@ const SEED: SeedNode[] = [
         children: [
           { title: 'Webflow vs WordPress', slug: 'webflow-vs/wordpress', nodeType: 'page', status: 'idea' },
           { title: 'Webflow vs Framer', slug: 'webflow-vs/framer', nodeType: 'page', status: 'idea' },
-          { title: 'Webflow vs Wix', slug: 'webflow-vs/wix', nodeType: 'page', status: 'idea' },
           { title: 'Webflow vs custom build', slug: 'webflow-vs/custom-build', nodeType: 'page', status: 'idea' },
+          // Dropped: /webflow-vs/wix (SMB intent, doesn\'t serve product-led SaaS ICP)
         ],
       },
 
@@ -147,16 +148,20 @@ const SEED: SeedNode[] = [
         ],
       },
 
-      // ── Vertical landings ────────────────────────────────────────────
+      // ── Vertical landings (specific, product-led SaaS only) ──────────
       {
         title: 'For',
         slug: 'for',
         nodeType: 'section',
         status: 'idea',
+        purpose: 'Vertical landing pages. Sharpened from generic /for/saas to product-led SaaS sub-categories matching the FlowNinja-meets-Webstacks ICP. AI products + data platforms + healthtech products + devtools + cybersecurity. Liam: refine slugs as the first logo in each lands.',
         children: [
-          { title: 'For SaaS', slug: 'for/saas', nodeType: 'page', status: 'idea' },
-          { title: 'For non-profits + charities', slug: 'for/non-profits', nodeType: 'page', status: 'idea' },
-          { title: 'For fast-moving digital products', slug: 'for/fast-moving-products', nodeType: 'page', status: 'idea' },
+          { title: 'For AI SaaS', slug: 'for/ai-saas', nodeType: 'page', status: 'idea', purpose: 'ElevenLabs / Anthropic / OpenAI-tier. AI-product marketing sites that need to demo capability live.' },
+          { title: 'For data platforms', slug: 'for/data-platforms', nodeType: 'page', status: 'idea', purpose: 'Snowflake / Sigma / dbt-tier. Data infrastructure where the marketing site has to look as serious as the product.' },
+          { title: 'For devtools', slug: 'for/devtools', nodeType: 'page', status: 'idea', purpose: 'Vercel / Linear / Sentry-tier. Developer products with interactive demo expectations.' },
+          { title: 'For healthtech products', slug: 'for/healthtech-products', nodeType: 'page', status: 'idea', purpose: 'Physitrack / Champion Health / digital therapeutics tier. Existing client base sweet spot.' },
+          { title: 'For cybersecurity products', slug: 'for/cybersecurity-products', nodeType: 'page', status: 'idea', purpose: 'Glasswall / Snyk-tier. Security products with technical-buyer scrutiny.' },
+          // Dropped: /for/saas (too generic), /for/non-profits, /for/fast-moving-products (don\'t match product-led ICP)
         ],
       },
 
@@ -164,33 +169,41 @@ const SEED: SeedNode[] = [
       { title: 'Webflow agency New Zealand', slug: 'webflow-agency-new-zealand', nodeType: 'page', status: 'idea', purpose: 'Geo landing. Low-difficulty, high-conversion local query. Local case studies + NZD pricing + NZ timezone.' },
       { title: 'Webflow agency Australia', slug: 'webflow-agency-australia', nodeType: 'page', status: 'idea' },
 
-      // ── Why + Sustainability ─────────────────────────────────────────
-      { title: 'Why Tahi', slug: 'why-tahi', nodeType: 'page', status: 'idea', purpose: 'ONE manifesto-style page. Sections inside, not separate URLs. Wedges as sections: engineering-grade, transparency, AI-native, ops-on-tap.' },
-      { title: 'Sustainability', slug: 'sustainability', nodeType: 'page', status: 'idea', purpose: 'Folds carbon-negative donations + accessibility commitment + ethical AI use + charity partnerships + sustainable engineering practices (perf = energy efficiency). Shows the studio cares without making it a regulated-buyer trust play.' },
+      // ── Why + Sustainability + Security ──────────────────────────────
+      { title: 'Why Tahi', slug: 'why-tahi', nodeType: 'page', status: 'idea', purpose: 'ONE manifesto-style page. Three sections, not separate URLs: (1) Engineering-grade Webflow (between marketing + engineering, ships Webflow Cloud apps); (2) AI-fluent (content engine, reviewer panels, AEO discipline — reframed from "AI-native" per CTO panel: "AI-native" reads as buzzword to AI-company buyers, "AI-fluent" doesn\'t); (3) Embedded WebOps (renamed from "ops-on-tap" per Sales panel — owns Matomo/GA4/GSC/AEO/Zapier stack, the retainer pitch). Sustainability + transparency become footer/about signals, not nav-level wedges.' },
+      { title: 'Sustainability', slug: 'sustainability', nodeType: 'page', status: 'idea', purpose: 'Folds carbon-negative donations + accessibility commitment + ethical AI use + charity partnerships + sustainable engineering practices.' },
+      { title: 'Security + trust', slug: 'security', nodeType: 'page', status: 'idea', purpose: 'Lean single page (not a hub). Procurement Ctrl-F enablement: data handling, sub-processors (Webflow, Cloudflare, R2, Clerk, Stripe, Resend), GDPR posture, accessibility commitment, SOC2 honest readiness statement, DPA-on-request, handover policy. Killed the hub plan; this slim version handles the procurement gate.' },
 
       // ── Newsletter ───────────────────────────────────────────────────
-      { title: 'Newsletter', slug: 'newsletter', nodeType: 'page', status: 'idea', purpose: "Liam's engineering notes capture surface. Marketing flagged this as biggest demand-gen gap. Lead magnet: first 10 issues bundled PDF." },
+      { title: 'Newsletter', slug: 'newsletter', nodeType: 'page', status: 'idea', purpose: 'THE WEBFLOW ENTERPRISE BRIEF (per Marketing panel reframe). Weekly, 5-min read. Promise: one capability ceiling test + one AEO/schema move + one migration teardown. Owns the enterprise-Webflow beat — no competitor publishes this regularly.' },
 
-      // ── About + Careers ──────────────────────────────────────────────
+      // ── Teardowns (manufactured trust, monthly cadence) ──────────────
       {
-        title: 'About',
-        slug: 'about',
+        title: 'Teardowns',
+        slug: 'teardowns',
         nodeType: 'section',
         status: 'idea',
+        purpose: 'Monthly cadence — one new teardown per month. Aspirational-prospect rebuilds: "How we\'d rebuild [Tier-1 Brand]\'s marketing site on Webflow." Frame: engineering-grade thinking + architecture diagrams + cost comparison, NOT a sales pitch. Shareable on X + LinkedIn. Manufactured trust before logos land. First target: Vercel (devtools, currently on custom Next, less obvious than ElevenLabs).',
         children: [
-          {
-            title: 'Team (CMS)',
-            slug: 'about/team',
-            nodeType: 'cms_collection',
-            status: 'idea',
-            purpose: 'CMS listing every Tahi team member. Each member has a Person-schema profile page. Drives author E-E-A-T for blog + glossary content.',
-            children: [
-              { title: 'Liam Miller', slug: 'about/team/liam-miller', nodeType: 'page', status: 'idea', purpose: 'Person schema. Links to every Liam-authored article. E-E-A-T signal.' },
-              { title: 'Staci Bonnie', slug: 'about/team/staci-bonnie', nodeType: 'page', status: 'idea' },
-            ],
-          },
+          { title: 'How we\'d rebuild Vercel on Webflow', slug: 'teardowns/vercel', nodeType: 'page', positioningVertical: 'Showcase', status: 'idea', purpose: 'First teardown. Vercel = devtools-tier exemplar, currently on custom Next stack. Show: architecture, Webflow Cloud app for live demos, perf comparison, what they\'d gain/lose. Shareable on X + dev.to + Indie Hackers. Don\'t pitch — analyse.' },
         ],
       },
+
+      // ── Experts (E-E-A-T entity-graph play) ──────────────────────────
+      {
+        title: 'Experts',
+        slug: 'experts',
+        nodeType: 'section',
+        status: 'idea',
+        purpose: 'Promoted from /about/team/* to root per AEO panel — highest-leverage single AEO move. Each page = full Person schema + sameAs + knowsAbout + author backlinks across blog/glossary. Unlocks entity-graph citation across the entire content corpus in one move.',
+        children: [
+          { title: 'Liam Miller', slug: 'experts/liam-miller', nodeType: 'page', status: 'idea', purpose: 'Person schema. Engineering/CEO. Links to every Liam-authored article + LinkedIn + GitHub + speaking history.' },
+          { title: 'Staci Bonnie', slug: 'experts/staci-bonnie', nodeType: 'page', status: 'idea', purpose: 'Person schema. Design/co-founder. Links to every Staci-authored article + design portfolio + LinkedIn.' },
+        ],
+      },
+
+      // ── About + Careers ──────────────────────────────────────────────
+      { title: 'About', slug: 'about', nodeType: 'page', status: 'idea', purpose: 'Studio story. Founder narrative + the engineering-design pairing. Links out to /experts/* for full Person bios + /case-studies for proof. Single page, not a section.' },
       { title: 'Careers', slug: 'careers', nodeType: 'page', status: 'idea' },
 
       // ── Social proof ─────────────────────────────────────────────────
@@ -220,9 +233,9 @@ const SEED: SeedNode[] = [
         positioningVertical: 'Resources & Education',
         status: 'idea',
         children: [
-          { title: 'Glossary (CMS)', slug: 'resources/glossary', nodeType: 'cms_collection', positioningVertical: 'Resources & Education', status: 'idea', purpose: 'Currently best-performing surface — "brand bible" ranks #34 (2,900 vol/mo), interaction design ranks 8 keywords. Target 350+ DefinedTerm-schema pages.' },
+          { title: 'Glossary (CMS)', slug: 'resources/glossary', nodeType: 'cms_collection', positioningVertical: 'Resources & Education', status: 'idea', purpose: 'Currently best-performing surface — "brand bible" ranks #34 (2,900 vol/mo), interaction design ranks 8 keywords. Target 350+ DefinedTerm-schema pages. Discipline per page: definition + Tahi POV + use case + contrarian take + 3 real examples + related terms + author byline.' },
           { title: 'Cloneables (CMS)', slug: 'resources/cloneables', nodeType: 'cms_collection', status: 'idea', purpose: 'Free + paid cloneable Webflow templates. Each = email capture + LinkedIn-shareable.' },
-          { title: 'FAQs', slug: 'resources/faqs', nodeType: 'page', positioningVertical: 'Resources & Education', status: 'idea' },
+          // Dropped: /resources/faqs (3-way cannibalisation with /will-it-webflow Q-pages + /blog per SEO panel)
           {
             title: 'Reports',
             slug: 'resources/reports',
