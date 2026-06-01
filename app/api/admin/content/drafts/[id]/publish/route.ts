@@ -549,6 +549,26 @@ export async function POST(
     }
   }
 
+  // When the response is a SCHEDULED publish (not an immediate one),
+  // probe the master cron flag. If it's off, the item will sit in
+  // Webflow as a draft forever — the cron is what flips isDraft=false
+  // when scheduledFor arrives. Surface a warning so the UI can prompt
+  // Liam to enable it.
+  let cronWarning: string | null = null
+  if (slotResult.scheduledFor && !publishedAtIso) {
+    try {
+      const [row] = await database
+        .select({ value: schema.settings.value })
+        .from(schema.settings)
+        .where(eq(schema.settings.key, 'content.publishCronEnabled'))
+        .limit(1)
+      const enabled = row?.value === 'true' || row?.value === '1'
+      if (!enabled) {
+        cronWarning = 'Scheduled but content.publishCronEnabled is OFF — the staged draft will not auto-publish at the scheduled time. Enable in Settings → Crons (or POST { value: "true" } to /api/admin/settings/content.publishCronEnabled).'
+      }
+    } catch { /* probe failed — don't break the publish */ }
+  }
+
   return NextResponse.json({
     webflowItemId,
     publishUrl,
@@ -556,5 +576,6 @@ export async function POST(
     publishedAt: publishedAtIso,
     reason: slotResult.reason,
     cooldownConflicts: slotResult.cooldownConflicts,
+    cronWarning,
   })
 }

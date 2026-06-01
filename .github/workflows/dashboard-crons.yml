@@ -70,6 +70,11 @@ on:
     # Indexing reverser — Sunday 20:00 UTC. GSC URL Inspection for
     # every live URL, IndexNow ping for unindexed ones.
     - cron: '0 20 * * SUN'
+    # Publish-scheduled — every 15 min. Promotes staged Webflow drafts
+    # to live when their content_drafts.scheduledFor has arrived.
+    # Gated by content.publishCronEnabled setting — fires this endpoint
+    # regardless, the route short-circuits when the setting is off.
+    - cron: '3,18,33,48 * * * *'
   # Manual trigger via the Actions UI — pick which cron to fire.
   workflow_dispatch:
     inputs:
@@ -92,6 +97,7 @@ on:
           - content-gap-hunt
           - schema-watchdog
           - indexing-reverser
+          - publish-scheduled
 
 jobs:
   fire:
@@ -125,6 +131,7 @@ jobs:
               "30 19 * * SUN")                   targets="content-gap-hunt" ;;
               "0 23 * * SUN")                    targets="schema-watchdog" ;;
               "0 20 * * SUN")                    targets="indexing-reverser" ;;
+              "3,18,33,48 * * * *")              targets="publish-scheduled" ;;
               *)                                 echo "::warning::Unknown schedule '$schedule'" ;;
             esac
           fi

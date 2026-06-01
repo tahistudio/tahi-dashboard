@@ -413,6 +413,7 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
         publishUrl?: string; webflowItemId?: string; scheduledFor?: string; publishedAt?: string | null;
         error?: string; detail?: string;
         canAutoFix?: boolean; errors?: Array<{ severity: string; node: string; field: string; message: string }>;
+        cronWarning?: string | null;
       }
       if (!res.ok) {
         if (res.status === 422 && json.canAutoFix && Array.isArray(json.errors)) {
@@ -425,7 +426,7 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
       }
       if (mode === 'draft') setPublishMsg(`Saved to Webflow as a draft (item ${json.webflowItemId}). Publish it from Webflow or here when ready.`)
       else if (mode === 'now' || json.publishedAt) setPublishMsg(`Published live: ${json.publishUrl}`)
-      else setPublishMsg(`Scheduled for ${json.scheduledFor ? new Date(json.scheduledFor).toLocaleString() : 'next slot'} (staged in Webflow).`)
+      else setPublishMsg(`Scheduled for ${json.scheduledFor ? new Date(json.scheduledFor).toLocaleString() : 'next slot'} (staged in Webflow as draft).${json.cronWarning ? ` ⚠️ ${json.cronWarning}` : ' The publish-scheduled cron will flip it live when the time arrives.'}`)
       await fetchSnapshot()
     } catch (err) {
       setPublishMsg(`Failed: ${err instanceof Error ? err.message : 'error'}`)
