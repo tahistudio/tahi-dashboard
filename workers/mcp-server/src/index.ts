@@ -1218,6 +1218,57 @@ const TOOLS: ToolDef[] = [
     billable: prop('boolean', 'Default true'),
     hourlyRate: prop('number', 'Override default rate'),
   }),
+
+  // ── Sitemap (Liam + Staci marketing-site planning library) ────────────
+  tool('list_sitemap_nodes', 'List every planned page / section / CMS collection in the marketing-site sitemap. Returns a flat array; reconstruct the tree via parentId.'),
+  tool('get_sitemap_node', 'Get a single sitemap node with its full structured doc + latest 50 reviews.', {
+    nodeId: prop('string', 'Sitemap node ID'),
+  }, ['nodeId']),
+  tool('create_sitemap_node', 'Create a new sitemap node. nodeType is "page" | "cms_collection" | "section". Optional parentId to nest under another node.', {
+    title: prop('string', 'Node title'),
+    nodeType: prop('string', 'page | cms_collection | section. Default page.'),
+    parentId: prop('string', 'Parent node ID for nesting. Omit for root.'),
+    slug: prop('string', 'URL slug fragment'),
+    url: prop('string', 'Live or target URL'),
+    positioningVertical: prop('string', 'Tahi positioning vertical e.g. "Enterprise Custom Webflow"'),
+    status: prop('string', 'idea | spec_done | design_done | webflow_done | live | parked. Default idea.'),
+    sortOrder: prop('number', 'Position among siblings'),
+  }, ['title']),
+  tool('update_sitemap_node', 'Update editable fields on a sitemap node. Any of: title, slug, url, purpose, icpAudience, primaryKeyword, aeoIntent, positioningVertical, successMetric, status, specialFeatures, designNotes, contentNotes, targetLaunchDate, bodyTiptap, parentId, sortOrder, nodeType.', {
+    nodeId: prop('string', 'Node ID'),
+    title: prop('string', 'Node title'),
+    slug: prop('string', 'URL slug'),
+    url: prop('string', 'Live or target URL'),
+    purpose: prop('string', 'Why this page exists'),
+    icpAudience: prop('string', 'Target ICP description'),
+    primaryKeyword: prop('string', 'Primary SEO keyword'),
+    aeoIntent: prop('string', 'AEO question this page answers'),
+    positioningVertical: prop('string', 'Tahi positioning vertical'),
+    successMetric: prop('string', 'How we know it is working'),
+    status: prop('string', 'idea | spec_done | design_done | webflow_done | live | parked'),
+    specialFeatures: prop('string', 'Distinctive features'),
+    designNotes: prop('string', 'Visual / layout notes'),
+    contentNotes: prop('string', 'Voice / key claims notes'),
+    targetLaunchDate: prop('string', 'YYYY-MM-DD'),
+    bodyTiptap: prop('string', 'Tiptap JSON freeform body'),
+    parentId: prop('string', 'Move under a different parent'),
+    sortOrder: prop('number', 'New position among siblings'),
+    nodeType: prop('string', 'page | cms_collection | section'),
+  }, ['nodeId']),
+  tool('delete_sitemap_node', 'Delete a sitemap node and every descendant (cascade). Returns the count deleted.', {
+    nodeId: prop('string', 'Node ID'),
+  }, ['nodeId']),
+  tool('duplicate_sitemap_node', 'Clone a single sitemap node (NOT its subtree) under the same parent. Title gets "(copy)" suffix, status resets to "idea".', {
+    nodeId: prop('string', 'Source node ID'),
+  }, ['nodeId']),
+  tool('review_sitemap_node', 'Run a single sub-agent reviewer against a sitemap node. reviewerKey: seo_aeo | icp | brand_voice | cro | sales | marketing.', {
+    nodeId: prop('string', 'Node ID'),
+    reviewerKey: prop('string', 'seo_aeo | icp | brand_voice | cro | sales | marketing'),
+  }, ['nodeId', 'reviewerKey']),
+  tool('review_sitemap_node_all', 'Run all 6 sub-agent reviewers (SEO/AEO, ICP, brand voice, CRO, sales, marketing) in parallel against a sitemap node. Returns per-reviewer outcomes.', {
+    nodeId: prop('string', 'Node ID'),
+  }, ['nodeId']),
+  tool('export_sitemap_bundle', 'Export the entire sitemap as a single markdown document: tree overview + every page with its structured doc, freeform notes, and latest sub-agent reviews. Returns the raw markdown text.'),
 ]
 
 // ---------------------------------------------------------------------------
@@ -2040,6 +2091,35 @@ async function executeTool(
     }
     case 'log_time_entry':
       return json(await apiWrite('/api/admin/time-entries', token, 'POST', args as Record<string, unknown>))
+
+    // ── Sitemap ──────────────────────────────────────────────────────
+    case 'list_sitemap_nodes':
+      return json(await apiGet('/api/admin/sitemap/nodes', token))
+    case 'get_sitemap_node':
+      return json(await apiGet(`/api/admin/sitemap/nodes/${s('nodeId')}`, token))
+    case 'create_sitemap_node':
+      return json(await apiWrite('/api/admin/sitemap/nodes', token, 'POST', args as Record<string, unknown>))
+    case 'update_sitemap_node': {
+      const { nodeId, ...patch } = args
+      return json(await apiWrite(`/api/admin/sitemap/nodes/${nodeId}`, token, 'PATCH', patch))
+    }
+    case 'delete_sitemap_node':
+      return json(await apiWrite(`/api/admin/sitemap/nodes/${s('nodeId')}`, token, 'DELETE'))
+    case 'duplicate_sitemap_node':
+      return json(await apiWrite(`/api/admin/sitemap/nodes/${s('nodeId')}/duplicate`, token, 'POST'))
+    case 'review_sitemap_node':
+      return json(await apiWrite(`/api/admin/sitemap/nodes/${s('nodeId')}/review`, token, 'POST', { reviewerKey: s('reviewerKey') }))
+    case 'review_sitemap_node_all':
+      return json(await apiWrite(`/api/admin/sitemap/nodes/${s('nodeId')}/review-all`, token, 'POST'))
+    case 'export_sitemap_bundle': {
+      // Export returns raw markdown, not JSON. Fetch + return as-is.
+      const url = new URL(`${DASHBOARD_URL}/api/admin/sitemap/export`)
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) throw new Error(`Export failed: ${res.status}`)
+      return res.text()
+    }
 
     default:
       throw new Error(`Unknown tool: ${name}`)

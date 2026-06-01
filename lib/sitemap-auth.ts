@@ -33,10 +33,14 @@ export async function hasSitemapAccess(userId: string | null | undefined): Promi
   }
 }
 
-/** For API routes — returns the userId when allowed, null when blocked. */
+/** For API routes — returns the userId when allowed, null when blocked.
+ *  The 'api-service' userId comes from TAHI_API_TOKEN auth (MCP, cron, etc.)
+ *  and is trusted by definition: anyone holding the token already controls
+ *  the whole dashboard, so gating by email would just block legitimate MCP. */
 export async function assertSitemapApiAccess(req: NextRequest): Promise<string | null> {
   const { userId } = await getRequestAuth(req)
   if (!userId) return null
+  if (userId === 'api-service') return userId
   const allowed = await hasSitemapAccess(userId)
   return allowed ? userId : null
 }

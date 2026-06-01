@@ -1783,6 +1783,53 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE content_drafts ADD COLUMN audit_target_webflow_id text`,
     ],
   },
+  {
+    name: '0073',
+    description: 'Sitemap planning library — sitemap_nodes (tree of pages with structured doc fields + Tiptap freeform body) + sitemap_node_reviews (latest sub-agent critique per reviewer key). Gated to Liam + Staci at the route layer.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS sitemap_nodes (
+        id TEXT PRIMARY KEY NOT NULL,
+        parent_id TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        node_type TEXT NOT NULL DEFAULT 'page',
+        title TEXT NOT NULL,
+        slug TEXT,
+        url TEXT,
+        purpose TEXT,
+        icp_audience TEXT,
+        primary_keyword TEXT,
+        aeo_intent TEXT,
+        positioning_vertical TEXT,
+        success_metric TEXT,
+        status TEXT NOT NULL DEFAULT 'idea',
+        special_features TEXT,
+        design_notes TEXT,
+        content_notes TEXT,
+        target_launch_date TEXT,
+        body_tiptap TEXT,
+        created_by TEXT,
+        last_edited_by TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_sitemap_nodes_parent ON sitemap_nodes(parent_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_sitemap_nodes_status ON sitemap_nodes(status)`,
+
+      `CREATE TABLE IF NOT EXISTS sitemap_node_reviews (
+        id TEXT PRIMARY KEY NOT NULL,
+        node_id TEXT NOT NULL,
+        reviewer_key TEXT NOT NULL,
+        score INTEGER,
+        summary TEXT,
+        suggestions TEXT,
+        critique TEXT,
+        cost_cents INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_sitemap_node_reviews_node ON sitemap_node_reviews(node_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_sitemap_node_reviews_reviewer ON sitemap_node_reviews(reviewer_key)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
