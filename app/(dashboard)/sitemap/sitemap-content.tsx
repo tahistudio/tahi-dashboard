@@ -198,6 +198,16 @@ export function SitemapContent() {
       if (!selectedId && json.nodes.length > 0) {
         setSelectedId(json.nodes.find(n => !n.parentId)?.id ?? json.nodes[0].id)
       }
+      // First load: expand every node that has children so the full
+      // planned IA is visible at a glance. Subsequent loads keep the
+      // user's manual collapse state.
+      setExpanded(prev => {
+        if (prev.size > 0) return prev
+        const withChildren = new Set<string>()
+        const parentIds = new Set(json.nodes.map(n => n.parentId).filter((id): id is string => !!id))
+        for (const id of parentIds) withChildren.add(id)
+        return withChildren
+      })
     } catch (err) {
       showToast(`Failed to load: ${err instanceof Error ? err.message : 'error'}`, 'error')
     } finally {
