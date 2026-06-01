@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Plus, Trash2, Copy, ChevronRight, ChevronDown,
-  Loader2, Save, FileText, Layers, FolderTree,
+  Loader2, Save, FileText, Layers, FolderTree, Sparkles, AlertCircle, CheckCircle2,
 } from 'lucide-react'
 import { PageHeader } from '@/components/tahi/page-header'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -79,6 +79,29 @@ const STATUS_LABEL: Record<SitemapNode['status'], string> = {
   live: 'Live',
   parked: 'Parked',
 }
+
+type ReviewerKey = 'seo_aeo' | 'icp' | 'brand_voice' | 'cro' | 'sales' | 'marketing'
+
+interface SitemapReview {
+  id: string
+  nodeId: string
+  reviewerKey: ReviewerKey
+  score: number | null
+  summary: string | null
+  suggestions: string | null
+  critique: string | null
+  costCents: number
+  createdAt: string
+}
+
+const REVIEWERS: Array<{ key: ReviewerKey; label: string; tagline: string }> = [
+  { key: 'seo_aeo',     label: 'SEO + AEO',    tagline: 'Search + answer-engine fit' },
+  { key: 'icp',         label: 'ICP fit',      tagline: 'Voice of the ideal buyer' },
+  { key: 'brand_voice', label: 'Brand voice',  tagline: 'Tahi tone + AI-tells' },
+  { key: 'cro',         label: 'CRO',          tagline: 'Conversion lens' },
+  { key: 'sales',       label: 'Sales',        tagline: 'Objections + close' },
+  { key: 'marketing',   label: 'Marketing',    tagline: 'Distribution + cluster' },
+]
 
 const VERTICAL_OPTIONS = [
   'Enterprise Custom Webflow',
@@ -440,6 +463,81 @@ interface NodeDetailProps {
 }
 
 function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetailProps) {
+  const { showToast } = useToast()
+  const [reviews, setReviews] = useState<SitemapReview[]>([])
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const [runningKey, setRunningKey] = useState<ReviewerKey | 'all' | null>(null)
+
+  const fetchReviews = useCallback(async () => {
+    setReviewLoading(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/sitemap/nodes/${node.id}`))
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const json = await res.json() as { reviews: SitemapReview[] }
+      setReviews(json.reviews ?? [])
+    } catch {
+      // Silent — the panel already shows the node, reviews are a bonus.
+    } finally {
+      setReviewLoading(false)
+    }
+  }, [node.id])
+
+  useEffect(() => { void fetchReviews() }, [fetchReviews])
+
+  async function runReviewer(reviewerKey: ReviewerKey) {
+    setRunningKey(reviewerKey)
+    try {
+      const res = await fetch(apiPath(`/api/admin/sitemap/nodes/${node.id}/review`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviewerKey }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        showToast(`Reviewer failed: ${j.error ?? 'unknown'}`, 'error')
+        return
+      }
+      await fetchReviews()
+      showToast(`${REVIEWERS.find(r => r.key === reviewerKey)?.label ?? reviewerKey} done`)
+    } catch (err) {
+      showToast(`Reviewer failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
+    } finally {
+      setRunningKey(null)
+    }
+  }
+
+  async function runAllReviewers() {
+    setRunningKey('all')
+    try {
+      const res = await fetch(apiPath(`/api/admin/sitemap/nodes/${node.id}/review-all`), {
+        method: 'POST',
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        showToast(`Review-all failed: ${j.error ?? 'unknown'}`, 'error')
+        return
+      }
+      const json = await res.json() as { outcomes: Array<{ reviewerKey: string; ok: boolean }> }
+      const ok = json.outcomes.filter(o => o.ok).length
+      const total = json.outcomes.length
+      await fetchReviews()
+      showToast(`${ok}/${total} reviewers completed`, ok === total ? 'success' : 'error')
+    } catch (err) {
+      showToast(`Review-all failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
+    } finally {
+      setRunningKey(null)
+    }
+  }
+
+  // Latest review per reviewer key (reviews come back desc by createdAt)
+  const latestByKey = useMemo(() => {
+    const map = new Map<ReviewerKey, SitemapReview>()
+    for (const r of reviews) {
+      if (!map.has(r.reviewerKey)) map.set(r.reviewerKey, r)
+    }
+    return map
+  }, [reviews])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       {/* Header */}
@@ -529,6 +627,143 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetail
           />
         </div>
       </div>
+
+      {/* Sub-agent reviewer panel */}
+      <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '1.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '0.875rem' }}>
+          <div>
+            <h3 style={{ fontSize: '0.9375rem', fontWeight: 600, margin: 0 }}>Sub-agent review</h3>
+            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: '0.125rem 0 0' }}>
+              Six lenses on this page plan. Run individually or all at once.
+            </p>
+          </div>
+          <TahiButton
+            size="sm"
+            loading={runningKey === 'all'}
+            disabled={runningKey !== null}
+            onClick={() => { void runAllReviewers() }}
+            iconLeft={<Sparkles className="w-3.5 h-3.5" />}
+          >
+            Run all
+          </TahiButton>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))', gap: '0.75rem' }}>
+          {REVIEWERS.map(r => {
+            const review = latestByKey.get(r.key)
+            const running = runningKey === r.key || runningKey === 'all'
+            return (
+              <ReviewerCard
+                key={r.key}
+                label={r.label}
+                tagline={r.tagline}
+                review={review}
+                running={running}
+                disabled={runningKey !== null}
+                onRun={() => { void runReviewer(r.key) }}
+              />
+            )
+          })}
+        </div>
+        {reviewLoading && reviews.length === 0 && (
+          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.5rem' }}>
+            Loading reviews...
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Reviewer card ─────────────────────────────────────────────────────────
+
+interface ReviewerCardProps {
+  label: string
+  tagline: string
+  review: SitemapReview | undefined
+  running: boolean
+  disabled: boolean
+  onRun: () => void
+}
+
+function ReviewerCard({ label, tagline, review, running, disabled, onRun }: ReviewerCardProps) {
+  const [open, setOpen] = useState(false)
+  const score = review?.score ?? null
+  const scoreColour = score === null ? 'var(--color-text-muted)'
+    : score >= 75 ? 'var(--color-success)'
+    : score >= 60 ? 'var(--color-warning)'
+    : 'var(--color-danger)'
+  const ScoreIcon = score === null ? null : score >= 75 ? CheckCircle2 : AlertCircle
+  let suggestions: Array<{ label: string; detail: string }> = []
+  if (review?.suggestions) {
+    try {
+      const parsed = JSON.parse(review.suggestions) as Array<{ label: string; detail: string }>
+      if (Array.isArray(parsed)) suggestions = parsed
+    } catch { /* ignore */ }
+  }
+  return (
+    <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-leaf-sm)', padding: '0.75rem', background: 'var(--color-bg)' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.5rem' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, fontSize: '0.8125rem' }}>{label}</div>
+          <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>{tagline}</div>
+        </div>
+        {score !== null && ScoreIcon !== null && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: scoreColour, fontSize: '0.875rem', fontWeight: 600, flexShrink: 0 }}>
+            <ScoreIcon className="w-3.5 h-3.5" />
+            <span>{score}</span>
+          </div>
+        )}
+      </div>
+
+      {review?.summary && (
+        <p style={{ fontSize: '0.75rem', color: 'var(--color-text)', margin: '0.5rem 0 0', lineHeight: 1.5 }}>
+          {review.summary}
+        </p>
+      )}
+
+      <div style={{ display: 'flex', gap: '0.375rem', marginTop: '0.625rem' }}>
+        <TahiButton
+          size="sm"
+          variant="secondary"
+          loading={running}
+          disabled={disabled}
+          onClick={onRun}
+        >
+          {review ? 'Re-run' : 'Run'}
+        </TahiButton>
+        {review && (
+          <TahiButton size="sm" variant="ghost" onClick={() => setOpen(o => !o)}>
+            {open ? 'Hide' : 'Details'}
+          </TahiButton>
+        )}
+      </div>
+
+      {open && review && (
+        <div style={{ marginTop: '0.625rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {review.critique && (
+            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', lineHeight: 1.5, background: 'var(--color-bg-secondary)', padding: '0.5rem', borderRadius: '0.375rem' }}>
+              {review.critique}
+            </div>
+          )}
+          {suggestions.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+              <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Suggestions ({suggestions.length})
+              </div>
+              {suggestions.map((s, i) => (
+                <div key={i} style={{ fontSize: '0.75rem', lineHeight: 1.5 }}>
+                  <div style={{ fontWeight: 500 }}>{s.label}</div>
+                  {s.detail && <div style={{ color: 'var(--color-text-muted)' }}>{s.detail}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+            {new Date(review.createdAt).toLocaleString()} · ${(review.costCents / 100).toFixed(3)}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

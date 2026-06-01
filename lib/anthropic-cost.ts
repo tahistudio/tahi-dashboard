@@ -27,7 +27,7 @@ export type ClaudeModel = string
 
 export interface ClaudeCallOptions<T> {
   database: Database
-  scope: 'draft' | 'ideation' | 'backfill' | 'links' | 'health' | 'site_index'
+  scope: 'draft' | 'ideation' | 'backfill' | 'links' | 'health' | 'site_index' | 'sitemap'
   scopeId?: string | null
   /** Stage name — also written to ai_cost_log.stage. Use snake_case keys
    *  matching draft_reviews.reviewer_key when this call is a reviewer. */
