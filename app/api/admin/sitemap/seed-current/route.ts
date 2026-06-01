@@ -30,52 +30,53 @@ interface SeedNode {
   url?: string
   nodeType: 'page' | 'cms_collection' | 'section'
   positioningVertical?: string
-  status: 'live'
+  status: 'idea'
   children?: SeedNode[]
 }
 
 // Single-root tree: everything cascades from Home. The themed folders
 // underneath (Marketing / Case studies / Resources / Legal) are
 // 'section' nodes that act as grouping containers, not real URLs.
+// Tree mirrors URL structure: Home is root, top-level pages are direct
+// children, and folders only exist where the URL actually nests
+// (/resources/* and /legal/*). No artificial grouping containers.
 const SEED: SeedNode[] = [
   {
     title: 'Home',
     slug: '',
     url: 'https://www.tahi.studio/',
     nodeType: 'page',
-    status: 'live',
+    status: 'idea',
     children: [
-      {
-        title: 'Marketing',
-        nodeType: 'section',
-        status: 'live',
-        children: [
-          { title: 'Pricing', slug: 'pricing', url: 'https://www.tahi.studio/pricing', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'live' },
-          { title: 'Contact', slug: 'contact', url: 'https://www.tahi.studio/contact', nodeType: 'page', status: 'live' },
-          { title: 'Free site audit', slug: 'free-site-audit', url: 'https://www.tahi.studio/free-site-audit', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'live' },
-          { title: 'Webflow project calculator', slug: 'webflow-project-calculator', url: 'https://www.tahi.studio/webflow-project-calculator', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'live' },
-        ],
-      },
-      { title: 'Case studies (CMS)', slug: 'case-studies', url: 'https://www.tahi.studio/case-studies', nodeType: 'cms_collection', positioningVertical: 'Showcase', status: 'live' },
+      { title: 'Pricing', slug: 'pricing', url: 'https://www.tahi.studio/pricing', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'idea' },
+      { title: 'Contact', slug: 'contact', url: 'https://www.tahi.studio/contact', nodeType: 'page', status: 'idea' },
+      { title: 'Free site audit', slug: 'free-site-audit', url: 'https://www.tahi.studio/free-site-audit', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'idea' },
+      { title: 'Webflow project calculator', slug: 'webflow-project-calculator', url: 'https://www.tahi.studio/webflow-project-calculator', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'idea' },
+      { title: 'Case studies (CMS)', slug: 'case-studies', url: 'https://www.tahi.studio/case-studies', nodeType: 'cms_collection', positioningVertical: 'Showcase', status: 'idea' },
+      { title: 'Blog (CMS)', slug: 'blog', url: 'https://www.tahi.studio/blog', nodeType: 'cms_collection', positioningVertical: 'Resources & Education', status: 'idea' },
       {
         title: 'Resources',
+        slug: 'resources',
+        url: 'https://www.tahi.studio/resources',
         nodeType: 'section',
-        status: 'live',
+        positioningVertical: 'Resources & Education',
+        status: 'idea',
         children: [
-          { title: 'Blog (CMS)', slug: 'blog', url: 'https://www.tahi.studio/blog', nodeType: 'cms_collection', positioningVertical: 'Resources & Education', status: 'live' },
-          { title: 'Glossary (CMS)', slug: 'resources/glossary', url: 'https://www.tahi.studio/resources/glossary', nodeType: 'cms_collection', positioningVertical: 'Resources & Education', status: 'live' },
-          { title: 'Resource categories (CMS)', slug: 'resources/categories', url: 'https://www.tahi.studio/resources/categories', nodeType: 'cms_collection', positioningVertical: 'Resources & Education', status: 'live' },
-          { title: 'FAQs', slug: 'resources/faqs', url: 'https://www.tahi.studio/resources/faqs', nodeType: 'page', positioningVertical: 'Resources & Education', status: 'live' },
-          { title: 'Webflow pricing report 2025', slug: 'resources/webflow-pricing-report-2025', url: 'https://www.tahi.studio/resources/webflow-pricing-report-2025', nodeType: 'page', positioningVertical: 'Resources & Education', status: 'live' },
+          { title: 'Glossary (CMS)', slug: 'resources/glossary', url: 'https://www.tahi.studio/resources/glossary', nodeType: 'cms_collection', positioningVertical: 'Resources & Education', status: 'idea' },
+          { title: 'Resource categories (CMS)', slug: 'resources/categories', url: 'https://www.tahi.studio/resources/categories', nodeType: 'cms_collection', positioningVertical: 'Resources & Education', status: 'idea' },
+          { title: 'FAQs', slug: 'resources/faqs', url: 'https://www.tahi.studio/resources/faqs', nodeType: 'page', positioningVertical: 'Resources & Education', status: 'idea' },
+          { title: 'Webflow pricing report 2025', slug: 'resources/webflow-pricing-report-2025', url: 'https://www.tahi.studio/resources/webflow-pricing-report-2025', nodeType: 'page', positioningVertical: 'Resources & Education', status: 'idea' },
         ],
       },
       {
         title: 'Legal',
+        slug: 'legal',
+        url: 'https://www.tahi.studio/legal',
         nodeType: 'section',
-        status: 'live',
+        status: 'idea',
         children: [
-          { title: 'Privacy policy', slug: 'legal/privacy-policy', url: 'https://www.tahi.studio/legal/privacy-policy', nodeType: 'page', status: 'live' },
-          { title: 'Terms of service', slug: 'legal/terms-of-service', url: 'https://www.tahi.studio/legal/terms-of-service', nodeType: 'page', status: 'live' },
+          { title: 'Privacy policy', slug: 'legal/privacy-policy', url: 'https://www.tahi.studio/legal/privacy-policy', nodeType: 'page', status: 'idea' },
+          { title: 'Terms of service', slug: 'legal/terms-of-service', url: 'https://www.tahi.studio/legal/terms-of-service', nodeType: 'page', status: 'idea' },
         ],
       },
     ],
