@@ -23,7 +23,8 @@ const EDITABLE_FIELDS = new Set([
   'parentId', 'sortOrder', 'nodeType', 'title', 'slug', 'url',
   'purpose', 'icpAudience', 'primaryKeyword', 'aeoIntent',
   'positioningVertical', 'successMetric', 'status', 'specialFeatures',
-  'designNotes', 'contentNotes', 'targetLaunchDate', 'bodyTiptap',
+  'designNotes', 'contentNotes', 'contentBlocksNeeded',
+  'targetLaunchDate', 'bodyTiptap',
 ])
 
 export async function GET(req: NextRequest, { params }: Params) {

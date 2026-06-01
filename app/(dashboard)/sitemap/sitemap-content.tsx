@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Plus, Trash2, Copy, ChevronRight, ChevronDown,
-  Loader2, Save, FileText, Layers, FolderTree, Sparkles, AlertCircle, CheckCircle2, Download,
+  Loader2, Save, FileText, Layers, FolderTree, Sparkles, AlertCircle, CheckCircle2, Download, Users,
 } from 'lucide-react'
 import { PageHeader } from '@/components/tahi/page-header'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -43,11 +43,29 @@ interface SitemapNode {
   specialFeatures: string | null
   designNotes: string | null
   contentNotes: string | null
+  contentBlocksNeeded: string | null
   targetLaunchDate: string | null
   bodyTiptap: string | null
   createdAt: string
   updatedAt: string
   lastEditedBy: string | null
+}
+
+type ApplyableField =
+  | 'title' | 'slug' | 'url' | 'purpose' | 'icpAudience' | 'primaryKeyword'
+  | 'aeoIntent' | 'positioningVertical' | 'successMetric' | 'specialFeatures'
+  | 'designNotes' | 'contentNotes' | 'contentBlocksNeeded' | 'targetLaunchDate'
+
+interface SuggestionApply {
+  field: ApplyableField
+  operation: 'replace' | 'append'
+  newValue: string
+}
+
+interface ParsedSuggestion {
+  label: string
+  detail: string
+  apply?: SuggestionApply
 }
 
 const NODE_TYPE_LABEL: Record<SitemapNode['nodeType'], string> = {
@@ -124,6 +142,46 @@ export function SitemapContent() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
   const [adding, setAdding] = useState(false)
+  const [boardroomOpen, setBoardroomOpen] = useState(false)
+  const [siteReviews, setSiteReviews] = useState<SitemapReview[]>([])
+  const [boardroomRunning, setBoardroomRunning] = useState(false)
+
+  const fetchSiteReviews = useCallback(async () => {
+    try {
+      const res = await fetch(apiPath('/api/admin/sitemap/review-site'))
+      if (!res.ok) return
+      const json = await res.json() as { reviews: SitemapReview[] }
+      setSiteReviews(json.reviews ?? [])
+    } catch { /* ignore */ }
+  }, [])
+
+  async function runBoardroom() {
+    if (nodes.length === 0) {
+      showToast('Sitemap is empty', 'error')
+      return
+    }
+    if (!confirm(`Run all 6 site-level reviewers against the entire sitemap (${nodes.length} nodes)? This may take 30-60s and costs ~$0.30.`)) return
+    setBoardroomRunning(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/sitemap/review-site'), { method: 'POST' })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        showToast(`Boardroom failed: ${j.error ?? 'unknown'}`, 'error')
+        return
+      }
+      const json = await res.json() as { outcomes: Array<{ reviewerKey: string; ok: boolean }> }
+      const ok = json.outcomes.filter(o => o.ok).length
+      await fetchSiteReviews()
+      setBoardroomOpen(true)
+      showToast(`${ok}/${json.outcomes.length} site reviewers completed`, ok === json.outcomes.length ? 'success' : 'error')
+    } catch (err) {
+      showToast(`Boardroom failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
+    } finally {
+      setBoardroomRunning(false)
+    }
+  }
+
+  useEffect(() => { void fetchSiteReviews() }, [fetchSiteReviews])
 
   const selected = useMemo(
     () => nodes.find(n => n.id === selectedId) ?? null,
@@ -255,6 +313,15 @@ export function SitemapContent() {
           <TahiButton
             size="sm"
             variant="secondary"
+            loading={boardroomRunning}
+            onClick={() => { void runBoardroom() }}
+            iconLeft={<Users className="w-3.5 h-3.5" />}
+          >
+            Boardroom
+          </TahiButton>
+          <TahiButton
+            size="sm"
+            variant="secondary"
             onClick={() => { window.location.href = apiPath('/api/admin/sitemap/export') }}
             iconLeft={<Download className="w-3.5 h-3.5" />}
           >
@@ -271,6 +338,15 @@ export function SitemapContent() {
           </TahiButton>
         </div>
       </PageHeader>
+
+      {/* Boardroom collapsible */}
+      {siteReviews.length > 0 && (
+        <BoardroomBar
+          reviews={siteReviews}
+          open={boardroomOpen}
+          onToggle={() => setBoardroomOpen(o => !o)}
+        />
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(18rem, 1fr) 2.4fr', gap: '1rem', flex: 1, minHeight: 0 }}>
         {/* Tree */}
@@ -475,6 +551,70 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetail
   const [reviews, setReviews] = useState<SitemapReview[]>([])
   const [reviewLoading, setReviewLoading] = useState(false)
   const [runningKey, setRunningKey] = useState<ReviewerKey | 'all' | null>(null)
+  const [applyingAll, setApplyingAll] = useState(false)
+
+  function applySuggestion(apply: SuggestionApply): boolean {
+    const field = apply.field
+    const currentValue = (node as unknown as Record<string, string | null>)[field] ?? ''
+    const nextValue = apply.operation === 'append'
+      ? (currentValue ? `${currentValue}\n${apply.newValue}` : apply.newValue)
+      : apply.newValue
+    // Cast through Partial<SitemapNode> — `field` is a known applyable key.
+    onPatch({ [field]: nextValue } as Partial<SitemapNode>)
+    return true
+  }
+
+  function applyAllInReview(review: SitemapReview): number {
+    let count = 0
+    try {
+      const parsed = JSON.parse(review.suggestions ?? '[]') as ParsedSuggestion[]
+      const patch: Partial<SitemapNode> = {}
+      for (const s of parsed) {
+        if (!s.apply) continue
+        const cur = (patch[s.apply.field as keyof SitemapNode] as string | null | undefined)
+          ?? ((node as unknown as Record<string, string | null>)[s.apply.field] ?? '')
+        const next = s.apply.operation === 'append'
+          ? (cur ? `${cur}\n${s.apply.newValue}` : s.apply.newValue)
+          : s.apply.newValue
+        ;(patch as Record<string, string>)[s.apply.field] = next
+        count++
+      }
+      if (count > 0) onPatch(patch)
+    } catch { /* ignore parse failures */ }
+    return count
+  }
+
+  async function applyAllFromAllReviewers() {
+    setApplyingAll(true)
+    try {
+      // Batch-merge — same field across reviewers: last reviewer wins.
+      const patch: Partial<SitemapNode> = {}
+      let count = 0
+      for (const r of reviews) {
+        try {
+          const parsed = JSON.parse(r.suggestions ?? '[]') as ParsedSuggestion[]
+          for (const s of parsed) {
+            if (!s.apply) continue
+            const cur = (patch[s.apply.field as keyof SitemapNode] as string | null | undefined)
+              ?? ((node as unknown as Record<string, string | null>)[s.apply.field] ?? '')
+            const next = s.apply.operation === 'append'
+              ? (cur ? `${cur}\n${s.apply.newValue}` : s.apply.newValue)
+              : s.apply.newValue
+            ;(patch as Record<string, string>)[s.apply.field] = next
+            count++
+          }
+        } catch { /* ignore */ }
+      }
+      if (count === 0) {
+        showToast('No applyable suggestions available', 'error')
+        return
+      }
+      onPatch(patch)
+      showToast(`Applied ${count} suggestion${count === 1 ? '' : 's'} from ${reviews.length} reviewer${reviews.length === 1 ? '' : 's'}`)
+    } finally {
+      setApplyingAll(false)
+    }
+  }
 
   const fetchReviews = useCallback(async () => {
     setReviewLoading(true)
@@ -619,6 +759,7 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetail
 
       <FieldTextArea label="Success metric" value={node.successMetric ?? ''} onSave={(v) => onPatch({ successMetric: v || null })} placeholder="How do we know this page is working? (e.g. '5 demo bookings/month from organic')" />
       <FieldTextArea label="Special features" value={node.specialFeatures ?? ''} onSave={(v) => onPatch({ specialFeatures: v || null })} placeholder="Distinctive interactions, integrations, animations — the things people don't see anywhere else." />
+      <FieldTextArea label="Content blocks needed (one per line)" value={node.contentBlocksNeeded ?? ''} onSave={(v) => onPatch({ contentBlocksNeeded: v || null })} placeholder="FAQs section&#10;Pricing comparison table&#10;Testimonial carousel&#10;3-step process diagram&#10;ROI calculator&#10;Hero with client logos&#10;Inline CTA after section 2" />
       <FieldTextArea label="Design notes" value={node.designNotes ?? ''} onSave={(v) => onPatch({ designNotes: v || null })} placeholder="Staci's notes — visual direction, layout, components, references." />
       <FieldTextArea label="Content notes" value={node.contentNotes ?? ''} onSave={(v) => onPatch({ contentNotes: v || null })} placeholder="Liam's notes — voice, key claims, what NOT to say, citations to pull in." />
 
@@ -645,15 +786,26 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetail
               Six lenses on this page plan. Run individually or all at once.
             </p>
           </div>
-          <TahiButton
-            size="sm"
-            loading={runningKey === 'all'}
-            disabled={runningKey !== null}
-            onClick={() => { void runAllReviewers() }}
-            iconLeft={<Sparkles className="w-3.5 h-3.5" />}
-          >
-            Run all
-          </TahiButton>
+          <div style={{ display: 'flex', gap: '0.375rem' }}>
+            <TahiButton
+              size="sm"
+              variant="secondary"
+              loading={applyingAll}
+              disabled={runningKey !== null || reviews.length === 0}
+              onClick={() => { void applyAllFromAllReviewers() }}
+            >
+              Apply all suggestions
+            </TahiButton>
+            <TahiButton
+              size="sm"
+              loading={runningKey === 'all'}
+              disabled={runningKey !== null}
+              onClick={() => { void runAllReviewers() }}
+              iconLeft={<Sparkles className="w-3.5 h-3.5" />}
+            >
+              Run all
+            </TahiButton>
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))', gap: '0.75rem' }}>
@@ -669,6 +821,11 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetail
                 running={running}
                 disabled={runningKey !== null}
                 onRun={() => { void runReviewer(r.key) }}
+                onApplySuggestion={applySuggestion}
+                onApplyAll={(r) => {
+                  const n = applyAllInReview(r)
+                  showToast(n > 0 ? `Applied ${n} suggestion${n === 1 ? '' : 's'}` : 'No applyable suggestions', n > 0 ? 'success' : 'error')
+                }}
               />
             )
           })}
@@ -692,9 +849,11 @@ interface ReviewerCardProps {
   running: boolean
   disabled: boolean
   onRun: () => void
+  onApplySuggestion: (apply: SuggestionApply) => boolean
+  onApplyAll: (review: SitemapReview) => void
 }
 
-function ReviewerCard({ label, tagline, review, running, disabled, onRun }: ReviewerCardProps) {
+function ReviewerCard({ label, tagline, review, running, disabled, onRun, onApplySuggestion, onApplyAll }: ReviewerCardProps) {
   const [open, setOpen] = useState(false)
   const score = review?.score ?? null
   const scoreColour = score === null ? 'var(--color-text-muted)'
@@ -702,13 +861,14 @@ function ReviewerCard({ label, tagline, review, running, disabled, onRun }: Revi
     : score >= 60 ? 'var(--color-warning)'
     : 'var(--color-danger)'
   const ScoreIcon = score === null ? null : score >= 75 ? CheckCircle2 : AlertCircle
-  let suggestions: Array<{ label: string; detail: string }> = []
+  let suggestions: ParsedSuggestion[] = []
   if (review?.suggestions) {
     try {
-      const parsed = JSON.parse(review.suggestions) as Array<{ label: string; detail: string }>
+      const parsed = JSON.parse(review.suggestions) as ParsedSuggestion[]
       if (Array.isArray(parsed)) suggestions = parsed
     } catch { /* ignore */ }
   }
+  const applyableCount = suggestions.filter(s => !!s.apply).length
   return (
     <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-leaf-sm)', padding: '0.75rem', background: 'var(--color-bg)' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.5rem' }}>
@@ -755,14 +915,66 @@ function ReviewerCard({ label, tagline, review, running, disabled, onRun }: Revi
             </div>
           )}
           {suggestions.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-              <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                Suggestions ({suggestions.length})
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Suggestions ({suggestions.length})
+                  {applyableCount > 0 && (
+                    <span style={{ color: 'var(--color-brand)', marginLeft: '0.375rem', textTransform: 'none', fontWeight: 500 }}>
+                      · {applyableCount} applyable
+                    </span>
+                  )}
+                </div>
+                {applyableCount > 0 && review && (
+                  <button
+                    onClick={() => onApplyAll(review)}
+                    style={{
+                      background: 'var(--color-brand-50)',
+                      color: 'var(--color-brand-dark)',
+                      border: '1px solid var(--color-brand-100)',
+                      borderRadius: '0.25rem',
+                      padding: '0.125rem 0.5rem',
+                      fontSize: '0.6875rem',
+                      cursor: 'pointer',
+                      fontWeight: 500,
+                    }}
+                  >
+                    Apply all {applyableCount}
+                  </button>
+                )}
               </div>
               {suggestions.map((s, i) => (
-                <div key={i} style={{ fontSize: '0.75rem', lineHeight: 1.5 }}>
-                  <div style={{ fontWeight: 500 }}>{s.label}</div>
-                  {s.detail && <div style={{ color: 'var(--color-text-muted)' }}>{s.detail}</div>}
+                <div key={i} style={{ fontSize: '0.75rem', lineHeight: 1.5, paddingBottom: '0.375rem', borderBottom: i < suggestions.length - 1 ? '1px solid var(--color-border-subtle)' : 'none' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.5rem' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 500 }}>{s.label}</div>
+                      {s.detail && <div style={{ color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>{s.detail}</div>}
+                      {s.apply && (
+                        <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>
+                          → <code style={{ background: 'var(--color-bg-secondary)', padding: '0 0.25rem', borderRadius: '0.125rem' }}>{s.apply.field}</code>
+                          {s.apply.operation === 'append' ? ' (append)' : ''}
+                        </div>
+                      )}
+                    </div>
+                    {s.apply && (
+                      <button
+                        onClick={() => { onApplySuggestion(s.apply!) }}
+                        style={{
+                          background: 'var(--color-brand)',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '0.25rem',
+                          padding: '0.125rem 0.5rem',
+                          fontSize: '0.6875rem',
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                          fontWeight: 500,
+                        }}
+                      >
+                        Apply
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -859,6 +1071,152 @@ function FieldSelect({ label, value, options, onSave }: FieldSelectProps) {
       >
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
+    </div>
+  )
+}
+
+// ── Boardroom (site-level reviewer summary) ──────────────────────────────
+
+const REVIEWER_LABEL: Record<string, string> = {
+  seo_aeo: 'SEO + AEO',
+  icp: 'ICP fit',
+  brand_voice: 'Brand voice',
+  cro: 'CRO',
+  sales: 'Sales',
+  marketing: 'Marketing',
+}
+
+interface BoardroomBarProps {
+  reviews: SitemapReview[]
+  open: boolean
+  onToggle: () => void
+}
+
+function BoardroomBar({ reviews, open, onToggle }: BoardroomBarProps) {
+  const avgScore = reviews.length === 0 ? null
+    : Math.round(reviews.reduce((acc, r) => acc + (r.score ?? 0), 0) / reviews.length)
+  const oldestRun = reviews.reduce((acc, r) => acc < r.createdAt ? acc : r.createdAt, reviews[0]?.createdAt ?? '')
+  return (
+    <Card style={{ padding: 0 }}>
+      <button
+        onClick={onToggle}
+        style={{
+          background: 'none',
+          border: 'none',
+          width: '100%',
+          textAlign: 'left',
+          padding: '0.75rem 1rem',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '1rem',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <Users className="w-4 h-4" style={{ color: 'var(--color-brand)' }} />
+          <div>
+            <div style={{ fontSize: '0.8125rem', fontWeight: 600 }}>Boardroom review</div>
+            <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
+              {reviews.length} site reviewer{reviews.length === 1 ? '' : 's'}
+              {avgScore !== null && ` · avg ${avgScore}/100`}
+              {oldestRun && ` · ran ${new Date(oldestRun).toLocaleString()}`}
+            </div>
+          </div>
+        </div>
+        {open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+      </button>
+      {open && (
+        <div style={{ padding: '0.5rem 1rem 1rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(20rem, 1fr))', gap: '0.75rem' }}>
+            {reviews.map(r => <SiteReviewerCard key={r.id} review={r} />)}
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function SiteReviewerCard({ review }: { review: SitemapReview }) {
+  const [open, setOpen] = useState(false)
+  const score = review.score ?? 0
+  const scoreColour = score >= 75 ? 'var(--color-success)'
+    : score >= 60 ? 'var(--color-warning)'
+    : 'var(--color-danger)'
+  let strengths: string[] = []
+  let gaps: string[] = []
+  let risks: string[] = []
+  let suggestions: ParsedSuggestion[] = []
+  if (review.suggestions) {
+    try {
+      const parsed = JSON.parse(review.suggestions) as {
+        topStrengths?: string[]
+        topGaps?: string[]
+        topRisks?: string[]
+        suggestions?: ParsedSuggestion[]
+      }
+      strengths = parsed.topStrengths ?? []
+      gaps = parsed.topGaps ?? []
+      risks = parsed.topRisks ?? []
+      suggestions = parsed.suggestions ?? []
+    } catch { /* ignore */ }
+  }
+  return (
+    <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-leaf-sm)', padding: '0.75rem', background: 'var(--color-bg)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+        <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{REVIEWER_LABEL[review.reviewerKey] ?? review.reviewerKey}</div>
+        <div style={{ color: scoreColour, fontSize: '0.9375rem', fontWeight: 600 }}>{score}</div>
+      </div>
+      {review.summary && (
+        <p style={{ fontSize: '0.75rem', color: 'var(--color-text)', margin: '0.375rem 0 0.5rem', lineHeight: 1.5 }}>
+          {review.summary}
+        </p>
+      )}
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{ fontSize: '0.6875rem', color: 'var(--color-brand)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 500 }}
+      >
+        {open ? 'Hide details' : 'Show details'}
+      </button>
+      {open && (
+        <div style={{ marginTop: '0.625rem', display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+          {review.critique && (
+            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', lineHeight: 1.5, background: 'var(--color-bg-secondary)', padding: '0.5rem', borderRadius: '0.375rem' }}>
+              {review.critique}
+            </div>
+          )}
+          {strengths.length > 0 && <BoardroomList title="Strengths" items={strengths} tone="success" />}
+          {gaps.length > 0 && <BoardroomList title="Gaps" items={gaps} tone="warning" />}
+          {risks.length > 0 && <BoardroomList title="Risks" items={risks} tone="danger" />}
+          {suggestions.length > 0 && (
+            <div>
+              <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.25rem' }}>
+                Suggestions
+              </div>
+              {suggestions.map((s, i) => (
+                <div key={i} style={{ fontSize: '0.75rem', lineHeight: 1.5, paddingBottom: '0.375rem' }}>
+                  <div style={{ fontWeight: 500 }}>{s.label}</div>
+                  {s.detail && <div style={{ color: 'var(--color-text-muted)' }}>{s.detail}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BoardroomList({ title, items, tone }: { title: string; items: string[]; tone: 'success' | 'warning' | 'danger' }) {
+  const colour = tone === 'success' ? 'var(--color-success)' : tone === 'warning' ? 'var(--color-warning)' : 'var(--color-danger)'
+  return (
+    <div>
+      <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: colour, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.25rem' }}>
+        {title}
+      </div>
+      <ul style={{ margin: 0, paddingLeft: '1.125rem', fontSize: '0.75rem', lineHeight: 1.5, color: 'var(--color-text)' }}>
+        {items.map((s, i) => <li key={i}>{s}</li>)}
+      </ul>
     </div>
   )
 }

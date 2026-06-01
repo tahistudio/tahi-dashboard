@@ -3167,6 +3167,10 @@ export const sitemapNodes = sqliteTable('sitemap_nodes', {
   specialFeatures: text('special_features'),
   designNotes: text('design_notes'),
   contentNotes: text('content_notes'),
+  // One content block per line. Staci uses this as a design shopping
+  // list: "FAQs · pricing comparison · testimonial section · ROI
+  // calculator · hero with case-study logos · 3-step process …".
+  contentBlocksNeeded: text('content_blocks_needed'),
   targetLaunchDate: text('target_launch_date'),
   // Tiptap JSON for the freeform notes block at the bottom of each doc
   bodyTiptap: text('body_tiptap'),

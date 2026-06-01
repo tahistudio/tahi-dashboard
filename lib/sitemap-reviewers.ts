@@ -39,6 +39,7 @@ export interface SitemapNodeForReview {
   specialFeatures: string | null
   designNotes: string | null
   contentNotes: string | null
+  contentBlocksNeeded: string | null
   bodyTiptap: string | null
 }
 
@@ -51,15 +52,34 @@ export interface SitemapReviewerDef {
   buildUserPrompt: (node: SitemapNodeForReview) => string
 }
 
+const APPLYABLE_FIELDS = [
+  'title', 'slug', 'url', 'purpose', 'icpAudience', 'primaryKeyword',
+  'aeoIntent', 'positioningVertical', 'successMetric', 'specialFeatures',
+  'designNotes', 'contentNotes', 'targetLaunchDate',
+] as const
+
 const COMMON_OUTPUT_CONTRACT = `Respond with ONE JSON object only (no markdown fences, no prose):
 {
   "score": number,            // 0-100, how well the plan serves its goal from your lens
   "summary": "one short sentence",
-  "suggestions": [             // concrete edits / additions to the plan
-    { "label": "...", "detail": "..." }
+  "suggestions": [
+    {
+      "label": "concrete edit headline",
+      "detail": "why this matters",
+      // Optional. Include only when the suggestion has a concrete field change
+      // that can be applied without further interpretation. Omit for
+      // "rethink this" style suggestions.
+      "apply": {
+        "field": "purpose" | "icpAudience" | "primaryKeyword" | "aeoIntent" | "positioningVertical" | "successMetric" | "specialFeatures" | "designNotes" | "contentNotes" | "targetLaunchDate" | "title" | "slug",
+        "operation": "replace" | "append",
+        "newValue": "the exact new text for that field"
+      }
+    }
   ],
   "critique": "2-4 sentences explaining the score and what's missing / what's strong"
-}`
+}
+
+When suggesting a concrete fix, ALWAYS include the apply block with the exact final text the field should hold. The human reviewer should be able to click "Apply" and have the change land verbatim. For purpose / icpAudience / successMetric: write the full final value, don't just describe the change. For positioningVertical: use one of: Enterprise Custom Webflow, Operations, Webflow Cloud, UI/UX, Product Integrations, Pricing & Sales, Resources & Education, Showcase.`
 
 function nodeToContext(node: SitemapNodeForReview): string {
   const fields: Array<[string, string | null]> = [
@@ -77,6 +97,7 @@ function nodeToContext(node: SitemapNodeForReview): string {
     ['Special features', node.specialFeatures],
     ['Design notes', node.designNotes],
     ['Content notes', node.contentNotes],
+    ['Content blocks needed (one per line)', node.contentBlocksNeeded],
   ]
   const lines = fields
     .filter(([, v]) => v && v.trim().length > 0)
@@ -259,11 +280,37 @@ export function getReviewer(key: SitemapReviewerKey): SitemapReviewerDef {
   return r
 }
 
+export type ApplyableField = (typeof APPLYABLE_FIELDS)[number]
+
+export interface SuggestionApply {
+  field: ApplyableField
+  operation: 'replace' | 'append'
+  newValue: string
+}
+
+export interface SitemapSuggestion {
+  label: string
+  detail: string
+  apply?: SuggestionApply
+}
+
 export interface SitemapReviewResult {
   score: number
   summary: string
-  suggestions: Array<{ label: string; detail: string }>
+  suggestions: SitemapSuggestion[]
   critique: string
+}
+
+const APPLYABLE_SET = new Set<string>(APPLYABLE_FIELDS)
+
+function parseApply(raw: unknown): SuggestionApply | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const a = raw as Record<string, unknown>
+  const field = typeof a.field === 'string' ? a.field : ''
+  const operation = a.operation === 'append' ? 'append' : 'replace'
+  const newValue = typeof a.newValue === 'string' ? a.newValue : ''
+  if (!APPLYABLE_SET.has(field) || newValue.length === 0) return undefined
+  return { field: field as ApplyableField, operation, newValue }
 }
 
 export function parseSitemapReviewerOutput(raw: string): SitemapReviewResult {
@@ -274,11 +321,12 @@ export function parseSitemapReviewerOutput(raw: string): SitemapReviewResult {
   const score = typeof parsed.score === 'number' ? Math.max(0, Math.min(100, Math.round(parsed.score))) : 0
   const summary = typeof parsed.summary === 'string' ? parsed.summary.trim() : ''
   const suggestionsRaw = Array.isArray(parsed.suggestions) ? parsed.suggestions : []
-  const suggestions = suggestionsRaw
+  const suggestions: SitemapSuggestion[] = suggestionsRaw
     .filter((s): s is Record<string, unknown> => !!s && typeof s === 'object')
-    .map(s => ({
+    .map((s): SitemapSuggestion => ({
       label: typeof s.label === 'string' ? s.label.trim() : '',
       detail: typeof s.detail === 'string' ? s.detail.trim() : '',
+      apply: parseApply(s.apply),
     }))
     .filter(s => s.label.length > 0)
   const critique = typeof parsed.critique === 'string' ? parsed.critique.trim() : ''

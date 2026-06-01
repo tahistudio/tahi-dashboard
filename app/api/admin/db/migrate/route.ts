@@ -1784,6 +1784,13 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0074',
+    description: 'Sitemap: add content_blocks_needed column for Staci\'s design shopping list (one block per line: FAQs, ROI calculator, etc.).',
+    statements: [
+      `ALTER TABLE sitemap_nodes ADD COLUMN content_blocks_needed TEXT`,
+    ],
+  },
+  {
     name: '0073',
     description: 'Sitemap planning library — sitemap_nodes (tree of pages with structured doc fields + Tiptap freeform body) + sitemap_node_reviews (latest sub-agent critique per reviewer key). Gated to Liam + Staci at the route layer.',
     statements: [
