@@ -48,17 +48,7 @@ const SEED: SeedNode[] = [
       { title: 'Webflow project calculator', slug: 'webflow-project-calculator', url: 'https://www.tahi.studio/webflow-project-calculator', nodeType: 'page', positioningVertical: 'Pricing & Sales', status: 'live' },
     ],
   },
-  {
-    title: 'Case studies',
-    nodeType: 'section',
-    status: 'live',
-    children: [
-      { title: 'BCS Consultancy', slug: 'bcs-consultancy', url: 'https://www.tahi.studio/case-studies/bcs-consultancy', nodeType: 'page', positioningVertical: 'Showcase', status: 'live' },
-      { title: 'Elevate', slug: 'elevate', url: 'https://www.tahi.studio/case-studies/elevate', nodeType: 'page', positioningVertical: 'Showcase', status: 'live' },
-      { title: 'Glasswall', slug: 'glasswall', url: 'https://www.tahi.studio/case-studies/glasswall', nodeType: 'page', positioningVertical: 'Showcase', status: 'live' },
-      { title: 'Physitrack', slug: 'physitrack', url: 'https://www.tahi.studio/case-studies/physitrack', nodeType: 'page', positioningVertical: 'Showcase', status: 'live' },
-    ],
-  },
+  { title: 'Case studies (CMS)', slug: 'case-studies', url: 'https://www.tahi.studio/case-studies', nodeType: 'cms_collection', positioningVertical: 'Showcase', status: 'live' },
   {
     title: 'Resources',
     nodeType: 'section',
