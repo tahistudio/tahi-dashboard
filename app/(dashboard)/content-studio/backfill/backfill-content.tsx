@@ -480,7 +480,7 @@ export function BackfillContent() {
             : key === 'schema-watchdog'
               ? `Scanned ${json.totalScanned ?? 0} · ${Array.isArray(json.issues) ? json.issues.length : 0} issues · ${json.autoFixed ?? 0} auto-fixed`
               : key === 'post-scorecard-sync'
-                ? `Scanned ${json.scanned ?? 0} URLs · ${json.updated ?? 0} updated · ${json.inserted ?? 0} new rows · ${errorsCount} errors`
+                ? `Scanned ${json.scanned ?? 0} published URLs · ${json.updated ?? 0} updated · ${json.inserted ?? 0} new rows · skipped ${json.skippedDrafts ?? 0} drafts${json.skippedArchived ? ` · ${json.skippedArchived} archived` : ''} · ${errorsCount} errors`
                 : key === 'content-auto-backfill'
                   ? json.skipped
                     ? `Skipped: ${String(json.skipped).slice(0, 120)}`
@@ -875,24 +875,59 @@ export function BackfillContent() {
             )}
 
             {underperformers.unindexedItems.length > 0 && (
-              <div style={{ marginTop: '0.625rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.375rem' }}>
-                  <h3 style={{ fontSize: '0.875rem', fontWeight: 600, margin: 0 }}>Not currently indexed ({underperformers.unindexedItems.length})</h3>
-                  <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
-                    Run Indexing reverser above to ping IndexNow
-                  </span>
+              <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--color-border-subtle)' }}>
+                <h3 style={{ fontSize: '0.875rem', fontWeight: 600, margin: '0 0 0.375rem' }}>
+                  Not currently indexed ({underperformers.unindexedItems.length})
+                </h3>
+                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: '0 0 0.75rem', maxWidth: '70ch', lineHeight: 1.5 }}>
+                  Items here are either crawled-but-not-indexed by Google, or just unknown to Google. At DA 43 this almost always means content is too thin / too similar to other pages / lacking distinct signal. <strong>What actually works</strong>: rewrite the content (Tier 3 for glossary, round-table for blog) AND add internal links from already-indexed pages. IndexNow / GSC submit-URL are nudges; they only help when the underlying content has improved. Google does NOT accept programmatic force-index requests for sites outside the Job Postings + Broadcast Events APIs. If an item here is still a Webflow draft (not yet published live), it shouldn&apos;t appear — refresh after re-running the scorecard sync, which now skips drafts.
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  {underperformers.unindexedItems.slice(0, 10).map(item => (
-                    <div key={item.itemId} style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', padding: '0.25rem 0.5rem' }}>
-                      <code>{item.slug}</code> — {item.reason}
-                    </div>
-                  ))}
-                  {underperformers.unindexedItems.length > 10 && (
-                    <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
-                      +{underperformers.unindexedItems.length - 10} more
-                    </div>
-                  )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {underperformers.unindexedItems.map(item => {
+                    const isRewriting = agentRunning === `rewrite-${item.itemId}`
+                    const isBlog = item.url.includes('/blog/')
+                    return (
+                      <div key={item.itemId} style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-leaf-sm)', padding: '0.625rem 0.875rem', background: 'var(--color-bg)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
+                          <div style={{ flex: 1, minWidth: '14rem' }}>
+                            <div style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                              {item.term}
+                              <Badge tone={isBlog ? 'info' : 'brand'}>{isBlog ? 'blog' : 'glossary'}</Badge>
+                            </div>
+                            <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', marginTop: '0.125rem', fontFamily: 'monospace' }}>
+                              {item.url.replace('https://www.tahi.studio', '')}
+                            </div>
+                            <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', marginTop: '0.125rem', fontStyle: 'italic' }}>
+                              {item.reason}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.375rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <a href={item.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                              <Eye className="w-3 h-3" /> View live
+                            </a>
+                            {!isBlog && (
+                              <TahiButton size="sm" variant="secondary" disabled={!!agentRunning} onClick={() => { void runAudit(item.itemId) }}>
+                                Audit
+                              </TahiButton>
+                            )}
+                            {!isBlog && (
+                              <TahiButton size="sm" loading={isRewriting} disabled={!!agentRunning} onClick={() => { void rewriteUnderperformer(item.itemId, item.term, item.url) }} iconLeft={<Sparkles className="w-3.5 h-3.5" />}>
+                                Rewrite
+                              </TahiButton>
+                            )}
+                            {isBlog && (
+                              <a
+                                href={apiPath('/content-studio?tab=audits')}
+                                style={{ fontSize: '0.75rem', color: 'var(--color-brand)', textDecoration: 'none', padding: '0.375rem 0.625rem', border: '1px solid var(--color-border)', borderRadius: '0.5rem' }}
+                              >
+                                Open Audits tab →
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )}

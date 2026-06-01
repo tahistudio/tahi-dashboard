@@ -101,6 +101,8 @@ export async function POST(req: NextRequest) {
     publishedAt: string
   }
   const posts: PostTarget[] = []
+  let skippedDrafts = 0
+  let skippedArchived = 0
   try {
     const blogCollectionId = await getBlogPostsCollectionId()
     let offset = 0
@@ -111,11 +113,17 @@ export async function POST(req: NextRequest) {
         if (posts.length >= maxPosts) break
         const slug = (it.fieldData.slug as string | undefined) ?? ''
         if (!slug) continue
+        // Skip Webflow drafts (no live URL) + archived items. lastPublished
+        // is the authoritative marker — null = never published live, so
+        // there's nothing for Google to crawl + no point scoring it.
+        if (it.isDraft) { skippedDrafts++; continue }
+        if (it.isArchived) { skippedArchived++; continue }
+        if (!it.lastPublished) { skippedDrafts++; continue }
         posts.push({
           webflowItemId: it.id,
           draftId: null,
           url: `https://www.tahi.studio/blog/${slug}`,
-          publishedAt: it.lastPublished ?? it.createdOn ?? new Date().toISOString(),
+          publishedAt: it.lastPublished,
         })
       }
       if (page.items.length < 100) break
@@ -132,17 +140,40 @@ export async function POST(req: NextRequest) {
         if (posts.length >= maxPosts) break
         const slug = (it.fieldData.slug as string | undefined) ?? ''
         if (!slug) continue
+        if (it.isDraft) { skippedDrafts++; continue }
+        if (it.isArchived) { skippedArchived++; continue }
+        if (!it.lastPublished) { skippedDrafts++; continue }
         posts.push({
           webflowItemId: it.id,
           draftId: null,
           url: `https://www.tahi.studio/resources/glossary/${slug}`,
-          publishedAt: it.lastPublished ?? it.createdOn ?? new Date().toISOString(),
+          publishedAt: it.lastPublished,
         })
       }
       if (page.items.length < 100) break
       offset += page.items.length
     }
   } catch (err) { console.error('glossary collection fetch failed', err) }
+
+  // Purge any scorecard rows for items that are no longer published live
+  // (item became a draft / archived / deleted in Webflow). Otherwise the
+  // "unindexed" bucket keeps showing them and confuses the underperformers
+  // ranking. Match on webflowItemId; anything not in the current published
+  // set gets deleted.
+  let purged = 0
+  try {
+    const livePublishedIds = new Set(posts.map(p => p.webflowItemId))
+    const existingRows = await database
+      .select({ id: schema.postScorecards.id, webflowItemId: schema.postScorecards.webflowItemId })
+      .from(schema.postScorecards)
+      .limit(500)
+    for (const row of existingRows) {
+      if (row.webflowItemId && !livePublishedIds.has(row.webflowItemId)) {
+        await database.delete(schema.postScorecards).where(eq(schema.postScorecards.id, row.id))
+        purged++
+      }
+    }
+  } catch (err) { console.error('scorecard purge failed', err) }
 
   let updated = 0
   let inserted = 0
@@ -264,6 +295,9 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     scanned: posts.length,
+    skippedDrafts,
+    skippedArchived,
+    purged,
     updated,
     inserted,
     errors,
