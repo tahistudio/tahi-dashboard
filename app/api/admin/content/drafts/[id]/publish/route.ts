@@ -345,6 +345,18 @@ export async function POST(
   // 5) Build the fieldData payload
   const slug = slugify(draft.shortenedName ?? draft.title ?? draft.id)
   const publishUrl = `${TAHI_BLOG_BASE}/${slug}`
+
+  // Webflow's PlainText field caps. Going over these = Webflow 400.
+  // Truncate at the last word boundary inside the cap so we don't end
+  // mid-word + lose a trailing period. Writer prompts target shorter,
+  // but reviewers/editor sometimes nudge over — this is the safety net.
+  const truncateAtWord = (s: string, max: number): string => {
+    if (!s || s.length <= max) return s ?? ''
+    const slice = s.slice(0, max)
+    const lastSpace = slice.lastIndexOf(' ')
+    return (lastSpace > max * 0.7 ? slice.slice(0, lastSpace) : slice).trim()
+  }
+
   const fieldData: Record<string, unknown> = {
     name: draft.title ?? draft.shortenedName ?? 'Untitled',
     slug,
@@ -357,9 +369,14 @@ export async function POST(
     'faq-section-heading': faqHeading,
     schema: draft.schemaJsonLd ?? '',
     'hreflang-block': draft.hreflangBlock ?? '',
-    'meta-title': draft.metaTitle ?? draft.title ?? '',
-    'meta-description-2': draft.metaDescription ?? '',
-    'post-description': draft.postExcerpt ?? '',
+    'meta-title': truncateAtWord(draft.metaTitle ?? draft.title ?? '', 60),
+    // Webflow's hard cap = 158. Writer target = 145-160. Truncate to be
+    // safe on the upper bound — overshooting by 1-2 chars is the common
+    // failure mode for a reviewer-tuned description.
+    'meta-description-2': truncateAtWord(draft.metaDescription ?? '', 158),
+    // post-description (post excerpt) caps at 170 chars per Liam's
+    // Webflow collection. Same word-boundary truncation.
+    'post-description': truncateAtWord(draft.postExcerpt ?? '', 170),
     'shortened-name': draft.shortenedName ?? '',
     // Purpose-written by the structurer — "ask AI about this post" prompt
     // tailored to this article's angle. Falls back to summary only if the

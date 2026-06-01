@@ -191,7 +191,7 @@ You check:
 - Snippet bait paragraphs (40-60 word definition-style for the primary query)
 - FAQ section present and answers question-format queries
 - Internal link opportunities flagged
-- Title length 50-65 chars, meta description 145-160 chars
+- Title length 50-60 chars (60 hard max), meta description 145-155 chars (158 hard max — Webflow rejects 159+)
 - E-E-A-T signals: author byline visible, dates, sources, depth
 
 ${SCORING_RUBRIC}

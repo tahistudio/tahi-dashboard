@@ -483,7 +483,8 @@ Rules:
 - faqs: extract 4-6 Q/A pairs. If the article had an FAQ section, use those. If not, derive sensible ones from the content. Keep answers to 1-3 sentences. Question text is PLAIN TEXT only — no markdown links, no inline formatting (the Webflow CMS field is plain text). Answers CAN preserve inline markdown links from the source body where they appear; the answer field renders as rich text. If a question in the source body contains a link, strip the link wrapper and keep only the text.
 - faqSectionHeading: a short, topic-specific heading that frames the FAQ block (e.g. "Common questions about Webflow security", not just "FAQs"). 4-8 words.
 - keyTakeaways: 3-5 punchy one-line takeaways.
-- metaTitle <= 60 chars, metaDescription 145-160 chars, summary 1-2 sentences, postExcerpt a short teaser, shortenedName a short card label.
+- metaTitle <= 60 chars (HARD MAX). metaDescription 145-155 chars (HARD MAX 158 — Webflow rejects 159+). postExcerpt <= 165 chars (HARD MAX 170 — Webflow rejects 171+). summary 1-2 sentences. shortenedName a short card label.
+- Treat the length caps as hard ceilings. Going one char over fails the publish.
 - aiPrompt: a 1-2 sentence prompt the reader could paste into ChatGPT/Claude/Perplexity to dig deeper on this specific article's topic. NOT a duplicate of the summary. Frame as a curiosity-driving question or instruction. Example: "Compare Tahi's approach to enterprise Webflow governance with how three other top Webflow agencies handle SOC 2 readiness for their clients." Make it specific to THIS article's angle.
 - Never use em dashes.`
 
@@ -507,10 +508,10 @@ Respond JSON only:
   "faqs": [{ "q": "...", "a": "..." }],
   "faqSectionHeading": "topic-specific FAQ heading, 4-8 words",
   "keyTakeaways": ["...", "..."],
-  "metaTitle": "<= 60 chars",
-  "metaDescription": "145-160 chars",
+  "metaTitle": "<= 60 chars (hard max)",
+  "metaDescription": "145-155 chars (HARD MAX 158 — Webflow rejects 159+)",
   "summary": "1-2 sentences",
-  "postExcerpt": "short teaser",
+  "postExcerpt": "<= 165 chars (HARD MAX 170 — Webflow rejects 171+)",
   "shortenedName": "short label",
   "aiPrompt": "1-2 sentence purpose-written 'ask AI about this' prompt, specific to this article"
 }`
