@@ -3134,3 +3134,72 @@ export const backlinkStats = sqliteTable('backlink_stats', {
   updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
 })
 
+// ============================================================
+// SITEMAP (Liam + Staci's planning surface — /sitemap route)
+// ============================================================
+
+/**
+ * Planning library for the upcoming Tahi marketing site redesign.
+ * One row per planned page / CMS collection / grouping section.
+ * Tree structure via nullable parentId — unbounded depth, UI guides
+ * away from nesting past 3-4 levels.
+ *
+ * Gated to business@tahi.studio + staci@tahi.studio at the route
+ * layer. Long-lived planning artefact — will outlive the redesign.
+ */
+export const sitemapNodes = sqliteTable('sitemap_nodes', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  parentId: text('parent_id'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  // 'page' | 'cms_collection' | 'section'
+  nodeType: text('node_type').notNull().default('page'),
+  title: text('title').notNull(),
+  slug: text('slug'),
+  url: text('url'),  // live or target URL; nullable when not yet decided
+  purpose: text('purpose'),
+  icpAudience: text('icp_audience'),
+  primaryKeyword: text('primary_keyword'),
+  aeoIntent: text('aeo_intent'),
+  positioningVertical: text('positioning_vertical'),
+  successMetric: text('success_metric'),
+  // 'idea' | 'spec_done' | 'design_done' | 'webflow_done' | 'live' | 'parked'
+  status: text('status').notNull().default('idea'),
+  specialFeatures: text('special_features'),
+  designNotes: text('design_notes'),
+  contentNotes: text('content_notes'),
+  targetLaunchDate: text('target_launch_date'),
+  // Tiptap JSON for the freeform notes block at the bottom of each doc
+  bodyTiptap: text('body_tiptap'),
+  createdBy: text('created_by'),
+  lastEditedBy: text('last_edited_by'),
+  ...timestamps,
+}, (table) => ({
+  parentIdx: index('idx_sitemap_nodes_parent').on(table.parentId),
+  statusIdx: index('idx_sitemap_nodes_status').on(table.status),
+}))
+
+/**
+ * Sub-agent review history per node. One row per (node × reviewer
+ * × run). Keeps the full critique payload + suggestions so the UI
+ * can show review-over-time without re-running.
+ */
+export const sitemapNodeReviews = sqliteTable('sitemap_node_reviews', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  nodeId: text('node_id').notNull(),
+  // 'seo_aeo' | 'icp' | 'brand_voice' | 'cro' | 'sales' | 'marketing'
+  reviewerKey: text('reviewer_key').notNull(),
+  score: integer('score'),
+  summary: text('summary'),
+  // JSON array of {priority, suggestion} or just strings
+  suggestions: text('suggestions'),
+  // JSON — full critique payload from the model
+  critique: text('critique'),
+  costCents: integer('cost_cents').notNull().default(0),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => ({
+  nodeIdx: index('idx_sitemap_node_reviews_node').on(table.nodeId),
+  reviewerIdx: index('idx_sitemap_node_reviews_reviewer').on(table.reviewerKey),
+}))
+
