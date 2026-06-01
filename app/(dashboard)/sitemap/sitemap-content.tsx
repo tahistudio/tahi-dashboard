@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Plus, Trash2, Copy, ChevronRight, ChevronDown,
-  Loader2, Save, FileText, Layers, FolderTree, Sparkles, AlertCircle, CheckCircle2,
+  Loader2, Save, FileText, Layers, FolderTree, Sparkles, AlertCircle, CheckCircle2, Download,
 } from 'lucide-react'
 import { PageHeader } from '@/components/tahi/page-header'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -252,6 +252,14 @@ export function SitemapContent() {
         subtitle="Plan + document every page of the redesign. Long-lived planning library."
       >
         <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <TahiButton
+            size="sm"
+            variant="secondary"
+            onClick={() => { window.location.href = apiPath('/api/admin/sitemap/export') }}
+            iconLeft={<Download className="w-3.5 h-3.5" />}
+          >
+            Export
+          </TahiButton>
           <TahiButton size="sm" variant="secondary" loading={adding} onClick={() => { void createNode(null, 'section') }} iconLeft={<FolderTree className="w-3.5 h-3.5" />}>
             Add section
           </TahiButton>

@@ -37,7 +37,7 @@ import {
   FolderOpen, ShoppingBag, PanelLeftClose, PanelLeftOpen,
   LayoutDashboard, Star, TrendingUp, FileSignature, Gauge,
   Calendar, Megaphone, ChevronDown, UserPlus, Share2, Phone,
-  PenLine,
+  PenLine, Map,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
@@ -45,7 +45,12 @@ import { useSidebar } from '@/components/tahi/sidebar-context'
 import { Tooltip } from '@/components/tahi/tooltip'
 import { TahiIconMark, TahiStudioWordmark } from '@/components/tahi/tahi-glyphs'
 import { SidebarUserCard } from '@/components/tahi/sidebar-user-card'
+import { useUser } from '@clerk/nextjs'
 import * as React from 'react'
+
+// Emails allowed to see the /sitemap nav entry. The page itself is also
+// 404-gated server-side — this is purely UX (no broken link for the team).
+const SITEMAP_ALLOWLIST_EMAILS = new Set(['business@tahi.studio', 'staci@tahi.studio'])
 
 type NavItem = {
   label: string
@@ -54,6 +59,8 @@ type NavItem = {
   adminOnly?: boolean
   clientOnly?: boolean
   clientVisible?: boolean
+  /** Hidden unless current user's email is in this allowlist. */
+  emailAllowlist?: Set<string>
   count?: number
 }
 
@@ -100,6 +107,7 @@ const ADMIN_NAV: NavGroup[] = [
     collapsible: true,
     items: [
       { label: 'Content studio', href: '/content-studio', icon: PenLine,   adminOnly: true },
+      { label: 'Sitemap',        href: '/sitemap',        icon: Map,       adminOnly: true, emailAllowlist: SITEMAP_ALLOWLIST_EMAILS },
       { label: 'Social',         href: '/social',         icon: Share2,    adminOnly: true },
       { label: 'Reviews',        href: '/reviews',        icon: Star,      adminOnly: true },
       { label: 'Announcements',  href: '/announcements',  icon: Megaphone, adminOnly: true },
@@ -239,10 +247,14 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
     && impersonatedAccessRules.length > 0
     && impersonatedAccessRules.every(r => r.role === 'viewer')
 
+  const { user } = useUser()
+  const userEmail = user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? null
+
   const sourceNav = showAsAdmin ? ADMIN_NAV : CLIENT_NAV
   const visibleNav = sourceNav.map(group => ({
     ...group,
     items: group.items.filter(item => {
+      if (item.emailAllowlist && (!userEmail || !item.emailAllowlist.has(userEmail))) return false
       if (showAsAdmin) {
         if (item.clientOnly) return false
         if (isViewerRole && VIEWER_HIDDEN_PAGES.has(item.href)) return false
