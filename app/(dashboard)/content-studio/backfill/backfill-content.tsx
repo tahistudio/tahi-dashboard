@@ -454,13 +454,15 @@ export function BackfillContent() {
     }
   }
 
-  async function runAgent(key: 'content-gap-hunt' | 'indexing-reverser' | 'schema-watchdog' | 'post-scorecard-sync' | 'content-auto-backfill') {
+  async function runAgent(key: 'content-gap-hunt' | 'indexing-reverser' | 'schema-watchdog' | 'post-scorecard-sync' | 'content-auto-backfill' | 'unwrap-schema-tags') {
     setAgentRunning(key)
     setAgentResults(prev => ({ ...prev, [key]: 'Running...' }))
     try {
       const path = key === 'post-scorecard-sync'
         ? '/api/admin/cron/post-scorecard-sync'
-        : `/api/admin/cron/${key}`
+        : key === 'unwrap-schema-tags'
+          ? '/api/admin/content/schema/unwrap-existing'
+          : `/api/admin/cron/${key}`
       const res = await fetch(apiPath(path), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -485,7 +487,9 @@ export function BackfillContent() {
                   ? json.skipped
                     ? `Skipped: ${String(json.skipped).slice(0, 120)}`
                     : `Broken found: ${json.brokenFound ?? 0} · processed ${json.processed ?? 0} · patched ${json.patched ?? 0} · remaining ${json.remaining ?? 0}`
-                  : JSON.stringify(json).slice(0, 200)
+                  : key === 'unwrap-schema-tags'
+                    ? `Blog: ${json.blog ? `${(json.blog as { scanned: number; unwrapped: number; alreadyClean: number }).scanned}/${(json.blog as { scanned: number; unwrapped: number; alreadyClean: number }).unwrapped} unwrapped` : 'n/a'} · Glossary: ${json.glossary ? `${(json.glossary as { scanned: number; unwrapped: number; alreadyClean: number }).scanned}/${(json.glossary as { scanned: number; unwrapped: number; alreadyClean: number }).unwrapped} unwrapped` : 'n/a'}`
+                    : JSON.stringify(json).slice(0, 200)
       setAgentResults(prev => ({ ...prev, [key]: summary }))
       if (res.ok) showToast(`${key}: ${summary}`)
       else showToast(`${key} failed: ${summary}`, 'error')
@@ -771,6 +775,7 @@ export function BackfillContent() {
             { key: 'schema-watchdog', label: 'Schema watchdog', desc: 'Validate every page schema + auto-fix breakages', cost: '$0' },
             { key: 'post-scorecard-sync', label: 'Refresh GSC + GA4 data', desc: 'Pull latest GSC + GA4 per published URL', cost: '$0' },
             { key: 'content-auto-backfill', label: 'Auto-backfill broken schema', desc: 'Schema patches on items with missing/invalid markup', cost: '$0' },
+            { key: 'unwrap-schema-tags', label: 'Unwrap <script> tags from schema', desc: 'Strip the <script>application/ld+json</script> wrapper from every Blog + Glossary item. Webflow template adds the wrapper at render time, so the stored value must be raw JSON. Run once after switching templates.', cost: '$0' },
           ].map(a => {
             const isRunning = agentRunning === a.key
             const result = agentResults[a.key]
@@ -786,7 +791,7 @@ export function BackfillContent() {
                   variant="secondary"
                   loading={isRunning}
                   disabled={!!agentRunning}
-                  onClick={() => { void runAgent(a.key as 'content-gap-hunt' | 'indexing-reverser' | 'schema-watchdog' | 'post-scorecard-sync' | 'content-auto-backfill') }}
+                  onClick={() => { void runAgent(a.key as 'content-gap-hunt' | 'indexing-reverser' | 'schema-watchdog' | 'post-scorecard-sync' | 'content-auto-backfill' | 'unwrap-schema-tags') }}
                   iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
                 >
                   Run now

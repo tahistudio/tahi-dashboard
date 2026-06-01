@@ -611,9 +611,12 @@ function buildBreadcrumbs(input: SchemaInput): object {
 
 /**
  * Build the full JSON-LD additions block for a blog post. Always
- * deterministic — same input produces byte-identical output. Output is
- * a single `<script type="application/ld+json">` element wrapping a
- * `@graph` array. Drop it straight into Webflow's `schema` field.
+ * deterministic — same input produces byte-identical output. Output
+ * is a RAW JSON-LD string (the @context + @graph object), NOT wrapped
+ * in a <script> tag — the Webflow page template inserts the wrapper
+ * at render time. Storing the wrapper inside the CMS `schema` field
+ * caused encoding issues + double-wrapping risk. See DECISIONS for
+ * the rationale.
  */
 export function buildBlogSchemaAdditions(input: SchemaInput): SchemaOutput {
   const blocks: object[] = []
@@ -666,8 +669,11 @@ export function buildBlogSchemaAdditions(input: SchemaInput): SchemaOutput {
   // Strict JSON.stringify — no pretty printing. Closing-tag injection
   // is guarded by escaping `</` in any string value so the script block
   // can't be broken by user content.
-  const safeJson = JSON.stringify(payload).replace(/<\/(script)/gi, '<\\/$1')
-  const jsonLdString = `<script type="application/ld+json">${safeJson}</script>`
+  // Raw JSON only — no <script> wrapper. The Webflow template emits the
+  // `<script type="application/ld+json">` tag around this value at
+  // render time. Storing wrapped content inside the CMS field caused
+  // double-wrapping + HTML-entity-encoding issues.
+  const jsonLdString = JSON.stringify(payload)
 
   return { jsonLdString, blocks }
 }

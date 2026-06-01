@@ -200,10 +200,9 @@ export function buildGlossarySchema(input: GlossaryInput): GlossaryOutput {
     }
   }
 
+  // Raw JSON only — no <script> wrapper. Webflow template adds the
+  // tag at render time. (Matches the blog schema generator pattern.)
   const graph = { '@context': 'https://schema.org', '@graph': blocks }
-  const safeJson = JSON.stringify(graph)
-    .replace(/<\/script/gi, '<\\/script')
-    .replace(/<!--/g, '<\\!--')
-  const jsonLdString = `<script type="application/ld+json">${safeJson}</script>`
+  const jsonLdString = JSON.stringify(graph)
   return { jsonLdString, blocks, faqCount: faqs.length, wordCount }
 }

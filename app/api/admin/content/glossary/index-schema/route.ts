@@ -100,15 +100,12 @@ export async function GET(req: NextRequest) {
     '@context': 'https://schema.org',
     '@graph': [collectionPage, definedTermSet, TAHI_ORG_NODE, breadcrumb],
   }
-  const safeJson = JSON.stringify(graph)
-    .replace(/<\/script/gi, '<\\/script')
-    .replace(/<!--/g, '<\\!--')
-  const jsonLdString = `<script type="application/ld+json">${safeJson}</script>`
+  const jsonLdString = JSON.stringify(graph)
 
   return NextResponse.json({
     termCount: terms.length,
     jsonLdString,
     charsTotal: jsonLdString.length,
-    instructions: 'Paste jsonLdString into the /resources/glossary page <head> embed in Webflow Designer (Page Settings > Inside <head> tag). The TAHI_ORG_NODE @id matches the blog post + glossary term schema so Google merges them into a single Organization entity.',
+    instructions: 'Raw JSON-LD only (no <script> wrapper) — paste into the /resources/glossary page schema field. The Webflow template wraps it in <script type="application/ld+json">...</script> at render time. The TAHI_ORG_NODE @id matches the blog post + glossary term schema so Google merges them into a single Organization entity.',
   })
 }
