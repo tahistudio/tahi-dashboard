@@ -38,10 +38,19 @@ export async function GET(req: NextRequest) {
      ORDER BY tbl_name, name`
   ).all<{ name: string; tbl_name: string; sql: string }>()
 
+  const stripFk = req.nextUrl.searchParams.get('stripFk') === '1'
+
   // Normalize: add IF NOT EXISTS so apply is idempotent
-  const tableStatements = (tables.results ?? []).map(r =>
-    r.sql.replace(/^\s*CREATE\s+TABLE\s+/i, 'CREATE TABLE IF NOT EXISTS ')
-  )
+  const tableStatements = (tables.results ?? []).map(r => {
+    let s = r.sql.replace(/^\s*CREATE\s+TABLE\s+/i, 'CREATE TABLE IF NOT EXISTS ')
+    if (stripFk) {
+      // strip inline REFERENCES ... [ON DELETE/UPDATE ...]
+      s = s.replace(/\s+REFERENCES\s+"?[\w]+"?\s*\([^)]+\)(?:\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))*/gi, '')
+      // strip table-level FOREIGN KEY (...) REFERENCES ...
+      s = s.replace(/,\s*FOREIGN\s+KEY\s*\([^)]+\)\s+REFERENCES\s+"?[\w]+"?\s*\([^)]+\)(?:\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))*/gi, '')
+    }
+    return s
+  })
   const indexStatements = (indexes.results ?? []).map(r =>
     r.sql.replace(/^\s*CREATE\s+(UNIQUE\s+)?INDEX\s+/i, (_m, u) =>
       `CREATE ${u ?? ''}INDEX IF NOT EXISTS `
