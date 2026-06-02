@@ -22,6 +22,7 @@ import { EmptyState } from '@/components/tahi/empty-state'
 import { useToast } from '@/components/tahi/toast'
 import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
 import { apiPath } from '@/lib/api'
+import { renderMarkdown, looksLikeHtml } from '@/lib/markdown'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -1077,19 +1078,22 @@ interface FieldTextProps {
 // ── Spec view (read-only doc) ────────────────────────────────────────────
 
 function SpecView({ node }: { node: SitemapNode }) {
-  // Render any field that has content. Empty fields show as a greyed
+  // Render any field that has content as markdown prose (matches the
+  // Docs Hub reading experience). Empty fields show a greyed
   // "Not yet specified" so Staci sees the gap without clutter.
-  function Section({ heading, value, multiline }: { heading: string; value: string | null; multiline?: boolean }) {
+  function Section({ heading, value }: { heading: string; value: string | null }) {
     const has = !!(value && value.trim())
     return (
-      <section style={{ marginBottom: '1.25rem' }}>
-        <h3 style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 0.375rem' }}>
+      <section style={{ marginBottom: '1.5rem' }}>
+        <h3 style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 0.5rem' }}>
           {heading}
         </h3>
         {has ? (
-          <div style={{ fontSize: '0.9375rem', lineHeight: 1.6, color: 'var(--color-text)', whiteSpace: multiline ? 'pre-wrap' : 'normal' }}>
-            {value}
-          </div>
+          <div
+            className="tahi-doc-prose"
+            style={{ fontSize: '0.9375rem' }}
+            dangerouslySetInnerHTML={{ __html: looksLikeHtml(value!) ? value! : renderMarkdown(value!) }}
+          />
         ) : (
           <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>
             Not yet specified
@@ -1127,15 +1131,17 @@ function SpecView({ node }: { node: SitemapNode }) {
         <SpecFact label="Target launch" value={node.targetLaunchDate} />
       </div>
 
-      <Section heading="Purpose" value={node.purpose} multiline />
-      <Section heading="Target ICP audience" value={node.icpAudience} multiline />
-      <Section heading="AEO intent" value={node.aeoIntent} multiline />
-      <Section heading="Success metric" value={node.successMetric} multiline />
-      <Section heading="Special features" value={node.specialFeatures} multiline />
-      <Section heading="Content blocks needed" value={node.contentBlocksNeeded} multiline />
-      <Section heading="Design notes" value={node.designNotes} multiline />
-      <Section heading="Content notes" value={node.contentNotes} multiline />
-      <Section heading="Freeform notes" value={bodyText || null} multiline />
+      <Section heading="Purpose" value={node.purpose} />
+      <Section heading="Who it's for" value={node.icpAudience} />
+      <Section heading="Success metric" value={node.successMetric} />
+      {/* The brief body — the section skeleton + proof + funnel guidance,
+          rendered as full markdown prose so it reads like a real doc. */}
+      <Section heading="The brief" value={node.contentNotes} />
+      <Section heading="Content blocks needed" value={node.contentBlocksNeeded} />
+      <Section heading="AEO intent" value={node.aeoIntent} />
+      <Section heading="Special features" value={node.specialFeatures} />
+      <Section heading="Design notes" value={node.designNotes} />
+      <Section heading="Freeform notes" value={bodyText || null} />
     </div>
   )
 }
