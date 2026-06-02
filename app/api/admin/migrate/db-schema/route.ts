@@ -44,10 +44,14 @@ export async function GET(req: NextRequest) {
   const tableStatements = (tables.results ?? []).map(r => {
     let s = r.sql.replace(/^\s*CREATE\s+TABLE\s+/i, 'CREATE TABLE IF NOT EXISTS ')
     if (stripFk) {
-      // strip inline REFERENCES ... [ON DELETE/UPDATE ...]
-      s = s.replace(/\s+REFERENCES\s+"?[\w]+"?\s*\([^)]+\)(?:\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))*/gi, '')
+      // Identifier: backtick-quoted, double-quoted, or bare
+      const ID = '(?:`[^`]+`|"[^"]+"|\\w+)'
+      // ON DELETE/UPDATE action clauses (chainable)
+      const ON = '(?:\\s+ON\\s+(?:DELETE|UPDATE)\\s+(?:CASCADE|SET\\s+NULL|SET\\s+DEFAULT|RESTRICT|NO\\s+ACTION))'
+      // strip inline column-level REFERENCES
+      s = s.replace(new RegExp(`\\s+REFERENCES\\s+${ID}\\s*\\([^)]+\\)${ON}*`, 'gi'), '')
       // strip table-level FOREIGN KEY (...) REFERENCES ...
-      s = s.replace(/,\s*FOREIGN\s+KEY\s*\([^)]+\)\s+REFERENCES\s+"?[\w]+"?\s*\([^)]+\)(?:\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))*/gi, '')
+      s = s.replace(new RegExp(`,\\s*FOREIGN\\s+KEY\\s*\\([^)]+\\)\\s+REFERENCES\\s+${ID}\\s*\\([^)]+\\)${ON}*`, 'gi'), '')
     }
     return s
   })
