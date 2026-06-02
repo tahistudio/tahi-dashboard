@@ -23,6 +23,12 @@ import { useToast } from '@/components/tahi/toast'
 import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
 import { apiPath } from '@/lib/api'
 import { renderMarkdown, looksLikeHtml } from '@/lib/markdown'
+import { useUser } from '@clerk/nextjs'
+
+// Both Liam + Staci can view/edit the sitemap (allowlist on the page),
+// but only the owner sees the AI machinery (Boardroom, sub-agent runs,
+// apply-suggestions). Staci works the docs; Liam drives the AI.
+const SITEMAP_AI_OWNER = 'business@tahi.studio'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -137,6 +143,8 @@ const VERTICAL_OPTIONS = [
 
 export function SitemapContent() {
   const { showToast } = useToast()
+  const { user } = useUser()
+  const isOwner = (user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? '') === SITEMAP_AI_OWNER
   const [nodes, setNodes] = useState<SitemapNode[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -148,13 +156,14 @@ export function SitemapContent() {
   const [boardroomRunning, setBoardroomRunning] = useState(false)
 
   const fetchSiteReviews = useCallback(async () => {
+    if (!isOwner) return
     try {
       const res = await fetch(apiPath('/api/admin/sitemap/review-site'))
       if (!res.ok) return
       const json = await res.json() as { reviews: SitemapReview[] }
       setSiteReviews(json.reviews ?? [])
     } catch { /* ignore */ }
-  }, [])
+  }, [isOwner])
 
   async function runBoardroom() {
     if (nodes.length === 0) {
@@ -341,15 +350,17 @@ export function SitemapContent() {
         subtitle="Plan + document every page of the redesign. Long-lived planning library."
       >
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <TahiButton
-            size="sm"
-            variant="secondary"
-            loading={boardroomRunning}
-            onClick={() => { void runBoardroom() }}
-            iconLeft={<Users className="w-3.5 h-3.5" />}
-          >
-            Boardroom
-          </TahiButton>
+          {isOwner && (
+            <TahiButton
+              size="sm"
+              variant="secondary"
+              loading={boardroomRunning}
+              onClick={() => { void runBoardroom() }}
+              iconLeft={<Users className="w-3.5 h-3.5" />}
+            >
+              Boardroom
+            </TahiButton>
+          )}
           <TahiButton
             size="sm"
             variant="secondary"
@@ -370,8 +381,8 @@ export function SitemapContent() {
         </div>
       </PageHeader>
 
-      {/* Boardroom collapsible */}
-      {siteReviews.length > 0 && (
+      {/* Boardroom collapsible (owner only) */}
+      {isOwner && siteReviews.length > 0 && (
         <BoardroomBar
           reviews={siteReviews}
           open={boardroomOpen}
@@ -424,6 +435,7 @@ export function SitemapContent() {
               onDelete={() => { void deleteNode(selected.id) }}
               onDuplicate={() => { void duplicateNode(selected.id) }}
               saving={saving}
+              isOwner={isOwner}
             />
           )}
         </Card>
@@ -575,9 +587,10 @@ interface NodeDetailProps {
   onDelete: () => void
   onDuplicate: () => void
   saving: boolean
+  isOwner: boolean
 }
 
-function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetailProps) {
+function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving, isOwner }: NodeDetailProps) {
   const { showToast } = useToast()
   const [reviews, setReviews] = useState<SitemapReview[]>([])
   const [reviewLoading, setReviewLoading] = useState(false)
@@ -658,6 +671,7 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetail
   }
 
   const fetchReviews = useCallback(async () => {
+    if (!isOwner) return
     setReviewLoading(true)
     try {
       const res = await fetch(apiPath(`/api/admin/sitemap/nodes/${node.id}`))
@@ -665,11 +679,11 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetail
       const json = await res.json() as { reviews: SitemapReview[] }
       setReviews(json.reviews ?? [])
     } catch {
-      // Silent — the panel already shows the node, reviews are a bonus.
+      // Silent. The panel already shows the node, reviews are a bonus.
     } finally {
       setReviewLoading(false)
     }
-  }, [node.id])
+  }, [node.id, isOwner])
 
   useEffect(() => { void fetchReviews() }, [fetchReviews])
 
@@ -854,7 +868,8 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetail
         <SpecView node={node} />
       )}
 
-      {/* Sub-agent reviewer panel */}
+      {/* Sub-agent reviewer panel (owner only) */}
+      {isOwner && (
       <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '1.25rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '0.875rem' }}>
           <div>
@@ -913,6 +928,7 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving }: NodeDetail
           </p>
         )}
       </div>
+      )}
     </div>
   )
 }
