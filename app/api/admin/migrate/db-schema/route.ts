@@ -48,10 +48,11 @@ export async function GET(req: NextRequest) {
       const ID = '(?:`[^`]+`|"[^"]+"|\\w+)'
       // ON DELETE/UPDATE action clauses (chainable)
       const ON = '(?:\\s+ON\\s+(?:DELETE|UPDATE)\\s+(?:CASCADE|SET\\s+NULL|SET\\s+DEFAULT|RESTRICT|NO\\s+ACTION))'
-      // strip inline column-level REFERENCES
-      s = s.replace(new RegExp(`\\s+REFERENCES\\s+${ID}\\s*\\([^)]+\\)${ON}*`, 'gi'), '')
-      // strip table-level FOREIGN KEY (...) REFERENCES ...
+      // Strip table-level FOREIGN KEY first (more specific). If we ran the
+      // inline REFERENCES strip first it would partially destroy these matches.
       s = s.replace(new RegExp(`,\\s*FOREIGN\\s+KEY\\s*\\([^)]+\\)\\s+REFERENCES\\s+${ID}\\s*\\([^)]+\\)${ON}*`, 'gi'), '')
+      // Then strip any remaining inline column-level REFERENCES
+      s = s.replace(new RegExp(`\\s+REFERENCES\\s+${ID}\\s*\\([^)]+\\)${ON}*`, 'gi'), '')
     }
     return s
   })
