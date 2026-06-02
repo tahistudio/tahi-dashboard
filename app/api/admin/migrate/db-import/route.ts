@@ -81,10 +81,19 @@ export async function POST(req: NextRequest) {
     return env.DB.prepare(sql).bind(...vals)
   })
 
+  // Disable FK enforcement for this batch so we can import in any table order.
+  // D1's PRAGMA scope is per-connection; running it as part of the same batch
+  // keeps it active for the inserts that follow.
+  const batchWithPragma = [
+    env.DB.prepare('PRAGMA foreign_keys = OFF'),
+    ...stmts,
+  ]
+
   try {
-    const results = await env.DB.batch(stmts)
-    const inserted = results.reduce((s, r) => s + (r.meta?.changes ?? 0), 0)
-    return NextResponse.json({ inserted, batches: results.length, cols: colOrder.length })
+    const results = await env.DB.batch(batchWithPragma)
+    // skip the PRAGMA result when summing
+    const inserted = results.slice(1).reduce((s, r) => s + (r.meta?.changes ?? 0), 0)
+    return NextResponse.json({ inserted, batches: results.length - 1, cols: colOrder.length })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
     return NextResponse.json({ error: 'Insert failed', details: msg }, { status: 500 })
