@@ -17,6 +17,7 @@ build/
 .env.test.local
 .env.production.local
 .env.migration
+scripts/.migrate-state.json
 
 # Debug
 npm-debug.log*
