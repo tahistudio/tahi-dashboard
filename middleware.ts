@@ -28,6 +28,10 @@ const isPublicRoute = createRouteMatcher([
   // protected, so the user has to be signed in to actually see results.
   '/api/admin/integrations/google/callback(.*)',
   '/api/admin/integrations/xero/callback(.*)',
+  // TEMP: env-var dump endpoint for tahi-test-dashboard -> tahi-dashboard migration.
+  // Bearer-token gated inside the route; bypass Clerk so the bearer header is
+  // not parsed as a Clerk JWT. Delete this entry along with the route.
+  '/api/admin/_migrate/(.*)',
   // Public-share routes for schedules / proposals / contracts. Token-based
   // access — the route handler validates the token before returning data.
   // Pages live under /p/<resource>/<token>; their data APIs under /api/public.
@@ -43,6 +47,7 @@ const isPublicRoute = createRouteMatcher([
   '/dashboard/api/admin/ai/briefing/cron(.*)',
   '/dashboard/api/admin/integrations/google/callback(.*)',
   '/dashboard/api/admin/integrations/xero/callback(.*)',
+  '/dashboard/api/admin/_migrate/(.*)',
   '/dashboard/p/(.*)',
   '/dashboard/api/public/(.*)',
 ])
