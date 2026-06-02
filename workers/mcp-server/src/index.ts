@@ -1269,6 +1269,11 @@ const TOOLS: ToolDef[] = [
     nodeId: prop('string', 'Node ID'),
   }, ['nodeId']),
   tool('export_sitemap_bundle', 'Export the entire sitemap as a single markdown document: tree overview + every page with its structured doc, freeform notes, and latest sub-agent reviews. Returns the raw markdown text.'),
+  tool('review_sitemap_site', 'Run the Boardroom: all 6 site-level reviewers (SEO/AEO, ICP, brand voice, CRO, sales, marketing) against the ENTIRE sitemap at once. Returns per-reviewer outcomes. Use for a whole-site critique, not a single page.'),
+  tool('get_sitemap_site_reviews', 'Get the latest Boardroom (site-level) reviews, one per reviewer, with scores + summaries + suggestions.'),
+  tool('seed_sitemap', 'Seed or reseed the sitemap with the planned redesign structure. Pass force=true to wipe all existing nodes + reviews first, otherwise refuses if nodes already exist.', {
+    force: prop('boolean', 'Wipe existing nodes + reviews before seeding. Default false.'),
+  }),
 ]
 
 // ---------------------------------------------------------------------------
@@ -2120,6 +2125,12 @@ async function executeTool(
       if (!res.ok) throw new Error(`Export failed: ${res.status}`)
       return res.text()
     }
+    case 'review_sitemap_site':
+      return json(await apiWrite('/api/admin/sitemap/review-site', token, 'POST'))
+    case 'get_sitemap_site_reviews':
+      return json(await apiGet('/api/admin/sitemap/review-site', token))
+    case 'seed_sitemap':
+      return json(await apiWrite('/api/admin/sitemap/seed-current', token, 'POST', { force: args.force === true }))
 
     default:
       throw new Error(`Unknown tool: ${name}`)
