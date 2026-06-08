@@ -19,24 +19,49 @@ export async function POST(req: NextRequest) {
   const database = await db() as unknown as D1
 
   try {
-    // Fetch invoices from Stripe via REST API
-    const stripeRes = await fetch('https://api.stripe.com/v1/invoices?limit=100&expand[]=data.lines', {
-      headers: { Authorization: `Bearer ${stripeKey}` },
-    })
+    // Fetch ALL invoices from Stripe, paging past the 100-per-request cap
+    // via the `starting_after` cursor. MAX_PAGES bounds the worst case so a
+    // huge account can't run the Worker past its CPU budget; the response
+    // reports `truncated` if we stopped early.
+    const MAX_PAGES = 25
+    const allInvoices: StripeInvoiceLike[] = []
+    let startingAfter: string | null = null
+    let hasMore = true
+    let pages = 0
 
-    if (!stripeRes.ok) {
-      const errText = await stripeRes.text()
-      return NextResponse.json({ error: 'Stripe API error', message: errText }, { status: 502 })
+    while (hasMore && pages < MAX_PAGES) {
+      let url = 'https://api.stripe.com/v1/invoices?limit=100&expand[]=data.lines'
+      if (startingAfter) url += `&starting_after=${startingAfter}`
+
+      const stripeRes = await fetch(url, {
+        headers: { Authorization: `Bearer ${stripeKey}` },
+      })
+
+      if (!stripeRes.ok) {
+        // First page failing is a hard error; a later page failing just stops
+        // paging and we import what we already pulled.
+        if (pages === 0) {
+          const errText = await stripeRes.text()
+          return NextResponse.json({ error: 'Stripe API error', message: errText }, { status: 502 })
+        }
+        break
+      }
+
+      const page = await stripeRes.json() as { data: StripeInvoiceLike[]; has_more?: boolean }
+      allInvoices.push(...page.data)
+      startingAfter = page.data.length ? page.data[page.data.length - 1].id : null
+      hasMore = !!page.has_more && page.data.length > 0
+      pages++
     }
 
-    const stripeData = await stripeRes.json() as { data: StripeInvoiceLike[] }
+    const truncated = hasMore
 
     let imported = 0
     let updated = 0
     let skipped = 0
     const results: Array<{ number: string | null | undefined; status: string; orgMatch?: string }> = []
 
-    for (const inv of stripeData.data) {
+    for (const inv of allInvoices) {
       const res = await importStripeInvoice(database, inv, { autoCreateOrg: true })
       if ('skipped' in res) {
         skipped++
@@ -50,7 +75,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, imported, updated, skipped, total: stripeData.data.length, results })
+    return NextResponse.json({ success: true, imported, updated, skipped, total: allInvoices.length, truncated, results })
   } catch (err) {
     return NextResponse.json({
       error: 'Stripe import failed',

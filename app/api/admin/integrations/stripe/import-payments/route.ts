@@ -38,16 +38,36 @@ export async function POST(req: NextRequest) {
   const database = await db() as unknown as D1
 
   try {
-    // Fetch charges from Stripe (one-off payments)
-    const chargesRes = await fetch('https://api.stripe.com/v1/charges?limit=100', {
-      headers: { Authorization: `Bearer ${stripeKey}` },
-    })
+    // Fetch ALL charges from Stripe, paging past the 100-per-request cap via
+    // the `starting_after` cursor. MAX_PAGES bounds the worst case; `truncated`
+    // is reported if we stopped early.
+    const MAX_PAGES = 25
+    const allCharges: StripeCharge[] = []
+    let startingAfter: string | null = null
+    let hasMore = true
+    let pages = 0
 
-    if (!chargesRes.ok) {
-      return NextResponse.json({ error: 'Stripe API error' }, { status: 502 })
+    while (hasMore && pages < MAX_PAGES) {
+      let url = 'https://api.stripe.com/v1/charges?limit=100'
+      if (startingAfter) url += `&starting_after=${startingAfter}`
+
+      const chargesRes = await fetch(url, {
+        headers: { Authorization: `Bearer ${stripeKey}` },
+      })
+
+      if (!chargesRes.ok) {
+        if (pages === 0) return NextResponse.json({ error: 'Stripe API error' }, { status: 502 })
+        break
+      }
+
+      const page = await chargesRes.json() as { data: StripeCharge[]; has_more?: boolean }
+      allCharges.push(...page.data)
+      startingAfter = page.data.length ? page.data[page.data.length - 1].id : null
+      hasMore = !!page.has_more && page.data.length > 0
+      pages++
     }
 
-    const chargesData = await chargesRes.json() as { data: StripeCharge[] }
+    const truncated = hasMore
 
     // Get existing stripeInvoiceIds to avoid duplicates (we use charge ID as stripeInvoiceId for these)
     const existing = await database
@@ -67,7 +87,7 @@ export async function POST(req: NextRequest) {
     let skipped = 0
     const results: Array<{ chargeId: string; status: string; amount?: number; orgMatch?: string }> = []
 
-    for (const charge of chargesData.data) {
+    for (const charge of allCharges) {
       // Skip charges that are linked to invoices (already imported via invoice import)
       if (charge.invoice) {
         skipped++
@@ -165,7 +185,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, imported, skipped, total: chargesData.data.length, results })
+    return NextResponse.json({ success: true, imported, skipped, total: allCharges.length, truncated, results })
   } catch (err) {
     return NextResponse.json({
       error: 'Stripe payments import failed',
