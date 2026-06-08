@@ -1187,6 +1187,21 @@ function ActivityLog({
   // `open` toggles the whole card; `expanded` toggles Show more inside it.
   const [open, setOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  // `filter` switches between all events and comments-only, persisted so the
+  // preference sticks across requests and sessions.
+  const [filter, setFilter] = useState<'all' | 'comments'>('all')
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('tahi-activity-filter')
+      if (saved === 'comments' || saved === 'all') setFilter(saved)
+    } catch { /* localStorage unavailable */ }
+  }, [])
+
+  const applyFilter = useCallback((next: 'all' | 'comments') => {
+    setFilter(next)
+    try { localStorage.setItem('tahi-activity-filter', next) } catch { /* ignore */ }
+  }, [])
 
   // Build activity events from available data
   const events: ActivityEvent[] = []
@@ -1247,7 +1262,10 @@ function ActivityLog({
   // Sort chronologically (newest first)
   events.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
 
-  const displayed = expanded ? events : events.slice(0, 5)
+  const filteredEvents = filter === 'comments'
+    ? events.filter(e => e.type === 'message')
+    : events
+  const displayed = expanded ? filteredEvents : filteredEvents.slice(0, 5)
 
   const iconMap: Record<ActivityEvent['type'], React.ReactNode> = {
     created: <Plus size={10} />,
@@ -1310,9 +1328,48 @@ function ActivityLog({
 
       {open && (
       <div id="activity-log-body" style={{ padding: '0.75rem 1.25rem' }}>
-        {events.length === 0 ? (
+        {events.length > 0 && (
+          <div
+            role="tablist"
+            aria-label="Activity filter"
+            style={{
+              display: 'inline-flex',
+              gap: '0.125rem',
+              padding: '0.1875rem',
+              background: 'var(--color-bg-tertiary)',
+              borderRadius: '0.5rem',
+              marginBottom: '0.75rem',
+            }}
+          >
+            {(['all', 'comments'] as const).map(key => {
+              const active = filter === key
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => applyFilter(key)}
+                  className="text-xs font-medium transition-colors"
+                  style={{
+                    padding: '0.25rem 0.625rem',
+                    borderRadius: '0.375rem',
+                    border: 'none',
+                    cursor: 'pointer',
+                    background: active ? 'var(--color-bg)' : 'transparent',
+                    color: active ? 'var(--color-text)' : 'var(--color-text-subtle)',
+                    boxShadow: active ? 'var(--shadow-xs)' : 'none',
+                  }}
+                >
+                  {key === 'all' ? 'All' : 'Comments'}
+                </button>
+              )
+            })}
+          </div>
+        )}
+        {filteredEvents.length === 0 ? (
           <p className="text-xs" style={{ color: 'var(--color-text-subtle)', padding: '0.5rem 0' }}>
-            No activity yet.
+            {filter === 'comments' ? 'No comments yet.' : 'No activity yet.'}
           </p>
         ) : (
           <div className="flex flex-col" style={{ gap: '0.5rem' }}>
@@ -1349,7 +1406,7 @@ function ActivityLog({
           </div>
         )}
 
-        {events.length > 5 && (
+        {filteredEvents.length > 5 && (
           <button
             type="button"
             onClick={() => setExpanded(!expanded)}
@@ -1363,7 +1420,7 @@ function ActivityLog({
               display: 'block',
             }}
           >
-            {expanded ? 'Show less' : `Show all ${events.length} events`}
+            {expanded ? 'Show less' : `Show all ${filteredEvents.length} events`}
           </button>
         )}
       </div>
