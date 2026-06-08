@@ -53,6 +53,7 @@ interface MessageItem {
   createdAt: string
   editedAt: string | null
   deletedAt: string | null
+  voiceNote?: { url: string; durationSeconds?: number } | null
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -92,106 +93,6 @@ function getConversationDisplayName(conv: ConversationSummary): string {
     return conv.participantNames.slice(0, 3).join(', ')
   }
   return 'Unnamed conversation'
-}
-
-// Deterministic waveform bar heights (seeded pattern, not random per render)
-const WAVEFORM_HEIGHTS = [
-  0.35, 0.55, 0.75, 0.45, 0.90, 0.60, 0.80, 0.40, 0.95, 0.50,
-  0.70, 0.85, 0.30, 0.65, 1.00, 0.55, 0.45, 0.80, 0.60, 0.38,
-]
-
-// NOTE: VoiceNotePlayer is intentionally preserved as-is. It animates a
-// fake progress bar rather than playing the recorded audio. The real
-// fix is tracked under T735 (P1 — STATUS.md). Do not "fix" it here.
-function VoiceNotePlayer({ body }: { body: string }) {
-  const [playing, setPlaying] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const durationMatch = body.match(/(\d+)s/)
-  const duration = durationMatch ? parseInt(durationMatch[1]) : 0
-
-  useEffect(() => {
-    if (!playing) return
-    const totalMs = duration * 1000
-    const interval = totalMs / 20
-    const timer = setInterval(() => {
-      setProgress(prev => {
-        if (prev >= 20) {
-          setPlaying(false)
-          return 0
-        }
-        return prev + 1
-      })
-    }, interval || 100)
-    return () => clearInterval(timer)
-  }, [playing, duration])
-
-  function handlePlayPause() {
-    if (playing) {
-      setPlaying(false)
-    } else {
-      setProgress(0)
-      setPlaying(true)
-    }
-  }
-
-  return (
-    <div
-      className="flex items-center gap-3 mt-1"
-      style={{
-        padding: '0.5rem 0.75rem',
-        background: 'var(--color-bg-secondary)',
-        borderRadius: '1.25rem',
-        maxWidth: '16rem',
-      }}
-    >
-      <button
-        type="button"
-        onClick={handlePlayPause}
-        style={{
-          width: '2rem',
-          height: '2rem',
-          borderRadius: '50%',
-          background: 'var(--color-brand)',
-          border: 'none',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          color: 'white',
-        }}
-        aria-label={playing ? 'Pause' : 'Play'}
-      >
-        {playing ? (
-          <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor">
-            <rect x="0" y="0" width="3" height="12" rx="1" />
-            <rect x="7" y="0" width="3" height="12" rx="1" />
-          </svg>
-        ) : (
-          <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor">
-            <path d="M0 0L10 6L0 12z" />
-          </svg>
-        )}
-      </button>
-      <div className="flex items-center gap-0.5 flex-1">
-        {WAVEFORM_HEIGHTS.map((h, i) => (
-          <div
-            key={i}
-            style={{
-              width: '0.1875rem',
-              height: `${h * 1.25}rem`,
-              borderRadius: '0.125rem',
-              background: i < progress ? 'var(--color-brand)' : 'var(--color-border)',
-              transition: 'background 0.15s',
-            }}
-          />
-        ))}
-      </div>
-      <span className="text-xs font-medium" style={{ color: 'var(--color-text-muted)', flexShrink: 0 }}>
-        {playing ? `${Math.min(Math.round((progress / 20) * duration), duration)}s` : `${duration}s`}
-      </span>
-    </div>
-  )
 }
 
 function stripHtml(text: string): string {
@@ -690,6 +591,7 @@ export function MessagesContent({ isAdmin: isAdminProp }: { isAdmin: boolean }) 
               renderMessage={(msg) => {
                 const isDeleted = !!msg.deletedAt
                 const isVoice = !isDeleted && msg.body.startsWith('[Voice note:')
+                const playableVoice = isVoice && msg.voiceNote?.url ? msg.voiceNote : null
 
                 return (
                   <MessageBubble
@@ -701,7 +603,12 @@ export function MessagesContent({ isAdmin: isAdminProp }: { isAdmin: boolean }) 
                     timestamp={msg.createdAt}
                     editedAt={msg.editedAt ?? undefined}
                     visibility={msg.isInternal ? 'internal' : 'external'}
-                    bodyHtml={isDeleted ? undefined : isVoice ? undefined : bodyToHtml(stripHtml(msg.body))}
+                    voiceNote={
+                      playableVoice
+                        ? { url: apiPath(playableVoice.url), durationSeconds: playableVoice.durationSeconds }
+                        : undefined
+                    }
+                    bodyHtml={isDeleted || isVoice ? undefined : bodyToHtml(stripHtml(msg.body))}
                     body={
                       isDeleted
                         ? (
@@ -709,8 +616,12 @@ export function MessagesContent({ isAdmin: isAdminProp }: { isAdmin: boolean }) 
                             This message has been removed.
                           </span>
                         )
-                        : isVoice
-                          ? <VoiceNotePlayer body={msg.body} />
+                        : isVoice && !playableVoice
+                          ? (
+                            <span style={{ color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>
+                              Voice note (recording unavailable)
+                            </span>
+                          )
                           : undefined
                     }
                     actions={

@@ -2,7 +2,7 @@ import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, ne } from 'drizzle-orm'
+import { eq, desc, and, ne, inArray } from 'drizzle-orm'
 import { createNotifications } from '@/lib/notifications'
 
 // ── GET /api/portal/conversations/[id]/messages ────────────────────────────
@@ -95,6 +95,16 @@ export async function GET(
     .limit(limit)
     .offset(offset)
 
+  // Batch-load voice notes so playback resolves the real R2 file.
+  const messageIds = messages.map(m => m.id)
+  const voiceRows = messageIds.length
+    ? await database
+        .select()
+        .from(schema.voiceNotes)
+        .where(inArray(schema.voiceNotes.messageId, messageIds))
+    : []
+  const voiceByMessage = new Map(voiceRows.map(v => [v.messageId, v]))
+
   // Enrich with sender names
   const enrichedMessages = await Promise.all(
     messages.map(async msg => {
@@ -122,6 +132,8 @@ export async function GET(
         }
       }
 
+      const vn = voiceByMessage.get(msg.id)
+
       return {
         id: msg.id,
         body: msg.body,
@@ -132,6 +144,12 @@ export async function GET(
         authorAvatarUrl,
         createdAt: msg.createdAt,
         editedAt: msg.editedAt,
+        voiceNote: vn
+          ? {
+              url: `/api/uploads/serve?key=${encodeURIComponent(vn.storageKey)}`,
+              durationSeconds: vn.durationSeconds ?? undefined,
+            }
+          : null,
       }
     })
   )
@@ -170,9 +188,12 @@ export async function POST(
 
     const { id: conversationId } = await params
 
-    let body: { content?: string }
+    let body: {
+      content?: string
+      voiceNote?: { storageKey?: string; durationSeconds?: number; mimeType?: string }
+    }
     try {
-      body = await req.json() as { content?: string }
+      body = await req.json() as typeof body
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
     }
@@ -251,6 +272,17 @@ export async function POST(
       createdAt: now,
       updatedAt: now,
     })
+
+    // Persist the voice note reference so playback can resolve the R2 file.
+    if (body.voiceNote?.storageKey) {
+      await database.insert(schema.voiceNotes).values({
+        id: crypto.randomUUID(),
+        messageId: msgId,
+        storageKey: body.voiceNote.storageKey,
+        durationSeconds: body.voiceNote.durationSeconds ?? null,
+        mimeType: body.voiceNote.mimeType ?? 'audio/webm',
+      })
+    }
 
     // Update conversation updatedAt
     await database

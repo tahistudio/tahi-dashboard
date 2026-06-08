@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, ne } from 'drizzle-orm'
+import { eq, desc, and, ne, inArray } from 'drizzle-orm'
 import { createNotifications, notifyMentionedPerson } from '@/lib/notifications'
 import { parseMentions } from '@/lib/parse-mentions'
 
@@ -64,6 +64,17 @@ export async function GET(
     .limit(limit)
     .offset(offset)
 
+  // Batch-load voice notes for these messages so playback has a real
+  // R2 URL to point at (the serve route enforces org-scoping on the key).
+  const messageIds = messages.map(m => m.id)
+  const voiceRows = messageIds.length
+    ? await database
+        .select()
+        .from(schema.voiceNotes)
+        .where(inArray(schema.voiceNotes.messageId, messageIds))
+    : []
+  const voiceByMessage = new Map(voiceRows.map(v => [v.messageId, v]))
+
   // Enrich with sender names
   const enrichedMessages = await Promise.all(
     messages.map(async msg => {
@@ -91,6 +102,8 @@ export async function GET(
         }
       }
 
+      const vn = voiceByMessage.get(msg.id)
+
       return {
         id: msg.id,
         body: msg.body,
@@ -102,6 +115,12 @@ export async function GET(
         createdAt: msg.createdAt,
         editedAt: msg.editedAt,
         deletedAt: msg.deletedAt ?? null,
+        voiceNote: vn
+          ? {
+              url: `/api/uploads/serve?key=${encodeURIComponent(vn.storageKey)}`,
+              durationSeconds: vn.durationSeconds ?? undefined,
+            }
+          : null,
       }
     })
   )
@@ -142,9 +161,13 @@ export async function POST(
 
     const { id: conversationId } = await params
 
-    let body: { content?: string; isInternal?: boolean }
+    let body: {
+      content?: string
+      isInternal?: boolean
+      voiceNote?: { storageKey?: string; durationSeconds?: number; mimeType?: string }
+    }
     try {
-      body = await req.json() as { content?: string; isInternal?: boolean }
+      body = await req.json() as typeof body
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
     }
@@ -240,6 +263,17 @@ export async function POST(
       createdAt: now,
       updatedAt: now,
     })
+
+    // Persist the voice note reference so playback can resolve the R2 file.
+    if (body.voiceNote?.storageKey) {
+      await database.insert(schema.voiceNotes).values({
+        id: crypto.randomUUID(),
+        messageId: msgId,
+        storageKey: body.voiceNote.storageKey,
+        durationSeconds: body.voiceNote.durationSeconds ?? null,
+        mimeType: body.voiceNote.mimeType ?? 'audio/webm',
+      })
+    }
 
     // Update conversation's updatedAt
     await database
