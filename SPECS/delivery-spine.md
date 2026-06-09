@@ -1,8 +1,10 @@
 # Delivery Spine (#148) — proposal → contract → schedule → live delivery
 
-Status: proposed 2026-06-09. The differentiator over ManyRequests: link an
-engagement's sales artifacts to its actual delivery so the schedule shows,
-live, where delivery is, and auto-flags blocked / delayed / off-track.
+Status: 2026-06-09 — Slices 0,1,2,3 built + pushed (dfa95f4); awaiting deploy +
+migration 0076. In-viewer linking picker + Slices 4-5 remain. The differentiator
+over ManyRequests: link an engagement's sales artifacts to its actual delivery so
+the schedule shows, live, where delivery is, and auto-flags blocked / delayed /
+off-track.
 
 See [[project_portal_readiness_arc]].
 
