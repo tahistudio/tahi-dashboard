@@ -1,7 +1,7 @@
 # Tahi Dashboard — Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-05-28** by Claude (Phase H finance + calendar two-way sync shipped)
+> Last updated: **2026-06-09** by Claude (portal-readiness sweep: voice notes P1 fix, request comments filter, Stripe import pagination, client tags + filter)
 
 ---
 
@@ -40,7 +40,7 @@ Features that are coded and routed but haven't earned the user's trust as primar
 
 Verified 2026-05-21 against current code. Pipeline polish backlog (5 items) all shipped — see `memory/project_pipeline_polish_2026_05.md`. March QA audit largely resolved — see `memory/project_qa_resolved_2026_05.md`.
 
-1. **P1 — Voice note playback is fake.** `app/(dashboard)/messages/messages-content.tsx:95` `VoiceNotePlayer` animates a progress bar instead of decoding and playing the actual audio blob. Recording + R2 upload work; only playback is broken. Fix: swap the fake player for an `<audio>` element pointing at the R2 file URL.
+1. ~~**P1 — Voice note playback is fake.**~~ **FIXED 2026-06-09 (commit 385e03f), pending live verification.** Root cause was deeper than a fake player: the conversations POST endpoint silently dropped the `voiceNote.storageKey`, so no `voice_notes` row was ever written and there was no audio URL to play. Fix persists the row on POST (admin + portal), joins it on GET to return `voiceNote.url` (=/api/uploads/serve), and renders the real `MessageBubble` `VoiceNoteInline` player. Legacy notes (no row) show "recording unavailable". Verify on the deployed URL, then flip this off the list.
 2. **P2 — Needs live verification on production:**
    - R2 STORAGE binding (file upload end-to-end test on Webflow Cloud)
    - Settings page tabs (team / portal branding / modules — March audit said broken; code has no obvious stubs now)
@@ -69,6 +69,16 @@ Lifecycle-order build is in progress. Docs Hub was the first list-page lap; the 
 Full plan: `C:\Users\Work\.claude\plans\i-d-like-you-to-gentle-neumann.md`
 
 ---
+
+## Recent activity (2026-06-09)
+
+Portal-readiness sweep (direction: Liam owns portal, team owns the website redesign). Goal arc: ManyRequests parity via granular permissions + working requests/tasks + the proposal/contract/schedule/delivery spine (task #148). This session = quick wins + bug sweep first.
+
+- **T735 (P1) voice notes — fixed end-to-end** (385e03f). Was a data-loss bug, not just a fake UI: the conversations POST dropped the storageKey. Now persisted + joined + real player, admin + portal.
+- **T660 — request activity comments-only filter** (6674c1d). Segmented control, localStorage-persisted.
+- **T666 — Stripe import pagination** (07c5658). Both import-invoices + import-payments now page past the 100-record cap via `starting_after`.
+- **T661 — client tags + filter requests by client tag** (f3b1e59). orgs had no tags column and the managed tags table was never wired, so built free-form: org tags column (migration 0075), TagsCard editor on client detail, requests list tag filter. **Migration 0075 must run on prod after this deploy.**
+- **Bug-sweep finding: the quick-win backlog is ~half stale.** T665 (Stripe in_*/ch_* dedupe) already handled in code; T664 (accent sweep) effectively done, remaining hex are intentional (semantic callouts, success states, cluster palette, client PDF). Still open: T662 (email requestNumber var — needs the email layer inspected), T663 (portal noindex/robots — note the app mounts at /dashboard so /robots.txt serves under base path, may be wrong layer), T667 (Xero category overrides — needs its own migration).
 
 ## Recent activity (2026-05-27 → 2026-05-28)
 
