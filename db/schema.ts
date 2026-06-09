@@ -361,6 +361,9 @@ export const requests = sqliteTable('requests', {
   requestNumber: integer('request_number'),
   // JSON: array of checklists [{title, items: [{label, done}]}]
   checklists: text('checklists').default('[]'),
+  // Delivery spine (#148): the schedule gantt row this request delivers.
+  // Null = not mapped to a plan phase. One row -> many requests.
+  scheduleRowId: text('schedule_row_id').references(() => scheduleRows.id, { onDelete: 'set null' }),
   ...timestamps,
 }, (table) => [
   index('idx_requests_org').on(table.orgId),
@@ -369,6 +372,7 @@ export const requests = sqliteTable('requests', {
   index('idx_requests_track').on(table.trackId),
   index('idx_requests_number').on(table.requestNumber),
   index('idx_requests_parent').on(table.parentRequestId),
+  index('idx_requests_schedule_row').on(table.scheduleRowId),
 ])
 
 // ============================================================
@@ -731,6 +735,8 @@ export const tasks = sqliteTable('tasks', {
   position: integer('position'),
   // Link task to a request
   requestId: text('request_id').references(() => requests.id),
+  // Delivery spine (#148): the schedule gantt row this task delivers.
+  scheduleRowId: text('schedule_row_id').references(() => scheduleRows.id, { onDelete: 'set null' }),
   ...timestamps,
 }, (table) => [
   index('idx_tasks_org').on(table.orgId),
@@ -738,6 +744,7 @@ export const tasks = sqliteTable('tasks', {
   index('idx_tasks_status').on(table.status),
   index('idx_tasks_track').on(table.trackId),
   index('idx_tasks_request').on(table.requestId),
+  index('idx_tasks_schedule_row').on(table.scheduleRowId),
 ])
 
 // ============================================================

@@ -1844,6 +1844,16 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE organisations ADD COLUMN tags text DEFAULT '[]'`,
     ],
   },
+  {
+    name: '0076',
+    description: 'Delivery spine (#148) slice 0: requests.schedule_row_id + tasks.schedule_row_id link delivery work to a schedule gantt row, so the schedule can show live progress and flag off-track. Nullable; FK enforced at the app layer (Drizzle). Idempotent.',
+    statements: [
+      `ALTER TABLE requests ADD COLUMN schedule_row_id text`,
+      `ALTER TABLE tasks ADD COLUMN schedule_row_id text`,
+      `CREATE INDEX IF NOT EXISTS idx_requests_schedule_row ON requests(schedule_row_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_tasks_schedule_row ON tasks(schedule_row_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
