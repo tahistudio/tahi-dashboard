@@ -23,6 +23,7 @@
 'use client'
 
 import React from 'react'
+import type { DeliveryStatus } from '@/lib/delivery-status'
 
 export type RowOwner = 'tahi' | 'client' | 'joint' | 'tahi_parallel'
 export type RowType = 'section_header' | 'task' | 'gate' | 'critical_gate'
@@ -48,6 +49,29 @@ interface GanttGridProps {
   compact?: boolean
   /** Explicit min height per row, used by drag-reorder UIs to keep targets stable. */
   rowMinHeight?: string
+  /** Delivery spine (#148): rowId -> live delivery status. When present, a
+   *  status dot shows next to the phase label. Optional + backward-compatible:
+   *  omitted on the public viewer / PDF / proposal embeds. */
+  statusByRow?: Record<string, DeliveryStatus>
+}
+
+// Delivery status dot colours (hardcoded hex, brand-locked visual like OWNER_BG).
+export const DELIVERY_STATUS_COLOR: Record<DeliveryStatus, string> = {
+  done: '#4ade80',
+  in_progress: '#60a5fa',
+  not_started: '#cbd5e1',
+  at_risk: '#fb923c',
+  delayed: '#f87171',
+  blocked: '#b91c1c',
+}
+
+export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
+  done: 'Done',
+  in_progress: 'In progress',
+  not_started: 'Not started',
+  at_risk: 'At risk',
+  delayed: 'Delayed',
+  blocked: 'Blocked',
 }
 
 // Owner → colour. Hardcoded hex (not CSS vars) per CLAUDE.md guidance for
@@ -87,6 +111,7 @@ export function GanttGrid({
   onRowClick,
   compact = false,
   rowMinHeight,
+  statusByRow,
 }: GanttGridProps) {
   const weeks = Math.max(1, numberOfWeeks)
   const gridTemplateColumns = `${compact ? '12rem' : PHASE_COL} ${OWNER_COL} repeat(${weeks}, 1fr)`
@@ -216,7 +241,7 @@ export function GanttGrid({
                 if (onClick) e.currentTarget.style.backgroundColor = 'transparent'
               }}
             >
-              {/* Phase label */}
+              {/* Phase label (+ delivery status dot when provided) */}
               <div
                 style={{
                   padding: cellPad,
@@ -224,12 +249,31 @@ export function GanttGrid({
                   fontWeight: 500,
                   color: 'var(--color-text)',
                   overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
                 }}
-                title={row.label}
+                title={
+                  statusByRow?.[row.id]
+                    ? `${row.label} — ${DELIVERY_STATUS_LABEL[statusByRow[row.id]]}`
+                    : row.label
+                }
               >
-                {row.label}
+                {statusByRow?.[row.id] && (
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: '0.5rem',
+                      height: '0.5rem',
+                      borderRadius: '50%',
+                      flexShrink: 0,
+                      background: DELIVERY_STATUS_COLOR[statusByRow[row.id]],
+                    }}
+                  />
+                )}
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {row.label}
+                </span>
               </div>
               {/* Owner pill */}
               <div

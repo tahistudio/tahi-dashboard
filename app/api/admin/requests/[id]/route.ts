@@ -208,6 +208,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     scopeFlagged?: boolean
     trackId?: string | null
     checklists?: string
+    scheduleRowId?: string | null
   }
 
   const now = new Date().toISOString()
@@ -225,6 +226,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (body.scopeFlagged !== undefined) patch.scopeFlagged = body.scopeFlagged
   if ('trackId' in body) patch.trackId = body.trackId ?? null
   if (body.checklists !== undefined) patch.checklists = body.checklists
+  if ('scheduleRowId' in body) patch.scheduleRowId = body.scheduleRowId ?? null
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>

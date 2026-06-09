@@ -16,6 +16,8 @@ import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { GanttGrid, type GanttRow, type RowOwner, type RowType } from '@/components/tahi/gantt-grid'
 import { GanttLegend } from '@/components/tahi/gantt-legend'
+import type { DeliveryStatus, EngagementRollup } from '@/lib/delivery-status'
+import { DELIVERY_STATUS_COLOR, DELIVERY_STATUS_LABEL } from '@/components/tahi/gantt-grid'
 import { SectionRenderer, type ScheduleSection, type SectionType } from '@/components/tahi/schedule-section-renderers'
 import { ShareAnalyticsCard } from '@/components/tahi/share-analytics-card'
 import { TiptapDocEditor } from '@/components/tahi/tiptap-doc-editor'
@@ -117,6 +119,9 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [sections, setSections] = useState<ScheduleSection[]>([])
   const [loading, setLoading] = useState(true)
+  // Delivery spine (#148): live per-row status + engagement rollup.
+  const [statusByRow, setStatusByRow] = useState<Record<string, DeliveryStatus>>({})
+  const [engagement, setEngagement] = useState<EngagementRollup | null>(null)
   const [editingRowId, setEditingRowId] = useState<string | null>(null)
   const [draft, setDraft] = useState<RowDraft | null>(null)
   const [savingDraft, setSavingDraft] = useState(false)
@@ -197,6 +202,19 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       } else {
         setSections([])
       }
+      // Delivery spine (#148): live per-row status from linked requests/tasks.
+      // Non-fatal — a schedule with nothing linked just shows no dots.
+      try {
+        const dsRes = await fetch(apiPath(`/api/admin/schedules/${scheduleId}/delivery-status`))
+        if (dsRes.ok) {
+          const ds = await dsRes.json() as {
+            rows: Array<{ rowId: string; status: DeliveryStatus }>
+            engagement: EngagementRollup
+          }
+          setStatusByRow(Object.fromEntries(ds.rows.map(r => [r.rowId, r.status])))
+          setEngagement(ds.engagement)
+        }
+      } catch { /* non-fatal */ }
     } catch {
       // silent
     } finally {
@@ -856,6 +874,30 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
             />
           )}
 
+          {engagement && engagement.rowsTotal > 0 && (
+            <div
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.875rem', flexWrap: 'wrap',
+                padding: '0.75rem 1rem', marginBottom: '1rem',
+                background: 'var(--color-bg)', border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+              }}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4375rem', fontWeight: 600, fontSize: '0.8125rem', color: 'var(--color-text)' }}>
+                <span aria-hidden="true" style={{ width: '0.625rem', height: '0.625rem', borderRadius: '50%', background: DELIVERY_STATUS_COLOR[engagement.status] }} />
+                Delivery: {DELIVERY_STATUS_LABEL[engagement.status]}
+              </span>
+              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+                {engagement.rowsDone}/{engagement.rowsTotal} phases done ({Math.round(engagement.pctComplete * 100)}%)
+              </span>
+              {engagement.offTrackRowIds.length > 0 && (
+                <span style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-danger)' }}>
+                  {engagement.offTrackRowIds.length} off track
+                </span>
+              )}
+            </div>
+          )}
+
           {activeSection && (
             <SectionEditorPane
               key={activeSection.id}
@@ -879,6 +921,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
               onDeleteRow={() => editingRowId && deleteRow(editingRowId)}
               onCancelRowEdit={() => { setEditingRowId(null); setDraft(null) }}
               onChangeRowDraft={setDraft}
+              statusByRow={statusByRow}
             />
           )}
 
@@ -1024,6 +1067,7 @@ function SectionEditorPane(props: {
   onDeleteRow: () => void
   onCancelRowEdit: () => void
   onChangeRowDraft: (next: RowDraft) => void
+  statusByRow?: Record<string, DeliveryStatus>
 }) {
   const { section, numberOfWeeks, isFirst, isLast, slideNumber, onPatch, onMoveUp, onMoveDown, onDelete } = props
 
@@ -1094,6 +1138,7 @@ function SectionEditorPane(props: {
           onCancelRowEdit={props.onCancelRowEdit}
           onChangeRowDraft={props.onChangeRowDraft}
           onPatchSection={onPatch}
+          statusByRow={props.statusByRow}
         />
       )}
 
@@ -1113,7 +1158,7 @@ function SectionEditorPane(props: {
 function GanttSectionEditor({
   section, numberOfWeeks, draft, editingRowId, savingDraft,
   onAddRow, onOpenRow, onSaveRowDraft, onDeleteRow, onCancelRowEdit, onChangeRowDraft,
-  onPatchSection,
+  onPatchSection, statusByRow,
 }: {
   section: ScheduleSection
   numberOfWeeks: number
@@ -1127,6 +1172,7 @@ function GanttSectionEditor({
   onCancelRowEdit: () => void
   onChangeRowDraft: (next: RowDraft) => void
   onPatchSection: (changes: { startWeek?: number | null; endWeek?: number | null }) => void
+  statusByRow?: Record<string, DeliveryStatus>
 }) {
   const rows = section.rows ?? []
 
@@ -1187,6 +1233,7 @@ function GanttSectionEditor({
         rows={rows}
         numberOfWeeks={numberOfWeeks}
         onRowClick={onOpenRow}
+        statusByRow={statusByRow}
       />
 
       <GanttLegend />

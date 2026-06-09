@@ -31,6 +31,7 @@ export async function PATCH(
     requestId?: string | null
     orgId?: string | null
     tags?: string
+    scheduleRowId?: string | null
   }
 
   const database = await db()
@@ -95,6 +96,7 @@ export async function PATCH(
   if (body.requestId !== undefined) updates.requestId = body.requestId
   if (body.orgId !== undefined) updates.orgId = body.orgId
   if (body.tags !== undefined) updates.tags = body.tags
+  if (body.scheduleRowId !== undefined) updates.scheduleRowId = body.scheduleRowId
 
   await drizzle
     .update(schema.tasks)
