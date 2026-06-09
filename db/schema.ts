@@ -48,6 +48,10 @@ export const organisations = sqliteTable('organisations', {
   internalNotes: text('internal_notes'),
   // JSON array of brand names, e.g. ["Brand A", "Brand B"]
   brands: text('brands').default('[]'),
+  // JSON array of free-form tag strings, e.g. ["enterprise", "at risk"].
+  // Used to group/filter clients and their requests. (The managed `tags`
+  // table is unused; these are lightweight string labels.)
+  tags: text('tags').default('[]'),
   // S13 remaining: CRM extended fields
   // JSON object for arbitrary custom fields, e.g. {"industry_vertical":"SaaS"}
   customFields: text('custom_fields').default('{}'),

@@ -177,6 +177,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     healthNote: string
     internalNotes: string
     brands: string
+    tags: string
     customFields: string
     defaultHourlyRate: number | null
     preferredCurrency: string | null
@@ -193,7 +194,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const patch: Record<string, unknown> = { updatedAt: now }
   const allowed = [
     'name', 'website', 'industry', 'planType', 'status',
-    'healthStatus', 'healthNote', 'internalNotes', 'brands',
+    'healthStatus', 'healthNote', 'internalNotes', 'brands', 'tags',
     'customFields', 'defaultHourlyRate', 'preferredCurrency',
     'size', 'annualRevenue',
   ] as const

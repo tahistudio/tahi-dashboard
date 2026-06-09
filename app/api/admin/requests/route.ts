@@ -72,8 +72,9 @@ export async function GET(req: NextRequest) {
       deliveredAt: schema.requests.deliveredAt,
       requestNumber: schema.requests.requestNumber,
       parentRequestId: schema.requests.parentRequestId,
-      // Join org name
+      // Join org name + tags (tags is a JSON array string of free-form labels)
       orgName: schema.organisations.name,
+      orgTags: schema.organisations.tags,
     })
     .from(schema.requests)
     .leftJoin(schema.organisations, eq(schema.requests.orgId, schema.organisations.id))

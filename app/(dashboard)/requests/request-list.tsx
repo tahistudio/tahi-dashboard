@@ -44,6 +44,19 @@ interface Request {
   createdAt: string | null
   requestNumber?: number | null
   parentRequestId?: string | null
+  // JSON array string of the owning org's free-form tags
+  orgTags?: string | null
+}
+
+/** Parse an org's tags JSON column into a clean string[]. */
+function parseOrgTags(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? arr.filter((t): t is string => typeof t === 'string') : []
+  } catch {
+    return []
+  }
 }
 
 type ViewMode = 'list' | 'board' | 'workload'
@@ -307,6 +320,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
+  const [tagFilter, setTagFilter] = useState('all')
   const [requests, setRequests] = useState<Request[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(() => searchParams.get('new') === '1')
@@ -415,8 +429,15 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     if (categoryFilter !== 'all' && (r.category ?? '') !== categoryFilter) return false
     // Type filter
     if (typeFilter !== 'all' && r.type !== typeFilter) return false
+    // Client tag filter (matches against the owning org's tags)
+    if (tagFilter !== 'all' && !parseOrgTags(r.orgTags).includes(tagFilter)) return false
     return true
   })
+
+  // Union of all client tags present in the loaded set, for the filter dropdown.
+  const availableTags = Array.from(
+    new Set(requests.flatMap(r => parseOrgTags(r.orgTags))),
+  ).sort((a, b) => a.localeCompare(b))
 
   const sorted = sortRequests(filtered, sortKey)
 
@@ -583,6 +604,20 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
               ]}
             />
           </div>
+          {availableTags.length > 0 && (
+            <div className="hidden sm:block">
+              <Select
+                value={tagFilter}
+                onChange={e => setTagFilter(e.target.value)}
+                aria-label="Client tag filter"
+                highlightActive
+                options={[
+                  { value: 'all', label: 'All Tags' },
+                  ...availableTags.map(t => ({ value: t, label: t })),
+                ]}
+              />
+            </div>
+          )}
 
           <div className="flex-1" />
 

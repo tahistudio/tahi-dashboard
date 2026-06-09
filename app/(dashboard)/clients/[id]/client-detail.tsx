@@ -114,6 +114,7 @@ interface Organisation {
   healthNote: string | null
   internalNotes: string | null
   brands: string | null
+  tags: string | null
   preferredCurrency: string | null
   customMrr: number | null
   customMrrCurrency: string | null
@@ -461,6 +462,7 @@ function OverviewTab({
           {!subscription && <NoSubscriptionCard planType={org.planType} />}
           {org.healthNote && <HealthNoteCard note={org.healthNote} health={org.healthStatus} />}
           <BrandsCard org={org} onUpdated={onUpdated} />
+          <TagsCard org={org} onUpdated={onUpdated} />
           <InternalNotesCard org={org} onUpdated={onUpdated} />
         </div>
       </div>
@@ -717,6 +719,122 @@ function BrandsCard({ org, onUpdated }: { org: Organisation; onUpdated: () => vo
             border: 'none',
             cursor: !newBrand.trim() || saving ? 'not-allowed' : 'pointer',
             opacity: !newBrand.trim() || saving ? 0.5 : 1,
+            padding: '0.375rem 0.75rem',
+            minHeight: '2rem',
+          }}
+        >
+          {saving ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : 'Add'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Tags card ────────────────────────────────────────────────────────────────
+
+function TagsCard({ org, onUpdated }: { org: Organisation; onUpdated: () => void }) {
+  const [tags, setTags] = useState<string[]>(() => {
+    try {
+      const arr = JSON.parse(org.tags ?? '[]')
+      return Array.isArray(arr) ? arr.filter((t): t is string => typeof t === 'string') : []
+    } catch {
+      return []
+    }
+  })
+  const [newTag, setNewTag] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const saveTags = async (updated: string[]) => {
+    setSaving(true)
+    try {
+      await fetch(apiPath(`/api/admin/clients/${org.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: JSON.stringify(updated) }),
+      })
+      setTags(updated)
+      onUpdated()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const addTag = () => {
+    const name = newTag.trim().toLowerCase()
+    if (!name || tags.includes(name)) return
+    setNewTag('')
+    saveTags([...tags, name])
+  }
+
+  const removeTag = (name: string) => {
+    saveTags(tags.filter(t => t !== name))
+  }
+
+  return (
+    <div
+      className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl"
+      style={{ padding: '1.25rem' }}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <Tag className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+        <h3 className="text-sm font-semibold text-[var(--color-text)]">Tags</h3>
+      </div>
+      <p className="text-xs text-[var(--color-text-subtle)] mb-3">
+        Label this client to group and filter their requests.
+      </p>
+
+      {tags.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          {tags.map(t => (
+            <span
+              key={t}
+              className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full"
+              style={{
+                background: 'var(--color-bg-tertiary)',
+                color: 'var(--color-text)',
+              }}
+            >
+              {t}
+              <button
+                onClick={() => removeTag(t)}
+                disabled={saving}
+                className="hover:text-[var(--color-danger)] transition-colors"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                aria-label={`Remove tag ${t}`}
+              >
+                <Trash2 className="w-3 h-3" aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={newTag}
+          onChange={e => setNewTag(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') addTag() }}
+          placeholder="Add a tag (e.g. enterprise)..."
+          className="flex-1 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+          style={{
+            padding: '0.375rem 0.5rem',
+            borderRadius: 'var(--radius-input)',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg)',
+            minHeight: '2rem',
+          }}
+        />
+        <button
+          onClick={addTag}
+          disabled={!newTag.trim() || saving}
+          className="text-xs font-medium text-white transition-colors"
+          style={{
+            background: 'var(--color-brand)',
+            borderRadius: 'var(--radius-button)',
+            border: 'none',
+            cursor: !newTag.trim() || saving ? 'not-allowed' : 'pointer',
+            opacity: !newTag.trim() || saving ? 0.5 : 1,
             padding: '0.375rem 0.75rem',
             minHeight: '2rem',
           }}

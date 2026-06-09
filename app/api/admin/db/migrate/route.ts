@@ -1837,6 +1837,13 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_sitemap_node_reviews_reviewer ON sitemap_node_reviews(reviewer_key)`,
     ],
   },
+  {
+    name: '0075',
+    description: 'Client tags (T661): organisations.tags — JSON array of free-form tag strings. Lets clients be labelled and their requests filtered by those labels. Duplicate-column error is caught upstream so re-runs are idempotent.',
+    statements: [
+      `ALTER TABLE organisations ADD COLUMN tags text DEFAULT '[]'`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
