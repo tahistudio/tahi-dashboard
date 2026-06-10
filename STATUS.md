@@ -1,7 +1,7 @@
 # Tahi Dashboard — Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-06-10** by Claude (delivery spine #148: slices 0-3 live + verified, in-viewer linking picker shipped)
+> Last updated: **2026-06-10** by Claude (portal arc: spine slices 0-5 live + verified, requests v3 lift, portal leak fix; permissions design awaiting approval)
 
 ---
 
@@ -70,7 +70,20 @@ Full plan: `C:\Users\Work\.claude\plans\i-d-like-you-to-gentle-neumann.md`
 
 ---
 
-## Recent activity (2026-06-10)
+## Recent activity (2026-06-10, later)
+
+Portal-readiness arc pushed hard. Spine now complete (slices 0-5), requests lapped onto v3, portal leak closed; permissions design drafted for approval.
+
+- **Portal split airtight** — `/api/portal/tracks` GET + reorder now filter `isInternal=false` (the one leak; internal requests no longer reach the client track view). Tasks stay 100% admin-gated. Requests=client / tasks=internal holds (Decisions #030/#046).
+- **Spine Slice 4 (engagement health card)** — live + verified on prod. `/api/admin/engagements/delivery-status?dealId=|orgId=` rolls up across a deal/org's schedules; `EngagementHealthCard` on deal + client detail. Verified: Giant Group card showed "Delivery health · Delayed · 0/1 done · 1 off track · Discovery & sitemap".
+- **Spine Slice 5 (overview off-track widget + notify)** — live + verified. `/api/admin/engagements/off-track` + `OffTrackEngagementsWidget` (verified showing Giant Group delayed). `delivery-watch` cron (absolute + 23h dedup, no new schema) -> `delivery_off_track` notifications; registered in CRONS. MCP parity on all of it.
+- **Requests v3 lift (#129/#186)** — live + verified. PageHeader + FilterBar + DataTable (list, bulk preserved) + BoardView (kanban + timeline) + StatusChipSelect on detail. ~1270 lines of bespoke code removed; all business logic preserved (cross-client nest guard, un-nest-on-column-drop, optimistic status, custom kanban columns, AI wizard, impersonation gating). Verified live: list + board render, light + dark mode clean, mobile responsive (501px cards + bottom nav), no console errors.
+- **Granular permissions** — DESIGN written (`SPECS/granular-permissions.md`), awaiting Liam's approval before build. Build on #119 + feature_visibility table + FEATURE_TREE manifest + lib/permissions.ts + sidebar/`<Gate>` + builder UI.
+- **Tracks visualization for clients** — flagged to scope (task #189, biggest client-facing UI/UX call).
+
+QA residuals (minor, for a polish pass): board view shows both the page FilterBar and BoardView's built-in search (double search); desktop-width kanban/table visual not captured (test window was ~501px); bulk-select interaction not click-tested (DataTable supports it); portal-leak full client-session test deferred (endpoint + deploy confirmed).
+
+## Recent activity (2026-06-10, earlier)
 
 Delivery spine #148 (the ManyRequests differentiator) is live end-to-end.
 
