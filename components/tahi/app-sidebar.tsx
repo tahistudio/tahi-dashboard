@@ -37,9 +37,11 @@ import {
   FolderOpen, ShoppingBag, PanelLeftClose, PanelLeftOpen,
   LayoutDashboard, Star, TrendingUp, FileSignature, Gauge,
   Calendar, Megaphone, ChevronDown, UserPlus, Share2, Phone,
-  PenLine, Map,
+  PenLine, Map, ShieldCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { featureKeyForRoute } from '@/lib/feature-tree'
+import { usePermissions } from '@/components/tahi/permissions-context'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { useSidebar } from '@/components/tahi/sidebar-context'
 import { Tooltip } from '@/components/tahi/tooltip'
@@ -61,6 +63,8 @@ type NavItem = {
   clientVisible?: boolean
   /** Hidden unless current user's email is in this allowlist. */
   emailAllowlist?: Set<string>
+  /** Hidden unless the user can manage permissions (admin / super admin). */
+  requiresManage?: boolean
   count?: number
 }
 
@@ -128,8 +132,9 @@ const ADMIN_NAV: NavGroup[] = [
     group: 'Operations',
     collapsible: true,
     items: [
-      { label: 'Capacity',  href: '/capacity',  icon: Gauge,         adminOnly: true },
-      { label: 'Team',      href: '/team',      icon: UserCog,       adminOnly: true },
+      { label: 'Capacity',    href: '/capacity',    icon: Gauge,        adminOnly: true },
+      { label: 'Team',        href: '/team',        icon: UserCog,      adminOnly: true },
+      { label: 'Permissions', href: '/permissions', icon: ShieldCheck,  adminOnly: true, requiresManage: true },
     ],
   },
   {
@@ -171,7 +176,7 @@ const CLIENT_NAV: NavGroup[] = [
 
 const VIEWER_HIDDEN_PAGES = new Set(['/team', '/billing', '/contracts'])
 
-export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
+export function AppSidebar({ isAdmin, features }: { isAdmin: boolean; features?: Record<string, boolean> }) {
   const pathname = usePathname()
   const { collapsed, setCollapsed } = useSidebar()
   const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
@@ -249,12 +254,21 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
 
   const { user } = useUser()
   const userEmail = user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? null
+  const { canManagePermissions } = usePermissions()
 
   const sourceNav = showAsAdmin ? ADMIN_NAV : CLIENT_NAV
   const visibleNav = sourceNav.map(group => ({
     ...group,
     items: group.items.filter(item => {
       if (item.emailAllowlist && (!userEmail || !item.emailAllowlist.has(userEmail))) return false
+      if (item.requiresManage && !canManagePermissions) return false
+      // Granular permissions: hide a nav item when its feature is turned off
+      // for this user / client (server-resolved feature map). Unknown routes
+      // (no feature key) are never hidden.
+      if (features) {
+        const key = featureKeyForRoute(item.href)
+        if (key && features[key] === false) return false
+      }
       if (showAsAdmin) {
         if (item.clientOnly) return false
         if (isViewerRole && VIEWER_HIDDEN_PAGES.has(item.href)) return false

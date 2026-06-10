@@ -103,3 +103,11 @@ export function featureAncestry(key: string): string[] {
 export function featurePages(audience: FeatureAudience): FeatureNode[] {
   return FEATURE_TREE.filter(n => n.parent === null && n.route && n.appliesTo.includes(audience))
 }
+
+const BY_ROUTE = new Map(FEATURE_TREE.filter(n => n.route).map(n => [n.route as string, n.key]))
+
+/** Feature key for a sidebar route (e.g. '/requests' -> 'requests'), or
+ *  undefined if the route is not a gateable feature. */
+export function featureKeyForRoute(route: string): string | undefined {
+  return BY_ROUTE.get(route)
+}

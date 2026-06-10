@@ -306,6 +306,24 @@ const TOOLS: ToolDef[] = [
   tool('list_team', 'List all team members with roles, capacity, and skills'),
   tool('get_org_chart', 'Get the team org chart with reporting structure'),
 
+  // ── Granular permissions ───────────────────────────────────────────────
+  tool('list_permission_subjects', 'List everything the permissions builder needs: team members (with roles), client orgs, and the role catalogue.'),
+  tool('get_feature_visibility', 'List a subject\'s feature-visibility overrides. subjectType is role | team_member | organisation.', {
+    subjectType: prop('string', 'role | team_member | organisation'),
+    subjectId: prop('string', 'Role ID, team member ID, or org ID'),
+  }, ['subjectType', 'subjectId']),
+  tool('set_feature_visibility', 'Turn a feature on/off for a subject (page > tab > card key from the FEATURE_TREE). effect allow | deny | inherit (inherit clears the override). Optional free-text reason.', {
+    subjectType: prop('string', 'role | team_member | organisation'),
+    subjectId: prop('string', 'Role ID, team member ID, or org ID'),
+    featureKey: prop('string', 'Dotted feature key, e.g. requests, requests.board, clients.billing_card'),
+    effect: prop('string', 'allow | deny | inherit'),
+    reason: prop('string', 'Optional free-text why'),
+  }, ['subjectType', 'subjectId', 'featureKey', 'effect']),
+  tool('assign_team_role', 'Set a team member\'s level role (super_admin | admin | project_manager | task_handler | viewer). Pass roleId null to clear (-> default admin level).', {
+    teamMemberId: prop('string', 'Team member ID'),
+    roleId: prop('string', 'Role ID, or omit/null to clear'),
+  }, ['teamMemberId']),
+
   // ── Write: Team ───────────────────────────────────────────────────────
   tool('create_team_member', 'Create a new team member', {
     name: prop('string', 'Team member full name'),
@@ -1437,6 +1455,24 @@ async function executeTool(
       return json(await apiGet('/api/admin/team', token))
     case 'get_org_chart':
       return json(await apiGet('/api/admin/team/org-chart', token))
+
+    // ── Granular permissions ───────────────────────────────────────────
+    case 'list_permission_subjects':
+      return json(await apiGet('/api/admin/permissions/subjects', token))
+    case 'get_feature_visibility': {
+      const st = typeof args.subjectType === 'string' ? args.subjectType : ''
+      const si = typeof args.subjectId === 'string' ? args.subjectId : ''
+      return json(await apiGet(`/api/admin/permissions/feature-visibility?subjectType=${encodeURIComponent(st)}&subjectId=${encodeURIComponent(si)}`, token))
+    }
+    case 'set_feature_visibility':
+      return json(await apiWrite('/api/admin/permissions/feature-visibility', token, 'PUT', {
+        subjectType: s('subjectType'), subjectId: s('subjectId'), featureKey: s('featureKey'),
+        effect: s('effect'), reason: typeof args.reason === 'string' ? args.reason : null,
+      }))
+    case 'assign_team_role':
+      return json(await apiWrite('/api/admin/permissions/assign-role', token, 'POST', {
+        teamMemberId: s('teamMemberId'), roleId: typeof args.roleId === 'string' && args.roleId ? args.roleId : null,
+      }))
     case 'create_team_member':
       return json(await apiWrite('/api/admin/team', token, 'POST', args as Record<string, unknown>))
     case 'update_team_member': {
