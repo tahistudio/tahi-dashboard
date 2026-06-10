@@ -1874,6 +1874,15 @@ const MIGRATIONS: Migration[] = [
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_feature_visibility_unique ON feature_visibility(subject_type, subject_id, feature_key)`,
     ],
   },
+  {
+    name: '0078',
+    description: 'Granular permissions: seed Liam + Staci as super_admin so the level hierarchy is correct out of the box (super_admin is un-lockable + manages permissions). Deterministic assignment ids + INSERT OR IGNORE make it idempotent. Other team members stay role-less (= default admin) until assigned via the builder.',
+    statements: [
+      `INSERT OR IGNORE INTO team_member_roles (id, team_member_id, role_id, started_at, created_at) VALUES
+        ('tmr-superadmin-liam', 'b3025c04-6cdd-4154-822c-5d4fbfb95b76', 'role-super-admin', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        ('tmr-superadmin-staci', 'ae158f66-d8a8-4555-9da4-6d02988b3c79', 'role-super-admin', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
