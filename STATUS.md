@@ -1,7 +1,7 @@
 # Tahi Dashboard — Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-06-10** by Claude (portal arc: spine slices 0-5 live + verified, requests v3 lift, portal leak fix; permissions design awaiting approval)
+> Last updated: **2026-06-10** by Claude (granular permissions built + validated live; spine 0-5; requests v3 lift; portal fix; Private/Client view modes)
 
 ---
 
@@ -69,6 +69,14 @@ Lifecycle-order build is in progress. Docs Hub was the first list-page lap; the 
 Full plan: `C:\Users\Work\.claude\plans\i-d-like-you-to-gentle-neumann.md`
 
 ---
+
+## Recent activity (2026-06-10, latest)
+
+Granular permissions (the capstone) BUILT + validated live, plus the two settings-popup view modes.
+
+- **Granular permissions** — built on #119 RBAC + new `feature_visibility` table (migration 0077, applied to prod) + `FEATURE_TREE` manifest. Resolver `lib/permissions.ts` (4 levels: super_admin un-lockable / admin all-but-deny-hides / team_member role-baseline / client audience-gated + per-org), 11 unit tests. Enforcement: layout -> PermissionsProvider, sidebar nav filter, `<Gate>` on cards, real page guards (financial-reports/team/billing redirect a denied team member). Builder UI at `/permissions` (Team/Clients/Roles tabs, per-feature allow/deny/inherit + reasons, role assignment) — admin+ only. API: /me, subjects, feature-visibility, assign-role. MCP parity (4 tools). **Validated live on prod**: override deny flips /me + inherit restores; role assignment persists; builder renders. Super-admin seed = migration `0078` (Liam + Staci), runs on the in-flight deploy; assign-role guard relaxed so managers can grant any role.
+- **Private mode + Client view** (settings popup, super-admin only) — Private mode toggles `.tahi-private` (localStorage) and blurs `[data-private]` (hover reveals); validated live (blur 8px). Client view impersonates a real client via the existing impersonation banner. Operator identity tagged data-private as initial coverage; extend by tagging more PII/financial surfaces.
+- Tracks-visualization scoping still open (#189).
 
 ## Recent activity (2026-06-10, later)
 
