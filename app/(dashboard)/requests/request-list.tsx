@@ -630,11 +630,12 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
               />
             )}
             {r.requestNumber != null && (
-              <span className="font-mono" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }}>
+              <span data-private className="font-mono" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }}>
                 #{String(r.requestNumber).padStart(3, '0')}
               </span>
             )}
             <Link
+              data-private
               href={`/requests/${r.id}`}
               onClick={e => e.stopPropagation()}
               style={{
@@ -665,7 +666,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         render: r => (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', minWidth: 0 }}>
             {r.orgName && <Avatar name={r.orgName} size="xs" />}
-            <span style={{
+            <span data-private style={{
               fontSize: '0.8125rem',
               color: 'var(--color-text-muted)',
               overflow: 'hidden',

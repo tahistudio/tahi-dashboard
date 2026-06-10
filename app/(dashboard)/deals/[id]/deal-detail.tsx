@@ -387,7 +387,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
         <div className="lg:col-span-2 flex flex-col" style={{ gap: 'var(--space-6)' }}>
           {/* Title + stage */}
           <div>
-            <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)', marginBottom: 'var(--space-3)' }}>
+            <h1 data-private style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)', marginBottom: 'var(--space-3)' }}>
               {deal.title}
             </h1>
             {/* Stage progress indicator */}
@@ -770,7 +770,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
           {ltv && ltv.total > 0 && (
             <SidebarCard title="Client Lifetime Value">
               <div className="flex flex-col gap-1.5">
-                <p className="font-bold" style={{ fontSize: '1.125rem', color: 'var(--color-brand)' }}>
+                <p className="font-bold" data-private style={{ fontSize: '1.125rem', color: 'var(--color-brand)' }}>
                   {formatCurrency(ltv.total, 'NZD')}
                 </p>
                 <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
@@ -1721,7 +1721,7 @@ function ValueBreakdown({
         {/* Upfront row */}
         <div className="flex items-center justify-between" style={{ fontSize: '0.8125rem' }}>
           <span style={{ color: 'var(--color-text-subtle)' }}>Upfront</span>
-          <span style={{ color: 'var(--color-text)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+          <span data-private style={{ color: 'var(--color-text)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
             {upfrontLabel}
             {initialHasRange && upfront > 0 && (
               <span style={{ color: 'var(--color-text-subtle)', fontWeight: 400, marginLeft: '0.375rem' }}>
@@ -1734,7 +1734,7 @@ function ValueBreakdown({
         {/* Monthly row */}
         <div className="flex items-center justify-between" style={{ fontSize: '0.8125rem' }}>
           <span style={{ color: 'var(--color-text-subtle)' }}>Monthly</span>
-          <span style={{ color: 'var(--color-text)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+          <span data-private style={{ color: 'var(--color-text)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
             {monthly > 0 ? `${formatCurrency(monthly, currency)}/mo` : '—'}
           </span>
         </div>
@@ -1760,7 +1760,7 @@ function ValueBreakdown({
           style={{ fontSize: '0.75rem', paddingTop: '0.375rem', borderTop: '1px dashed var(--color-border-subtle)' }}
         >
           <span style={{ color: 'var(--color-text-subtle)' }}>12-mo total</span>
-          <span style={{ color: 'var(--color-text-muted)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
+          <span data-private style={{ color: 'var(--color-text-muted)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
             {formatCurrency(total12, currency)}
             {altLabel && (
               <span style={{ color: 'var(--color-text-subtle)', marginLeft: '0.375rem' }}>{`≈ ${altLabel}`}</span>
@@ -2288,11 +2288,11 @@ function ContactLinker({ dealId, contacts, onUpdated }: {
             {getInitials(c.contactName ?? '?')}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="font-medium truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>
+            <p className="font-medium truncate" data-private style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>
               {c.contactName}
             </p>
             {c.contactEmail && (
-              <p className="truncate" style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>{c.contactEmail}</p>
+              <p className="truncate" data-private style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>{c.contactEmail}</p>
             )}
           </div>
           <button
@@ -2332,8 +2332,8 @@ function ContactLinker({ dealId, contacts, onUpdated }: {
                 onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
                 onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
               >
-                <span className="font-medium">{c.name}</span>
-                <span style={{ color: 'var(--color-text-subtle)' }}>{c.email}</span>
+                <span className="font-medium" data-private>{c.name}</span>
+                <span data-private style={{ color: 'var(--color-text-subtle)' }}>{c.email}</span>
               </button>
             ))}
             {filtered.length === 0 && (
@@ -2416,6 +2416,7 @@ function OrgSelector({ dealId, currentOrgId, currentOrgName, onUpdated }: {
             <Link
               href={`/clients/${currentOrgId}`}
               className="inline-flex items-center gap-2 font-medium transition-colors"
+              data-private
               style={{ fontSize: '0.875rem', color: 'var(--color-brand)', textDecoration: 'none' }}
               onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark)' }}
               onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-brand)' }}
@@ -2490,6 +2491,7 @@ function OrgSelector({ dealId, currentOrgId, currentOrgName, onUpdated }: {
             }}
             onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
             onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+            data-private
           >
             {o.name}
           </button>
@@ -3361,6 +3363,7 @@ function AssociatedRequests({ orgId }: { orgId: string }) {
               >
                 <span
                   className="truncate font-medium"
+                  data-private
                   style={{ fontSize: '0.8125rem', color: 'var(--color-text)', maxWidth: '70%' }}
                 >
                   {req.title}
@@ -3428,6 +3431,7 @@ function ConvertToClientCard({ dealId, orgId, orgName, onConverted }: {
           }}
           onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark)' }}
           onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-brand)' }}
+          data-private
         >
           {linkedOrgName}
           <ExternalLink style={{ width: '0.75rem', height: '0.75rem' }} />

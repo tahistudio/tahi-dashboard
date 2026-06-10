@@ -419,8 +419,8 @@ export function FinancialReportsContent() {
                       {fundedBanks.map(b => (
                         <tr key={b.currency}>
                           <td className="text-sm font-medium text-[var(--color-text)]" style={{ padding: '0.5rem 0.5rem' }}>{b.currency}</td>
-                          <td className="text-sm text-[var(--color-text)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatNativeRaw(b.available, b.currency)}</td>
-                          <td className="text-sm text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{b.currency === cur ? 'native' : toCur(b.available, b.currency)}</td>
+                          <td data-private className="text-sm text-[var(--color-text)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatNativeRaw(b.available, b.currency)}</td>
+                          <td data-private className="text-sm text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{b.currency === cur ? 'native' : toCur(b.available, b.currency)}</td>
                           <td style={{ padding: '0.5rem 0.5rem', textAlign: 'right' }}>
                             {b.sources.map(s => (
                               <Badge key={s} tone="neutral" variant="soft" size="sm">{s}</Badge>
@@ -430,7 +430,7 @@ export function FinancialReportsContent() {
                       ))}
                       <tr style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
                         <td className="text-sm font-medium text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem' }}>Reserved</td>
-                        <td colSpan={2} className="text-sm text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                        <td data-private colSpan={2} className="text-sm text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                           -{toCur(data.reserves.total, data.primaryCurrency)}
                         </td>
                         <td className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right' }}>
@@ -466,7 +466,7 @@ export function FinancialReportsContent() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-sm font-semibold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                          <div data-private className="text-sm font-semibold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
                             {formatNativeRaw(r.accruedAmount, r.currency)}
                             {r.targetAmount ? <span className="text-xs text-[var(--color-text-subtle)] font-normal"> / {formatNativeRaw(r.targetAmount, r.currency)}</span> : null}
                           </div>
@@ -538,7 +538,7 @@ export function FinancialReportsContent() {
               getRowId={(r) => r.id}
               empty={<div className="p-4 text-sm text-[var(--color-text-muted)]">No retainer clients tracked. Set custom_mrr on a client to add them here.</div>}
               columns={[
-                { key: 'name', header: 'Client', sortable: true, accessor: (r) => r.name },
+                { key: 'name', header: 'Client', sortable: true, sortValue: (r) => r.name, render: (r) => <span data-private>{r.name}</span> },
                 {
                   key: 'native',
                   header: 'Native MRR',
@@ -546,7 +546,7 @@ export function FinancialReportsContent() {
                   sortable: true,
                   sortValue: (r) => r.nativeAmount,
                   render: (r) => (
-                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    <span data-private style={{ fontVariantNumeric: 'tabular-nums' }}>
                       {new Intl.NumberFormat('en-NZ', { style: 'currency', currency: r.nativeCurrency, maximumFractionDigits: 0 }).format(r.nativeAmount)}
                     </span>
                   ),
@@ -563,7 +563,7 @@ export function FinancialReportsContent() {
                   sortable: true,
                   sortValue: (r) => r.mrrNzd,
                   render: (r) => (
-                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>
+                    <span data-private style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>
                       {toCur(r.mrrNzd, data.primaryCurrency)}
                     </span>
                   ),
@@ -603,7 +603,7 @@ export function FinancialReportsContent() {
                       segments={data.clientConcentration.top.map(c => ({ label: c.name, value: c.mrr }))}
                       centreLabel={<span className="text-[0.6875rem] uppercase tracking-wider text-[var(--color-text-subtle)]">Top client</span>}
                       centreValue={
-                        <span className="text-xl font-bold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        <span data-private className="text-xl font-bold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
                           {Math.round(data.clientConcentration.topClientShare * 100)}%
                         </span>
                       }
@@ -614,7 +614,7 @@ export function FinancialReportsContent() {
                   <div className="grid" style={{ gap: '0.5rem', minWidth: 0 }}>
                     <div className="flex items-baseline justify-between text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ marginBottom: '0.25rem' }}>
                       <span>If your top 3 leave</span>
-                      <span style={{ color: data.clientConcentration.top3Share > 0.7 ? 'var(--color-warning)' : 'var(--color-text)', fontWeight: 600 }}>
+                      <span data-private style={{ color: data.clientConcentration.top3Share > 0.7 ? 'var(--color-warning)' : 'var(--color-text)', fontWeight: 600 }}>
                         {Math.round(data.clientConcentration.top3Share * 100)}% gone
                       </span>
                     </div>
@@ -624,11 +624,11 @@ export function FinancialReportsContent() {
                       return (
                         <div key={c.name} className="flex items-center" style={{ gap: '0.625rem', minWidth: 0 }}>
                           <span style={{ width: '0.5rem', height: '0.5rem', borderRadius: '999px', background: dot, flexShrink: 0 }} />
-                          <span className="text-sm text-[var(--color-text)] truncate" style={{ flex: 1, minWidth: 0 }}>{c.name}</span>
-                          <span className="text-xs text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                          <span data-private className="text-sm text-[var(--color-text)] truncate" style={{ flex: 1, minWidth: 0 }}>{c.name}</span>
+                          <span data-private className="text-xs text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
                             {toCur(c.mrr, data.primaryCurrency)}
                           </span>
-                          <span className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ fontVariantNumeric: 'tabular-nums', width: '2.5rem', textAlign: 'right', flexShrink: 0 }}>
+                          <span data-private className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ fontVariantNumeric: 'tabular-nums', width: '2.5rem', textAlign: 'right', flexShrink: 0 }}>
                             {(pct * 100).toFixed(0)}%
                           </span>
                         </div>
@@ -843,7 +843,7 @@ function ShareCell({ pct }: { pct: number }) {
           background: 'var(--color-brand)',
         }} />
       </div>
-      <span className="text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', minWidth: '2.5rem', textAlign: 'right' }}>
+      <span data-private className="text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', minWidth: '2.5rem', textAlign: 'right' }}>
         {display}%
       </span>
     </div>
@@ -860,6 +860,7 @@ function ActivityRow({ title, amountLabel, dateLabel }: { title: string; amountL
       style={{ gap: '0.5rem', padding: '0.4375rem 0.625rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-sm)', minWidth: 0 }}
     >
       <span
+        data-private
         className="text-[var(--color-text)]"
         style={{
           minWidth: 0,
@@ -872,7 +873,7 @@ function ActivityRow({ title, amountLabel, dateLabel }: { title: string; amountL
       >
         {title}
       </span>
-      <span className="text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0, fontWeight: 500 }}>
+      <span data-private className="text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0, fontWeight: 500 }}>
         {amountLabel}
       </span>
       {dateLabel && (
@@ -1100,6 +1101,7 @@ function NeedsAttentionCard({ data, toCur }: {
                     {item.label}
                   </span>
                   <span
+                    data-private
                     style={{
                       flexShrink: 0,
                       fontSize: 'var(--text-xs)',
@@ -1200,7 +1202,7 @@ function HeroCashCard({
               Cash and runway
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <span style={{
+              <span data-private style={{
                 fontSize: '2.25rem',
                 fontWeight: 700,
                 letterSpacing: '-0.02em',
@@ -1350,7 +1352,7 @@ function HeroRevenueCard({
               Revenue engine
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <span style={{
+              <span data-private style={{
                 fontSize: '2.25rem',
                 fontWeight: 700,
                 letterSpacing: '-0.02em',
@@ -1389,7 +1391,7 @@ function HeroRevenueCard({
           </div>
         ) : (
           <div style={{ height: '4rem', display: 'flex', alignItems: 'center' }}>
-            <span className="text-xs text-[var(--color-text-subtle)]">Trend shows when more than one month of history exists. MRR base: {Math.round(mrrCombined).toLocaleString()}.</span>
+            <span className="text-xs text-[var(--color-text-subtle)]">Trend shows when more than one month of history exists. MRR base: <span data-private>{Math.round(mrrCombined).toLocaleString()}</span>.</span>
           </div>
         )}
       </div>
@@ -1494,7 +1496,7 @@ function TakeHomeCard({ takeHome, formatNative, onSaved }: {
             {/* Left: hero gap + supporting combined number. */}
             <div>
               <div className="text-xs text-[var(--color-text-muted)]" style={{ fontWeight: 500 }}>Gap to target (combined)</div>
-              <div style={{
+              <div data-private style={{
                 fontSize: '2rem',
                 fontWeight: 700,
                 letterSpacing: '-0.02em',
@@ -1505,7 +1507,7 @@ function TakeHomeCard({ takeHome, formatNative, onSaved }: {
               }}>
                 {onTarget ? 'On target' : formatNative(takeHome.gapCombined, 'NZD')}
               </div>
-              <div className="text-xs text-[var(--color-text-muted)]" style={{ marginTop: '0.25rem', lineHeight: 1.5 }}>
+              <div data-private className="text-xs text-[var(--color-text-muted)]" style={{ marginTop: '0.25rem', lineHeight: 1.5 }}>
                 {onTarget
                   ? 'Both founders at or above their target.'
                   : `Closing the gap costs about ${formatNative(takeHome.gapCombined / 12, 'NZD')}/mo over the next year.`}
@@ -1568,7 +1570,7 @@ function ProgressRow({ label, current, target, pct, formatNative }: {
     <div>
       <div className="flex items-center justify-between text-[0.6875rem] mb-0.5">
         <span className="text-[var(--color-text)]" style={{ fontWeight: 500 }}>{label}</span>
-        <span className="text-[var(--color-text-subtle)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+        <span data-private className="text-[var(--color-text-subtle)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
           {formatNative(current, 'NZD')} of {formatNative(target, 'NZD')}
         </span>
       </div>
@@ -1649,7 +1651,7 @@ function QuarterAndProjectionCard({ quarterly, yearEnd, ytdRevenue, effectiveMon
         {/* Quarter progress bar */}
         <div style={{ marginBottom: '1rem' }}>
           <div className="flex items-center justify-between mb-1 text-xs">
-            <span className="text-[var(--color-text)]">
+            <span data-private className="text-[var(--color-text)]">
               {editing ? 'Quarterly target (NZD)' : `Quarter target: ${quarterly.target > 0 ? formatNative(quarterly.target, 'NZD') : 'not set'}`}
             </span>
             {!editing && (
@@ -1693,7 +1695,7 @@ function QuarterAndProjectionCard({ quarterly, yearEnd, ytdRevenue, effectiveMon
                 <div style={{ position: 'absolute', left: `${quarterly.pctElapsed * 100}%`, top: 0, bottom: 0, width: '2px', background: 'var(--color-text-subtle)' }} />
               </div>
               <div className="flex items-center justify-between text-[0.6875rem] text-[var(--color-text-subtle)] mt-1">
-                <span>{formatNative(quarterly.actual, 'NZD')} so far</span>
+                <span data-private>{formatNative(quarterly.actual, 'NZD')} so far</span>
                 <span>{Math.round(quarterly.pctElapsed * 100)}% of quarter elapsed</span>
               </div>
             </>
@@ -1754,7 +1756,7 @@ function ForexCard({ forex, formatNative }: {
                 <div style={{ flex: 1, height: '0.5rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
                   <div style={{ width: `${Math.max(2, pct * 100)}%`, height: '100%', background: b.currency === 'NZD' ? 'var(--color-brand)' : 'var(--color-brand-light)' }} />
                 </div>
-                <span className="text-xs text-[var(--color-text-muted)]" style={{ width: '7rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                <span data-private className="text-xs text-[var(--color-text-muted)]" style={{ width: '7rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                   {formatNative(b.available, b.currency)}
                 </span>
                 <span className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ width: '3rem', textAlign: 'right' }}>
@@ -1855,7 +1857,7 @@ function CostMixCard({ costMix, spendSplit, formatNative }: {
                 segments={costMix.map(c => ({ label: c.category, value: c.monthly }))}
                 centreLabel={<span className="text-[0.6875rem] uppercase tracking-wider text-[var(--color-text-subtle)]">Monthly</span>}
                 centreValue={
-                  <span className="text-sm font-bold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  <span data-private className="text-sm font-bold text-[var(--color-text)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
                     {formatNative(total, 'NZD')}
                   </span>
                 }
@@ -1871,7 +1873,7 @@ function CostMixCard({ costMix, spendSplit, formatNative }: {
                   <div key={c.category} className="flex items-center" style={{ gap: '0.5rem', minWidth: 0 }}>
                     <span style={{ width: '0.5rem', height: '0.5rem', borderRadius: '999px', background: dot, flexShrink: 0 }} />
                     <span className="text-xs text-[var(--color-text)] capitalize truncate" style={{ flex: 1, minWidth: 0 }}>{c.category}</span>
-                    <span className="text-xs text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                    <span data-private className="text-xs text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
                       {formatNative(c.monthly, 'NZD')}
                     </span>
                     <span className="text-[0.6875rem] text-[var(--color-text-subtle)]" style={{ fontVariantNumeric: 'tabular-nums', width: '2.5rem', textAlign: 'right', flexShrink: 0 }}>
@@ -1984,7 +1986,7 @@ function PipelineFunnelCard({ funnel, open, formatNative }: {
               <div className="text-sm font-semibold text-[var(--color-text)]" style={{ marginTop: '0.125rem', fontVariantNumeric: 'tabular-nums' }}>
                 {s.count}
               </div>
-              <div className="text-[0.625rem] text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              <div data-private className="text-[0.625rem] text-[var(--color-text-muted)]" style={{ fontVariantNumeric: 'tabular-nums' }}>
                 {formatNative(s.value, 'NZD')}
               </div>
             </div>
@@ -2041,7 +2043,7 @@ function YoyCard({ yoy, history, cur, toCur }: {
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: 'var(--space-4)' }}>
           <div>
             <div className="text-xs text-[var(--color-text-muted)]" style={{ fontWeight: 500 }}>This month so far</div>
-            <div style={{
+            <div data-private style={{
               fontSize: '1.75rem',
               fontWeight: 700,
               letterSpacing: '-0.01em',
@@ -2056,7 +2058,7 @@ function YoyCard({ yoy, history, cur, toCur }: {
           </div>
           <div>
             <div className="text-xs text-[var(--color-text-muted)]" style={{ fontWeight: 500 }}>Same month last year</div>
-            <div style={{
+            <div data-private style={{
               fontSize: '1.375rem',
               fontWeight: 700,
               letterSpacing: '-0.01em',
@@ -2071,7 +2073,7 @@ function YoyCard({ yoy, history, cur, toCur }: {
           </div>
           <div>
             <div className="text-xs text-[var(--color-text-muted)]" style={{ fontWeight: 500 }}>Delta</div>
-            <div style={{
+            <div data-private style={{
               fontSize: '1.375rem',
               fontWeight: 700,
               letterSpacing: '-0.01em',
@@ -2369,8 +2371,8 @@ function AnomaliesCard() {
                 borderRadius: 'var(--radius-md)',
               }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="text-sm font-semibold text-[var(--color-text)]">{a.title}</div>
-                  {a.body && <div className="text-xs text-[var(--color-text-muted)] mt-1" style={{ lineHeight: 1.5 }}>{a.body}</div>}
+                  <div data-private className="text-sm font-semibold text-[var(--color-text)]">{a.title}</div>
+                  {a.body && <div data-private className="text-xs text-[var(--color-text-muted)] mt-1" style={{ lineHeight: 1.5 }}>{a.body}</div>}
                   <div className="text-[0.625rem] text-[var(--color-text-subtle)] mt-1">{fmtRelative(a.createdAt)}</div>
                 </div>
                 <button
@@ -2760,10 +2762,10 @@ function RecurringOutflowsCard({ formatNative }: {
                 accessor: (r) => r.name,
                 render: (r) => (
                   <div>
-                    <div className="font-medium text-[var(--color-text)]" style={{ opacity: r.active ? 1 : 0.55 }}>
+                    <div data-private className="font-medium text-[var(--color-text)]" style={{ opacity: r.active ? 1 : 0.55 }}>
                       {r.name}
                     </div>
-                    <div className="text-[0.6875rem] text-[var(--color-text-subtle)] truncate">
+                    <div data-private className="text-[0.6875rem] text-[var(--color-text-subtle)] truncate">
                       {r.vendor ?? r.category} · {r.cadence.replace('_', ' ')}
                       {r.billingDayOfMonth ? ` · day ${r.billingDayOfMonth}` : ''}
                     </div>
@@ -2784,7 +2786,7 @@ function RecurringOutflowsCard({ formatNative }: {
                 sortable: true,
                 sortValue: (r) => monthlyEquivNative(r),
                 render: (r) => (
-                  <div style={{ fontVariantNumeric: 'tabular-nums', opacity: r.active ? 1 : 0.55 }}>
+                  <div data-private style={{ fontVariantNumeric: 'tabular-nums', opacity: r.active ? 1 : 0.55 }}>
                     <div className="text-[var(--color-text)] font-medium">{formatNative(r.amount, r.currency)}</div>
                     <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
                       {formatNative(monthlyEquivNative(r), r.currency)}/mo
@@ -2800,7 +2802,7 @@ function RecurringOutflowsCard({ formatNative }: {
                 sortValue: (r) => r.lastBankHit?.settledAt ?? '',
                 render: (r) => r.lastBankHit ? (
                   <div style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    <div className="text-[var(--color-text-muted)] text-xs">
+                    <div data-private className="text-[var(--color-text-muted)] text-xs">
                       {formatNative(r.lastBankHit.amount, r.lastBankHit.currency)}
                     </div>
                     <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
@@ -3279,7 +3281,7 @@ function SpendImpactCard({ startingCash, burn, revenue, reserveTarget, formatNat
             sub={`Month ${lowest.month}`}
           />
         </div>
-        <p className="text-xs text-[var(--color-text-muted)]" style={{ marginTop: '0.75rem', lineHeight: 1.5 }}>
+        <p data-private className="text-xs text-[var(--color-text-muted)]" style={{ marginTop: '0.75rem', lineHeight: 1.5 }}>
           {verdict.detail} Assumes revenue stays flat at {formatNative(revenue, 'NZD')}/mo and existing burn at {formatNative(burn, 'NZD')}/mo. Adjust either in the reserve target card above for a different projection. <em>{label}</em>: this scenario.
         </p>
       </div>
@@ -3314,10 +3316,10 @@ function RunwayTile({ label, sub, value, detail, tone }: {
         {label}
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginTop: '0.1875rem', fontVariantNumeric: 'tabular-nums' }}>
-        <div style={{ fontSize: '1.25rem', fontWeight: 700, color: accent, lineHeight: 1.1 }}>{value}</div>
+        <div data-private style={{ fontSize: '1.25rem', fontWeight: 700, color: accent, lineHeight: 1.1 }}>{value}</div>
       </div>
       <div className="text-[0.6875rem]" style={{ color: 'var(--color-text-muted)', marginTop: '0.1875rem' }}>{sub}</div>
-      <div className="text-[0.625rem]" style={{ color: 'var(--color-text-subtle)', marginTop: '0.125rem', fontVariantNumeric: 'tabular-nums' }}>{detail}</div>
+      <div data-private className="text-[0.625rem]" style={{ color: 'var(--color-text-subtle)', marginTop: '0.125rem', fontVariantNumeric: 'tabular-nums' }}>{detail}</div>
     </div>
   )
 }
@@ -3466,7 +3468,7 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
             </div>
             {burnMode === 'auto' ? (
               <div style={{ ...inputStyle, border: '1px dashed var(--color-border)', background: 'var(--color-bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontWeight: 600 }}>
-                <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatNative(config.autoBurnNzd, 'NZD')}</span>
+                <span data-private style={{ fontVariantNumeric: 'tabular-nums' }}>{formatNative(config.autoBurnNzd, 'NZD')}</span>
                 <span style={{ fontSize: '0.625rem', fontWeight: 500, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   From commitments
                 </span>
@@ -3482,7 +3484,7 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
                 style={inputStyle}
               />
             )}
-            <div style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem', lineHeight: 1.45 }}>
+            <div data-private style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem', lineHeight: 1.45 }}>
               {burnMode === 'auto'
                 ? 'Sum of every active commitment, currency-converted.'
                 : `Auto would give ${formatNative(config.autoBurnNzd, 'NZD')}/mo.`}
@@ -3502,11 +3504,11 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
           </div>
           <div>
             <label style={labelStyle}>Target amount</label>
-            <div style={{ ...inputStyle, border: 'none', padding: '0.4375rem 0', fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-brand-dark)' }}>
+            <div data-private style={{ ...inputStyle, border: 'none', padding: '0.4375rem 0', fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-brand-dark)' }}>
               {formatNative(dirty ? previewTarget : config.targetAmount, 'NZD')}
             </div>
             {dirty && Math.abs(previewTarget - config.targetAmount) > 0.5 && (
-              <div style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>
+              <div data-private style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>
                 Was {formatNative(config.targetAmount, 'NZD')}. Save to apply.
               </div>
             )}
@@ -3569,7 +3571,7 @@ function ArBucket({ label, amount, cur, toCur, tone }: {
   return (
     <div>
       <div className="text-xs text-[var(--color-text-muted)]">{label}</div>
-      <div className="text-base font-semibold mt-0.5" style={{
+      <div data-private className="text-base font-semibold mt-0.5" style={{
         color: isEmpty ? 'var(--color-text-subtle)' : 'var(--color-text)',
         fontVariantNumeric: 'tabular-nums',
       }}>
@@ -3597,7 +3599,7 @@ function MetricBlock({ label, value, sub, accent = false, compact = false }: { l
   return (
     <div>
       <div className="text-xs text-[var(--color-text-muted)]" style={{ fontWeight: 500 }}>{label}</div>
-      <div style={{
+      <div data-private style={{
         fontSize,
         fontWeight: 700,
         letterSpacing: '-0.01em',
@@ -3609,7 +3611,7 @@ function MetricBlock({ label, value, sub, accent = false, compact = false }: { l
         {value}
       </div>
       {sub && (
-        <div className="text-[0.6875rem] text-[var(--color-text-subtle)] mt-0.5" style={{ lineHeight: 1.4 }}>
+        <div data-private className="text-[0.6875rem] text-[var(--color-text-subtle)] mt-0.5" style={{ lineHeight: 1.4 }}>
           {sub}
         </div>
       )}

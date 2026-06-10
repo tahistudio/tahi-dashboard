@@ -643,7 +643,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                         {item.label}
                       </span>
                     </div>
-                    <p className="tabular-nums" style={{
+                    <p data-private className="tabular-nums" style={{
                       fontSize: 'var(--text-xl)',
                       fontWeight: 700,
                       color: item.warn ? 'var(--status-in-review-text)' : 'var(--color-text)',
@@ -831,7 +831,7 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                       <span className="sm:hidden tabular-nums" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                         {count}
                       </span>
-                      <span className="tabular-nums" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)' }}>
+                      <span data-private className="tabular-nums" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)' }}>
                         {fmtCur(total)}
                       </span>
                       {count > 0 && (
@@ -872,12 +872,14 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                           {invoices.map(inv => (
                             <tr key={inv.id}>
                               <td
+                                data-private
                                 className="text-sm font-medium text-[var(--color-text)]"
                                 style={{ padding: '0.375rem 0.75rem' }}
                               >
                                 {inv.orgName}
                               </td>
                               <td
+                                data-private
                                 className="text-sm text-[var(--color-text)] text-right"
                                 style={{ padding: '0.375rem 0.75rem' }}
                               >
@@ -1635,6 +1637,7 @@ function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
                         {stage.dealCount}
                       </td>
                       <td
+                        data-private
                         className="text-sm text-[var(--color-text)] text-right font-medium"
                         style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
                       >
@@ -1706,7 +1709,7 @@ function SummaryCard({
         </div>
         <div>
           <p className="text-xs font-medium text-[var(--color-text-muted)]">{label}</p>
-          <p className="text-xl font-bold text-[var(--color-text)]">{value}</p>
+          <p data-private className="text-xl font-bold text-[var(--color-text)]">{value}</p>
         </div>
       </div>
     </div>
@@ -1949,6 +1952,7 @@ function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProp
                       {row.deals}
                     </td>
                     <td
+                      data-private
                       className="text-sm text-[var(--color-text)] text-right font-medium"
                       style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}
                     >
@@ -2249,7 +2253,7 @@ function CloseRateSourceBreakdownSection({ displayCurrency, exchangeRates }: Cur
                   <td className="text-sm text-right font-semibold" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)', color: rateColor }}>
                     {row.closeRate}%
                   </td>
-                  <td className="text-sm text-right text-[var(--color-text)]" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}>
+                  <td data-private className="text-sm text-right text-[var(--color-text)]" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}>
                     {row.avgDealSize > 0 ? formatInCur(row.avgDealSize, displayCurrency, exchangeRates) : '--'}
                   </td>
                   <td className="text-sm text-right text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--color-border-subtle)' }}>
@@ -2487,11 +2491,11 @@ function RetainerHealthSection({ displayCurrency, exchangeRates }: CurrencyProps
                 <tr key={r.orgId} className="border-b" style={{ borderColor: 'var(--color-border-subtle)' }}>
                   <td className="py-2 pr-3">
                     <Link href={`/clients/${r.orgId}`} className="font-medium text-[var(--color-text)] hover:text-[var(--color-brand)]">
-                      {r.orgName}
+                      <span data-private>{r.orgName}</span>
                     </Link>
                     <div className="text-xs text-[var(--color-text-subtle)]">{r.monthsActive} mo · {r.planType ?? 'no plan'}</div>
                   </td>
-                  <td className="py-2 pr-3 text-[var(--color-text)]">
+                  <td data-private className="py-2 pr-3 text-[var(--color-text)]">
                     {formatInCur(r.mrrNzd, displayCurrency, exchangeRates)}
                   </td>
                   <td className="py-2 pr-3 text-[var(--color-text)]">{r.billableHoursLast30d.toFixed(1)}h</td>
@@ -2718,7 +2722,7 @@ function MiniMetric({ label, value, colour }: { label: string; value: string; co
       }}
     >
       <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">{label}</div>
-      <div className="text-xl font-semibold mt-1" style={{ color: colour }}>{value}</div>
+      <div data-private className="text-xl font-semibold mt-1" style={{ color: colour }}>{value}</div>
     </div>
   )
 }
@@ -2991,10 +2995,10 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
                           {c.isRecurring ? 'Recurring' : 'One-off'}
                         </button>
                       </td>
-                      <td className="py-2 pr-3 text-right text-[var(--color-text)] font-medium">
+                      <td data-private className="py-2 pr-3 text-right text-[var(--color-text)] font-medium">
                         {formatInCur(c.total, displayCurrency, exchangeRates)}
                       </td>
-                      <td className="py-2 pr-3 text-right text-[var(--color-text-muted)] text-xs">
+                      <td data-private className="py-2 pr-3 text-right text-[var(--color-text-muted)] text-xs">
                         {formatInCur(monthlyAvg, displayCurrency, exchangeRates)}
                       </td>
                     </tr>
@@ -3098,15 +3102,15 @@ function ClientProfitabilityScorecard({ displayCurrency, exchangeRates }: Curren
                 <tr key={r.orgId} className="border-b" style={{ borderColor: 'var(--color-border-subtle)' }}>
                   <td className="py-2 pr-3">
                     <Link href={`/clients/${r.orgId}?tab=profitability`} className="font-medium text-[var(--color-text)] hover:text-[var(--color-brand)]">
-                      {r.orgName}
+                      <span data-private>{r.orgName}</span>
                     </Link>
-                    <div className="text-xs text-[var(--color-text-subtle)]">{r.billableHours.toFixed(1)}h at ${r.hourlyRate}/h · {r.planType ?? 'no plan'}</div>
+                    <div data-private className="text-xs text-[var(--color-text-subtle)]">{r.billableHours.toFixed(1)}h at ${r.hourlyRate}/h · {r.planType ?? 'no plan'}</div>
                   </td>
-                  <td className="py-2 pr-3 text-right text-[var(--color-text)]">{formatInCur(r.revenueNzd, displayCurrency, exchangeRates)}</td>
-                  <td className="py-2 pr-3 text-right text-[var(--color-text-muted)]">{formatInCur(r.timeCostNzd, displayCurrency, exchangeRates)}</td>
-                  <td className="py-2 pr-3 text-right text-[var(--color-text-muted)]">{formatInCur(r.directCostNzd, displayCurrency, exchangeRates)}</td>
-                  <td className="py-2 pr-3 text-right text-[var(--color-text)]">{formatInCur(r.costNzd, displayCurrency, exchangeRates)}</td>
-                  <td className="py-2 pr-3 text-right font-medium" style={{ color: colour.fg }}>
+                  <td data-private className="py-2 pr-3 text-right text-[var(--color-text)]">{formatInCur(r.revenueNzd, displayCurrency, exchangeRates)}</td>
+                  <td data-private className="py-2 pr-3 text-right text-[var(--color-text-muted)]">{formatInCur(r.timeCostNzd, displayCurrency, exchangeRates)}</td>
+                  <td data-private className="py-2 pr-3 text-right text-[var(--color-text-muted)]">{formatInCur(r.directCostNzd, displayCurrency, exchangeRates)}</td>
+                  <td data-private className="py-2 pr-3 text-right text-[var(--color-text)]">{formatInCur(r.costNzd, displayCurrency, exchangeRates)}</td>
+                  <td data-private className="py-2 pr-3 text-right font-medium" style={{ color: colour.fg }}>
                     {formatInCur(r.marginNzd, displayCurrency, exchangeRates)}
                   </td>
                   <td className="py-2 pr-3 text-right">
@@ -3364,20 +3368,20 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
             Xero P&amp;L is too chaotic (reclassifications, journal entries) to trust for forecasting.
           </p>
           <p className="text-xs text-[var(--color-text-subtle)] mt-1">
-            <strong>Monthly run rate:</strong> {formatInCur(totalMonthlyNzd, displayCurrency, exchangeRates)} ·
-            <strong> Annual:</strong> {formatInCur(annualNzd, displayCurrency, exchangeRates)} ·
+            <strong>Monthly run rate:</strong> <span data-private>{formatInCur(totalMonthlyNzd, displayCurrency, exchangeRates)}</span> ·
+            <strong> Annual:</strong> <span data-private>{formatInCur(annualNzd, displayCurrency, exchangeRates)}</span> ·
             {active.length} active commitment{active.length === 1 ? '' : 's'}
           </p>
           <p className="text-xs mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
             <span style={{ color: 'var(--color-text)' }}>
               <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ background: 'var(--color-brand)' }} />
-              <strong>Essential</strong> {formatInCur(essentialMonthlyNzd, displayCurrency, exchangeRates)}/mo
+              <strong>Essential</strong> <span data-private>{formatInCur(essentialMonthlyNzd, displayCurrency, exchangeRates)}/mo</span>
             </span>
             <span style={{ color: 'var(--color-text-muted)' }}>
               <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ background: 'var(--color-warning)' }} />
-              <strong>Discretionary</strong> {formatInCur(discretionaryMonthlyNzd, displayCurrency, exchangeRates)}/mo
+              <strong>Discretionary</strong> <span data-private>{formatInCur(discretionaryMonthlyNzd, displayCurrency, exchangeRates)}/mo</span>
               {discretionaryMonthlyNzd > 0 && (
-                <span className="text-[var(--color-text-subtle)]"> · {formatInCur(discretionaryMonthlyNzd * 12, displayCurrency, exchangeRates)}/yr if cut</span>
+                <span data-private className="text-[var(--color-text-subtle)]"> · {formatInCur(discretionaryMonthlyNzd * 12, displayCurrency, exchangeRates)}/yr if cut</span>
               )}
             </span>
             {untaggedCount > 0 && (
@@ -3505,8 +3509,8 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
               return (
                 <tr key={c.id} className="border-b" style={{ borderColor: 'var(--color-border-subtle)', opacity: c.active ? 1 : 0.5 }}>
                   <td className="py-2 pr-3">
-                    <div className="font-medium text-[var(--color-text)]">{c.name}</div>
-                    {c.vendor && <div className="text-xs text-[var(--color-text-subtle)]">{c.vendor}</div>}
+                    <div data-private className="font-medium text-[var(--color-text)]">{c.name}</div>
+                    {c.vendor && <div data-private className="text-xs text-[var(--color-text-subtle)]">{c.vendor}</div>}
                     {(c.startDate || c.endDate) && (
                       <div className="text-xs text-[var(--color-text-subtle)] mt-0.5">
                         {c.startDate && <>from {c.startDate}</>}
@@ -3516,14 +3520,14 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
                     )}
                   </td>
                   <td className="py-2 pr-3 text-xs text-[var(--color-text-muted)] capitalize">{c.category}</td>
-                  <td className="py-2 pr-3 text-right text-[var(--color-text)]">
+                  <td data-private className="py-2 pr-3 text-right text-[var(--color-text)]">
                     {new Intl.NumberFormat('en-NZ', { style: 'currency', currency: c.currency, maximumFractionDigits: 0 }).format(c.amount)}
                   </td>
                   <td className="py-2 pr-3 text-xs text-[var(--color-text-muted)]">
                     {c.cadence.replace('_', ' ')}
                     {c.billingDayOfMonth && <div className="text-xs text-[var(--color-text-subtle)]">day {c.billingDayOfMonth}</div>}
                   </td>
-                  <td className="py-2 pr-3 text-right text-[var(--color-text-muted)]">
+                  <td data-private className="py-2 pr-3 text-right text-[var(--color-text-muted)]">
                     {formatInCur(monthlyDisplay, displayCurrency, exchangeRates)}
                   </td>
                   <td className="py-2 pr-3">

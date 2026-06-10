@@ -363,7 +363,7 @@ export function ClientList() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', minWidth: 0 }}>
           <Avatar name={r.name} size="sm" />
           <div style={{ minWidth: 0 }}>
-            <div style={{
+            <div data-private style={{
               fontWeight: 600,
               color: 'var(--color-text)',
               overflow: 'hidden',
@@ -384,7 +384,7 @@ export function ClientList() {
                 {r.industry && <span>{r.industry}</span>}
                 {r.industry && r.website && <span aria-hidden="true">·</span>}
                 {r.website && (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <span data-private style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                     <Globe size={10} aria-hidden="true" />
                     {r.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
                   </span>

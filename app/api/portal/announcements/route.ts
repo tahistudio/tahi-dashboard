@@ -1,4 +1,4 @@
-import { getRequestAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -9,7 +9,7 @@ import { eq, desc } from 'drizzle-orm'
 // Filters by targetType: if 'all' show it, if 'plan_type' check org's
 // subscription, if 'org' check if orgId is in targetIds JSON array.
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const { orgId, userId } = await getPortalAuth(req)
   if (!userId || !orgId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }

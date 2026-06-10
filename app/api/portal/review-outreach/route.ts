@@ -1,4 +1,4 @@
-import { getRequestAuth } from '@/lib/server-auth'
+import { getRequestAuth, getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -9,7 +9,7 @@ import { eq, and } from 'drizzle-orm'
  * Checks if the current org has a pending outreach.
  */
 export async function GET(req: NextRequest) {
-  const { userId, orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getPortalAuth(req)
   if (!userId || !orgId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }

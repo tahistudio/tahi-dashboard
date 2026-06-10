@@ -1,4 +1,4 @@
-import { getRequestAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -16,7 +16,7 @@ import { getPlanLabel } from '@/lib/plan-utils'
 // ── GET /api/portal/subscription ────────────────────────────────────────────
 // Returns the client's active subscription with billing tier details.
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const { orgId, userId } = await getPortalAuth(req)
 
   // Deny if not authenticated or if this is the Tahi admin org
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {

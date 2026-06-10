@@ -103,14 +103,14 @@ export function RequestCard({
           {scopeFlagged && (
             <AlertTriangle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" aria-label="Scope creep flagged" />
           )}
-          <span className="text-sm font-medium text-[var(--color-text)] group-hover:text-[var(--color-brand-dark)] transition-colors leading-snug line-clamp-1">
+          <span data-private className="text-sm font-medium text-[var(--color-text)] group-hover:text-[var(--color-brand-dark)] transition-colors leading-snug line-clamp-1">
             {title}
           </span>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
           {isAdmin && orgName && (
-            <span className="text-xs text-[var(--color-text-subtle)] font-medium">{orgName}</span>
+            <span data-private className="text-xs text-[var(--color-text-subtle)] font-medium">{orgName}</span>
           )}
           <span className="text-xs px-1.5 py-0.5 rounded font-medium" style={catStyle}>
             {formatType(type)}

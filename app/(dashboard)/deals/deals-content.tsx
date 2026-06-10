@@ -886,7 +886,7 @@ function KanbanView({ deals, stages, onMutateDealLocal, onSilentRevalidate, disp
                 )}
               </div>
               {stageValue > 0 && (
-                <span className="tabular-nums flex-shrink-0" style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)' }}>
+                <span className="tabular-nums flex-shrink-0" data-private style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)' }}>
                   {formatCurrency(toDisplay(stageValue), displayCurrency)}
                 </span>
               )}
@@ -1277,7 +1277,7 @@ function DealCard({ deal, displayCurrency, toDisplay }: { deal: Deal; displayCur
       {/* Value + Probability header */}
       <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-2)' }}>
         <div className="flex items-center" style={{ gap: 'var(--space-1-5)', minWidth: 0 }}>
-          <p className="font-semibold tabular-nums truncate" style={{
+          <p className="font-semibold tabular-nums truncate" data-private style={{
             fontSize: 'var(--text-base)',
             color: pointValue > 0 ? 'var(--color-text)' : 'var(--color-text-subtle)',
           }}>
@@ -1313,7 +1313,7 @@ function DealCard({ deal, displayCurrency, toDisplay }: { deal: Deal; displayCur
       </div>
 
       {/* Title */}
-      <p className="truncate" style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-text)', marginBottom: 'var(--space-1-5)' }}>
+      <p className="truncate" data-private style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-text)', marginBottom: 'var(--space-1-5)' }}>
         {deal.title}
       </p>
 
@@ -1329,7 +1329,7 @@ function DealCard({ deal, displayCurrency, toDisplay }: { deal: Deal; displayCur
           }}>
             <Building2 size={10} aria-hidden="true" />
           </div>
-          <span className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+          <span className="truncate" data-private style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
             {deal.orgName}
           </span>
         </div>
@@ -1501,12 +1501,13 @@ function ListView({ deals, stages, sortKey, displayCurrency, toDisplay }: {
                     <Link
                       href={`/pipeline/${deal.id}`}
                       className="font-medium hover:underline"
+                      data-private
                       style={{ color: 'var(--color-text)', textDecoration: 'none' }}
                     >
                       {deal.title}
                     </Link>
                   </td>
-                  <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+                  <td data-private style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
                     {deal.orgName ?? '--'}
                   </td>
                   <td style={{ padding: '0.75rem 1rem' }}>
@@ -1528,7 +1529,7 @@ function ListView({ deals, stages, sortKey, displayCurrency, toDisplay }: {
                       )
                     })()}
                   </td>
-                  <td className="font-semibold" style={{ padding: '0.75rem 1rem', color: 'var(--color-text)', whiteSpace: 'nowrap' }}>
+                  <td className="font-semibold" data-private style={{ padding: '0.75rem 1rem', color: 'var(--color-text)', whiteSpace: 'nowrap' }}>
                     {formatCurrency(toDisplay(deal.valueNzd ?? deal.value), displayCurrency)}
                   </td>
                   <td style={{ padding: '0.75rem 1rem', whiteSpace: 'nowrap' }}>

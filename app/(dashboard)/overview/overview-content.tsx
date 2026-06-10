@@ -353,7 +353,7 @@ function PipelineSummaryCard() {
                 {item.label}
               </span>
             </div>
-            <p className="tabular-nums" style={{
+            <p data-private className="tabular-nums" style={{
               fontSize: 'var(--text-2xl)',
               fontWeight: 700,
               color: 'var(--color-text)',
@@ -783,7 +783,7 @@ function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
         <KPICell
           icon={FileText}
           label="Outstanding"
-          value={loading ? '-' : format(outstanding)}
+          value={loading ? '-' : <span data-private>{format(outstanding)}</span>}
           sub="invoices"
           tone={outstanding > 0 ? 'warning' : 'brand'}
           href="/invoices"
@@ -791,7 +791,7 @@ function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
         <KPICell
           icon={BarChart3}
           label="MRR"
-          value={loading ? '-' : format(kpis?.mrr ?? 0)}
+          value={loading ? '-' : <span data-private>{format(kpis?.mrr ?? 0)}</span>}
           sub="recurring retainers"
           href="/reports"
         />
@@ -941,7 +941,7 @@ function OffTrackEngagementsWidget() {
             style={{ width: '0.625rem', height: '0.625rem', borderRadius: '50%', background: DELIVERY_STATUS_COLOR[e.status], flexShrink: 0 }}
           />
           <div className="flex-1" style={{ minWidth: 0 }}>
-            <p style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <p data-private style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {e.orgName}
             </p>
             <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
@@ -1020,7 +1020,7 @@ function RequestRow({ req, isLast, showOrg }: { req: RecentRequest; isLast: bool
       <StatusBadge status={req.status} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center" style={{ gap: 'var(--space-1-5)' }}>
-          <p className="truncate" style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
+          <p data-private className="truncate" style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
             {req.title}
           </p>
           {req.scopeFlagged && (
@@ -1044,7 +1044,8 @@ function RequestRow({ req, isLast, showOrg }: { req: RecentRequest; isLast: bool
           )}
         </div>
         <p className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
-          {showOrg && req.orgName ? `${req.orgName} \u00b7 ` : ''}
+          {showOrg && req.orgName ? <span data-private>{req.orgName}</span> : null}
+          {showOrg && req.orgName ? ' \u00b7 ' : ''}
           {req.type.replace(/_/g, ' ')}
         </p>
       </div>
@@ -1297,15 +1298,15 @@ function UpcomingCallsWidget() {
                     className="truncate hover:underline"
                     style={{ display: 'block', fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}
                   >
-                    {call.withName ?? call.title}
+                    <span data-private>{call.withName ?? call.title}</span>
                   </Link>
                 ) : (
                   <p className="truncate" style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
-                    {call.withName ?? call.title}
+                    <span data-private>{call.withName ?? call.title}</span>
                   </p>
                 )}
                 <p className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
-                  {call.withSubtitle ? `${call.withSubtitle} \u00b7 ` : ''}
+                  {call.withSubtitle ? <><span data-private>{call.withSubtitle}</span>{' \u00b7 '}</> : ''}
                   {d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}
                   {' at '}
                   {d.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}
@@ -1567,7 +1568,7 @@ function TrackCapacityCard() {
                   </span>
                 </div>
                 {isOccupied ? (
-                  <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>
+                  <p data-private className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>
                     {track.currentRequest?.title}
                   </p>
                 ) : (
@@ -1590,7 +1591,7 @@ function TrackCapacityCard() {
               {data.queue.slice(0, 5).map((req, i) => (
                 <div key={req.id} className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-text)' }}>
                   <span style={{ color: 'var(--color-text-subtle)', fontWeight: 500, minWidth: '1rem' }}>{i + 1}.</span>
-                  <span className="truncate">{req.title}</span>
+                  <span data-private className="truncate">{req.title}</span>
                 </div>
               ))}
             </div>
@@ -1934,14 +1935,14 @@ function TodayFocusStrip() {
           {loading
             ? 'Loading...'
             : call
-              ? (call.withName ? `Next call with ${call.withName}` : call.title)
+              ? (call.withName ? <>Next call with <span data-private>{call.withName}</span></> : <span data-private>{call.title}</span>)
               : 'No calls scheduled'}
         </FeatureCard.Title>
         <FeatureCard.Description>
           {loading
             ? ' '
             : call
-              ? `${call.withSubtitle ? `${call.withSubtitle} · ` : ''}${new Date(call.scheduledAt).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })} at ${new Date(call.scheduledAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })} (${call.durationMinutes}min)`
+              ? <>{call.withSubtitle ? <><span data-private>{call.withSubtitle}</span>{' · '}</> : ''}{`${new Date(call.scheduledAt).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })} at ${new Date(call.scheduledAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })} (${call.durationMinutes}min)`}</>
               : 'Schedule a call from the calls page when one comes up.'}
         </FeatureCard.Description>
         {call && call.meetingUrl && (
@@ -1961,14 +1962,14 @@ function TodayFocusStrip() {
           {loading
             ? 'Loading...'
             : deal
-              ? format(deal.valueNzd ?? deal.value ?? 0)
+              ? <span data-private>{format(deal.valueNzd ?? deal.value ?? 0)}</span>
               : 'Nothing closing yet'}
         </FeatureCard.Title>
         <FeatureCard.Description>
           {loading
             ? ' '
             : deal
-              ? `${deal.title}${deal.orgName ? ` · ${deal.orgName}` : ''}${deal.stageName ? ` · ${deal.stageName}` : ''}`
+              ? <><span data-private>{deal.title}</span>{deal.orgName ? <> · <span data-private>{deal.orgName}</span></> : ''}{deal.stageName ? ` · ${deal.stageName}` : ''}</>
               : 'Set an expected close date on a deal to surface it here.'}
         </FeatureCard.Description>
       </FeatureCard>
@@ -2059,10 +2060,10 @@ function PipelineForecastCard() {
         <>
           {/* Summary numbers — weighted vs unweighted */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
-            <ForecastStat label="Weighted upfront" value={fmt(data.weightedUpfrontNzd)} sub={`of ${fmt(data.unweightedUpfrontNzd)}`} />
-            <ForecastStat label="Weighted MRR" value={fmt(data.weightedMonthlyNzd)} sub={`of ${fmt(data.unweightedMonthlyNzd)}`} />
+            <ForecastStat label="Weighted upfront" value={fmt(data.weightedUpfrontNzd)} sub={`of ${fmt(data.unweightedUpfrontNzd)}`} priv />
+            <ForecastStat label="Weighted MRR" value={fmt(data.weightedMonthlyNzd)} sub={`of ${fmt(data.unweightedMonthlyNzd)}`} priv />
             <ForecastStat label="Active deals" value={String(activeStages.reduce((s, x) => s + x.dealCount, 0))} sub={`${data.totalDeals} total`} />
-            <ForecastStat label="12-mo expected" value={fmt(data.weightedUpfrontNzd + data.weightedMonthlyNzd * 12)} sub="upfront + 12× MRR" />
+            <ForecastStat label="12-mo expected" value={fmt(data.weightedUpfrontNzd + data.weightedMonthlyNzd * 12)} sub="upfront + 12× MRR" priv />
           </div>
 
           {/* Per-stage bars */}
@@ -2079,7 +2080,7 @@ function PipelineForecastCard() {
                         {stage.dealCount} × {stage.probability}% probability
                       </span>
                     </span>
-                    <span style={{ color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
+                    <span data-private style={{ color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
                       {fmt(stage.weightedUpfrontNzd)}
                       {stage.weightedMonthlyNzd > 0 && (
                         <span style={{ color: 'var(--color-text-subtle)' }}>
@@ -2112,7 +2113,7 @@ function PipelineForecastCard() {
   )
 }
 
-function ForecastStat({ label, value, sub }: { label: string; value: string; sub: string }) {
+function ForecastStat({ label, value, sub, priv }: { label: string; value: string; sub: string; priv?: boolean }) {
   return (
     <div style={{
       padding: 'var(--space-3)',
@@ -2123,7 +2124,7 @@ function ForecastStat({ label, value, sub }: { label: string; value: string; sub
       <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
         {label}
       </p>
-      <p style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--color-text)', marginTop: 'var(--space-1)', fontVariantNumeric: 'tabular-nums' }}>
+      <p {...(priv ? { 'data-private': true } : {})} style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--color-text)', marginTop: 'var(--space-1)', fontVariantNumeric: 'tabular-nums' }}>
         {value}
       </p>
       <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)' }}>

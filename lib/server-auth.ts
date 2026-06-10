@@ -109,6 +109,30 @@ export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResul
 }
 
 /**
+ * Portal auth with admin "Client view" impersonation.
+ *
+ * Portal endpoints scope to the caller's own org. When a Tahi admin previews the
+ * client experience (Client view), the browser carries a `tahi-impersonate-org`
+ * cookie naming the org to view. ONLY the admin org may use it; for any real
+ * client the cookie is ignored (their orgId is never the admin org, so the
+ * branch never runs). The returned `orgId` is the effective portal org, so an
+ * endpoint's existing "reject the admin org" guard keeps working unchanged.
+ */
+export async function getPortalAuth(
+  req: NextRequest,
+): Promise<RequestAuthResult & { impersonating: boolean }> {
+  const result = await getRequestAuth(req)
+  const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
+  if (result.orgId && tahiOrgId && result.orgId === tahiOrgId) {
+    const target = req.cookies.get('tahi-impersonate-org')?.value
+    if (target) {
+      return { ...result, orgId: target, impersonating: true }
+    }
+  }
+  return { ...result, impersonating: false }
+}
+
+/**
  * Get auth state inside a Server Component / page.tsx.
  * Builds a synthetic Request from next/headers cookies so @clerk/backend
  * can validate the session JWT directly : no middleware signal needed.

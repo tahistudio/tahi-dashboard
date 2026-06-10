@@ -1019,17 +1019,24 @@ textarea,
 
 /* Toggled by SidebarUserCard. Adds `.tahi-private` to <html>; persisted in
    localStorage('tahi-private-mode'). Any element tagged `data-private` is
-   blurred so the screen is safe to share; hover (or focus-within) reveals it
-   momentarily for the operator. Tag operator identity, client PII, and
-   financial figures with data-private to mask them. */
+   blurred so the screen is safe to share on a call. The blur stays put on hover
+   and focus (no accidental reveal while sharing) : the operator toggles private
+   mode off when they need to read a value. Tag operator identity, client PII,
+   request titles/numbers, deal names + values, and every financial figure with
+   data-private to mask them. */
 html.tahi-private [data-private] {
   filter: blur(0.5rem);
   transition: filter 140ms ease;
   user-select: none;
+  pointer-events: none;
 }
-html.tahi-private [data-private]:hover,
-html.tahi-private [data-private]:focus-within {
-  filter: none;
+/* Re-enable interaction on controls that merely CONTAIN private text, so the
+   operator can still click a blurred client row / button while sharing. */
+html.tahi-private a[data-private],
+html.tahi-private button[data-private],
+html.tahi-private [data-private] a,
+html.tahi-private [data-private] button {
+  pointer-events: auto;
 }
 
 /* ============================================================

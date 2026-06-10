@@ -213,7 +213,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
           <div className="flex flex-col gap-3 mb-5 sm:flex-row sm:items-start">
             <div className="flex items-start gap-3 flex-1 min-w-0">
               <div className="flex-1 min-w-0">
-                <h1 className="text-xl font-bold text-[var(--color-text)] md:text-2xl break-words">
+                <h1 data-private className="text-xl font-bold text-[var(--color-text)] md:text-2xl break-words">
                   {org.name}
                 </h1>
                 <div className="flex items-center gap-2 flex-wrap mt-2">
@@ -228,6 +228,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-brand)] mt-1.5"
+                    data-private
                   >
                     <Globe className="w-3.5 h-3.5" />
                     {org.website.replace(/^https?:\/\//, '')}
@@ -559,13 +560,13 @@ function ClientSignalTiles({
       <FeatureCard variant="cream" padding="md">
         <FeatureCard.Eyebrow>Monthly recurring</FeatureCard.Eyebrow>
         <FeatureCard.Title style={{ fontSize: '1.625rem' }}>
-          {mrrDisplay ?? (subscription ? 'On retainer' : 'Not set')}
+          <span data-private>{mrrDisplay ?? (subscription ? 'On retainer' : 'Not set')}</span>
         </FeatureCard.Title>
         <FeatureCard.Description>
           {subscription
             ? `${subscription.planType.charAt(0).toUpperCase()}${subscription.planType.slice(1)} plan · ${subscription.status}`
             : primaryContact
-              ? `Primary contact: ${primaryContact.name}`
+              ? <>Primary contact: <span data-private>{primaryContact.name}</span></>
               : 'No active subscription on record.'}
         </FeatureCard.Description>
       </FeatureCard>
@@ -927,7 +928,7 @@ function MrrInlineEdit({
       onClick={() => { setDraft(value?.toString() ?? ''); setEditing(true) }}
       className="flex items-center gap-1.5 text-sm text-[var(--color-text)] hover:text-[var(--color-brand)] transition-colors group"
     >
-      <span>{formatted ?? '--'}</span>
+      <span data-private>{formatted ?? '--'}</span>
       <Pencil className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity text-[var(--color-text-muted)]" />
     </button>
   )
@@ -1316,6 +1317,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1 text-[var(--color-brand)] hover:underline"
+                  data-private
                 >
                   <Globe className="w-3.5 h-3.5" />
                   {org.website.replace(/^https?:\/\//, '')}
@@ -1371,9 +1373,9 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
               <dd className="text-[var(--color-text)] font-medium">
                 {org.customMrr ? (
                   <>
-                    <span>{new Intl.NumberFormat('en-NZ', { style: 'currency', currency: org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD', maximumFractionDigits: 0 }).format(org.customMrr)}</span>
+                    <span data-private>{new Intl.NumberFormat('en-NZ', { style: 'currency', currency: org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD', maximumFractionDigits: 0 }).format(org.customMrr)}</span>
                     {(org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD') !== displayCurrency && (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginLeft: '0.5rem', fontWeight: 400 }}>
+                      <span data-private style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginLeft: '0.5rem', fontWeight: 400 }}>
                         {formatNativeWithDisplay(org.customMrr, org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD').split('\u2248 ')[1] ?? ''}
                       </span>
                     )}
@@ -1465,7 +1467,7 @@ function ContactsCard({ contacts }: { contacts: Contact[] }) {
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-sm font-medium text-[var(--color-text)] truncate">
+                  <span data-private className="text-sm font-medium text-[var(--color-text)] truncate">
                     {contact.name}
                   </span>
                   {contact.isPrimary && (
@@ -1476,12 +1478,12 @@ function ContactsCard({ contacts }: { contacts: Contact[] }) {
                 </div>
                 <div className="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
                   <Mail className="w-3 h-3" />
-                  <span className="truncate">{contact.email}</span>
+                  <span data-private className="truncate">{contact.email}</span>
                 </div>
                 {contact.role && (
                   <div className="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
                     <User className="w-3 h-3" />
-                    {contact.role}
+                    <span data-private>{contact.role}</span>
                   </div>
                 )}
                 <div className={cn('mt-0.5 w-1.5 h-1.5 rounded-full inline-block', contact.clerkUserId ? 'bg-emerald-400' : 'bg-[var(--color-border)]')} title={contact.clerkUserId ? 'Has portal access' : 'No portal access yet'} />
@@ -2396,7 +2398,7 @@ function ContactsTab({
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-sm font-medium text-[var(--color-text)] truncate">
+                    <span data-private className="text-sm font-medium text-[var(--color-text)] truncate">
                       {contact.name}
                     </span>
                     {contact.isPrimary && (
@@ -2407,12 +2409,12 @@ function ContactsTab({
                   </div>
                   <div className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] mt-1">
                     <Mail className="w-3 h-3 flex-shrink-0" />
-                    <span className="truncate">{contact.email}</span>
+                    <span data-private className="truncate">{contact.email}</span>
                   </div>
                   {contact.role && (
                     <div className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] mt-0.5">
                       <User className="w-3 h-3 flex-shrink-0" />
-                      {contact.role}
+                      <span data-private>{contact.role}</span>
                     </div>
                   )}
                   <div className="mt-1.5 flex items-center gap-2">

@@ -208,12 +208,13 @@ export function ContactDetail({ contactId }: { contactId: string }) {
               </div>
 
               <div className="flex-1 min-w-0">
-                <h1 className="text-xl font-bold text-[var(--color-text)] md:text-2xl break-words">
+                <h1 data-private className="text-xl font-bold text-[var(--color-text)] md:text-2xl break-words">
                   {contact.name}
                 </h1>
                 <div className="flex items-center gap-2 flex-wrap mt-1">
                   {contact.role && (
                     <span
+                      data-private
                       className="text-xs font-medium px-2 py-0.5 rounded-full"
                       style={{
                         background: 'var(--color-bg-tertiary)',
@@ -261,6 +262,7 @@ export function ContactDetail({ contactId }: { contactId: string }) {
                   <a
                     href={`mailto:${contact.email}`}
                     className="text-sm text-[var(--color-brand)] hover:underline truncate"
+                    data-private
                   >
                     {contact.email}
                   </a>
@@ -268,7 +270,7 @@ export function ContactDetail({ contactId }: { contactId: string }) {
                 {contact.role && (
                   <div className="flex items-center gap-2.5">
                     <User className="w-4 h-4 text-[var(--color-text-subtle)]" />
-                    <span className="text-sm text-[var(--color-text)]">{contact.role}</span>
+                    <span data-private className="text-sm text-[var(--color-text)]">{contact.role}</span>
                   </div>
                 )}
                 {contact.lastLoginAt && (
@@ -307,7 +309,7 @@ export function ContactDetail({ contactId }: { contactId: string }) {
                 <div className="flex items-center gap-2.5 min-w-0">
                   <Building2 className="w-4 h-4 text-[var(--color-brand)] flex-shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-[var(--color-text)] truncate">
+                    <p data-private className="text-sm font-medium text-[var(--color-text)] truncate">
                       {contact.org.name}
                     </p>
                     <div className="flex items-center gap-2 mt-0.5">
@@ -320,7 +322,7 @@ export function ContactDetail({ contactId }: { contactId: string }) {
               {contact.org.website && (
                 <div className="flex items-center gap-1.5 mt-2">
                   <Globe className="w-3.5 h-3.5 text-[var(--color-text-subtle)]" />
-                  <span className="text-xs text-[var(--color-text-muted)] truncate">
+                  <span data-private className="text-xs text-[var(--color-text-muted)] truncate">
                     {contact.org.website.replace(/^https?:\/\//, '')}
                   </span>
                 </div>
@@ -350,7 +352,7 @@ export function ContactDetail({ contactId }: { contactId: string }) {
                       className="flex items-center justify-between py-2 border-b border-[var(--color-border-subtle)] last:border-0"
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-[var(--color-text)] truncate">
+                        <p data-private className="text-sm font-medium text-[var(--color-text)] truncate">
                           {deal.title}
                         </p>
                         <div className="flex items-center gap-2 mt-0.5">
@@ -372,7 +374,7 @@ export function ContactDetail({ contactId }: { contactId: string }) {
                           )}
                         </div>
                       </div>
-                      <span className="text-sm font-medium text-[var(--color-text)] ml-2 flex-shrink-0">
+                      <span data-private className="text-sm font-medium text-[var(--color-text)] ml-2 flex-shrink-0">
                         {deal.currency} {deal.value.toLocaleString()}
                       </span>
                     </div>
@@ -537,7 +539,7 @@ export function ContactDetail({ contactId }: { contactId: string }) {
                       className="border-b border-[var(--color-border-subtle)] last:border-0"
                       style={{ paddingBottom: '0.75rem' }}
                     >
-                      <p className="text-sm text-[var(--color-text)] line-clamp-2">
+                      <p data-private className="text-sm text-[var(--color-text)] line-clamp-2">
                         {msg.body ?? '(no content)'}
                       </p>
                       <div className="flex items-center gap-3 mt-1">

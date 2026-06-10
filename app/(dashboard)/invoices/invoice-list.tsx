@@ -317,7 +317,7 @@ function CreateInvoiceSlideOver({
               fontSize: '0.8125rem',
             }}
           >
-            <strong>{selectedOrgName}</strong> has no contact with an email. Stripe needs one to invoice them. Add a contact on the client&apos;s Contacts tab first.
+            <strong data-private>{selectedOrgName}</strong> has no contact with an email. Stripe needs one to invoice them. Add a contact on the client&apos;s Contacts tab first.
           </div>
         )}
         <form id="create-invoice-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -357,7 +357,7 @@ function CreateInvoiceSlideOver({
                   color: 'var(--color-brand-dark)',
                 }}
               >
-                <span style={{ fontWeight: 500 }}>{selectedOrgName}</span>
+                <span data-private style={{ fontWeight: 500 }}>{selectedOrgName}</span>
                 <button
                   type="button"
                   onClick={() => { setOrgId(''); setSelectedOrgName(''); setOrgSearch('') }}
@@ -405,6 +405,7 @@ function CreateInvoiceSlideOver({
                         }}
                         onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
                         onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                        data-private
                       >
                         {o.name}
                       </button>
@@ -765,7 +766,7 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
           href: r => r.orgId ? `/clients/${r.orgId}` : null,
         },
         render: r => (
-          <span style={{
+          <span data-private style={{
             fontWeight: 500,
             color: 'var(--color-text)',
             overflow: 'hidden',
@@ -787,11 +788,11 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
       width: '10rem',
       render: r => (
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontWeight: 600, color: 'var(--color-text)' }}>
+          <div data-private style={{ fontWeight: 600, color: 'var(--color-text)' }}>
             {formatInvoiceCurrency(r.totalAmount, r.currency)}
           </div>
           {r.currency && r.currency !== displayCurrency && (
-            <div style={{ fontSize: '0.7rem', fontWeight: 400, color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
+            <div data-private style={{ fontSize: '0.7rem', fontWeight: 400, color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
               {formatNativeWithDisplay(r.totalAmount, r.currency).split('≈ ')[1] ?? ''}
             </div>
           )}

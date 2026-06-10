@@ -570,6 +570,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           >
             {request.requestNumber != null && (
               <span
+                data-private
                 className="font-mono"
                 style={{ color: 'var(--color-text-subtle)', fontWeight: 500 }}
               >
@@ -631,6 +632,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
               who's on this request. */}
           <div className="flex items-start" style={{ gap: '1rem' }}>
             <h1
+              data-private
               className="font-bold tracking-tight flex-1"
               style={{
                 color: 'var(--color-text)',
@@ -651,7 +653,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             style={{ gap: '0.875rem', marginTop: '0.625rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}
           >
             {request.orgName && (
-              <span className="flex items-center" style={{ gap: '0.375rem' }}>
+              <span data-private className="flex items-center" style={{ gap: '0.375rem' }}>
                 <User size={12} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
                 {request.orgName}
               </span>
@@ -809,6 +811,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 <Card.Title as="h2">Description</Card.Title>
               </Card.Header>
               <div
+                data-private
                 className="prose prose-sm max-w-none"
                 style={{ padding: '1.25rem', color: 'var(--color-text)', fontSize: '0.875rem', lineHeight: 1.6 }}
                 dangerouslySetInnerHTML={{ __html: request.description }}

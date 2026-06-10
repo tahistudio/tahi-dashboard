@@ -56,11 +56,12 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
     setOpen(false)
     setLoadingClientView(true)
     try {
-      const res = await fetch(apiPath('/api/admin/clients'))
+      const res = await fetch(apiPath('/api/admin/clients?status=active'))
       if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { clients?: Array<{ id: string; name: string }>; items?: Array<{ id: string; name: string }> }
-      const first = (data.clients ?? data.items ?? [])[0]
-      if (!first) { showToast('No clients to preview yet', 'error'); return }
+      // /api/admin/clients returns { organisations: [...] }.
+      const data = await res.json() as { organisations?: Array<{ id: string; name: string }> }
+      const first = (data.organisations ?? [])[0]
+      if (!first) { showToast('No active clients to preview yet', 'error'); return }
       setImpersonation({ orgId: first.id, orgName: first.name })
       router.push('/overview')
     } catch {

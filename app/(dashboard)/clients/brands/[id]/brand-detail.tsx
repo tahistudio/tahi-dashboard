@@ -119,7 +119,7 @@ export function BrandDetail({ brandId }: { brandId: string }) {
               )}
 
               <div className="flex-1 min-w-0">
-                <h1 className="text-xl font-bold text-[var(--color-text)] md:text-2xl break-words">
+                <h1 data-private className="text-xl font-bold text-[var(--color-text)] md:text-2xl break-words">
                   {brand.name}
                 </h1>
                 <div className="flex items-center gap-3 flex-wrap mt-1.5">
@@ -145,6 +145,7 @@ export function BrandDetail({ brandId }: { brandId: string }) {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-brand)]"
+                      data-private
                     >
                       <Globe className="w-3.5 h-3.5" />
                       {brand.website.replace(/^https?:\/\//, '')}
@@ -181,7 +182,7 @@ export function BrandDetail({ brandId }: { brandId: string }) {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <Building2 className="w-4 h-4 text-[var(--color-brand)] flex-shrink-0" />
-                    <p className="text-sm font-medium text-[var(--color-text)] truncate">
+                    <p data-private className="text-sm font-medium text-[var(--color-text)] truncate">
                       {brand.orgName}
                     </p>
                   </div>
@@ -231,6 +232,7 @@ export function BrandDetail({ brandId }: { brandId: string }) {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-sm text-[var(--color-brand)] hover:underline truncate"
+                      data-private
                     >
                       {brand.website.replace(/^https?:\/\//, '')}
                     </a>
@@ -322,7 +324,7 @@ export function BrandDetail({ brandId }: { brandId: string }) {
 
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-[var(--color-text)] truncate">
+                            <span data-private className="text-sm font-medium text-[var(--color-text)] truncate">
                               {contact.name}
                             </span>
                             {isPrimary && (
@@ -335,11 +337,11 @@ export function BrandDetail({ brandId }: { brandId: string }) {
                             )}
                           </div>
                           <div className="flex items-center gap-3 mt-0.5">
-                            <span className="text-xs text-[var(--color-text-muted)] truncate">
+                            <span data-private className="text-xs text-[var(--color-text-muted)] truncate">
                               {contact.email}
                             </span>
                             {contact.role && (
-                              <span className="text-xs text-[var(--color-text-subtle)]">
+                              <span data-private className="text-xs text-[var(--color-text-subtle)]">
                                 {contact.role}
                               </span>
                             )}

@@ -1,4 +1,4 @@
-import { getRequestAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 
 // GET /api/portal/services - list services visible in catalog
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId } = await getPortalAuth(req)
   if (!orgId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }

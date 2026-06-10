@@ -40,6 +40,19 @@ interface LegacyImpersonationData {
 
 const STORAGE_KEY = 'tahi-impersonate'
 
+// Cookie that carries the impersonated org to the server so portal GET
+// endpoints (via getPortalAuth) scope to the previewed client. Session cookie
+// (no Max-Age) so it dies on browser close; path=/ so it covers the basePath.
+const ORG_COOKIE = 'tahi-impersonate-org'
+
+function setImpersonateOrgCookie(orgId: string) {
+  try { document.cookie = `${ORG_COOKIE}=${encodeURIComponent(orgId)}; path=/; SameSite=Lax` } catch { /* no document */ }
+}
+
+function clearImpersonateOrgCookie() {
+  try { document.cookie = `${ORG_COOKIE}=; path=/; Max-Age=0; SameSite=Lax` } catch { /* no document */ }
+}
+
 // ---- Reactive sessionStorage store ----
 // Allows all components using useImpersonation() to update immediately
 // when impersonation is set or cleared, without page refresh.
@@ -104,6 +117,7 @@ function notify() {
 export function setImpersonation(data: LegacyImpersonationData) {
   const typed: ClientImpersonationData = { type: 'client', ...data }
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(typed))
+  setImpersonateOrgCookie(data.orgId)
   notify()
 }
 
@@ -115,12 +129,15 @@ export function setTeamMemberImpersonation(data: {
 }) {
   const typed: TeamMemberImpersonationData = { type: 'team_member', ...data }
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(typed))
+  // Team-member view is admin-side scoping, not a client org: drop any org cookie.
+  clearImpersonateOrgCookie()
   notify()
 }
 
 /** Clear impersonation */
 export function clearImpersonation() {
   sessionStorage.removeItem(STORAGE_KEY)
+  clearImpersonateOrgCookie()
   notify()
 }
 

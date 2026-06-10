@@ -5,7 +5,7 @@
  * Used by the TrackQueuePanel on the client overview page.
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { getRequestAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, ne, asc, gte, desc } from 'drizzle-orm'
@@ -14,7 +14,7 @@ import { getTrackEntitlements, getTrackSummary, resolveTracksConfig, buildEffect
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId } = await getPortalAuth(req)
   if (!orgId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }

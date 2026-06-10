@@ -216,10 +216,11 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
           }}
         >
           <div>
-            <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
+            <p data-private style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
               {invoice.orgName ?? 'Unknown Client'}
             </p>
             <p
+              data-private
               style={{
                 fontSize: '2.25rem',
                 fontWeight: 700,
@@ -231,7 +232,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
               {formatInvoiceCurrency(invoice.totalUsd, invoice.currency)}
             </p>
             {invoice.currency && invoice.currency !== displayCurrency && invoice.totalUsd > 0 && (
-              <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>
+              <p data-private style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>
                 {formatNativeWithDisplay(invoice.totalUsd, invoice.currency).split('\u2248 ')[1] ?? ''}
               </p>
             )}
@@ -262,13 +263,13 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
             paddingTop: '1.25rem',
           }}
         >
-          <MetaField label="Invoice ID" value={invoice.id.slice(0, 8).toUpperCase()} />
+          <MetaField label="Invoice ID" value={invoice.id.slice(0, 8).toUpperCase()} isPrivate />
           <MetaField label="Created" value={formatDate(invoice.createdAt)} />
           <MetaField label="Due Date" value={formatDate(invoice.dueDate)} highlight={isOverdue(invoice.dueDate, invoice.status)} />
           {invoice.sentAt && <MetaField label="Sent" value={formatDate(invoice.sentAt)} />}
           {invoice.paidAt && <MetaField label="Paid" value={formatDate(invoice.paidAt)} />}
-          {invoice.stripeInvoiceId && <MetaField label="Stripe ID" value={invoice.stripeInvoiceId} />}
-          {invoice.xeroInvoiceId && <MetaField label="Xero ID" value={invoice.xeroInvoiceId.slice(0, 8)} />}
+          {invoice.stripeInvoiceId && <MetaField label="Stripe ID" value={invoice.stripeInvoiceId} isPrivate />}
+          {invoice.xeroInvoiceId && <MetaField label="Xero ID" value={invoice.xeroInvoiceId.slice(0, 8)} isPrivate />}
           <MetaField
             label="Source"
             value={invoice.source === 'xero' ? 'Xero' : invoice.source === 'stripe' ? 'Stripe' : 'Manual'}
@@ -478,16 +479,16 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
               <tbody>
                 {items.map((item, i) => (
                   <tr key={item.id} style={{ borderBottom: i < items.length - 1 ? '1px solid var(--color-border-subtle)' : 'none' }}>
-                    <td style={{ padding: '0.875rem 1.25rem', fontSize: '0.875rem', color: 'var(--color-text)' }}>
+                    <td data-private style={{ padding: '0.875rem 1.25rem', fontSize: '0.875rem', color: 'var(--color-text)' }}>
                       {item.description}
                     </td>
                     <td style={{ padding: '0.875rem 1.25rem', textAlign: 'right', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
                       {item.quantity ?? 1}
                     </td>
-                    <td style={{ padding: '0.875rem 1.25rem', textAlign: 'right', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
+                    <td data-private style={{ padding: '0.875rem 1.25rem', textAlign: 'right', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
                       {formatInvoiceCurrency(item.unitPriceUsd, invoice.currency)}
                     </td>
-                    <td style={{ padding: '0.875rem 1.25rem', textAlign: 'right', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
+                    <td data-private style={{ padding: '0.875rem 1.25rem', textAlign: 'right', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
                       {formatInvoiceCurrency(item.totalUsd, invoice.currency)}
                     </td>
                   </tr>
@@ -510,7 +511,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', width: 240 }}>
             <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>Subtotal</span>
-            <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{formatInvoiceCurrency(subtotal, invoice.currency)}</span>
+            <span data-private style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{formatInvoiceCurrency(subtotal, invoice.currency)}</span>
           </div>
           {(() => {
             // Show tax if stored, or if total > subtotal (e.g. GST from Xero)
@@ -522,14 +523,14 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
             return (
               <div style={{ display: 'flex', justifyContent: 'space-between', width: 240 }}>
                 <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>{isNzd ? 'GST (15%)' : 'Tax'}</span>
-                <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{formatInvoiceCurrency(taxAmount, invoice.currency)}</span>
+                <span data-private style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{formatInvoiceCurrency(taxAmount, invoice.currency)}</span>
               </div>
             )
           })()}
           {(invoice.discountAmountUsd ?? 0) > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', width: 240 }}>
               <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>Discount</span>
-              <span style={{ fontSize: '0.8125rem', color: 'var(--color-danger)' }}>-{formatInvoiceCurrency(invoice.discountAmountUsd ?? 0, invoice.currency)}</span>
+              <span data-private style={{ fontSize: '0.8125rem', color: 'var(--color-danger)' }}>-{formatInvoiceCurrency(invoice.discountAmountUsd ?? 0, invoice.currency)}</span>
             </div>
           )}
           <div
@@ -542,7 +543,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
             }}
           >
             <span style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-text)' }}>Total</span>
-            <span style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-text)' }}>{formatInvoiceCurrency(invoice.totalUsd, invoice.currency)}</span>
+            <span data-private style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-text)' }}>{formatInvoiceCurrency(invoice.totalUsd, invoice.currency)}</span>
           </div>
         </div>
       </div>
@@ -555,13 +556,13 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
 
 // ─── Helper sub-components ────────────────────────────────────────────────────
 
-function MetaField({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+function MetaField({ label, value, highlight, isPrivate }: { label: string; value: string; highlight?: boolean; isPrivate?: boolean }) {
   return (
     <div>
       <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.125rem' }}>
         {label}
       </p>
-      <p style={{ fontSize: '0.8125rem', fontWeight: 500, color: highlight ? 'var(--color-danger)' : 'var(--color-text)' }}>
+      <p {...(isPrivate ? { 'data-private': true } : {})} style={{ fontSize: '0.8125rem', fontWeight: 500, color: highlight ? 'var(--color-danger)' : 'var(--color-text)' }}>
         {value}
       </p>
     </div>

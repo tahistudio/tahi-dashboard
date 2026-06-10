@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getRequestAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm'
 // GET /api/portal/settings/booking
 // Returns the Google Calendar booking URL configured by admin.
 export async function GET(req: NextRequest) {
-  const { userId } = await getRequestAuth(req)
+  const { userId } = await getPortalAuth(req)
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
