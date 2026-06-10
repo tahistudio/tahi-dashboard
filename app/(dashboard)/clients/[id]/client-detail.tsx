@@ -52,6 +52,8 @@ import {
   Minus,
 } from 'lucide-react'
 import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badge'
+import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
+import { Card } from '@/components/tahi/card'
 import { TrackMeter } from '@/components/tahi/track-meter'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { RequestCard } from '@/components/tahi/request-card'
@@ -2111,15 +2113,6 @@ interface InvoiceRow {
   updatedAt: string
 }
 
-const INVOICE_STATUS_STYLES: Record<string, { bg: string; text: string; dot: string }> = {
-  draft:       { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)', dot: 'var(--color-text-subtle)' },
-  sent:        { bg: 'var(--color-info-bg)', text: 'var(--color-info)', dot: 'var(--color-info)' },
-  viewed:      { bg: 'var(--color-info-bg)', text: 'var(--color-info)', dot: 'var(--color-info)' },
-  overdue:     { bg: 'var(--color-danger-bg)', text: 'var(--color-danger)', dot: 'var(--color-danger)' },
-  paid:        { bg: 'var(--color-success-bg)', text: 'var(--color-success)', dot: 'var(--color-success)' },
-  written_off: { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)', dot: 'var(--color-text-subtle)' },
-}
-
 function InvoicesTab({ clientId }: { clientId: string }) {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -2134,11 +2127,48 @@ function InvoicesTab({ clientId }: { clientId: string }) {
       .finally(() => setLoading(false))
   }, [clientId])
 
-  if (loading) {
-    return (
-      <SkeletonTable rows={4} columns={4} />
-    )
+  const formatTabDate = (dateStr: string | null): string => {
+    if (!dateStr) return '--'
+    return new Date(dateStr).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
   }
+
+  const columns: DataTableColumn<InvoiceRow>[] = [
+    {
+      key: 'status',
+      header: 'Status',
+      width: '8rem',
+      render: r => <StatusBadge status={r.status} type="invoice" />,
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      width: '10rem',
+      render: r => (
+        <span data-private style={{ fontWeight: 600, color: 'var(--color-text)' }}>
+          ${(r.totalAmount ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+        </span>
+      ),
+    },
+    {
+      key: 'currency',
+      header: 'Currency',
+      muted: true,
+      render: r => r.currency ?? 'USD',
+    },
+    {
+      key: 'dueDate',
+      header: 'Due date',
+      muted: true,
+      render: r => formatTabDate(r.dueDate),
+    },
+    {
+      key: 'createdAt',
+      header: 'Created',
+      muted: true,
+      render: r => formatTabDate(r.createdAt),
+    },
+  ]
 
   return (
     <div>
@@ -2150,63 +2180,23 @@ function InvoicesTab({ clientId }: { clientId: string }) {
         </TahiButton>
       </div>
 
-      {invoices.length === 0 ? (
-        <EmptyState
-          variant="inline"
-          icon={<DollarSign className="w-8 h-8" />}
-          title="No invoices for this client yet"
+      <Card padding="none">
+        <DataTable<InvoiceRow>
+          ariaLabel="Invoices"
+          columns={columns}
+          rows={invoices}
+          getRowId={r => r.id}
+          loading={loading}
+          onRowClick={r => router.push(`/invoices/${r.id}`)}
+          empty={
+            <EmptyState
+              variant="inline"
+              icon={<DollarSign className="w-8 h-8" />}
+              title="No invoices for this client yet"
+            />
+          }
         />
-      ) : (
-        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Status</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Amount</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Currency</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Due date</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoices.map(inv => {
-                const styles = INVOICE_STATUS_STYLES[inv.status] ?? INVOICE_STATUS_STYLES.draft
-                return (
-                  <tr
-                    key={inv.id}
-                    className="border-b border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-secondary)] cursor-pointer transition-colors"
-                    onClick={() => router.push(`/invoices/${inv.id}`)}
-                  >
-                    <td className="px-4 py-3">
-                      <span
-                        className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full"
-                        style={{ background: styles.bg, color: styles.text }}
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: styles.dot }} />
-                        {inv.status.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-[var(--color-text)] font-medium">
-                      ${(inv.totalAmount ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-4 py-3 text-[var(--color-text-muted)]">
-                      {inv.currency ?? 'USD'}
-                    </td>
-                    <td className="px-4 py-3 text-[var(--color-text-muted)]">
-                      {inv.dueDate
-                        ? new Date(inv.dueDate).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
-                        : '--'}
-                    </td>
-                    <td className="px-4 py-3 text-[var(--color-text-muted)]">
-                      {new Date(inv.createdAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      </Card>
     </div>
   )
 }
@@ -2681,12 +2671,6 @@ function FilesTab({ clientId }: { clientId: string }) {
       .finally(() => setLoading(false))
   }, [clientId])
 
-  if (loading) {
-    return (
-      <SkeletonList rows={4} />
-    )
-  }
-
   function formatSize(bytes: number | null): string {
     if (!bytes) return '--'
     if (bytes < 1024) return `${bytes} B`
@@ -2694,71 +2678,87 @@ function FilesTab({ clientId }: { clientId: string }) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
+  const columns: DataTableColumn<FileRow>[] = [
+    {
+      key: 'filename',
+      header: 'Name',
+      minWidth: '14rem',
+      render: r => (
+        <div className="flex items-center gap-2">
+          <FileText className="w-4 h-4 text-[var(--color-text-muted)] flex-shrink-0" />
+          <span data-private className="truncate max-w-[12.5rem]" style={{ fontWeight: 500, color: 'var(--color-text)' }}>
+            {r.filename}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: 'type',
+      header: 'Type',
+      muted: true,
+      render: r => r.mimeType?.split('/').pop() ?? '--',
+    },
+    {
+      key: 'size',
+      header: 'Size',
+      muted: true,
+      render: r => formatSize(r.sizeBytes),
+    },
+    {
+      key: 'request',
+      header: 'Request',
+      muted: true,
+      render: r => r.requestTitle
+        ? <span data-private className="truncate max-w-[10rem] inline-block">{r.requestTitle}</span>
+        : '--',
+    },
+    {
+      key: 'createdAt',
+      header: 'Uploaded',
+      muted: true,
+      render: r => new Date(r.createdAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' }),
+    },
+    {
+      key: 'download',
+      header: '',
+      align: 'right',
+      width: '8rem',
+      render: r => (
+        <a
+          href={apiPath(`/api/uploads/serve/${r.storageKey}`)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] font-medium"
+        >
+          <Download className="w-3.5 h-3.5" />
+          Download
+        </a>
+      ),
+    },
+  ]
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-semibold text-[var(--color-text)]">Files ({files.length})</h2>
       </div>
 
-      {files.length === 0 ? (
-        <EmptyState
-          variant="inline"
-          icon={<File className="w-8 h-8" />}
-          title="No files uploaded for this client yet"
+      <Card padding="none">
+        <DataTable<FileRow>
+          ariaLabel="Files"
+          columns={columns}
+          rows={files}
+          getRowId={r => r.id}
+          loading={loading}
+          empty={
+            <EmptyState
+              variant="inline"
+              icon={<File className="w-8 h-8" />}
+              title="No files uploaded for this client yet"
+            />
+          }
         />
-      ) : (
-        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Name</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Type</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Size</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Request</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Uploaded</th>
-                <th className="text-right px-4 py-3 font-medium text-[var(--color-text-muted)]"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {files.map(file => (
-                <tr key={file.id} className="border-b border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-secondary)] transition-colors">
-                  <td className="px-4 py-3 text-[var(--color-text)] font-medium">
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-[var(--color-text-muted)] flex-shrink-0" />
-                      <span className="truncate max-w-[12.5rem]">{file.filename}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-[var(--color-text-muted)]">
-                    {file.mimeType?.split('/').pop() ?? '--'}
-                  </td>
-                  <td className="px-4 py-3 text-[var(--color-text-muted)]">
-                    {formatSize(file.sizeBytes)}
-                  </td>
-                  <td className="px-4 py-3 text-[var(--color-text-muted)]">
-                    {file.requestTitle ? (
-                      <span className="truncate max-w-[10rem] inline-block">{file.requestTitle}</span>
-                    ) : '--'}
-                  </td>
-                  <td className="px-4 py-3 text-[var(--color-text-muted)]">
-                    {new Date(file.createdAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <a
-                      href={apiPath(`/api/uploads/serve/${file.storageKey}`)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] font-medium"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      Download
-                    </a>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      </Card>
     </div>
   )
 }
