@@ -37,6 +37,8 @@ export interface CapacityResponse {
   delivered?: CapRequest[]
   /** Per-client override (added in the override slice). */
   tracksMode?: 'auto' | 'custom' | 'off'
+  /** Whether to show the ghost upgrade cards (auto mode + retainer plan only). */
+  showGhosts?: boolean
 }
 
 const UP_NEXT = new Set(['submitted', 'queued'])

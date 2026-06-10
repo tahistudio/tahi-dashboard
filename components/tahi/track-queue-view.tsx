@@ -57,6 +57,8 @@ export interface TrackQueueViewProps {
   basePath?: string
   onReorder?: (trackId: string, orderedRequestIds: string[]) => Promise<void>
   onUpgradeClick?: () => void
+  /** Unified (tracks-off) mode: one full-width board, no slot/track framing. */
+  unified?: boolean
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -236,13 +238,14 @@ function EmptyLane({ label }: { label: string }) {
 
 // ── Track card ───────────────────────────────────────────────────────────────
 
-function TrackCard({ track, basePath, onReorder, onUpgradeClick }: {
+function TrackCard({ track, basePath, onReorder, onUpgradeClick, unified }: {
   track: TrackLanes; basePath: string
   onReorder?: (trackId: string, orderedRequestIds: string[]) => Promise<void>
   onUpgradeClick?: () => void
+  unified?: boolean
 }) {
   const isLarge = track.type === 'large'
-  const Icon = isLarge ? Layers : AlignLeft
+  const Icon = unified ? Layers : isLarge ? Layers : AlignLeft
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [localQueue, setLocalQueue] = useState(track.upNext)
@@ -292,7 +295,7 @@ function TrackCard({ track, basePath, onReorder, onUpgradeClick }: {
     setPriorityModal(null)
   }, [priorityModal, onReorder, track.id])
 
-  const showUpsell = localQueue.length >= 3
+  const showUpsell = !unified && localQueue.length >= 3
   const slotActive = track.inProgress.length > 0 || track.review.length > 0
   const statBits: string[] = []
   if (track.deliveredCount > 0) statBits.push(`${track.deliveredCount} delivered (30d)`)
@@ -306,14 +309,16 @@ function TrackCard({ track, basePath, onReorder, onUpgradeClick }: {
           <div style={{ width: '1.75rem', height: '1.75rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '0 0.625rem 0 0.625rem', background: isLarge ? 'var(--color-brand-50)' : 'var(--color-bg-tertiary)' }}>
             <Icon size={14} style={{ color: isLarge ? 'var(--color-brand)' : 'var(--color-text-muted)' }} />
           </div>
-          <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--color-text)' }}>{isLarge ? 'Large track' : 'Small track'}</span>
-          {track.isPriorityTrack && (
+          <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--color-text)' }}>{unified ? 'Your work' : isLarge ? 'Large track' : 'Small track'}</span>
+          {!unified && track.isPriorityTrack && (
             <span style={{ fontSize: '0.625rem', fontWeight: 600, padding: '0.0625rem 0.375rem', borderRadius: 'var(--radius-full)', background: 'var(--color-brand-50)', color: 'var(--color-brand-dark)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Priority</span>
           )}
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3125rem', marginLeft: 'auto', fontSize: '0.6875rem', fontWeight: 600, color: slotActive ? 'var(--color-brand-dark)' : 'var(--color-text-subtle)' }}>
-            <span aria-hidden="true" style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: slotActive ? 'var(--color-brand)' : 'var(--color-border)' }} />
-            {slotActive ? 'Active' : 'Open'}
-          </span>
+          {!unified && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3125rem', marginLeft: 'auto', fontSize: '0.6875rem', fontWeight: 600, color: slotActive ? 'var(--color-brand-dark)' : 'var(--color-text-subtle)' }}>
+              <span aria-hidden="true" style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: slotActive ? 'var(--color-brand)' : 'var(--color-border)' }} />
+              {slotActive ? 'Active' : 'Open'}
+            </span>
+          )}
         </div>
 
         {/* Stat strip */}
@@ -342,7 +347,7 @@ function TrackCard({ track, basePath, onReorder, onUpgradeClick }: {
             {track.inProgress.length === 0 ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', padding: '0.5rem', borderRadius: 'var(--radius-button)', border: '1px dashed var(--color-border)' }}>
                 <Clock size={12} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
-                <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>Your slot is open</span>
+                <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>{unified ? 'Nothing in progress' : 'Your slot is open'}</span>
               </div>
             ) : track.inProgress.map(item => <LaneCard key={item.id} item={item} basePath={basePath} accent="brand" />)}
           </div>
@@ -441,7 +446,7 @@ function GhostCard({ ghost, onUpgradeClick }: { ghost: GhostTrack; onUpgradeClic
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
-export function TrackQueueView({ tracks, ghosts = [], basePath = '/requests', onReorder, onUpgradeClick }: TrackQueueViewProps) {
+export function TrackQueueView({ tracks, ghosts = [], basePath = '/requests', onReorder, onUpgradeClick, unified }: TrackQueueViewProps) {
   if (tracks.length === 0 && ghosts.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '3rem 1.5rem', background: 'var(--color-bg)', borderRadius: 'var(--radius-card)', border: '1px solid var(--color-border-subtle)' }}>
@@ -458,11 +463,11 @@ export function TrackQueueView({ tracks, ghosts = [], basePath = '/requests', on
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 30rem), 1fr))', gap: '1rem' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: unified ? '1fr' : 'repeat(auto-fill, minmax(min(100%, 30rem), 1fr))', gap: '1rem' }}>
       {tracks.map(track => (
-        <TrackCard key={track.id} track={track} basePath={basePath} onReorder={onReorder} onUpgradeClick={onUpgradeClick} />
+        <TrackCard key={track.id} track={track} basePath={basePath} onReorder={onReorder} onUpgradeClick={onUpgradeClick} unified={unified} />
       ))}
-      {ghosts.map((ghost, i) => (
+      {!unified && ghosts.map((ghost, i) => (
         <GhostCard key={`ghost-${ghost.type}-${i}`} ghost={ghost} onUpgradeClick={onUpgradeClick} />
       ))}
     </div>

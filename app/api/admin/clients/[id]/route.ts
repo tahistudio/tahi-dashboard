@@ -188,6 +188,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     billingModel: string | null
     retainerStartDate: string | null
     retainerEndDate: string | null
+    tracksMode: string | null
+    customSmallTracks: number | null
+    customLargeTracks: number | null
   }>
 
   const now = new Date().toISOString()
@@ -248,6 +251,24 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       await drizzle.run(sql`UPDATE organisations SET ${sql.raw(flag)} = 1 WHERE id = ${id}`)
     } catch {
       // Flag column does not exist yet — silently skip.
+    }
+  }
+
+  // Per-client tracks override (migration 0079). Raw SQL + try/catch so saving
+  // other fields never crashes between deploy and the migration running.
+  const tracksColumnMap: Record<string, string> = {
+    tracksMode: 'tracks_mode',
+    customSmallTracks: 'custom_small_tracks',
+    customLargeTracks: 'custom_large_tracks',
+  }
+  for (const field of Object.keys(tracksColumnMap)) {
+    if (field in body) {
+      const val = (body as Record<string, unknown>)[field] ?? null
+      try {
+        await drizzle.run(sql`UPDATE organisations SET ${sql.raw(tracksColumnMap[field])} = ${val} WHERE id = ${id}`)
+      } catch {
+        // Column does not exist yet (pre-migration-0079) — silently skip.
+      }
     }
   }
 

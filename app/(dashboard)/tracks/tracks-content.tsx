@@ -19,11 +19,12 @@ import { EmptyState } from '@/components/tahi/empty-state'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { apiPath } from '@/lib/api'
 import { getUpgradeGhostTracks, type GhostTrack } from '@/lib/plan-utils'
-import { bucketTracks, type CapacityResponse } from '@/lib/track-lanes'
+import { bucketTracks, bucketUnified, type CapacityResponse } from '@/lib/track-lanes'
 
 export function TracksContent({ isAdmin }: { isAdmin: boolean }) {
   const [tracks, setTracks] = useState<TrackLanes[]>([])
   const [ghosts, setGhosts] = useState<GhostTrack[]>([])
+  const [unified, setUnified] = useState(false)
   const [loading, setLoading] = useState(!isAdmin)
 
   const fetchTracks = useCallback(async () => {
@@ -33,10 +34,21 @@ export function TracksContent({ isAdmin }: { isAdmin: boolean }) {
       const res = await fetch(apiPath('/api/portal/capacity'))
       if (!res.ok) throw new Error('Failed')
       const data = await res.json() as CapacityResponse
-      setTracks(bucketTracks(data))
-      setGhosts(getUpgradeGhostTracks(data.subscription?.planType ?? null, !!data.subscription?.hasPrioritySupport))
+      if (data.tracksMode === 'off') {
+        // Tracks off: one unified board, no per-track split, no upsell.
+        setUnified(true)
+        setTracks([bucketUnified(data)])
+        setGhosts([])
+      } else {
+        setUnified(false)
+        setTracks(bucketTracks(data))
+        // Ghost upsell only when the server says so (auto mode + retainer plan).
+        setGhosts(data.showGhosts
+          ? getUpgradeGhostTracks(data.subscription?.planType ?? null, !!data.subscription?.hasPrioritySupport)
+          : [])
+      }
     } catch {
-      setTracks([]); setGhosts([])
+      setTracks([]); setGhosts([]); setUnified(false)
     } finally {
       setLoading(false)
     }
@@ -44,9 +56,11 @@ export function TracksContent({ isAdmin }: { isAdmin: boolean }) {
 
   useEffect(() => { fetchTracks() }, [fetchTracks])
 
-  const handleReorder = async (trackId: string, orderedRequestIds: string[]) => {
+  // Org-scoped reorder: works for every mode (auto real tracks, custom synthetic
+  // shells, and the unified board), since queueOrder is a single org-wide order.
+  const handleReorder = async (_trackId: string, orderedRequestIds: string[]) => {
     try {
-      const res = await fetch(apiPath(`/api/portal/tracks/${trackId}/reorder`), {
+      const res = await fetch(apiPath('/api/portal/capacity/reorder'), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ requestIds: orderedRequestIds }),
       })
@@ -94,6 +108,7 @@ export function TracksContent({ isAdmin }: { isAdmin: boolean }) {
           tracks={tracks}
           ghosts={ghosts}
           basePath="/requests"
+          unified={unified}
           onReorder={handleReorder}
           onUpgradeClick={() => { window.location.href = '/billing' }}
         />
