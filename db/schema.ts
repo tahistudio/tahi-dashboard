@@ -4,6 +4,7 @@ import {
   integer,
   real,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/sqlite-core'
 import { sql } from 'drizzle-orm'
 
@@ -224,6 +225,29 @@ export const fieldRestrictions = sqliteTable('field_restrictions', {
 }, (table) => [
   index('idx_field_restrictions_role').on(table.roleId),
   index('idx_field_restrictions_resource').on(table.resource),
+])
+
+// Feature visibility (granular permissions, delivery of SPECS/granular-permissions.md).
+// Layered on top of #119 RBAC: lets the owner turn whole features or sub-parts
+// (page > tab > card, keyed by FEATURE_TREE in lib/feature-tree.ts) on/off for a
+// specific role, a specific team member, OR a specific client org. Resolution is
+// most-specific-wins (team_member/org override > role grant > default); a `deny`
+// beats an `allow` at the same specificity. `reason` is the free-text "why".
+export const featureVisibility = sqliteTable('feature_visibility', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // Who the rule applies to.
+  subjectType: text('subject_type').notNull(), // 'role' | 'team_member' | 'organisation'
+  subjectId: text('subject_id').notNull(),     // roleId | teamMemberId | orgId
+  // Dotted FEATURE_TREE path, e.g. 'requests', 'requests.board', 'clients.billing_card'.
+  featureKey: text('feature_key').notNull(),
+  effect: text('effect').notNull().default('deny'), // 'allow' | 'deny'
+  reason: text('reason'),                            // free-text why
+  createdById: text('created_by_id'),
+  ...timestamps,
+}, (table) => [
+  index('idx_feature_visibility_subject').on(table.subjectType, table.subjectId),
+  index('idx_feature_visibility_feature').on(table.featureKey),
+  uniqueIndex('idx_feature_visibility_unique').on(table.subjectType, table.subjectId, table.featureKey),
 ])
 
 // ============================================================

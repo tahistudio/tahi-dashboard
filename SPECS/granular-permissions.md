@@ -1,6 +1,11 @@
 # Granular Permissions — design for approval
 
-Status: 2026-06-10 — DESIGN, awaiting Liam's approval. Nothing built yet.
+Status: 2026-06-10 — APPROVED by Liam, building. Decisions locked:
+- Architecture: approved as written (build on #119 + feature_visibility + FEATURE_TREE).
+- Granularity v1: **page + tab/card level** (not per-action yet).
+- Default posture: new clients are **ON by default** for client-safe features; toggle off.
+- Reason capture: **free-text** reason per override.
+Build order S0 -> S5 below.
 Owner ask: "every user who comes on, every organization/client that comes on, I
 can select exactly what they can see, why they can see it, and how much they can
 see — turn off entire features or just certain parts of a feature, right down to

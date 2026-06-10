@@ -1854,6 +1854,26 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_tasks_schedule_row ON tasks(schedule_row_id)`,
     ],
   },
+  {
+    name: '0077',
+    description: 'Granular permissions (SPECS/granular-permissions.md) S0: feature_visibility — per-role / per-team-member / per-org allow|deny overrides on FEATURE_TREE feature keys (page > tab > card) with a free-text reason. Layered on top of #119 RBAC. New table referenced by nothing yet, so safe to deploy before this runs. Idempotent.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS feature_visibility (
+        id TEXT PRIMARY KEY NOT NULL,
+        subject_type TEXT NOT NULL,
+        subject_id TEXT NOT NULL,
+        feature_key TEXT NOT NULL,
+        effect TEXT NOT NULL DEFAULT 'deny',
+        reason TEXT,
+        created_by_id TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_feature_visibility_subject ON feature_visibility(subject_type, subject_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_feature_visibility_feature ON feature_visibility(feature_key)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_feature_visibility_unique ON feature_visibility(subject_type, subject_id, feature_key)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
