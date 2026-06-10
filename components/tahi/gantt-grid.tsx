@@ -24,6 +24,8 @@
 
 import React from 'react'
 import type { DeliveryStatus } from '@/lib/delivery-status'
+// Pure-module status maps so server code (delivery-watch cron) can share them.
+import { DELIVERY_STATUS_COLOR, DELIVERY_STATUS_LABEL } from '@/lib/delivery-status-labels'
 
 export type RowOwner = 'tahi' | 'client' | 'joint' | 'tahi_parallel'
 export type RowType = 'section_header' | 'task' | 'gate' | 'critical_gate'
@@ -55,24 +57,9 @@ interface GanttGridProps {
   statusByRow?: Record<string, DeliveryStatus>
 }
 
-// Delivery status dot colours (hardcoded hex, brand-locked visual like OWNER_BG).
-export const DELIVERY_STATUS_COLOR: Record<DeliveryStatus, string> = {
-  done: '#4ade80',
-  in_progress: '#60a5fa',
-  not_started: '#cbd5e1',
-  at_risk: '#fb923c',
-  delayed: '#f87171',
-  blocked: '#b91c1c',
-}
-
-export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
-  done: 'Done',
-  in_progress: 'In progress',
-  not_started: 'Not started',
-  at_risk: 'At risk',
-  delayed: 'Delayed',
-  blocked: 'Blocked',
-}
+// Re-exported (imported at top) so existing imports from
+// '@/components/tahi/gantt-grid' keep working.
+export { DELIVERY_STATUS_COLOR, DELIVERY_STATUS_LABEL }
 
 // Owner → colour. Hardcoded hex (not CSS vars) per CLAUDE.md guidance for
 // brand-locked visuals; matches the printed PDF reference exactly.

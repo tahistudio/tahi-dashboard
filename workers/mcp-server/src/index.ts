@@ -659,6 +659,7 @@ const TOOLS: ToolDef[] = [
   tool('cron_daily_summary', 'Computes day-over-day metrics (new leads, scoring, calls, replies, promotions) and pushes a single in-app notification to the default lead owner. Skip if a daily_summary was already pushed in the last 23h.'),
   tool('cron_affiliate_reactivation', 'Finds affiliateCode values that haven\'t sent a lead in the last 60 days (default), pushes a reactivation notification for each. Capped at 5 notifications per run; 30-day dedup per code.'),
   tool('cron_pre_call_digest', 'Scans discovery_calls scheduled in the next 25-35 min window. For each: composes a pre-call brief (lead context + AI score + briefing + questions + sources) and emails to leads.preCallDigestEmail (default business@tahi.studio). Idempotent.'),
+  tool('cron_delivery_watch', 'Delivery spine: scans active engagements and pushes a notification to the default owner for each client whose delivery rollup is off track (blocked / delayed / at_risk). One ping per off-track client per 23h.'),
 
   // ── Google Drive: Gemini transcript autopull ─────────────────────────
   tool('drive_sync_gemini_transcripts', 'Scan Google Drive for "Notes by Gemini" docs modified in the last N hours, parse the summary + transcript + next steps, and write them to matching discovery_calls. Matches by parsed meeting time (±2h) + attendee name in the call title or attendees JSON. Idempotent — already-synced calls are skipped.', {
@@ -731,6 +732,11 @@ const TOOLS: ToolDef[] = [
     requestId: prop('string', 'Request ID'),
     scheduleRowId: prop('string', 'Schedule row ID to link to. Omit to unlink.'),
   }, ['requestId']),
+  tool('get_engagement_delivery_status', 'Engagement-level delivery rollup across ALL schedules of a deal (dealId) or client org (orgId): overall status, phases done, per-schedule breakdown, and off-track rows. Pass exactly one of dealId / orgId.', {
+    dealId: prop('string', 'Deal ID (aggregate across the deal\'s schedules)'),
+    orgId: prop('string', 'Client org ID (aggregate across the org\'s schedules)'),
+  }),
+  tool('list_off_track_engagements', 'List client engagements whose delivery rollup is currently off track (blocked / delayed / at_risk), worst first, with off-track phase counts. Powers the overview off-track view.', {}),
   tool('create_schedule', 'Create a new project schedule. Optionally seed via `templateId` (instantiates sections + rows from a saved schedule_template snapshot) or with a `rows` array (legacy). Each row: { rowType, label, owner?, startWeek?, endWeek?, riskFlag? }', {
     title: prop('string', 'Schedule title (optional when templateId is provided — falls back to template title)'),
     subtitle: prop('string', 'Subtitle / eyebrow text (default "PROJECT SCHEDULE, GANTT")'),
@@ -1693,6 +1699,8 @@ async function executeTool(
       return json(await apiWrite('/api/admin/cron/auto-promote-calls', token, 'POST', {}))
     case 'cron_daily_summary':
       return json(await apiWrite('/api/admin/cron/daily-summary', token, 'POST', {}))
+    case 'cron_delivery_watch':
+      return json(await apiWrite('/api/admin/cron/delivery-watch', token, 'POST', {}))
     case 'cron_affiliate_reactivation':
       return json(await apiWrite('/api/admin/cron/affiliate-reactivation', token, 'POST', {}))
     case 'cron_pre_call_digest':
@@ -1770,6 +1778,14 @@ async function executeTool(
       return json(await apiGet(`/api/admin/schedules/${s('scheduleId')}/delivery-status`, token))
     case 'get_schedule_linked_work':
       return json(await apiGet(`/api/admin/schedules/${s('scheduleId')}/linked-work`, token))
+    case 'get_engagement_delivery_status': {
+      const dId = typeof args.dealId === 'string' ? args.dealId : ''
+      const oId = typeof args.orgId === 'string' ? args.orgId : ''
+      const qp = dId ? `dealId=${encodeURIComponent(dId)}` : `orgId=${encodeURIComponent(oId)}`
+      return json(await apiGet(`/api/admin/engagements/delivery-status?${qp}`, token))
+    }
+    case 'list_off_track_engagements':
+      return json(await apiGet('/api/admin/engagements/off-track', token))
     case 'create_schedule':
       return json(await apiWrite('/api/admin/schedules', token, 'POST', args as Record<string, unknown>))
     case 'update_schedule': {

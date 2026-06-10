@@ -11,6 +11,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useToast } from '@/components/tahi/toast'
+import { EngagementHealthCard } from '@/components/tahi/engagement-health-card'
 import { parseActivityMetadata } from '@/lib/activity-meta'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { DISPLAY_CURRENCIES } from '@/lib/currency'
@@ -679,6 +680,8 @@ export function DealDetail({ dealId }: { dealId: string }) {
             orgId={deal.orgId ?? null}
             dealTitle={deal.title}
           />
+          {/* Delivery spine (#148) Slice 4 — live rollup across this deal's schedules. */}
+          <EngagementHealthCard dealId={dealId} />
           <SharedSidebarCard className="flex flex-col" style={{ alignSelf: 'stretch' }}>
           {/* Stage selector */}
           <SidebarCard title="Stage">

@@ -107,6 +107,13 @@ const CRONS: CronDef[] = [
     schedule: 'Weekly Mon 09:00 UK (disabled by default)',
   },
   {
+    cron: 'delivery-watch',
+    label: 'Delivery off-track watch',
+    description: 'Scans active engagements (schedules with linked requests/tasks) and notifies the owner when a client\'s delivery rollup is blocked / delayed / at risk. One ping per off-track client per 23h.',
+    endpoint: '/api/admin/cron/delivery-watch',
+    schedule: 'Daily (or every few hours)',
+  },
+  {
     cron: 'round-table-advance',
     label: 'Round table orchestrator',
     description: 'Hand-cranks the round-table drafting pipeline forward by one stage per draft (oldest first, up to 3 drafts per tick). Picks up any draft in a non-terminal status (queued, researching, strategising, headline_lab, drafting, reviewing, editing, signing_off, covering). Drafts continue until ready_for_publish, failed, or cost_capped. Safe to run frequently — each stage has its own cost cap check.',

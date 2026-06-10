@@ -22,6 +22,7 @@ export type NotificationEventType =
   | 'request_created'
   | 'retainer_churn_risk'
   | 'retainer_upsell_opportunity'
+  | 'delivery_off_track'
 
 export type NotificationEntityType =
   | 'request'

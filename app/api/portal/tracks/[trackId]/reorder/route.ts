@@ -59,7 +59,8 @@ export async function PUT(
 
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
 
-  // Update position for each request, but only if the request belongs to the client's org
+  // Update position for each request, but only if the request belongs to the
+  // client's org AND is client-visible (not an internal-only request).
   for (let i = 0; i < requestIds.length; i++) {
     // Verify each request belongs to this org before updating
     const [request] = await drizzle
@@ -68,7 +69,8 @@ export async function PUT(
       .where(
         and(
           eq(schema.requests.id, requestIds[i]),
-          eq(schema.requests.orgId, orgId)
+          eq(schema.requests.orgId, orgId),
+          eq(schema.requests.isInternal, false)
         )
       )
       .limit(1)

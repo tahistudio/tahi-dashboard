@@ -16,6 +16,8 @@ import { AIDailyBriefing } from '@/components/tahi/ai-briefing-card'
 import { KPIStrip as SharedKPIStrip, KPICell } from '@/components/tahi/kpi-strip'
 import { FeatureCard } from '@/components/tahi/feature-card'
 import { apiPath } from '@/lib/api'
+import { DELIVERY_STATUS_COLOR, DELIVERY_STATUS_LABEL } from '@/components/tahi/gantt-grid'
+import type { DeliveryStatus } from '@/lib/delivery-status'
 import { calculatePipelineTotals } from '@/lib/pipeline-math'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { formatDistanceToNow } from 'date-fns'
@@ -164,6 +166,9 @@ export function AdminOverview({ userName }: { userName: string }) {
 
       {/* 3. KPI strip */}
       <KPIStrip kpis={kpis} loading={loading} />
+
+      {/* 3b. Engagements off track (delivery spine #148, Slice 5) */}
+      <OffTrackEngagementsWidget />
 
       {/* 4. Recent requests + Upcoming calls side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-5" style={{ gap: 'var(--space-6)' }}>
@@ -887,6 +892,70 @@ function StatCard({
 }
 
 // ─── Section card wrapper ─────────────────────────────────────────────────────
+
+// ─── Off-track engagements widget (delivery spine #148, Slice 5) ─────────────
+
+interface OffTrackEngagement {
+  orgId: string
+  orgName: string
+  status: DeliveryStatus
+  pctComplete: number
+  rowsDone: number
+  rowsTotal: number
+  offTrackCount: number
+}
+
+function OffTrackEngagementsWidget() {
+  const [items, setItems] = useState<OffTrackEngagement[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/engagements/off-track'))
+      .then(r => (r.ok ? r.json() as Promise<{ engagements?: OffTrackEngagement[] }> : { engagements: [] }))
+      .then(d => setItems(d.engagements ?? []))
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  // Quiet until known, and hidden entirely when every engagement is on track
+  // (no clutter on a healthy overview).
+  if (loading || items.length === 0) return null
+
+  return (
+    <SectionCard title="Engagements off track" action={{ label: 'View schedules', href: '/schedules' }}>
+      {items.map((e, i) => (
+        <Link
+          key={e.orgId}
+          href={`/clients/${e.orgId}`}
+          className="flex items-center hover:bg-[var(--color-bg-secondary)]"
+          style={{
+            padding: 'var(--space-4) var(--space-5)',
+            borderBottom: i < items.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
+            gap: 'var(--space-3)',
+            textDecoration: 'none',
+            transition: 'background 140ms ease',
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{ width: '0.625rem', height: '0.625rem', borderRadius: '50%', background: DELIVERY_STATUS_COLOR[e.status], flexShrink: 0 }}
+          />
+          <div className="flex-1" style={{ minWidth: 0 }}>
+            <p style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {e.orgName}
+            </p>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
+              {e.rowsDone}/{e.rowsTotal} phases done · {e.offTrackCount} off track
+            </p>
+          </div>
+          <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: DELIVERY_STATUS_COLOR[e.status], flexShrink: 0 }}>
+            {DELIVERY_STATUS_LABEL[e.status]}
+          </span>
+        </Link>
+      ))}
+    </SectionCard>
+  )
+}
 
 function SectionCard({
   title, action, children,

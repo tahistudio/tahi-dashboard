@@ -5,7 +5,9 @@ import { schema } from '@/db/d1'
 import { eq, and, ne, asc } from 'drizzle-orm'
 
 // ── GET /api/portal/tracks ────────────────────────────────────────────────
-// Client portal: return the authenticated org's tracks with active and queued tasks
+// Client portal: return the authenticated org's tracks with active and queued
+// requests. Internal-only requests (isInternal=true) are never exposed to the
+// client, matching every other portal route.
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
 
@@ -41,7 +43,8 @@ export async function GET(req: NextRequest) {
     .from(schema.tracks)
     .where(eq(schema.tracks.subscriptionId, sub.id))
 
-  // Get all non-delivered/archived requests for this org, ordered by queue
+  // Get all non-delivered/archived requests for this org, ordered by queue.
+  // isInternal=false: internal admin-created requests stay hidden from the client.
   const requests = await drizzle
     .select({
       id: schema.requests.id,
@@ -56,6 +59,7 @@ export async function GET(req: NextRequest) {
     .from(schema.requests)
     .where(and(
       eq(schema.requests.orgId, orgId),
+      eq(schema.requests.isInternal, false),
       ne(schema.requests.status, 'delivered'),
       ne(schema.requests.status, 'archived'),
     ))

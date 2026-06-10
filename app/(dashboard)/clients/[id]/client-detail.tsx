@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { apiPath } from '@/lib/api'
+import { EngagementHealthCard } from '@/components/tahi/engagement-health-card'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { stageColour } from '@/lib/chart-colors'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
@@ -452,6 +453,8 @@ function OverviewTab({
 
         {/* Right column (narrow) */}
         <div className="flex flex-col gap-6">
+          {/* Delivery spine (#148) Slice 4 — live rollup across this client's schedules. */}
+          <EngagementHealthCard orgId={org.id} />
           {recentRequests.length > 0 && (
             <RequestMixCard requests={recentRequests} />
           )}
