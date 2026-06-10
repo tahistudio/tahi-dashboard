@@ -56,13 +56,15 @@ export function TracksContent({ isAdmin }: { isAdmin: boolean }) {
 
   useEffect(() => { fetchTracks() }, [fetchTracks])
 
-  // Org-scoped reorder: works for every mode (auto real tracks, custom synthetic
-  // shells, and the unified board), since queueOrder is a single org-wide order.
-  const handleReorder = async (_trackId: string, orderedRequestIds: string[]) => {
+  // Org-scoped reorder / cross-track move: passing the target trackId lets the
+  // server bind the moved request to that track (type-validated: a large_task can
+  // never land in a small track). Works for every mode (auto real tracks, custom
+  // synthetic shells, and the unified board).
+  const handleReorder = async (trackId: string, orderedRequestIds: string[]) => {
     try {
       const res = await fetch(apiPath('/api/portal/capacity/reorder'), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestIds: orderedRequestIds }),
+        body: JSON.stringify({ trackId, requestIds: orderedRequestIds }),
       })
       if (!res.ok) throw new Error('Failed')
       await fetchTracks()

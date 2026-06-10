@@ -9,7 +9,7 @@ import { getPortalAuth } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, ne, asc, gte, desc } from 'drizzle-orm'
-import { getTrackEntitlements, getTrackSummary, resolveTracksConfig, buildEffectiveTracks } from '@/lib/plan-utils'
+import { getTrackEntitlements, getTracksConfigSummary, resolveTracksConfig, buildEffectiveTracks } from '@/lib/plan-utils'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -61,6 +61,7 @@ export async function GET(req: NextRequest) {
       queueOrder: schema.requests.queueOrder,
       dueDate: schema.requests.dueDate,
       createdAt: schema.requests.createdAt,
+      trackId: schema.requests.trackId,
     })
     .from(schema.requests)
     .where(and(
@@ -127,7 +128,7 @@ export async function GET(req: NextRequest) {
     : buildEffectiveTracks(tracks, config.smallTracks, config.largeTracks)
 
   const entitlements = getTrackEntitlements(sub?.planType ?? null, sub?.hasPrioritySupport ?? false)
-  const summary = getTrackSummary(sub?.planType ?? null, sub?.hasPrioritySupport ?? false)
+  const summary = getTracksConfigSummary(config)
 
   return NextResponse.json({
     subscription: sub ?? null,

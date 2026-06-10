@@ -1477,6 +1477,8 @@ interface CapacityData {
   summary: string
   tracks: TrackData[]
   queue: Array<{ id: string; title: string; status: string; priority: string }>
+  /** Override-aware upsell gate: false when the client is on custom/off tracks. */
+  showGhosts?: boolean
 }
 
 function TrackCapacityCard() {
@@ -1498,15 +1500,18 @@ function TrackCapacityCard() {
 
   const plan = data.subscription
 
-  // Build upsell messages based on plan
+  // Build upsell messages based on plan, but only when the server says to (the
+  // per-client override suppresses upsell on custom / tracks-off clients).
   const upsells: string[] = []
-  if (plan.planType === 'maintain' && !plan.hasPrioritySupport) {
-    upsells.push('Add Priority Support for an extra small track')
-    upsells.push('Upgrade to Scale for large tasks and more capacity')
-  } else if (plan.planType === 'maintain' && plan.hasPrioritySupport) {
-    upsells.push('Upgrade to Scale for large tasks and more capacity')
-  } else if (plan.planType === 'scale' && !plan.hasPrioritySupport) {
-    upsells.push('Add Priority Support for an extra small track')
+  if (data.showGhosts !== false) {
+    if (plan.planType === 'maintain' && !plan.hasPrioritySupport) {
+      upsells.push('Add Priority Support for an extra small track')
+      upsells.push('Upgrade to Scale for large tasks and more capacity')
+    } else if (plan.planType === 'maintain' && plan.hasPrioritySupport) {
+      upsells.push('Upgrade to Scale for large tasks and more capacity')
+    } else if (plan.planType === 'scale' && !plan.hasPrioritySupport) {
+      upsells.push('Add Priority Support for an extra small track')
+    }
   }
 
   return (

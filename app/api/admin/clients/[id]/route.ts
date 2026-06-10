@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { eq, desc, and, sql } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { applyBillingDerivation } from '@/lib/billing-derivation'
+import { resolveTracksConfig, buildEffectiveTracks } from '@/lib/plan-utils'
 
 type BillingDb = Parameters<typeof applyBillingDerivation>[0]
 
@@ -140,10 +141,13 @@ export async function GET(req: NextRequest, { params }: Params) {
       .limit(10),
   ])
 
-  // Get tracks if subscription exists
+  // Get tracks if subscription exists. The header track meter must agree with
+  // the Track Queue tab + overview, so we apply the per-client override here
+  // (tracks_mode / custom_small_tracks / custom_large_tracks) and return the
+  // EFFECTIVE tracks, exactly like the capacity endpoints do.
   let tracks: unknown[] = []
   if (subscription) {
-    tracks = await drizzle
+    const rawTracks = await drizzle
       .select({
         id: schema.tracks.id,
         type: schema.tracks.type,
@@ -154,6 +158,57 @@ export async function GET(req: NextRequest, { params }: Params) {
       .from(schema.tracks)
       .leftJoin(schema.requests, eq(schema.tracks.currentRequestId, schema.requests.id))
       .where(eq(schema.tracks.subscriptionId, subscription.id))
+
+    // Per-client tracks override (migration 0079). Wrapped so the endpoint keeps
+    // working between deploy and the migration running (missing columns throw).
+    let override: { tracksMode: string | null; customSmallTracks: number | null; customLargeTracks: number | null } | undefined
+    try {
+      ;[override] = await drizzle
+        .select({
+          tracksMode: schema.organisations.tracksMode,
+          customSmallTracks: schema.organisations.customSmallTracks,
+          customLargeTracks: schema.organisations.customLargeTracks,
+        })
+        .from(schema.organisations)
+        .where(eq(schema.organisations.id, id))
+        .limit(1)
+    } catch {
+      override = undefined
+    }
+
+    const config = resolveTracksConfig(
+      override,
+      subscription.planType ?? null,
+      subscription.hasPrioritySupport ?? false,
+    )
+
+    if (config.mode === 'off') {
+      // Unified board: no per-track meter.
+      tracks = []
+    } else {
+      // Titles are keyed by the real track row's currentRequestId so synthetic
+      // shells (currentRequestId = null) correctly render as open slots.
+      const titleById = new Map(
+        rawTracks.map(t => [t.id, t.currentRequestTitle ?? null] as const),
+      )
+      const effective = buildEffectiveTracks(
+        rawTracks.map(t => ({
+          id: t.id,
+          type: t.type,
+          isPriorityTrack: t.isPriorityTrack,
+          currentRequestId: t.currentRequestId,
+        })),
+        config.smallTracks,
+        config.largeTracks,
+      )
+      tracks = effective.map(t => ({
+        id: t.id,
+        type: t.type,
+        isPriorityTrack: t.isPriorityTrack,
+        currentRequestId: t.currentRequestId,
+        currentRequestTitle: t.currentRequestId ? titleById.get(t.id) ?? null : null,
+      }))
+    }
   }
 
   return NextResponse.json({ org: { ...org, ...billingExtras }, contacts, subscription, tracks, recentRequests })

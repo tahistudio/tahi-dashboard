@@ -21,6 +21,7 @@ import {
   GripVertical, Layers, AlignLeft, Clock, ArrowRight, ArrowUpRight,
   AlertTriangle, X, Sparkles, Lock,
 } from 'lucide-react'
+import { trackCanHandle } from '@/lib/plan-utils'
 import type { GhostTrack } from '@/lib/plan-utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -185,16 +186,16 @@ function LaneHeader({ label, count, tone }: { label: string; count: number; tone
 
 // ── Draggable Up-next item ────────────────────────────────────────────────────
 
-function DraggableItem({ item, position, basePath, isDragging, isDragOver, onDragStart, onDragOver, onDragEnd, onDrop }: {
-  item: TrackLaneItem; position: number; basePath: string; isDragging: boolean; isDragOver: boolean
-  onDragStart: (e: React.DragEvent, id: string) => void; onDragOver: (e: React.DragEvent, id: string) => void
+function DraggableItem({ item, position, basePath, isDragging, isDragOver, reject, onDragStart, onDragOver, onDragEnd, onDrop }: {
+  item: TrackLaneItem; position: number; basePath: string; isDragging: boolean; isDragOver: boolean; reject: boolean
+  onDragStart: (e: React.DragEvent, item: TrackLaneItem) => void; onDragOver: (e: React.DragEvent, id: string) => void
   onDragEnd: () => void; onDrop: (e: React.DragEvent, id: string) => void
 }) {
   const [hovered, setHovered] = useState(false)
   return (
     <div
       draggable
-      onDragStart={e => onDragStart(e, item.id)}
+      onDragStart={e => onDragStart(e, item)}
       onDragOver={e => onDragOver(e, item.id)}
       onDragEnd={onDragEnd}
       onDrop={e => onDrop(e, item.id)}
@@ -202,9 +203,9 @@ function DraggableItem({ item, position, basePath, isDragging, isDragOver, onDra
         display: 'flex', alignItems: 'center', gap: '0.375rem', padding: '0.5rem 0.5rem',
         borderRadius: 'var(--radius-button)', marginBottom: '0.375rem',
         opacity: isDragging ? 0.4 : 1,
-        background: isDragOver ? 'var(--color-brand-50)' : hovered ? 'var(--color-bg-secondary)' : 'var(--color-bg)',
+        background: isDragOver && !reject ? 'var(--color-brand-50)' : hovered ? 'var(--color-bg-secondary)' : 'var(--color-bg)',
         border: '1px solid var(--color-border)',
-        borderTop: isDragOver ? '2px solid var(--color-brand)' : '1px solid var(--color-border)',
+        borderTop: isDragOver && !reject ? '2px solid var(--color-brand)' : '1px solid var(--color-border)',
         transition: 'background 0.1s, opacity 0.15s', cursor: 'grab',
       }}
       onMouseEnter={() => setHovered(true)}
@@ -238,64 +239,31 @@ function EmptyLane({ label }: { label: string }) {
 
 // ── Track card ───────────────────────────────────────────────────────────────
 
-function TrackCard({ track, basePath, onReorder, onUpgradeClick, unified }: {
+function TrackCard({ track, basePath, onUpgradeClick, unified, drag, dragOverId, onDragStart, onDragOverItem, onDragEnd, onDropBefore, onDropEnd }: {
   track: TrackLanes; basePath: string
-  onReorder?: (trackId: string, orderedRequestIds: string[]) => Promise<void>
   onUpgradeClick?: () => void
   unified?: boolean
+  /** Item being dragged anywhere in the board (null = none). */
+  drag: { id: string; type: string; from: string } | null
+  dragOverId: string | null
+  onDragStart: (e: React.DragEvent, fromTrackId: string, item: TrackLaneItem) => void
+  onDragOverItem: (e: React.DragEvent, id: string, accept: boolean) => void
+  onDragEnd: () => void
+  onDropBefore: (toTrackId: string, beforeId: string) => void
+  onDropEnd: (toTrackId: string) => void
 }) {
   const isLarge = track.type === 'large'
   const Icon = unified ? Layers : isLarge ? Layers : AlignLeft
-  const [dragId, setDragId] = useState<string | null>(null)
-  const [dragOverId, setDragOverId] = useState<string | null>(null)
-  const [localQueue, setLocalQueue] = useState(track.upNext)
-  const [priorityModal, setPriorityModal] = useState<{ itemId: string; currentTopTitle: string } | null>(null)
+  const upNext = track.upNext
 
-  const prevRef = useRef(track.upNext)
-  if (prevRef.current !== track.upNext) { prevRef.current = track.upNext; setLocalQueue(track.upNext) }
+  // Can the dragged item land in THIS track? small track rejects large_task.
+  const accept = !drag || trackCanHandle(track.type, drag.type)
+  const rejecting = !!drag && !accept
 
-  const handleDragStart = useCallback((_e: React.DragEvent, id: string) => setDragId(id), [])
-  const handleDragOver = useCallback((e: React.DragEvent, id: string) => { e.preventDefault(); setDragOverId(id) }, [])
-  const handleDragEnd = useCallback(() => { setDragId(null); setDragOverId(null) }, [])
+  const laneDragOver = (e: React.DragEvent) => { if (accept) e.preventDefault() }
+  const laneDrop = (e: React.DragEvent) => { e.preventDefault(); if (accept) onDropEnd(track.id) }
 
-  const handleDrop = useCallback((e: React.DragEvent, targetId: string) => {
-    e.preventDefault()
-    if (!dragId || dragId === targetId) { handleDragEnd(); return }
-    const dragged = localQueue.find(i => i.id === dragId)
-    const targetIdx = localQueue.findIndex(i => i.id === targetId)
-    if (dragged?.priority === 'high' && targetIdx === 0 && localQueue.length > 0) {
-      setPriorityModal({ itemId: dragId, currentTopTitle: localQueue[0].title })
-      handleDragEnd(); return
-    }
-    setLocalQueue(prev => {
-      const items = [...prev]
-      const from = items.findIndex(i => i.id === dragId)
-      const to = items.findIndex(i => i.id === targetId)
-      if (from === -1 || to === -1) return prev
-      const [moved] = items.splice(from, 1)
-      items.splice(to, 0, moved)
-      onReorder?.(track.id, items.map(i => i.id))
-      return items
-    })
-    handleDragEnd()
-  }, [dragId, localQueue, handleDragEnd, onReorder, track.id])
-
-  const handlePriorityConfirm = useCallback(() => {
-    if (!priorityModal) return
-    const { itemId } = priorityModal
-    setLocalQueue(prev => {
-      const items = [...prev]
-      const idx = items.findIndex(i => i.id === itemId)
-      if (idx === -1) return prev
-      const [moved] = items.splice(idx, 1)
-      items.unshift(moved)
-      onReorder?.(track.id, items.map(i => i.id))
-      return items
-    })
-    setPriorityModal(null)
-  }, [priorityModal, onReorder, track.id])
-
-  const showUpsell = !unified && localQueue.length >= 3
+  const showUpsell = !unified && upNext.length >= 3
   const slotActive = track.inProgress.length > 0 || track.review.length > 0
   const statBits: string[] = []
   if (track.deliveredCount > 0) statBits.push(`${track.deliveredCount} delivered (30d)`)
@@ -330,14 +298,31 @@ function TrackCard({ track, basePath, onReorder, onUpgradeClick, unified }: {
 
         {/* Lanes */}
         <div style={LANE_GRID}>
-          {/* Up next */}
-          <div>
-            <LaneHeader label="Up next" count={localQueue.length} />
-            {localQueue.length === 0 ? <EmptyLane label="Nothing queued" /> : localQueue.map((item, i) => (
+          {/* Up next : the only drag-reorderable lane. Also a cross-track drop
+              target, type-gated (a large_task can never land in a small track). */}
+          <div
+            onDragOver={laneDragOver}
+            onDrop={laneDrop}
+            style={{
+              borderRadius: 'var(--radius-button)',
+              outline: rejecting ? '2px dashed var(--color-danger)' : (drag && accept ? '2px dashed var(--color-brand-light)' : 'none'),
+              outlineOffset: '0.125rem',
+              transition: 'outline-color 0.12s',
+            }}
+          >
+            <LaneHeader label="Up next" count={upNext.length} />
+            {upNext.length === 0 ? (
+              <div style={{ padding: '0.5rem', borderRadius: 'var(--radius-button)', border: '1px dashed var(--color-border)', fontSize: '0.6875rem', fontStyle: 'italic', color: rejecting ? 'var(--color-danger)' : 'var(--color-text-subtle)' }}>
+                {drag ? (accept ? 'Drop here' : 'Not allowed here') : 'Nothing queued'}
+              </div>
+            ) : upNext.map((item, i) => (
               <DraggableItem
                 key={item.id} item={item} position={i + 1} basePath={basePath}
-                isDragging={dragId === item.id} isDragOver={dragOverId === item.id}
-                onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd} onDrop={handleDrop}
+                isDragging={drag?.id === item.id} isDragOver={dragOverId === item.id} reject={rejecting}
+                onDragStart={(e, it) => onDragStart(e, track.id, it)}
+                onDragOver={(e, id) => onDragOverItem(e, id, accept)}
+                onDragEnd={onDragEnd}
+                onDrop={(e, id) => { e.preventDefault(); e.stopPropagation(); if (accept) onDropBefore(track.id, id) }}
               />
             ))}
           </div>
@@ -385,10 +370,6 @@ function TrackCard({ track, basePath, onReorder, onUpgradeClick, unified }: {
           </div>
         )}
       </div>
-
-      {priorityModal && (
-        <PriorityConfirmModal currentTopTitle={priorityModal.currentTopTitle} onConfirm={handlePriorityConfirm} onCancel={() => setPriorityModal(null)} />
-      )}
     </>
   )
 }
@@ -447,7 +428,90 @@ function GhostCard({ ghost, onUpgradeClick }: { ghost: GhostTrack; onUpgradeClic
 // ── Main ────────────────────────────────────────────────────────────────────
 
 export function TrackQueueView({ tracks, ghosts = [], basePath = '/requests', onReorder, onUpgradeClick, unified }: TrackQueueViewProps) {
-  if (tracks.length === 0 && ghosts.length === 0) {
+  // Optimistic copy of the lanes so a drag updates instantly; re-synced whenever
+  // the parent passes fresh data (after a refetch).
+  const [lanes, setLanes] = useState(tracks)
+  const prevRef = useRef(tracks)
+  if (prevRef.current !== tracks) { prevRef.current = tracks; setLanes(tracks) }
+
+  const [drag, setDrag] = useState<{ id: string; type: string; from: string; priority: string } | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [priorityModal, setPriorityModal] = useState<{ itemId: string; toTrackId: string; currentTopTitle: string } | null>(null)
+
+  // Always-fresh view of the lanes for drop decisions, so a refetch landing
+  // between a drop firing and the handler running can't act on stale data.
+  const lanesRef = useRef(lanes)
+  lanesRef.current = lanes
+
+  const onDragStart = useCallback((_e: React.DragEvent, fromTrackId: string, item: TrackLaneItem) => {
+    setDrag({ id: item.id, type: item.type, from: fromTrackId, priority: item.priority })
+  }, [])
+  const onDragOverItem = useCallback((e: React.DragEvent, id: string, accept: boolean) => {
+    if (!accept) return
+    e.preventDefault()
+    setDragOverId(id)
+  }, [])
+  const onDragEnd = useCallback(() => { setDrag(null); setDragOverId(null) }, [])
+
+  // Move `draggedId` into `toTrackId` before `beforeId` (or to the end when null),
+  // optimistically, then persist the target lane's new order (+ its trackId). A
+  // no-op (dropped back into its own slot in the same track) skips the write.
+  const doMove = useCallback((toTrackId: string, beforeId: string | null, draggedId: string) => {
+    setLanes(prev => {
+      const fromT = prev.find(t => t.upNext.some(i => i.id === draggedId))
+      const toT = prev.find(t => t.id === toTrackId)
+      if (!fromT || !toT) return prev
+      const item = fromT.upNext.find(i => i.id === draggedId)
+      if (!item) return prev
+      const sameTrack = fromT === toT
+      const sourceFiltered = fromT.upNext.filter(i => i.id !== draggedId)
+      const targetBase = sameTrack ? sourceFiltered : toT.upNext
+      let insertAt = beforeId == null ? targetBase.length : targetBase.findIndex(i => i.id === beforeId)
+      if (insertAt < 0) insertAt = targetBase.length
+      const newTarget = [...targetBase.slice(0, insertAt), item, ...targetBase.slice(insertAt)]
+      if (sameTrack && newTarget.map(i => i.id).join() === toT.upNext.map(i => i.id).join()) {
+        return prev // dropped into the same position : nothing to persist
+      }
+      const next = prev.map(t => {
+        if (t.id === toT.id) return { ...t, upNext: newTarget }
+        if (t === fromT) return { ...t, upNext: sourceFiltered }
+        return t
+      })
+      onReorder?.(toTrackId, newTarget.map(i => i.id))
+      return next
+    })
+  }, [onReorder])
+
+  const commitDrop = useCallback((toTrackId: string, beforeId: string | null) => {
+    const dragged = drag
+    setDragOverId(null)
+    setDrag(null)
+    if (!dragged || dragged.id === beforeId) return
+    const toTrack = lanesRef.current.find(t => t.id === toTrackId)
+    if (!toTrack || !trackCanHandle(toTrack.type, dragged.type)) return
+    // Within-track drop onto the very top, for a high-priority item, asks first.
+    if (dragged.from === toTrackId && dragged.priority === 'high') {
+      const top = toTrack.upNext[0]
+      if (top && beforeId === top.id && top.id !== dragged.id) {
+        setPriorityModal({ itemId: dragged.id, toTrackId, currentTopTitle: top.title })
+        return
+      }
+    }
+    doMove(toTrackId, beforeId, dragged.id)
+  }, [drag, doMove])
+
+  const onDropBefore = useCallback((toTrackId: string, beforeId: string) => commitDrop(toTrackId, beforeId), [commitDrop])
+  const onDropEnd = useCallback((toTrackId: string) => commitDrop(toTrackId, null), [commitDrop])
+
+  const confirmPriority = useCallback(() => {
+    if (!priorityModal) return
+    const { itemId, toTrackId } = priorityModal
+    const top = lanesRef.current.find(t => t.id === toTrackId)?.upNext[0]?.id ?? null
+    doMove(toTrackId, top, itemId)
+    setPriorityModal(null)
+  }, [priorityModal, doMove])
+
+  if (lanes.length === 0 && ghosts.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '3rem 1.5rem', background: 'var(--color-bg)', borderRadius: 'var(--radius-card)', border: '1px solid var(--color-border-subtle)' }}>
         <div style={{ width: '3rem', height: '3rem', margin: '0 auto 0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '0 1rem 0 1rem', background: 'linear-gradient(135deg, var(--color-brand-50), var(--color-brand-100))' }}>
@@ -463,13 +527,23 @@ export function TrackQueueView({ tracks, ghosts = [], basePath = '/requests', on
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: unified ? '1fr' : 'repeat(auto-fill, minmax(min(100%, 30rem), 1fr))', gap: '1rem' }}>
-      {tracks.map(track => (
-        <TrackCard key={track.id} track={track} basePath={basePath} onReorder={onReorder} onUpgradeClick={onUpgradeClick} unified={unified} />
-      ))}
-      {!unified && ghosts.map((ghost, i) => (
-        <GhostCard key={`ghost-${ghost.type}-${i}`} ghost={ghost} onUpgradeClick={onUpgradeClick} />
-      ))}
-    </div>
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: unified ? '1fr' : 'repeat(auto-fill, minmax(min(100%, 30rem), 1fr))', gap: '1rem' }}>
+        {lanes.map(track => (
+          <TrackCard
+            key={track.id} track={track} basePath={basePath} onUpgradeClick={onUpgradeClick} unified={unified}
+            drag={drag} dragOverId={dragOverId}
+            onDragStart={onDragStart} onDragOverItem={onDragOverItem} onDragEnd={onDragEnd}
+            onDropBefore={onDropBefore} onDropEnd={onDropEnd}
+          />
+        ))}
+        {!unified && ghosts.map((ghost, i) => (
+          <GhostCard key={`ghost-${ghost.type}-${i}`} ghost={ghost} onUpgradeClick={onUpgradeClick} />
+        ))}
+      </div>
+      {priorityModal && (
+        <PriorityConfirmModal currentTopTitle={priorityModal.currentTopTitle} onConfirm={confirmPriority} onCancel={() => setPriorityModal(null)} />
+      )}
+    </>
   )
 }

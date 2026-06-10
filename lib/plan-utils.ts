@@ -189,6 +189,15 @@ export function getTrackSummary(planType: string | null, hasPrioritySupport: boo
   return parts.length > 0 ? parts.join(' + ') : 'No active tracks'
 }
 
+/** Override-aware track summary so the header, overview and kanban all agree. */
+export function getTracksConfigSummary(config: TracksConfig): string {
+  if (config.mode === 'off') return 'One unified board'
+  const parts: string[] = []
+  if (config.largeTracks > 0) parts.push(`${config.largeTracks} large track${config.largeTracks > 1 ? 's' : ''}`)
+  if (config.smallTracks > 0) parts.push(`${config.smallTracks} small track${config.smallTracks > 1 ? 's' : ''}`)
+  return parts.length > 0 ? parts.join(' + ') : 'No active tracks'
+}
+
 // ─── Ghost-track upsell ───────────────────────────────────────────────────────
 //
 // The tracks a client would GAIN by upgrading, rendered as greyed-out "ghost"
