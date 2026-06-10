@@ -13,7 +13,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, ne, asc, gte, desc } from 'drizzle-orm'
-import { getTrackEntitlements, getTrackSummary } from '@/lib/plan-utils'
+import { getTrackEntitlements, getTrackSummary, resolveTracksConfig, buildEffectiveTracks } from '@/lib/plan-utils'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -90,9 +90,36 @@ export async function GET(req: NextRequest) {
     ))
     .orderBy(desc(schema.requests.deliveredAt))
 
+  // Per-client tracks override (auto | custom | off). Wrapped so the endpoint
+  // keeps working between deploy and the 0079 migration (missing columns throw).
+  let org: { tracksMode: string | null; customSmallTracks: number | null; customLargeTracks: number | null } | undefined
+  try {
+    ;[org] = await database
+      .select({
+        tracksMode: schema.organisations.tracksMode,
+        customSmallTracks: schema.organisations.customSmallTracks,
+        customLargeTracks: schema.organisations.customLargeTracks,
+      })
+      .from(schema.organisations)
+      .where(eq(schema.organisations.id, targetOrgId))
+      .limit(1)
+  } catch {
+    org = undefined
+  }
+
+  const config = resolveTracksConfig(org, sub?.planType ?? null, sub?.hasPrioritySupport ?? false)
+
   const currentIds = tracks.map(t => t.currentRequestId).filter(Boolean) as string[]
   const activeRequests = queued.filter(r => currentIds.includes(r.id))
   const queuedRequests = queued.filter(r => !currentIds.includes(r.id))
+
+  const effectiveTracks = config.mode === 'off'
+    ? tracks.map(t => ({ id: t.id, type: t.type, isPriorityTrack: t.isPriorityTrack, currentRequestId: t.currentRequestId }))
+    : buildEffectiveTracks(
+        tracks.map(t => ({ id: t.id, type: t.type, isPriorityTrack: t.isPriorityTrack, currentRequestId: t.currentRequestId })),
+        config.smallTracks,
+        config.largeTracks,
+      )
 
   const entitlements = getTrackEntitlements(sub?.planType ?? null, sub?.hasPrioritySupport ?? false)
   const summary = getTrackSummary(sub?.planType ?? null, sub?.hasPrioritySupport ?? false)
@@ -101,7 +128,11 @@ export async function GET(req: NextRequest) {
     subscription: sub ?? null,
     entitlements,
     summary,
-    tracks: tracks.map(t => ({
+    tracksMode: config.mode,
+    showGhosts: config.showGhosts,
+    customSmallTracks: org?.customSmallTracks ?? 0,
+    customLargeTracks: org?.customLargeTracks ?? 0,
+    tracks: effectiveTracks.map(t => ({
       ...t,
       currentRequest: activeRequests.find(r => r.id === t.currentRequestId) ?? null,
     })),

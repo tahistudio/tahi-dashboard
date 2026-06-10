@@ -61,6 +61,112 @@ export function trackCanHandle(trackType: 'small' | 'large', requestType: string
   return requestType !== 'large_task'             // small tracks reject large_task only
 }
 
+// ─── Per-client tracks override ───────────────────────────────────────────────
+//
+// A client's effective tracks come from one of three modes (organisations.tracks_mode):
+//   auto   → derive from the plan entitlements, show the ghost upsell
+//   custom → use explicit small/large counts (total clamped to 4), no upsell
+//   off    → one unified board, no per-track split, no upsell
+// The override always wins over the plan default, for any client.
+
+export const MAX_TRACKS = 4
+
+export type TracksMode = 'auto' | 'custom' | 'off'
+
+export interface TracksOverride {
+  tracksMode?: string | null
+  customSmallTracks?: number | null
+  customLargeTracks?: number | null
+}
+
+export interface TracksConfig {
+  mode: TracksMode
+  smallTracks: number
+  largeTracks: number
+  /** Show the greyed-out upgrade ghost cards (auto + retainer plan only). */
+  showGhosts: boolean
+}
+
+export function resolveTracksConfig(
+  override: TracksOverride | null | undefined,
+  planType: string | null,
+  hasPrioritySupport: boolean,
+): TracksConfig {
+  const mode: TracksMode =
+    override?.tracksMode === 'custom' ? 'custom'
+      : override?.tracksMode === 'off' ? 'off'
+        : 'auto'
+
+  if (mode === 'off') {
+    return { mode, smallTracks: 0, largeTracks: 0, showGhosts: false }
+  }
+
+  if (mode === 'custom') {
+    let small = Math.max(0, Math.floor(override?.customSmallTracks ?? 0))
+    let large = Math.max(0, Math.floor(override?.customLargeTracks ?? 0))
+    // Clamp the total to MAX_TRACKS, trimming large first then small.
+    if (large > MAX_TRACKS) large = MAX_TRACKS
+    if (small + large > MAX_TRACKS) small = MAX_TRACKS - large
+    return { mode, smallTracks: small, largeTracks: large, showGhosts: false }
+  }
+
+  const e = getTrackEntitlements(planType, hasPrioritySupport)
+  return {
+    mode,
+    smallTracks: e.smallTracks,
+    largeTracks: e.largeTracks,
+    showGhosts: planType === 'maintain' || planType === 'scale',
+  }
+}
+
+export interface RealTrackRow {
+  id: string
+  /** DB column is free text; only 'small' / 'large' rows are placed. */
+  type: string
+  isPriorityTrack: number | boolean | null
+  currentRequestId: string | null
+}
+
+export interface EffectiveTrack {
+  id: string
+  type: 'small' | 'large'
+  isPriorityTrack: number | boolean | null
+  currentRequestId: string | null
+  /** True when this is a placeholder slot with no backing tracks-table row. */
+  synthetic: boolean
+}
+
+/**
+ * Reconcile real track rows to the desired per-type counts. Real rows are kept
+ * first (preserving their active slot), then synthetic placeholder slots fill
+ * the remainder. Extra real rows beyond the count are trimmed. Synthetic ids are
+ * deterministic and never collide with real UUIDs, so they are safe as React
+ * keys; reorder is org-scoped so it never looks them up.
+ */
+export function buildEffectiveTracks(
+  real: ReadonlyArray<RealTrackRow>,
+  smallTracks: number,
+  largeTracks: number,
+): EffectiveTrack[] {
+  const out: EffectiveTrack[] = []
+  for (const type of ['large', 'small'] as const) {
+    const want = type === 'large' ? largeTracks : smallTracks
+    // Keep rows with an active request first, so a tight custom count never
+    // hides in-progress work.
+    const rows = real.filter(t => t.type === type)
+      .sort((a, b) => (a.currentRequestId ? 0 : 1) - (b.currentRequestId ? 0 : 1))
+    for (let i = 0; i < want; i++) {
+      const row = rows[i]
+      if (row) {
+        out.push({ id: row.id, type, isPriorityTrack: row.isPriorityTrack, currentRequestId: row.currentRequestId, synthetic: false })
+      } else {
+        out.push({ id: `synthetic-${type}-${i}`, type, isPriorityTrack: false, currentRequestId: null, synthetic: true })
+      }
+    }
+  }
+  return out
+}
+
 // ─── Plan display helpers ─────────────────────────────────────────────────────
 
 export function getPlanLabel(planType: string | null): string {

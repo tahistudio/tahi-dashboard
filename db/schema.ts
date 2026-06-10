@@ -60,6 +60,14 @@ export const organisations = sqliteTable('organisations', {
   // micro | small | medium | large | enterprise
   size: text('size'),
   annualRevenue: integer('annual_revenue'),
+  // Per-client tracks override (migration 0079). Wins over the plan default for
+  // every client, not just custom plans.
+  //   auto   = derive tracks from the plan entitlements (+ ghost upsell)
+  //   custom = use customSmallTracks / customLargeTracks (no upsell)
+  //   off    = one unified board, no per-track split, no upsell
+  tracksMode: text('tracks_mode').default('auto'),
+  customSmallTracks: integer('custom_small_tracks').default(0),
+  customLargeTracks: integer('custom_large_tracks').default(0),
   ...timestamps,
 }, (table) => [
   index('idx_orgs_status').on(table.status),

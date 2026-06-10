@@ -1883,6 +1883,15 @@ const MIGRATIONS: Migration[] = [
         ('tmr-superadmin-staci', 'ae158f66-d8a8-4555-9da4-6d02988b3c79', 'role-super-admin', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`,
     ],
   },
+  {
+    name: '0079',
+    description: 'Tracks viz #189 per-client override: organisations.tracks_mode (auto|custom|off) + custom_small_tracks + custom_large_tracks. Lets a client be given more/fewer tracks (total <= 4) or switched to one unified board with no upsell, overriding the plan default for any client. Defaults keep every existing client on auto. Duplicate-column error caught upstream so re-runs are idempotent.',
+    statements: [
+      `ALTER TABLE organisations ADD COLUMN tracks_mode text DEFAULT 'auto'`,
+      `ALTER TABLE organisations ADD COLUMN custom_small_tracks integer DEFAULT 0`,
+      `ALTER TABLE organisations ADD COLUMN custom_large_tracks integer DEFAULT 0`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
