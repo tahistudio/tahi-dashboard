@@ -11,6 +11,7 @@ import { SidebarProvider } from '@/components/tahi/sidebar-context'
 import { SkipToContent } from '@/components/tahi/skip-to-content'
 import { DisplayCurrencyProvider } from '@/lib/display-currency-context'
 import { PermissionsProvider, type PermissionsValue } from '@/components/tahi/permissions-context'
+import { PrivateModeProvider } from '@/components/tahi/private-mode-context'
 import { db } from '@/lib/db'
 import { resolvePermissions, featureMap } from '@/lib/permissions'
 
@@ -52,6 +53,7 @@ export default async function DashboardLayout({
     <ToastProvider>
     <DisplayCurrencyProvider>
       <PermissionsProvider value={perms}>
+      <PrivateModeProvider>
       <SidebarProvider>
         {/* Sidebar collapsed-state persistence script lives in the
             root layout <head> so it runs before body parses. See
@@ -75,6 +77,7 @@ export default async function DashboardLayout({
           <KeyboardShortcuts />
         </div>
       </SidebarProvider>
+      </PrivateModeProvider>
       </PermissionsProvider>
     </DisplayCurrencyProvider>
     </ToastProvider>

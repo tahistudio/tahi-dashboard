@@ -18,9 +18,13 @@ import * as React from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useUser, useClerk } from '@clerk/nextjs'
-import { Sun, Moon, Settings, LogOut, ChevronDown, Eye, EyeOff } from 'lucide-react'
+import { Sun, Moon, Settings, LogOut, ChevronDown, Eye, EyeOff, Check } from 'lucide-react'
 import { Avatar } from '@/components/tahi/avatar'
 import { Popover } from '@/components/tahi/popover'
+import { apiPath } from '@/lib/api'
+import { setImpersonation } from '@/components/tahi/impersonation-banner'
+import { usePrivateMode } from '@/components/tahi/private-mode-context'
+import { useToast } from '@/components/tahi/toast'
 
 interface SidebarUserCardProps {
   collapsed: boolean
@@ -39,8 +43,32 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
   const { user, isLoaded } = useUser()
   const { signOut } = useClerk()
   const router = useRouter()
+  const { privateMode, togglePrivateMode } = usePrivateMode()
+  const { showToast } = useToast()
   const [open, setOpen] = React.useState(false)
+  const [loadingClientView, setLoadingClientView] = React.useState(false)
   const triggerRef = React.useRef<HTMLButtonElement | null>(null)
+
+  // Client view: preview the dashboard as a client sees it by impersonating a
+  // real client org (the most recently updated one). The impersonation banner
+  // provides the exit. No-op with a toast if there are no clients.
+  const handleClientView = React.useCallback(async () => {
+    setOpen(false)
+    setLoadingClientView(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/clients'))
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json() as { clients?: Array<{ id: string; name: string }>; items?: Array<{ id: string; name: string }> }
+      const first = (data.clients ?? data.items ?? [])[0]
+      if (!first) { showToast('No clients to preview yet', 'error'); return }
+      setImpersonation({ orgId: first.id, orgName: first.name })
+      router.push('/overview')
+    } catch {
+      showToast('Could not start client view', 'error')
+    } finally {
+      setLoadingClientView(false)
+    }
+  }, [router, showToast])
 
   // While Clerk is loading the user, render a skeleton placeholder so
   // the sidebar doesn't shift layout when data arrives. Padding flips
@@ -118,7 +146,7 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
         <Avatar name={fullName} src={imageUrl} size="md" noRing />
         {!collapsed && (
           <>
-            <div className="tahi-sidebar-expanded-only" style={{ flex: 1, minWidth: 0 }}>
+            <div className="tahi-sidebar-expanded-only" data-private style={{ flex: 1, minWidth: 0 }}>
               <div style={{
                 fontSize: '0.8125rem',
                 fontWeight: 600,
@@ -181,20 +209,20 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
           {isSuperAdmin && (
             <>
               <div style={{ height: '1px', background: 'var(--color-border-subtle)', margin: '0.25rem 0' }} />
-              {/* Demo + Private mode are super-admin-only. They render
-                  for liam + staci. No-op for now: backend wiring lands
-                  in a later phase. See BACKLOG-UIUX.md for spec. */}
+              {/* Super-admin-only (liam + staci). Client view previews the
+                  client experience via impersonation; Private mode blurs
+                  data-private surfaces for screen-shares. */}
               <MenuItem
                 icon={<Eye className="w-4 h-4" />}
-                label="Client view"
-                disabled
-                onClick={() => setOpen(false)}
+                label={loadingClientView ? 'Starting client view...' : 'Client view'}
+                onClick={handleClientView}
+                disabled={loadingClientView}
               />
               <MenuItem
                 icon={<EyeOff className="w-4 h-4" />}
                 label="Private mode"
-                disabled
-                onClick={() => setOpen(false)}
+                onClick={() => { togglePrivateMode(); setOpen(false) }}
+                trailing={privateMode ? <Check className="w-4 h-4" style={{ color: 'var(--color-brand)' }} /> : undefined}
               />
             </>
           )}
@@ -218,6 +246,7 @@ function MenuItem({
   onClick,
   tone,
   disabled,
+  trailing,
 }: {
   icon: React.ReactNode
   label: string
@@ -225,6 +254,7 @@ function MenuItem({
   onClick?: () => void
   tone?: 'danger'
   disabled?: boolean
+  trailing?: React.ReactNode
 }) {
   const colour = tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text)'
   const hoverBg = tone === 'danger' ? 'var(--color-danger-bg)' : 'var(--color-bg-secondary)'
@@ -259,7 +289,8 @@ function MenuItem({
     return (
       <Link href={href} role="menuitem" style={style} onClick={onClick} onMouseEnter={onEnter} onMouseLeave={onLeave}>
         <span style={{ color: iconColour }}>{icon}</span>
-        {label}
+        <span style={{ flex: 1 }}>{label}</span>
+        {trailing}
       </Link>
     )
   }
@@ -272,10 +303,10 @@ function MenuItem({
       onMouseLeave={onLeave}
       disabled={disabled}
       aria-disabled={disabled || undefined}
-      title={disabled ? 'Coming soon' : undefined}
     >
       <span style={{ color: iconColour }}>{icon}</span>
-      {label}
+      <span style={{ flex: 1 }}>{label}</span>
+      {trailing}
     </button>
   )
 }

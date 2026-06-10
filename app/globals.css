@@ -1014,6 +1014,25 @@ textarea,
 }
 
 /* ============================================================
+   PRIVATE MODE (screen-share safe)
+   ============================================================ */
+
+/* Toggled by SidebarUserCard. Adds `.tahi-private` to <html>; persisted in
+   localStorage('tahi-private-mode'). Any element tagged `data-private` is
+   blurred so the screen is safe to share; hover (or focus-within) reveals it
+   momentarily for the operator. Tag operator identity, client PII, and
+   financial figures with data-private to mask them. */
+html.tahi-private [data-private] {
+  filter: blur(0.5rem);
+  transition: filter 140ms ease;
+  user-select: none;
+}
+html.tahi-private [data-private]:hover,
+html.tahi-private [data-private]:focus-within {
+  filter: none;
+}
+
+/* ============================================================
    DARK MODE
    ============================================================ */
 
