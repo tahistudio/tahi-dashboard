@@ -1,8 +1,8 @@
 # Client Track Visualization — per-track mini-kanban
 
-Status: 2026-06-11 — DESIGN approved (forks locked), spec for review. Not built.
-Task #189. The biggest client-facing UI/UX surface: tracks are how clients
-interact with Tahi daily and understand what they pay for.
+Status: 2026-06-11 — BUILT (pass 1 + pass 2), awaiting deploy + migration 0079 +
+live QA. Task #189. The biggest client-facing UI/UX surface: tracks are how
+clients interact with Tahi daily and understand what they pay for.
 
 See [[project_tracks_visualization]] and [[project_portal_readiness_arc]].
 
@@ -140,7 +140,40 @@ track (existing `trackCanHandle` logic), unchanged.
   impersonation) that internal requests never appear and the lanes bucket
   correctly.
 
+## Per-client tracks override (pass 2, built 2026-06-11)
+
+Liam: per client (custom project / hourly / ongoing, but applies to ANY client),
+turn more or fewer tracks on (up to 4 total), or turn tracks off entirely (which
+kills the upsell and shows one big board).
+
+**Model.** `organisations.tracks_mode` ('auto' | 'custom' | 'off') +
+`custom_small_tracks` + `custom_large_tracks` (migration 0079). The override wins
+over the plan default for every client.
+- **auto** — tracks from plan entitlements; ghost upsell shown.
+- **custom** — explicit small/large counts, total clamped to 4; NO upsell.
+- **off** — one unified "Your work" board (all work, four lanes, no per-track
+  split); NO upsell.
+
+**Resolution (shared, pure, unit-tested):** `resolveTracksConfig(override, plan,
+priority)` -> `{ mode, smallTracks, largeTracks, showGhosts }`;
+`buildEffectiveTracks(realRows, small, large)` keeps real rows (active slots
+first) then pads with deterministic synthetic shells to hit the counts. Both
+capacity endpoints apply it and return `tracksMode` + `showGhosts` (override read
+wrapped in try/catch so the endpoint survives the deploy-before-migration window).
+
+**Reorder.** Custom synthetic shells + the unified board have no single backing
+`tracks` row, so reorder moved to org-scoped `PUT /api/portal/capacity/reorder`
+(client-visible only). The client page uses it for all modes.
+
+**Admin controls.** Client detail -> Track tab: Auto / Custom / Off segmented
+control + small/large steppers (<= 4), saved via PATCH the org (raw SQL +
+try/catch, migration-safe). Off renders the unified board in the admin view too.
+
+No ghost upsell for custom or off (only auto + a maintain/scale plan).
+
 ## Decisions locked
 
 - Delivered window = **last 30 days** + a "View all delivered" link. (Liam, 2026-06-11.)
 - Ghost-track upsell is in scope and first-class (Liam, 2026-06-11).
+- Per-client override (auto/custom/off) wins over the plan default for ANY client;
+  off + custom suppress the upsell; tracks-off = one unified board. (Liam, 2026-06-11.)
