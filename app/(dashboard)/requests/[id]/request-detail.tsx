@@ -19,6 +19,8 @@ import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { useToast } from '@/components/tahi/toast'
 import { Card } from '@/components/tahi/card'
+import { Badge, statusTone } from '@/components/tahi/badge'
+import { Popover } from '@/components/tahi/popover'
 import { SubRequestsPanel, type SubRequestRow } from '@/components/tahi/sub-requests-panel'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { PeoplePanel, type Participant } from '@/components/tahi/people-panel'
@@ -740,16 +742,13 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         {/* Left column — thread-first, description / sub-requests / files below,
             activity collapsed at the bottom */}
         <div className="flex flex-col gap-6">
-          {/* Thread — first for immediate comms context */}
-          <div
-            className="bg-[var(--color-bg)] rounded-xl"
-            style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
-          >
-            <div
-              className="flex items-center justify-between"
-              style={{ padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}
+          {/* Thread (first for immediate comms context) */}
+          <Card padding="none" style={{ overflow: 'hidden' }}>
+            <Card.Header
+              bordered
+              style={{ margin: 0, padding: '0.875rem 1.25rem' }}
             >
-              <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <Card.Title as="h2" className="flex items-center gap-2">
                 Thread
                 {messages.length > 0 && (
                   <span
@@ -776,8 +775,8 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     {unreadCount} new
                   </span>
                 )}
-              </h2>
-            </div>
+              </Card.Title>
+            </Card.Header>
 
             <div style={{ padding: '1.25rem' }}>
               <RequestThread messages={messages} currentUserId={currentUserId} />
@@ -788,7 +787,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             <div
               style={{
                 padding: '1rem 1.25rem',
-                borderTop: '1px solid var(--color-row-border)',
+                borderTop: '1px solid var(--color-border-subtle)',
                 background: 'var(--color-bg-secondary)',
               }}
             >
@@ -801,30 +800,20 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 orgId={request?.orgId}
               />
             </div>
-          </div>
+          </Card>
 
           {/* Description */}
           {request.description && (
-            <div
-              className="bg-[var(--color-bg)] rounded-xl"
-              style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
-            >
-              <div
-                style={{
-                  padding: '0.875rem 1.25rem',
-                  borderBottom: '1px solid var(--color-row-border)',
-                }}
-              >
-                <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
-                  Description
-                </h2>
-              </div>
+            <Card padding="none" style={{ overflow: 'hidden' }}>
+              <Card.Header bordered style={{ margin: 0, padding: '0.875rem 1.25rem' }}>
+                <Card.Title as="h2">Description</Card.Title>
+              </Card.Header>
               <div
                 className="prose prose-sm max-w-none"
                 style={{ padding: '1.25rem', color: 'var(--color-text)', fontSize: '0.875rem', lineHeight: 1.6 }}
                 dangerouslySetInnerHTML={{ __html: request.description }}
               />
-            </div>
+            </Card>
           )}
 
           {/* Sub-requests — only for top-level requests (V1 disallows grandchildren) */}
@@ -865,7 +854,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           {isAdmin && (
             <SidebarCard title="Actions">
               <div className="flex flex-col" style={{ gap: '0.5rem' }}>
-                {/* Status */}
+                {/* Status: editable chip matching the requests list status chip */}
                 <div className="flex items-center" style={{ gap: '0.5rem' }}>
                   <span
                     className="text-xs font-medium"
@@ -876,60 +865,12 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                   >
                     Status
                   </span>
-                  <div style={{ position: 'relative', flex: 1 }}>
-                    <select
-                      value={request.status}
-                      onChange={e => handleStatusChange(e.target.value)}
-                      disabled={statusUpdating}
-                      style={{
-                        width: '100%',
-                        appearance: 'none',
-                        WebkitAppearance: 'none',
-                        padding: '0.375rem 2rem 0.375rem 0.625rem',
-                        fontSize: '0.75rem',
-                        fontWeight: 500,
-                        color: 'var(--color-text)',
-                        background: 'var(--color-bg)',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius-button)',
-                        cursor: statusUpdating ? 'not-allowed' : 'pointer',
-                        opacity: statusUpdating ? 0.6 : 1,
-                        minHeight: '2rem',
-                        outline: 'none',
-                      }}
-                      onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
-                      onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
-                    >
-                      {STATUS_FLOW.map(s => (
-                        <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-                      ))}
-                      {!STATUS_FLOW.includes(request.status as typeof STATUS_FLOW[number]) && (
-                        <option value={request.status}>{STATUS_LABELS[request.status] ?? request.status}</option>
-                      )}
-                    </select>
-                    {statusUpdating ? (
-                      <Loader2
-                        size={12}
-                        className="animate-spin"
-                        style={{
-                          position: 'absolute', right: '0.5rem',
-                          top: '50%', transform: 'translateY(-50%)',
-                          color: 'var(--color-text-subtle)',
-                          pointerEvents: 'none',
-                        }}
-                      />
-                    ) : (
-                      <ChevronDown
-                        size={12}
-                        aria-hidden="true"
-                        style={{
-                          position: 'absolute', right: '0.5rem',
-                          top: '50%', transform: 'translateY(-50%)',
-                          color: 'var(--color-text-subtle)',
-                          pointerEvents: 'none',
-                        }}
-                      />
-                    )}
+                  <div style={{ flex: 1 }}>
+                    <StatusChipSelect
+                      status={request.status}
+                      busy={statusUpdating}
+                      onChange={handleStatusChange}
+                    />
                   </div>
                 </div>
 
@@ -1318,10 +1259,7 @@ function ActivityLog({
   }
 
   return (
-    <div
-      className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
-      style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
-    >
+    <Card padding="none" style={{ overflow: 'hidden' }}>
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
@@ -1468,7 +1406,7 @@ function ActivityLog({
         )}
       </div>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -1591,6 +1529,108 @@ function PeopleStack({ participants }: { participants: Participant[] }) {
         </span>
       )}
     </div>
+  )
+}
+
+// ---- Status chip select ------------------------------------------------------
+
+// Editable status control rendered as a Badge chip, matching the requests list
+// status chip. Clicking opens a Popover of statuses; picking one fires onChange
+// (the parent runs the optimistic PATCH). Disabled while a change is in flight.
+const STATUS_CHOICES = [
+  'submitted',
+  'in_review',
+  'in_progress',
+  'client_review',
+  'delivered',
+  'archived',
+]
+
+function StatusChipSelect({
+  status,
+  busy,
+  onChange,
+}: {
+  status: string
+  busy: boolean
+  onChange: (next: string) => void
+}) {
+  const ref = useRef<HTMLButtonElement | null>(null)
+  const [open, setOpen] = useState(false)
+  // Always include the current status so non-standard values still render.
+  const choices = STATUS_CHOICES.includes(status)
+    ? STATUS_CHOICES
+    : [status, ...STATUS_CHOICES]
+
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        onClick={() => { if (!busy) setOpen(o => !o) }}
+        disabled={busy}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="tahi-focus-ring inline-flex items-center"
+        style={{
+          gap: '0.375rem',
+          padding: '0.25rem 0.4375rem',
+          background: 'transparent',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-md)',
+          cursor: busy ? 'not-allowed' : 'pointer',
+          opacity: busy ? 0.6 : 1,
+          minHeight: '2rem',
+          transition: 'border-color 150ms ease, background-color 150ms ease',
+        }}
+        onMouseEnter={e => { if (!busy) e.currentTarget.style.borderColor = 'var(--color-brand)' }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+      >
+        <Badge tone={statusTone(status)} variant="soft" size="sm" leader="dot">
+          {STATUS_LABELS[status] ?? status}
+        </Badge>
+        {busy ? (
+          <Loader2 size={12} className="animate-spin" aria-hidden="true" style={{ color: 'var(--color-text-subtle)' }} />
+        ) : (
+          <ChevronDown size={12} aria-hidden="true" style={{ color: 'var(--color-text-subtle)' }} />
+        )}
+      </button>
+      <Popover anchorRef={ref} open={open} onClose={() => setOpen(false)} align="start" width="11rem">
+        <div role="listbox" aria-label="Status options">
+          {choices.map(s => {
+            const isActive = s === status
+            return (
+              <button
+                key={s}
+                type="button"
+                role="option"
+                aria-selected={isActive}
+                onClick={() => { onChange(s); setOpen(false) }}
+                className="w-full inline-flex items-center"
+                style={{
+                  gap: '0.5rem',
+                  padding: '0.4375rem 0.625rem',
+                  background: isActive ? 'var(--color-bg-secondary)' : 'transparent',
+                  border: 'none',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 'var(--text-sm)',
+                  color: 'var(--color-text)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'background-color 120ms ease',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = isActive ? 'var(--color-bg-secondary)' : 'transparent' }}
+              >
+                <Badge tone={statusTone(s)} variant="soft" size="sm" leader="dot">
+                  {STATUS_LABELS[s] ?? s}
+                </Badge>
+              </button>
+            )
+          })}
+        </div>
+      </Popover>
+    </>
   )
 }
 
@@ -2047,13 +2087,10 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
   }
 
   return (
-    <div
-      className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
-      style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
-    >
+    <Card padding="none" style={{ overflow: 'hidden' }}>
       <div
         className="flex items-center justify-between"
-        style={{ padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}
+        style={{ padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--color-border-subtle)' }}
       >
         <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
           <Paperclip size={14} style={{ color: 'var(--color-text-subtle)' }} />
@@ -2197,7 +2234,7 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
           ))}
         </div>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -2290,154 +2327,6 @@ function FileActions({ file, onDeleted }: {
         onCancel={() => setConfirmOpen(false)}
       />
     </div>
-  )
-}
-
-// ---- Time Entry Panel --------------------------------------------------------
-
-interface TimeEntryItem {
-  id: string
-  hours: number
-  billable: boolean | null
-  notes: string | null
-  date: string
-  teamMemberName: string | null
-}
-
-function TimeEntryPanel({ requestId }: { requestId: string }) {
-  const [entries, setEntries] = useState<TimeEntryItem[]>([])
-  const [loading, setLoading] = useState(true)
-  const [hours, setHours] = useState('')
-  const [description, setDescription] = useState('')
-  const [billable, setBillable] = useState(true)
-  const [saving, setSaving] = useState(false)
-
-  const loadEntries = useCallback(async () => {
-    try {
-      const res = await fetch(apiPath(`/api/admin/requests/${requestId}/time-entries`))
-      if (res.ok) {
-        const data = await res.json() as { items: TimeEntryItem[] }
-        setEntries(data.items ?? [])
-      }
-    } catch {
-      setEntries([])
-    } finally {
-      setLoading(false)
-    }
-  }, [requestId])
-
-  useEffect(() => { void loadEntries() }, [loadEntries])
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const h = parseFloat(hours)
-    if (!h || h <= 0) return
-
-    setSaving(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/requests/${requestId}/time-entries`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hours: h, description: description.trim() || undefined, billable }),
-      })
-      if (res.ok) {
-        setHours('')
-        setDescription('')
-        setBillable(true)
-        await loadEntries()
-      }
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const totalHours = entries.reduce((s, e) => s + e.hours, 0)
-
-  return (
-    <SidebarCard title="Time">
-      {/* Summary */}
-      {!loading && entries.length > 0 && (
-        <div style={{ marginBottom: '0.75rem' }}>
-          <div className="flex items-center justify-between text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            <span>{entries.length} {entries.length === 1 ? 'entry' : 'entries'}</span>
-            <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{totalHours.toFixed(1)}h total</span>
-          </div>
-          <div className="flex flex-col gap-1 mt-2">
-            {entries.slice(0, 5).map(entry => (
-              <div key={entry.id} className="flex items-center justify-between text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                <span className="truncate" style={{ maxWidth: '8rem' }}>{entry.teamMemberName ?? 'Unknown'}</span>
-                <span className="font-medium" style={{ color: 'var(--color-text)' }}>{entry.hours.toFixed(1)}h</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Log form */}
-      <form onSubmit={handleSubmit} className="flex flex-col" style={{ gap: '0.5rem' }}>
-        <div className="flex gap-2">
-          <input
-            type="number"
-            min="0.1"
-            step="0.1"
-            value={hours}
-            onChange={e => setHours(e.target.value)}
-            placeholder="Hours"
-            required
-            style={{
-              flex: 1,
-              padding: '0.375rem 0.5rem',
-              fontSize: '0.8125rem',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-button)',
-              color: 'var(--color-text)',
-              background: 'var(--color-bg)',
-              outline: 'none',
-            }}
-          />
-          <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            <input
-              type="checkbox"
-              checked={billable}
-              onChange={e => setBillable(e.target.checked)}
-              style={{ accentColor: 'var(--color-brand)' }}
-            />
-            Billable
-          </label>
-        </div>
-        <input
-          type="text"
-          value={description}
-          onChange={e => setDescription(e.target.value)}
-          placeholder="Description (optional)"
-          style={{
-            padding: '0.375rem 0.5rem',
-            fontSize: '0.8125rem',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-button)',
-            color: 'var(--color-text)',
-            background: 'var(--color-bg)',
-            outline: 'none',
-          }}
-        />
-        <button
-          type="submit"
-          disabled={saving || !hours}
-          style={{
-            padding: '0.375rem 0.75rem',
-            fontSize: '0.8125rem',
-            fontWeight: 600,
-            border: 'none',
-            borderRadius: 'var(--radius-button)',
-            background: saving ? 'var(--color-text-subtle)' : 'var(--color-brand)',
-            color: 'white',
-            cursor: saving ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {saving ? 'Saving...' : 'Log Time'}
-        </button>
-      </form>
-    </SidebarCard>
   )
 }
 

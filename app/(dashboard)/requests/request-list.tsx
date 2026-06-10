@@ -1,27 +1,36 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  Plus, Search, LayoutList, Columns3, BarChart3,
+  Plus, LayoutList, Columns3, BarChart3,
   AlertTriangle, ChevronDown, Inbox, RefreshCw,
-  Calendar, Zap, Clock, Download,
+  Calendar, Zap, Download,
   CheckSquare, Square, Users, Loader2, X, Sparkles,
 } from 'lucide-react'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { AiRequestWizard } from '@/components/tahi/ai-request-wizard'
-import { DateRangePicker, type DateRange } from '@/components/tahi/date-range-picker'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { ViewToggle } from '@/components/tahi/view-toggle'
-import { Input, Select } from '@/components/tahi/input'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Badge, statusTone, priorityTone } from '@/components/tahi/badge'
 import { Avatar } from '@/components/tahi/avatar'
 import { EmptyState as SharedEmptyState } from '@/components/tahi/empty-state'
+import { PageHeader } from '@/components/tahi/page-header'
+import { Card } from '@/components/tahi/card'
+import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
+import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
+import {
+  BoardView,
+  type BoardItem,
+  type BoardColumn as BoardViewColumn,
+  type BoardPriority,
+  type BoardTag,
+} from '@/components/tahi/board-view'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,33 +71,70 @@ function parseOrgTags(raw: string | null | undefined): string[] {
 type ViewMode = 'list' | 'board' | 'workload'
 type SortKey = 'updatedAt' | 'dueDate' | 'priority' | 'status'
 
+/** ISO from/to date range used by the FilterBar created-date chip. */
+interface DateRange {
+  from: string | null
+  to: string | null
+}
+
 // ─── Config using CSS variables ────────────────────────────────────────────────
 // Colors live in globals.css @theme; change once, updates everywhere.
 
 import { REQUEST_STATUS_CONFIG as STATUS_CFG, CATEGORY_CONFIG as CAT_CFG } from '@/lib/status-config'
 
-const BOARD_COLS = [
-  { status: 'submitted',     topColor: 'var(--status-submitted-dot)'      },
-  { status: 'in_review',     topColor: 'var(--status-in-review-dot)'      },
-  { status: 'in_progress',   topColor: 'var(--status-in-progress-dot)'    },
-  { status: 'client_review', topColor: 'var(--status-client-review-dot)'  },
-  { status: 'delivered',     topColor: 'var(--status-delivered-dot)'      },
+// Default board columns mapped to the shared BoardView column shape. Used as a
+// fallback when no per-client custom kanban columns are configured.
+const BOARD_COLS: BoardViewColumn[] = [
+  { id: 'submitted',     label: 'Submitted',     statusValue: 'submitted',     color: 'var(--status-submitted-dot)'     },
+  { id: 'in_review',     label: 'In Review',     statusValue: 'in_review',     color: 'var(--status-in-review-dot)'     },
+  { id: 'in_progress',   label: 'In Progress',   statusValue: 'in_progress',   color: 'var(--status-in-progress-dot)'   },
+  { id: 'client_review', label: 'Client Review', statusValue: 'client_review', color: 'var(--status-client-review-dot)' },
+  { id: 'delivered',     label: 'Delivered',     statusValue: 'delivered',     color: 'var(--status-delivered-dot)'     },
 ]
 
 const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, standard: 2 }
 
-const ADMIN_TABS = [
-  { label: 'Open',       value: 'active'     },
-  { label: 'All',        value: 'all'        },
-  { label: 'Unassigned', value: 'unassigned' },
-  { label: 'Completed',  value: 'delivered'  },
+// Status filter options that fold in the old Open/All/Unassigned/Completed tab
+// strip. Admin and client see different subsets; the selected value maps 1:1
+// to the existing activeTab state + fetch param.
+const ADMIN_STATUS_OPTIONS = [
+  { value: 'active',     label: 'Active'     },
+  { value: 'all',        label: 'All'        },
+  { value: 'unassigned', label: 'Unassigned' },
+  { value: 'delivered',  label: 'Delivered'  },
 ]
 
-const CLIENT_TABS = [
-  { label: 'Active',    value: 'active'   },
-  { label: 'Completed', value: 'delivered'},
-  { label: 'All',       value: 'all'      },
+const CLIENT_STATUS_OPTIONS = [
+  { value: 'active',    label: 'Active'    },
+  { value: 'delivered', label: 'Delivered' },
+  { value: 'all',       label: 'All'       },
 ]
+
+const CATEGORY_OPTIONS = [
+  { value: 'design',      label: 'Design'      },
+  { value: 'development', label: 'Development' },
+  { value: 'strategy',    label: 'Strategy'    },
+  { value: 'content',     label: 'Content'     },
+  { value: 'marketing',   label: 'Marketing'   },
+  { value: 'other',       label: 'Other'       },
+]
+
+const TYPE_OPTIONS = [
+  { value: 'small_task', label: 'Small Task' },
+  { value: 'large_task', label: 'Large Task' },
+]
+
+/** Map a request priority to the BoardView priority scale. The legacy
+ *  "standard" priority maps to "medium"; low / high / urgent pass through. */
+function toBoardPriority(priority: string | null): BoardPriority | undefined {
+  switch (priority) {
+    case 'urgent': return 'urgent'
+    case 'high':   return 'high'
+    case 'low':    return 'low'
+    case 'standard': return 'medium'
+    default: return undefined
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -139,77 +185,17 @@ function sortRequests(requests: Request[], sortKey: SortKey): Request[] {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+// Status values offered in the inline status-chip column + bulk actions. Maps
+// each to a Badge tone for the DataTable ChipCell options.
 const ALL_STATUSES = ['submitted', 'in_review', 'in_progress', 'client_review', 'on_hold', 'delivered', 'cancelled']
 
-function StatusPill({ status, requestId, isAdmin, onStatusChange }: {
-  status: string
-  requestId?: string
-  isAdmin?: boolean
-  onStatusChange?: (id: string, newStatus: string) => void
-}) {
-  const [open, setOpen] = useState(false)
+// Read-only status badge for the client (non-admin) status column.
+function StatusBadgeCell({ status }: { status: string }) {
   const c = STATUS_CFG[status] ?? STATUS_CFG.submitted
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [open])
-
-  if (!isAdmin || !requestId || !onStatusChange) {
-    return (
-      <Badge tone={statusTone(status)} variant="soft" size="sm" leader="dot">
-        {c.label}
-      </Badge>
-    )
-  }
-
   return (
-    <div ref={ref} className="relative" style={{ display: 'inline-block' }}>
-      <button
-        onClick={e => { e.stopPropagation(); setOpen(!open) }}
-        className="inline-flex items-center gap-1.5 rounded-full whitespace-nowrap font-medium cursor-pointer transition-opacity hover:opacity-80"
-        style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: c.bg, color: c.text, border: `1px solid ${c.border}` }}
-      >
-        <span className="rounded-full flex-shrink-0" style={{ width: '0.375rem', height: '0.375rem', background: c.dot, display: 'inline-block' }} />
-        {c.label}
-        <ChevronDown style={{ width: '0.625rem', height: '0.625rem', opacity: 0.6 }} />
-      </button>
-      {open && (
-        <div
-          className="absolute left-0 z-50 mt-1 rounded-lg border shadow-lg overflow-hidden"
-          style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)', minWidth: '9rem' }}
-        >
-          {ALL_STATUSES.map(s => {
-            const sc = STATUS_CFG[s] ?? STATUS_CFG.submitted
-            return (
-              <button
-                key={s}
-                onClick={e => {
-                  e.stopPropagation()
-                  onStatusChange(requestId, s)
-                  setOpen(false)
-                }}
-                className="w-full text-left flex items-center gap-2 cursor-pointer transition-colors hover:bg-[var(--color-bg-tertiary)]"
-                style={{
-                  padding: '0.375rem 0.75rem',
-                  fontSize: '0.75rem',
-                  color: s === status ? sc.text : 'var(--color-text-muted)',
-                  fontWeight: s === status ? 600 : 400,
-                }}
-              >
-                <span className="rounded-full flex-shrink-0" style={{ width: '0.375rem', height: '0.375rem', background: sc.dot }} />
-                {sc.label}
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
+    <Badge tone={statusTone(status)} variant="soft" size="sm" leader="dot">
+      {c.label}
+    </Badge>
   )
 }
 
@@ -263,33 +249,8 @@ function DueDateChip({ dueDate, status }: { dueDate: string | null; status: stri
   )
 }
 
-function OrgAvatar({ name }: { name: string }) {
-  // Shared <Avatar> primitive at xs (20px) sits close to the legacy 22px footprint
-  // while giving us auto-tooltips, ring, and dark-mode compatibility for free.
-  return <Avatar name={name} size="xs" />
-}
-
-function HoursChip({ hours }: { hours: number | null }) {
-  if (!hours) return null
-  return (
-    <span
-      className="inline-flex items-center gap-0.5"
-      style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}
-      title={`${hours}h estimated`}
-    >
-      <Clock style={{ width: '0.625rem', height: '0.625rem' }} />
-      {hours}h
-    </span>
-  )
-}
 
 // ─── Main component ───────────────────────────────────────────────────────────
-
-interface BoardColumn {
-  status: string
-  topColor: string
-  label?: string
-}
 
 export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
@@ -300,13 +261,16 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     impersonatedAccessRules.length > 0 &&
     impersonatedAccessRules.every(r => r.role === 'viewer')
   const searchParams = useSearchParams()
+  const router = useRouter()
   // Persisted per-user preferences (Decision #047).
   const [view, setView] = useUserPreference<ViewMode>(
     'requests.viewMode',
     'list',
     { validator: oneOf<ViewMode>(['list', 'board', 'workload']) },
   )
-  const [sortKey, setSortKey] = useUserPreference<SortKey>(
+  // Persisted default ordering applied before the table / board renders.
+  // The DataTable also exposes per-column header sorting on top of this.
+  const [sortKey] = useUserPreference<SortKey>(
     'requests.sortKey',
     'updatedAt',
     { validator: oneOf<SortKey>(['updatedAt', 'dueDate', 'priority', 'status']) },
@@ -337,13 +301,13 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     window.addEventListener('tahi:shortcut', handleShortcut)
     return () => window.removeEventListener('tahi:shortcut', handleShortcut)
   }, [])
-  const [boardColumns, setBoardColumns] = useState<BoardColumn[]>(BOARD_COLS)
+  const [boardColumns, setBoardColumns] = useState<BoardViewColumn[]>(BOARD_COLS)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
+  const statusOptions = isAdmin ? ADMIN_STATUS_OPTIONS : CLIENT_STATUS_OPTIONS
 
-  const tabs = isAdmin ? ADMIN_TABS : CLIENT_TABS
-
-  // Fetch custom kanban columns (admin only)
+  // Fetch custom kanban columns (admin only). Mapped to the shared BoardView
+  // column shape; falls back to BOARD_COLS when none are configured.
   useEffect(() => {
     if (!isAdmin) return
     fetch(apiPath('/api/admin/kanban-columns'))
@@ -353,12 +317,13 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       })
       .then(data => {
         if (data.columns && data.columns.length > 0) {
-          const mapped: BoardColumn[] = data.columns
+          const mapped: BoardViewColumn[] = data.columns
             .sort((a, b) => a.position - b.position)
             .map(c => ({
-              status: c.statusValue,
-              topColor: c.colour ?? `var(--status-${c.statusValue.replace(/_/g, '-')}-dot)`,
+              id: c.statusValue,
               label: c.label,
+              statusValue: c.statusValue,
+              color: c.colour ?? `var(--status-${c.statusValue.replace(/_/g, '-')}-dot)`,
             }))
           setBoardColumns(mapped)
         }
@@ -405,25 +370,20 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // Clear selection when tab changes
   useEffect(() => { setSelectedIds(new Set()) }, [activeTab])
 
-  const toggleSelect = useCallback((id: string) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }, [])
-
   const filtered = requests.filter(r => {
     // Text search
     if (search.trim()) {
       const q = search.toLowerCase()
       if (!r.title.toLowerCase().includes(q) && !(r.orgName ?? '').toLowerCase().includes(q)) return false
     }
-    // Date range filter (on createdAt)
-    if (dateRange.from && dateRange.to && r.createdAt) {
-      const d = new Date(r.createdAt).getTime()
-      if (d < dateRange.from.getTime() || d > dateRange.to.getTime()) return false
+    // Date range filter (on createdAt). FilterBar gives ISO YYYY-MM-DD strings.
+    if (dateRange.from && r.createdAt) {
+      const d = r.createdAt.slice(0, 10)
+      if (d < dateRange.from) return false
+    }
+    if (dateRange.to && r.createdAt) {
+      const d = r.createdAt.slice(0, 10)
+      if (d > dateRange.to) return false
     }
     // Category filter
     if (categoryFilter !== 'all' && (r.category ?? '') !== categoryFilter) return false
@@ -441,12 +401,342 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
 
   const sorted = sortRequests(filtered, sortKey)
 
-  const toggleSelectAll = useCallback(() => {
-    setSelectedIds(prev => {
-      if (prev.size === sorted.length) return new Set()
-      return new Set(sorted.map(r => r.id))
-    })
+  // ── FilterBar wiring ──────────────────────────────────────────────────────
+  // FilterBar drives the same individual filter state vars used by `filtered`.
+  // Status + Category + Type chips are permanent (nonRemovable). The client-tag
+  // and created-date chips appear when relevant.
+  const filterDefs: FilterDef[] = useMemo(() => {
+    const defs: FilterDef[] = [
+      {
+        id: 'status',
+        label: 'Status',
+        kind: 'select',
+        nonRemovable: true,
+        options: statusOptions,
+      },
+      {
+        id: 'category',
+        label: 'Category',
+        kind: 'select',
+        nonRemovable: true,
+        options: [{ value: 'all', label: 'All' }, ...CATEGORY_OPTIONS],
+      },
+      {
+        id: 'type',
+        label: 'Type',
+        kind: 'select',
+        nonRemovable: true,
+        options: [{ value: 'all', label: 'All' }, ...TYPE_OPTIONS],
+      },
+      {
+        id: 'created',
+        label: 'Created',
+        kind: 'daterange',
+        options: [],
+      },
+    ]
+    if (availableTags.length > 0) {
+      defs.splice(3, 0, {
+        id: 'tag',
+        label: 'Client tag',
+        kind: 'select',
+        options: [{ value: 'all', label: 'All' }, ...availableTags.map(t => ({ value: t, label: t }))],
+      })
+    }
+    return defs
+  }, [statusOptions, availableTags])
+
+  const activeFilters: ActiveFilter[] = useMemo(() => {
+    const list: ActiveFilter[] = [
+      { id: 'status', value: activeTab },
+      { id: 'category', value: categoryFilter },
+      { id: 'type', value: typeFilter },
+    ]
+    if (availableTags.length > 0 && tagFilter !== 'all') {
+      list.push({ id: 'tag', value: tagFilter })
+    }
+    if (dateRange.from || dateRange.to) {
+      list.push({ id: 'created', from: dateRange.from, to: dateRange.to })
+    }
+    return list
+  }, [activeTab, categoryFilter, typeFilter, tagFilter, dateRange, availableTags])
+
+  const handleFiltersChange = useCallback((next: ActiveFilter[]) => {
+    const byId = new Map(next.map(a => [a.id, a]))
+    setActiveTab(byId.get('status')?.value ?? 'active')
+    setCategoryFilter(byId.get('category')?.value ?? 'all')
+    setTypeFilter(byId.get('type')?.value ?? 'all')
+    setTagFilter(byId.get('tag')?.value ?? 'all')
+    const created = byId.get('created')
+    setDateRange({ from: created?.from ?? null, to: created?.to ?? null })
+  }, [setActiveTab])
+
+  // ── DataTable selection bridge ────────────────────────────────────────────
+  // DataTable owns selection through selectedIds + onSelectionChange. We bridge
+  // those to the existing bulk-selection Set state so the BulkActionBar keeps
+  // working unchanged.
+  const handleSelectionChange = useCallback((nextSel: Set<string>) => {
+    setSelectedIds(nextSel)
+  }, [])
+
+  // ── Inline status change as a DataTable edit chip ─────────────────────────
+  const handleRowStatusChange = useCallback((row: Request, next: string) => {
+    handleStatusChange(row.id, next)
+  }, [handleStatusChange])
+
+  // ── Board: map requests → BoardItem (top-level + nested children) ─────────
+  const boardItems: BoardItem[] = useMemo(() => {
+    const childrenByParent = new Map<string, Request[]>()
+    for (const r of sorted) {
+      if (r.parentRequestId) {
+        const list = childrenByParent.get(r.parentRequestId) ?? []
+        list.push(r)
+        childrenByParent.set(r.parentRequestId, list)
+      }
+    }
+    const toItem = (r: Request): BoardItem => {
+      const tags: BoardTag[] = []
+      if (r.category) {
+        const cat = CAT_CFG[r.category]
+        tags.push({ id: `cat-${r.category}`, label: formatType(r.category), color: cat?.color })
+      }
+      for (const t of parseOrgTags(r.orgTags)) {
+        tags.push({ id: `tag-${t}`, label: t })
+      }
+      const overdue = getDueDateState(r.dueDate, r.status) === 'overdue'
+      return {
+        id: r.id,
+        status: r.status,
+        title: r.requestNumber != null
+          ? `#${String(r.requestNumber).padStart(3, '0')} ${r.title}`
+          : r.title,
+        priority: toBoardPriority(r.priority),
+        tags: tags.length > 0 ? tags : undefined,
+        dueDate: r.dueDate ?? undefined,
+        startDate: r.startDate ?? undefined,
+        isOverdue: overdue,
+      }
+    }
+    return sorted
+      .filter(r => !r.parentRequestId)
+      .map(r => {
+        const item = toItem(r)
+        const kids = childrenByParent.get(r.id)
+        if (kids && kids.length > 0) item.children = kids.map(toItem)
+        return item
+      })
   }, [sorted])
+
+  // Drag source context for the cross-client guard. dataTransfer is empty during
+  // dragover, so we mirror the dragged request's org into a ref via boardItems
+  // lookup at move/nest time.
+  const requestById = useMemo(() => {
+    const m = new Map<string, Request>()
+    for (const r of requests) m.set(r.id, r)
+    return m
+  }, [requests])
+
+  const [nestPrompt, setNestPrompt] = useState<{
+    sourceId: string
+    sourceTitle: string
+    targetId: string
+    targetTitle: string
+  } | null>(null)
+  const [nestError, setNestError] = useState<string | null>(null)
+
+  // Board move: status change, and un-nest-on-column-drop (moving a nested child
+  // onto a column clears its parent, matching the legacy board).
+  const handleBoardMove = useCallback(async (itemId: string, toStatus: string) => {
+    if (!isAdmin) return
+    const src = requestById.get(itemId)
+    if (!src) return
+    const fromStatus = src.status
+    const wasChild = !!src.parentRequestId
+    try {
+      if (wasChild) {
+        await fetch(apiPath(`/api/admin/requests/${itemId}/nest`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ parentRequestId: null }),
+        })
+      }
+      if (fromStatus !== toStatus) {
+        await fetch(apiPath(`/api/admin/requests/${itemId}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: toStatus }),
+        })
+      }
+      if (wasChild || fromStatus !== toStatus) fetchRequests()
+    } catch {
+      // silent
+    }
+  }, [isAdmin, requestById, fetchRequests])
+
+  // Board nest: dropping card A onto card B nests A under B. Cross-client drops
+  // are refused before the confirm dialog opens (same guard the backend enforces).
+  const handleBoardNest = useCallback((childId: string, parentId: string) => {
+    if (!isAdmin || childId === parentId) return
+    const source = requestById.get(childId)
+    const target = requestById.get(parentId)
+    if (!source || !target) return
+    if ((source.orgId ?? null) !== (target.orgId ?? null)) return
+    setNestError(null)
+    setNestPrompt({
+      sourceId: childId,
+      sourceTitle: source.title,
+      targetId: parentId,
+      targetTitle: target.title,
+    })
+  }, [isAdmin, requestById])
+
+  const confirmNest = useCallback(async () => {
+    if (!nestPrompt) return
+    setNestError(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/requests/${nestPrompt.sourceId}/nest`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentRequestId: nestPrompt.targetId }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        setNestError(j.error ?? 'Failed to nest request')
+        return
+      }
+      setNestPrompt(null)
+      fetchRequests()
+    } catch {
+      setNestError('Failed to nest request (network)')
+    }
+  }, [nestPrompt, fetchRequests])
+
+  // ── DataTable columns ─────────────────────────────────────────────────────
+  const columns = useMemo<DataTableColumn<Request>[]>(() => {
+    const cols: DataTableColumn<Request>[] = [
+      {
+        key: 'title',
+        header: 'Title',
+        sortable: true,
+        sortValue: r => r.title.toLowerCase(),
+        minWidth: '18rem',
+        render: r => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+            {r.scopeFlagged && (
+              <AlertTriangle
+                size={13}
+                aria-label="Scope flagged"
+                style={{ color: 'var(--color-danger)', flexShrink: 0 }}
+              />
+            )}
+            {r.requestNumber != null && (
+              <span className="font-mono" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }}>
+                #{String(r.requestNumber).padStart(3, '0')}
+              </span>
+            )}
+            <Link
+              href={`/requests/${r.id}`}
+              onClick={e => e.stopPropagation()}
+              style={{
+                fontWeight: 600,
+                color: 'var(--color-text)',
+                textDecoration: 'none',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand-dark)' }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text)' }}
+            >
+              {r.title}
+            </Link>
+          </div>
+        ),
+      },
+    ]
+
+    if (isAdmin) {
+      cols.push({
+        key: 'client',
+        header: 'Client',
+        sortable: true,
+        sortValue: r => (r.orgName ?? '').toLowerCase(),
+        minWidth: '10rem',
+        render: r => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', minWidth: 0 }}>
+            {r.orgName && <Avatar name={r.orgName} size="xs" />}
+            <span style={{
+              fontSize: '0.8125rem',
+              color: 'var(--color-text-muted)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}>
+              {r.orgName ?? '--'}
+            </span>
+          </div>
+        ),
+      })
+    }
+
+    cols.push({
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      sortValue: r => r.status,
+      width: '11rem',
+      // Admin gets an editable chip wired to the optimistic status PUT; clients
+      // see a read-only status badge.
+      ...(isAdmin
+        ? {
+            edit: {
+              value: (r: Request) => r.status,
+              options: ALL_STATUSES.map(s => ({
+                value: s,
+                label: STATUS_CFG[s]?.label ?? s,
+                tone: statusTone(s),
+              })),
+              onChange: handleRowStatusChange,
+            },
+          }
+        : {
+            render: (r: Request) => <StatusBadgeCell status={r.status} />,
+          }),
+    })
+
+    cols.push({
+      key: 'priority',
+      header: 'Priority',
+      sortable: true,
+      sortValue: r => PRIORITY_ORDER[r.priority ?? 'standard'] ?? 2,
+      width: '7rem',
+      render: r => <PriorityBadge priority={r.priority} />,
+    })
+
+    cols.push({
+      key: 'dueDate',
+      header: 'Due',
+      sortable: true,
+      sortValue: r => r.dueDate ?? '',
+      width: '7rem',
+      render: r => <DueDateChip dueDate={r.dueDate} status={r.status} />,
+    })
+
+    cols.push({
+      key: 'updatedAt',
+      header: 'Updated',
+      sortable: true,
+      sortValue: r => r.updatedAt ?? '',
+      width: '7rem',
+      render: r => (
+        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+          {formatDate(r.updatedAt ? r.updatedAt.slice(0, 10) : null)}
+        </span>
+      ),
+    })
+
+    return cols
+  }, [isAdmin, handleRowStatusChange])
 
   return (
     <>
@@ -468,27 +758,24 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         submitEndpoint={isAdmin ? '/api/admin/requests' : '/api/portal/requests'}
       />
 
-      {/* Page header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text)' }}>Requests</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
-            {!loading
-              ? `${filtered.length} ${filtered.length === 1 ? 'request' : 'requests'}`
-              : 'Manage all work items and track progress'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+      <div style={{ padding: '1.25rem 0', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+        {/* Page header */}
+        <PageHeader
+          title="Requests"
+          subtitle={loading
+            ? 'Manage all work items and track progress'
+            : `${filtered.length} ${filtered.length === 1 ? 'request' : 'requests'}`}
+        >
           <TahiButton
             variant="secondary"
-            size="md"
+            size="sm"
             onClick={() => {
               const link = document.createElement('a')
               link.href = apiPath('/api/admin/export/requests')
               link.download = 'requests.csv'
               link.click()
             }}
-            iconLeft={<Download className="w-4 h-4" />}
+            iconLeft={<Download className="w-3.5 h-3.5" />}
             aria-label="Export CSV"
           >
             <span className="hidden sm:inline">Export CSV</span>
@@ -496,9 +783,9 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
           {isAdmin && (
             <TahiButton
               variant="secondary"
-              size="md"
+              size="sm"
               onClick={() => setBulkCreateOpen(true)}
-              iconLeft={<Users className="w-4 h-4" />}
+              iconLeft={<Users className="w-3.5 h-3.5" />}
               className="hidden sm:inline-flex"
             >
               Bulk Create
@@ -507,9 +794,9 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
           {!isViewerImpersonation && (
             <TahiButton
               variant="secondary"
-              size="md"
+              size="sm"
               onClick={() => setAiWizardOpen(true)}
-              iconLeft={<Sparkles className="w-4 h-4" />}
+              iconLeft={<Sparkles className="w-3.5 h-3.5" />}
               title="Draft a request with AI"
               className="hidden sm:inline-flex"
             >
@@ -519,636 +806,106 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
           {!isViewerImpersonation && (
             <TahiButton
               variant="primary"
-              size="md"
+              size="sm"
               onClick={() => setDialogOpen(true)}
-              iconLeft={<Plus className="w-4 h-4" />}
+              iconLeft={<Plus className="w-3.5 h-3.5" />}
             >
-              <span className="hidden sm:inline">Create Request</span>
+              <span className="hidden sm:inline">New Request</span>
               <span className="sm:hidden">New</span>
             </TahiButton>
           )}
-        </div>
-      </div>
+        </PageHeader>
 
-      {/* Main card */}
-      <div
-        className="overflow-hidden"
-        style={{
-          background: 'var(--color-bg)',
-          border: '1px solid var(--color-border)',
-          borderRadius: '0.75rem',
-          boxShadow: 'var(--shadow-sm)',
-        }}
-      >
-
-        {/* Toolbar */}
-        <div
-          className="flex flex-wrap items-center gap-2"
-          style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--color-border-subtle)', background: 'var(--color-bg)' }}
-        >
-          {/* Search */}
-          <div style={{ width: '16rem', minWidth: '8rem', flexShrink: 1 }}>
-            <Input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search requests…"
-              leadingIcon={<Search size={14} aria-hidden="true" />}
-              style={{ width: '100%' }}
-            />
-          </div>
-
-          {/* Sort */}
-          <div className="hidden sm:block">
-            <Select
-              value={sortKey}
-              onChange={e => setSortKey(e.target.value as SortKey)}
-              aria-label="Sort"
-              options={[
-                { value: 'updatedAt', label: 'Sort: Updated'  },
-                { value: 'dueDate',   label: 'Sort: Due date' },
-                { value: 'priority',  label: 'Sort: Priority' },
-                { value: 'status',    label: 'Sort: Status'   },
-              ]}
-            />
-          </div>
-
-          {/* Filters */}
-          <DateRangePicker value={dateRange} onChange={setDateRange} label="Created date" />
-          <div className="hidden sm:block">
-            <Select
-              value={categoryFilter}
-              onChange={e => setCategoryFilter(e.target.value)}
-              aria-label="Category filter"
-              highlightActive
-              options={[
-                { value: 'all',         label: 'All Categories' },
-                { value: 'design',      label: 'Design'         },
-                { value: 'development', label: 'Development'    },
-                { value: 'strategy',    label: 'Strategy'       },
-                { value: 'content',     label: 'Content'        },
-                { value: 'marketing',   label: 'Marketing'      },
-                { value: 'other',       label: 'Other'          },
-              ]}
-            />
-          </div>
-          <div className="hidden sm:block">
-            <Select
-              value={typeFilter}
-              onChange={e => setTypeFilter(e.target.value)}
-              aria-label="Type filter"
-              highlightActive
-              options={[
-                { value: 'all',        label: 'All Types'  },
-                { value: 'small_task', label: 'Small Task' },
-                { value: 'large_task', label: 'Large Task' },
-              ]}
-            />
-          </div>
-          {availableTags.length > 0 && (
-            <div className="hidden sm:block">
-              <Select
-                value={tagFilter}
-                onChange={e => setTagFilter(e.target.value)}
-                aria-label="Client tag filter"
-                highlightActive
-                options={[
-                  { value: 'all', label: 'All Tags' },
-                  ...availableTags.map(t => ({ value: t, label: t })),
-                ]}
-              />
-            </div>
-          )}
-
-          <div className="flex-1" />
-
-          {/* View toggle */}
-          <ViewToggle
-            value={view}
-            onChange={v => setView(v)}
-            options={
-              isAdmin
-                ? [
-                    { value: 'list',     icon: LayoutList, label: 'List view'     },
-                    { value: 'board',    icon: Columns3,   label: 'Board view'    },
-                    { value: 'workload', icon: BarChart3,  label: 'Workload view' },
-                  ]
-                : [
-                    { value: 'list',  icon: LayoutList, label: 'List view'  },
-                    { value: 'board', icon: Columns3,   label: 'Board view' },
-                  ]
-            }
-          />
-        </div>
-
-        {/* Tabs */}
-        <div
-          className="flex items-end overflow-x-auto overflow-y-hidden scrollbar-hide"
-          style={{ borderBottom: '1px solid var(--color-border)', paddingLeft: '0.25rem', paddingRight: '1rem', background: 'var(--color-bg)', WebkitOverflowScrolling: 'touch' }}
-        >
-          {tabs.map(tab => (
-            <button
-              key={tab.value}
-              onClick={() => setActiveTab(tab.value)}
-              className="font-medium whitespace-nowrap flex-shrink-0 transition-colors"
-              style={{
-                padding: '0.625rem 1rem',
-                fontSize: '0.875rem',
-                border: 0,
-                borderBottom: activeTab === tab.value ? '2px solid var(--color-brand)' : '2px solid transparent',
-                marginBottom: '-1px',
-                color: activeTab === tab.value ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-                background: 'transparent',
-                cursor: 'pointer',
+        {/* Filter row + view toggle */}
+        <div className="flex flex-wrap items-center" style={{ gap: '0.5rem' }}>
+          <div style={{ flex: 1, minWidth: '14rem' }}>
+            <FilterBar
+              filters={filterDefs}
+              active={activeFilters}
+              onChange={handleFiltersChange}
+              search={{
+                value: search,
+                onChange: setSearch,
+                placeholder: 'Search requests',
               }}
-            >
-              {tab.label}
-            </button>
-          ))}
-          {loading && (
-            <RefreshCw
-              className="animate-spin flex-shrink-0"
-              style={{ width: '0.875rem', height: '0.875rem', color: 'var(--color-text-subtle)', marginLeft: '0.5rem', marginBottom: '0.75rem' }}
+              size="sm"
             />
-          )}
+          </div>
+          <div className="flex items-center" style={{ gap: '0.5rem' }}>
+            {loading && (
+              <RefreshCw
+                className="animate-spin flex-shrink-0"
+                aria-hidden="true"
+                style={{ width: '0.875rem', height: '0.875rem', color: 'var(--color-text-subtle)' }}
+              />
+            )}
+            <ViewToggle
+              value={view}
+              onChange={v => setView(v)}
+              size="sm"
+              options={
+                isAdmin
+                  ? [
+                      { value: 'list',     icon: LayoutList, label: 'List view'     },
+                      { value: 'board',    icon: Columns3,   label: 'Board view'    },
+                      { value: 'workload', icon: BarChart3,  label: 'Workload view' },
+                    ]
+                  : [
+                      { value: 'list',  icon: LayoutList, label: 'List view'  },
+                      { value: 'board', icon: Columns3,   label: 'Board view' },
+                    ]
+              }
+            />
+          </div>
         </div>
 
         {/* Bulk action bar */}
         {isAdmin && selectedIds.size > 0 && (
-          <BulkActionBar
-            selectedCount={selectedIds.size}
-            selectedIds={selectedIds}
-            onClear={() => setSelectedIds(new Set())}
-            onDone={() => { setSelectedIds(new Set()); fetchRequests() }}
-          />
+          <Card padding="none" style={{ overflow: 'visible' }}>
+            <BulkActionBar
+              selectedCount={selectedIds.size}
+              selectedIds={selectedIds}
+              onClear={() => setSelectedIds(new Set())}
+              onDone={() => { setSelectedIds(new Set()); fetchRequests() }}
+            />
+          </Card>
         )}
 
         {/* Content area */}
-        <div style={{ background: view === 'board' || view === 'workload' ? 'var(--color-bg-secondary)' : 'var(--color-bg)' }}>
-          {loading ? (
-            <LoadingSkeleton />
-          ) : view === 'workload' && isAdmin ? (
-            <WorkloadView requests={sorted} />
-          ) : sorted.length === 0 ? (
-            <EmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />
-          ) : view === 'list' ? (
-            <ListView
-              requests={sorted}
-              isAdmin={isAdmin}
-              selectedIds={selectedIds}
-              onToggleSelect={isAdmin ? toggleSelect : undefined}
-              onToggleAll={isAdmin ? toggleSelectAll : undefined}
-              onStatusChange={isAdmin ? handleStatusChange : undefined}
-            />
-          ) : (
-            <BoardView requests={sorted} columns={boardColumns} isAdmin={isAdmin} onStatusChange={fetchRequests} />
-          )}
-        </div>
-      </div>
-
-      {/* Bulk Create Dialog */}
-      {bulkCreateOpen && (
-        <BulkCreateDialog
-          onClose={() => setBulkCreateOpen(false)}
-          onCreated={() => { setBulkCreateOpen(false); fetchRequests() }}
-        />
-      )}
-    </>
-  )
-}
-
-// ─── List View ────────────────────────────────────────────────────────────────
-
-function ListView({
-  requests,
-  isAdmin,
-  selectedIds,
-  onToggleSelect,
-  onToggleAll,
-  onStatusChange,
-}: {
-  requests: Request[]
-  isAdmin: boolean
-  selectedIds?: Set<string>
-  onToggleSelect?: (id: string) => void
-  onStatusChange?: (id: string, status: string) => void
-  onToggleAll?: () => void
-}) {
-  const showCheckboxes = isAdmin && onToggleSelect
-  const allSelected = showCheckboxes && selectedIds && selectedIds.size === requests.length && requests.length > 0
-
-  return (
-    <div>
-      {/* Table header: hidden on mobile, visible md+ */}
-      <div
-        className="hidden md:grid text-xs font-semibold uppercase tracking-wide items-center"
-        style={{
-          gridTemplateColumns: showCheckboxes
-            ? '2rem 1fr 7.5rem 9rem 8rem 5.5rem 6rem 5.5rem'
-            : isAdmin
-              ? '1fr 7.5rem 9rem 8rem 5.5rem 6rem 5.5rem'
-              : '1fr 8.75rem 8rem 5.5rem 5.5rem 5.5rem',
-          padding: '0.625rem 1rem',
-          borderBottom: '1px solid var(--color-border-subtle)',
-          color: 'var(--color-th-text)',
-          background: 'var(--color-th-bg)',
-        }}
-      >
-        {showCheckboxes && (
-          <button
-            onClick={e => { e.preventDefault(); onToggleAll?.() }}
-            className="flex items-center justify-center"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-            aria-label={allSelected ? 'Deselect all' : 'Select all'}
-          >
-            {allSelected
-              ? <CheckSquare className="w-4 h-4" style={{ color: 'var(--color-brand)' }} />
-              : <Square className="w-4 h-4" style={{ color: 'var(--color-text-subtle)' }} />}
-          </button>
-        )}
-        <span>Title</span>
-        {isAdmin && <span>Client</span>}
-        <span>Type</span>
-        <span>Status</span>
-        <span>Due</span>
-        <span>Est.</span>
-        <span>Priority</span>
-      </div>
-
-      {/* Rows */}
-      <div>
-        {requests.map((req, i) => (
-          <ListRow
-            key={req.id}
-            req={req}
-            isAdmin={isAdmin}
-            isLast={i === requests.length - 1}
-            isSelected={selectedIds?.has(req.id)}
-            onToggleSelect={onToggleSelect}
-            onStatusChange={onStatusChange}
+        {view === 'workload' && isAdmin ? (
+          // WorkloadView keeps its own card surface, so it isn't re-wrapped.
+          <WorkloadView requests={sorted} />
+        ) : view === 'board' ? (
+          <BoardView
+            views={['kanban', 'timeline']}
+            defaultView="kanban"
+            columns={boardColumns}
+            items={boardItems}
+            searchPlaceholder="Search requests"
+            onMove={isAdmin ? handleBoardMove : undefined}
+            onNest={isAdmin ? handleBoardNest : undefined}
+            onItemClick={(item) => { router.push(`/requests/${item.id}`) }}
+            readOnly={!isAdmin}
           />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function ListRow({
-  req,
-  isAdmin,
-  isLast,
-  isSelected,
-  onToggleSelect,
-  onStatusChange,
-}: {
-  req: Request
-  isAdmin: boolean
-  isLast: boolean
-  isSelected?: boolean
-  onToggleSelect?: (id: string) => void
-  onStatusChange?: (id: string, status: string) => void
-}) {
-  const cat = CAT_CFG[req.category ?? ''] ?? { bg: 'var(--cat-admin-bg)', color: 'var(--cat-admin-text)' }
-  const showCheckbox = isAdmin && onToggleSelect
-
-  return (
-    <Link
-      href={`/requests/${req.id}`}
-      style={{ textDecoration: 'none', display: 'block' }}
-      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--color-row-hover)' }}
-      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = isSelected ? 'var(--color-brand-50)' : 'var(--color-bg)' }}
-    >
-      {/* Mobile layout (< md): card-style */}
-      <div
-        className="flex flex-col gap-2 md:hidden"
-        style={{
-          padding: '0.875rem 1rem',
-          borderBottom: isLast ? 'none' : '1px solid var(--color-row-border)',
-          background: 'inherit',
-        }}
-      >
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-1.5 min-w-0">
-            {req.scopeFlagged && <AlertTriangle style={{ width: '0.875rem', height: '0.875rem', color: 'var(--color-danger)', flexShrink: 0 }} />}
-            {req.requestNumber != null && (
-              <span className="flex-shrink-0 font-mono font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
-                #{String(req.requestNumber).padStart(3, '0')}
-              </span>
-            )}
-            <span className="font-medium truncate" style={{ fontSize: '0.9375rem', color: 'var(--color-text)' }}>{req.title}</span>
-          </div>
-          <StatusPill status={req.status} requestId={req.id} isAdmin={isAdmin} onStatusChange={onStatusChange} />
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {isAdmin && req.orgName && (
-            <div className="flex items-center gap-1">
-              <OrgAvatar name={req.orgName} />
-              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{req.orgName}</span>
-            </div>
-          )}
-          <span
-            className="inline-flex items-center rounded"
-            style={{ padding: '0.125rem 0.5rem', fontSize: '0.6875rem', background: cat.bg, color: cat.color }}
-          >
-            {formatType(req.type)}
-          </span>
-          <PriorityBadge priority={req.priority} />
-          {req.dueDate && <DueDateChip dueDate={req.dueDate} status={req.status} />}
-          <HoursChip hours={req.estimatedHours} />
-        </div>
-      </div>
-
-      {/* Desktop layout (md+): grid table row */}
-      <div
-        className="hidden md:grid items-center"
-        style={{
-          gridTemplateColumns: showCheckbox
-            ? '2rem 1fr 7.5rem 9rem 8rem 5.5rem 6rem 5.5rem'
-            : isAdmin
-              ? '1fr 7.5rem 9rem 8rem 5.5rem 6rem 5.5rem'
-              : '1fr 8.75rem 8rem 5.5rem 5.5rem 5.5rem',
-          padding: '0.75rem 1rem',
-          borderBottom: isLast ? 'none' : '1px solid var(--color-row-border)',
-          background: isSelected ? 'var(--color-brand-50)' : 'inherit',
-        }}
-      >
-        {/* Checkbox */}
-        {showCheckbox && (
-          <button
-            onClick={e => { e.preventDefault(); e.stopPropagation(); onToggleSelect(req.id) }}
-            className="flex items-center justify-center"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-            aria-label={isSelected ? 'Deselect' : 'Select'}
-          >
-            {isSelected
-              ? <CheckSquare className="w-4 h-4" style={{ color: 'var(--color-brand)' }} />
-              : <Square className="w-4 h-4" style={{ color: 'var(--color-text-subtle)' }} />}
-          </button>
+        ) : (
+          <Card padding="none">
+            <DataTable<Request>
+              ariaLabel="Requests"
+              columns={columns}
+              rows={sorted}
+              getRowId={r => r.id}
+              loading={loading}
+              selectable={isAdmin}
+              selectedIds={isAdmin ? selectedIds : undefined}
+              onSelectionChange={isAdmin ? handleSelectionChange : undefined}
+              onRowClick={(r) => { router.push(`/requests/${r.id}`) }}
+              empty={<EmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />}
+            />
+          </Card>
         )}
-        {/* Title */}
-        <div className="flex items-center gap-2 min-w-0" style={{ paddingRight: '0.75rem' }}>
-          {req.scopeFlagged && (
-            <AlertTriangle style={{ width: '0.875rem', height: '0.875rem', color: 'var(--color-danger)', flexShrink: 0 }} aria-label="Scope flagged" />
-          )}
-          {req.requestNumber != null && (
-            <span className="flex-shrink-0 font-mono font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
-              #{String(req.requestNumber).padStart(3, '0')}
-            </span>
-          )}
-          <span className="font-medium truncate" style={{ fontSize: '0.875rem', color: 'var(--color-text)' }}>
-            {req.title}
-          </span>
-        </div>
-
-        {/* Client (admin only) */}
-        {isAdmin && (
-          <div className="flex items-center gap-1.5 min-w-0" style={{ paddingRight: '0.75rem' }}>
-            {req.orgName && <OrgAvatar name={req.orgName} />}
-            <span className="truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-              {req.orgName ?? '--'}
-            </span>
-          </div>
-        )}
-
-        {/* Type / category */}
-        <div style={{ paddingRight: '0.75rem' }}>
-          <span
-            className="inline-flex items-center rounded"
-            style={{ padding: '0.125rem 0.5rem', fontSize: '0.75rem', background: cat.bg, color: cat.color }}
-          >
-            {formatType(req.type)}
-          </span>
-        </div>
-
-        {/* Status */}
-        <div style={{ paddingRight: '0.75rem' }}>
-          <StatusPill status={req.status} requestId={req.id} isAdmin={isAdmin} onStatusChange={onStatusChange} />
-        </div>
-
-        {/* Due date */}
-        <div style={{ paddingRight: '0.75rem' }}>
-          <DueDateChip dueDate={req.dueDate} status={req.status} />
-        </div>
-
-        {/* Estimated hours */}
-        <div style={{ paddingRight: '0.75rem' }}>
-          <HoursChip hours={req.estimatedHours} />
-        </div>
-
-        {/* Priority */}
-        <div>
-          <PriorityBadge priority={req.priority} />
-        </div>
       </div>
-    </Link>
-  )
-}
 
-// ─── Board View ───────────────────────────────────────────────────────────────
-
-function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: Request[]; columns: BoardColumn[]; isAdmin: boolean; onStatusChange: () => void }) {
-  // Top-level requests group by status. Children nest visually under their
-  // parent card and do NOT appear as separate column entries.
-  const topLevel = requests.filter(r => !r.parentRequestId)
-  const childrenByParent = new Map<string, Request[]>()
-  for (const r of requests) {
-    if (r.parentRequestId) {
-      const list = childrenByParent.get(r.parentRequestId) ?? []
-      list.push(r)
-      childrenByParent.set(r.parentRequestId, list)
-    }
-  }
-  const byStatus = (status: string) => topLevel.filter(r => r.status === status)
-
-  // Source-of-drag context used by card dragover handlers for the
-  // cross-client guard. dataTransfer.getData is empty during dragover (browser
-  // security), so we mirror orgId + parentRequestId + source id into a ref at
-  // dragstart and read it during dragover.
-  const dragSource = useRef<{ id: string; orgId: string | null; parentId: string | null } | null>(null)
-
-  // Drag-to-nest state : when a card is dropped onto another card, we stash
-  // source + target here and show a ConfirmDialog. User confirms → POST /nest.
-  const [nestPrompt, setNestPrompt] = useState<{
-    sourceId: string
-    sourceTitle: string
-    targetId: string
-    targetTitle: string
-  } | null>(null)
-  const [nestError, setNestError] = useState<string | null>(null)
-
-  const handleDrop = async (e: React.DragEvent, newStatus: string) => {
-    e.preventDefault()
-    const el = e.currentTarget as HTMLElement
-    el.style.borderColor = 'var(--color-border)'
-    // If the drop already triggered a nest onto a card, skip the status change
-    // (the card handler called stopPropagation but belt-and-braces).
-    if (e.dataTransfer.getData('nestHandled') === '1') return
-    const requestId = e.dataTransfer.getData('requestId')
-    const fromStatus = e.dataTransfer.getData('fromStatus')
-    const fromParent = e.dataTransfer.getData('fromParent') || null
-    if (!requestId) return
-    if (!isAdmin) return
-    try {
-      // If this card was a sub-request, un-nest first. Dropping into a column
-      // implies "break me out of my parent". If the user wanted to keep it as
-      // a child, they'd drop onto another parent card instead.
-      if (fromParent) {
-        await fetch(apiPath(`/api/admin/requests/${requestId}/nest`), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ parentRequestId: null }),
-        })
-      }
-      if (fromStatus !== newStatus) {
-        await fetch(apiPath(`/api/admin/requests/${requestId}`), {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: newStatus }),
-        })
-      }
-      if (fromParent || fromStatus !== newStatus) onStatusChange()
-    } catch {
-      // silent
-    }
-  }
-
-  /** Drop-on-card handler : A dropped onto B → nest A under B. Only admins. */
-  const handleNestDrop = useCallback((sourceId: string, targetReq: Request) => {
-    if (!isAdmin || sourceId === targetReq.id) return
-    const source = requests.find(r => r.id === sourceId)
-    if (!source) return
-    // Cross-client drops are rejected before the ConfirmDialog opens — same
-    // guard the backend enforces, but faster feedback for the user. Treat
-    // null orgId as its own bucket so null↔client-org is also refused.
-    if ((source.orgId ?? null) !== (targetReq.orgId ?? null)) return
-    setNestError(null)
-    setNestPrompt({
-      sourceId,
-      sourceTitle: source.title,
-      targetId: targetReq.id,
-      targetTitle: targetReq.title,
-    })
-  }, [isAdmin, requests])
-
-  const confirmNest = useCallback(async () => {
-    if (!nestPrompt) return
-    setNestError(null)
-    try {
-      const res = await fetch(apiPath(`/api/admin/requests/${nestPrompt.sourceId}/nest`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parentRequestId: nestPrompt.targetId }),
-      })
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({})) as { error?: string }
-        setNestError(j.error ?? 'Failed to nest request')
-        return
-      }
-      setNestPrompt(null)
-      onStatusChange() // refresh list
-    } catch {
-      setNestError('Failed to nest request (network)')
-    }
-  }, [nestPrompt, onStatusChange])
-
-  return (
-    <div
-      className="flex gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide"
-      style={{ padding: '1rem', paddingBottom: '1.25rem', background: 'var(--color-bg-secondary)', WebkitOverflowScrolling: 'touch', height: 'calc(100vh - 14rem)' }}
-    >
-      {columns.map(col => {
-        const cards = byStatus(col.status)
-        const cfg = STATUS_CFG[col.status] ?? { label: col.label ?? col.status, dot: col.topColor, bg: 'var(--color-bg-secondary)', text: 'var(--color-text-muted)', border: 'var(--color-border)' }
-        return (
-          <div
-            key={col.status}
-            className="flex flex-col flex-shrink-0"
-            style={{ width: '17rem', minWidth: '17rem' }}
-          >
-            {/* Column header */}
-            <div
-              className="flex items-center justify-between"
-              style={{
-                padding: '0.625rem 0.75rem',
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
-                borderBottom: 'none',
-                borderRadius: '0.5rem 0.5rem 0 0',
-                borderTop: `3px solid ${col.topColor}`,
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <span
-                  className="rounded-full flex-shrink-0"
-                  style={{ width: '0.5rem', height: '0.5rem', background: cfg.dot, display: 'inline-block' }}
-                />
-                <span
-                  className="font-semibold uppercase tracking-wide"
-                  style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}
-                >
-                  {cfg.label}
-                </span>
-              </div>
-              <span
-                className="font-semibold rounded-full"
-                style={{ padding: '0.125rem 0.4375rem', fontSize: '0.6875rem', background: 'var(--color-bg-secondary)', color: 'var(--color-text-subtle)' }}
-              >
-                {cards.length}
-              </span>
-            </div>
-
-            {/* Cards area - drop target */}
-            <div
-              className="flex flex-col gap-2 overflow-y-auto"
-              style={{
-                padding: '0.5rem',
-                background: 'var(--color-bg-tertiary)',
-                border: '1px solid var(--color-border)',
-                borderTop: 'none',
-                borderRadius: '0 0 0.5rem 0.5rem',
-                minHeight: '10rem',
-                maxHeight: 'calc(100vh - 18rem)',
-                transition: 'border-color 0.15s',
-              }}
-              onDragOver={(e) => {
-                e.preventDefault()
-                e.currentTarget.style.borderColor = 'var(--color-brand)'
-              }}
-              onDragLeave={(e) => {
-                e.currentTarget.style.borderColor = 'var(--color-border)'
-              }}
-              onDrop={(e) => { handleDrop(e, col.status) }}
-            >
-              {cards.length === 0 ? (
-                <div
-                  className="flex items-center justify-center rounded-lg"
-                  style={{
-                    padding: '1.75rem 0',
-                    fontSize: '0.75rem',
-                    color: 'var(--color-text-subtle)',
-                    border: '1px dashed var(--color-border)',
-                    background: 'transparent',
-                  }}
-                >
-                  No requests
-                </div>
-              ) : (
-                cards.map(req => (
-                  <KanbanCard
-                    key={req.id}
-                    req={req}
-                    canNest={isAdmin}
-                    onNestDrop={sourceId => handleNestDrop(sourceId, req)}
-                    nestedChildren={childrenByParent.get(req.id) ?? []}
-                    dragSource={dragSource}
-                  />
-                ))
-              )}
-            </div>
-          </div>
-        )
-      })}
-
-      {/* Drag-to-nest confirm dialog */}
+      {/* Drag-to-nest confirm dialog (board view) */}
       {nestPrompt && (
         <ConfirmDialog
           open
@@ -1164,244 +921,15 @@ function BoardView({ requests, columns, isAdmin, onStatusChange }: { requests: R
           onCancel={() => { setNestPrompt(null); setNestError(null) }}
         />
       )}
-    </div>
-  )
-}
 
-function KanbanCard({
-  req,
-  canNest = false,
-  onNestDrop,
-  nestedChildren = [],
-  dragSource,
-}: {
-  req: Request
-  canNest?: boolean
-  onNestDrop?: (sourceId: string) => void
-  nestedChildren?: Request[]
-  dragSource?: React.MutableRefObject<{ id: string; orgId: string | null; parentId: string | null } | null>
-}) {
-  const cat = CAT_CFG[req.category ?? ''] ?? { bg: 'var(--cat-admin-bg)', color: 'var(--cat-admin-text)' }
-  const [nestHover, setNestHover] = useState(false)
-
-  const handleDragStart = (e: React.DragEvent, r: Request) => {
-    e.dataTransfer.setData('requestId', r.id)
-    e.dataTransfer.setData('fromStatus', r.status)
-    e.dataTransfer.setData('fromParent', r.parentRequestId ?? '')
-    e.dataTransfer.effectAllowed = 'move'
-    if (dragSource) dragSource.current = { id: r.id, orgId: r.orgId ?? null, parentId: r.parentRequestId ?? null }
-    ;(e.currentTarget as HTMLElement).style.opacity = '0.5'
-  }
-  const handleDragEnd = (e: React.DragEvent) => {
-    ;(e.currentTarget as HTMLElement).style.opacity = '1'
-    if (dragSource) dragSource.current = null
-  }
-
-  return (
-    <div>
-      <Link
-        href={`/requests/${req.id}`}
-        className="block rounded-lg transition-all"
-        draggable
-        onDragStart={(e) => handleDragStart(e, req)}
-        onDragEnd={handleDragEnd}
-        // Drop-on-card : treat as "nest this request under the target".
-        // Cross-client drops are blocked at dragover so the browser shows the
-        // "no-drop" cursor and we never paint the green dashed border.
-        onDragOver={(e) => {
-          if (!canNest) return
-          const src = dragSource?.current
-          if (!src) return
-          if (src.id === req.id) return
-          // Same-client check — backend rejects these, but we also refuse to
-          // show any hover animation for a cross-client drag so the affordance
-          // reads "not allowed" instantly. null orgId is its own bucket.
-          if ((src.orgId ?? null) !== (req.orgId ?? null)) {
-            e.dataTransfer.dropEffect = 'none'
-            return
-          }
-          e.preventDefault()
-          e.dataTransfer.dropEffect = 'move'
-          if (!nestHover) setNestHover(true)
-        }}
-        onDragLeave={() => {
-          if (nestHover) setNestHover(false)
-        }}
-        onDrop={(e) => {
-          if (!canNest || !onNestDrop) return
-          const sourceId = e.dataTransfer.getData('requestId') || dragSource?.current?.id || ''
-          if (!sourceId || sourceId === req.id) {
-            setNestHover(false)
-            return
-          }
-          const src = dragSource?.current
-          if (src && (src.orgId ?? null) !== (req.orgId ?? null)) {
-            setNestHover(false)
-            return
-          }
-          // Prevent the column's drop handler from also firing (status change)
-          e.stopPropagation()
-          e.preventDefault()
-          e.dataTransfer.setData('nestHandled', '1')
-          setNestHover(false)
-          onNestDrop(sourceId)
-        }}
-        style={{
-          padding: '0.75rem',
-          background: nestHover ? 'var(--color-brand-50)' : 'var(--color-bg)',
-          border: `${nestHover ? '2px dashed var(--color-brand)' : '1px solid var(--color-border)'}`,
-          boxShadow: 'var(--shadow-sm)',
-          textDecoration: 'none',
-          cursor: 'grab',
-          transition: 'background 150ms ease, border-color 150ms ease',
-          borderBottomLeftRadius: nestedChildren.length > 0 ? 0 : undefined,
-          borderBottomRightRadius: nestedChildren.length > 0 ? 0 : undefined,
-        }}
-        onMouseEnter={e => {
-          if (nestHover) return
-          e.currentTarget.style.borderColor = 'var(--color-brand)'
-          e.currentTarget.style.boxShadow = 'var(--shadow-md)'
-        }}
-        onMouseLeave={e => {
-          if (nestHover) return
-          e.currentTarget.style.borderColor = 'var(--color-border)'
-          e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
-        }}
-      >
-      {/* Type + scope flag */}
-      <div className="flex items-center justify-between" style={{ marginBottom: '0.5rem' }}>
-        <span
-          className="inline-flex items-center rounded"
-          style={{ padding: '0.125rem 0.4375rem', fontSize: '0.6875rem', background: cat.bg, color: cat.color }}
-        >
-          {formatType(req.type)}
-        </span>
-        {req.scopeFlagged && (
-          <AlertTriangle style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-danger)', flexShrink: 0 }} />
-        )}
-      </div>
-
-      {/* Title */}
-      <p
-        className="font-medium leading-snug line-clamp-2"
-        style={{ fontSize: '0.875rem', color: 'var(--color-text)', marginBottom: '0.625rem' }}
-      >
-        {req.title}
-      </p>
-
-      {/* Due date bar (when set) */}
-      {req.dueDate && (
-        <div style={{ marginBottom: '0.5rem' }}>
-          <DueDateChip dueDate={req.dueDate} status={req.status} />
-        </div>
+      {/* Bulk Create Dialog */}
+      {bulkCreateOpen && (
+        <BulkCreateDialog
+          onClose={() => setBulkCreateOpen(false)}
+          onCreated={() => { setBulkCreateOpen(false); fetchRequests() }}
+        />
       )}
-
-      {/* Footer: org + meta */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5 min-w-0">
-          {req.orgName && (
-            <>
-              <OrgAvatar name={req.orgName} />
-              <span className="truncate" style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', maxWidth: '5.625rem' }}>
-                {req.orgName}
-              </span>
-            </>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <HoursChip hours={req.estimatedHours} />
-          <PriorityBadge priority={req.priority} />
-        </div>
-      </div>
-    </Link>
-
-      {/* Nested sub-request rows — only on top-level cards. Each child is
-          independently draggable (drop on a column = un-nest + move; drop on
-          another parent = re-nest if same client). */}
-      {nestedChildren.length > 0 && (
-        <div
-          role="list"
-          aria-label={`${nestedChildren.length} sub-request${nestedChildren.length === 1 ? '' : 's'}`}
-          style={{
-            borderLeft: '1px solid var(--color-border)',
-            borderRight: '1px solid var(--color-border)',
-            borderBottom: '1px solid var(--color-border)',
-            borderBottomLeftRadius: '0.5rem',
-            borderBottomRightRadius: '0.5rem',
-            background: 'var(--color-bg-secondary)',
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          {nestedChildren.map((c, idx) => (
-            <KanbanChildRow
-              key={c.id}
-              req={c}
-              isLast={idx === nestedChildren.length - 1}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function KanbanChildRow({
-  req,
-  isLast,
-  onDragStart,
-  onDragEnd,
-}: {
-  req: Request
-  isLast: boolean
-  onDragStart: (e: React.DragEvent, r: Request) => void
-  onDragEnd: (e: React.DragEvent) => void
-}) {
-  const statusDot = STATUS_CFG[req.status]?.dot ?? 'var(--color-text-subtle)'
-  return (
-    <Link
-      href={`/requests/${req.id}`}
-      draggable
-      onDragStart={(e) => { e.stopPropagation(); onDragStart(e, req) }}
-      onDragEnd={onDragEnd}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.5rem',
-        padding: '0.625rem 0.75rem 0.625rem 1.25rem',
-        minHeight: '2.75rem', // 44px WCAG AA / mobile touch target
-        fontSize: '0.75rem',
-        color: 'var(--color-text)',
-        textDecoration: 'none',
-        borderBottom: isLast ? undefined : '1px solid var(--color-border-subtle)',
-        cursor: 'grab',
-        transition: 'background 120ms ease',
-      }}
-      onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)' }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-      aria-label={`Sub-request: ${req.title}`}
-    >
-      <span
-        aria-hidden="true"
-        style={{ width: '0.375rem', height: '0.375rem', borderRadius: '9999px', background: statusDot, flexShrink: 0 }}
-      />
-      <span
-        className="truncate"
-        style={{ flex: 1, minWidth: 0 }}
-      >
-        {req.requestNumber != null && (
-          <span style={{ color: 'var(--color-text-subtle)', marginRight: '0.3125rem' }}>
-            #{String(req.requestNumber).padStart(3, '0')}
-          </span>
-        )}
-        {req.title}
-      </span>
-      {req.scopeFlagged && (
-        <AlertTriangle size={10} style={{ color: 'var(--color-danger)', flexShrink: 0 }} aria-label="Scope flagged" />
-      )}
-    </Link>
+    </>
   )
 }
 
@@ -1624,33 +1152,6 @@ function WorkloadView({ requests }: { requests: Request[] }) {
     </div>
   )
 }
-
-// ─── Loading skeleton ─────────────────────────────────────────────────────────
-
-function LoadingSkeleton() {
-  return (
-    <div>
-      <div style={{ height: '2.5rem', background: 'var(--color-th-bg)', borderBottom: '1px solid var(--color-border-subtle)' }} />
-      {[...Array(5)].map((_, i) => (
-        <div
-          key={i}
-          className="flex items-center gap-4 animate-pulse"
-          style={{
-            padding: '0.875rem 1rem',
-            borderBottom: i < 4 ? '1px solid var(--color-row-border)' : 'none',
-          }}
-        >
-          <div className="h-4 rounded flex-1" style={{ background: 'var(--color-border-subtle)' }} />
-          <div className="h-4 rounded hidden sm:block" style={{ background: 'var(--color-border-subtle)', width: '6rem' }} />
-          <div className="h-5 rounded-full" style={{ background: 'var(--color-border-subtle)', width: '5rem' }} />
-          <div className="h-4 rounded hidden md:block" style={{ background: 'var(--color-border-subtle)', width: '4rem' }} />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ─── Empty state ──────────────────────────────────────────────────────────────
 
 // ─── Bulk Action Bar ─────────────────────────────────────────────────────────
 
