@@ -1,10 +1,12 @@
 # Delivery Spine (#148) — proposal → contract → schedule → live delivery
 
-Status: 2026-06-09 — Slices 0,1,2,3 built + pushed (dfa95f4); awaiting deploy +
-migration 0076. In-viewer linking picker + Slices 4-5 remain. The differentiator
-over ManyRequests: link an engagement's sales artifacts to its actual delivery so
-the schedule shows, live, where delivery is, and auto-flags blocked / delayed /
-off-track.
+Status: 2026-06-10 — Slices 0-3 deployed + verified live (migration 0076 applied,
+engine end-to-end tested on prod). In-viewer linking UI built: row editor
+"Linked work" picker (linked-work endpoint), "Delivery phase" selectors on
+request detail + task panel (schedules?includeRows=1), MCP parity tools on the
+worker. Slices 4-5 remain. The differentiator over ManyRequests: link an
+engagement's sales artifacts to its actual delivery so the schedule shows,
+live, where delivery is, and auto-flags blocked / delayed / off-track.
 
 See [[project_portal_readiness_arc]].
 

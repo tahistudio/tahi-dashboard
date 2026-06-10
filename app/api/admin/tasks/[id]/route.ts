@@ -96,7 +96,8 @@ export async function PATCH(
   if (body.requestId !== undefined) updates.requestId = body.requestId
   if (body.orgId !== undefined) updates.orgId = body.orgId
   if (body.tags !== undefined) updates.tags = body.tags
-  if (body.scheduleRowId !== undefined) updates.scheduleRowId = body.scheduleRowId
+  // '' and null both mean unlink (the MCP tool cannot send null).
+  if (body.scheduleRowId !== undefined) updates.scheduleRowId = body.scheduleRowId || null
 
   await drizzle
     .update(schema.tasks)

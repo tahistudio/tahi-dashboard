@@ -6,12 +6,13 @@ import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Plus, Trash2, AlertTriangle, Share2, Copy, ExternalLink, Mail, Eye,
   Diamond, FileText, ChevronUp, ChevronDown, BarChart3, GitBranch, Grid3x3, AlignLeft,
-  BookmarkPlus, Upload,
+  BookmarkPlus, Upload, X, CheckSquare,
 } from 'lucide-react'
 import { EmailShareModal, type EmailRecipientSuggestion } from '@/components/tahi/email-share-modal'
 import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { PromptDialog } from '@/components/tahi/prompt-dialog'
+import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { GanttGrid, type GanttRow, type RowOwner, type RowType } from '@/components/tahi/gantt-grid'
@@ -921,6 +922,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
               onDeleteRow={() => editingRowId && deleteRow(editingRowId)}
               onCancelRowEdit={() => { setEditingRowId(null); setDraft(null) }}
               onChangeRowDraft={setDraft}
+              onWorkChanged={() => { void fetchAll({ silent: true }) }}
               statusByRow={statusByRow}
             />
           )}
@@ -1067,6 +1069,7 @@ function SectionEditorPane(props: {
   onDeleteRow: () => void
   onCancelRowEdit: () => void
   onChangeRowDraft: (next: RowDraft) => void
+  onWorkChanged: () => void
   statusByRow?: Record<string, DeliveryStatus>
 }) {
   const { section, numberOfWeeks, isFirst, isLast, slideNumber, onPatch, onMoveUp, onMoveDown, onDelete } = props
@@ -1131,6 +1134,7 @@ function SectionEditorPane(props: {
           draft={props.ganttDraft}
           editingRowId={props.ganttEditingRowId}
           savingDraft={props.ganttSavingDraft}
+          scheduleId={props.schedule.id}
           onAddRow={props.onAddRow}
           onOpenRow={props.onOpenRow}
           onSaveRowDraft={props.onSaveRowDraft}
@@ -1138,6 +1142,7 @@ function SectionEditorPane(props: {
           onCancelRowEdit={props.onCancelRowEdit}
           onChangeRowDraft={props.onChangeRowDraft}
           onPatchSection={onPatch}
+          onWorkChanged={props.onWorkChanged}
           statusByRow={props.statusByRow}
         />
       )}
@@ -1156,15 +1161,16 @@ function SectionEditorPane(props: {
 // ─── Gantt section editor ────────────────────────────────────────────────
 
 function GanttSectionEditor({
-  section, numberOfWeeks, draft, editingRowId, savingDraft,
+  section, numberOfWeeks, draft, editingRowId, savingDraft, scheduleId,
   onAddRow, onOpenRow, onSaveRowDraft, onDeleteRow, onCancelRowEdit, onChangeRowDraft,
-  onPatchSection, statusByRow,
+  onPatchSection, onWorkChanged, statusByRow,
 }: {
   section: ScheduleSection
   numberOfWeeks: number
   draft: RowDraft | null
   editingRowId: string | null
   savingDraft: boolean
+  scheduleId: string
   onAddRow: (type: RowType) => void
   onOpenRow: (row: GanttRow) => void
   onSaveRowDraft: () => void
@@ -1172,6 +1178,7 @@ function GanttSectionEditor({
   onCancelRowEdit: () => void
   onChangeRowDraft: (next: RowDraft) => void
   onPatchSection: (changes: { startWeek?: number | null; endWeek?: number | null }) => void
+  onWorkChanged: () => void
   statusByRow?: Record<string, DeliveryStatus>
 }) {
   const rows = section.rows ?? []
@@ -1244,6 +1251,9 @@ function GanttSectionEditor({
           draft={draft}
           numberOfWeeks={numberOfWeeks}
           saving={savingDraft}
+          scheduleId={scheduleId}
+          rowId={editingRowId}
+          onWorkChanged={onWorkChanged}
           onChange={onChangeRowDraft}
           onSave={onSaveRowDraft}
           onDelete={onDeleteRow}
@@ -1406,12 +1416,219 @@ function ToolbarButton({
 
 // ─── Sticky row editor (kept from the old build, restyled) ──────────────
 
+// ─── Linked work (delivery spine #148) ───────────────────────────────────
+//
+// Attach/detach requests + tasks to the row being edited. The pool is the
+// schedule's org work in one fetch, so the picker filters client-side.
+// Writes go straight to the request/task PATCH endpoints; the parent then
+// silently refreshes the delivery-status overlay.
+
+interface LinkedWorkPoolItem {
+  id: string
+  title: string
+  status: string
+  requestNumber?: number | null
+  dueDate: string | null
+  scheduleRowId: string | null
+}
+
+interface LinkedWorkPool {
+  orgId: string | null
+  requests: LinkedWorkPoolItem[]
+  tasks: LinkedWorkPoolItem[]
+}
+
+const WORK_STATUS_LABEL: Record<string, string> = {
+  submitted: 'Submitted', in_review: 'In review', in_progress: 'In progress',
+  client_review: 'Client review', on_hold: 'On hold', delivered: 'Delivered',
+  todo: 'To do', blocked: 'Blocked', done: 'Done',
+}
+
+function LinkedWorkSection({ scheduleId, rowId, onChanged }: {
+  scheduleId: string
+  rowId: string
+  onChanged: () => void
+}) {
+  const { showToast } = useToast()
+  const [pool, setPool] = useState<LinkedWorkPool | null>(null)
+  const [loadingPool, setLoadingPool] = useState(true)
+  const [mutating, setMutating] = useState(false)
+
+  const loadPool = useCallback(async () => {
+    try {
+      const res = await fetch(apiPath(`/api/admin/schedules/${scheduleId}/linked-work`))
+      if (res.ok) setPool(await res.json() as LinkedWorkPool)
+    } catch { /* non-fatal */ }
+    finally { setLoadingPool(false) }
+  }, [scheduleId])
+
+  useEffect(() => { void loadPool() }, [loadPool])
+
+  async function setWorkRow(kind: 'request' | 'task', id: string, target: string | null) {
+    setMutating(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/${kind === 'request' ? 'requests' : 'tasks'}/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduleRowId: target }),
+      })
+      if (!res.ok) throw new Error('Failed')
+      await loadPool()
+      onChanged()
+    } catch {
+      showToast('Failed to update linked work', 'error')
+    } finally {
+      setMutating(false)
+    }
+  }
+
+  const all = pool
+    ? [
+      ...pool.requests.map(item => ({ ...item, kind: 'request' as const })),
+      ...pool.tasks.map(item => ({ ...item, kind: 'task' as const })),
+    ]
+    : []
+  const linked = all.filter(w => w.scheduleRowId === rowId)
+  const options = all
+    .filter(w => w.scheduleRowId !== rowId)
+    .map(w => ({
+      value: `${w.kind}:${w.id}`,
+      label: w.title,
+      subtitle: [
+        w.kind === 'request'
+          ? (w.requestNumber != null ? `Request #${w.requestNumber}` : 'Request')
+          : 'Task',
+        WORK_STATUS_LABEL[w.status] ?? w.status,
+        w.scheduleRowId ? 'linked to another phase' : null,
+      ].filter(Boolean).join(' · '),
+    }))
+
+  return (
+    <div
+      style={{
+        marginBottom: '0.75rem',
+        padding: '0.75rem',
+        background: 'var(--color-bg-secondary)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-md)',
+      }}
+    >
+      <div className="flex items-center justify-between" style={{ marginBottom: '0.5rem' }}>
+        <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          Linked work
+        </span>
+        {linked.length > 0 && (
+          <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
+            {linked.length} item{linked.length === 1 ? '' : 's'}
+          </span>
+        )}
+      </div>
+
+      {loadingPool ? (
+        <div className="animate-pulse rounded" style={{ height: '2rem', background: 'var(--color-bg-tertiary)' }} />
+      ) : pool && pool.orgId === null ? (
+        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>
+          Link this schedule to a client (or a deal with a client) to attach requests and tasks.
+        </p>
+      ) : (
+        <>
+          {linked.length > 0 && (
+            <div className="flex flex-wrap" style={{ gap: '0.375rem', marginBottom: '0.5rem' }}>
+              {linked.map(w => (
+                <span
+                  key={`${w.kind}:${w.id}`}
+                  className="inline-flex items-center"
+                  style={{
+                    gap: '0.375rem',
+                    padding: '0.25rem 0.375rem 0.25rem 0.5rem',
+                    fontSize: '0.75rem',
+                    background: 'var(--color-bg)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius-sm)',
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  {w.kind === 'request'
+                    ? <FileText size={11} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
+                    : <CheckSquare size={11} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />}
+                  <span style={{ maxWidth: '14rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {w.title}
+                  </span>
+                  <span style={{ color: 'var(--color-text-subtle)' }}>
+                    {WORK_STATUS_LABEL[w.status] ?? w.status}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Unlink ${w.title}`}
+                    disabled={mutating}
+                    onClick={() => setWorkRow(w.kind, w.id, null)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '1.25rem',
+                      height: '1.25rem',
+                      background: 'none',
+                      border: 'none',
+                      borderRadius: '999px',
+                      color: 'var(--color-text-subtle)',
+                      cursor: mutating ? 'not-allowed' : 'pointer',
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.color = 'var(--color-danger)'
+                      e.currentTarget.style.background = 'var(--color-bg-tertiary)'
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.color = 'var(--color-text-subtle)'
+                      e.currentTarget.style.background = 'none'
+                    }}
+                    onFocus={e => { e.currentTarget.style.color = 'var(--color-danger)' }}
+                    onBlur={e => { e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {options.length > 0 ? (
+            <div style={{ maxWidth: '20rem' }}>
+              <SearchableSelect
+                options={options}
+                value=""
+                onChange={v => {
+                  if (!v) return
+                  const sep = v.indexOf(':')
+                  setWorkRow(v.slice(0, sep) as 'request' | 'task', v.slice(sep + 1), rowId)
+                }}
+                placeholder="Attach a request or task..."
+                searchPlaceholder="Search work..."
+                emptyMessage="No matching work"
+                disabled={mutating}
+                size="sm"
+              />
+            </div>
+          ) : linked.length === 0 ? (
+            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>
+              No requests or tasks for this client yet.
+            </p>
+          ) : null}
+        </>
+      )}
+    </div>
+  )
+}
+
 function RowEditor({
-  draft, numberOfWeeks, saving, onChange, onSave, onDelete, onCancel,
+  draft, numberOfWeeks, saving, scheduleId, rowId, onWorkChanged, onChange, onSave, onDelete, onCancel,
 }: {
   draft: RowDraft
   numberOfWeeks: number
   saving: boolean
+  scheduleId: string
+  rowId: string
+  onWorkChanged: () => void
   onChange: (next: RowDraft) => void
   onSave: () => void
   onDelete: () => void
@@ -1542,6 +1759,11 @@ function RowEditor({
           </FieldGroup>
         )}
       </div>
+
+      {/* Linked work — deliverable rows only; headers are visual */}
+      {!isHeader && (
+        <LinkedWorkSection scheduleId={scheduleId} rowId={rowId} onChanged={onWorkChanged} />
+      )}
 
       <div className="flex items-center justify-end" style={{ gap: '0.5rem' }}>
         <button

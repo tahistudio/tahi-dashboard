@@ -2,12 +2,14 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and } from 'drizzle-orm'
+import { eq, desc, and, asc, inArray } from 'drizzle-orm'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 // ── GET /api/admin/schedules ──────────────────────────────────────────
 // List project schedules. Filterable by orgId / dealId / status.
+// `includeRows=1` additionally returns each schedule's deliverable gantt
+// rows (task / gate / critical_gate) for delivery-phase pickers.
 export async function GET(req: NextRequest) {
   const { orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
@@ -20,6 +22,7 @@ export async function GET(req: NextRequest) {
   const filterLeadId = url.searchParams.get('leadId')
   const filterProposalId = url.searchParams.get('proposalId')
   const filterStatus = url.searchParams.get('status')
+  const includeRows = url.searchParams.get('includeRows') === '1'
 
   const database = await db() as unknown as D1
 
@@ -59,7 +62,57 @@ export async function GET(req: NextRequest) {
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(schema.projectSchedules.updatedAt))
 
-  return NextResponse.json({ items })
+  if (!includeRows || items.length === 0) {
+    return NextResponse.json({ items })
+  }
+
+  // Deliverable rows only (section headers are visual). Chunked to stay
+  // under D1's 100-bind-variable cap.
+  const scheduleIds = items.map(i => i.id)
+  const ID_CHUNK = 90
+  const rows: Array<{
+    id: string
+    scheduleId: string
+    label: string
+    rowType: string
+    startWeek: number | null
+    endWeek: number | null
+    position: number
+    sectionTitle: string | null
+  }> = []
+  for (let i = 0; i < scheduleIds.length; i += ID_CHUNK) {
+    const chunk = scheduleIds.slice(i, i + ID_CHUNK)
+    const part = await database
+      .select({
+        id: schema.scheduleRows.id,
+        scheduleId: schema.scheduleRows.scheduleId,
+        label: schema.scheduleRows.label,
+        rowType: schema.scheduleRows.rowType,
+        startWeek: schema.scheduleRows.startWeek,
+        endWeek: schema.scheduleRows.endWeek,
+        position: schema.scheduleRows.position,
+        sectionTitle: schema.scheduleSections.title,
+      })
+      .from(schema.scheduleRows)
+      .leftJoin(schema.scheduleSections, eq(schema.scheduleRows.sectionId, schema.scheduleSections.id))
+      .where(and(
+        inArray(schema.scheduleRows.scheduleId, chunk),
+        inArray(schema.scheduleRows.rowType, ['task', 'gate', 'critical_gate']),
+      ))
+      .orderBy(asc(schema.scheduleRows.position))
+    rows.push(...part)
+  }
+
+  const rowsBySchedule = new Map<string, typeof rows>()
+  for (const row of rows) {
+    const list = rowsBySchedule.get(row.scheduleId)
+    if (list) list.push(row)
+    else rowsBySchedule.set(row.scheduleId, [row])
+  }
+
+  return NextResponse.json({
+    items: items.map(item => ({ ...item, rows: rowsBySchedule.get(item.id) ?? [] })),
+  })
 }
 
 // ── Schedule template snapshot shape ────────────────────────────────────

@@ -24,6 +24,7 @@ import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { PeoplePanel, type Participant } from '@/components/tahi/people-panel'
 import { TimeCard } from '@/components/tahi/time-card'
 import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
+import { fetchSchedulePhaseOptions, type SchedulePhaseOption } from '@/lib/schedule-phases'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -81,6 +82,7 @@ interface Request {
   parentRequestId: string | null
   subPosition: number | null
   scopeFlagReason: string | null
+  scheduleRowId: string | null
   createdAt: string
   updatedAt: string
   deliveredAt: string | null
@@ -160,6 +162,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const [newSubOpen, setNewSubOpen] = useState(false)
   const [unlinkingParent, setUnlinkingParent] = useState(false)
   const [participants, setParticipants] = useState<Participant[]>([])
+  const [phaseOptions, setPhaseOptions] = useState<SchedulePhaseOption[]>([])
   const threadBottomRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
 
@@ -253,6 +256,18 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     loadFiles()
     loadTeamMembers()
   }, [loadRequest, loadFiles, loadTeamMembers])
+
+  // Delivery-phase options for the spine selector. Keyed on the org so it
+  // only refetches if the request somehow changes org. Non-fatal on failure.
+  const requestOrgId = request?.orgId ?? null
+  useEffect(() => {
+    if (!isAdmin || !requestOrgId) return
+    let cancelled = false
+    fetchSchedulePhaseOptions(requestOrgId)
+      .then(options => { if (!cancelled) setPhaseOptions(options) })
+      .catch(() => { /* non-fatal */ })
+    return () => { cancelled = true }
+  }, [isAdmin, requestOrgId])
 
   useEffect(() => {
     threadBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -436,6 +451,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   async function handleDueDateChange(dueDate: string | null) {
     setEditingDueDate(false)
     await patchRequest({ dueDate }, dueDate ? 'Due date set' : 'Due date cleared')
+  }
+
+  async function handleScheduleRowChange(scheduleRowId: string | null) {
+    const label = scheduleRowId ? phaseOptions.find(o => o.value === scheduleRowId)?.label : null
+    await patchRequest(
+      { scheduleRowId },
+      scheduleRowId ? `Linked to ${label ?? 'schedule phase'}` : 'Unlinked from schedule',
+    )
   }
 
   // ---- Loading / Error / Not Found ------------------------------------------
@@ -1065,6 +1088,26 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                   </span>
                 )}
               </DetailRow>
+
+              {/* Delivery phase — links this request to a schedule gantt row
+                  so the schedule shows live delivery status (spine #148).
+                  Admin-only; hidden when the org has no schedule phases. */}
+              {isAdmin && (phaseOptions.length > 0 || request.scheduleRowId) && (
+                <DetailRow label="Delivery phase">
+                  <div style={{ width: '100%', maxWidth: '10rem' }}>
+                    <SearchableSelect
+                      options={phaseOptions}
+                      value={request.scheduleRowId ?? ''}
+                      onChange={v => handleScheduleRowChange(v || null)}
+                      placeholder="Not linked"
+                      searchPlaceholder="Search phases..."
+                      emptyMessage="No schedule phases"
+                      allowClear
+                      size="sm"
+                    />
+                  </div>
+                </DetailRow>
+              )}
 
               {/* Due date */}
               <DetailRow label="Due date">

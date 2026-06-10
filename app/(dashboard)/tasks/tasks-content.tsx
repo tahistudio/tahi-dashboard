@@ -22,6 +22,7 @@ import { TahiButton } from '@/components/tahi/tahi-button'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { Avatar } from '@/components/tahi/avatar'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
+import { fetchSchedulePhaseOptions, type SchedulePhaseOption } from '@/lib/schedule-phases'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,7 @@ interface Task {
   tags: string | null
   trackId?: string | null
   requestId?: string | null
+  scheduleRowId?: string | null
   position?: number | null
   createdAt: string | null
   updatedAt: string | null
@@ -1436,9 +1438,24 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
   const [editingStatus, setEditingStatus] = useState(task.status)
   const [saving, setSaving] = useState(false)
+  const [phaseOptions, setPhaseOptions] = useState<SchedulePhaseOption[]>([])
 
   const teamMap = new Map(teamMembers.map(m => [m.id, m]))
   const assignee = task.assigneeId ? teamMap.get(task.assigneeId) : null
+
+  // Delivery-phase options for the spine selector. Org-scoped: tahi_internal
+  // tasks have no org, so no schedule phases apply. Non-fatal on failure.
+  useEffect(() => {
+    if (!isAdmin || !task.orgId) {
+      setPhaseOptions([])
+      return
+    }
+    let cancelled = false
+    fetchSchedulePhaseOptions(task.orgId)
+      .then(options => { if (!cancelled) setPhaseOptions(options) })
+      .catch(() => { /* non-fatal */ })
+    return () => { cancelled = true }
+  }, [isAdmin, task.orgId])
 
   // Fetch subtasks
   useEffect(() => {
@@ -1521,6 +1538,28 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
       }
     } catch {
       setEditingStatus(task.status)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function updateScheduleRow(scheduleRowId: string | null) {
+    setSaving(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/tasks/${task.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduleRowId }),
+      })
+      if (res.ok) {
+        const label = scheduleRowId ? phaseOptions.find(o => o.value === scheduleRowId)?.label : null
+        showToast(scheduleRowId ? `Linked to ${label ?? 'schedule phase'}` : 'Unlinked from schedule')
+        onRefresh()
+      } else {
+        showToast('Failed to update delivery phase')
+      }
+    } catch {
+      showToast('Failed to update delivery phase')
     } finally {
       setSaving(false)
     }
@@ -1682,6 +1721,27 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
                   <Link2 style={{ width: '0.75rem', height: '0.75rem' }} />
                   View Request
                 </a>
+              </DetailField>
+            )}
+
+            {/* Delivery phase — links this task to a schedule gantt row so the
+                schedule shows live delivery status (spine #148). Admin-only;
+                hidden when the org has no schedule phases. */}
+            {isAdmin && task.orgId && (phaseOptions.length > 0 || task.scheduleRowId) && (
+              <DetailField label="Delivery Phase">
+                <div style={{ maxWidth: '16rem' }}>
+                  <SearchableSelect
+                    options={phaseOptions}
+                    value={task.scheduleRowId ?? ''}
+                    onChange={v => updateScheduleRow(v || null)}
+                    placeholder="Not linked"
+                    searchPlaceholder="Search phases..."
+                    emptyMessage="No schedule phases"
+                    allowClear
+                    disabled={saving}
+                    size="sm"
+                  />
+                </div>
               </DetailField>
             )}
 

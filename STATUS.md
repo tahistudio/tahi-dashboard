@@ -1,7 +1,7 @@
 # Tahi Dashboard — Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-06-09** by Claude (portal-readiness sweep: voice notes P1 fix, request comments filter, Stripe import pagination, client tags + filter)
+> Last updated: **2026-06-10** by Claude (delivery spine #148: slices 0-3 live + verified, in-viewer linking picker shipped)
 
 ---
 
@@ -69,6 +69,15 @@ Lifecycle-order build is in progress. Docs Hub was the first list-page lap; the 
 Full plan: `C:\Users\Work\.claude\plans\i-d-like-you-to-gentle-neumann.md`
 
 ---
+
+## Recent activity (2026-06-10)
+
+Delivery spine #148 (the ManyRequests differentiator) is live end-to-end.
+
+- **Slices 0-3 deployed + verified on prod** (dfa95f4 + migration 0076). `scheduleRowId` on requests/tasks, pure status engine (`lib/delivery-status.ts`, 13 tests), `/delivery-status` endpoint, GanttGrid status dots + schedule-editor delivery-health banner. Engine verified live: linked a request to a past-due Giant Group phase, engine computed `delayed` + correct rollup, clean unlink.
+- **In-viewer linking picker shipped.** Schedule row editor gets a "Linked work" panel (chips + attach picker, new `/api/admin/schedules/[id]/linked-work` endpoint with org fallback via deal + `requireAccessToOrg`); request detail + task slide-over get a "Delivery phase" selector (`/api/admin/schedules?includeRows=1`, shared `lib/schedule-phases.ts`). MCP parity on the worker: `get_schedule_delivery_status`, `get_schedule_linked_work`, `link_request_to_schedule_row`, `update_task.scheduleRowId`, `list_schedules.includeRows`.
+- **Drive-by fixes:** delivery-status `inArray` now chunked (D1 100-bind cap would have 500'd schedules with >100 rows); requests list GET accepts `orgId` alias (the MCP `list_requests` org filter was silently a no-op); two stale Buffer unit tests updated to the intentional dueAt/client-side-filter behaviour.
+- **Bug found, not yet fixed: `/tasks/[id]` full page is dead on prod.** `app/api/admin/tasks/[id]/route.ts` exports only PATCH, so the page's GET always 405s and it renders the error state. The tasks slide-over panel is the only working task detail surface. Fix = add a scoped GET (and DELETE) handler.
 
 ## Recent activity (2026-06-09)
 

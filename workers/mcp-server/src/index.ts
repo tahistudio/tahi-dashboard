@@ -238,6 +238,7 @@ const TOOLS: ToolDef[] = [
     assigneeId: prop('string', 'New assignee team member ID'),
     description: prop('string', 'Updated description'),
     dueDate: prop('string', 'Updated due date in YYYY-MM-DD format'),
+    scheduleRowId: prop('string', 'Schedule gantt row ID to link this task to (delivery spine). Pass an empty string to unlink.'),
   }, ['taskId']),
   tool('create_task_subtask', 'Create a subtask under a task', {
     taskId: prop('string', 'Parent task ID'),
@@ -715,10 +716,21 @@ const TOOLS: ToolDef[] = [
     orgId: prop('string', 'Filter by client organisation ID'),
     dealId: prop('string', 'Filter by deal ID'),
     status: prop('string', 'Filter by status: draft, shared, archived'),
+    includeRows: prop('boolean', 'Also return each schedule\'s deliverable gantt rows (task/gate rows) for delivery-phase linking'),
   }),
   tool('get_schedule', 'Get a single project schedule with all rows in display order', {
     scheduleId: prop('string', 'Schedule ID'),
   }, ['scheduleId']),
+  tool('get_schedule_delivery_status', 'Live delivery status for a schedule (delivery spine): per-gantt-row status (not_started/in_progress/at_risk/delayed/blocked/done) derived from linked requests/tasks vs the planned window, plus an engagement rollup.', {
+    scheduleId: prop('string', 'Schedule ID'),
+  }, ['scheduleId']),
+  tool('get_schedule_linked_work', 'The schedule org\'s work pool (requests + tasks) with each item\'s current scheduleRowId, for linking work to gantt phases.', {
+    scheduleId: prop('string', 'Schedule ID'),
+  }, ['scheduleId']),
+  tool('link_request_to_schedule_row', 'Link a request to a schedule gantt row (delivery spine) so the schedule shows live delivery status. Omit scheduleRowId to unlink. For tasks, use update_task with scheduleRowId.', {
+    requestId: prop('string', 'Request ID'),
+    scheduleRowId: prop('string', 'Schedule row ID to link to. Omit to unlink.'),
+  }, ['requestId']),
   tool('create_schedule', 'Create a new project schedule. Optionally seed via `templateId` (instantiates sections + rows from a saved schedule_template snapshot) or with a `rows` array (legacy). Each row: { rowType, label, owner?, startWeek?, endWeek?, riskFlag? }', {
     title: prop('string', 'Schedule title (optional when templateId is provided — falls back to template title)'),
     subtitle: prop('string', 'Subtitle / eyebrow text (default "PROJECT SCHEDULE, GANTT")'),
@@ -1349,6 +1361,10 @@ async function executeTool(
       return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'PATCH', { status: s('status') }))
     case 'assign_request':
       return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'PATCH', { assigneeId: s('assigneeId') }))
+    case 'link_request_to_schedule_row':
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'PATCH', {
+        scheduleRowId: typeof args.scheduleRowId === 'string' && args.scheduleRowId ? args.scheduleRowId : null,
+      }))
     case 'delete_request':
       return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'DELETE'))
     case 'post_request_message':
@@ -1744,11 +1760,16 @@ async function executeTool(
       if (typeof args.orgId === 'string') params.set('orgId', args.orgId)
       if (typeof args.dealId === 'string') params.set('dealId', args.dealId)
       if (typeof args.status === 'string') params.set('status', args.status)
+      if (args.includeRows) params.set('includeRows', '1')
       const qs = params.toString()
       return json(await apiGet(`/api/admin/schedules${qs ? `?${qs}` : ''}`, token))
     }
     case 'get_schedule':
       return json(await apiGet(`/api/admin/schedules/${s('scheduleId')}`, token))
+    case 'get_schedule_delivery_status':
+      return json(await apiGet(`/api/admin/schedules/${s('scheduleId')}/delivery-status`, token))
+    case 'get_schedule_linked_work':
+      return json(await apiGet(`/api/admin/schedules/${s('scheduleId')}/linked-work`, token))
     case 'create_schedule':
       return json(await apiWrite('/api/admin/schedules', token, 'POST', args as Record<string, unknown>))
     case 'update_schedule': {

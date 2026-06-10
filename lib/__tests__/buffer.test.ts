@@ -122,8 +122,7 @@ describe('Buffer GraphQL client', () => {
                 text: 'Hello world',
                 status: 'sent',
                 createdAt: '2026-05-20T12:00:00Z',
-                sentAt: '2026-05-20T12:05:00Z',
-                scheduledAt: null,
+                dueAt: '2026-05-20T12:05:00Z',
               },
             },
             {
@@ -133,8 +132,7 @@ describe('Buffer GraphQL client', () => {
                 text: 'Second post',
                 status: 'sent',
                 createdAt: '2026-05-19T10:00:00Z',
-                sentAt: '2026-05-19T10:05:00Z',
-                scheduledAt: null,
+                dueAt: '2026-05-19T10:05:00Z',
               },
             },
           ],
@@ -156,12 +154,21 @@ describe('Buffer GraphQL client', () => {
       expect(body.variables.first).toBe(100)
     })
 
-    it('defaults status filter to sent', async () => {
-      mockGql({ posts: { pageInfo: { endCursor: null, hasNextPage: false }, edges: [] } })
-      await listPosts('fake', 'org1')
+    it('filters by status client-side, not via GraphQL variables', async () => {
+      mockGql({
+        posts: {
+          pageInfo: { endCursor: null, hasNextPage: false },
+          edges: [
+            { node: { id: 'p1', channelId: 'ch1', text: 'sent post', status: 'sent', createdAt: null, dueAt: null } },
+            { node: { id: 'p2', channelId: 'ch1', text: 'queued post', status: 'queued', createdAt: null, dueAt: null } },
+          ],
+        },
+      })
+      const page = await listPosts('fake', 'org1', { statuses: ['sent'] })
       const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
-      const body = JSON.parse(call[1].body as string) as { variables: { statuses: string[] } }
-      expect(body.variables.statuses).toEqual(['sent'])
+      const body = JSON.parse(call[1].body as string) as { variables: Record<string, unknown> }
+      expect(body.variables.statuses).toBeUndefined()
+      expect(page.posts.map(p => p.id)).toEqual(['p1'])
     })
 
     it('passes channelIds filter through', async () => {

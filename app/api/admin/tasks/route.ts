@@ -74,6 +74,7 @@ export async function GET(req: NextRequest) {
       trackId: schema.tasks.trackId,
       position: schema.tasks.position,
       requestId: schema.tasks.requestId,
+      scheduleRowId: schema.tasks.scheduleRowId,
       createdAt: schema.tasks.createdAt,
       updatedAt: schema.tasks.updatedAt,
       orgName: schema.organisations.name,

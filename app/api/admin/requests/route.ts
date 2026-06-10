@@ -14,7 +14,9 @@ export async function GET(req: NextRequest) {
 
   const url = new URL(req.url)
   const status  = url.searchParams.get('status') ?? 'active'
-  const clientId = url.searchParams.get('clientId')
+  // `orgId` alias: the MCP list_requests tool sends orgId; the tasks list GET
+  // also filters by orgId. Accept both so the org filter works everywhere.
+  const clientId = url.searchParams.get('clientId') ?? url.searchParams.get('orgId')
   const page    = Math.max(1, parseInt(url.searchParams.get('page') ?? '1'))
   const limit   = 50
   const offset  = (page - 1) * limit

@@ -54,7 +54,11 @@ export async function GET(req: NextRequest, { params }: Params) {
     else byRow.set(rowId, [item])
   }
 
-  if (rowIds.length) {
+  // Chunked: D1 caps bind variables at 100 per statement, and a long
+  // schedule can exceed that in one inArray.
+  const ID_CHUNK = 90
+  for (let i = 0; i < rowIds.length; i += ID_CHUNK) {
+    const chunk = rowIds.slice(i, i + ID_CHUNK)
     const [reqs, tsks] = await Promise.all([
       drizzle
         .select({
@@ -65,7 +69,7 @@ export async function GET(req: NextRequest, { params }: Params) {
           scopeFlagged: schema.requests.scopeFlagged,
         })
         .from(schema.requests)
-        .where(inArray(schema.requests.scheduleRowId, rowIds)),
+        .where(inArray(schema.requests.scheduleRowId, chunk)),
       drizzle
         .select({
           id: schema.tasks.id,
@@ -74,7 +78,7 @@ export async function GET(req: NextRequest, { params }: Params) {
           dueDate: schema.tasks.dueDate,
         })
         .from(schema.tasks)
-        .where(inArray(schema.tasks.scheduleRowId, rowIds)),
+        .where(inArray(schema.tasks.scheduleRowId, chunk)),
     ])
 
     for (const r of reqs) {
