@@ -53,9 +53,44 @@ reorderable. Tapping any card opens the request detail. 44px touch targets.
 **Track header (the "what you're paying for" story):**
 - Track type (Large / Small) + Priority badge (existing).
 - Slot status: ● Active / ○ Open.
-- "{n} delivered this cycle" + "~{d}d avg turnaround" — computed from
+- "{n} delivered (30d)" + "~{d}d avg turnaround" — computed from
   `deliveredAt - createdAt` over the delivered-in-window requests for the track.
 - Gentle upsell when Up next depth >= 3 (reuse `UpsellBanner`).
+
+**Delivered lane window:** last 30 days, with a "View all delivered" link to the
+completed-requests list (so older completions are reachable without bloating the
+lane).
+
+## Ghost tracks (the upsell, first-class)
+
+Alongside the client's REAL tracks, render greyed-out "ghost" track cards for the
+tracks they'd gain by upgrading — making the upgrade path visual and showing what
+Tahi can do better (more throughput, bigger work, faster delivery). Lead with the
+CAPABILITY, then the plan (the Tahi sales doc: "lead with what they get, stack it,
+then name the price").
+
+Plan ladder (from `lib/plan-utils.getTrackEntitlements`):
+- maintain (1 small) -> +1 small (Priority support) AND +1 large (Scale)
+- maintain + priority (2 small) -> +1 large (Scale)
+- scale (1 large + 1 small) -> +1 large (Priority support)
+- scale + priority (2 large + 1 small) -> top tier, no ghost (subtle "You're on our top plan")
+
+Ghost card: same kanban card SHAPE so it reads as "another lane you could have",
+but visually muted (dashed border, reduced opacity, lock/sparkle icon), no live
+data. Content = a capability headline + subline + CTA:
+- +1 small: "Run two projects at once" / "A second track means two pieces of work
+  in flight." -> "Add priority support"
+- +1 large (from maintain): "Take on bigger builds" / "A large track handles full
+  pages + complex work, not just small tasks." -> "Upgrade to Scale"
+- +1 large (from scale): "Two big projects in parallel" / "Double your large-build
+  throughput." -> "Add priority support"
+CTA -> the existing upgrade path (`onUpgradeClick` -> /billing) or a "Talk to us"
+contact. Hover lifts the muted card slightly (affordance).
+
+A new pure helper `getUpgradeGhostTracks(planType, hasPrioritySupport)` in
+`lib/plan-utils.ts` returns the ghost specs `[{ type, headline, subline, cta }]`;
+unit-tested for every plan state. Ghost tracks render after the real tracks in the
+same grid.
 
 ## Data / backend
 
@@ -85,6 +120,8 @@ track (existing `trackCanHandle` logic), unchanged.
 - `app/api/portal/capacity/route.ts` (+ admin parity) — add the `delivered` query.
 - A small pure helper (e.g. `lib/track-stats.ts`) for delivered-count + avg
   turnaround, with unit tests.
+- `lib/plan-utils.ts` — add `getUpgradeGhostTracks(planType, hasPrioritySupport)`
+  (pure, unit-tested) returning the ghost-track upsell specs.
 
 ## Scope boundaries (YAGNI)
 
@@ -103,7 +140,7 @@ track (existing `trackCanHandle` logic), unchanged.
   impersonation) that internal requests never appear and the lanes bucket
   correctly.
 
-## Open question for review
+## Decisions locked
 
-- Delivered window: 30 days vs current billing cycle. Spec assumes 30 days;
-  switch to billing cycle only if you want delivered-count to reset with billing.
+- Delivered window = **last 30 days** + a "View all delivered" link. (Liam, 2026-06-11.)
+- Ghost-track upsell is in scope and first-class (Liam, 2026-06-11).

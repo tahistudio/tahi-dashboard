@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, ne, asc } from 'drizzle-orm'
+import { eq, and, ne, asc, gte, desc } from 'drizzle-orm'
 import { getTrackEntitlements, getTrackSummary } from '@/lib/plan-utils'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -68,6 +68,28 @@ export async function GET(req: NextRequest) {
     ))
     .orderBy(asc(schema.requests.queueOrder), asc(schema.requests.createdAt))
 
+  // Recently-delivered (last 30 days) for the Delivered lane + header stats.
+  const deliveredCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  const delivered = await database
+    .select({
+      id: schema.requests.id,
+      title: schema.requests.title,
+      type: schema.requests.type,
+      status: schema.requests.status,
+      priority: schema.requests.priority,
+      trackId: schema.requests.trackId,
+      dueDate: schema.requests.dueDate,
+      createdAt: schema.requests.createdAt,
+      deliveredAt: schema.requests.deliveredAt,
+    })
+    .from(schema.requests)
+    .where(and(
+      eq(schema.requests.orgId, targetOrgId),
+      eq(schema.requests.status, 'delivered'),
+      gte(schema.requests.deliveredAt, deliveredCutoff),
+    ))
+    .orderBy(desc(schema.requests.deliveredAt))
+
   const currentIds = tracks.map(t => t.currentRequestId).filter(Boolean) as string[]
   const activeRequests = queued.filter(r => currentIds.includes(r.id))
   const queuedRequests = queued.filter(r => !currentIds.includes(r.id))
@@ -84,6 +106,7 @@ export async function GET(req: NextRequest) {
       currentRequest: activeRequests.find(r => r.id === t.currentRequestId) ?? null,
     })),
     queue: queuedRequests,
+    delivered,
   })
 }
 

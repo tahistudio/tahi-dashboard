@@ -82,3 +82,66 @@ export function getTrackSummary(planType: string | null, hasPrioritySupport: boo
   if (e.smallTracks > 0) parts.push(`${e.smallTracks} small track${e.smallTracks > 1 ? 's' : ''}`)
   return parts.length > 0 ? parts.join(' + ') : 'No active tracks'
 }
+
+// ─── Ghost-track upsell ───────────────────────────────────────────────────────
+//
+// The tracks a client would GAIN by upgrading, rendered as greyed-out "ghost"
+// cards beside their real tracks so the upgrade path is visual. Lead with the
+// capability, not the price (per the Services & Pricing doc).
+
+export interface GhostTrack {
+  /** Track type the upgrade would add. */
+  type: 'small' | 'large'
+  headline: string
+  subline: string
+  /** CTA label; the view wires it to the upgrade path (/billing or contact). */
+  cta: string
+}
+
+export function getUpgradeGhostTracks(
+  planType: string | null,
+  hasPrioritySupport: boolean,
+): GhostTrack[] {
+  if (planType === 'maintain') {
+    if (!hasPrioritySupport) {
+      return [
+        {
+          type: 'small',
+          headline: 'Run two projects at once',
+          subline: 'A second track means two pieces of work moving in parallel.',
+          cta: 'Add priority support',
+        },
+        {
+          type: 'large',
+          headline: 'Take on bigger builds',
+          subline: 'A large track handles full pages and complex work, not just small tasks.',
+          cta: 'Upgrade to Scale',
+        },
+      ]
+    }
+    return [
+      {
+        type: 'large',
+        headline: 'Take on bigger builds',
+        subline: 'A large track handles full pages and complex work, not just small tasks.',
+        cta: 'Upgrade to Scale',
+      },
+    ]
+  }
+  if (planType === 'scale') {
+    if (!hasPrioritySupport) {
+      return [
+        {
+          type: 'large',
+          headline: 'Two big projects in parallel',
+          subline: 'A second large track doubles your large-build throughput.',
+          cta: 'Add priority support',
+        },
+      ]
+    }
+    return [] // top tier
+  }
+  // No recognised retainer plan: no ghost tracks (the track view only renders
+  // for active subscriptions anyway).
+  return []
+}

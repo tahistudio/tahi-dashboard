@@ -62,9 +62,8 @@ import { BoardView, type BoardItem, type BoardColumn, type BoardPriority } from 
 import { ViewToggle } from '@/components/tahi/view-toggle'
 import { List as ListIcon, Columns as ColumnsIcon } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
-import { TrackQueueView } from '@/components/tahi/track-queue-view'
-import type { TrackWithQueue, TrackActiveRequest } from '@/components/tahi/track-queue-view'
-import { trackCanHandle } from '@/lib/plan-utils'
+import { TrackQueueView, type TrackLanes } from '@/components/tahi/track-queue-view'
+import { bucketTracks, type CapacityResponse } from '@/lib/track-lanes'
 import {
   CYCLE_BUNDLED_ADDONS,
   CYCLE_MONTHS,
@@ -2462,106 +2461,17 @@ interface FileRow {
 
 // ── Track Queue tab ───────────────────────────────────────────────────────────
 
-interface AdminTrackResponse {
-  id: string
-  type: 'small' | 'large'
-  isPriorityTrack: number | boolean | null
-  currentRequestId: string | null
-  currentRequestTitle?: string | null
-}
-
-interface AdminQueuedRequest {
-  id: string
-  title: string
-  type: string
-  status: string
-  priority: string
-  queueOrder: number | null
-  dueDate?: string | null
-}
-
-const TRACK_ACTIVE_STATUSES = new Set(['in_progress', 'in_review', 'client_review'])
-const TRACK_QUEUED_STATUSES = new Set(['submitted', 'queued'])
-
 function TrackQueueTab({ clientId }: { clientId: string }) {
-  const [tracks, setTracks] = useState<TrackWithQueue[]>([])
+  const [tracks, setTracks] = useState<TrackLanes[]>([])
   const [loading, setLoading] = useState(true)
 
   const fetchTracks = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(apiPath(`/api/admin/clients/${clientId}/tracks`))
+      const res = await fetch(apiPath(`/api/admin/capacity?orgId=${clientId}`))
       if (!res.ok) { setTracks([]); return }
-      const data = await res.json() as {
-        tracks: AdminTrackResponse[]
-        queue: AdminQueuedRequest[]
-      }
-
-      const trackMap = new Map<string, TrackWithQueue>()
-
-      for (const t of data.tracks) {
-        const active: TrackActiveRequest | null = t.currentRequestId
-          ? {
-              id: t.currentRequestId,
-              title: t.currentRequestTitle ?? 'Untitled',
-              type: 'small_task',
-              status: 'in_progress',
-              priority: 'medium',
-            }
-          : null
-
-        trackMap.set(t.id, {
-          id: t.id,
-          type: t.type,
-          isPriorityTrack: t.isPriorityTrack === 1 || t.isPriorityTrack === true,
-          activeRequest: active,
-          queue: [],
-        })
-      }
-
-      // Distribute queued requests to eligible tracks
-      for (const req of data.queue) {
-        if (TRACK_QUEUED_STATUSES.has(req.status) || TRACK_ACTIVE_STATUSES.has(req.status)) {
-          for (const track of trackMap.values()) {
-            if (trackCanHandle(track.type, req.type)) {
-              if (TRACK_ACTIVE_STATUSES.has(req.status) && !track.activeRequest) {
-                track.activeRequest = {
-                  id: req.id,
-                  title: req.title,
-                  type: req.type,
-                  status: req.status,
-                  priority: req.priority,
-                  dueDate: req.dueDate,
-                }
-              } else {
-                track.queue.push({
-                  id: req.id,
-                  title: req.title,
-                  type: req.type,
-                  priority: req.priority,
-                  queueOrder: req.queueOrder,
-                  dueDate: req.dueDate,
-                })
-              }
-              break
-            }
-          }
-        }
-      }
-
-      // Sort queues
-      for (const track of trackMap.values()) {
-        track.queue.sort((a, b) => (a.queueOrder ?? 9999) - (b.queueOrder ?? 9999))
-      }
-
-      // Large tracks first
-      const sorted = [...trackMap.values()].sort((a, b) => {
-        if (a.type === 'large' && b.type === 'small') return -1
-        if (a.type === 'small' && b.type === 'large') return 1
-        return 0
-      })
-
-      setTracks(sorted)
+      const data = await res.json() as CapacityResponse
+      setTracks(bucketTracks(data))
     } catch {
       setTracks([])
     } finally {
