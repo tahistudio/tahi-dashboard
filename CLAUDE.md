@@ -368,7 +368,7 @@ const S = {
 2. Hardcode hex in const objects at the top of the file for inline styles.
 3. Use CSS var references in Tailwind classes for dark-mode-compatible styling.
 4. Every interactive element must have a hover and focus state.
-5. Page background: `#f5f7f5` in the dashboard layout wrapper.
+5. Page background: `var(--color-bg-cream)` (warm sand `#F7F6F3` light / `#131211` dark) in the dashboard layout wrapper. Never hardcode it.
 
 ---
 

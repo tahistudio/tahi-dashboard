@@ -35,16 +35,32 @@
   /* One-off highlight yellow. Sticky-note callouts, not a status. */
   --color-highlight: #F7CE48;
 
-  /* Surface : Light mode */
+  /* Surface : Light mode.
+     Slice 0 (premium refresh): ONE warm-sand neutral family (hue ~85,
+     whisper of chroma) replaces the old green-tinted greys. The canvas is
+     warm sand (~Notion's proven #F7F6F3 territory); cards are pure white.
+     The quiet 2-3% lightness delta between them IS the hierarchy. Brand
+     green is reserved for signal (CTA, active nav, focus, celebration). */
   --color-bg: #ffffff;
-  --color-bg-cream: #F3F4F2;        /* warm off-white page background */
-  --color-bg-secondary: #f7f9f6;
-  --color-bg-tertiary: #eef3ec;
-  --color-bg-mist: #E3E6E2;         /* very subtle divider strip / panel bg */
+  --color-bg-cream: #F7F6F3;        /* warm sand page canvas */
+  --color-bg-secondary: #F4F3EF;    /* secondary / hover surface */
+  --color-bg-tertiary: #EDEBE6;     /* inset / kbd hint surface */
+  --color-bg-mist: #E8E6E1;         /* very subtle divider strip / panel bg */
   --color-text: #121A0F;
-  --color-text-muted: #5a6657;
-  --color-text-subtle: #647461;        /* WCAG AA on cream (4.52:1) + white (4.99:1) */
+  --color-text-muted: #5D5B55;      /* warm neutral ink (was green-tinted) */
+  --color-text-subtle: #6F6D66;     /* WCAG AA on sand (4.6:1) + white (4.9:1) */
   --color-text-on-dark: #FDFDFC;
+
+  /* Semantic surfaces (role-named; resolve per theme). New code should
+     prefer these over the raw bg tokens. */
+  --surface-canvas: var(--color-bg-cream);
+  --surface: var(--color-bg);
+  --surface-raised: var(--color-bg);
+  --surface-overlay: var(--color-bg);
+  /* The ONE ambient shadow, reserved for floating layers only
+     (popover, dropdown, modal, toast, drag-lifted card). In-flow data
+     cards get a hairline border and zero shadow. */
+  --shadow-floating: 0 4px 12px rgba(0, 0, 0, 0.12);
 
   /* Mode-aware "active item text". Light mode = darkest forest so
      active sidebar items pop on cream. Dark mode flips this to a
@@ -52,17 +68,19 @@
   --color-text-active: #1E3019;
 
   /* Mode-aware "ink wash" used for subtle hover backgrounds.
-     Light: near-black at 4%. Dark: near-white at 5%. */
-  --color-hover-tint: rgba(18, 26, 15, 0.04);
+     Light: warm near-black at 4%. Dark: near-white at 6%. */
+  --color-hover-tint: rgba(26, 25, 20, 0.04);
 
   /* Mode-aware inset highlight ring used on cards. Invisible in light
      (relies on the regular border) but pops as a faint brand-light edge
      in dark so cards have visible definition against the dark page. */
   --card-highlight-ring: transparent;
   --color-text-dim-on-dark: #DCE8D9;
-  --color-border: #d4e0d0;
-  --color-border-subtle: #e8f0e6;
-  --color-border-strong: #CDCFCC;   /* canonical 1px card border */
+  /* Borders as warm-ink ALPHA hairlines (work on any surface; dark mode
+     gets white-alpha equivalents for free). De-greened in Slice 0. */
+  --color-border: rgba(26, 25, 20, 0.10);
+  --color-border-subtle: rgba(26, 25, 20, 0.06);
+  --color-border-strong: rgba(26, 25, 20, 0.16);   /* canonical 1px card border */
 
   /* Surface : Dark mode */
   --color-bg-dark: #2A3626;
@@ -173,8 +191,8 @@
   --cat-strategy-bg:      #f3e8ff;
   --cat-strategy-text:    #7e22ce;
 
-  --cat-admin-bg:         #f3f4f6;
-  --cat-admin-text:       #4b5563;
+  --cat-admin-bg:         #F0EFEB;
+  --cat-admin-text:       #57554F;
 
   --cat-bug-bg:           #fee2e2;
   --cat-bug-text:         #dc2626;
@@ -203,11 +221,13 @@
   --color-on-track-bg:   #f0fdf4;
   --color-on-track-text: #15803d;
 
-  /* ── Table / list chrome ────────────────────────────────── */
-  --color-row-hover:  #fafafa;
-  --color-row-border: #f9fafb;
-  --color-th-bg:      #f9fafb;
-  --color-th-text:    #9ca3af;
+  /* ── Table / list chrome ────────────────────────────────────
+     Derived from the same warm-sand family as the canvas (the old
+     values were cool-blue Tailwind greys clashing with the warm ramp). */
+  --color-row-hover:  #F7F6F3;
+  --color-row-border: rgba(26, 25, 20, 0.05);
+  --color-th-bg:      #F7F6F3;
+  --color-th-text:    #8B8983;
 
   /* ── Spacing scale (8px-based) ──────────────────────────── */
   --spacing-px: 1px;
@@ -290,16 +310,26 @@
   --shadow-ring: 0 0 0 2px var(--color-brand-light);
 
   /* ── Motion ──────────────────────────────────────────────
-     The Tahi tempo is calm — slower than most systems, ease-out
-     only, never bounce. --motion-base (420ms) is the studio default
-     hover; --motion-quick (220ms) is for fast micro-feedback
-     (colour swaps, focus rings). The cubic 0.22, 1, 0.36, 1 reads
-     as premium without feeling sluggish. */
-  --motion-quick: 220ms;
-  --motion-base: 420ms;
-  --motion-medium: 520ms;
-  --motion-slow: 720ms;
-  --motion-grand: 1100ms;
+     Slice 0 re-base: motion serves perceived performance. UI feedback
+     is FAST (70-150ms, Carbon-productive territory); only expressive
+     brand moments earn the long durations. Ease-out only, never
+     bounce. Exits should run 50-100ms shorter than entrances.
+     Duration ladder (new code prefers --dur-*):
+       --dur-1 hover/press · --dur-2 small fades · --dur-3 popovers
+       --dur-4 slide-overs/toasts/reveals · --dur-5 expressive only */
+  --dur-1: 70ms;
+  --dur-2: 110ms;
+  --dur-3: 150ms;
+  --dur-4: 240ms;
+  --dur-5: 400ms;
+  /* Legacy aliases (existing components): re-based to the new tempo. */
+  --motion-quick: 110ms;
+  --motion-base: 200ms;
+  --motion-medium: 300ms;
+  --motion-slow: 450ms;
+  --motion-grand: 800ms;
+  /* Productive = UI feedback; expressive = brand moments. */
+  --ease-productive: cubic-bezier(0.2, 0, 0.38, 0.9);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -331,6 +361,9 @@ body {
   background-color: var(--color-bg);
   color: var(--color-text);
   line-height: 1.6;
+  /* Numbers never shudder: tabular figures for all numeric display
+     (Ramp-style mandate; required by CountUp + live-updating stats). */
+  font-variant-numeric: tabular-nums;
   /* Smooth theme swap. Light <-> dark is a 320ms cross-fade. */
   transition:
     background-color var(--motion-base, 320ms) var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1)),
@@ -1051,29 +1084,41 @@ html.tahi-private [data-private] button {
 .dark {
   color-scheme: dark;
 
-  /* Surfaces. Page bg sits darkest; cards float above slightly lighter. */
-  --color-bg: #1B2419;                 /* cards */
-  --color-bg-cream: #0F1410;           /* page background (was cream) */
-  --color-bg-secondary: #222C20;       /* hover, sub-card */
-  --color-bg-tertiary: #283224;        /* inset / kbd hint surface */
-  --color-bg-mist: #1F2820;            /* divider strip */
+  /* Surfaces. Slice 0: de-greened to a warm desaturated near-black (the
+     old saturated greens were the light mode's "dirty" problem in dark
+     clothing). FOUR elevation levels by LIGHTNESS, not shadow:
+     canvas -> card -> nested/hover -> overlay, each ~+4-5% luminance. */
+  --color-bg: #1C1B19;                 /* cards (level 2) */
+  --color-bg-cream: #131211;           /* page canvas (level 1) */
+  --color-bg-secondary: #242320;       /* hover, sub-card (level 3) */
+  --color-bg-tertiary: #2C2B27;        /* inset / overlay (level 4) */
+  --color-bg-mist: #201F1C;            /* divider strip */
 
-  /* Borders. Range from very subtle to canonical card border. */
-  --color-border: #2F3D2B;
-  --color-border-subtle: #252F22;
-  --color-border-strong: #3A4A36;
+  /* Semantic surfaces (dark resolution). */
+  --surface-canvas: #131211;
+  --surface: #1C1B19;
+  --surface-raised: #242320;
+  --surface-overlay: #2C2B27;
+  /* Floating elements separate by lightness + border in dark; the
+     ambient shadow signal disappears on near-black, so it is off. */
+  --shadow-floating: none;
 
-  /* Text. Off-cream foreground, muted readable greens behind. */
-  --color-text: #F0F2EF;
-  --color-text-muted: #B3C2AC;
-  --color-text-subtle: #8AA481;        /* still passes AA on the page bg */
+  /* Borders. White-alpha hairlines (work on every elevation level). */
+  --color-border: rgba(255, 255, 255, 0.09);
+  --color-border-subtle: rgba(255, 255, 255, 0.06);
+  --color-border-strong: rgba(255, 255, 255, 0.14);
+
+  /* Text. Warm off-white ladder (never pure white), de-greened. */
+  --color-text: #E8E6E2;
+  --color-text-muted: #A8A6A0;
+  --color-text-subtle: #8A8881;        /* still passes AA on the page bg */
 
   /* Mode-aware active item text. Sidebar / bottom-bar active items
      use this so they're visible on either surface. */
   --color-text-active: #DCE8D9;
 
-  /* Mode-aware hover ink wash. Near-white at 5%. */
-  --color-hover-tint: rgba(240, 242, 239, 0.05);
+  /* Mode-aware hover ink wash. Near-white at 6%. */
+  --color-hover-tint: rgba(232, 230, 226, 0.06);
 
   /* Inset highlight ring on cards. Visible in dark to add definition. */
   --card-highlight-ring: rgba(151, 186, 140, 0.14);
@@ -1091,19 +1136,22 @@ html.tahi-private [data-private] button {
   --color-brand-100: rgba(122, 171, 107, 0.18);
   --color-brand-200: rgba(122, 171, 107, 0.30);
 
-  /* Row chrome */
-  --color-row-hover: #222C20;
-  --color-row-border: #1F2820;
-  --color-th-bg: #1B2419;
-  --color-th-text: #8AA481;
+  /* Row chrome (same warm near-black family). */
+  --color-row-hover: #242320;
+  --color-row-border: #201F1C;
+  --color-th-bg: #1C1B19;
+  --color-th-text: #8A8881;
 
-  /* Shadows: higher opacity for visibility against dark surfaces. */
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.30);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.40), 0 1px 2px rgba(0, 0, 0, 0.30);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.50), 0 2px 4px -2px rgba(0, 0, 0, 0.30);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.55), 0 4px 6px -4px rgba(0, 0, 0, 0.30);
-  --shadow-leaf: 0 2px 6px rgba(122, 171, 107, 0.22);
-  --shadow-brand: 0 2px 8px rgba(122, 171, 107, 0.28);
+  /* Shadows: OFF for in-flow surfaces in dark (a dark shadow on a dark
+     canvas carries no signal; elevation is by lightness + border).
+     md/lg are kept faint for floating layers (popover/modal) only.
+     The focus ring stays: it is accessibility, not decoration. */
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 10px 24px rgba(0, 0, 0, 0.50);
+  --shadow-leaf: none;
+  --shadow-brand: none;
   --shadow-ring: 0 0 0 2px #93C98A;
 
   /* Status palette. Tinted-on-dark via translucent backgrounds with
