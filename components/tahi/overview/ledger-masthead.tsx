@@ -101,15 +101,9 @@ export function LedgerMasthead({ userName, data, loading }: { userName: string; 
           {loading ? (
             <div className="tahi-shimmer" style={{ height: '3.25rem', width: '11rem', borderRadius: 'var(--radius-sm)' }} />
           ) : canMrr && data?.kpis.mrr != null ? (
-            <div className="flex items-end" style={{ gap: 'var(--space-3)' }}>
-              <MrrFigure value={data.kpis.mrr} />
-              <Sparkbar points={(data.monthlyRevenue ?? []).map(m => m.total)} />
-            </div>
+            <MrrFigure value={data.kpis.mrr} />
           ) : (
             <p style={{ fontSize: 'var(--text-xl)', color: 'var(--color-text-subtle)' }}>&mdash;</p>
-          )}
-          {!loading && canMrr && data?.monthlyRevenue && (
-            <RevenueDelta points={data.monthlyRevenue.map(m => m.total)} />
           )}
         </div>
 
@@ -190,54 +184,6 @@ function MrrFigure({ value }: { value: number }) {
       {prefix}
       <CountUp value={Math.round(target)} format={n => Math.round(n).toLocaleString()} />
     </span>
-  )
-}
-
-function Sparkbar({ points }: { points: number[] }) {
-  const bars = points.slice(-6)
-  const max = Math.max(1, ...bars)
-  if (bars.length === 0) return null
-  return (
-    <div className="flex items-end" style={{ gap: '0.1875rem', height: '1.75rem', paddingBottom: '0.25rem' }} aria-hidden="true">
-      {bars.map((v, i) => {
-        const h = Math.max(8, Math.round((v / max) * 100))
-        const isLast = i === bars.length - 1
-        return (
-          <div
-            key={i}
-            style={{
-              width: '0.375rem',
-              height: `${h}%`,
-              background: isLast ? 'var(--color-brand)' : 'var(--color-brand-100)',
-              borderRadius: '2px',
-              transition: 'height var(--motion-medium) var(--ease-productive)',
-            }}
-          />
-        )
-      })}
-    </div>
-  )
-}
-
-function RevenueDelta({ points }: { points: number[] }) {
-  const bars = points.slice(-2)
-  if (bars.length < 2 || bars[0] === 0) return null
-  const pct = Math.round(((bars[1] - bars[0]) / bars[0]) * 100)
-  if (pct === 0) return null
-  const up = pct > 0
-  return (
-    <p
-      data-private
-      style={{
-        fontSize: 'var(--text-xs)',
-        fontWeight: 600,
-        color: up ? 'var(--color-success)' : 'var(--color-text-subtle)',
-        marginTop: 'var(--space-1-5)',
-        fontVariantNumeric: 'tabular-nums',
-      }}
-    >
-      {up ? '+' : ''}{pct}% <span style={{ color: 'var(--color-text-subtle)', fontWeight: 400 }}>vs last month</span>
-    </p>
   )
 }
 
