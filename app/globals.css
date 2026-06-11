@@ -243,14 +243,18 @@
      Colour lives in exactly five places (chips, pills, sparkline
      stroke/area, count pills, hero-tile tint). Never on borders,
      numerals, money, names, status pills, or the canvas. */
-  --domain-money:    var(--color-brand);   /* #5A824E green  · money/MRR/cash/take-home */
-  --domain-delivery: #0E7490;              /* teal           · requests/tasks/worklog/beakers */
-  --domain-sales:    #D97706;              /* amber          · deals/leads/proposals/calls */
-  --domain-content:  #7C3AED;              /* violet         · blog pipeline/clusters */
-  --domain-social:   #0284C7;              /* sky            · Buffer cadence */
-  --domain-seo:      #4F46E5;              /* indigo         · SE Ranking/index/sitemap/AEO */
-  --domain-clients:  #A21CAF;              /* orchid         · health/reviews/testimonials */
-  --domain-ops:      var(--color-text-muted); /* warm ink    · automations/docs/contracts/team */
+  /* BRAND GREEN ONLY. Liam wants one consistent brand green (or shades), not a
+     multi-hue domain rainbow. Every domain accent IS the brand green; the ONLY
+     other colours on the page are the semantic status red/amber/success.
+     Differentiation between cards comes from content, icons + motion, not hue. */
+  --domain-money:    var(--color-brand);   /* money/MRR/cash/take-home */
+  --domain-delivery: var(--color-brand);   /* requests/tasks/worklog/beakers/time */
+  --domain-sales:    var(--color-brand);   /* deals/leads/proposals/calls */
+  --domain-content:  var(--color-brand);   /* blog pipeline/clusters */
+  --domain-social:   var(--color-brand);   /* Buffer cadence */
+  --domain-seo:      var(--color-brand);   /* SE Ranking/index/sitemap/AEO */
+  --domain-clients:  var(--color-brand);   /* health/reviews/testimonials */
+  --domain-ops:      var(--color-text-muted); /* warm ink · automations/docs/contracts/team */
 
   /* Tints: 11% of the domain ink mixed into the card surface (light). */
   --domain-money-tint:    color-mix(in oklab, var(--domain-money) 11%, var(--surface));
@@ -1192,13 +1196,14 @@ html.tahi-private [data-private] button {
      surface, and each -tint rises to a 14% mix so hero tiles become
      velvet panels rather than washes. Money stays brand-light (the one
      green) and ops stays the warm muted ink, both already light enough. */
-  --domain-money:    var(--color-brand-light); /* lifts to clear AA on #1C1B19 */
-  --domain-delivery: #38BEDC;                  /* teal   bright */
-  --domain-sales:    #F0A93C;                  /* amber  bright */
-  --domain-content:  #B79CF6;                  /* violet bright */
-  --domain-social:   #56B6EE;                  /* sky    bright */
-  --domain-seo:      #9A8FF2;                  /* indigo bright */
-  --domain-clients:  #E472F0;                  /* orchid bright */
+  /* Brand green only, lifted to clear AA on the dark canvas (#1C1B19). */
+  --domain-money:    var(--color-brand-light);
+  --domain-delivery: var(--color-brand-light);
+  --domain-sales:    var(--color-brand-light);
+  --domain-content:  var(--color-brand-light);
+  --domain-social:   var(--color-brand-light);
+  --domain-seo:      var(--color-brand-light);
+  --domain-clients:  var(--color-brand-light);
   --domain-ops:      var(--color-text-muted);  /* warm ink (already light) */
 
   /* Tints rise to a 14% mix in dark for the velvet-panel look. */
@@ -1886,8 +1891,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: grid;
   grid-template-rows: 0fr;
 }
+/* Open on pointer hover, or when the explicit toggle sets data-open. NOT on
+   :focus-within: the toggle button keeps focus after a tap, which used to pin
+   the footer open so it never collapsed on a second tap. */
 .domain-card:hover .domain-card-footer,
-.domain-card:focus-within .domain-card-footer,
 .domain-card[data-open="true"] .domain-card-footer {
   grid-template-rows: 1fr;
 }
