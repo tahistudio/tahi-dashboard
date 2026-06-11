@@ -174,6 +174,13 @@ shrink); no horizontal scroll; 44px targets; portal sidebar -> bottom tab bar.
 8. **Theme toggle via `document.startViewTransition`** (progressive enhancement;
    skip React's experimental wrapper) : today the body cross-fades 420ms while
    every token-driven element snaps.
+8b. **`tahi-border-trace`** (Liam's idea, 2026-06-11): a clockwise brand-green
+   border light-up on hover. Verdict: SIGNATURE, SCARCE. As a default card
+   hover it is the Magic UI / AI-landing-page move; reserved instead for a tiny
+   set of primary surfaces (the lead KPI tile, the onboarding card, possibly
+   the celebrate moment) : one full clockwise trace that plays ONCE per hover
+   (honours the play-to-completion rule), conic-gradient border, never on
+   tables / data cards, no-op under reduced motion.
 9. (Slice B) sliding tab indicator + the broader icon micro-animation wiring.
 
 ## Per-surface design (first-run journey)
