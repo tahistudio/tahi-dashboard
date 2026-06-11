@@ -92,31 +92,39 @@ export function LedgerMasthead({ userName, data, loading }: { userName: string; 
         <NewMenu canRequests={canRequests} canClients={canClients} />
       </div>
 
-      {/* The ledger: MRR set bare on the canvas, vitals hairline-separated beside it */}
+      {/* The ledger: MRR as the solid forest-green signature block, vitals beside */}
       <div
-        className="flex flex-col lg:flex-row lg:items-end"
+        className="flex flex-col lg:flex-row lg:items-center"
         style={{ gap: 'var(--space-5)' }}
       >
-        {/* MRR hero figure */}
-        <div style={{ flexShrink: 0 }}>
+        {/* MRR hero: the brand-green gradient block (the page's bold money signal) */}
+        <div
+          style={{
+            flexShrink: 0,
+            padding: 'var(--space-4) var(--space-5)',
+            background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
+            borderRadius: 'var(--radius-leaf)',
+            color: '#ffffff',
+          }}
+        >
           <p
             style={{
               fontSize: 'var(--text-2xs, 0.6875rem)',
               fontWeight: 600,
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
-              color: 'var(--color-text-subtle)',
+              color: 'rgba(255, 255, 255, 0.78)',
               marginBottom: 'var(--space-1)',
             }}
           >
             Monthly recurring
           </p>
           {loading ? (
-            <div className="tahi-shimmer" style={{ height: '3.25rem', width: '11rem', borderRadius: 'var(--radius-sm)' }} />
+            <div style={{ height: '3.25rem', width: '11rem', borderRadius: 'var(--radius-sm)', background: 'rgba(255, 255, 255, 0.18)' }} />
           ) : canMrr && data?.kpis.mrr != null ? (
-            <MrrFigure value={data.kpis.mrr} />
+            <MrrFigure value={data.kpis.mrr} light />
           ) : (
-            <p style={{ fontSize: 'var(--text-xl)', color: 'var(--color-text-subtle)' }}>&middot;</p>
+            <p style={{ fontSize: 'var(--text-xl)', color: 'rgba(255, 255, 255, 0.7)' }}>&middot;</p>
           )}
         </div>
 
@@ -172,7 +180,7 @@ export function LedgerMasthead({ userName, data, loading }: { userName: string; 
 
 // ─── MRR figure ───────────────────────────────────────────────────────────────
 
-function MrrFigure({ value }: { value: number }) {
+function MrrFigure({ value, light }: { value: number; light?: boolean }) {
   const { format, toDisplay } = useDisplayCurrency()
   // Render the converted number with CountUp, keeping the display-currency prefix.
   const target = toDisplay(value)
@@ -189,7 +197,7 @@ function MrrFigure({ value }: { value: number }) {
         fontWeight: 700,
         lineHeight: 1,
         letterSpacing: '-0.02em',
-        color: 'var(--color-text)',
+        color: light ? '#ffffff' : 'var(--color-text)',
         fontVariantNumeric: 'tabular-nums',
         display: 'inline-block',
       }}

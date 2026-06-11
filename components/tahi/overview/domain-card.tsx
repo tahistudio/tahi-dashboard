@@ -245,29 +245,63 @@ export function DomainCard({
         border: '1px solid var(--color-border-subtle)',
         borderRadius: 'var(--radius-lg)',
         padding: 'var(--space-6)',
-        // Hero tiles get a full-surface domain wash; the tint is capped (11%
-        // light / 16% dark via the token) so it reads as a panel, not a fill.
-        // Non-hero cards stay on the plain surface. This is the one canonical
-        // hero look every heroTile card shares.
-        ...(heroTile ? { background: t.tint } : null),
+        // Hero tiles wear a light domain tint body UNDER a bold solid-gradient
+        // header band (rendered below). overflow:hidden clips the band's bleed to
+        // the rounded card corners. This is the one canonical hero look every
+        // heroTile card shares (Content violet, Pipeline amber).
+        ...(heroTile ? { background: t.tint, overflow: 'hidden' } : null),
       }}
     >
-      {/* Header: icon chip + letterpress title, optional view link */}
-      <div className="flex items-center justify-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-5)' }}>
-        <div className="flex items-center" style={{ gap: 'var(--space-2-5)', minWidth: 0 }}>
-          <IconChip domain={domain}>{icon}</IconChip>
-          <h2 style={TITLE_STYLE}>{title}</h2>
+      {/* Header: a bold solid-gradient band for hero tiles, a light row otherwise */}
+      {heroTile ? (
+        <div
+          className="flex items-center justify-between"
+          style={{
+            gap: 'var(--space-3)',
+            // Bleed the band to the card edges over the space-6 padding.
+            margin: 'calc(var(--space-6) * -1) calc(var(--space-6) * -1) var(--space-5)',
+            padding: 'var(--space-3-5) var(--space-6)',
+            background: `linear-gradient(135deg, ${t.ink} 0%, color-mix(in oklab, ${t.ink} 60%, #0b0b12) 100%)`,
+            color: '#ffffff',
+          }}
+        >
+          <div className="flex items-center" style={{ gap: 'var(--space-2-5)', minWidth: 0 }}>
+            <span
+              aria-hidden="true"
+              className="flex items-center justify-center"
+              style={{ width: '1.75rem', height: '1.75rem', flexShrink: 0, borderRadius: 'var(--radius-leaf-sm)', background: 'rgba(255, 255, 255, 0.2)', color: '#ffffff' }}
+            >
+              {icon}
+            </span>
+            <h2 style={{ ...TITLE_STYLE, color: 'rgba(255, 255, 255, 0.92)' }}>{title}</h2>
+          </div>
+          {viewHref && (
+            <Link
+              href={viewHref}
+              className="view-link flex items-center"
+              style={{ gap: 'var(--space-1)', fontSize: 'var(--text-xs)', fontWeight: 500, color: '#ffffff', opacity: 0.92, textDecoration: 'none', flexShrink: 0 }}
+            >
+              {viewLabel} <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
+            </Link>
+          )}
         </div>
-        {viewHref && (
-          <Link
-            href={viewHref}
-            className="view-link flex items-center"
-            style={{ gap: 'var(--space-1)', fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-link)', textDecoration: 'none', flexShrink: 0 }}
-          >
-            {viewLabel} <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
-          </Link>
-        )}
-      </div>
+      ) : (
+        <div className="flex items-center justify-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-5)' }}>
+          <div className="flex items-center" style={{ gap: 'var(--space-2-5)', minWidth: 0 }}>
+            <IconChip domain={domain}>{icon}</IconChip>
+            <h2 style={TITLE_STYLE}>{title}</h2>
+          </div>
+          {viewHref && (
+            <Link
+              href={viewHref}
+              className="view-link flex items-center"
+              style={{ gap: 'var(--space-1)', fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-link)', textDecoration: 'none', flexShrink: 0 }}
+            >
+              {viewLabel} <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
+            </Link>
+          )}
+        </div>
+      )}
 
       {/* Body */}
       <div style={{ minWidth: 0 }}>{children}</div>
