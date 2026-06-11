@@ -225,6 +225,43 @@
   --color-on-track-bg:   #f0fdf4;
   --color-on-track-text: #15803d;
 
+  /* ── Domain palette (closed 7+1) ──────────────────────────────
+     The homepage expansion ("The Studio Ledger, lit") assigns ONE hue
+     per cross-dashboard domain so every new card wears exactly one
+     colour. Closed set: no new hue without retiring one. Adjacent
+     non-green cards differ by 40+ OKLCH degrees. Green (money) is the
+     ONLY green-allowed domain (reserved for money / done / go).
+
+     Each domain ships three tokens:
+       --domain-<name>       the ink (icons, chips, strokes, pill text)
+       --domain-<name>-tint  11% mix on the card surface (hero tiles,
+                             chip backgrounds, count-pill backgrounds)
+       (dark only) the ink swaps to a lighter -bright variant inside
+       .dark below so it clears >=4.5:1 on the #1C1B19 card surface, and
+       the tint mix rises to 14% for the velvet-panel look Liam wants.
+
+     Colour lives in exactly five places (chips, pills, sparkline
+     stroke/area, count pills, hero-tile tint). Never on borders,
+     numerals, money, names, status pills, or the canvas. */
+  --domain-money:    var(--color-brand);   /* #5A824E green  · money/MRR/cash/take-home */
+  --domain-delivery: #0E7490;              /* teal           · requests/tasks/worklog/beakers */
+  --domain-sales:    #D97706;              /* amber          · deals/leads/proposals/calls */
+  --domain-content:  #7C3AED;              /* violet         · blog pipeline/clusters */
+  --domain-social:   #0284C7;              /* sky            · Buffer cadence */
+  --domain-seo:      #4F46E5;              /* indigo         · SE Ranking/index/sitemap/AEO */
+  --domain-clients:  #A21CAF;              /* orchid         · health/reviews/testimonials */
+  --domain-ops:      var(--color-text-muted); /* warm ink    · automations/docs/contracts/team */
+
+  /* Tints: 11% of the domain ink mixed into the card surface (light). */
+  --domain-money-tint:    color-mix(in oklab, var(--domain-money) 11%, var(--surface));
+  --domain-delivery-tint: color-mix(in oklab, var(--domain-delivery) 11%, var(--surface));
+  --domain-sales-tint:    color-mix(in oklab, var(--domain-sales) 11%, var(--surface));
+  --domain-content-tint:  color-mix(in oklab, var(--domain-content) 11%, var(--surface));
+  --domain-social-tint:   color-mix(in oklab, var(--domain-social) 11%, var(--surface));
+  --domain-seo-tint:      color-mix(in oklab, var(--domain-seo) 11%, var(--surface));
+  --domain-clients-tint:  color-mix(in oklab, var(--domain-clients) 11%, var(--surface));
+  --domain-ops-tint:      color-mix(in oklab, var(--domain-ops) 11%, var(--surface));
+
   /* ── Table / list chrome ────────────────────────────────────
      Derived from the same warm-sand family as the canvas (the old
      values were cool-blue Tailwind greys clashing with the warm ramp). */
@@ -1148,6 +1185,32 @@ html.tahi-private [data-private] button {
   --color-brand-100: rgba(122, 171, 107, 0.18);
   --color-brand-200: rgba(122, 171, 107, 0.30);
 
+  /* ── Domain palette (dark) ────────────────────────────────────
+     Dark reads slightly MORE luminous (Liam's direction): the ink swaps
+     to a -bright variant (L~0.78, the same hue lifted lighter) so chips,
+     icons, and sparkline strokes clear >=4.5:1 on the #1C1B19 card
+     surface, and each -tint rises to a 14% mix so hero tiles become
+     velvet panels rather than washes. Money stays brand-light (the one
+     green) and ops stays the warm muted ink, both already light enough. */
+  --domain-money:    var(--color-brand-light); /* lifts to clear AA on #1C1B19 */
+  --domain-delivery: #38BEDC;                  /* teal   bright */
+  --domain-sales:    #F0A93C;                  /* amber  bright */
+  --domain-content:  #B79CF6;                  /* violet bright */
+  --domain-social:   #56B6EE;                  /* sky    bright */
+  --domain-seo:      #9A8FF2;                  /* indigo bright */
+  --domain-clients:  #E472F0;                  /* orchid bright */
+  --domain-ops:      var(--color-text-muted);  /* warm ink (already light) */
+
+  /* Tints rise to a 14% mix in dark for the velvet-panel look. */
+  --domain-money-tint:    color-mix(in oklab, var(--domain-money) 14%, var(--surface));
+  --domain-delivery-tint: color-mix(in oklab, var(--domain-delivery) 14%, var(--surface));
+  --domain-sales-tint:    color-mix(in oklab, var(--domain-sales) 14%, var(--surface));
+  --domain-content-tint:  color-mix(in oklab, var(--domain-content) 14%, var(--surface));
+  --domain-social-tint:   color-mix(in oklab, var(--domain-social) 14%, var(--surface));
+  --domain-seo-tint:      color-mix(in oklab, var(--domain-seo) 14%, var(--surface));
+  --domain-clients-tint:  color-mix(in oklab, var(--domain-clients) 14%, var(--surface));
+  --domain-ops-tint:      color-mix(in oklab, var(--domain-ops) 14%, var(--surface));
+
   /* Row chrome (same warm near-black family). */
   --color-row-hover: #242320;
   --color-row-border: #201F1C;
@@ -1639,6 +1702,109 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .studio-note-link:hover {
   text-decoration: underline;
 }
+/* Time-tracker request picker row: warm hover + keyboard focus ring. */
+.time-picker-row {
+  transition: background-color var(--dur-2) var(--ease-productive);
+}
+.time-picker-row:hover {
+  background: var(--color-bg-secondary);
+}
+.time-picker-row:focus-visible {
+  outline: none;
+  background: var(--color-bg-secondary);
+  box-shadow: inset 0 0 0 1px var(--domain-delivery);
+}
+
+/* ── World clock + meeting planner (homepage card 10) ── */
+/* Remove (X) on a zone row: hidden until the row is hovered or the button
+   is keyboard-focused, so the resting card stays calm. */
+.world-clock-remove {
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-productive), background-color var(--dur-2) var(--ease-productive);
+}
+.world-clock-row:hover .world-clock-remove,
+.world-clock-remove:focus-visible {
+  opacity: 1;
+}
+.world-clock-remove:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+.world-clock-remove:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+}
+/* Touch devices have no hover; keep the remove always reachable there. */
+@media (hover: none) {
+  .world-clock-remove {
+    opacity: 1;
+  }
+}
+.world-clock-chip {
+  transition: border-color var(--dur-2) var(--ease-productive), color var(--dur-2) var(--ease-productive);
+}
+.world-clock-chip:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+.world-clock-chip:focus-visible {
+  outline: none;
+  border-color: var(--domain-delivery);
+}
+
+/* The scrubber: a styled range input. The thumb is a 20px visible teal knob on
+   a 44px-tall hit area (the input height). The track is a warm hairline. No
+   animation, so it is reduced-motion safe. */
+.world-clock-scrubber {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 2.75rem; /* 44px hit area */
+  background: transparent;
+  cursor: pointer;
+  margin: 0;
+}
+.world-clock-scrubber:focus-visible {
+  outline: none;
+}
+.world-clock-scrubber::-webkit-slider-runnable-track {
+  height: 0.375rem;
+  border-radius: 9999px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-subtle);
+}
+.world-clock-scrubber::-moz-range-track {
+  height: 0.375rem;
+  border-radius: 9999px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-subtle);
+}
+.world-clock-scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: -0.5rem; /* centre the 20px knob on the 6px track */
+  border-radius: 9999px;
+  background: var(--domain-delivery);
+  border: 2px solid var(--color-bg);
+  box-shadow: 0 0 0 1px var(--domain-delivery);
+}
+.world-clock-scrubber::-moz-range-thumb {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 9999px;
+  background: var(--domain-delivery);
+  border: 2px solid var(--color-bg);
+  box-shadow: 0 0 0 1px var(--domain-delivery);
+}
+.world-clock-scrubber:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 1px var(--domain-delivery), 0 0 0 4px var(--domain-delivery-tint);
+}
+.world-clock-scrubber:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 1px var(--domain-delivery), 0 0 0 4px var(--domain-delivery-tint);
+}
+
 /* Needs You row action: subtle brand-tinted lift on hover/focus. */
 .needs-you-action {
   transition: background-color var(--dur-2) var(--ease-productive), border-color var(--dur-2) var(--ease-productive);
@@ -1663,6 +1829,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   opacity: 1;
 }
 
+/* Hot-leads 80+ "new" dot + proposals "opened" dot: steady presence by default;
+   a gentle breathe in the motion-safe zone (the single ambient loop each of
+   those cards owns). Semantic colour is set inline. */
+.hot-leads-pulse,
+.proposals-open-pulse {
+  opacity: 1;
+}
+
 /* AHEAD zone fills: static by default (reduced-motion sees the final state);
    the grow transitions live in the motion-safe zone below. */
 .pipeline-ahead-bar {
@@ -1670,6 +1844,76 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 .studio-beaker-fill {
   transition: none;
+}
+
+/* ── CardDeck (homepage "lit" upgrade) ───────────────────────
+   Static fallbacks for the autoplay progress ring + deal-in entrance.
+   Under reduced motion the ring is never rendered (the component skips it)
+   and the deal-in is skipped entirely. --deck-progress (0 -> 1) is written
+   inline each frame by the component; registering it as a typed <number>
+   property lets the browser interpolate smoothly between the ~20fps JS
+   updates (the transition is declared in the motion-safe zone below). */
+@property --deck-progress {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+.card-deck-progress-ring {
+  /* The active dot's progress ring: a conic sweep of the active domain
+     ink (--deck-ring-colour, set inline) up to the current fraction
+     (--deck-progress, 0..1, set inline). Masked to a thin band so the dot
+     shows through the middle. Static by default; spins only autoplaying
+     in the motion-safe zone. */
+  --deck-progress: 0;
+  --deck-ring-colour: var(--color-brand);
+  background: conic-gradient(
+    from -90deg,
+    var(--deck-ring-colour) calc(var(--deck-progress) * 360deg),
+    transparent 0
+  );
+  -webkit-mask: radial-gradient(circle, transparent 60%, #fff 62%);
+          mask: radial-gradient(circle, transparent 60%, #fff 62%);
+}
+
+/* Domain card footer reveal: collapsed by default (0fr), expands to 1fr
+   when the card is hovered, focused within, or tap-opened (the component
+   sets data-open="true"). Grid-rows trick keeps it in flow with no fixed
+   height. Static (instant) under reduced motion via the transition being
+   declared only in the motion-safe zone. */
+.domain-card-footer {
+  display: grid;
+  grid-template-rows: 0fr;
+}
+.domain-card:hover .domain-card-footer,
+.domain-card:focus-within .domain-card-footer,
+.domain-card[data-open="true"] .domain-card-footer {
+  grid-template-rows: 1fr;
+}
+.domain-card-footer > * {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── Health dial pulse + segment fills (retainer + contracts cards) ──
+   Static fallbacks: the danger dial sits at rest, segmented bars paint at
+   their final width. The pulse + grow live in the motion-safe zone below so
+   reduced motion sees the resting state only. */
+.tahi-dial-pulse {
+  opacity: 1;
+}
+.tahi-segment-fill {
+  transition: none;
+}
+/* Semantic amber warning dot (near-expiry contracts): steady by default. */
+.tahi-warn-dot {
+  opacity: 1;
+}
+
+/* One-shot attention pulse (content "ideas await" chip + social most-recent
+   day marker): steady presence by default; plays a single breathe once on
+   mount in the motion-safe zone. Semantic / domain colour is set inline. */
+.tahi-pulse-once {
+  opacity: 1;
 }
 
 /* ── Motion-safe zone (all animation lives here) ─────────── */
@@ -1815,6 +2059,74 @@ input[type="date"]::-webkit-calendar-picker-indicator {
      starts from the top of the clock. */
   .tahi-border-trace:not(:hover)::before {
     --trace-angle: 0deg;
+  }
+
+  /* ── CardDeck "lit" motion ──────────────────────────────── */
+
+  /* Footer reveal animates the grid-rows expand (one extra info row slides
+     up). 240ms per spec; instant outside this zone. */
+  .domain-card-footer {
+    transition: grid-template-rows var(--dur-4) var(--ease-productive);
+  }
+
+  /* Autoplay progress ring: the component drives --deck-progress each tick
+     so the sweep grows smoothly. A short linear transition on the typed
+     property softens the per-frame steps without lagging the playhead. */
+  .card-deck-progress-ring {
+    transition: --deck-progress var(--dur-2) linear;
+  }
+
+  /* Deal-in entrance: cards settle from a slight upward stack on first
+     mount, once. The component adds .card-deck-dealin for one frame then
+     removes it; here we just declare the keyframe + binding. */
+  @keyframes tahi-deck-dealin {
+    from { opacity: 0; transform: translateY(0.625rem) scale(0.985); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .card-deck-dealin .card-deck-card {
+    animation: tahi-deck-dealin var(--dur-5) var(--ease-out) both;
+  }
+
+  /* ── Health dial pulse (RED dials only) ─────────────────── */
+  /* A slow opacity breathe on the at-risk churn dial, signalling danger
+     without motion noise. Semantic colour is set inline (danger), this only
+     drives the breathe. */
+  @keyframes tahi-dial-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+  .tahi-dial-pulse {
+    animation: tahi-dial-pulse 2.4s var(--ease-productive) infinite;
+  }
+
+  /* Near-expiry amber dot: a gentler version of the dial pulse. */
+  .tahi-warn-dot {
+    animation: tahi-dial-pulse 2s var(--ease-productive) infinite;
+  }
+
+  /* Hot-leads 80+ "new" dot + proposals "opened" dot: a soft attention breathe. */
+  .hot-leads-pulse,
+  .proposals-open-pulse {
+    animation: tahi-dial-pulse 2.2s var(--ease-productive) infinite;
+  }
+
+  /* One-shot attention pulse: a single scale + fade breathe played once on
+     mount (content "ideas await" chip when count > 0; social most-recent-day
+     marker). Plays to completion then rests; never loops (resting budget). */
+  @keyframes tahi-pulse-once {
+    0%   { transform: scale(1);    opacity: 1; }
+    45%  { transform: scale(1.35); opacity: 0.65; }
+    100% { transform: scale(1);    opacity: 1; }
+  }
+  .tahi-pulse-once {
+    animation: tahi-pulse-once 1.4s var(--ease-productive) 1 both;
+  }
+
+  /* Segmented bars (concentration share + signer progress) grow their width
+     from 0 on reveal. The component sets the final width inline once the
+     element scrolls into view; this transition eases the 0 -> target step. */
+  .tahi-segment-fill {
+    transition: width var(--dur-5) var(--ease-productive);
   }
 
 } /* end @media (prefers-reduced-motion: no-preference) */

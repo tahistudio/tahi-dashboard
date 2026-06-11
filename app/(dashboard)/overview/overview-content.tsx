@@ -21,6 +21,17 @@ import { PipelineAhead } from '@/components/tahi/overview/pipeline-ahead'
 import { StudioCapacity } from '@/components/tahi/overview/studio-capacity'
 import { CashRunway } from '@/components/tahi/overview/cash-runway'
 import { ReceivablesTide } from '@/components/tahi/overview/receivables-tide'
+import { TheWire } from '@/components/tahi/overview/the-wire'
+import { TimeTracker } from '@/components/tahi/overview/time-tracker'
+import { WorldClock } from '@/components/tahi/overview/world-clock'
+import { ContentEngine } from '@/components/tahi/overview/content-engine'
+import { SocialCadence } from '@/components/tahi/overview/social-cadence'
+import { HotLeads } from '@/components/tahi/overview/hot-leads'
+import { ProposalsLive } from '@/components/tahi/overview/proposals-live'
+import { RetainerHealth } from '@/components/tahi/overview/retainer-health'
+import { ContractsCard } from '@/components/tahi/overview/contracts-card'
+import { TakeHomeGauges } from '@/components/tahi/overview/take-home-gauges'
+import { CashFlowRibbon } from '@/components/tahi/overview/cash-flow-ribbon'
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
@@ -59,6 +70,7 @@ const KPI_DATA_FEATURES = ['clients', 'requests', 'invoices', 'financial_reports
 const CARD_FEATURES = [
   'clients', 'requests', 'invoices', 'financial_reports',
   'calls', 'deals', 'overview', 'schedules', 'capacity', 'tasks',
+  'content_studio', 'social', 'leads', 'proposals', 'contracts', 'time',
 ] as const
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -147,8 +159,10 @@ export function AdminOverview({ userName }: { userName: string }) {
   const cashVisible = features['financial_reports'] !== false
   const arVisible = features['invoices'] !== false
   const workVisible = requestsVisible || callsVisible
-  const aheadVisible = dealsVisible || capacityVisible
+  const aheadVisible = dealsVisible || capacityVisible || features['leads'] !== false || features['proposals'] !== false
   const booksVisible = cashVisible || arVisible
+  const growthVisible = features['content_studio'] !== false || features['social'] !== false
+  const clientsZoneVisible = features['clients'] !== false || features['contracts'] !== false
 
   return (
     <div className="flex flex-col" style={{ gap: 'var(--space-6)', maxWidth: '68.75rem' }}>
@@ -186,6 +200,24 @@ export function AdminOverview({ userName }: { userName: string }) {
           {/* Needs You: the act-now queue. Owns the page's single border-trace. */}
           <NeedsYou oldest={ledger?.arAging?.oldest ?? null} className="lg:col-span-12" />
 
+          {/* The Wire: cross-dashboard live ticker (the page's heartbeat) */}
+          <div className="lg:col-span-12"><TheWire /></div>
+
+          {/* Desk: timer + world clock, folded in high near the masthead clocks */}
+          <Gate feature="time">
+            <TimeTracker className="lg:col-span-5" />
+          </Gate>
+          <WorldClock className="lg:col-span-7" />
+
+          {/* GROWTH zone: content engine + social cadence */}
+          {growthVisible && <ZoneLabel>Growth</ZoneLabel>}
+          <Gate feature="content_studio">
+            <ContentEngine className="lg:col-span-7" />
+          </Gate>
+          <Gate feature="social">
+            <SocialCadence className="lg:col-span-5" />
+          </Gate>
+
           {/* WORK zone: the worklog + today's rail */}
           {workVisible && <ZoneLabel>Work</ZoneLabel>}
           <Gate feature="requests">
@@ -195,7 +227,7 @@ export function AdminOverview({ userName }: { userName: string }) {
             <TodayRail className={requestsVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
           </Gate>
 
-          {/* AHEAD zone: the pipeline + the studio's capacity */}
+          {/* AHEAD zone: pipeline + capacity + hot leads + proposals */}
           {aheadVisible && <ZoneLabel>Ahead</ZoneLabel>}
           <Gate feature="deals">
             <PipelineAhead className={capacityVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
@@ -203,14 +235,35 @@ export function AdminOverview({ userName }: { userName: string }) {
           <Gate feature="capacity">
             <StudioCapacity className={dealsVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
           </Gate>
+          <Gate feature="leads">
+            <HotLeads className="lg:col-span-6" />
+          </Gate>
+          <Gate feature="proposals">
+            <ProposalsLive className="lg:col-span-6" />
+          </Gate>
 
-          {/* BOOKS zone: cash + runway, receivables tide */}
+          {/* CLIENTS zone: retainer health + contracts */}
+          {clientsZoneVisible && <ZoneLabel>Clients</ZoneLabel>}
+          <Gate feature="clients">
+            <RetainerHealth className="lg:col-span-7" />
+          </Gate>
+          <Gate feature="contracts">
+            <ContractsCard className="lg:col-span-5" />
+          </Gate>
+
+          {/* BOOKS zone: take-home, cash + runway, forecast, receivables */}
           {booksVisible && <ZoneLabel>Books</ZoneLabel>}
           <Gate feature="financial_reports">
-            <CashRunway cash={ledger?.cash ?? null} className={arVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
+            <TakeHomeGauges className="lg:col-span-5" />
+          </Gate>
+          <Gate feature="financial_reports">
+            <CashRunway cash={ledger?.cash ?? null} className="lg:col-span-7" />
+          </Gate>
+          <Gate feature="financial_reports">
+            <CashFlowRibbon className="lg:col-span-7" />
           </Gate>
           <Gate feature="invoices">
-            <ReceivablesTide arAging={ledger?.arAging ?? null} className={cashVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
+            <ReceivablesTide arAging={ledger?.arAging ?? null} className="lg:col-span-5" />
           </Gate>
 
           {!loading && kpis !== null && kpis.activeClients === 0 && (

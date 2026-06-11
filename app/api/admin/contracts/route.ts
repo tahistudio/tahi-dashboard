@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and } from 'drizzle-orm'
+import { eq, desc, and, count, sql, inArray } from 'drizzle-orm'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -58,7 +58,40 @@ export async function GET(req: NextRequest) {
     .leftJoin(schema.organisations, eq(schema.contractDocuments.orgId, schema.organisations.id))
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(schema.contractDocuments.updatedAt))
-  return NextResponse.json({ items })
+
+  // Signer progress per contract for the homepage card: one grouped count over
+  // contract_signers (NOT N+1). Each contract gets signedCount + totalSigners.
+  // Wrapped so a missing signers table never breaks the existing list shape.
+  const signedMap = new Map<string, number>()
+  const totalMap = new Map<string, number>()
+  const contractIds = items.map(i => i.id)
+  if (contractIds.length) {
+    try {
+      const counts = await database
+        .select({
+          contractId: schema.contractSigners.contractId,
+          total: count(),
+          signed: sql<number>`SUM(CASE WHEN ${schema.contractSigners.status} = 'signed' THEN 1 ELSE 0 END)`,
+        })
+        .from(schema.contractSigners)
+        .where(inArray(schema.contractSigners.contractId, contractIds))
+        .groupBy(schema.contractSigners.contractId)
+      for (const row of counts) {
+        totalMap.set(row.contractId, row.total)
+        signedMap.set(row.contractId, Number(row.signed ?? 0))
+      }
+    } catch {
+      // contract_signers table missing — fall through to zeroed counts.
+    }
+  }
+
+  const withSigners = items.map(item => ({
+    ...item,
+    signedCount: signedMap.get(item.id) ?? 0,
+    totalSigners: totalMap.get(item.id) ?? 0,
+  }))
+
+  return NextResponse.json({ items: withSigners })
 }
 
 // POST /api/admin/contracts/documents — create from template (or raw HTML)

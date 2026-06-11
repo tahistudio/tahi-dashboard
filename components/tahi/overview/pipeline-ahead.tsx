@@ -16,9 +16,11 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight, TrendingUp } from 'lucide-react'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { calculatePipelineTotals } from '@/lib/pipeline-math'
+import { CountUp } from '@/components/tahi/count-up'
+import { IconChip } from '@/components/tahi/overview/domain-card'
 
 // ─── Shared data shapes (mirrors overview-content.tsx) ───────────────────────
 
@@ -36,7 +38,11 @@ interface DealSummary {
   stageIsClosedWon: number | null
   stageIsClosedLost: number | null
   orgName: string | null
+  updatedAt: string | null
 }
+
+// Open deals untouched for this long count as "stale" on the funnel header.
+const STALE_AFTER_MS = 14 * 24 * 60 * 60 * 1000
 
 interface StageSummary {
   id: string
@@ -191,9 +197,18 @@ export function PipelineAhead({ className }: { className?: string }) {
     .filter(d => d.orgName || d.title)
     .slice(0, 3)
 
+  // Stale open deals: untouched for STALE_AFTER_MS. Skipped gracefully when the
+  // deals payload carries no updatedAt (badge simply does not render).
+  const staleCount = openDeals.filter(d => {
+    if (!d.updatedAt) return false
+    const updated = new Date(d.updatedAt).getTime()
+    if (Number.isNaN(updated)) return false
+    return now.getTime() - updated >= STALE_AFTER_MS
+  }).length
+
   return (
     <section aria-label="Pipeline" className={className} style={shell}>
-      <Header />
+      <Header staleCount={staleCount} />
 
       {/* HERO: 12-month expected */}
       <div style={{ marginBottom: 'var(--space-1)' }}>
@@ -220,7 +235,7 @@ export function PipelineAhead({ className }: { className?: string }) {
             color: 'var(--color-text)',
           }}
         >
-          {format(expected12mo)}
+          <CountUp value={expected12mo} durationMs={800} format={format} />
         </p>
       </div>
 
@@ -383,21 +398,61 @@ export function PipelineAhead({ className }: { className?: string }) {
   )
 }
 
-// ─── Letterpress zone header ──────────────────────────────────────────────────
+// ─── SALES hero header band ───────────────────────────────────────────────────
+//
+// The AHEAD/SALES hero header: a tinted amber band carrying the amber IconChip +
+// the letterpress "Pipeline" label, plus an optional "stale" badge when open
+// deals have gone untouched. The card body stays on the plain surface (this is
+// the at-most-two-tinted-hero-tiles-per-viewport rule applied at the header band
+// only, mirroring DomainCard heroTile but without restructuring this card).
 
-function Header() {
+function Header({ staleCount }: { staleCount?: number }) {
   return (
-    <p
+    <div
+      className="flex items-center justify-between"
       style={{
-        fontSize: 'var(--text-2xs, 0.6875rem)',
-        fontWeight: 600,
-        letterSpacing: '0.08em',
-        textTransform: 'uppercase',
-        color: 'var(--color-text-subtle)',
-        marginBottom: 'var(--space-4)',
+        gap: 'var(--space-3)',
+        marginBottom: 'var(--space-5)',
+        marginLeft: 'calc(var(--space-6) * -1)',
+        marginRight: 'calc(var(--space-6) * -1)',
+        marginTop: 'calc(var(--space-6) * -1)',
+        padding: 'var(--space-4) var(--space-6)',
+        background: 'var(--domain-sales-tint)',
+        borderRadius: 'var(--radius-lg) var(--radius-lg) 0 0',
       }}
     >
-      Pipeline
-    </p>
+      <div className="flex items-center" style={{ gap: 'var(--space-2-5)', minWidth: 0 }}>
+        <IconChip domain="sales">
+          <TrendingUp size={15} aria-hidden="true" />
+        </IconChip>
+        <p
+          style={{
+            fontSize: 'var(--text-2xs, 0.6875rem)',
+            fontWeight: 600,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          Pipeline
+        </p>
+      </div>
+      {staleCount != null && staleCount > 0 && (
+        <span
+          className="tabular-nums flex-shrink-0"
+          style={{
+            padding: '0.0625rem 0.4375rem',
+            borderRadius: 'var(--radius-full)',
+            background: 'color-mix(in oklab, var(--color-warning) 16%, var(--color-bg))',
+            color: 'color-mix(in oklab, var(--color-warning) 64%, var(--color-text))',
+            fontSize: 'var(--text-2xs, 0.6875rem)',
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {staleCount} stale
+        </span>
+      )}
+    </div>
   )
 }
