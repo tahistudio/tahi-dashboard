@@ -52,7 +52,7 @@ function cashOutLabel(runway: number): string {
   return new Intl.DateTimeFormat('en-NZ', { month: 'short', year: 'numeric' }).format(d)
 }
 
-export function CashRunway({ cash, className }: { cash: CashData | null; className?: string }) {
+export function CashRunway({ cash, loading, className }: { cash: CashData | null; loading?: boolean; className?: string }) {
   const { format } = useDisplayCurrency()
   const runway = cash?.runwayMonths ?? null
   const mood = runwayMood(runway)
@@ -73,7 +73,13 @@ export function CashRunway({ cash, className }: { cash: CashData | null; classNa
         <h2 style={LABEL_STYLE}>Cash &amp; Runway</h2>
       </div>
 
-      {!cash ? (
+      {loading ? (
+        <div className="flex flex-col" style={{ gap: 'var(--space-4)' }} aria-hidden="true">
+          <div className="tahi-shimmer" style={{ height: '2.25rem', width: '8rem', borderRadius: 'var(--radius-sm)' }} />
+          <div className="tahi-shimmer" style={{ height: '0.5rem', width: '100%', borderRadius: 'var(--radius-full)' }} />
+          <div className="tahi-shimmer" style={{ height: '0.875rem', width: '55%', borderRadius: 'var(--radius-sm)' }} />
+        </div>
+      ) : !cash ? (
         <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-subtle)', lineHeight: 1.55 }}>
           Connect Xero to see runway
         </p>

@@ -12,6 +12,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Plus, ArrowRight } from 'lucide-react'
 import { CountUp } from '@/components/tahi/count-up'
+import { useSharedTick } from '@/lib/use-homepage-motion'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { usePermissions } from '@/components/tahi/permissions-context'
 
@@ -57,6 +58,39 @@ export function LedgerMasthead({ userName, data, loading }: { userName: string; 
   const canInvoices = features['invoices'] !== false
   const canClients = features['clients'] !== false
   const canRequests = features['requests'] !== false
+
+  // Permission-filtered vitals, rendered with hairline divider elements between
+  // them (not single-side borders, which the system bans and which also mis-fire
+  // when the trailing vital is gated off).
+  const vitals: { label: string; value: React.ReactNode; sub: React.ReactNode }[] = []
+  if (canMrr) {
+    vitals.push({
+      label: 'Cash',
+      value: data?.cash ? <Money n={data.cash.totalNzd} /> : <Muted />,
+      sub: data?.cash?.runwayMonths != null ? `${data.cash.runwayMonths.toFixed(1)} mo runway` : 'no burn data',
+    })
+  }
+  if (canInvoices) {
+    vitals.push({
+      label: 'Owed',
+      value: data?.kpis.outstandingInvoicesNzd != null ? <Money n={data.kpis.outstandingInvoicesNzd} /> : <Muted />,
+      sub: <AgedMicroBar aging={data?.arAging ?? null} />,
+    })
+  }
+  if (canClients) {
+    vitals.push({
+      label: 'Clients',
+      value: <span style={{ fontVariantNumeric: 'tabular-nums' }}>{data?.kpis.activeClients ?? 0}</span>,
+      sub: 'active',
+    })
+  }
+  if (canRequests) {
+    vitals.push({
+      label: 'Open',
+      value: <span style={{ fontVariantNumeric: 'tabular-nums' }}>{data?.kpis.openRequests ?? 0}</span>,
+      sub: data?.kpis.inProgress != null ? `${data.kpis.inProgress} in progress` : 'requests',
+    })
+  }
 
   return (
     <div className="flex flex-col" style={{ gap: 'var(--space-5)' }}>
@@ -113,7 +147,7 @@ export function LedgerMasthead({ userName, data, loading }: { userName: string; 
               fontWeight: 600,
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
-              color: 'rgba(255, 255, 255, 0.78)',
+              color: 'rgba(255, 255, 255, 0.92)',
               marginBottom: 'var(--space-1)',
             }}
           >
@@ -128,44 +162,22 @@ export function LedgerMasthead({ userName, data, loading }: { userName: string; 
           )}
         </div>
 
-        {/* Vitals */}
+        {/* Vitals: permission-filtered, hairline dividers between (no side borders) */}
         <div
           className="flex items-stretch flex-wrap"
           style={{ gap: 0, rowGap: 'var(--space-3)', marginLeft: 'auto' }}
         >
-          {canMrr && (
-            <Vital
-              label="Cash"
-              loading={loading}
-              value={data?.cash ? <Money n={data.cash.totalNzd} /> : <Muted />}
-              sub={data?.cash?.runwayMonths != null ? `${data.cash.runwayMonths.toFixed(1)} mo runway` : 'no burn data'}
-            />
-          )}
-          {canInvoices && (
-            <Vital
-              label="Owed"
-              loading={loading}
-              value={data?.kpis.outstandingInvoicesNzd != null ? <Money n={data.kpis.outstandingInvoicesNzd} /> : <Muted />}
-              sub={<AgedMicroBar aging={data?.arAging ?? null} />}
-            />
-          )}
-          {canClients && (
-            <Vital
-              label="Clients"
-              loading={loading}
-              value={<span style={{ fontVariantNumeric: 'tabular-nums' }}>{data?.kpis.activeClients ?? 0}</span>}
-              sub="active"
-            />
-          )}
-          {canRequests && (
-            <Vital
-              label="Open"
-              loading={loading}
-              value={<span style={{ fontVariantNumeric: 'tabular-nums' }}>{data?.kpis.openRequests ?? 0}</span>}
-              sub={data?.kpis.inProgress != null ? `${data.kpis.inProgress} in progress` : 'requests'}
-              last
-            />
-          )}
+          {vitals.map((v, i) => (
+            <React.Fragment key={v.label}>
+              {i > 0 && (
+                <div
+                  aria-hidden="true"
+                  style={{ width: 1, alignSelf: 'stretch', background: 'var(--color-border-subtle)' }}
+                />
+              )}
+              <Vital label={v.label} value={v.value} sub={v.sub} loading={loading} />
+            </React.Fragment>
+          ))}
         </div>
       </div>
 
@@ -210,13 +222,12 @@ function MrrFigure({ value, light }: { value: number; light?: boolean }) {
 
 // ─── Vital ────────────────────────────────────────────────────────────────────
 
-function Vital({ label, value, sub, loading, last }: { label: string; value: React.ReactNode; sub: React.ReactNode; loading: boolean; last?: boolean }) {
+function Vital({ label, value, sub, loading }: { label: string; value: React.ReactNode; sub: React.ReactNode; loading: boolean }) {
   return (
     <div
       style={{
         paddingLeft: 'var(--space-4)',
-        paddingRight: last ? 0 : 'var(--space-4)',
-        borderRight: last ? 'none' : '1px solid var(--color-border-subtle)',
+        paddingRight: 'var(--space-4)',
         minWidth: '5.5rem',
       }}
     >
@@ -283,16 +294,16 @@ function fmtTime(tz: string) {
 // their separating dots.
 function EyebrowTimeCluster({ activeTimer }: { activeTimer: LedgerMasthead_ActiveTimer | null }) {
   const [mounted, setMounted] = useState(false)
-  const [, setTick] = useState(0)
   const [localTz, setLocalTz] = useState<string | null>(null)
   const [dateStr, setDateStr] = useState<string | null>(null)
+  // Re-render on the page-wide minute tick (paused while the tab is hidden), the
+  // shared resting-page clock - no private interval per the motion budget.
+  useSharedTick(60000)
 
   useEffect(() => {
     setMounted(true)
     setLocalTz(Intl.DateTimeFormat().resolvedOptions().timeZone)
     setDateStr(new Intl.DateTimeFormat('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date()))
-    const id = setInterval(() => setTick(t => t + 1), 30000)
-    return () => clearInterval(id)
   }, [])
 
   if (!mounted) return null

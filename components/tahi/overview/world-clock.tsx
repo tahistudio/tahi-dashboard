@@ -330,8 +330,8 @@ export function WorldClock({ className }: { className?: string }) {
           aria-label={pickerOpen ? 'Close zone picker' : 'Add a time zone'}
           className="tahi-press flex items-center justify-center"
           style={{
-            width: '2.25rem',
-            height: '2.25rem',
+            width: '2.75rem',
+            height: '2.75rem',
             flexShrink: 0,
             border: '1px solid var(--color-border)',
             borderRadius: 'var(--radius-md)',
@@ -679,8 +679,8 @@ function Converter({
           aria-pressed={live}
           style={{
             gap: 'var(--space-1)',
-            minHeight: '1.75rem',
-            padding: '0 var(--space-2-5)',
+            minHeight: '2.75rem',
+            padding: '0 var(--space-3)',
             border: '1px solid',
             borderColor: live ? 'var(--domain-delivery)' : 'var(--color-border)',
             borderRadius: 'var(--radius-full)',

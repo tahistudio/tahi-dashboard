@@ -315,7 +315,7 @@ export function PipelineAhead({ className }: { className?: string }) {
                       style={{
                         width: `${Math.max(2, pct)}%`,
                         height: '100%',
-                        background: stage.colour ?? 'var(--color-brand)',
+                        background: 'var(--color-brand)',
                         borderRadius: 'var(--radius-full)',
                       }}
                     />
@@ -402,7 +402,7 @@ export function PipelineAhead({ className }: { className?: string }) {
             >
               <span
                 aria-hidden="true"
-                style={{ width: '0.375rem', height: '0.375rem', borderRadius: 'var(--radius-full)', background: d.stageColour ?? 'var(--color-brand)', flexShrink: 0 }}
+                style={{ width: '0.375rem', height: '0.375rem', borderRadius: 'var(--radius-full)', background: 'var(--color-brand)', flexShrink: 0 }}
               />
               <span className="truncate">{d.orgName ?? d.title}</span>
             </span>

@@ -238,7 +238,7 @@ export function CashFlowRibbon({ className }: { className?: string }) {
                       dataKey="label"
                       tickLine={false}
                       axisLine={false}
-                      tick={{ fontSize: 10, fill: 'var(--color-text-subtle)' }}
+                      tick={{ fontSize: 11, fill: 'var(--color-text-subtle)' }}
                       tickMargin={6}
                       interval="preserveStartEnd"
                     />

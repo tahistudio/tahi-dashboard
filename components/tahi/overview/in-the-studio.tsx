@@ -189,6 +189,7 @@ function TimelineRow({ req, isLast }: { req: RecentRequest; isLast: boolean }) {
             {req.scopeFlagged && (
               <span
                 className="flex-shrink-0"
+                role="img"
                 aria-label="Scope flagged"
                 title="Scope flagged"
                 style={{ width: '0.375rem', height: '0.375rem', borderRadius: '9999px', background: 'var(--color-danger)' }}
@@ -250,14 +251,14 @@ function ShimmerRows() {
 
 function EmptyState() {
   return (
-    <div className="flex items-center" style={{ gap: 'var(--space-2)', padding: 'var(--space-3) 0' }}>
+    <div className="flex items-start" style={{ gap: 'var(--space-2)', padding: 'var(--space-3) 0' }}>
       <svg
         width="14"
         height="14"
         viewBox="0 0 16 16"
         fill="none"
         aria-hidden="true"
-        style={{ flexShrink: 0, color: 'var(--color-text-subtle)' }}
+        style={{ flexShrink: 0, marginTop: '0.125rem', color: 'var(--color-text-subtle)' }}
       >
         <path
           d="M3 13C3 8 6 3.5 13 3C12.5 10 8 13 3 13ZM3 13C5.5 11 7.5 8.5 9.5 6"
@@ -267,9 +268,14 @@ function EmptyState() {
           strokeLinejoin="round"
         />
       </svg>
-      <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-subtle)' }}>
-        Nothing in the studio yet.
-      </p>
+      <div>
+        <p style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-text-muted)' }}>
+          Nothing in the studio yet
+        </p>
+        <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
+          Active requests appear here as work moves through the studio.
+        </p>
+      </div>
     </div>
   )
 }

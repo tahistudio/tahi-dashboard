@@ -13,6 +13,7 @@
 // Reuses PipelineCapacityCard's fetch verbatim: /api/admin/pipeline/capacity.
 
 import { useEffect, useState } from 'react'
+import { apiPath } from '@/lib/api'
 
 interface CapacityMember {
   id: string
@@ -34,18 +35,13 @@ interface CapacityData {
   forecastedCapacity: number
 }
 
-const apiBase = process.env.NEXT_PUBLIC_BASEPATH ?? ''
-function api(path: string): string {
-  return `${apiBase}${path}`
-}
-
 export function StudioCapacity({ className }: { className?: string }) {
   const [data, setData] = useState<CapacityData | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let cancelled = false
-    fetch(api('/api/admin/pipeline/capacity'))
+    fetch(apiPath('/api/admin/pipeline/capacity'))
       .then(r => {
         if (!r.ok) throw new Error('Failed')
         return r.json() as Promise<CapacityData>

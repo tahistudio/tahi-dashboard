@@ -292,7 +292,7 @@ function DraftCard({ draft }: { draft: Draft }) {
             fontWeight: 600,
             letterSpacing: '0.04em',
             textTransform: 'uppercase',
-            color: isFailed ? 'var(--color-danger)' : isReady ? 'var(--color-success)' : 'var(--domain-content)',
+            color: isFailed ? 'var(--color-danger)' : isReady ? 'var(--color-on-track-text)' : 'var(--domain-content)',
           }}
         >
           <span
@@ -415,7 +415,7 @@ function StageBar({ counts }: { counts: StageCounts }) {
       <div className="flex items-baseline justify-between" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
         <span style={LABEL_STYLE}>Pipeline stages</span>
         <span className="tabular-nums" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          <span style={{ fontWeight: 700, color: 'var(--color-success)' }}>{counts.ready}</span> ready
+          <span style={{ fontWeight: 700, color: 'var(--color-on-track-text)' }}>{counts.ready}</span> ready
           {counts.failed > 0 && (
             <>
               <span style={{ color: 'var(--color-text-subtle)' }}> &middot; </span>

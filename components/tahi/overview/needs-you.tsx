@@ -19,9 +19,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Calendar, ExternalLink, FileText, RotateCcw } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { useSharedTick } from '@/lib/use-homepage-motion'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import type { DeliveryStatus } from '@/lib/delivery-status'
-import { DELIVERY_STATUS_COLOR, DELIVERY_STATUS_LABEL } from '@/lib/delivery-status-labels'
+import { DELIVERY_STATUS_LABEL } from '@/lib/delivery-status-labels'
 
 const AUCKLAND_TZ = 'Pacific/Auckland'
 // Only a call landing within this window is "imminent" enough to demand the page.
@@ -87,11 +88,12 @@ export function NeedsYou({ oldest, className }: NeedsYouProps) {
   const [now, setNow] = useState<number | null>(null)
   const { format } = useDisplayCurrency()
 
+  // Refresh relative times on the page-wide minute tick (paused while the tab is
+  // hidden), not a private interval, per the resting-page motion budget.
+  const tick = useSharedTick(60000)
   useEffect(() => {
     setNow(Date.now())
-    const id = setInterval(() => setNow(Date.now()), 30000)
-    return () => clearInterval(id)
-  }, [])
+  }, [tick])
 
   useEffect(() => {
     let cancelled = false
@@ -138,6 +140,9 @@ export function NeedsYou({ oldest, className }: NeedsYouProps) {
     //    red = delayed/blocked).
     for (const e of offTrack) {
       const sev = SEVERITY[e.status] ?? 0
+      // Status word stays on the page's 3-status palette (amber for at-risk, red
+      // otherwise), not the shared delivery map, which carries a blue in_progress.
+      const statusColor = e.status === 'at_risk' ? 'var(--color-due-soon-text)' : 'var(--color-danger)'
       out.push({
         key: `eng:${e.orgId}`,
         urgency: URGENCY_OFF_TRACK_BASE + sev * 100 + Math.min(e.offTrackCount, 50),
@@ -145,7 +150,7 @@ export function NeedsYou({ oldest, className }: NeedsYouProps) {
         body: (
           <>
             <span data-private style={{ fontWeight: 600 }}>{e.orgName}</span>{' '}
-            <span style={{ color: DELIVERY_STATUS_COLOR[e.status] }}>{DELIVERY_STATUS_LABEL[e.status].toLowerCase()}</span>
+            <span style={{ color: statusColor }}>{DELIVERY_STATUS_LABEL[e.status].toLowerCase()}</span>
             <span style={{ color: 'var(--color-text-subtle)' }}>
               {' · '}
               {e.offTrackCount} {e.offTrackCount === 1 ? 'phase' : 'phases'} off track

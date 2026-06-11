@@ -158,6 +158,7 @@ export function AdminOverview({ userName }: { userName: string }) {
   const capacityVisible = features['capacity'] !== false
   const cashVisible = features['financial_reports'] !== false
   const arVisible = features['invoices'] !== false
+  const timeVisible = features['time'] !== false
   const workVisible = requestsVisible || callsVisible
   const aheadVisible = dealsVisible || capacityVisible || features['leads'] !== false || features['proposals'] !== false
   const booksVisible = cashVisible || arVisible
@@ -207,7 +208,7 @@ export function AdminOverview({ userName }: { userName: string }) {
           <Gate feature="time">
             <TimeTracker className="lg:col-span-5" />
           </Gate>
-          <WorldClock className="lg:col-span-7" />
+          <WorldClock className={timeVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
 
           {/* GROWTH zone: content engine + social cadence */}
           {growthVisible && <ZoneLabel>Growth</ZoneLabel>}
@@ -257,13 +258,13 @@ export function AdminOverview({ userName }: { userName: string }) {
             <TakeHomeGauges className="lg:col-span-5" />
           </Gate>
           <Gate feature="financial_reports">
-            <CashRunway cash={ledger?.cash ?? null} className="lg:col-span-7" />
+            <CashRunway cash={ledger?.cash ?? null} loading={loading} className="lg:col-span-7" />
           </Gate>
           <Gate feature="financial_reports">
             <CashFlowRibbon className="lg:col-span-7" />
           </Gate>
           <Gate feature="invoices">
-            <ReceivablesTide arAging={ledger?.arAging ?? null} className="lg:col-span-5" />
+            <ReceivablesTide arAging={ledger?.arAging ?? null} loading={loading} className="lg:col-span-5" />
           </Gate>
 
           {!loading && kpis !== null && kpis.activeClients === 0 && (
@@ -756,7 +757,7 @@ function RequestRow({ req, isLast, showOrg }: { req: RecentRequest; isLast: bool
                 background: 'var(--priority-high-bg)',
                 color: 'var(--priority-high-text)',
                 border: '1px solid var(--priority-high-border)',
-                fontSize: '0.625rem',
+                fontSize: 'var(--text-2xs)',
                 fontWeight: 600,
                 borderRadius: 'var(--radius-full)',
               }}
@@ -1041,7 +1042,7 @@ function TrackCapacityCard() {
       style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', overflow: 'hidden' }}
     >
       {/* Header */}
-      <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--color-border-subtle)' }}>
+      <div style={{ padding: 'var(--space-4) var(--space-5)', borderBottom: '1px solid var(--color-border-subtle)' }}>
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
@@ -1063,7 +1064,7 @@ function TrackCapacityCard() {
       </div>
 
       {/* Track slots */}
-      <div style={{ padding: '1rem 1.25rem' }}>
+      <div style={{ padding: 'var(--space-4) var(--space-5)' }}>
         <div className="flex gap-3 flex-wrap">
           {data.tracks.map(track => {
             const isOccupied = !!track.currentRequest
@@ -1073,7 +1074,7 @@ function TrackCapacityCard() {
                 style={{
                   flex: '1 1 8rem',
                   minWidth: '8rem',
-                  padding: '0.75rem',
+                  padding: 'var(--space-3)',
                   borderRadius: 'var(--radius-card)',
                   border: `2px solid ${isOccupied ? 'var(--color-brand)' : 'var(--color-border-subtle)'}`,
                   background: isOccupied ? 'var(--color-brand-50)' : 'var(--color-bg-secondary)',
@@ -1109,8 +1110,8 @@ function TrackCapacityCard() {
 
         {/* Queue */}
         {data.queue.length > 0 && (
-          <div style={{ marginTop: '0.75rem' }}>
-            <p className="text-xs font-medium" style={{ color: 'var(--color-text-muted)', marginBottom: '0.375rem' }}>
+          <div style={{ marginTop: 'var(--space-3)' }}>
+            <p className="text-xs font-medium" style={{ color: 'var(--color-text-muted)', marginBottom: 'var(--space-1-5)' }}>
               Queue ({data.queue.length} waiting)
             </p>
             <div className="flex flex-col gap-1">
@@ -1128,12 +1129,12 @@ function TrackCapacityCard() {
       {/* Upsell */}
       {upsells.length > 0 && (
         <div style={{
-          padding: '0.75rem 1.25rem',
+          padding: 'var(--space-3) var(--space-5)',
           borderTop: '1px solid var(--color-border-subtle)',
           background: 'var(--color-bg-secondary)',
         }}>
           {upsells.map((msg, i) => (
-            <div key={i} className="flex items-center gap-2" style={{ marginTop: i > 0 ? '0.375rem' : 0 }}>
+            <div key={i} className="flex items-center gap-2" style={{ marginTop: i > 0 ? 'var(--space-1-5)' : 0 }}>
               <TrendingUp size={12} style={{ color: 'var(--color-brand)', flexShrink: 0 }} />
               <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{msg}</span>
             </div>
@@ -1144,7 +1145,7 @@ function TrackCapacityCard() {
       {/* Full package badge */}
       {plan.planType === 'scale' && plan.hasPrioritySupport && (
         <div style={{
-          padding: '0.5rem 1.25rem',
+          padding: 'var(--space-2) var(--space-5)',
           borderTop: '1px solid var(--color-border-subtle)',
           background: 'var(--color-success-bg)',
           textAlign: 'center',

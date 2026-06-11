@@ -138,6 +138,7 @@ export function ContractsCard({ className }: { className?: string }) {
       title="Contracts"
       icon={<FileSignature size={15} />}
       viewHref="/clients"
+      className={className}
     >
       {/* AWAITING SIGNATURE */}
       {awaiting.length > 0 && (

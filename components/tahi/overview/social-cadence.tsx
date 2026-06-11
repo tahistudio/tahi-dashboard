@@ -485,7 +485,7 @@ function QueueMatrix({ scheduledPosts }: { scheduledPosts: BufferPost[] }) {
                 ))
               )}
             </div>
-            <span style={{ fontSize: '0.5625rem', fontWeight: 600, color: 'var(--color-text-subtle)', letterSpacing: '0.02em' }}>
+            <span style={{ fontSize: 'var(--text-2xs)', fontWeight: 600, color: 'var(--color-text-subtle)', letterSpacing: '0.02em' }}>
               {dayLabels[i]}
             </span>
           </div>

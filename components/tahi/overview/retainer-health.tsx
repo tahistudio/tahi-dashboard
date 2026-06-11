@@ -325,7 +325,7 @@ function ChurnDial({ score, tone }: { score: number; tone: HealthTone }) {
         >
           {Math.round(clamped)}
         </span>
-        <span style={{ fontSize: '0.5625rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--color-text-subtle)', marginTop: '0.0625rem' }}>
+        <span style={{ fontSize: 'var(--text-2xs)', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--color-text-subtle)', marginTop: '0.0625rem' }}>
           risk
         </span>
       </div>

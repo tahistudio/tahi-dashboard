@@ -293,6 +293,7 @@
 
   /* ── Typography scale ─────────────────────────────────── */
   /* Dashboard UI ladder. Tight, dense — used inside the app. */
+  --text-2xs: 0.6875rem;
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text-base: 0.875rem;

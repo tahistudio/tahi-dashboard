@@ -36,7 +36,7 @@ const LABEL_STYLE: React.CSSProperties = {
 // inside the warning band. Both still sit on the system amber token (no new hex).
 const BUCKET_DARK_AMBER = 'color-mix(in srgb, var(--color-warning) 78%, var(--color-danger))'
 
-export function ReceivablesTide({ arAging, className }: { arAging: ArAgingData | null; className?: string }) {
+export function ReceivablesTide({ arAging, loading, className }: { arAging: ArAgingData | null; loading?: boolean; className?: string }) {
   const { format } = useDisplayCurrency()
 
   const buckets = arAging
@@ -74,7 +74,16 @@ export function ReceivablesTide({ arAging, className }: { arAging: ArAgingData |
         </Link>
       </div>
 
-      {healthy ? (
+      {loading ? (
+        <div className="flex flex-col" style={{ gap: 'var(--space-4)' }} aria-hidden="true">
+          <div className="tahi-shimmer" style={{ height: '0.5rem', width: '100%', borderRadius: 'var(--radius-full)' }} />
+          <div className="grid grid-cols-2 sm:grid-cols-4" style={{ gap: 'var(--space-3)' }}>
+            {Array.from({ length: 4 }, (_, i) => (
+              <div key={i} className="tahi-shimmer" style={{ height: '2.25rem', borderRadius: 'var(--radius-sm)' }} />
+            ))}
+          </div>
+        </div>
+      ) : healthy ? (
         <div>
           {/* Calm green line: the tide is fully in */}
           <div
