@@ -72,6 +72,8 @@ function parseMentions(text: string): MentionSegment[] {
 // ── Avatar/Initials helper ────────────────────────────────────────────────────
 
 function PersonAvatar({ person }: { person: MentionPerson }) {
+  // Remote avatar URLs can 404/expire; on load failure fall through to initials.
+  const [imgFailed, setImgFailed] = useState(false)
   const initials = person.name
     .split(' ')
     .map(w => w[0])
@@ -79,11 +81,12 @@ function PersonAvatar({ person }: { person: MentionPerson }) {
     .toUpperCase()
     .slice(0, 2)
 
-  if (person.avatarUrl) {
+  if (person.avatarUrl && !imgFailed) {
     return (
       <img
         src={person.avatarUrl}
         alt={person.name}
+        onError={() => setImgFailed(true)}
         style={{
           width: '1.75rem',
           height: '1.75rem',

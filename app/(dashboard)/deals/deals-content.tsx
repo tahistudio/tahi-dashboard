@@ -123,6 +123,32 @@ function getInitials(name: string): string {
   return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
+// Deal owner avatar: a remote URL that can 404/expire degrades to the same
+// initials chip the no-avatar case already shows, instead of a broken-image glyph.
+function OwnerAvatar({ name, avatarUrl }: { name: string; avatarUrl: string | null }) {
+  const [imgFailed, setImgFailed] = useState(false)
+  if (avatarUrl && !imgFailed) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={avatarUrl}
+        alt={name}
+        onError={() => setImgFailed(true)}
+        className="rounded-full"
+        style={{ width: '1.25rem', height: '1.25rem' }}
+      />
+    )
+  }
+  return (
+    <div
+      className="rounded-full flex items-center justify-center font-semibold"
+      style={{ width: '1.25rem', height: '1.25rem', fontSize: '0.5rem', background: 'var(--color-brand)', color: 'white' }}
+    >
+      {getInitials(name)}
+    </div>
+  )
+}
+
 function daysInStage(stageEnteredAt: string | null, updatedAt: string): number {
   const ref = stageEnteredAt ?? updatedAt
   if (!ref) return 0
@@ -1358,21 +1384,7 @@ function DealCard({ deal, displayCurrency, toDisplay }: { deal: Deal; displayCur
       <div className="flex items-center justify-between" style={{ marginTop: '0.25rem' }}>
         {deal.ownerName ? (
           <div className="flex items-center gap-1.5">
-            {deal.ownerAvatarUrl ? (
-              <img
-                src={deal.ownerAvatarUrl}
-                alt={deal.ownerName}
-                className="rounded-full"
-                style={{ width: '1.25rem', height: '1.25rem' }}
-              />
-            ) : (
-              <div
-                className="rounded-full flex items-center justify-center font-semibold"
-                style={{ width: '1.25rem', height: '1.25rem', fontSize: '0.5rem', background: 'var(--color-brand)', color: 'white' }}
-              >
-                {getInitials(deal.ownerName)}
-              </div>
-            )}
+            <OwnerAvatar name={deal.ownerName} avatarUrl={deal.ownerAvatarUrl} />
             <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
               {deal.ownerName.split(' ')[0]}
             </span>

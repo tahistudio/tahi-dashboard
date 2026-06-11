@@ -2298,9 +2298,10 @@ function ContactLinker({ dealId, contacts, onUpdated }: {
           <button
             onClick={() => handleUnlink(c.contactId)}
             disabled={saving}
-            className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.125rem', color: 'var(--color-text-subtle)' }}
+            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.375rem', color: 'var(--color-text-subtle)' }}
             title="Unlink contact"
+            aria-label={`Unlink ${c.contactName ?? 'contact'}`}
           >
             <X style={{ width: '0.75rem', height: '0.75rem' }} />
           </button>

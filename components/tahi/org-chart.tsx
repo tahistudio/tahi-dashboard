@@ -63,6 +63,8 @@ function getInitials(name: string): string {
 
 function MemberNode({ node, depth = 0, onMemberClick }: { node: OrgMember & { type: 'member' }; depth?: number; onMemberClick?: (id: string) => void }) {
   const [expanded, setExpanded] = useState(true)
+  // Remote avatar URLs can 404/expire; on load failure fall through to initials.
+  const [avatarFailed, setAvatarFailed] = useState(false)
   const [hovered, setHovered] = useState(false)
   const hasChildren = node.children.length > 0
   const deptStyle = getDeptStyle(node.department)
@@ -101,10 +103,11 @@ function MemberNode({ node, depth = 0, onMemberClick }: { node: OrgMember & { ty
       >
         <div className="flex items-center gap-3">
           {/* Avatar */}
-          {node.avatarUrl ? (
+          {node.avatarUrl && !avatarFailed ? (
             <img
               src={node.avatarUrl}
               alt={node.name}
+              onError={() => setAvatarFailed(true)}
               className="flex-shrink-0"
               style={{
                 width: '2.75rem', height: '2.75rem',

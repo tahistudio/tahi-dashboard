@@ -46,6 +46,8 @@ export function BrandDetail({ brandId }: { brandId: string }) {
   const router = useRouter()
   const [brand, setBrand] = useState<BrandData | null>(null)
   const [loading, setLoading] = useState(true)
+  // A remote logo URL can 404/expire; on load failure fall back to the swatch.
+  const [logoError, setLogoError] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -56,6 +58,7 @@ export function BrandDetail({ brandId }: { brandId: string }) {
         return
       }
       setBrand(await res.json() as BrandData)
+      setLogoError(false)
     } finally {
       setLoading(false)
     }
@@ -87,10 +90,11 @@ export function BrandDetail({ brandId }: { brandId: string }) {
           <div className="flex flex-col gap-3 mb-5 sm:flex-row sm:items-start">
             <div className="flex items-start gap-3 flex-1 min-w-0">
               {/* Brand icon / colour swatch */}
-              {brand.logoUrl ? (
+              {brand.logoUrl && !logoError ? (
                 <img
                   src={brand.logoUrl}
                   alt={brand.name}
+                  onError={() => setLogoError(true)}
                   className="flex-shrink-0 object-contain"
                   style={{
                     width: '3rem',
