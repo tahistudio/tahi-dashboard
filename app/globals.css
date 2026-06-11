@@ -48,7 +48,7 @@
   --color-bg-mist: #E8E6E1;         /* very subtle divider strip / panel bg */
   --color-text: #121A0F;
   --color-text-muted: #5D5B55;      /* warm neutral ink (was green-tinted) */
-  --color-text-subtle: #6F6D66;     /* WCAG AA on sand (4.6:1) + white (4.9:1) */
+  --color-text-subtle: #63615B;     /* WCAG AA on sand (5.8:1) + white (6.2:1) */
   --color-text-on-dark: #FDFDFC;
 
   /* Semantic surfaces (role-named; resolve per theme). New code should
@@ -227,7 +227,7 @@
   --color-row-hover:  #F7F6F3;
   --color-row-border: rgba(26, 25, 20, 0.05);
   --color-th-bg:      #F7F6F3;
-  --color-th-text:    #8B8983;
+  --color-th-text:    #5D5B55;      /* WCAG AA on sand (6.3:1); was #8B8983 at 3.2:1 */
 
   /* ── Spacing scale (8px-based) ──────────────────────────── */
   --spacing-px: 1px;
@@ -1113,7 +1113,7 @@ html.tahi-private [data-private] button {
   /* Text. Warm off-white ladder (never pure white), de-greened. */
   --color-text: #E8E6E2;
   --color-text-muted: #A8A6A0;
-  --color-text-subtle: #8A8881;        /* still passes AA on the page bg */
+  --color-text-subtle: #9C9A95;        /* WCAG AA on the dark page bg (6.1:1) */
 
   /* Mode-aware active item text. Sidebar / bottom-bar active items
      use this so they're visible on either surface. */
@@ -1142,7 +1142,7 @@ html.tahi-private [data-private] button {
   --color-row-hover: #242320;
   --color-row-border: #201F1C;
   --color-th-bg: #1C1B19;
-  --color-th-text: #8A8881;
+  --color-th-text: #A8A6A0;
 
   /* Shadows: OFF for in-flow surfaces in dark (a dark shadow on a dark
      canvas carries no signal; elevation is by lightness + border).
