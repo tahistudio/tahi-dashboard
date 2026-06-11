@@ -218,8 +218,8 @@ interface DomainCardProps {
  * surface wears the capped domain tint (one of the at-most-two tinted hero tiles
  * per viewport) - this is the single canonical hero treatment, so every hero
  * card shares the same wash, header, radius, and padding. When `footer` is
- * provided it renders in a hover/tap reveal row; on touch an accessible toggle
- * button opens it (data-open drives the CSS expand).
+ * provided it collapses behind an explicit More/Less toggle (data-open drives
+ * the CSS expand); there is no hover reveal.
  */
 export function DomainCard({
   domain,
@@ -306,12 +306,12 @@ export function DomainCard({
       {/* Body */}
       <div style={{ minWidth: 0 }}>{children}</div>
 
-      {/* Hover / tap reveal footer */}
+      {/* Expandable detail footer: opens only via the explicit More/Less toggle */}
       {footer && (
         <>
-          {/* Touch toggle: opens the reveal where hover is unavailable. Hidden
-              from pointer users by the CSS hover already showing the footer; we
-              keep it focusable for keyboard + screen readers. */}
+          {/* The sole control that opens the footer (data-open drives the CSS
+              expand). Always visible on every device, for pointer, touch and
+              keyboard alike. No hover reveal. */}
           <button
             type="button"
             onClick={() => setOpen(o => !o)}

@@ -337,6 +337,11 @@ function ChannelStack({ channels }: { channels: BufferChannel[] }) {
 function ChannelAvatar({ channel, offset }: { channel: BufferChannel; offset: boolean }) {
   const label = serviceLabel(channel.service)
   const fallbackInitial = (channel.service || '?').charAt(0).toUpperCase()
+  // The avatar URL is a remote CDN photo (LinkedIn, etc.) that can 404 or expire.
+  // Render the service initial underneath and overlay the image; if it fails to
+  // load, hide it so the initial shows instead of a broken-image glyph.
+  const [imgFailed, setImgFailed] = useState(false)
+  const showImg = Boolean(channel.avatarUrl) && !imgFailed
 
   return (
     <span
@@ -356,15 +361,15 @@ function ChannelAvatar({ channel, offset }: { channel: BufferChannel; offset: bo
         position: 'relative',
       }}
     >
-      {channel.avatarUrl ? (
+      <span aria-hidden="true">{fallbackInitial}</span>
+      {showImg && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={channel.avatarUrl}
+          src={channel.avatarUrl as string}
           alt=""
-          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          onError={() => setImgFailed(true)}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
         />
-      ) : (
-        <span aria-hidden="true">{fallbackInitial}</span>
       )}
     </span>
   )

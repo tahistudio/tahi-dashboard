@@ -1892,10 +1892,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: grid;
   grid-template-rows: 0fr;
 }
-/* Open on pointer hover, or when the explicit toggle sets data-open. NOT on
-   :focus-within: the toggle button keeps focus after a tap, which used to pin
-   the footer open so it never collapsed on a second tap. */
-.domain-card:hover .domain-card-footer,
+/* Open ONLY when the explicit More/Less toggle sets data-open. No hover reveal
+   (popping the footer open just from passing the cursor over a card is jarring)
+   and no :focus-within (the toggle keeps focus after a tap, which used to pin it
+   open so it never collapsed on a second tap). */
 .domain-card[data-open="true"] .domain-card-footer {
   grid-template-rows: 1fr;
 }
