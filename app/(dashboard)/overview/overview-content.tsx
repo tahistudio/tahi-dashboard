@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import {
-  Users, Inbox, FileText, BarChart3,
+  Inbox, FileText,
   Plus, Clock, UserPlus,
   ArrowRight, AlertTriangle, RefreshCw, Video, ExternalLink,
   TrendingUp,
@@ -13,8 +13,16 @@ import { StatusBadge } from '@/components/tahi/status-badge'
 import { OnboardingChecklist, type OnboardingState } from '@/components/tahi/onboarding-checklist'
 import { BookingWidget } from '@/components/tahi/booking-widget'
 import { AIDailyBriefing } from '@/components/tahi/ai-briefing-card'
-import { KPIStrip as SharedKPIStrip, KPICell } from '@/components/tahi/kpi-strip'
 import { FeatureCard } from '@/components/tahi/feature-card'
+import { Gate, usePermissions } from '@/components/tahi/permissions-context'
+import { Reveal } from '@/components/tahi/reveal'
+import { CountUp } from '@/components/tahi/count-up'
+import { ProgressRing } from '@/components/tahi/progress-ring'
+import {
+  AnimatedUsers, AnimatedInbox, AnimatedFileText, AnimatedBarChart,
+  AnimatedTrendingUp, AnimatedClock, AnimatedCalendar, AnimatedGauge,
+  type AnimatedIconProps,
+} from '@/components/tahi/animated-icons'
 import { apiPath } from '@/lib/api'
 import { DELIVERY_STATUS_COLOR, DELIVERY_STATUS_LABEL } from '@/components/tahi/gantt-grid'
 import type { DeliveryStatus } from '@/lib/delivery-status'
@@ -47,6 +55,26 @@ const ACCENTS = {
 } as const
 
 type Accent = keyof typeof ACCENTS
+
+// ─── Admin overview permission registry ──────────────────────────────────────
+//
+// Feature keys that drive the admin overview cards. KPI_DATA_FEATURES guards
+// the shared /api/admin/overview fetch (KPI cells + Recent Requests + Getting
+// Started all read from it); CARD_FEATURES drives the zero-card fallback.
+const KPI_DATA_FEATURES = ['clients', 'requests', 'invoices', 'financial_reports'] as const
+const CARD_FEATURES = [
+  'clients', 'requests', 'invoices', 'financial_reports',
+  'calls', 'deals', 'overview', 'schedules', 'capacity',
+] as const
+
+// Literal class maps so Tailwind compiles every variant (never build class
+// strings dynamically from data).
+const KPI_DESKTOP_COLS: Record<number, string> = {
+  1: 'lg:grid-cols-1',
+  2: 'lg:grid-cols-2',
+  3: 'lg:grid-cols-3',
+  4: 'lg:grid-cols-4',
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -98,13 +126,21 @@ export function OverviewSwitcher({ userName, orgName }: { userName: string; orgN
 // ─── Admin Overview ───────────────────────────────────────────────────────────
 
 export function AdminOverview({ userName }: { userName: string }) {
+  const { features } = usePermissions()
   const [kpis, setKpis] = useState<KPIs | null>(null)
   const [recentRequests, setRecentRequests] = useState<RecentRequest[]>([])
-  const [, setMonthlyRevenue] = useState<MonthlyRevenue[]>([])
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState(false)
 
+  // The shared overview payload only feeds the KPI cells, Recent Requests and
+  // Getting Started. Skip the fetch entirely when none of them are visible.
+  const needsOverviewData = KPI_DATA_FEATURES.some(key => features[key] !== false)
+
   useEffect(() => {
+    if (!needsOverviewData) {
+      setLoading(false)
+      return
+    }
     fetch(apiPath('/api/admin/overview'))
       .then(r => {
         if (!r.ok) throw new Error('Failed to fetch overview')
@@ -113,16 +149,23 @@ export function AdminOverview({ userName }: { userName: string }) {
       .then(data => {
         setKpis(data.kpis)
         setRecentRequests(data.recentRequests)
-        setMonthlyRevenue(data.monthlyRevenue ?? [])
       })
       .catch(() => setFetchError(true))
       .finally(() => setLoading(false))
-  }, [])
+  }, [needsOverviewData])
 
   const firstName = userName.split(' ')[0]
+  const hasAnyCard = CARD_FEATURES.some(key => features[key] !== false)
+
+  // Pairs share a bento row; when one half is gated off, the survivor takes
+  // the full 12 columns so the grid re-packs with no holes.
+  const requestsVisible = features['requests'] !== false
+  const callsVisible = features['calls'] !== false
+  const dealsVisible = features['deals'] !== false
+  const capacityVisible = features['capacity'] !== false
 
   return (
-    <div className="flex flex-col" style={{ gap: 'var(--space-8)', maxWidth: '68.75rem' }}>
+    <div className="flex flex-col" style={{ gap: 'var(--space-6)', maxWidth: '68.75rem' }}>
       {fetchError && (
         <div
           className="flex items-center"
@@ -141,65 +184,146 @@ export function AdminOverview({ userName }: { userName: string }) {
         </div>
       )}
 
-      {/* 1. Greeting + quick actions */}
-      <div className="flex items-start justify-between" style={{ gap: 'var(--space-4)' }}>
-        <div>
-          <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)' }}>
-            Welcome back{firstName ? `, ${firstName}` : ''}
-          </h1>
-          <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-            Here&apos;s what&apos;s happening at Tahi today.
-          </p>
+      {/* Hero zone: greeting + quick actions + today's focus strip */}
+      <Reveal id="overview-hero" className="flex flex-col" style={{ gap: 'var(--space-6)' }}>
+        <div className="flex items-start justify-between" style={{ gap: 'var(--space-4)' }}>
+          <div>
+            <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)' }}>
+              Welcome back{firstName ? `, ${firstName}` : ''}
+            </h1>
+            <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+              Here&apos;s what&apos;s happening at Tahi today.
+            </p>
+          </div>
+          <div className="hidden sm:flex items-center flex-shrink-0" style={{ gap: 'var(--space-2)' }}>
+            <Gate feature="requests">
+              <QuickBtn href="/requests?new=1" icon={<Plus size={14} aria-hidden="true" />} label="New Request" primary />
+            </Gate>
+            <Gate feature="clients">
+              <QuickBtn href="/clients?new=1" icon={<UserPlus size={14} aria-hidden="true" />} label="Add Client" />
+            </Gate>
+            <Gate feature="time">
+              <QuickBtn href="/time?new=1" icon={<Clock size={14} aria-hidden="true" />} label="Log Time" />
+            </Gate>
+          </div>
         </div>
-        <div className="hidden sm:flex items-center flex-shrink-0" style={{ gap: 'var(--space-2)' }}>
-          <QuickBtn href="/requests?new=1" icon={<Plus size={14} aria-hidden="true" />} label="New Request" primary />
-          <QuickBtn href="/clients?new=1" icon={<UserPlus size={14} aria-hidden="true" />} label="Add Client" />
-          <QuickBtn href="/time?new=1" icon={<Clock size={14} aria-hidden="true" />} label="Log Time" />
-        </div>
-      </div>
 
-      {/* 2. Today's focus strip (next call + closing deal) */}
-      <TodayFocusStrip />
+        {/* Today's focus strip (next call + closing deal); self-gates per tile */}
+        <TodayFocusStrip />
+      </Reveal>
 
-      {/* 3. AI Daily Briefing */}
-      <AIDailyBriefing />
+      {hasAnyCard ? (
+        <Reveal
+          id="overview-grid"
+          stagger
+          className="grid grid-cols-1 lg:grid-cols-12"
+          style={{ gap: 'var(--space-6)', gridAutoFlow: 'dense' }}
+        >
+          {/* KPI strip: per-cell permission registry, MRR hero tile */}
+          <KPIBentoStrip kpis={kpis} loading={loading} />
 
-      {/* 3. KPI strip */}
-      <KPIStrip kpis={kpis} loading={loading} />
+          {/* Engagements off track (delivery spine #148, Slice 5): alert priority */}
+          <Gate feature="schedules">
+            <OffTrackEngagementsWidget />
+          </Gate>
 
-      {/* 3b. Engagements off track (delivery spine #148, Slice 5) */}
-      <OffTrackEngagementsWidget />
+          {/* AI Daily Briefing */}
+          <Gate feature="overview">
+            <div className="lg:col-span-12">
+              <AIDailyBriefing />
+            </div>
+          </Gate>
 
-      {/* 4. Recent requests + Upcoming calls side by side */}
-      <div className="grid grid-cols-1 lg:grid-cols-5" style={{ gap: 'var(--space-6)' }}>
-        <div className="lg:col-span-3">
-          <SectionCard title="Recent Requests" action={{ label: 'View all', href: '/requests' }}>
-            {loading ? <LoadingRows /> : recentRequests.length === 0 ? (
-              <EmptyRows
-                title="No requests yet"
-                message="When clients submit requests they'll appear here."
-                action={{ label: 'Create first request', href: '/requests?new=1' }}
-              />
-            ) : recentRequests.slice(0, 5).map((req, i) => (
-              <RequestRow key={req.id} req={req} isLast={i === Math.min(recentRequests.length, 5) - 1} showOrg />
-            ))}
-          </SectionCard>
-        </div>
-        <div className="lg:col-span-2">
-          <UpcomingCallsWidget />
-        </div>
-      </div>
+          {/* Recent requests + upcoming calls */}
+          <Gate feature="requests">
+            <SectionCard
+              className={callsVisible ? 'lg:col-span-7' : 'lg:col-span-12'}
+              icon={<HeaderIcon><AnimatedInbox size={14} /></HeaderIcon>}
+              title="Recent Requests"
+              action={{ label: 'View all', href: '/requests' }}
+            >
+              {loading ? <LoadingRows /> : recentRequests.length === 0 ? (
+                <EmptyRows
+                  title="No requests yet"
+                  message="When clients submit requests they'll appear here."
+                  action={{ label: 'Create first request', href: '/requests?new=1' }}
+                />
+              ) : recentRequests.slice(0, 5).map((req, i) => (
+                <RequestRow key={req.id} req={req} isLast={i === Math.min(recentRequests.length, 5) - 1} showOrg />
+              ))}
+            </SectionCard>
+          </Gate>
+          <Gate feature="calls">
+            <UpcomingCallsWidget className={requestsVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
+          </Gate>
 
-      {/* 5. Pipeline summary */}
-      <PipelineSummaryCard />
+          {/* Pipeline summary */}
+          <Gate feature="deals">
+            <PipelineSummaryCard />
+          </Gate>
 
-      {/* 5b. Weighted forecast */}
-      <PipelineForecastCard />
+          {/* Weighted forecast + team capacity */}
+          <Gate feature="deals">
+            <PipelineForecastCard className={capacityVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
+          </Gate>
+          <Gate feature="capacity">
+            <PipelineCapacityCard className={dealsVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
+          </Gate>
 
-      {/* 6. Team Capacity */}
-      <PipelineCapacityCard />
+          {!loading && kpis !== null && kpis.activeClients === 0 && (
+            <Gate feature="clients">
+              <GettingStarted />
+            </Gate>
+          )}
+        </Reveal>
+      ) : (
+        <NothingEnabledCard />
+      )}
+    </div>
+  )
+}
 
-      {!loading && (kpis?.activeClients ?? 0) === 0 && <GettingStarted />}
+// ─── Zero-card fallback ──────────────────────────────────────────────────────
+
+function NothingEnabledCard() {
+  const { features } = usePermissions()
+  const canOpenSettings = features['settings'] !== false
+  return (
+    <div
+      className="overflow-hidden"
+      style={{
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-lg)',
+      }}
+    >
+      <EmptyRows
+        title="Nothing enabled on your home yet"
+        message="Ask an admin to switch on home cards for you in Settings under Permissions."
+        action={canOpenSettings ? { label: 'Open Settings', href: '/settings' } : undefined}
+      />
+    </div>
+  )
+}
+
+// ─── Header icon wrapper (leaf radius, brand or warning tone) ────────────────
+
+function HeaderIcon({ tone = 'brand', children }: { tone?: 'brand' | 'warning'; children: React.ReactNode }) {
+  const c = tone === 'warning'
+    ? { bg: 'var(--color-warning-bg)', fg: 'var(--color-warning)' }
+    : { bg: 'var(--color-brand-50)', fg: 'var(--color-brand)' }
+  return (
+    <div
+      className="flex items-center justify-center flex-shrink-0"
+      style={{
+        width: '1.75rem',
+        height: '1.75rem',
+        background: c.bg,
+        color: c.fg,
+        borderRadius: 'var(--radius-leaf-sm)',
+      }}
+    >
+      {children}
     </div>
   )
 }
@@ -255,7 +379,7 @@ function PipelineSummaryCard() {
 
   if (loading) {
     return (
-      <div className="animate-pulse" style={{
+      <div className="lg:col-span-12" style={{
         background: 'var(--color-bg)',
         border: '1px solid var(--color-border-subtle)',
         borderRadius: 'var(--radius-lg)',
@@ -264,8 +388,8 @@ function PipelineSummaryCard() {
         <div className="grid grid-cols-1 sm:grid-cols-3" style={{ gap: 'var(--space-5)' }}>
           {[0, 1, 2].map(n => (
             <div key={n}>
-              <div style={{ height: '0.75rem', width: '40%', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)', marginBottom: 'var(--space-3)' }} />
-              <div style={{ height: '1.5rem', width: '60%', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
+              <div className="tahi-shimmer" style={{ height: '0.75rem', width: '40%', marginBottom: 'var(--space-3)' }} />
+              <div className="tahi-shimmer" style={{ height: '1.5rem', width: '60%' }} />
             </div>
           ))}
         </div>
@@ -302,22 +426,20 @@ function PipelineSummaryCard() {
   return (
     <Link
       href="/deals"
-      className="block"
+      className="block lg:col-span-12"
       style={{
         background: 'var(--color-bg)',
         border: '1px solid var(--color-border-subtle)',
         borderRadius: 'var(--radius-lg)',
         textDecoration: 'none',
         overflow: 'hidden',
-        transition: 'border-color 150ms ease, box-shadow 150ms ease',
+        transition: 'border-color var(--dur-2) var(--ease-productive)',
       }}
       onMouseEnter={e => {
         e.currentTarget.style.borderColor = 'var(--color-border)'
-        e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
       }}
       onMouseLeave={e => {
         e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
-        e.currentTarget.style.boxShadow = 'none'
       }}
     >
       <div className="grid grid-cols-1 sm:grid-cols-3">
@@ -388,7 +510,7 @@ interface CapacityData {
   forecastedCapacity: number
 }
 
-function PipelineCapacityCard() {
+function PipelineCapacityCard({ className }: { className?: string }) {
   const [data, setData] = useState<CapacityData | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -405,7 +527,11 @@ function PipelineCapacityCard() {
 
   if (loading) {
     return (
-      <SectionCard title="Team Capacity">
+      <SectionCard
+        className={className}
+        icon={<HeaderIcon><AnimatedGauge size={14} /></HeaderIcon>}
+        title="Team Capacity"
+      >
         <LoadingRows />
       </SectionCard>
     )
@@ -424,7 +550,7 @@ function PipelineCapacityCard() {
       : 'var(--color-brand)'
 
   return (
-    <div style={{
+    <div className={className} style={{
       background: 'var(--color-bg)',
       border: '1px solid var(--color-border-subtle)',
       borderRadius: 'var(--radius-lg)',
@@ -436,19 +562,15 @@ function PipelineCapacityCard() {
         borderBottom: '1px solid var(--color-border-subtle)',
       }}>
         <div className="flex items-center" style={{ gap: 'var(--space-3)' }}>
+          <HeaderIcon><AnimatedGauge size={14} /></HeaderIcon>
           <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
             Team Capacity
           </h2>
-          <span className="tabular-nums" style={{
-            fontSize: 'var(--text-sm)',
-            fontWeight: 700,
-            color: barColor,
-            padding: 'var(--space-0-5) var(--space-2)',
-            background: utilizationPct > 90 ? 'var(--color-danger-bg)' : utilizationPct > 70 ? 'var(--color-warning-bg)' : 'var(--color-brand-50)',
-            borderRadius: 'var(--radius-full)',
-          }}>
-            {utilizationPct}%
-          </span>
+          <ProgressRing value={utilizationPct} size={40} strokeWidth={4} label="Team capacity utilization">
+            <span style={{ color: barColor }}>
+              <CountUp value={utilizationPct} format={n => `${Math.round(n)}%`} />
+            </span>
+          </ProgressRing>
         </div>
         <Link href="/deals" className="view-link" style={{
           fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)',
@@ -758,45 +880,199 @@ function OnboardingChecklistWrapper() {
   )
 }
 
-// ─── KPI Strip (grouped panel with dividers) ────────────────────────────────
+// ─── KPI Bento Strip (per-cell permission registry, MRR hero tile) ───────────
 
-function KPIStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
+interface KPICellDef {
+  key: string
+  /** Permission feature key; cell is dropped when features[feature] === false. */
+  feature: string
+  /** Hero cells get the filled brand treatment (Donezo lead-KPI reference). */
+  hero?: boolean
+  label: string
+  icon: React.ComponentType<AnimatedIconProps>
+  value: React.ReactNode
+  sub?: React.ReactNode
+  href: string
+  tone?: 'brand' | 'warning'
+}
+
+function KPIBentoStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
+  const { features } = usePermissions()
   const { format } = useDisplayCurrency()
   const outstanding = kpis?.outstandingInvoicesNzd ?? 0
+
+  // Registry of KPI cells, filtered by feature visibility below. No hooks run
+  // inside the loop. MRR leads the row as the filled hero tile (lead metric
+  // top-left per the Donezo reference); CountUp fires once per load on it.
+  const registry: KPICellDef[] = [
+    {
+      key: 'mrr',
+      feature: 'financial_reports',
+      hero: true,
+      label: 'MRR',
+      icon: AnimatedBarChart,
+      href: '/reports',
+      sub: 'recurring retainers',
+      value: (
+        <span data-private>
+          <CountUp value={kpis?.mrr ?? 0} format={n => format(Math.round(n))} />
+        </span>
+      ),
+    },
+    {
+      key: 'clients',
+      feature: 'clients',
+      label: 'Active Clients',
+      icon: AnimatedUsers,
+      href: '/clients',
+      sub: 'across all plans',
+      value: String(kpis?.activeClients ?? 0),
+    },
+    {
+      key: 'requests',
+      feature: 'requests',
+      label: 'Open Requests',
+      icon: AnimatedInbox,
+      href: '/requests',
+      sub: kpis ? `${kpis.inProgress} in progress` : undefined,
+      value: String(kpis?.openRequests ?? 0),
+    },
+    {
+      key: 'outstanding',
+      feature: 'invoices',
+      label: 'Outstanding',
+      icon: AnimatedFileText,
+      href: '/invoices',
+      sub: 'invoices',
+      tone: outstanding > 0 ? 'warning' : 'brand',
+      value: <span data-private>{format(outstanding)}</span>,
+    },
+  ]
+
+  const visible = registry.filter(cell => features[cell.feature] !== false)
+  if (visible.length === 0) return null
+
+  const desktopCols = KPI_DESKTOP_COLS[visible.length] ?? 'lg:grid-cols-4'
+  const mobileCols = visible.length === 1 ? 'grid-cols-1' : 'grid-cols-2'
+
   return (
-    <div data-tour="overview-kpis">
-      <SharedKPIStrip>
-        <KPICell
-          icon={Users}
-          label="Active Clients"
-          value={loading ? '-' : String(kpis?.activeClients ?? 0)}
-          sub="across all plans"
-          href="/clients"
-        />
-        <KPICell
-          icon={Inbox}
-          label="Open Requests"
-          value={loading ? '-' : String(kpis?.openRequests ?? 0)}
-          sub={kpis ? `${kpis.inProgress} in progress` : undefined}
-          href="/requests"
-        />
-        <KPICell
-          icon={FileText}
-          label="Outstanding"
-          value={loading ? '-' : <span data-private>{format(outstanding)}</span>}
-          sub="invoices"
-          tone={outstanding > 0 ? 'warning' : 'brand'}
-          href="/invoices"
-        />
-        <KPICell
-          icon={BarChart3}
-          label="MRR"
-          value={loading ? '-' : <span data-private>{format(kpis?.mrr ?? 0)}</span>}
-          sub="recurring retainers"
-          href="/reports"
-        />
-      </SharedKPIStrip>
+    <div
+      data-tour="overview-kpis"
+      className={`lg:col-span-12 grid ${mobileCols} ${desktopCols}`}
+      style={{ gap: 'var(--space-4)' }}
+    >
+      {visible.map(cell => cell.hero
+        ? <HeroKPICard key={cell.key} cell={cell} loading={loading} />
+        : <LightKPICard key={cell.key} cell={cell} loading={loading} />)}
     </div>
+  )
+}
+
+// The lead KPI: filled brand gradient, white text, clockwise border trace on
+// hover (the scarce signature; nothing else on this page uses it).
+function HeroKPICard({ cell, loading }: { cell: KPICellDef; loading: boolean }) {
+  const Icon = cell.icon
+  return (
+    <Link
+      href={cell.href}
+      className="tahi-border-trace block"
+      style={{
+        padding: 'var(--space-5)',
+        background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
+        borderRadius: 'var(--radius-lg)',
+        color: 'white',
+        textDecoration: 'none',
+      }}
+    >
+      <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+        <div
+          className="flex items-center justify-center flex-shrink-0"
+          style={{
+            width: '2rem',
+            height: '2rem',
+            background: 'rgba(255, 255, 255, 0.16)',
+            color: 'white',
+            borderRadius: 'var(--radius-leaf-sm)',
+          }}
+        >
+          <Icon size={15} />
+        </div>
+        <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'rgba(255, 255, 255, 0.85)' }}>
+          {cell.label}
+        </span>
+      </div>
+      {loading ? (
+        <div className="tahi-shimmer" style={{ height: '1.75rem', width: '6rem' }} />
+      ) : (
+        <div className="tabular-nums" style={{ fontSize: 'var(--text-2xl)', fontWeight: 700, letterSpacing: '-0.01em', lineHeight: 1.2 }}>
+          {cell.value}
+        </div>
+      )}
+      {cell.sub && (
+        <div style={{ fontSize: 'var(--text-xs)', color: 'rgba(255, 255, 255, 0.75)', marginTop: 'var(--space-1)' }}>
+          {cell.sub}
+        </div>
+      )}
+    </Link>
+  )
+}
+
+function LightKPICard({ cell, loading }: { cell: KPICellDef; loading: boolean }) {
+  const Icon = cell.icon
+  const toneStyle = cell.tone === 'warning'
+    ? { bg: 'var(--color-warning-bg)', fg: 'var(--color-warning)' }
+    : { bg: 'var(--color-brand-50)', fg: 'var(--color-brand)' }
+  return (
+    <Link
+      href={cell.href}
+      className="block"
+      style={{
+        padding: 'var(--space-5)',
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-lg)',
+        textDecoration: 'none',
+        transition: 'border-color var(--dur-2) var(--ease-productive), background-color var(--dur-2) var(--ease-productive)',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.borderColor = 'var(--color-border)'
+        e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
+        e.currentTarget.style.backgroundColor = 'var(--color-bg)'
+      }}
+    >
+      <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+        <div
+          className="flex items-center justify-center flex-shrink-0"
+          style={{
+            width: '2rem',
+            height: '2rem',
+            background: toneStyle.bg,
+            color: toneStyle.fg,
+            borderRadius: 'var(--radius-leaf-sm)',
+          }}
+        >
+          <Icon size={15} />
+        </div>
+        <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)' }}>
+          {cell.label}
+        </span>
+      </div>
+      {loading ? (
+        <div className="tahi-shimmer" style={{ height: '1.75rem', width: '4.5rem' }} />
+      ) : (
+        <div className="tabular-nums" style={{ fontSize: 'var(--text-2xl)', fontWeight: 700, color: 'var(--color-text)', letterSpacing: '-0.01em', lineHeight: 1.2 }}>
+          {cell.value}
+        </div>
+      )}
+      {cell.sub && (
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)' }}>
+          {cell.sub}
+        </div>
+      )}
+    </Link>
   )
 }
 
@@ -922,7 +1198,12 @@ function OffTrackEngagementsWidget() {
   if (loading || items.length === 0) return null
 
   return (
-    <SectionCard title="Engagements off track" action={{ label: 'View schedules', href: '/schedules' }}>
+    <SectionCard
+      className="lg:col-span-12"
+      icon={<HeaderIcon tone="warning"><AnimatedClock size={14} /></HeaderIcon>}
+      title="Engagements off track"
+      action={{ label: 'View schedules', href: '/schedules' }}
+    >
       {items.map((e, i) => (
         <Link
           key={e.orgId}
@@ -958,15 +1239,17 @@ function OffTrackEngagementsWidget() {
 }
 
 function SectionCard({
-  title, action, children,
+  title, action, children, icon, className,
 }: {
   title: string
   action?: { label: string; href: string }
   children: React.ReactNode
+  icon?: React.ReactNode
+  className?: string
 }) {
   return (
     <div
-      className="overflow-hidden"
+      className={className ? `overflow-hidden ${className}` : 'overflow-hidden'}
       style={{
         background: 'var(--color-bg)',
         border: '1px solid var(--color-border-subtle)',
@@ -980,7 +1263,10 @@ function SectionCard({
           borderBottom: '1px solid var(--color-border-subtle)',
         }}
       >
-        <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>{title}</h2>
+        <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
+          {icon}
+          <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>{title}</h2>
+        </div>
         {action && (
           <Link
             href={action.href}
@@ -1065,19 +1351,19 @@ function LoadingRows() {
       {[...Array(4)].map((_, i) => (
         <div
           key={i}
-          className="flex items-center animate-pulse"
+          className="flex items-center"
           style={{
             padding: 'var(--space-4) var(--space-5)',
             borderBottom: i < 3 ? '1px solid var(--color-border-subtle)' : 'none',
             gap: 'var(--space-3)',
           }}
         >
-          <div style={{ width: '5rem', height: '1.375rem', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-full)' }} />
+          <div className="tahi-shimmer" style={{ width: '5rem', height: '1.375rem', borderRadius: 'var(--radius-full)' }} />
           <div className="flex-1 flex flex-col" style={{ gap: 'var(--space-1-5)' }}>
-            <div style={{ height: '0.8125rem', width: '60%', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
-            <div style={{ height: '0.6875rem', width: '35%', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
+            <div className="tahi-shimmer" style={{ height: '0.8125rem', width: '60%' }} />
+            <div className="tahi-shimmer" style={{ height: '0.6875rem', width: '35%' }} />
           </div>
-          <div style={{ height: '0.6875rem', width: '3rem', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
+          <div className="tahi-shimmer" style={{ height: '0.6875rem', width: '3rem' }} />
         </div>
       ))}
     </div>
@@ -1152,7 +1438,7 @@ function QuickBtn({
             fontSize: 'var(--text-sm)',
             fontWeight: 600,
             gap: 'var(--space-1-5)',
-            transition: 'background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease',
+            transition: 'background-color var(--dur-2) var(--ease-productive)',
           }
         : {
             padding: 'var(--space-2) var(--space-3)',
@@ -1170,8 +1456,6 @@ function QuickBtn({
       onMouseEnter={e => {
         if (primary) {
           e.currentTarget.style.background = 'var(--color-brand-dark)'
-          e.currentTarget.style.boxShadow = '0 4px 14px rgba(90,130,78,0.4)'
-          e.currentTarget.style.transform = 'translateY(-1px)'
         } else {
           e.currentTarget.style.borderColor = 'var(--color-border)'
           e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'
@@ -1180,8 +1464,6 @@ function QuickBtn({
       onMouseLeave={e => {
         if (primary) {
           e.currentTarget.style.background = 'var(--color-brand)'
-          e.currentTarget.style.boxShadow = 'none'
-          e.currentTarget.style.transform = 'none'
         } else {
           e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
           e.currentTarget.style.backgroundColor = 'var(--color-bg)'
@@ -1209,7 +1491,7 @@ interface UpcomingCall {
   fromCalendar: boolean
 }
 
-function UpcomingCallsWidget() {
+function UpcomingCallsWidget({ className }: { className?: string }) {
   const [calls, setCalls] = useState<UpcomingCall[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -1229,16 +1511,24 @@ function UpcomingCallsWidget() {
 
   if (!loading && calls.length === 0) {
     return (
-      <SectionCard title="Upcoming Calls" action={{ label: 'Open leads', href: '/leads' }}>
+      <SectionCard
+        className={className}
+        icon={<HeaderIcon><AnimatedCalendar size={14} /></HeaderIcon>}
+        title="Upcoming Calls"
+        action={{ label: 'Open leads', href: '/leads' }}
+      >
         <EmptyRows title="No upcoming calls" message="Calls auto-sync from Google Calendar. Schedule one in Google Cal with a lead's email." />
       </SectionCard>
     )
   }
 
   return (
-    <div>
+    <div className={className}>
       <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-3)' }}>
-        <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>Upcoming Calls</h2>
+        <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
+          <HeaderIcon><AnimatedCalendar size={14} /></HeaderIcon>
+          <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>Upcoming Calls</h2>
+        </div>
         <Link
           href="/leads"
           className="view-link"
@@ -1249,17 +1539,17 @@ function UpcomingCallsWidget() {
       </div>
       <div className="flex flex-col" style={{ gap: 'var(--space-2)' }}>
         {loading ? [0, 1, 2].map(n => (
-          <div key={n} className="animate-pulse flex items-center" style={{
+          <div key={n} className="flex items-center" style={{
             padding: 'var(--space-3) var(--space-4)',
             background: 'var(--color-bg)',
             border: '1px solid var(--color-border-subtle)',
             borderRadius: 'var(--radius-md)',
             gap: 'var(--space-3)',
           }}>
-            <div style={{ width: '2rem', height: '2rem', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-leaf-sm)', flexShrink: 0 }} />
+            <div className="tahi-shimmer" style={{ width: '2rem', height: '2rem', borderRadius: 'var(--radius-leaf-sm)', flexShrink: 0 }} />
             <div className="flex-1" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <div style={{ height: '0.75rem', width: '70%', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
-              <div style={{ height: '0.625rem', width: '50%', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
+              <div className="tahi-shimmer" style={{ height: '0.75rem', width: '70%' }} />
+              <div className="tahi-shimmer" style={{ height: '0.625rem', width: '50%' }} />
             </div>
           </div>
         )) : calls.map(call => {
@@ -1342,7 +1632,7 @@ function GettingStarted() {
     { n: 4, label: 'Connect Stripe for billing',       href: '/settings'      },
   ]
   return (
-    <div style={{
+    <div className="lg:col-span-12" style={{
       padding: 'var(--space-6)',
       background: 'var(--color-bg)',
       border: '1px solid var(--color-border-subtle)',
@@ -1889,20 +2179,32 @@ function NextCallJoinButton({ meetingUrl, scheduledAt, durationMinutes }: {
 }
 
 function TodayFocusStrip() {
+  const { features } = usePermissions()
   const { format } = useDisplayCurrency()
+  const showCall = features['calls'] !== false
+  const showDeal = features['deals'] !== false
   const [call, setCall] = useState<FocusCall | null>(null)
   const [deal, setDeal] = useState<FocusDeal | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    Promise.all([
-      fetch(apiPath('/api/admin/discovery-calls/upcoming?limit=1&includePast=1'))
-        .then(r => (r.ok ? r.json() as Promise<{ calls: FocusCall[] }> : { calls: [] }))
-        .catch(() => ({ calls: [] as FocusCall[] })),
-      fetch(apiPath('/api/admin/deals?limit=100'))
-        .then(r => (r.ok ? r.json() as Promise<{ items: FocusDeal[] }> : { items: [] }))
-        .catch(() => ({ items: [] as FocusDeal[] })),
-    ])
+    if (!showCall && !showDeal) {
+      setLoading(false)
+      return
+    }
+    // Only fetch what the viewer is permitted to see.
+    const callsPromise = showCall
+      ? fetch(apiPath('/api/admin/discovery-calls/upcoming?limit=1&includePast=1'))
+          .then(r => (r.ok ? r.json() as Promise<{ calls: FocusCall[] }> : { calls: [] }))
+          .catch(() => ({ calls: [] as FocusCall[] }))
+      : Promise.resolve({ calls: [] as FocusCall[] })
+    const dealsPromise = showDeal
+      ? fetch(apiPath('/api/admin/deals?limit=100'))
+          .then(r => (r.ok ? r.json() as Promise<{ items: FocusDeal[] }> : { items: [] }))
+          .catch(() => ({ items: [] as FocusDeal[] }))
+      : Promise.resolve({ items: [] as FocusDeal[] })
+
+    Promise.all([callsPromise, dealsPromise])
       .then(([callsData, dealsData]) => {
         setCall(callsData.calls?.[0] ?? null)
 
@@ -1922,62 +2224,73 @@ function TodayFocusStrip() {
         setDeal(closingThisMonth[0] ?? null)
       })
       .finally(() => setLoading(false))
-  }, [])
+  }, [showCall, showDeal])
 
-  // Nothing to show? Hide the entire strip rather than render placeholders.
-  if (!loading && !call && !deal) return null
+  // Both tiles gated off: the strip does not exist for this viewer.
+  if (!showCall && !showDeal) return null
+
+  // Nothing to show in any visible tile? Hide the strip, no placeholders.
+  if (!loading && !(showCall && call) && !(showDeal && deal)) return null
+
+  // Collapse to one full-width tile when only one half is visible.
+  const gridClass = showCall && showDeal ? 'grid grid-cols-1 md:grid-cols-2' : 'grid grid-cols-1'
+
+  if (loading) {
+    return (
+      <div className={gridClass} style={{ gap: 'var(--space-4)' }}>
+        {showCall && <div className="tahi-shimmer" style={{ minHeight: '8.5rem', borderRadius: 'var(--radius-leaf)' }} />}
+        {showDeal && <div className="tahi-shimmer" style={{ minHeight: '8.5rem', borderRadius: 'var(--radius-leaf)' }} />}
+      </div>
+    )
+  }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: 'var(--space-4)' }}>
-      <FeatureCard variant="forest" padding="lg">
-        <FeatureCard.Eyebrow>
-          <span className="inline-flex items-center" style={{ gap: '0.5rem' }}>
-            Next call
-            {call && <NextCallLiveBadge scheduledAt={call.scheduledAt} durationMinutes={call.durationMinutes} />}
-          </span>
-        </FeatureCard.Eyebrow>
-        <FeatureCard.Title>
-          {loading
-            ? 'Loading...'
-            : call
+    <div className={gridClass} style={{ gap: 'var(--space-4)' }}>
+      {showCall && (
+        <FeatureCard variant="forest" padding="lg">
+          <FeatureCard.Eyebrow>
+            <span className="inline-flex items-center" style={{ gap: '0.5rem' }}>
+              Next call
+              {call && <NextCallLiveBadge scheduledAt={call.scheduledAt} durationMinutes={call.durationMinutes} />}
+            </span>
+          </FeatureCard.Eyebrow>
+          <FeatureCard.Title>
+            {call
               ? (call.withName ? <>Next call with <span data-private>{call.withName}</span></> : <span data-private>{call.title}</span>)
               : 'No calls scheduled'}
-        </FeatureCard.Title>
-        <FeatureCard.Description>
-          {loading
-            ? ' '
-            : call
+          </FeatureCard.Title>
+          <FeatureCard.Description>
+            {call
               ? <>{call.withSubtitle ? <><span data-private>{call.withSubtitle}</span>{' · '}</> : ''}{`${new Date(call.scheduledAt).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })} at ${new Date(call.scheduledAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })} (${call.durationMinutes}min)`}</>
               : 'Schedule a call from the calls page when one comes up.'}
-        </FeatureCard.Description>
-        {call && call.meetingUrl && (
-          <FeatureCard.Footer>
-            <NextCallJoinButton
-              meetingUrl={call.meetingUrl}
-              scheduledAt={call.scheduledAt}
-              durationMinutes={call.durationMinutes}
-            />
-          </FeatureCard.Footer>
-        )}
-      </FeatureCard>
+          </FeatureCard.Description>
+          {call && call.meetingUrl && (
+            <FeatureCard.Footer>
+              <NextCallJoinButton
+                meetingUrl={call.meetingUrl}
+                scheduledAt={call.scheduledAt}
+                durationMinutes={call.durationMinutes}
+              />
+            </FeatureCard.Footer>
+          )}
+        </FeatureCard>
+      )}
 
-      <FeatureCard variant="lime" padding="lg">
-        <FeatureCard.Eyebrow>Closing this month</FeatureCard.Eyebrow>
-        <FeatureCard.Title>
-          {loading
-            ? 'Loading...'
-            : deal
+      {showDeal && (
+        <FeatureCard variant="lime" padding="lg">
+          <FeatureCard.Eyebrow>Closing this month</FeatureCard.Eyebrow>
+          <FeatureCard.Title>
+            {deal
               ? <span data-private>{format(deal.valueNzd ?? deal.value ?? 0)}</span>
               : 'Nothing closing yet'}
-        </FeatureCard.Title>
-        <FeatureCard.Description>
-          {loading
-            ? ' '
-            : deal
+          </FeatureCard.Title>
+          <FeatureCard.Description>
+            {deal
               ? <><span data-private>{deal.title}</span>{deal.orgName ? <> · <span data-private>{deal.orgName}</span></> : ''}{deal.stageName ? ` · ${deal.stageName}` : ''}</>
               : 'Set an expected close date on a deal to surface it here.'}
-        </FeatureCard.Description>
-      </FeatureCard>
+          </FeatureCard.Description>
+        </FeatureCard>
+      )}
     </div>
   )
 }
@@ -2009,7 +2322,8 @@ interface ForecastResponse {
   byStage: ForecastByStage[]
 }
 
-function PipelineForecastCard() {
+function PipelineForecastCard({ className }: { className?: string }) {
+  const { format } = useDisplayCurrency()
   const [data, setData] = useState<ForecastResponse | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -2021,28 +2335,28 @@ function PipelineForecastCard() {
       .finally(() => setLoading(false))
   }, [])
 
-  const fmt = (n: number) =>
-    new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD', maximumFractionDigits: 0 }).format(n)
-
   const activeStages = data?.byStage.filter(s => !s.isClosedWon && !s.isClosedLost && s.dealCount > 0) ?? []
   // Max weighted upfront for bar scaling
   const maxWeighted = Math.max(1, ...activeStages.map(s => s.weightedUpfrontNzd + s.weightedMonthlyNzd * 6))
 
   return (
-    <div style={{
+    <div className={className} style={{
       padding: 'var(--space-6)',
       background: 'var(--color-bg)',
       border: '1px solid var(--color-border-subtle)',
       borderRadius: 'var(--radius-lg)',
     }}>
       <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-4)' }}>
-        <div>
-          <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
-            Pipeline forecast
-          </h2>
-          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)' }}>
-            Weighted by each stage&apos;s probability
-          </p>
+        <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
+          <HeaderIcon><AnimatedTrendingUp size={14} /></HeaderIcon>
+          <div>
+            <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
+              Pipeline forecast
+            </h2>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)' }}>
+              Weighted by each stage&apos;s probability
+            </p>
+          </div>
         </div>
         <Link
           href="/deals"
@@ -2054,21 +2368,17 @@ function PipelineForecastCard() {
       </div>
 
       {loading ? (
-        <div className="animate-pulse" style={{
-          height: '6rem',
-          background: 'var(--color-bg-tertiary)',
-          borderRadius: 'var(--radius-md)',
-        }} />
+        <div className="tahi-shimmer" style={{ height: '6rem' }} />
       ) : !data || activeStages.length === 0 ? (
         <EmptyRows title="No active deals" message="Add deals to the pipeline to see a weighted forecast." />
       ) : (
         <>
           {/* Summary numbers — weighted vs unweighted */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
-            <ForecastStat label="Weighted upfront" value={fmt(data.weightedUpfrontNzd)} sub={`of ${fmt(data.unweightedUpfrontNzd)}`} priv />
-            <ForecastStat label="Weighted MRR" value={fmt(data.weightedMonthlyNzd)} sub={`of ${fmt(data.unweightedMonthlyNzd)}`} priv />
+          <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
+            <ForecastStat label="Weighted upfront" value={format(data.weightedUpfrontNzd)} sub={`of ${format(data.unweightedUpfrontNzd)}`} priv />
+            <ForecastStat label="Weighted MRR" value={format(data.weightedMonthlyNzd)} sub={`of ${format(data.unweightedMonthlyNzd)}`} priv />
             <ForecastStat label="Active deals" value={String(activeStages.reduce((s, x) => s + x.dealCount, 0))} sub={`${data.totalDeals} total`} />
-            <ForecastStat label="12-mo expected" value={fmt(data.weightedUpfrontNzd + data.weightedMonthlyNzd * 12)} sub="upfront + 12× MRR" priv />
+            <ForecastStat label="12-mo expected" value={format(data.weightedUpfrontNzd + data.weightedMonthlyNzd * 12)} sub="upfront + 12× MRR" priv />
           </div>
 
           {/* Per-stage bars */}
@@ -2086,10 +2396,10 @@ function PipelineForecastCard() {
                       </span>
                     </span>
                     <span data-private style={{ color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
-                      {fmt(stage.weightedUpfrontNzd)}
+                      {format(stage.weightedUpfrontNzd)}
                       {stage.weightedMonthlyNzd > 0 && (
                         <span style={{ color: 'var(--color-text-subtle)' }}>
-                          {' + '}{fmt(stage.weightedMonthlyNzd)}/mo
+                          {' + '}{format(stage.weightedMonthlyNzd)}/mo
                         </span>
                       )}
                     </span>

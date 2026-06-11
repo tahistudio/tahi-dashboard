@@ -27,7 +27,7 @@ import { motion, useAnimationControls, type MotionProps } from 'motion/react'
 const TAHI_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1]
 const TAHI_SPRING: [number, number, number, number] = [0.16, 1, 0.3, 1]
 
-interface AnimatedIconProps {
+export interface AnimatedIconProps {
   size?: number | string
   strokeWidth?: number
   color?: string
