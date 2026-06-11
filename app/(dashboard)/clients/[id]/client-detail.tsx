@@ -667,37 +667,20 @@ function BrandsCard({ org, onUpdated }: { org: Organisation; onUpdated: () => vo
   }
 
   return (
-    <div
-      className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl"
-      style={{ padding: '1.25rem' }}
-    >
-      <div className="flex items-center gap-2 mb-3">
-        <Tag className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
-        <h3 className="text-sm font-semibold text-[var(--color-text)]">Brands</h3>
-      </div>
+    <Card>
+      <Card.Header style={{ marginBottom: 'var(--space-3)' }}>
+        <div className="flex items-center gap-2">
+          <Tag className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          <Card.Title style={{ fontSize: 'var(--text-sm)' }}>Brands</Card.Title>
+        </div>
+      </Card.Header>
 
       {brands.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-3">
           {brands.map(b => (
-            <span
-              key={b}
-              className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full"
-              style={{
-                background: 'var(--color-brand-50)',
-                color: 'var(--color-brand-dark)',
-              }}
-            >
+            <Badge key={b} tone="brand" onRemove={saving ? undefined : () => removeBrand(b)}>
               {b}
-              <button
-                onClick={() => removeBrand(b)}
-                disabled={saving}
-                className="hover:text-[var(--color-danger)] transition-colors"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                aria-label={`Remove brand ${b}`}
-              >
-                <Trash2 className="w-3 h-3" aria-hidden="true" />
-              </button>
-            </span>
+            </Badge>
           ))}
         </div>
       )}
@@ -718,24 +701,17 @@ function BrandsCard({ org, onUpdated }: { org: Organisation; onUpdated: () => vo
             minHeight: '2rem',
           }}
         />
-        <button
+        <TahiButton
+          variant="primary"
+          size="sm"
           onClick={addBrand}
           disabled={!newBrand.trim() || saving}
-          className="text-xs font-medium text-white transition-colors"
-          style={{
-            background: 'var(--color-brand)',
-            borderRadius: 'var(--radius-button)',
-            border: 'none',
-            cursor: !newBrand.trim() || saving ? 'not-allowed' : 'pointer',
-            opacity: !newBrand.trim() || saving ? 0.5 : 1,
-            padding: '0.375rem 0.75rem',
-            minHeight: '2rem',
-          }}
+          loading={saving}
         >
-          {saving ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : 'Add'}
-        </button>
+          Add
+        </TahiButton>
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -780,40 +756,23 @@ function TagsCard({ org, onUpdated }: { org: Organisation; onUpdated: () => void
   }
 
   return (
-    <div
-      className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl"
-      style={{ padding: '1.25rem' }}
-    >
-      <div className="flex items-center gap-2 mb-1">
-        <Tag className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
-        <h3 className="text-sm font-semibold text-[var(--color-text)]">Tags</h3>
-      </div>
-      <p className="text-xs text-[var(--color-text-subtle)] mb-3">
-        Label this client to group and filter their requests.
-      </p>
+    <Card>
+      <Card.Header style={{ marginBottom: 'var(--space-3)', display: 'block' }}>
+        <div className="flex items-center gap-2 mb-1">
+          <Tag className="w-4 h-4 text-[var(--color-text-muted)]" aria-hidden="true" />
+          <Card.Title style={{ fontSize: 'var(--text-sm)' }}>Tags</Card.Title>
+        </div>
+        <Card.Subtitle style={{ marginTop: 0 }}>
+          Label this client to group and filter their requests.
+        </Card.Subtitle>
+      </Card.Header>
 
       {tags.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-3">
           {tags.map(t => (
-            <span
-              key={t}
-              className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full"
-              style={{
-                background: 'var(--color-bg-tertiary)',
-                color: 'var(--color-text)',
-              }}
-            >
+            <Badge key={t} tone="neutral" onRemove={saving ? undefined : () => removeTag(t)}>
               {t}
-              <button
-                onClick={() => removeTag(t)}
-                disabled={saving}
-                className="hover:text-[var(--color-danger)] transition-colors"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                aria-label={`Remove tag ${t}`}
-              >
-                <Trash2 className="w-3 h-3" aria-hidden="true" />
-              </button>
-            </span>
+            </Badge>
           ))}
         </div>
       )}
@@ -834,24 +793,17 @@ function TagsCard({ org, onUpdated }: { org: Organisation; onUpdated: () => void
             minHeight: '2rem',
           }}
         />
-        <button
+        <TahiButton
+          variant="primary"
+          size="sm"
           onClick={addTag}
           disabled={!newTag.trim() || saving}
-          className="text-xs font-medium text-white transition-colors"
-          style={{
-            background: 'var(--color-brand)',
-            borderRadius: 'var(--radius-button)',
-            border: 'none',
-            cursor: !newTag.trim() || saving ? 'not-allowed' : 'pointer',
-            opacity: !newTag.trim() || saving ? 0.5 : 1,
-            padding: '0.375rem 0.75rem',
-            minHeight: '2rem',
-          }}
+          loading={saving}
         >
-          {saving ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : 'Add'}
-        </button>
+          Add
+        </TahiButton>
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -1118,9 +1070,10 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
   const STATUS_OPTIONS = ['prospect', 'active', 'paused', 'churned', 'archived']
 
   return (
-    <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="font-semibold text-[var(--color-text)]">Organisation details</h2>
+    <Card>
+      <Card.Header>
+        <Card.Title>Organisation details</Card.Title>
+        <Card.Action>
         {!editing ? (
           <div className="flex items-center gap-3">
             <button
@@ -1158,7 +1111,8 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
             </button>
           </div>
         )}
-      </div>
+        </Card.Action>
+      </Card.Header>
 
       {editing ? (
         <div className="grid grid-cols-2 gap-4">
@@ -1443,7 +1397,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
           </div>
         </dl>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -1451,16 +1405,22 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
 
 function ContactsCard({ contacts }: { contacts: Contact[] }) {
   return (
-    <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-sm text-[var(--color-text)]">Contacts</h3>
-        <button className="p-1 rounded hover:bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)]">
-          <Plus className="w-3.5 h-3.5" />
-        </button>
-      </div>
+    <Card>
+      <Card.Header style={{ marginBottom: 'var(--space-3)' }}>
+        <Card.Title style={{ fontSize: 'var(--text-sm)' }}>Contacts</Card.Title>
+        <Card.Action>
+          <TahiButton variant="ghost" size="sm" iconLeft={<Plus className="w-3.5 h-3.5" />} aria-label="Add contact">
+            Add
+          </TahiButton>
+        </Card.Action>
+      </Card.Header>
 
       {contacts.length === 0 ? (
-        <p className="text-xs text-[var(--color-text-muted)]">No contacts yet.</p>
+        <EmptyState
+          variant="inline"
+          icon={<Users className="w-8 h-8" />}
+          title="No contacts yet"
+        />
       ) : (
         <div className="flex flex-col gap-3">
           {contacts.map(contact => (
@@ -1474,9 +1434,7 @@ function ContactsCard({ contacts }: { contacts: Contact[] }) {
                     {contact.name}
                   </span>
                   {contact.isPrimary && (
-                    <span className="text-xs text-[var(--color-brand)] bg-[var(--color-brand-50)] px-1.5 py-0.5 rounded-full">
-                      Primary
-                    </span>
+                    <Badge tone="brand" size="sm">Primary</Badge>
                   )}
                 </div>
                 <div className="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
@@ -1489,13 +1447,17 @@ function ContactsCard({ contacts }: { contacts: Contact[] }) {
                     <span data-private>{contact.role}</span>
                   </div>
                 )}
-                <div className={cn('mt-0.5 w-1.5 h-1.5 rounded-full inline-block', contact.clerkUserId ? 'bg-emerald-400' : 'bg-[var(--color-border)]')} title={contact.clerkUserId ? 'Has portal access' : 'No portal access yet'} />
+                <div
+                  className="mt-0.5 w-1.5 h-1.5 rounded-full inline-block"
+                  style={{ background: contact.clerkUserId ? 'var(--color-success)' : 'var(--color-border)' }}
+                  title={contact.clerkUserId ? 'Has portal access' : 'No portal access yet'}
+                />
               </div>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -1554,9 +1516,10 @@ function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { subscrip
   }
 
   return (
-    <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-sm text-[var(--color-text)]">Subscription</h3>
+    <Card>
+      <Card.Header style={{ marginBottom: 'var(--space-3)' }}>
+        <Card.Title style={{ fontSize: 'var(--text-sm)' }}>Subscription</Card.Title>
+        <Card.Action>
         {!editing ? (
           <button
             onClick={() => setEditing(true)}
@@ -1582,7 +1545,8 @@ function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { subscrip
             </button>
           </div>
         )}
-      </div>
+        </Card.Action>
+      </Card.Header>
 
       {editing ? (
         <div className="mb-3">
@@ -1646,7 +1610,7 @@ function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { subscrip
           </div>
         )}
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -1876,29 +1840,21 @@ function InternalNotesCard({ org, onUpdated }: { org: Organisation; onUpdated: (
   }
 
   return (
-    <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-5">
-      <div className="flex items-center justify-between mb-3" style={{ gap: '0.75rem' }}>
+    <Card>
+      <Card.Header style={{ marginBottom: 'var(--space-3)', alignItems: 'center' }}>
         <div className="flex items-center" style={{ gap: '0.5rem', minWidth: 0 }}>
-          <h3 className="font-semibold text-sm text-[var(--color-text)]" style={{ margin: 0 }}>Internal notes</h3>
-          <span
-            className="inline-flex items-center"
-            style={{
-              gap: '0.25rem',
-              padding: '0.0625rem 0.4375rem',
-              fontSize: '0.625rem',
-              fontWeight: 500,
-              color: 'var(--color-text-subtle)',
-              background: 'var(--color-bg-secondary)',
-              border: '1px solid var(--color-border-subtle)',
-              borderRadius: '9999px',
-              flexShrink: 0,
-            }}
-            title="Visible to the Tahi team only — never shown in the client portal"
+          <Card.Title style={{ fontSize: 'var(--text-sm)' }}>Internal notes</Card.Title>
+          <Badge
+            tone="neutral"
+            size="sm"
+            leader="icon"
+            icon={<Lock aria-hidden="true" />}
+            title="Visible to the Tahi team only, never shown in the client portal"
           >
-            <Lock size={9} aria-hidden="true" />
             Private
-          </span>
+          </Badge>
         </div>
+        <Card.Action>
         {!editing ? (
           <button
             onClick={() => setEditing(true)}
@@ -1914,7 +1870,8 @@ function InternalNotesCard({ org, onUpdated }: { org: Organisation; onUpdated: (
             </button>
           </div>
         )}
-      </div>
+        </Card.Action>
+      </Card.Header>
 
       {editing ? (
         <textarea
@@ -1930,7 +1887,7 @@ function InternalNotesCard({ org, onUpdated }: { org: Organisation; onUpdated: (
           {notes || <span className="text-[var(--color-text-muted)] italic">No notes yet. Click Edit to add.</span>}
         </p>
       )}
-    </div>
+    </Card>
   )
 }
 
