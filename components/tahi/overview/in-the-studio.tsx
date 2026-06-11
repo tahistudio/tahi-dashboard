@@ -6,14 +6,14 @@
 // Recent requests rendered as a LEFT-SPINE vertical timeline: a hairline rail
 // runs down the left, a small node sits per row. Rows are title-led (title
 // primary, "{client} . {type}" secondary) and the relative updated time is
-// rendered as "temperature" colour: brand green when fresh (< 6h), muted in the
-// settled middle (6h .. 3d), amber when stale (> 3d). Status shows as a small
-// letterpress tag, not a coloured pill. No edition numbers yet (the
-// deliveryNumber field is fallback-first and does not exist), so rows carry no
-// numbering. See SPECS/homepage-studio-ledger.md (the five signature moves).
+// rendered as "temperature" colour: --color-link when fresh (< 6h), muted in
+// the settled middle (6h-3d), subtle when stale (> 3d -- no amber, the warning
+// channel is reserved for overdue/blocked only). Status shows as a small
+// letterpress tag, not a coloured pill.
+// See SPECS/homepage-studio-ledger.md (the five signature moves).
 
 import Link from 'next/link'
-import { ArrowRight, Inbox } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 
 // Mirrors the fields RequestRow consumes in overview-content.tsx. Kept local so
 // this component owns its own contract; the parent maps its payload onto it.
@@ -39,16 +39,16 @@ const LABEL_STYLE: React.CSSProperties = {
   color: 'var(--color-text-subtle)',
 }
 
-// Temperature of the last touch: fresh work glows brand-green, settled work is
-// quiet, stale work warms to amber. Green is signal only (never decoration);
-// amber is the single warning channel. Red is reserved for overdue/error.
+// Temperature of the last touch: fresh work uses --color-link (AA-safe brand
+// green) to signal recency, settled work is quiet muted, stale work falls back
+// to subtle (no amber -- the warning channel is reserved for overdue/blocked).
 function temperature(updatedAt: string): { color: string; node: string } {
   const t = new Date(updatedAt).getTime()
   if (isNaN(t)) return { color: 'var(--color-text-subtle)', node: 'var(--color-border-strong)' }
   const age = Date.now() - t
-  if (age < 6 * HOUR) return { color: 'var(--color-brand)', node: 'var(--color-brand)' }
-  if (age > 3 * DAY) return { color: 'var(--color-warning)', node: 'var(--color-warning)' }
-  return { color: 'var(--color-text-subtle)', node: 'var(--color-border-strong)' }
+  if (age < 6 * HOUR) return { color: 'var(--color-link)', node: 'var(--color-link)' }
+  if (age > 3 * DAY) return { color: 'var(--color-text-subtle)', node: 'var(--color-border-strong)' }
+  return { color: 'var(--color-text-muted)', node: 'var(--color-border-strong)' }
 }
 
 // Compact relative stamp without a date-fns dependency in this leaf component.
@@ -83,6 +83,7 @@ export function InTheStudio({
 
   return (
     <section
+      aria-label="In the studio"
       className={className}
       style={{
         background: 'var(--color-bg)',
@@ -211,7 +212,7 @@ function TimelineRow({ req, isLast }: { req: RecentRequest; isLast: boolean }) {
           </span>
           <span
             className="tabular-nums"
-            style={{ fontSize: 'var(--text-xs)', fontWeight: temp.color === 'var(--color-text-subtle)' ? 400 : 600, color: temp.color }}
+            style={{ fontSize: 'var(--text-xs)', fontWeight: temp.color === 'var(--color-link)' ? 600 : 400, color: temp.color }}
           >
             {timeAgo(req.updatedAt)}
           </span>
@@ -249,21 +250,25 @@ function ShimmerRows() {
 
 function EmptyState() {
   return (
-    <div
-      className="flex flex-col items-center justify-center text-center"
-      style={{ padding: 'var(--space-10) var(--space-4)', gap: 'var(--space-2)' }}
-    >
-      <div
-        className="flex items-center justify-center brand-gradient"
-        style={{ width: '2.5rem', height: '2.5rem', borderRadius: 'var(--radius-leaf-sm)', marginBottom: 'var(--space-1)' }}
+    <div className="flex items-center" style={{ gap: 'var(--space-2)', padding: 'var(--space-3) 0' }}>
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden="true"
+        style={{ flexShrink: 0, color: 'var(--color-text-subtle)' }}
       >
-        <Inbox size={18} aria-hidden="true" style={{ color: '#fff' }} />
-      </div>
-      <p style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
-        All quiet in the studio
-      </p>
-      <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', maxWidth: '15rem' }}>
-        New requests land here as the work moves.
+        <path
+          d="M3 13C3 8 6 3.5 13 3C12.5 10 8 13 3 13ZM3 13C5.5 11 7.5 8.5 9.5 6"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-subtle)' }}>
+        Nothing in the studio yet.
       </p>
     </div>
   )

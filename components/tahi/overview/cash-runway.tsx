@@ -12,6 +12,8 @@
 // prompt. See SPECS/homepage-studio-ledger.md (the five signature moves, BOOKS).
 
 import { useEffect, useRef } from 'react'
+import Link from 'next/link'
+import { ArrowRight } from 'lucide-react'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 
 export interface CashData {
@@ -57,6 +59,7 @@ export function CashRunway({ cash, className }: { cash: CashData | null; classNa
 
   return (
     <section
+      aria-label="Cash and runway"
       className={className}
       style={{
         background: 'var(--color-bg)',
@@ -80,7 +83,7 @@ export function CashRunway({ cash, className }: { cash: CashData | null; classNa
           <div className="flex items-baseline" style={{ gap: 'var(--space-3)', flexWrap: 'wrap' }}>
             <span
               style={{
-                fontSize: 'clamp(2.25rem, 6vw, 3.25rem)',
+                fontSize: 'clamp(1.75rem, 4vw, 2.25rem)',
                 fontWeight: 700,
                 lineHeight: 1,
                 letterSpacing: '-0.02em',
@@ -88,7 +91,7 @@ export function CashRunway({ cash, className }: { cash: CashData | null; classNa
                 fontVariantNumeric: 'tabular-nums',
               }}
             >
-              {runway === null ? <span style={{ fontSize: 'var(--text-2xl)' }}>&mdash;</span> : `${runway.toFixed(1)} mo`}
+              {runway === null ? <span style={{ fontSize: 'var(--text-2xl)' }}>&middot;</span> : `${runway.toFixed(1)} mo`}
             </span>
             <span style={{ ...LABEL_STYLE, color: mood.color, paddingBottom: '0.25rem' }}>
               {mood.verdict}
@@ -121,6 +124,15 @@ export function CashRunway({ cash, className }: { cash: CashData | null; classNa
             <span style={{ color: 'var(--color-text-subtle)' }}> &middot; </span>
             Burn {format(cash.burnNzd)}/mo
           </div>
+
+          {/* Footer link */}
+          <Link
+            href="/financial-reports"
+            className="view-link flex items-center"
+            style={{ gap: 'var(--space-1)', marginTop: 'var(--space-4)', fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-link)', textDecoration: 'none' }}
+          >
+            View reports <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
+          </Link>
         </>
       )}
     </section>

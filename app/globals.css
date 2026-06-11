@@ -23,6 +23,10 @@
   --color-brand-light: #7aab6b;
   --color-brand-lighter: #97BA8C;
   --color-brand-bright: #78C45E;
+  /* --color-link: brand colour for inline links + small text. brand-dark clears
+     AA (>=4.5:1) on light surfaces where plain --color-brand (4.47:1) does not.
+     Overridden brighter in .dark. */
+  --color-link: #425F39;
   --color-brand-50: #f0f7ee;
   --color-brand-100: #dcefd8;
   --color-brand-200: #b9deb1;
@@ -236,7 +240,9 @@
   --space-1: 0.25rem;
   --space-1-5: 0.375rem;
   --space-2: 0.5rem;
+  --space-2-5: 0.625rem;
   --space-3: 0.75rem;
+  --space-3-5: 0.875rem;
   --space-4: 1rem;
   --space-5: 1.25rem;
   --space-6: 1.5rem;
@@ -1085,6 +1091,10 @@ html.tahi-private [data-private] button {
    translucent tinted backgrounds with lighter text. */
 .dark {
   color-scheme: dark;
+
+  /* Brighter brand for links/small text so they clear AA on the dark canvas
+     (plain --color-brand is only ~4:1 on #1C1B19). */
+  --color-link: #93C98A;
 
   /* Surfaces. Slice 0: de-greened to a warm desaturated near-black (the
      old saturated greens were the light mode's "dirty" problem in dark

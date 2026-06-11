@@ -120,12 +120,12 @@ export function PipelineAhead({ className }: { className?: string }) {
 
   if (loading) {
     return (
-      <div className={className} style={shell}>
+      <section aria-label="Pipeline" className={className} style={shell}>
         <Header />
         <div className="tahi-shimmer" style={{ height: '3rem', width: '60%', marginBottom: 'var(--space-4)' }} />
         <div className="tahi-shimmer" style={{ height: '5rem', marginBottom: 'var(--space-4)' }} />
         <div className="tahi-shimmer" style={{ height: '2.5rem' }} />
-      </div>
+      </section>
     )
   }
 
@@ -135,12 +135,12 @@ export function PipelineAhead({ className }: { className?: string }) {
   // Empty state: no active deals anywhere. Calm single line.
   if (openDeals.length === 0 && activeStages.length === 0) {
     return (
-      <div className={className} style={shell}>
+      <section aria-label="Pipeline" className={className} style={shell}>
         <Header />
         <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', lineHeight: 1.55 }}>
           No deals in the pipeline yet. New work will show up here as it lands.
         </p>
-      </div>
+      </section>
     )
   }
 
@@ -192,7 +192,7 @@ export function PipelineAhead({ className }: { className?: string }) {
     .slice(0, 3)
 
   return (
-    <div className={className} style={shell}>
+    <section aria-label="Pipeline" className={className} style={shell}>
       <Header />
 
       {/* HERO: 12-month expected */}
@@ -213,7 +213,7 @@ export function PipelineAhead({ className }: { className?: string }) {
           data-private
           className="tabular-nums"
           style={{
-            fontSize: 'clamp(2rem, 5vw, 2.75rem)',
+            fontSize: 'clamp(1.75rem, 4vw, 2.25rem)',
             fontWeight: 700,
             lineHeight: 1,
             letterSpacing: '-0.02em',
@@ -375,11 +375,11 @@ export function PipelineAhead({ className }: { className?: string }) {
       <Link
         href="/deals"
         className="view-link flex items-center"
-        style={{ gap: 'var(--space-1)', fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)', textDecoration: 'none' }}
+        style={{ gap: 'var(--space-1)', fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-link)', textDecoration: 'none' }}
       >
         View pipeline <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
       </Link>
-    </div>
+    </section>
   )
 }
 
@@ -390,11 +390,10 @@ function Header() {
     <p
       style={{
         fontSize: 'var(--text-2xs, 0.6875rem)',
-        fontWeight: 700,
-        letterSpacing: '0.1em',
+        fontWeight: 600,
+        letterSpacing: '0.08em',
         textTransform: 'uppercase',
         color: 'var(--color-text-subtle)',
-        textShadow: '0 1px 0 var(--color-bg)',
         marginBottom: 'var(--space-4)',
       }}
     >

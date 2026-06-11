@@ -53,6 +53,7 @@ export function ReceivablesTide({ arAging, className }: { arAging: ArAgingData |
 
   return (
     <section
+      aria-label="Receivables"
       className={className}
       style={{
         background: 'var(--color-bg)',
@@ -67,7 +68,7 @@ export function ReceivablesTide({ arAging, className }: { arAging: ArAgingData |
         <Link
           href="/invoices"
           className="view-link flex items-center flex-shrink-0"
-          style={{ gap: 'var(--space-1)', fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)', textDecoration: 'none' }}
+          style={{ gap: 'var(--space-1)', fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-link)', textDecoration: 'none' }}
         >
           View invoices <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
         </Link>

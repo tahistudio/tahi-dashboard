@@ -58,8 +58,12 @@ export function CardDeck<T>({ items, renderCard, getKey, ariaLabel, minHeight = 
       onKeyDown={onKeyDown}
       tabIndex={0}
       className="card-deck"
-      style={{ position: 'relative', outline: 'none' }}
+      style={{ position: 'relative', borderRadius: 'var(--radius-lg)' }}
     >
+      {/* sr-only live region: announces the active card to AT on navigation */}
+      <div aria-live="polite" aria-atomic="true" style={{ position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px', overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0 }}>
+        {`Card ${active + 1} of ${items.length}`}
+      </div>
       <div style={{ position: 'relative', minHeight }}>
         {items.map((item, i) => {
           // Depth relative to the active card, wrapping so the deck feels circular.
@@ -80,6 +84,7 @@ export function CardDeck<T>({ items, renderCard, getKey, ariaLabel, minHeight = 
             <div
               key={getKey(item, i)}
               aria-hidden={!isActive}
+              aria-label={isActive ? `Card ${active + 1} of ${items.length}` : undefined}
               className="card-deck-card"
               style={{
                 position: isActive ? 'relative' : 'absolute',
@@ -137,8 +142,8 @@ function DeckBtn({ children, label, onClick }: { children: React.ReactNode; labe
       aria-label={label}
       className="flex items-center justify-center new-menu-item"
       style={{
-        width: '1.75rem',
-        height: '1.75rem',
+        minWidth: '2.75rem',
+        minHeight: '2.75rem',
         borderRadius: 'var(--radius-sm)',
         border: '1px solid var(--color-border-subtle)',
         background: 'var(--color-bg)',

@@ -270,7 +270,13 @@ export function NeedsYou({ oldest, className }: NeedsYouProps) {
 
 // ─── Row ──────────────────────────────────────────────────────────────────────
 
+const SR_PREFIX: Partial<Record<Tone, string>> = {
+  danger: 'Urgent: ',
+  warning: 'Warning: ',
+}
+
 function NeedsYouRow({ tone, body, action }: { tone: Tone; body: React.ReactNode; action: React.ReactNode }) {
+  const prefix = SR_PREFIX[tone]
   return (
     <div
       className="flex flex-col sm:flex-row sm:items-center"
@@ -297,6 +303,7 @@ function NeedsYouRow({ tone, body, action }: { tone: Tone; body: React.ReactNode
         className="flex-1"
         style={{ minWidth: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text)', lineHeight: 1.4 }}
       >
+        {prefix && <span className="sr-only">{prefix}</span>}
         {body}
       </p>
       {action && <div className="flex-shrink-0">{action}</div>}
@@ -314,7 +321,7 @@ const actionStyle: React.CSSProperties = {
   minHeight: '2.75rem',
   padding: 'var(--space-1-5) var(--space-3-5, 0.875rem)',
   background: 'var(--color-bg)',
-  color: 'var(--color-brand)',
+  color: 'var(--color-link)',
   border: '1px solid var(--color-border)',
   borderRadius: 'var(--radius-leaf-sm)',
   fontSize: 'var(--text-sm)',

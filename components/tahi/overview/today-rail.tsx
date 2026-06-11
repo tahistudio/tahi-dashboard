@@ -81,7 +81,7 @@ function taskDueState(due: string | null): { label: string; color: string } | nu
   const dueDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
   const diffDays = Math.round((dueDay - startOfToday) / 86400000)
   if (diffDays < 0) return { label: `${Math.abs(diffDays)}d overdue`, color: 'var(--color-danger)' }
-  if (diffDays === 0) return { label: 'Due today', color: 'var(--color-warning)' }
+  if (diffDays === 0) return { label: 'Due today', color: 'var(--color-due-soon-text)' }
   if (diffDays <= 7) return { label: `Due in ${diffDays}d`, color: 'var(--color-text-muted)' }
   return { label: `Due ${d.toLocaleDateString('en-NZ', { month: 'short', day: 'numeric' })}`, color: 'var(--color-text-subtle)' }
 }
@@ -138,6 +138,7 @@ export function TodayRail({ className }: { className?: string }) {
 
   return (
     <section
+      aria-label="Today"
       className={className}
       style={{
         background: 'var(--color-bg)',
@@ -152,7 +153,7 @@ export function TodayRail({ className }: { className?: string }) {
         <Link
           href="/leads"
           className="view-link"
-          style={{ ...LABEL_STYLE, color: 'var(--color-brand)' }}
+          style={{ ...LABEL_STYLE, color: 'var(--color-link)' }}
         >
           Calls <ArrowRight size={11} aria-hidden="true" className="view-arrow" style={{ display: 'inline', verticalAlign: 'middle' }} />
         </Link>

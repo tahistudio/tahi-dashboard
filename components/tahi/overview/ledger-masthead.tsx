@@ -8,7 +8,7 @@
 // ledger row. The page speaks exactly one human sentence per day (the Studio
 // Note). See SPECS/homepage-studio-ledger.md.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Plus, ArrowRight } from 'lucide-react'
 import { CountUp } from '@/components/tahi/count-up'
@@ -49,7 +49,9 @@ const AUCKLAND_TZ = 'Pacific/Auckland'
 
 export function LedgerMasthead({ userName, data, loading }: { userName: string; data: LedgerData | null; loading: boolean }) {
   const { features } = usePermissions()
-  const firstName = userName.split(' ')[0]
+  // Guard: split may yield an empty string if userName is blank
+  const firstNameRaw = userName.split(' ')[0]
+  const firstName = firstNameRaw.trim() || null
 
   const canMrr = features['financial_reports'] !== false
   const canInvoices = features['invoices'] !== false
@@ -58,23 +60,34 @@ export function LedgerMasthead({ userName, data, loading }: { userName: string; 
 
   return (
     <div className="flex flex-col" style={{ gap: 'var(--space-5)' }}>
+      {/* Visually-hidden page h1 so every page has exactly one landmark heading */}
+      <h1
+        style={{
+          position: 'absolute',
+          width: '1px',
+          height: '1px',
+          padding: 0,
+          margin: '-1px',
+          overflow: 'hidden',
+          clip: 'rect(0,0,0,0)',
+          whiteSpace: 'nowrap',
+          border: 0,
+        }}
+      >
+        Studio overview
+      </h1>
+
       {/* Eyebrow: greeting + clocks + workshop light · quick action */}
       <div
         className="flex items-center justify-between flex-wrap"
         style={{ gap: 'var(--space-3)', fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}
       >
         <div className="flex items-center flex-wrap" style={{ gap: 'var(--space-2-5)', rowGap: 'var(--space-1)' }}>
-          <span style={{ fontWeight: 600, color: 'var(--color-text-muted)' }}>Kia ora, {firstName}</span>
-          <Dot />
-          <TodayDate />
-          <Dot />
-          <TwoClocks />
-          {data?.activeTimer?.running && (
-            <>
-              <Dot />
-              <WorkshopLight label={data.activeTimer.label} />
-            </>
-          )}
+          <span style={{ fontWeight: 600, color: 'var(--color-text-muted)' }}>
+            {firstName ? `Kia ora, ${firstName}` : 'Kia ora'}
+          </span>
+          {/* Mount-gate the entire date/clock/dot cluster so no dangling middots appear during SSR */}
+          <EyebrowTimeCluster activeTimer={data?.activeTimer ?? null} />
         </div>
         <NewMenu canRequests={canRequests} canClients={canClients} />
       </div>
@@ -103,7 +116,7 @@ export function LedgerMasthead({ userName, data, loading }: { userName: string; 
           ) : canMrr && data?.kpis.mrr != null ? (
             <MrrFigure value={data.kpis.mrr} />
           ) : (
-            <p style={{ fontSize: 'var(--text-xl)', color: 'var(--color-text-subtle)' }}>&mdash;</p>
+            <p style={{ fontSize: 'var(--text-xl)', color: 'var(--color-text-subtle)' }}>&middot;</p>
           )}
         </div>
 
@@ -222,13 +235,13 @@ function Money({ n }: { n: number }) {
 }
 
 function Muted() {
-  return <span style={{ color: 'var(--color-text-subtle)' }}>&mdash;</span>
+  return <span style={{ color: 'var(--color-text-subtle)' }}>&middot;</span>
 }
 
 function AgedMicroBar({ aging }: { aging: LedgerData['arAging'] }) {
   if (!aging || aging.totalNzd <= 0) return <span>nothing overdue</span>
   const segs = [
-    { v: aging.currentNzd, c: 'var(--color-success)' },
+    { v: aging.currentNzd, c: 'var(--color-border-strong)' },
     { v: aging.d30Nzd + aging.d60Nzd, c: 'var(--color-warning)' },
     { v: aging.d90Nzd, c: 'var(--color-danger)' },
   ]
@@ -257,33 +270,59 @@ function fmtTime(tz: string) {
   }
 }
 
-function TwoClocks() {
-  // Mount-gated: time differs between server and client, so render nothing until
-  // mounted to avoid a hydration mismatch, then tick every 30s.
+// Mount-gated cluster: renders nothing on SSR so no dangling Dot separators appear.
+// Once mounted, date + clocks + optional workshop light all render together with
+// their separating dots.
+function EyebrowTimeCluster({ activeTimer }: { activeTimer: LedgerMasthead_ActiveTimer | null }) {
   const [mounted, setMounted] = useState(false)
   const [, setTick] = useState(0)
   const [localTz, setLocalTz] = useState<string | null>(null)
+  const [dateStr, setDateStr] = useState<string | null>(null)
+
   useEffect(() => {
     setMounted(true)
     setLocalTz(Intl.DateTimeFormat().resolvedOptions().timeZone)
+    setDateStr(new Intl.DateTimeFormat('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date()))
     const id = setInterval(() => setTick(t => t + 1), 30000)
     return () => clearInterval(id)
   }, [])
+
   if (!mounted) return null
+
   const akl = fmtTime(AUCKLAND_TZ)
   const showLocal = localTz && localTz !== AUCKLAND_TZ
-  return (
-    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+
+  const nodes: React.ReactNode[] = []
+  if (dateStr) nodes.push(<span key="date">{dateStr}</span>)
+  nodes.push(
+    <span key="clocks" style={{ fontVariantNumeric: 'tabular-nums' }}>
       AKL {akl}
-      {showLocal && <span style={{ color: 'var(--color-text-subtle)' }}> &middot; you {fmtTime(localTz)}</span>}
+      {showLocal && <span style={{ color: 'var(--color-text-subtle)' }}> &middot; you {fmtTime(localTz!)}</span>}
     </span>
+  )
+  if (activeTimer?.running) {
+    nodes.push(<WorkshopLight key="workshop" label={activeTimer.label} />)
+  }
+
+  return (
+    <>
+      {nodes.map((node, idx) => (
+        <React.Fragment key={idx}>
+          <Dot />
+          {node}
+        </React.Fragment>
+      ))}
+    </>
   )
 }
 
+// Type alias used by EyebrowTimeCluster to avoid repeating the shape inline.
+type LedgerMasthead_ActiveTimer = NonNullable<LedgerData['activeTimer']>
+
 function WorkshopLight({ label }: { label: string | null }) {
   return (
-    <span className="flex items-center" style={{ gap: 'var(--space-1-5)', color: 'var(--color-brand)' }}>
-      <span className="workshop-pulse" aria-hidden="true" style={{ width: '0.4375rem', height: '0.4375rem', borderRadius: '9999px', background: 'var(--color-brand)', display: 'inline-block' }} />
+    <span className="flex items-center" style={{ gap: 'var(--space-1-5)', color: 'var(--color-link)' }}>
+      <span className="workshop-pulse" aria-hidden="true" style={{ width: '0.4375rem', height: '0.4375rem', borderRadius: '9999px', background: 'var(--color-link)', display: 'inline-block' }} />
       <span data-private style={{ fontWeight: 500 }}>{label ?? 'In the studio'}</span>
     </span>
   )
@@ -336,7 +375,7 @@ function StudioNote({ data, loading }: { data: LedgerData | null; loading: boole
               href={concern.href}
               data-private
               className="studio-note-link"
-              style={{ color: 'var(--color-brand)', fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}
+              style={{ color: 'var(--color-link)', fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}
             >
               {concern.text} <ArrowRight size={12} aria-hidden="true" style={{ display: 'inline', verticalAlign: 'middle' }} />
             </Link>
@@ -385,6 +424,9 @@ function LeafGlyph() {
 function NewMenu({ canRequests, canClients }: { canRequests: boolean; canClients: boolean }) {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
+  // Close on outside click + global Escape.
   useEffect(() => {
     if (!open) return
     function onDown(e: MouseEvent) {
@@ -401,6 +443,13 @@ function NewMenu({ canRequests, canClients }: { canRequests: boolean; canClients
     }
   }, [open])
 
+  // On open: move focus to the first menu item (ARIA menu pattern).
+  useEffect(() => {
+    if (!open || !menuRef.current) return
+    const first = menuRef.current.querySelector<HTMLElement>('[role="menuitem"]')
+    first?.focus()
+  }, [open])
+
   const items = [
     canRequests && { label: 'New request', href: '/requests?new=1' },
     canClients && { label: 'Add client', href: '/clients?new=1' },
@@ -408,6 +457,30 @@ function NewMenu({ canRequests, canClients }: { canRequests: boolean; canClients
   ].filter(Boolean) as { label: string; href: string }[]
 
   if (items.length === 0) return null
+
+  function handleMenuKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (!menuRef.current) return
+    const allItems = Array.from(menuRef.current.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+    const focused = document.activeElement as HTMLElement
+    const idx = allItems.indexOf(focused)
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      const next = allItems[(idx + 1) % allItems.length]
+      next?.focus()
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      const prev = allItems[(idx - 1 + allItems.length) % allItems.length]
+      prev?.focus()
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      allItems[0]?.focus()
+    } else if (e.key === 'End') {
+      e.preventDefault()
+      allItems[allItems.length - 1]?.focus()
+    } else if (e.key === 'Escape') {
+      setOpen(false)
+    }
+  }
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
@@ -433,7 +506,9 @@ function NewMenu({ canRequests, canClients }: { canRequests: boolean; canClients
       </button>
       {open && (
         <div
+          ref={menuRef}
           role="menu"
+          onKeyDown={handleMenuKeyDown}
           style={{
             position: 'absolute',
             top: 'calc(100% + 0.375rem)',
@@ -475,14 +550,6 @@ function NewMenu({ canRequests, canClients }: { canRequests: boolean; canClients
 
 function Dot() {
   return <span aria-hidden="true" style={{ color: 'var(--color-text-subtle)', opacity: 0.6 }}>&middot;</span>
-}
-
-function TodayDate() {
-  const [s, setS] = useState<string | null>(null)
-  useEffect(() => {
-    setS(new Intl.DateTimeFormat('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date()))
-  }, [])
-  return <span suppressHydrationWarning>{s ?? ''}</span>
 }
 
 function joinList(parts: string[]): string {

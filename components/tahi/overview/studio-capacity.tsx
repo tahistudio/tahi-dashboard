@@ -73,7 +73,7 @@ export function StudioCapacity({ className }: { className?: string }) {
 
   if (loading) {
     return (
-      <div className={className} style={shell}>
+      <section aria-label="The studio" className={className} style={shell}>
         <Header />
         <div className="flex flex-wrap" style={{ gap: 'var(--space-5)' }}>
           {[0, 1].map(n => (
@@ -83,7 +83,7 @@ export function StudioCapacity({ className }: { className?: string }) {
             </div>
           ))}
         </div>
-      </div>
+      </section>
     )
   }
 
@@ -91,12 +91,12 @@ export function StudioCapacity({ className }: { className?: string }) {
 
   if (members.length === 0) {
     return (
-      <div className={className} style={shell}>
+      <section aria-label="The studio" className={className} style={shell}>
         <Header />
         <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', lineHeight: 1.55 }}>
           No one in the studio yet. Add team members and log hours to fill the beakers.
         </p>
-      </div>
+      </section>
     )
   }
 
@@ -106,7 +106,7 @@ export function StudioCapacity({ className }: { className?: string }) {
   const verdict = verdictLine(overallUtil, data?.totalCapacity ?? 0, data?.totalAllocated ?? 0)
 
   return (
-    <div className={className} style={shell}>
+    <section aria-label="The studio" className={className} style={shell}>
       <Header />
 
       {/* Beakers — wrap on mobile, stay tidy. */}
@@ -142,7 +142,7 @@ export function StudioCapacity({ className }: { className?: string }) {
           {verdict.text}
         </p>
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -158,7 +158,7 @@ function Beaker({ member }: { member: CapacityMember }) {
   const fillColour =
     util > 100 ? 'var(--color-danger)' : util > 90 ? 'var(--color-warning)' : 'var(--color-brand)'
   const pctColour =
-    util > 100 ? 'var(--color-danger)' : util > 90 ? 'var(--color-warning)' : 'var(--color-text)'
+    util > 100 ? 'var(--color-danger)' : util > 90 ? 'var(--color-due-soon-text)' : 'var(--color-text)'
 
   return (
     <div className="flex flex-col items-center" style={{ gap: 'var(--space-2)', minWidth: BEAKER_WIDTH }}>
@@ -261,11 +261,10 @@ function Header() {
     <p
       style={{
         fontSize: 'var(--text-2xs, 0.6875rem)',
-        fontWeight: 700,
-        letterSpacing: '0.1em',
+        fontWeight: 600,
+        letterSpacing: '0.08em',
         textTransform: 'uppercase',
         color: 'var(--color-text-subtle)',
-        textShadow: '0 1px 0 var(--color-bg)',
         marginBottom: 'var(--space-5)',
       }}
     >
