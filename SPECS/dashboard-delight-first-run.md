@@ -1,9 +1,12 @@
-# Dashboard Delight Layer — first-run journey (login → onboarding → home)
+# Tahi Dashboard — Premium Design Refresh (foundation + first-run delight)
 
-Status: 2026-06-11 — DESIGN, awaiting spec review. First slice of the dashboard
-"delight layer" (microanimations + personality). Scope: the **first-run journey**
-only — sign-in / sign-up, the onboarding phase, and the home (overview) page.
-Full-app propagation is a later slice.
+Status: 2026-06-11 — DESIGN, awaiting spec review. Build paused per Liam ("spec
+everything fully first"). A premium refresh in two parts: **(Slice 0)** an app-wide
+COLOUR + light + space + responsiveness foundation that fixes the "dirty" green-
+tinted feel, then **(Slices A-C)** the motion + personality "delight layer", focused
+first on the **first-run journey** (sign-in / sign-up, onboarding, overview).
+Colour direction is research-backed (premium light + dark surface systems); see the
+Colour foundation section. Full per-page propagation is a later slice.
 
 See [[project_client_detail_overhaul]] (design-system reference + primitives),
 [[project_icon_pack]] (animated-icon set, used sparingly),
@@ -109,6 +112,55 @@ calm-premium, aligned with our system. We borrow ideas, not pixels.
 - Circular progress rings (animated fill) for progress / capacity / time.
 - The interaction Liam called out: **stacked cards with depth you swipe away to
   reveal the next** : a card-deck. We add a `CardStack` primitive.
+
+## Colour & light : the premium foundation (Slice 0)
+
+**Diagnosis of the "dirty" feel.** Our neutrals are GREEN-TINTED. The page wrapper
+is `#f5f7f5` (green-grey); `--color-bg-secondary #f7f9f6`, `--color-bg-tertiary
+#eef3ec`, and the borders (`#d4e0d0`, `#e8f0e6`) all carry a green cast. Tinted
+greys read muddy. Premium products use clean near-neutral off-whites and reserve
+the brand hue for signal only. (Research: off-white beats pure white over long
+sessions, but the tint must be intentional, not a wash; Stripe-style white/near-
+white canvas + white cards reads premium via subtle contrast.)
+
+**Light mode**
+- **Canvas (page) = a warm-neutral off-white**, de-greened. We already have
+  `--color-bg-cream #F3F4F2`; standardise the entire app canvas on it (kill the
+  `#f5f7f5` wrapper) and nudge it warm-neutral so it reads cream, not green.
+- **Cards = pure white `#ffffff`** floating on the cream : that crisp white-on-cream
+  contrast IS the premium signal (Stripe / the Crextio ref do exactly this).
+- **De-green the secondary ramp:** retune `bg-secondary` / `bg-tertiary` / `mist`
+  and the subtle borders toward warm-neutral greys (keep `--color-border-strong
+  #CDCFCC` as the canonical hairline). Brand green = accents / signal only.
+- Hierarchy comes from white-vs-cream + one hairline + type + space, not green wash.
+
+**Dark mode** (currently saturated greens : `--color-bg-dark #2A3626` etc., heavy)
+- **Not pure black** (causes halation). Base canvas ~L:9-11 desaturated near-black
+  with a WHISPER of warm/green undertone so it stays "Tahi dark", not generic.
+- **Elevation by LIGHTNESS, not shadow:** canvas -> cards (+3-4 L) -> popovers /
+  modals (+3-4 L). Three clear layers.
+- Off-white text (~#E8EBE6), not pure white. Low-contrast borders. Brand green kept
+  for accents only.
+
+**Token restructure (semantic surfaces).** Role-named tokens that resolve per theme
+so every surface is intentional: `--surface-canvas` (page), `--surface` (cards),
+`--surface-raised` / `--surface-overlay` (popovers/modals), plus the de-greened
+neutral + border ramp. Migrate components off ad-hoc `--color-bg*` to these, done
+carefully so nothing regresses. This is **Slice 0** : highest-impact, lowest-risk,
+and it transforms the whole feel before any motion lands.
+
+## Space, density & responsiveness
+
+**Space.** Standardise on the rem spacing scale; consistent card padding (~1.25rem)
++ section rhythm (`space-y-6`). Let surfaces breathe; de-emphasise chrome so content
+leads (Linear). Use width deliberately : a bento-ish grid where tile size maps to
+importance, not dead space or cramming. ~6-10 components per view; every widget
+earns its place with a next-step / deep-link.
+
+**Responsiveness.** True mobile-first (the buyer checks on a phone). 375px / tablet /
+desktop reflow gracefully (stack + reorder by importance, not just shrink). No
+horizontal scroll; 44px targets; sidebar -> bottom tab bar on the client portal.
+Test every surface at 375 + 768 + desktop, light + dark.
 
 ## The reusable kit (built this slice, reused everywhere after)
 
@@ -273,4 +325,12 @@ mount entrance; CountUp = number tween; celebrate = one-shot overlay).
 - **Joy moments on the big wins**; the hero is client-facing onboarding completion
   (later: request delivered). Leaf sweep, never confetti. (Liam, 2026-06-11.)
 - Approach = **CSS-first + tiny JS**, no motion library. (2026-06-11.)
-- First build scope = **sign-in/up + onboarding + home** only. (Liam, 2026-06-11.)
+- First build scope = **sign-in/up + onboarding + home** only, AFTER the Slice 0
+  colour foundation. (Liam, 2026-06-11.)
+- **Sequence: spec everything fully first, then build** (no implementation until the
+  spec is reviewed + approved). (Liam, 2026-06-11.)
+- The "dirty" feel = **green-tinted neutrals**. Fix = de-greened warm-neutral cream
+  canvas + pure-white cards (light), desaturated near-black with elevation-by-
+  lightness (dark), brand green reserved for signal. Research-backed; **exact canvas
+  direction (warm cream vs cool neutral) pending Liam's pick** on the presented
+  recommendation. (2026-06-11.)
