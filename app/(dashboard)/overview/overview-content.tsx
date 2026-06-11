@@ -82,8 +82,8 @@ interface KPIs {
   activeClients: number
   openRequests: number
   inProgress: number
-  outstandingInvoicesNzd: number
-  mrr: number
+  outstandingInvoicesNzd?: number
+  mrr?: number
 }
 
 interface RecentRequest {
@@ -537,7 +537,20 @@ function PipelineCapacityCard({ className }: { className?: string }) {
     )
   }
 
-  if (!data) return null
+  if (!data) {
+    return (
+      <SectionCard
+        className={className}
+        icon={<HeaderIcon><AnimatedGauge size={14} /></HeaderIcon>}
+        title="Team Capacity"
+      >
+        <EmptyRows
+          title="No capacity data yet"
+          message="Add team members and allocate hours to see utilization here."
+        />
+      </SectionCard>
+    )
+  }
 
   const utilizationPct = data.totalCapacity > 0
     ? Math.round((data.totalAllocated / data.totalCapacity) * 100)
@@ -568,7 +581,7 @@ function PipelineCapacityCard({ className }: { className?: string }) {
           </h2>
           <ProgressRing value={utilizationPct} size={40} strokeWidth={4} label="Team capacity utilization">
             <span style={{ color: barColor }}>
-              <CountUp value={utilizationPct} format={n => `${Math.round(n)}%`} />
+              {utilizationPct}%
             </span>
           </ProgressRing>
         </div>
@@ -1141,10 +1154,9 @@ function StatCard({
 
       {/* Value */}
       {value === null ? (
-        <div className="animate-pulse" style={{
+        <div className="tahi-shimmer" style={{
           height: '2rem',
           width: '3.5rem',
-          background: 'var(--color-bg-tertiary)',
           borderRadius: 'var(--radius-sm)',
           marginBottom: 'var(--space-2)',
         }} />

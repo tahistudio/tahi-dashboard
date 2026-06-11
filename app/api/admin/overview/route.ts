@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, ne, count, and, inArray, gte, sql } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
+import { resolvePermissions, can } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,13 +19,19 @@ async function getRateMap(drizzle: D1): Promise<RateMap> {
 // ── GET /api/admin/overview ───────────────────────────────────────────────────
 // Returns all KPIs needed for the admin dashboard home page in one request.
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
-  if (!isTahiAdmin(orgId)) {
+  const auth = await getRequestAuth(req)
+  if (!isTahiAdmin(auth.orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const database = await db()
   const drizzle = database as D1
+
+  // Resolve caller's feature-level access so sensitive KPIs are omitted from
+  // the response when the caller lacks the corresponding feature.
+  const access = await resolvePermissions(drizzle, auth)
+  const canSeeMrr = can(access, 'financial_reports')
+  const canSeeInvoices = can(access, 'invoices')
 
   // Load exchange rates for currency conversion
   const rateMap = await getRateMap(drizzle)
@@ -162,8 +169,8 @@ export async function GET(req: NextRequest) {
       activeClients: activeClientsResult[0]?.count ?? 0,
       openRequests: openRequestsResult[0]?.count ?? 0,
       inProgress: inProgressResult[0]?.count ?? 0,
-      outstandingInvoicesNzd: Math.round(outstandingNzd),
-      mrr: Math.round(mrr),
+      ...(canSeeInvoices ? { outstandingInvoicesNzd: Math.round(outstandingNzd) } : {}),
+      ...(canSeeMrr ? { mrr: Math.round(mrr) } : {}),
     },
     recentRequests,
     monthlyRevenue,
