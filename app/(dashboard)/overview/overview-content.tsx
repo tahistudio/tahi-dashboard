@@ -1195,8 +1195,8 @@ function ReviewOutreachBanner() {
   return (
     <div style={{
       padding: 'var(--space-5)',
-      background: 'var(--color-info-bg)',
-      border: '1px solid var(--color-info)',
+      background: 'var(--color-brand-50)',
+      border: '1px solid var(--color-brand-100)',
       borderRadius: 'var(--radius-lg)',
     }}>
       <p style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
