@@ -1,26 +1,30 @@
 'use client'
 
-// ─── Pipeline Ahead (the AHEAD zone, left) ───────────────────────────────────
+// ─── Pipeline Ahead (the AHEAD/SALES zone, amber HERO tile) ──────────────────
 //
-// Merges the old PipelineSummaryCard + PipelineForecastCard into one card.
-// Okisuka hierarchy: the 12-month expected figure is the single HERO; one quiet
-// gap sentence ("raw, weighted to ...") sits beneath it. Below that, a continuous
-// descending erosion funnel (per-stage weighted bars) shows where value leaks out
-// of the pipeline. Then a neutral "closing this month" rail (no fake target tick,
-// since monthlyCloseTarget does not exist yet) and up to three named closing-deal
-// chips. See SPECS/homepage-studio-ledger.md (AHEAD zone) + homepage-visual-refs.md.
+// Domain SALES (amber). This is the second of the at-most-two tinted hero tiles
+// per viewport (the other is Content violet). It composes from the SHARED
+// DomainCard `heroTile` shell so it renders the IDENTICAL amber wash + header +
+// radius + padding as Content Engine; the card has no bespoke shell of its own.
+// The 12-month expected figure is the single body HERO; one quiet gap sentence
+// ("raw, weighted to ...") sits beneath it. Below that, a continuous descending
+// erosion funnel (per-stage weighted bars) shows where value leaks out of the
+// pipeline. Then a neutral "closing this month" rail (no fake target tick, since
+// monthlyCloseTarget does not exist yet), up to three named closing-deal chips,
+// and a "stale" badge at the top when open deals have gone untouched. See
+// SPECS/homepage-lit.md (colour rules) + homepage-studio-ledger.md (AHEAD zone).
 //
 // Reuses both existing fetches verbatim:
 //   - /api/admin/deals + /api/admin/pipeline/stages  (summary / closing-this-month)
 //   - /api/admin/reports/pipeline-forecast           (weighted forecast / funnel)
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
-import { ArrowRight, TrendingUp } from 'lucide-react'
+import { TrendingUp } from 'lucide-react'
+import { apiPath } from '@/lib/api'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { calculatePipelineTotals } from '@/lib/pipeline-math'
 import { CountUp } from '@/components/tahi/count-up'
-import { IconChip } from '@/components/tahi/overview/domain-card'
+import { DomainCard } from '@/components/tahi/overview/domain-card'
 
 // ─── Shared data shapes (mirrors overview-content.tsx) ───────────────────────
 
@@ -77,10 +81,18 @@ interface ForecastResponse {
   byStage: ForecastByStage[]
 }
 
-const apiBase = process.env.NEXT_PUBLIC_BASEPATH ?? ''
-function api(path: string): string {
-  return `${apiBase}${path}`
-}
+// One DomainCard heroTile shell for every state (loading, empty, populated), so
+// Pipeline renders the IDENTICAL amber hero wash + header + radius + padding as
+// the Content Engine hero. The amber lives only in the shared shell's tint +
+// IconChip; the body figures and names stay ink.
+const CARD_PROPS = {
+  domain: 'sales',
+  title: 'Pipeline',
+  icon: <TrendingUp size={15} aria-hidden="true" />,
+  heroTile: true,
+  viewHref: '/deals',
+  viewLabel: 'Pipeline',
+} as const
 
 export function PipelineAhead({ className }: { className?: string }) {
   const { format } = useDisplayCurrency()
@@ -93,9 +105,9 @@ export function PipelineAhead({ className }: { className?: string }) {
   useEffect(() => {
     let cancelled = false
     Promise.all([
-      fetch(api('/api/admin/deals?limit=100')).then(r => (r.ok ? (r.json() as Promise<{ items: DealSummary[] }>) : { items: [] })),
-      fetch(api('/api/admin/pipeline/stages')).then(r => (r.ok ? (r.json() as Promise<{ stages: StageSummary[] }>) : { stages: [] })),
-      fetch(api('/api/admin/reports/pipeline-forecast')).then(r => (r.ok ? (r.json() as Promise<ForecastResponse>) : null)),
+      fetch(apiPath('/api/admin/deals?limit=100')).then(r => (r.ok ? (r.json() as Promise<{ items: DealSummary[] }>) : { items: [] })),
+      fetch(apiPath('/api/admin/pipeline/stages')).then(r => (r.ok ? (r.json() as Promise<{ stages: StageSummary[] }>) : { stages: [] })),
+      fetch(apiPath('/api/admin/reports/pipeline-forecast')).then(r => (r.ok ? (r.json() as Promise<ForecastResponse>) : null)),
     ])
       .then(([dealsData, stagesData, forecastData]) => {
         if (cancelled) return
@@ -117,21 +129,13 @@ export function PipelineAhead({ className }: { className?: string }) {
     }
   }, [])
 
-  const shell: React.CSSProperties = {
-    background: 'var(--color-bg)',
-    border: '1px solid var(--color-border-subtle)',
-    borderRadius: 'var(--radius-lg)',
-    padding: 'var(--space-6)',
-  }
-
   if (loading) {
     return (
-      <section aria-label="Pipeline" className={className} style={shell}>
-        <Header />
+      <DomainCard {...CARD_PROPS} className={className}>
         <div className="tahi-shimmer" style={{ height: '3rem', width: '60%', marginBottom: 'var(--space-4)' }} />
         <div className="tahi-shimmer" style={{ height: '5rem', marginBottom: 'var(--space-4)' }} />
         <div className="tahi-shimmer" style={{ height: '2.5rem' }} />
-      </section>
+      </DomainCard>
     )
   }
 
@@ -141,12 +145,11 @@ export function PipelineAhead({ className }: { className?: string }) {
   // Empty state: no active deals anywhere. Calm single line.
   if (openDeals.length === 0 && activeStages.length === 0) {
     return (
-      <section aria-label="Pipeline" className={className} style={shell}>
-        <Header />
+      <DomainCard {...CARD_PROPS} className={className}>
         <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', lineHeight: 1.55 }}>
           No deals in the pipeline yet. New work will show up here as it lands.
         </p>
-      </section>
+      </DomainCard>
     )
   }
 
@@ -207,8 +210,27 @@ export function PipelineAhead({ className }: { className?: string }) {
   }).length
 
   return (
-    <section aria-label="Pipeline" className={className} style={shell}>
-      <Header staleCount={staleCount} />
+    <DomainCard {...CARD_PROPS} className={className}>
+      {/* Stale badge: open deals untouched past the threshold. Lives at the top
+          of the card body now the shared shell owns the header. */}
+      {staleCount > 0 && (
+        <div className="flex" style={{ marginBottom: 'var(--space-3)' }}>
+          <span
+            className="tabular-nums flex-shrink-0"
+            style={{
+              padding: '0.0625rem 0.4375rem',
+              borderRadius: 'var(--radius-full)',
+              background: 'color-mix(in oklab, var(--color-warning) 16%, var(--color-bg))',
+              color: 'color-mix(in oklab, var(--color-warning) 64%, var(--color-text))',
+              fontSize: 'var(--text-2xs, 0.6875rem)',
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {staleCount} stale
+          </span>
+        </div>
+      )}
 
       {/* HERO: 12-month expected */}
       <div style={{ marginBottom: 'var(--space-1)' }}>
@@ -306,8 +328,10 @@ export function PipelineAhead({ className }: { className?: string }) {
       )}
 
       {/* Closing-this-month rail: value + deal count on a neutral month-progress rail
-          (no fake target tick — monthlyCloseTarget does not exist yet). */}
-      <div style={{ marginBottom: closingChips.length > 0 ? 'var(--space-4)' : 'var(--space-5)' }}>
+          (no fake target tick, since monthlyCloseTarget does not exist yet). The
+          shared shell owns the bottom padding now, so this is the last block's
+          bottom margin only when chips follow. */}
+      <div style={{ marginBottom: closingChips.length > 0 ? 'var(--space-4)' : 0 }}>
         <div className="flex items-baseline justify-between" style={{ marginBottom: 'var(--space-2)', gap: 'var(--space-2)' }}>
           <p
             style={{
@@ -359,7 +383,7 @@ export function PipelineAhead({ className }: { className?: string }) {
 
       {/* Up to 3 named closing-deal chips */}
       {closingChips.length > 0 && (
-        <div className="flex flex-wrap" style={{ gap: 'var(--space-1-5)', marginBottom: 'var(--space-5)' }}>
+        <div className="flex flex-wrap" style={{ gap: 'var(--space-1-5)' }}>
           {closingChips.map(d => (
             <span
               key={d.id}
@@ -385,74 +409,6 @@ export function PipelineAhead({ className }: { className?: string }) {
           ))}
         </div>
       )}
-
-      {/* Footer link */}
-      <Link
-        href="/deals"
-        className="view-link flex items-center"
-        style={{ gap: 'var(--space-1)', fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-link)', textDecoration: 'none' }}
-      >
-        View pipeline <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
-      </Link>
-    </section>
-  )
-}
-
-// ─── SALES hero header band ───────────────────────────────────────────────────
-//
-// The AHEAD/SALES hero header: a tinted amber band carrying the amber IconChip +
-// the letterpress "Pipeline" label, plus an optional "stale" badge when open
-// deals have gone untouched. The card body stays on the plain surface (this is
-// the at-most-two-tinted-hero-tiles-per-viewport rule applied at the header band
-// only, mirroring DomainCard heroTile but without restructuring this card).
-
-function Header({ staleCount }: { staleCount?: number }) {
-  return (
-    <div
-      className="flex items-center justify-between"
-      style={{
-        gap: 'var(--space-3)',
-        marginBottom: 'var(--space-5)',
-        marginLeft: 'calc(var(--space-6) * -1)',
-        marginRight: 'calc(var(--space-6) * -1)',
-        marginTop: 'calc(var(--space-6) * -1)',
-        padding: 'var(--space-4) var(--space-6)',
-        background: 'var(--domain-sales-tint)',
-        borderRadius: 'var(--radius-lg) var(--radius-lg) 0 0',
-      }}
-    >
-      <div className="flex items-center" style={{ gap: 'var(--space-2-5)', minWidth: 0 }}>
-        <IconChip domain="sales">
-          <TrendingUp size={15} aria-hidden="true" />
-        </IconChip>
-        <p
-          style={{
-            fontSize: 'var(--text-2xs, 0.6875rem)',
-            fontWeight: 600,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            color: 'var(--color-text-muted)',
-          }}
-        >
-          Pipeline
-        </p>
-      </div>
-      {staleCount != null && staleCount > 0 && (
-        <span
-          className="tabular-nums flex-shrink-0"
-          style={{
-            padding: '0.0625rem 0.4375rem',
-            borderRadius: 'var(--radius-full)',
-            background: 'color-mix(in oklab, var(--color-warning) 16%, var(--color-bg))',
-            color: 'color-mix(in oklab, var(--color-warning) 64%, var(--color-text))',
-            fontSize: 'var(--text-2xs, 0.6875rem)',
-            fontWeight: 600,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {staleCount} stale
-        </span>
-      )}
-    </div>
+    </DomainCard>
   )
 }

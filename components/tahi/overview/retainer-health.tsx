@@ -47,8 +47,10 @@ interface RetainerClient {
 // the explicit healthStatus with the churn score so a high score always reads
 // hot even when an org's healthStatus is stale or unset.
 interface HealthTone {
-  /** Semantic ink for the dial arc + score. */
+  /** Semantic ink for SVG graphic arcs (3:1 graphic threshold is sufficient). */
   color: string
+  /** AA-passing ink for readable text (numeral + verdict) on white. */
+  textColor: string
   /** A soft tint for the dial track. */
   track: string
   /** One-word verdict under the dial. */
@@ -64,6 +66,7 @@ function healthTone(client: RetainerClient): HealthTone {
   if (status === 'red' || score >= 60) {
     return {
       color: 'var(--color-danger)',
+      textColor: 'color-mix(in oklab, var(--color-danger) 62%, var(--color-text))',
       track: 'var(--color-danger-bg)',
       verdict: 'at risk',
       pulse: true,
@@ -73,6 +76,7 @@ function healthTone(client: RetainerClient): HealthTone {
   if (status === 'amber' || score >= 35) {
     return {
       color: 'var(--color-warning)',
+      textColor: 'color-mix(in oklab, var(--color-warning) 62%, var(--color-text))',
       track: 'var(--color-warning-bg)',
       verdict: 'watch',
       pulse: false,
@@ -81,6 +85,7 @@ function healthTone(client: RetainerClient): HealthTone {
   // Green: healthy.
   return {
     color: 'var(--color-success)',
+    textColor: 'color-mix(in oklab, var(--color-success) 55%, var(--color-text))',
     track: 'var(--color-success-bg)',
     verdict: 'healthy',
     pulse: false,
@@ -240,7 +245,7 @@ function ClientCard({
               {Math.round(client.utilizationPct)}% used
             </CountPill>
           )}
-          <span className="tabular-nums" style={{ fontSize: 'var(--text-2xs, 0.6875rem)', fontWeight: 600, color: tone.color }}>
+          <span className="tabular-nums" style={{ fontSize: 'var(--text-2xs, 0.6875rem)', fontWeight: 600, color: tone.textColor }}>
             {tone.verdict}
           </span>
         </div>
@@ -314,7 +319,7 @@ function ChurnDial({ score, tone }: { score: number; tone: HealthTone }) {
             fontSize: 'var(--text-base)',
             fontWeight: 700,
             lineHeight: 1,
-            color: tone.color,
+            color: tone.textColor,
             letterSpacing: '-0.02em',
           }}
         >

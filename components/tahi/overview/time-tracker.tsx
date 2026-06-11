@@ -139,6 +139,7 @@ export function TimeTracker({ className }: { className?: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [srAnnounce, setSrAnnounce] = useState('')
 
   // Shared 1s tick drives the live clock (no per-card interval).
   useSharedTick(1000)
@@ -194,6 +195,35 @@ export function TimeTracker({ className }: { className?: string }) {
       active = false
     }
   }, [fetchTimer, fetchToday])
+
+  // ── SR announcements ────────────────────────────────────────────────────────
+  // Announce timer state transitions to screen readers via a visually-hidden
+  // live region. We use a brief non-empty string then clear it so re-starting
+  // the same request fires a fresh announcement each time.
+  const prevTimerRef = useRef<ActiveTimer | null>(null)
+  useEffect(() => {
+    const prev = prevTimerRef.current
+    prevTimerRef.current = timer
+    if (!loading) {
+      if (!prev && timer) {
+        // Started
+        const name = timer.targetTitle ?? 'Studio time'
+        setSrAnnounce(`Timer started for ${name}`)
+      } else if (prev && !timer) {
+        // Stopped
+        setSrAnnounce('Timer stopped')
+      } else if (prev && timer && prev.isPaused !== timer.isPaused) {
+        setSrAnnounce(timer.isPaused ? 'Timer paused' : 'Timer resumed')
+      }
+    }
+  }, [timer, loading])
+
+  // Clear announcement after a short delay so the same message can fire again.
+  useEffect(() => {
+    if (!srAnnounce) return
+    const id = window.setTimeout(() => setSrAnnounce(''), 2000)
+    return () => window.clearTimeout(id)
+  }, [srAnnounce])
 
   // ── Mutations ───────────────────────────────────────────────────────────────
 
@@ -286,6 +316,25 @@ export function TimeTracker({ className }: { className?: string }) {
         padding: 'var(--space-6)',
       }}
     >
+      {/* Visually-hidden live region for timer state announcements */}
+      <span
+        aria-live="polite"
+        aria-atomic="true"
+        style={{
+          position: 'absolute',
+          width: '1px',
+          height: '1px',
+          padding: 0,
+          margin: '-1px',
+          overflow: 'hidden',
+          clip: 'rect(0,0,0,0)',
+          whiteSpace: 'nowrap',
+          border: 0,
+        }}
+      >
+        {srAnnounce}
+      </span>
+
       {/* Header: teal chip + letterpress title + live/idle state pill */}
       <div className="flex items-center justify-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-5)' }}>
         <div className="flex items-center" style={{ gap: 'var(--space-2-5)', minWidth: 0 }}>
@@ -307,7 +356,7 @@ export function TimeTracker({ className }: { className?: string }) {
                 display: 'inline-block',
               }}
             />
-            {timer?.isPaused ? 'Paused' : 'Running'}
+            {timer?.isPaused ? 'Timer paused' : 'Timer running'}
           </CountPill>
         )}
       </div>
@@ -422,7 +471,7 @@ function RunningFace({
           className="tabular-nums"
           aria-live="off"
           style={{
-            fontSize: 'clamp(2.25rem, 7vw, 3rem)',
+            fontSize: 'clamp(1.75rem, 5vw, 2.25rem)',
             fontWeight: 700,
             lineHeight: 1,
             letterSpacing: '-0.02em',
@@ -617,6 +666,7 @@ function RequestPicker({
             fontWeight: 600,
             cursor: 'pointer',
             padding: 'var(--space-1) var(--space-1)',
+            borderRadius: 'var(--radius-sm)',
           }}
         >
           Cancel

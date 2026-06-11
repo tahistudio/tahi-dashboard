@@ -65,7 +65,13 @@ const DOMAIN: Record<Domain, DomainTokens> = {
   ops: { ink: 'var(--domain-ops)', tint: 'var(--domain-ops-tint)' },
 }
 
-const TITLE_STYLE: React.CSSProperties = {
+/**
+ * TITLE_STYLE. The single canonical letterpress card-title treatment: 2xs
+ * uppercase, 0.08em tracking, semibold, muted ink. Exported so every homepage
+ * card (and any hand-rolled loading/empty header) renders the IDENTICAL label
+ * instead of re-declaring its own copy.
+ */
+export const TITLE_STYLE: React.CSSProperties = {
   fontSize: 'var(--text-2xs, 0.6875rem)',
   fontWeight: 600,
   letterSpacing: '0.08em',
@@ -190,7 +196,12 @@ interface DomainCardProps {
   domain: Domain
   title: string
   icon: ReactNode
-  /** When true, the header band gets the domain tint (a hero tile). */
+  /**
+   * When true, the WHOLE card surface wears the capped domain tint (a hero
+   * tile). This full-surface wash is the single canonical hero treatment: at
+   * most two per viewport (Content violet, Pipeline amber). Both hero cards must
+   * pass `heroTile` to this shell so they render identically.
+   */
   heroTile?: boolean
   viewHref?: string
   viewLabel?: string
@@ -203,10 +214,12 @@ interface DomainCardProps {
 /**
  * DomainCard. The standard card shell for the homepage expansion: hairline
  * border (no shadow), radius-lg, space-6 padding, a leaf-radius IconChip in the
- * domain colour beside a letterpress title. When `heroTile`, the header band
- * wears the domain tint (one of the at-most-two tinted hero tiles per viewport).
- * When `footer` is provided it renders in a hover/tap reveal row; on touch an
- * accessible toggle button opens it (data-open drives the CSS expand).
+ * domain colour beside a letterpress title. When `heroTile`, the whole card
+ * surface wears the capped domain tint (one of the at-most-two tinted hero tiles
+ * per viewport) - this is the single canonical hero treatment, so every hero
+ * card shares the same wash, header, radius, and padding. When `footer` is
+ * provided it renders in a hover/tap reveal row; on touch an accessible toggle
+ * button opens it (data-open drives the CSS expand).
  */
 export function DomainCard({
   domain,
@@ -232,9 +245,10 @@ export function DomainCard({
         border: '1px solid var(--color-border-subtle)',
         borderRadius: 'var(--radius-lg)',
         padding: 'var(--space-6)',
-        // Hero tiles get a soft domain wash behind the whole card header; the
-        // tint is capped (11% light / 14% dark via the token) so it reads as a
-        // panel, not a fill. Non-hero cards stay on the plain surface.
+        // Hero tiles get a full-surface domain wash; the tint is capped (11%
+        // light / 16% dark via the token) so it reads as a panel, not a fill.
+        // Non-hero cards stay on the plain surface. This is the one canonical
+        // hero look every heroTile card shares.
         ...(heroTile ? { background: t.tint } : null),
       }}
     >
@@ -268,6 +282,7 @@ export function DomainCard({
             type="button"
             onClick={() => setOpen(o => !o)}
             aria-expanded={open}
+            aria-label={open ? `Show less for ${title}` : `Show more for ${title}`}
             className="domain-card-footer-toggle flex items-center"
             style={{
               gap: 'var(--space-1)',

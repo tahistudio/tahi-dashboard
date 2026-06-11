@@ -343,17 +343,16 @@ function RibbonSkeleton() {
   return (
     <div aria-hidden="true">
       <div
-        className="animate-pulse"
-        style={{ width: '8rem', height: '1.5rem', borderRadius: '0.375rem', background: 'var(--color-bg-tertiary)' }}
+        className="tahi-shimmer"
+        style={{ width: '8rem', height: '1.5rem', borderRadius: '0.375rem' }}
       />
       <div
-        className="animate-pulse"
+        className="tahi-shimmer"
         style={{
           width: '100%',
           height: '8.5rem',
           marginTop: 'var(--space-4)',
           borderRadius: 'var(--radius-md, 0.5rem)',
-          background: 'var(--color-bg-tertiary)',
         }}
       />
     </div>

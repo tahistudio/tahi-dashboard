@@ -271,7 +271,7 @@ function ExpiringRow({ contract }: { contract: Contract }) {
         style={{
           fontSize: 'var(--text-xs)',
           fontWeight: 600,
-          color: urgent ? 'var(--color-warning)' : 'var(--color-text-muted)',
+          color: urgent ? 'color-mix(in oklab, var(--color-warning) 62%, var(--color-text))' : 'var(--color-text-muted)',
           whiteSpace: 'nowrap',
           flexShrink: 0,
         }}

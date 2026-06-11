@@ -41,7 +41,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { PenTool } from 'lucide-react'
 import { apiPath } from '@/lib/api'
-import { DomainCard, IconChip, CountPill } from '@/components/tahi/overview/domain-card'
+import { DomainCard, CountPill } from '@/components/tahi/overview/domain-card'
 import { CardDeck } from '@/components/tahi/card-deck'
 import { CountUp } from '@/components/tahi/count-up'
 import { useReveal, useSharedTick } from '@/lib/use-homepage-motion'
@@ -102,12 +102,18 @@ const LABEL_STYLE: React.CSSProperties = {
   color: 'var(--color-text-subtle)',
 }
 
-const SHELL_HERO: React.CSSProperties = {
-  background: 'var(--domain-content-tint)',
-  border: '1px solid var(--color-border-subtle)',
-  borderRadius: 'var(--radius-lg)',
-  padding: 'var(--space-6)',
-}
+// One DomainCard heroTile shell for every state. Loading and empty render the
+// IDENTICAL violet wash + header + radius + padding as the populated card; only
+// the body child differs. This keeps the skeleton from drifting from the live
+// card (which previously used a hand-rolled SHELL_HERO + local Header).
+const CARD_PROPS = {
+  domain: 'content',
+  title: 'Content engine',
+  icon: <PenTool size={15} aria-hidden="true" />,
+  heroTile: true,
+  viewHref: '/content-studio',
+  viewLabel: 'Studio',
+} as const
 
 // ── Card ──────────────────────────────────────────────────────────────────────
 
@@ -167,11 +173,10 @@ export function ContentEngine({ className }: { className?: string }) {
 
   if (loading) {
     return (
-      <section aria-label="Content engine" className={className} style={SHELL_HERO}>
-        <Header />
+      <DomainCard {...CARD_PROPS} className={className}>
         <div className="tahi-shimmer" style={{ height: '8.5rem', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-4)' }} />
         <div className="tahi-shimmer" style={{ height: '0.875rem', width: '70%' }} />
-      </section>
+      </DomainCard>
     )
   }
 
@@ -179,12 +184,7 @@ export function ContentEngine({ className }: { className?: string }) {
 
   return (
     <DomainCard
-      domain="content"
-      title="Content engine"
-      icon={<PenTool size={15} aria-hidden="true" />}
-      heroTile
-      viewHref="/content-studio"
-      viewLabel="Studio"
+      {...CARD_PROPS}
       className={className}
       footer={<PublishFooter history={history} nextSlotIso={nextSlotIso} />}
     >
@@ -569,15 +569,4 @@ function formatCountdown(ms: number): string {
   if (days > 0) return `${days}d ${hours}h`
   if (hours > 0) return `${hours}h ${minutes}m`
   return `${minutes}m ${seconds}s`
-}
-
-// ── Letterpress header (loading state) ────────────────────────────────────────
-
-function Header() {
-  return (
-    <div className="flex items-center" style={{ gap: 'var(--space-2-5)', marginBottom: 'var(--space-5)' }}>
-      <IconChip domain="content"><PenTool size={15} aria-hidden="true" /></IconChip>
-      <h2 style={LABEL_STYLE}>Content engine</h2>
-    </div>
-  )
 }

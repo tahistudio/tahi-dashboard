@@ -222,9 +222,28 @@ export function TheWire({ className }: { className?: string }) {
         fontSize: 'var(--text-xs)',
       }}
     >
-      <div
+      {/* Stable live region: always present, never animated, so SR picks up each
+          event announcement reliably regardless of the visual transition state. */}
+      <span
         aria-live="polite"
         aria-atomic="true"
+        style={{
+          position: 'absolute',
+          width: '1px',
+          height: '1px',
+          padding: 0,
+          margin: '-1px',
+          overflow: 'hidden',
+          clip: 'rect(0,0,0,0)',
+          whiteSpace: 'nowrap',
+          border: 0,
+        }}
+      >
+        {current.text}
+      </span>
+
+      {/* Visual ticker: transitions are decorative only; no live region here. */}
+      <div
         style={{
           display: 'flex',
           alignItems: 'center',

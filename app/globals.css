@@ -1765,7 +1765,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   margin: 0;
 }
 .world-clock-scrubber:focus-visible {
-  outline: none;
+  outline: 2px solid var(--domain-delivery);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
 }
 .world-clock-scrubber::-webkit-slider-runnable-track {
   height: 0.375rem;
@@ -2095,19 +2097,21 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.55; }
   }
+  /* Finite, not infinite: these attention dots ping a few times on load then
+     rest. Resting-page motion budget allows only the workshop ember to loop. */
   .tahi-dial-pulse {
-    animation: tahi-dial-pulse 2.4s var(--ease-productive) infinite;
+    animation: tahi-dial-pulse 2.4s var(--ease-productive) 3;
   }
 
   /* Near-expiry amber dot: a gentler version of the dial pulse. */
   .tahi-warn-dot {
-    animation: tahi-dial-pulse 2s var(--ease-productive) infinite;
+    animation: tahi-dial-pulse 2s var(--ease-productive) 3;
   }
 
   /* Hot-leads 80+ "new" dot + proposals "opened" dot: a soft attention breathe. */
   .hot-leads-pulse,
   .proposals-open-pulse {
-    animation: tahi-dial-pulse 2.2s var(--ease-productive) infinite;
+    animation: tahi-dial-pulse 2.2s var(--ease-productive) 3;
   }
 
   /* One-shot attention pulse: a single scale + fade breathe played once on

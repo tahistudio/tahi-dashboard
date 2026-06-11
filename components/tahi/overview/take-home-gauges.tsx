@@ -149,8 +149,7 @@ function FounderGauge({ founder, target, inView }: { founder: Founder; target: n
             <path
               d={arcPath(frac, 1)}
               fill="none"
-              stroke="var(--color-due-soon-text)"
-              strokeOpacity={0.32}
+              stroke="color-mix(in oklab, var(--color-warning) 55%, transparent)"
               strokeWidth={GAUGE.stroke}
               strokeLinecap="round"
             />
@@ -348,17 +347,16 @@ function GaugesSkeleton() {
       {[0, 1].map(i => (
         <div key={i} className="flex flex-col items-center" style={{ gap: 'var(--space-2)' }}>
           <div
-            className="animate-pulse"
+            className="tahi-shimmer"
             style={{
               width: GAUGE.size,
               height: GAUGE.size,
               borderRadius: '9999px',
-              background: 'var(--color-bg-tertiary)',
             }}
           />
           <div
-            className="animate-pulse"
-            style={{ width: '3.5rem', height: '0.75rem', borderRadius: '9999px', background: 'var(--color-bg-tertiary)' }}
+            className="tahi-shimmer"
+            style={{ width: '3.5rem', height: '0.75rem', borderRadius: '9999px' }}
           />
         </div>
       ))}

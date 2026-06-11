@@ -519,8 +519,8 @@ function ClockRow({
             aria-label={`Remove ${labelFor(zone)}`}
             className="world-clock-remove tahi-press flex items-center justify-center"
             style={{
-              width: '1.75rem',
-              height: '1.75rem',
+              minWidth: '2.75rem',
+              minHeight: '2.75rem',
               border: 'none',
               background: 'transparent',
               color: 'var(--color-text-subtle)',
@@ -561,6 +561,9 @@ function ZonePicker({
 
   return (
     <div
+      onKeyDown={e => {
+        if (e.key === 'Escape') onClose()
+      }}
       style={{
         marginBottom: 'var(--space-4)',
         padding: 'var(--space-3)',
@@ -605,7 +608,7 @@ function ZonePicker({
               className="world-clock-chip tahi-press flex items-center"
               style={{
                 gap: 'var(--space-1)',
-                minHeight: '2.25rem',
+                minHeight: '2.75rem',
                 padding: '0 var(--space-3)',
                 border: '1px solid var(--color-border)',
                 borderRadius: 'var(--radius-full)',
@@ -754,7 +757,7 @@ function Converter({
               aria-pressed={selected}
               className="tahi-press"
               style={{
-                minHeight: '2.25rem',
+                minHeight: '2.75rem',
                 minWidth: '2.75rem',
                 padding: '0 var(--space-2-5)',
                 border: '1px solid',

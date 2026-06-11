@@ -198,6 +198,16 @@ export function ProposalsLive({ className }: { className?: string }) {
     )
   }
 
+  const footerContent = (
+    <ProposalsSummaryFooter
+      shared={funnel.shared}
+      accepted={funnel.accepted}
+      declined={funnel.declined}
+      totalViews={funnel.totalViews}
+      proposals={proposals}
+    />
+  )
+
   return (
     <DomainCard
       domain="sales"
@@ -205,6 +215,7 @@ export function ProposalsLive({ className }: { className?: string }) {
       icon={<FileText size={15} aria-hidden="true" />}
       viewHref="/proposals"
       viewLabel="All proposals"
+      footer={footerContent}
       className={className}
     >
       {/* Live view ticker */}
@@ -275,6 +286,90 @@ function SemanticPill({ kind, children }: { kind: 'success' | 'warning'; childre
     >
       {children}
     </span>
+  )
+}
+
+// ── Proposals summary footer (revealed on hover/tap) ─────────────────────────
+//
+// Compact 30-day breakdown: shared, accepted, and declined counts plus the
+// aggregate unique-session reach across all shared proposals. Uses data already
+// fetched by the parent - no extra API call needed.
+
+const FOOTER_LABEL: React.CSSProperties = {
+  fontSize: 'var(--text-2xs, 0.6875rem)',
+  fontWeight: 600,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+  color: 'var(--color-text-subtle)',
+}
+
+function ProposalsSummaryFooter({
+  shared,
+  accepted,
+  declined,
+  totalViews,
+  proposals,
+}: {
+  shared: number
+  accepted: number
+  declined: number
+  totalViews: number
+  proposals: LiveProposal[]
+}) {
+  const totalUniqueSessions = proposals.reduce((sum, p) => sum + (p.stats?.uniqueSessions ?? 0), 0)
+  const conversionRate = shared + accepted + declined > 0
+    ? Math.round((accepted / (shared + accepted + declined)) * 100)
+    : null
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+      <span style={FOOTER_LABEL}>30-day pipeline</span>
+      <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+        <FooterStat label="Shared" value={shared} />
+        <FooterStat label="Accepted" value={accepted} highlight="success" />
+        {declined > 0 && <FooterStat label="Declined" value={declined} />}
+        {conversionRate !== null && (
+          <FooterStat label="Close rate" value={`${conversionRate}%`} />
+        )}
+      </div>
+      {totalUniqueSessions > 0 && (
+        <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', lineHeight: 1.5 }}>
+          <span className="tabular-nums" style={{ fontWeight: 600, color: 'var(--color-text-muted)' }}>
+            {totalUniqueSessions}
+          </span>{' '}
+          unique viewer{totalUniqueSessions === 1 ? '' : 's'},{' '}
+          <span className="tabular-nums" style={{ fontWeight: 600, color: 'var(--color-text-muted)' }}>
+            {totalViews}
+          </span>{' '}
+          total view{totalViews === 1 ? '' : 's'}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function FooterStat({
+  label,
+  value,
+  highlight,
+}: {
+  label: string
+  value: number | string
+  highlight?: 'success'
+}) {
+  const valueColor = highlight === 'success'
+    ? 'color-mix(in oklab, var(--color-success) 55%, var(--color-text))'
+    : 'var(--color-text)'
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
+      <span style={FOOTER_LABEL}>{label}</span>
+      <span
+        className="tabular-nums"
+        style={{ fontSize: 'var(--text-base)', fontWeight: 700, color: valueColor, lineHeight: 1.2 }}
+      >
+        {value}
+      </span>
+    </div>
   )
 }
 
