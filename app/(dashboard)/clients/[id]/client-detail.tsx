@@ -6,12 +6,11 @@ import { apiPath } from '@/lib/api'
 import { EngagementHealthCard } from '@/components/tahi/engagement-health-card'
 import { Gate } from '@/components/tahi/permissions-context'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
-import { stageColour } from '@/lib/chart-colors'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { ActivityTimeline, ActivityItem, type ActivityType } from '@/components/tahi/activity-timeline'
-import { Badge } from '@/components/tahi/badge'
+import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { EmptyState } from '@/components/tahi/empty-state'
-import { SkeletonList, SkeletonTable } from '@/components/tahi/skeletons'
+import { SkeletonList } from '@/components/tahi/skeletons'
 import {
   Globe,
   Building2,
@@ -2748,7 +2747,6 @@ function BrandsTab({ clientId }: { clientId: string }) {
   const [formSaving, setFormSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -2863,12 +2861,9 @@ function BrandsTab({ clientId }: { clientId: string }) {
 
       {/* Create / Edit form */}
       {(showCreate || editingId) && (
-        <div
-          className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl mb-4"
-          style={{ padding: '1.25rem' }}
-        >
+        <Card className="mb-4">
           <h3 className="text-sm font-semibold text-[var(--color-text)] mb-3">
-            {editingId ? 'Edit Brand' : 'New Brand'}
+            {editingId ? 'Edit brand' : 'New brand'}
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -2976,7 +2971,7 @@ function BrandsTab({ clientId }: { clientId: string }) {
               Cancel
             </TahiButton>
           </div>
-        </div>
+        </Card>
       )}
 
       {brands.length === 0 && !showCreate ? (
@@ -2989,16 +2984,7 @@ function BrandsTab({ clientId }: { clientId: string }) {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {brands.map(brand => (
-            <div
-              key={brand.id}
-              className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl transition-shadow"
-              style={{
-                padding: '1rem',
-                boxShadow: hoveredId === brand.id ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
-              }}
-              onMouseEnter={() => setHoveredId(brand.id)}
-              onMouseLeave={() => setHoveredId(null)}
-            >
+            <Card key={brand.id} padding="sm">
               {/* Logo + name row */}
               <div className="flex items-start gap-3 mb-3">
                 {brand.logoUrl ? (
@@ -3091,7 +3077,7 @@ function BrandsTab({ clientId }: { clientId: string }) {
                   Delete
                 </button>
               </div>
-            </div>
+            </Card>
           ))}
         </div>
       )}
@@ -3120,12 +3106,12 @@ const CONTRACT_TYPE_LABELS: Record<string, string> = {
   other: 'Other',
 }
 
-const CONTRACT_STATUS_STYLES: Record<string, { bg: string; text: string }> = {
-  draft:     { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)' },
-  sent:      { bg: 'var(--color-info-bg)', text: 'var(--color-info)' },
-  signed:    { bg: 'var(--color-success-bg)', text: 'var(--color-success)' },
-  expired:   { bg: 'var(--color-danger-bg)', text: 'var(--color-danger)' },
-  cancelled: { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-subtle)' },
+const CONTRACT_STATUS_TONES: Record<string, BadgeTone> = {
+  draft:     'neutral',
+  sent:      'info',
+  signed:    'positive',
+  expired:   'danger',
+  cancelled: 'neutral',
 }
 
 function ContractsTab({ clientId }: { clientId: string }) {
@@ -3148,11 +3134,55 @@ function ContractsTab({ clientId }: { clientId: string }) {
 
   useEffect(() => { void load() }, [load])
 
-  if (loading) {
-    return (
-      <SkeletonList rows={4} />
-    )
-  }
+  const columns: DataTableColumn<ContractRow>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      render: r => (
+        <div className="flex items-center gap-2 font-medium text-[var(--color-text)]">
+          <ScrollText className="w-4 h-4 text-[var(--color-text-muted)] flex-shrink-0" />
+          {r.name}
+        </div>
+      ),
+    },
+    {
+      key: 'type',
+      header: 'Type',
+      render: r => (
+        <Badge tone="neutral" size="sm">{CONTRACT_TYPE_LABELS[r.type] ?? r.type}</Badge>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: r => <Badge tone={CONTRACT_STATUS_TONES[r.status] ?? 'neutral'} size="sm" className="capitalize">{r.status}</Badge>,
+    },
+    {
+      key: 'expiry',
+      header: 'Expiry',
+      muted: true,
+      render: r => r.expiryDate
+        ? new Date(r.expiryDate).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
+        : '--',
+    },
+    {
+      key: 'download',
+      header: '',
+      align: 'right',
+      width: '8rem',
+      render: r => (
+        <a
+          href={apiPath(`/api/uploads/serve/${r.storageKey}`)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] font-medium"
+        >
+          <Download className="w-3.5 h-3.5" />
+          Download
+        </a>
+      ),
+    },
+  ]
 
   return (
     <div>
@@ -3160,72 +3190,23 @@ function ContractsTab({ clientId }: { clientId: string }) {
         <h2 className="font-semibold text-[var(--color-text)]">Contracts ({contracts.length})</h2>
       </div>
 
-      {contracts.length === 0 ? (
-        <EmptyState
-          variant="inline"
-          icon={<ScrollText className="w-8 h-8" />}
-          title="No contracts for this client yet"
-          description="Upload contracts from the contracts page."
+      <Card padding="none">
+        <DataTable<ContractRow>
+          ariaLabel="Contracts"
+          columns={columns}
+          rows={contracts}
+          getRowId={r => r.id}
+          loading={loading}
+          empty={
+            <EmptyState
+              variant="inline"
+              icon={<ScrollText className="w-8 h-8" />}
+              title="No contracts for this client yet"
+              description="Upload contracts from the contracts page."
+            />
+          }
         />
-      ) : (
-        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Name</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Type</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Status</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Expiry</th>
-                <th className="text-right px-4 py-3 font-medium text-[var(--color-text-muted)]"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {contracts.map(contract => {
-                const statusStyle = CONTRACT_STATUS_STYLES[contract.status] ?? CONTRACT_STATUS_STYLES.draft
-                return (
-                  <tr key={contract.id} className="border-b border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-secondary)] transition-colors">
-                    <td className="px-4 py-3 text-[var(--color-text)] font-medium">
-                      <div className="flex items-center gap-2">
-                        <ScrollText className="w-4 h-4 text-[var(--color-text-muted)] flex-shrink-0" />
-                        {contract.name}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]">
-                        {CONTRACT_TYPE_LABELS[contract.type] ?? contract.type}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full capitalize"
-                        style={{ background: statusStyle.bg, color: statusStyle.text }}
-                      >
-                        {contract.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-[var(--color-text-muted)]">
-                      {contract.expiryDate
-                        ? new Date(contract.expiryDate).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
-                        : '--'}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <a
-                        href={apiPath(`/api/uploads/serve/${contract.storageKey}`)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] font-medium"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        Download
-                      </a>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      </Card>
     </div>
   )
 }
@@ -3247,6 +3228,13 @@ const CALL_STATUS_STYLES: Record<string, { bg: string; color: string; label: str
   completed:  { bg: 'var(--color-success-bg)', color: 'var(--color-success)', label: 'Completed' },
   cancelled:  { bg: 'var(--color-bg-tertiary)',          color: 'var(--color-text-muted)',        label: 'Cancelled' },
   no_show:    { bg: 'var(--color-danger-bg)',   color: 'var(--color-danger)',   label: 'No Show' },
+}
+
+const CALL_STATUS_TONES: Record<string, BadgeTone> = {
+  scheduled: 'info',
+  completed: 'positive',
+  cancelled: 'neutral',
+  no_show:   'danger',
 }
 
 function CallsTab({ clientId, orgName }: { clientId: string; orgName: string }) {
@@ -3333,15 +3321,15 @@ function CallsTab({ clientId, orgName }: { clientId: string; orgName: string }) 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h3 className="text-base font-semibold text-[var(--color-text)]">Scheduled Calls</h3>
+        <h3 className="font-semibold text-[var(--color-text)]">Scheduled calls</h3>
         <TahiButton size="sm" onClick={() => setShowForm(!showForm)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
-          Schedule Call
+          Schedule call
         </TahiButton>
       </div>
 
       {/* New call form */}
       {showForm && (
-        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-5 space-y-4">
+        <Card className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label htmlFor="call-title" className="block text-sm font-medium text-[var(--color-text)] mb-1">Title</label>
@@ -3406,18 +3394,20 @@ function CallsTab({ clientId, orgName }: { clientId: string; orgName: string }) 
               {submitting ? 'Scheduling...' : 'Schedule'}
             </TahiButton>
           </div>
-        </div>
+        </Card>
       )}
 
       {/* Upcoming calls */}
       {upcoming.length > 0 && (
         <div>
           <h4 className="text-sm font-medium text-[var(--color-text-muted)] mb-2">Upcoming</h4>
-          <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-hidden divide-y divide-[var(--color-border-subtle)]">
-            {upcoming.map(call => (
-              <CallRow key={call.id} call={call} onStatusChange={updateCallStatus} />
-            ))}
-          </div>
+          <Card padding="none">
+            <div className="divide-y divide-[var(--color-border-subtle)]">
+              {upcoming.map(call => (
+                <CallRow key={call.id} call={call} onStatusChange={updateCallStatus} />
+              ))}
+            </div>
+          </Card>
         </div>
       )}
 
@@ -3425,20 +3415,23 @@ function CallsTab({ clientId, orgName }: { clientId: string; orgName: string }) 
       {past.length > 0 && (
         <div>
           <h4 className="text-sm font-medium text-[var(--color-text-muted)] mb-2">Past</h4>
-          <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-hidden divide-y divide-[var(--color-border-subtle)]">
-            {past.map(call => (
-              <CallRow key={call.id} call={call} onStatusChange={updateCallStatus} />
-            ))}
-          </div>
+          <Card padding="none">
+            <div className="divide-y divide-[var(--color-border-subtle)]">
+              {past.map(call => (
+                <CallRow key={call.id} call={call} onStatusChange={updateCallStatus} />
+              ))}
+            </div>
+          </Card>
         </div>
       )}
 
       {calls.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <Video className="w-10 h-10 text-[var(--color-text-subtle)] mb-3" />
-          <h3 className="text-sm font-semibold text-[var(--color-text)] mb-1">No calls scheduled</h3>
-          <p className="text-xs text-[var(--color-text-muted)]">Schedule a call with {orgName} to get started.</p>
-        </div>
+        <EmptyState
+          variant="inline"
+          icon={<Video className="w-8 h-8" />}
+          title="No calls scheduled"
+          description={`Schedule a call with ${orgName} to get started.`}
+        />
       )}
     </div>
   )
@@ -3469,12 +3462,9 @@ function CallRow({ call, onStatusChange }: { call: ScheduledCallRow; onStatusCha
           ({call.durationMinutes}min)
         </p>
       </div>
-      <span
-        className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0"
-        style={{ background: style.bg, color: style.color }}
-      >
+      <Badge tone={CALL_STATUS_TONES[call.status] ?? 'info'} size="sm" className="flex-shrink-0">
         {style.label}
-      </span>
+      </Badge>
       {call.meetingUrl && (
         <a
           href={call.meetingUrl}
@@ -3520,15 +3510,12 @@ function MessagesTab({ orgName }: { clientId: string; orgName: string }) {
         </TahiButton>
       </div>
 
-      <div className="flex flex-col items-center justify-center py-16 bg-[var(--color-bg-secondary)] rounded-xl text-center">
-        <MessageSquare className="w-10 h-10 text-[var(--color-text-subtle)] mb-3" />
-        <h3 className="text-sm font-semibold text-[var(--color-text)] mb-1">
-          Conversations with {orgName}
-        </h3>
-        <p className="text-xs text-[var(--color-text-muted)] max-w-xs">
-          Open the messaging page to view and manage conversations with this client.
-        </p>
-      </div>
+      <EmptyState
+        variant="inline"
+        icon={<MessageSquare className="w-8 h-8" />}
+        title={`Conversations with ${orgName}`}
+        description="Open the messaging page to view and manage conversations with this client."
+      />
     </div>
   )
 }
@@ -3558,20 +3545,51 @@ function TimeTab({ clientId }: { clientId: string }) {
       .finally(() => setLoading(false))
   }, [clientId])
 
-  if (loading) {
-    return (
-      <SkeletonTable rows={4} columns={4} />
-    )
-  }
-
   const totalHours = entries.reduce((s, e) => s + e.hours, 0)
   const billableHours = entries.filter(e => e.billable).reduce((s, e) => s + e.hours, 0)
+
+  const columns: DataTableColumn<TimeEntryRow>[] = [
+    {
+      key: 'date',
+      header: 'Date',
+      muted: true,
+      render: r => new Date(r.date.includes('T') ? r.date : r.date + 'T00:00:00').toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' }),
+    },
+    {
+      key: 'teamMember',
+      header: 'Team member',
+      render: r => (
+        <span className="font-medium text-[var(--color-text)]">{r.teamMemberName ?? 'Unknown'}</span>
+      ),
+    },
+    {
+      key: 'hours',
+      header: 'Hours',
+      render: r => (
+        <span className="font-semibold text-[var(--color-text)]">{r.hours.toFixed(1)}h</span>
+      ),
+    },
+    {
+      key: 'billable',
+      header: 'Billable',
+      render: r => (
+        <Badge tone={r.billable ? 'positive' : 'neutral'} size="sm">{r.billable ? 'Yes' : 'No'}</Badge>
+      ),
+    },
+    {
+      key: 'notes',
+      header: 'Notes',
+      muted: true,
+      wrap: true,
+      render: r => <span className="block max-w-[12.5rem] truncate">{r.notes ?? '--'}</span>,
+    },
+  ]
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-semibold text-[var(--color-text)]">
-          Time Entries ({entries.length})
+          Time entries ({entries.length})
         </h2>
         <div className="flex items-center gap-3 text-sm">
           <span className="text-[var(--color-text-muted)]">
@@ -3583,59 +3601,22 @@ function TimeTab({ clientId }: { clientId: string }) {
         </div>
       </div>
 
-      {entries.length === 0 ? (
-        <EmptyState
-          variant="inline"
-          icon={<Clock className="w-8 h-8" />}
-          title="No time entries for this client yet"
+      <Card padding="none">
+        <DataTable<TimeEntryRow>
+          ariaLabel="Time entries"
+          columns={columns}
+          rows={entries}
+          getRowId={r => r.id}
+          loading={loading}
+          empty={
+            <EmptyState
+              variant="inline"
+              icon={<Clock className="w-8 h-8" />}
+              title="No time entries for this client yet"
+            />
+          }
         />
-      ) : (
-        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Date</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)] hidden sm:table-cell">Team Member</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Hours</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Billable</th>
-                <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)] hidden md:table-cell">Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map(entry => (
-                <tr
-                  key={entry.id}
-                  className="border-b border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-secondary)] transition-colors"
-                >
-                  <td className="px-4 py-3 text-[var(--color-text-muted)]">
-                    {new Date(entry.date.includes('T') ? entry.date : entry.date + 'T00:00:00').toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
-                  </td>
-                  <td className="px-4 py-3 text-[var(--color-text)] font-medium hidden sm:table-cell">
-                    {entry.teamMemberName ?? 'Unknown'}
-                  </td>
-                  <td className="px-4 py-3 text-[var(--color-text)] font-semibold">
-                    {entry.hours.toFixed(1)}h
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
-                      style={{
-                        background: entry.billable ? 'var(--color-success-bg)' : 'var(--color-bg-tertiary)',
-                        color: entry.billable ? 'var(--color-success)' : 'var(--color-text-muted)',
-                      }}
-                    >
-                      {entry.billable ? 'Yes' : 'No'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-[var(--color-text-muted)] max-w-[12.5rem] truncate hidden md:table-cell">
-                    {entry.notes ?? '--'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      </Card>
     </div>
   )
 }
@@ -3710,36 +3691,32 @@ function DealsTab({ clientId, orgName }: { clientId: string; orgName: string }) 
         <EmptyState
           variant="inline"
           icon={<Handshake className="w-8 h-8" />}
-          title="No deals for {orgName} yet"
+          title={`No deals for ${orgName} yet`}
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {deals.map((deal, i) => {
-            // Use shared stageColour() so a deal's stage chip matches the
-            // Pipeline board and the Reports charts for the same stage.
-            const stageColor = stageColour(deal.stageName, i)
+          {deals.map(deal => {
             const isWon = deal.stageIsClosedWon === 1
             const isLost = deal.stageIsClosedLost === 1
             return (
-              <div
+              <Card
                 key={deal.id}
-                className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl cursor-pointer hover:border-[var(--color-brand)] transition-colors"
-                style={{ padding: '1.25rem' }}
+                interactive
                 onClick={() => router.push(`/pipeline?deal=${deal.id}`)}
               >
-                <div className="flex items-start justify-between mb-2">
-                  <h3 className="text-sm font-semibold text-[var(--color-text)] truncate mr-2">
+                <div className="flex items-start justify-between mb-2 gap-2">
+                  <h3 className="text-sm font-semibold text-[var(--color-text)] truncate">
                     {deal.title}
                   </h3>
-                  <span
-                    className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0"
-                    style={{
-                      background: isWon ? 'var(--color-success-bg)' : isLost ? 'var(--color-danger-bg)' : `${stageColor}18`,
-                      color: isWon ? 'var(--color-brand)' : isLost ? 'var(--color-danger)' : stageColor,
-                    }}
-                  >
-                    {deal.stageName ?? 'Unknown'}
-                  </span>
+                  {/* Use shared stageColour() (via Badge stage=) so a deal's stage
+                      chip matches the Pipeline board and the Reports charts. */}
+                  {isWon ? (
+                    <Badge tone="positive" size="sm" className="flex-shrink-0">{deal.stageName ?? 'Unknown'}</Badge>
+                  ) : isLost ? (
+                    <Badge tone="danger" size="sm" className="flex-shrink-0">{deal.stageName ?? 'Unknown'}</Badge>
+                  ) : (
+                    <Badge stage={deal.stageName ?? 'Unknown'} size="sm" className="flex-shrink-0">{deal.stageName ?? 'Unknown'}</Badge>
+                  )}
                 </div>
 
                 <p className="text-lg font-bold text-[var(--color-text)] mb-2">
@@ -3769,7 +3746,7 @@ function DealsTab({ clientId, orgName }: { clientId: string; orgName: string }) 
                     </span>
                   )}
                 </div>
-              </div>
+              </Card>
             )
           })}
         </div>
@@ -3859,10 +3836,7 @@ function CrmActivitiesTab({ clientId }: { clientId: string }) {
 
       {/* Quick-add form */}
       {showForm && (
-        <div
-          className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl mb-4"
-          style={{ padding: '1.25rem' }}
-        >
+        <Card className="mb-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <div>
               <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Type</label>
@@ -3908,7 +3882,7 @@ function CrmActivitiesTab({ clientId }: { clientId: string }) {
               Save
             </TahiButton>
           </div>
-        </div>
+        </Card>
       )}
 
       {items.length === 0 ? (
@@ -3918,7 +3892,7 @@ function CrmActivitiesTab({ clientId }: { clientId: string }) {
           title="No CRM activities for this client yet"
         />
       ) : (
-        <div className="bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] p-4">
+        <Card>
           <ActivityTimeline>
             {items.map(item => (
               <ActivityItem
@@ -3936,7 +3910,7 @@ function CrmActivitiesTab({ clientId }: { clientId: string }) {
               />
             ))}
           </ActivityTimeline>
-        </div>
+        </Card>
       )}
     </div>
   )
@@ -4053,17 +4027,13 @@ function RevenueTab({ clientId }: { clientId: string }) {
 
   return (
     <div>
-      <h2 className="font-semibold text-[var(--color-text)] mb-4">Revenue Summary</h2>
+      <h2 className="font-semibold text-[var(--color-text)] mb-4">Revenue summary</h2>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {statCards.map(card => {
           const Icon = card.icon
           return (
-            <div
-              key={card.label}
-              className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl"
-              style={{ padding: '1.25rem' }}
-            >
+            <Card key={card.label}>
               <div className="flex items-center gap-3 mb-3">
                 <div
                   className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -4077,7 +4047,7 @@ function RevenueTab({ clientId }: { clientId: string }) {
               </div>
               <p className="text-xl font-bold text-[var(--color-text)]">{card.value}</p>
               <p className="text-xs text-[var(--color-text-subtle)] mt-1">{card.detail}</p>
-            </div>
+            </Card>
           )
         })}
       </div>
@@ -4203,9 +4173,9 @@ function ProfitabilityTab({ clientId }: { clientId: string }) {
 
   if (!data) {
     return (
-      <div className="rounded-xl border p-6 bg-[var(--color-bg)]" style={{ borderColor: 'var(--color-border)' }}>
+      <Card>
         <p className="text-sm text-[var(--color-text-muted)]">Unable to load profitability data.</p>
-      </div>
+      </Card>
     )
   }
 
@@ -4218,32 +4188,32 @@ function ProfitabilityTab({ clientId }: { clientId: string }) {
     <div className="space-y-6">
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="rounded-xl border p-4" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        <Card padding="sm">
           <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Revenue (paid)</div>
           <div className="text-xl font-bold text-[var(--color-text)] mt-1">{nzd(data.revenueNzd)}</div>
-        </div>
-        <div className="rounded-xl border p-4" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        </Card>
+        <Card padding="sm">
           <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Total cost</div>
           <div className="text-xl font-bold text-[var(--color-text)] mt-1">{nzd(data.costNzd)}</div>
           <div className="text-xs text-[var(--color-text-subtle)] mt-0.5">
             {data.timeCost.hours.toFixed(1)}h × ${data.timeCost.rate}/h = {nzd(data.timeCost.cost)}
           </div>
-        </div>
-        <div className="rounded-xl border p-4" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        </Card>
+        <Card padding="sm">
           <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Gross margin</div>
           <div className="text-xl font-bold mt-1" style={{ color: marginColour }}>{nzd(data.marginNzd)}</div>
-        </div>
-        <div className="rounded-xl border p-4" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+        </Card>
+        <Card padding="sm">
           <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Margin %</div>
           <div className="text-xl font-bold mt-1" style={{ color: marginColour }}>
             {data.marginPct.toFixed(1)}%
           </div>
-        </div>
+        </Card>
       </div>
 
       {/* By category */}
-      <div className="rounded-xl border p-5" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
-        <h3 className="text-base font-semibold text-[var(--color-text)] mb-3">Cost breakdown</h3>
+      <Card>
+        <h3 className="font-semibold text-[var(--color-text)] mb-3">Cost breakdown</h3>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {(['contractor', 'software', 'hours', 'other', 'timeCost'] as const).map(cat => (
             <div key={cat} className="rounded-lg p-3" style={{ background: 'var(--color-bg-secondary)' }}>
@@ -4254,19 +4224,20 @@ function ProfitabilityTab({ clientId }: { clientId: string }) {
             </div>
           ))}
         </div>
-      </div>
+      </Card>
 
       {/* Costs list + add form */}
-      <div className="rounded-xl border p-5" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+      <Card>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-base font-semibold text-[var(--color-text)]">Logged costs</h3>
-          <button
+          <h3 className="font-semibold text-[var(--color-text)]">Logged costs</h3>
+          <TahiButton
+            variant={showAdd ? 'secondary' : 'primary'}
+            size="sm"
             onClick={() => setShowAdd(v => !v)}
-            className="text-xs font-medium px-3 py-1.5 rounded transition-colors"
-            style={{ background: showAdd ? 'var(--color-bg-tertiary)' : 'var(--color-brand)', color: showAdd ? 'var(--color-text)' : 'white', border: 'none', cursor: 'pointer', minHeight: '2.25rem' }}
+            iconLeft={showAdd ? undefined : <Plus className="w-3.5 h-3.5" />}
           >
-            {showAdd ? 'Cancel' : '+ Add cost'}
-          </button>
+            {showAdd ? 'Cancel' : 'Add cost'}
+          </TahiButton>
         </div>
 
         {showAdd && (
@@ -4335,18 +4306,20 @@ function ProfitabilityTab({ clientId }: { clientId: string }) {
             </div>
             {error && <p className="text-sm md:col-span-2" style={{ color: 'var(--color-danger)' }}>{error}</p>}
             <div className="md:col-span-2 flex justify-end">
-              <button type="submit" disabled={saving} className="text-sm font-medium px-4 py-2 rounded disabled:opacity-50"
-                style={{ background: 'var(--color-brand)', color: 'white', border: 'none', cursor: saving ? 'wait' : 'pointer' }}>
+              <TahiButton type="submit" size="sm" loading={saving} disabled={saving}>
                 {saving ? 'Saving...' : 'Save cost'}
-              </button>
+              </TahiButton>
             </div>
           </form>
         )}
 
         {costs.length === 0 ? (
-          <p className="text-sm text-[var(--color-text-muted)] py-4">
-            No costs logged yet. Add subcontractor fees, software subscriptions, or other client-specific costs to compute real gross margin.
-          </p>
+          <EmptyState
+            variant="inline"
+            icon={<DollarSign className="w-8 h-8" />}
+            title="No costs logged yet"
+            description="Add subcontractor fees, software subscriptions, or other client-specific costs to compute real gross margin."
+          />
         ) : (
           <div className="h-scroll">
           <table className="w-full text-sm">
@@ -4369,7 +4342,7 @@ function ProfitabilityTab({ clientId }: { clientId: string }) {
                   <td className="py-2 pr-3 text-right text-[var(--color-text)] font-medium">
                     {new Intl.NumberFormat('en-NZ', { style: 'currency', currency: c.currency }).format(c.amount)}
                   </td>
-                  <td className="py-2 pr-3">{c.recurring && <span className="text-xs text-[var(--color-brand)] font-medium">Recurring</span>}</td>
+                  <td className="py-2 pr-3">{c.recurring && <Badge tone="brand" size="sm">Recurring</Badge>}</td>
                   <td className="py-2 pr-3 text-right">
                     <button onClick={() => handleDelete(c.id)} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-danger)]">
                       <Trash2 className="w-3.5 h-3.5" />
@@ -4381,7 +4354,7 @@ function ProfitabilityTab({ clientId }: { clientId: string }) {
           </table>
           </div>
         )}
-      </div>
+      </Card>
     </div>
   )
 }
