@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { desc, gte } from 'drizzle-orm'
 import { buildRateMap, toNzd } from '@/lib/currency'
+import { resolvePermissions, can } from '@/lib/permissions'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -24,10 +25,17 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  *   lastSyncedAt: max(updatedAt) across bank rows
  */
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
-  if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const auth = await getRequestAuth(req)
+  if (!isTahiAdmin(auth.orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const drizzle = (await db()) as D1
+
+  // Cash + runway is sensitive; gate behind the financial_reports feature so a
+  // team member without it cannot reach the figures by calling the API directly.
+  const access = await resolvePermissions(drizzle, auth)
+  if (!can(access, 'financial_reports')) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const rateMap = buildRateMap(await drizzle.select().from(schema.exchangeRates))
 

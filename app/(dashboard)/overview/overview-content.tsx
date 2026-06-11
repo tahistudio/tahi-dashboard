@@ -8,6 +8,7 @@ import {
   ArrowRight, AlertTriangle, RefreshCw, Video, ExternalLink,
   TrendingUp,
   Target, Scale, Timer,
+  Wallet, Receipt, ListChecks,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { OnboardingChecklist, type OnboardingState } from '@/components/tahi/onboarding-checklist'
@@ -64,7 +65,7 @@ type Accent = keyof typeof ACCENTS
 const KPI_DATA_FEATURES = ['clients', 'requests', 'invoices', 'financial_reports'] as const
 const CARD_FEATURES = [
   'clients', 'requests', 'invoices', 'financial_reports',
-  'calls', 'deals', 'overview', 'schedules', 'capacity',
+  'calls', 'deals', 'overview', 'schedules', 'capacity', 'tasks',
 ] as const
 
 // Literal class maps so Tailwind compiles every variant (never build class
@@ -163,6 +164,8 @@ export function AdminOverview({ userName }: { userName: string }) {
   const callsVisible = features['calls'] !== false
   const dealsVisible = features['deals'] !== false
   const capacityVisible = features['capacity'] !== false
+  const cashVisible = features['financial_reports'] !== false
+  const arVisible = features['invoices'] !== false
 
   return (
     <div className="flex flex-col" style={{ gap: 'var(--space-6)', maxWidth: '68.75rem' }}>
@@ -268,6 +271,19 @@ export function AdminOverview({ userName }: { userName: string }) {
           </Gate>
           <Gate feature="capacity">
             <PipelineCapacityCard className={dealsVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
+          </Gate>
+
+          {/* Cash position + receivables */}
+          <Gate feature="financial_reports">
+            <FinancialSnapshotCard className={arVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
+          </Gate>
+          <Gate feature="invoices">
+            <ARAgingCard className={cashVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
+          </Gate>
+
+          {/* Open internal tasks */}
+          <Gate feature="tasks">
+            <OpenTasksCard className="lg:col-span-12" />
           </Gate>
 
           {!loading && kpis !== null && kpis.activeClients === 0 && (
@@ -2440,7 +2456,7 @@ function PipelineForecastCard({ className }: { className?: string }) {
   )
 }
 
-function ForecastStat({ label, value, sub, priv }: { label: string; value: string; sub: string; priv?: boolean }) {
+function ForecastStat({ label, value, sub, priv, valueColor }: { label: string; value: string; sub: string; priv?: boolean; valueColor?: string }) {
   return (
     <div style={{
       padding: 'var(--space-3)',
@@ -2451,13 +2467,326 @@ function ForecastStat({ label, value, sub, priv }: { label: string; value: strin
       <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
         {label}
       </p>
-      <p {...(priv ? { 'data-private': true } : {})} style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--color-text)', marginTop: 'var(--space-1)', fontVariantNumeric: 'tabular-nums' }}>
+      <p {...(priv ? { 'data-private': true } : {})} style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: valueColor ?? 'var(--color-text)', marginTop: 'var(--space-1)', fontVariantNumeric: 'tabular-nums' }}>
         {value}
       </p>
       <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)' }}>
         {sub}
       </p>
     </div>
+  )
+}
+
+// ─── Cash position (financial_reports) ───────────────────────────────────────
+
+interface BankBalancesResponse {
+  asOf: string | null
+  totalBalanceNzd: number
+  avgMonthlyBurnNzd: number
+  runwayMonths: number | null
+  lastSyncedAt: string | null
+  accounts: Array<{ accountName: string | null; balanceNzd: number; currency: string }>
+}
+
+function FinancialSnapshotCard({ className }: { className?: string }) {
+  const { format } = useDisplayCurrency()
+  const [data, setData] = useState<BankBalancesResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/reports/bank-balances'))
+      .then(r => (r.ok ? (r.json() as Promise<BankBalancesResponse>) : null))
+      .then(d => setData(d))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const runway = data?.runwayMonths ?? null
+  const runwayColor = runway === null
+    ? 'var(--color-text)'
+    : runway >= 6 ? 'var(--color-success)'
+    : runway >= 3 ? 'var(--color-warning)'
+    : 'var(--color-danger)'
+  const runwayLabel = runway === null
+    ? 'need burn data'
+    : runway >= 6 ? 'comfortable'
+    : runway >= 3 ? 'keep an eye on it'
+    : 'tight'
+
+  return (
+    <div className={className} style={{
+      padding: 'var(--space-6)',
+      background: 'var(--color-bg)',
+      border: '1px solid var(--color-border-subtle)',
+      borderRadius: 'var(--radius-lg)',
+    }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-4)' }}>
+        <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
+          <HeaderIcon><Wallet size={14} /></HeaderIcon>
+          <div>
+            <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
+              Cash position
+            </h2>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)' }}>
+              {data?.lastSyncedAt ? `Synced ${timeAgo(data.lastSyncedAt)}` : 'Live bank balance'}
+            </p>
+          </div>
+        </div>
+        <Link href="/financial-reports" className="view-link" style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)' }}>
+          View reports <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
+        </Link>
+      </div>
+
+      {loading ? (
+        <div className="tahi-shimmer" style={{ height: '6rem' }} />
+      ) : !data || (data.accounts.length === 0 && data.totalBalanceNzd === 0) ? (
+        <EmptyRows title="No bank data yet" message="Connect Xero to sync your bank balances and see runway." />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-3" style={{ gap: 'var(--space-3)' }}>
+          <ForecastStat label="Total cash" value={format(data.totalBalanceNzd)} sub={`${data.accounts.length} account${data.accounts.length === 1 ? '' : 's'}`} priv />
+          <ForecastStat label="Runway" value={runway === null ? '—' : `${runway.toFixed(1)} mo`} sub={runwayLabel} valueColor={runwayColor} />
+          <ForecastStat label="Monthly burn" value={format(data.avgMonthlyBurnNzd)} sub="trailing 3-mo avg" priv />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Receivables / AR aging (invoices) ───────────────────────────────────────
+
+interface AgingBucketData { count: number; totalNzd: number }
+interface AgingResponse {
+  aging: { current: AgingBucketData; thirtyDays: AgingBucketData; sixtyDays: AgingBucketData; ninetyPlus: AgingBucketData }
+  summary: { totalOutstanding: number; invoiceCount: number; oldestDaysPastDue: number }
+}
+
+function ARAgingCard({ className }: { className?: string }) {
+  const { format } = useDisplayCurrency()
+  const [data, setData] = useState<AgingResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/reports/invoice-aging'))
+      .then(r => (r.ok ? (r.json() as Promise<AgingResponse>) : null))
+      .then(d => setData(d))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const buckets = data ? [
+    { label: 'Current', bucket: data.aging.current, color: 'var(--color-success)' },
+    { label: '31-60d', bucket: data.aging.thirtyDays, color: 'var(--color-warning)' },
+    { label: '61-90d', bucket: data.aging.sixtyDays, color: 'var(--color-warning)' },
+    { label: '90d+', bucket: data.aging.ninetyPlus, color: 'var(--color-danger)' },
+  ] : []
+  const maxTotal = Math.max(1, ...buckets.map(x => x.bucket.totalNzd))
+  const oldest = data?.summary.oldestDaysPastDue ?? 0
+  const oldestSevere = oldest > 60
+
+  return (
+    <div className={className} style={{
+      padding: 'var(--space-6)',
+      background: 'var(--color-bg)',
+      border: '1px solid var(--color-border-subtle)',
+      borderRadius: 'var(--radius-lg)',
+    }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-4)' }}>
+        <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
+          <HeaderIcon><Receipt size={14} /></HeaderIcon>
+          <div>
+            <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
+              Receivables
+            </h2>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)' }}>
+              Outstanding by age
+            </p>
+          </div>
+        </div>
+        <Link href="/invoices" className="view-link" style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)' }}>
+          View invoices <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
+        </Link>
+      </div>
+
+      {loading ? (
+        <div className="tahi-shimmer" style={{ height: '6rem' }} />
+      ) : !data || data.summary.invoiceCount === 0 ? (
+        <EmptyRows title="All clear" message="No outstanding invoices. Everything has been paid." />
+      ) : (
+        <>
+          <div className="flex items-baseline justify-between" style={{ marginBottom: 'var(--space-4)', gap: 'var(--space-3)' }}>
+            <div>
+              <p data-private style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
+                {format(data.summary.totalOutstanding)}
+              </p>
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
+                {data.summary.invoiceCount} invoice{data.summary.invoiceCount === 1 ? '' : 's'} outstanding
+              </p>
+            </div>
+            {oldest > 0 && (
+              <span className="flex-shrink-0" style={{
+                padding: 'var(--space-1) var(--space-2)',
+                background: oldestSevere ? 'var(--color-danger-bg)' : 'var(--color-warning-bg)',
+                color: oldestSevere ? 'var(--color-danger)' : 'var(--color-warning)',
+                border: `1px solid ${oldestSevere ? 'var(--color-danger)' : 'var(--color-warning)'}`,
+                fontSize: 'var(--text-xs)',
+                fontWeight: 600,
+                borderRadius: 'var(--radius-full)',
+              }}>
+                {oldest}d overdue
+              </span>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            {buckets.map(({ label, bucket, color }) => {
+              const pct = Math.round((bucket.totalNzd / maxTotal) * 100)
+              return (
+                <div key={label}>
+                  <div className="flex items-center justify-between" style={{ fontSize: 'var(--text-xs)', marginBottom: 'var(--space-1)' }}>
+                    <span style={{ color: 'var(--color-text-muted)', fontWeight: 500 }}>
+                      {label}
+                      <span style={{ color: 'var(--color-text-subtle)', marginLeft: 'var(--space-2)' }}>
+                        {bucket.count} invoice{bucket.count === 1 ? '' : 's'}
+                      </span>
+                    </span>
+                    <span data-private style={{ color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
+                      {format(bucket.totalNzd)}
+                    </span>
+                  </div>
+                  <div style={{ height: '0.375rem', background: 'var(--color-bg-tertiary)', borderRadius: '9999px', overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: '9999px', transition: 'width 400ms ease-out' }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ─── Open tasks (tasks) ───────────────────────────────────────────────────────
+
+interface OverviewTask {
+  id: string
+  title: string
+  status: string
+  priority: string
+  dueDate: string | null
+  orgName: string | null
+  type: string
+  subtaskCount: number
+}
+
+const TASK_CLOSED = new Set(['done', 'completed', 'cancelled'])
+
+function priorityWeight(p: string): number {
+  switch (p) {
+    case 'urgent': return 3
+    case 'high': return 2
+    case 'standard': return 1
+    default: return 0
+  }
+}
+
+function taskDueState(due: string | null): { label: string; color: string } | null {
+  if (!due) return null
+  const d = new Date(due)
+  if (isNaN(d.getTime())) return null
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const dueDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const diffDays = Math.round((dueDay - startOfToday) / 86400000)
+  if (diffDays < 0) return { label: `${Math.abs(diffDays)}d overdue`, color: 'var(--color-danger)' }
+  if (diffDays === 0) return { label: 'Due today', color: 'var(--color-warning)' }
+  if (diffDays <= 7) return { label: `Due in ${diffDays}d`, color: 'var(--color-text-muted)' }
+  return { label: `Due ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`, color: 'var(--color-text-subtle)' }
+}
+
+function OpenTasksCard({ className }: { className?: string }) {
+  const [tasks, setTasks] = useState<OverviewTask[] | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(apiPath('/api/admin/tasks'))
+      .then(r => (r.ok ? (r.json() as Promise<{ tasks: OverviewTask[] }>) : null))
+      .then(d => setTasks(d?.tasks ?? []))
+      .catch(() => setTasks([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const open = (tasks ?? [])
+    .filter(t => !TASK_CLOSED.has(t.status))
+    .sort((a, b) => {
+      const ad = a.dueDate ? new Date(a.dueDate).getTime() : Infinity
+      const bd = b.dueDate ? new Date(b.dueDate).getTime() : Infinity
+      if (ad !== bd) return ad - bd
+      return priorityWeight(b.priority) - priorityWeight(a.priority)
+    })
+    .slice(0, 6)
+
+  return (
+    <SectionCard
+      className={className}
+      icon={<HeaderIcon><ListChecks size={14} /></HeaderIcon>}
+      title="Open Tasks"
+      action={{ label: 'View all', href: '/tasks' }}
+    >
+      {loading ? (
+        <div style={{ padding: 'var(--space-5)' }}>
+          <div className="tahi-shimmer" style={{ height: '4rem' }} />
+        </div>
+      ) : open.length === 0 ? (
+        <EmptyRows title="Nothing open" message="No open internal tasks. Inbox zero." action={{ label: 'Create a task', href: '/tasks?new=1' }} />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 'var(--space-3)', padding: 'var(--space-5)' }}>
+          {open.map(t => <TaskChip key={t.id} task={t} />)}
+        </div>
+      )}
+    </SectionCard>
+  )
+}
+
+function TaskChip({ task }: { task: OverviewTask }) {
+  const dueState = taskDueState(task.dueDate)
+  const prColor = task.priority === 'urgent' || task.priority === 'high'
+    ? 'var(--color-danger)'
+    : task.priority === 'low' ? 'var(--color-text-subtle)'
+    : 'var(--color-brand)'
+  return (
+    <Link
+      href={`/tasks?task=${task.id}`}
+      className="group"
+      style={{
+        display: 'block',
+        padding: 'var(--space-3)',
+        background: 'var(--color-bg-secondary)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-md)',
+        textDecoration: 'none',
+        transition: 'border-color 150ms ease',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-border-strong)' }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-subtle)' }}
+    >
+      <div className="flex items-start" style={{ gap: 'var(--space-2)' }}>
+        <span aria-hidden="true" style={{ width: '0.5rem', height: '0.5rem', borderRadius: '9999px', background: prColor, flexShrink: 0, marginTop: '0.3125rem' }} />
+        <p data-private className="truncate" style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-text)', flex: 1, minWidth: 0 }}>
+          {task.title}
+        </p>
+      </div>
+      <div className="flex items-center justify-between" style={{ marginTop: 'var(--space-2)', paddingLeft: 'var(--space-4)', gap: 'var(--space-2)' }}>
+        <span data-private className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', minWidth: 0 }}>
+          {task.orgName ?? task.type.replace(/_/g, ' ')}
+        </span>
+        {dueState && (
+          <span className="flex-shrink-0" style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: dueState.color }}>
+            {dueState.label}
+          </span>
+        )}
+      </div>
+    </Link>
   )
 }
 

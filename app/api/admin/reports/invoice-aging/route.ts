@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
+import { resolvePermissions, can } from '@/lib/permissions'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -31,13 +32,20 @@ interface AgingBucket {
 
 // ── GET /api/admin/reports/invoice-aging ────────────────────────────────────
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
-  if (!isTahiAdmin(orgId)) {
+  const auth = await getRequestAuth(req)
+  if (!isTahiAdmin(auth.orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const database = await db()
   const drizzle = database as D1
+
+  // Receivables are gated behind the invoices feature so a scoped team member
+  // without it cannot read aging totals by hitting the endpoint directly.
+  const access = await resolvePermissions(drizzle, auth)
+  if (!can(access, 'invoices')) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const rateMap = await getRateMap(drizzle)
 
