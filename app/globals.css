@@ -1629,6 +1629,19 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .studio-note-link:hover {
   text-decoration: underline;
 }
+/* Needs You row action: subtle brand-tinted lift on hover/focus. */
+.needs-you-action {
+  transition: background-color var(--dur-2) var(--ease-productive), border-color var(--dur-2) var(--ease-productive);
+}
+.needs-you-action:hover {
+  background: var(--color-brand-50);
+  border-color: var(--color-brand-light);
+}
+.needs-you-action:focus-visible {
+  outline: none;
+  border-color: var(--color-brand);
+  box-shadow: var(--shadow-ring);
+}
 .tahi-press {
   transition: transform var(--dur-1) var(--ease-productive);
 }
@@ -1638,6 +1651,15 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* Workshop Light: steady presence dot by default; pulses in the motion-safe zone. */
 .workshop-pulse {
   opacity: 1;
+}
+
+/* AHEAD zone fills: static by default (reduced-motion sees the final state);
+   the grow transitions live in the motion-safe zone below. */
+.pipeline-ahead-bar {
+  transition: none;
+}
+.studio-beaker-fill {
+  transition: none;
 }
 
 /* ── Motion-safe zone (all animation lives here) ─────────── */
@@ -1651,6 +1673,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   }
   .workshop-pulse {
     animation: tahi-workshop-pulse 2.2s var(--ease-productive) infinite;
+  }
+
+  /* AHEAD zone: erosion-funnel bars grow their width, beakers grow their fill. */
+  .pipeline-ahead-bar {
+    transition: width var(--dur-5) var(--ease-productive);
+  }
+  .studio-beaker-fill {
+    transition: height var(--dur-5) var(--ease-productive);
   }
 
   /* ── tahi-reveal-up keyframe ──────────────────────────── */

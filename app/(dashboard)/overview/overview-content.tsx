@@ -5,28 +5,23 @@ import Link from 'next/link'
 import {
   Inbox, FileText,
   Plus,
-  ArrowRight, AlertTriangle, RefreshCw, Video, ExternalLink,
+  ArrowRight, AlertTriangle, RefreshCw, Video,
   TrendingUp,
-  Target, Scale, Timer,
-  Wallet, Receipt, ListChecks,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { OnboardingChecklist, type OnboardingState } from '@/components/tahi/onboarding-checklist'
 import { BookingWidget } from '@/components/tahi/booking-widget'
-import { FeatureCard } from '@/components/tahi/feature-card'
 import { Gate, usePermissions } from '@/components/tahi/permissions-context'
 import { Reveal } from '@/components/tahi/reveal'
-import { ProgressRing } from '@/components/tahi/progress-ring'
-import {
-  AnimatedInbox,
-  AnimatedTrendingUp, AnimatedClock, AnimatedCalendar, AnimatedGauge,
-} from '@/components/tahi/animated-icons'
 import { LedgerMasthead, type LedgerData } from '@/components/tahi/overview/ledger-masthead'
+import { NeedsYou } from '@/components/tahi/overview/needs-you'
+import { InTheStudio } from '@/components/tahi/overview/in-the-studio'
+import { TodayRail } from '@/components/tahi/overview/today-rail'
+import { PipelineAhead } from '@/components/tahi/overview/pipeline-ahead'
+import { StudioCapacity } from '@/components/tahi/overview/studio-capacity'
+import { CashRunway } from '@/components/tahi/overview/cash-runway'
+import { ReceivablesTide } from '@/components/tahi/overview/receivables-tide'
 import { apiPath } from '@/lib/api'
-import { DELIVERY_STATUS_COLOR, DELIVERY_STATUS_LABEL } from '@/components/tahi/gantt-grid'
-import type { DeliveryStatus } from '@/lib/delivery-status'
-import { calculatePipelineTotals } from '@/lib/pipeline-math'
-import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { formatDistanceToNow } from 'date-fns'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 
@@ -151,6 +146,9 @@ export function AdminOverview({ userName }: { userName: string }) {
   const capacityVisible = features['capacity'] !== false
   const cashVisible = features['financial_reports'] !== false
   const arVisible = features['invoices'] !== false
+  const workVisible = requestsVisible || callsVisible
+  const aheadVisible = dealsVisible || capacityVisible
+  const booksVisible = cashVisible || arVisible
 
   return (
     <div className="flex flex-col" style={{ gap: 'var(--space-6)', maxWidth: '68.75rem' }}>
@@ -176,9 +174,6 @@ export function AdminOverview({ userName }: { userName: string }) {
           Replaces the old greeting, the KPI bento strip and the AI briefing card. */}
       <Reveal id="overview-hero" className="flex flex-col" style={{ gap: 'var(--space-6)' }}>
         <LedgerMasthead userName={userName} data={ledger} loading={loading} />
-
-        {/* Today's focus strip (next call + closing deal); self-gates per tile */}
-        <TodayFocusStrip />
       </Reveal>
 
       {hasAnyCard ? (
@@ -188,58 +183,34 @@ export function AdminOverview({ userName }: { userName: string }) {
           className="grid grid-cols-1 lg:grid-cols-12"
           style={{ gap: 'var(--space-6)', gridAutoFlow: 'dense' }}
         >
-          {/* Engagements off track (delivery spine #148, Slice 5): alert priority */}
-          <Gate feature="schedules">
-            <OffTrackEngagementsWidget />
-          </Gate>
+          {/* Needs You: the act-now queue. Owns the page's single border-trace. */}
+          <NeedsYou oldest={ledger?.arAging?.oldest ?? null} className="lg:col-span-12" />
 
-          {/* Recent requests + upcoming calls */}
+          {/* WORK zone: the worklog + today's rail */}
+          {workVisible && <ZoneLabel>Work</ZoneLabel>}
           <Gate feature="requests">
-            <SectionCard
-              className={callsVisible ? 'lg:col-span-7' : 'lg:col-span-12'}
-              icon={<HeaderIcon><AnimatedInbox size={14} /></HeaderIcon>}
-              title="Recent Requests"
-              action={{ label: 'View all', href: '/requests' }}
-            >
-              {loading ? <LoadingRows /> : recentRequests.length === 0 ? (
-                <EmptyRows
-                  title="No requests yet"
-                  message="When clients submit requests they'll appear here."
-                  action={{ label: 'Create first request', href: '/requests?new=1' }}
-                />
-              ) : recentRequests.slice(0, 5).map((req, i) => (
-                <RequestRow key={req.id} req={req} isLast={i === Math.min(recentRequests.length, 5) - 1} showOrg />
-              ))}
-            </SectionCard>
+            <InTheStudio data={recentRequests} loading={loading} className={callsVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
           </Gate>
           <Gate feature="calls">
-            <UpcomingCallsWidget className={requestsVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
+            <TodayRail className={requestsVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
           </Gate>
 
-          {/* Pipeline summary */}
+          {/* AHEAD zone: the pipeline + the studio's capacity */}
+          {aheadVisible && <ZoneLabel>Ahead</ZoneLabel>}
           <Gate feature="deals">
-            <PipelineSummaryCard />
-          </Gate>
-
-          {/* Weighted forecast + team capacity */}
-          <Gate feature="deals">
-            <PipelineForecastCard className={capacityVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
+            <PipelineAhead className={capacityVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
           </Gate>
           <Gate feature="capacity">
-            <PipelineCapacityCard className={dealsVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
+            <StudioCapacity className={dealsVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
           </Gate>
 
-          {/* Cash position + receivables */}
+          {/* BOOKS zone: cash + runway, receivables tide */}
+          {booksVisible && <ZoneLabel>Books</ZoneLabel>}
           <Gate feature="financial_reports">
-            <FinancialSnapshotCard className={arVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
+            <CashRunway cash={ledger?.cash ?? null} className={arVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
           </Gate>
           <Gate feature="invoices">
-            <ARAgingCard className={cashVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
-          </Gate>
-
-          {/* Open internal tasks */}
-          <Gate feature="tasks">
-            <OpenTasksCard className="lg:col-span-12" />
+            <ReceivablesTide arAging={ledger?.arAging ?? null} className={cashVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
           </Gate>
 
           {!loading && kpis !== null && kpis.activeClients === 0 && (
@@ -251,6 +222,18 @@ export function AdminOverview({ userName }: { userName: string }) {
       ) : (
         <NothingEnabledCard />
       )}
+    </div>
+  )
+}
+
+// ─── Zone label (letterpress section divider in the bento) ───────────────────
+
+function ZoneLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="lg:col-span-12" style={{ marginTop: 'var(--space-4)' }}>
+      <span style={{ fontSize: 'var(--text-2xs, 0.6875rem)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--color-text-subtle)' }}>
+        {children}
+      </span>
     </div>
   )
 }
@@ -280,190 +263,11 @@ function NothingEnabledCard() {
 
 // ─── Header icon wrapper (leaf radius, brand or warning tone) ────────────────
 
-function HeaderIcon({ tone = 'brand', children }: { tone?: 'brand' | 'warning'; children: React.ReactNode }) {
-  const c = tone === 'warning'
-    ? { bg: 'var(--color-warning-bg)', fg: 'var(--color-warning)' }
-    : { bg: 'var(--color-brand-50)', fg: 'var(--color-brand)' }
-  return (
-    <div
-      className="flex items-center justify-center flex-shrink-0"
-      style={{
-        width: '1.75rem',
-        height: '1.75rem',
-        background: c.bg,
-        color: c.fg,
-        borderRadius: 'var(--radius-leaf-sm)',
-      }}
-    >
-      {children}
-    </div>
-  )
-}
 
 // ─── Pipeline Summary Card (T360) ───────────────────────────────────────────
 
-interface DealSummary {
-  id: string
-  title: string
-  stageId: string
-  value: number | null
-  valueNzd: number | null
-  currency: string | null
-  expectedCloseDate: string | null
-  stageName: string | null
-  stageColour: string | null
-  stageProbability: number | null
-  stageIsClosedWon: number | null
-  stageIsClosedLost: number | null
-  orgName: string | null
-}
 
-interface StageSummary {
-  id: string
-  probability: number | null
-  historicalProbability: number | null
-  isClosedWon: number | boolean | null
-  isClosedLost: number | boolean | null
-}
 
-function PipelineSummaryCard() {
-  const { format } = useDisplayCurrency()
-  const [deals, setDeals] = useState<DealSummary[]>([])
-  const [stages, setStages] = useState<StageSummary[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    Promise.all([
-      fetch(apiPath('/api/admin/deals?limit=100')).then(r => r.ok ? r.json() as Promise<{ items: DealSummary[] }> : { items: [] }),
-      // NB: /api/admin/pipeline/stages returns { stages: [...] }, not { items: [...] }.
-      fetch(apiPath('/api/admin/pipeline/stages')).then(r => r.ok ? r.json() as Promise<{ stages: StageSummary[] }> : { stages: [] }),
-    ])
-      .then(([dealsData, stagesData]) => {
-        setDeals(dealsData.items ?? [])
-        setStages(stagesData.stages ?? [])
-      })
-      .catch(() => {
-        setDeals([])
-        setStages([])
-      })
-      .finally(() => setLoading(false))
-  }, [])
-
-  if (loading) {
-    return (
-      <div className="lg:col-span-12" style={{
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-lg)',
-        padding: 'var(--space-5)',
-      }}>
-        <div className="grid grid-cols-1 sm:grid-cols-3" style={{ gap: 'var(--space-5)' }}>
-          {[0, 1, 2].map(n => (
-            <div key={n}>
-              <div className="tahi-shimmer" style={{ height: '0.75rem', width: '40%', marginBottom: 'var(--space-3)' }} />
-              <div className="tahi-shimmer" style={{ height: '1.5rem', width: '60%' }} />
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-  if (deals.length === 0) return null
-
-  // Calculate totals via the shared pipeline-math helper so this agrees
-  // with the Pipeline page and Reports. Historical close rates take
-  // precedence over static stage probability. See Decision #040.
-  const totals = calculatePipelineTotals(deals, stages)
-  const totalPipelineValue = totals.totalValue
-  const weightedValue = totals.weightedValue
-  const openDeals = deals.filter(d => !d.stageIsClosedWon && !d.stageIsClosedLost)
-
-  // Deals closing this month
-  const now = new Date()
-  const currentMonth = now.getMonth()
-  const currentYear = now.getFullYear()
-  const closingThisMonth = openDeals.filter(d => {
-    if (!d.expectedCloseDate) return false
-    const close = new Date(d.expectedCloseDate)
-    return close.getMonth() === currentMonth && close.getFullYear() === currentYear
-  })
-  const closingThisMonthValue = closingThisMonth.reduce((sum, d) => sum + (d.valueNzd ?? d.value ?? 0), 0)
-
-  const pipelineItems = [
-    { label: 'Pipeline Value', value: format(totalPipelineValue), sub: `${openDeals.length} open deal${openDeals.length !== 1 ? 's' : ''}`, icon: <Target size={14} aria-hidden="true" /> },
-    { label: 'Weighted Value', value: format(weightedValue), sub: 'probability-adjusted', icon: <Scale size={14} aria-hidden="true" /> },
-    { label: 'Closing This Month', value: format(closingThisMonthValue), sub: `${closingThisMonth.length} deal${closingThisMonth.length !== 1 ? 's' : ''}`, icon: <Timer size={14} aria-hidden="true" /> },
-  ]
-
-  return (
-    <Link
-      href="/deals"
-      className="block lg:col-span-12"
-      style={{
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-lg)',
-        textDecoration: 'none',
-        overflow: 'hidden',
-        transition: 'border-color var(--dur-2) var(--ease-productive)',
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.borderColor = 'var(--color-border)'
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
-      }}
-    >
-      <div className="grid grid-cols-1 sm:grid-cols-3">
-        {pipelineItems.map((item, i) => (
-          <div
-            key={item.label}
-            className="pipeline-divider-item"
-            style={{
-              padding: 'var(--space-5)',
-              borderBottom: i < pipelineItems.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
-            }}
-          >
-            <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
-              <div
-                className="flex items-center justify-center flex-shrink-0"
-                style={{
-                  width: '2rem',
-                  height: '2rem',
-                  background: 'var(--color-brand-50)',
-                  color: 'var(--color-brand)',
-                  borderRadius: 'var(--radius-leaf-sm)',
-                }}
-              >
-                {item.icon}
-              </div>
-              <span style={{
-                fontSize: 'var(--text-xs)',
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.04em',
-                color: 'var(--color-text-subtle)',
-              }}>
-                {item.label}
-              </span>
-            </div>
-            <p data-private className="tabular-nums" style={{
-              fontSize: 'var(--text-2xl)',
-              fontWeight: 700,
-              color: 'var(--color-text)',
-              marginBottom: 'var(--space-1)',
-            }}>
-              {item.value}
-            </p>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
-              {item.sub}
-            </p>
-          </div>
-        ))}
-      </div>
-    </Link>
-  )
-}
 
 // ─── Pipeline Capacity Card ──────────────────────────────────────────────────
 
@@ -482,150 +286,6 @@ interface CapacityData {
   forecastedCapacity: number
 }
 
-function PipelineCapacityCard({ className }: { className?: string }) {
-  const [data, setData] = useState<CapacityData | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/pipeline/capacity'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<CapacityData>
-      })
-      .then(setData)
-      .catch(() => { /* silent */ })
-      .finally(() => setLoading(false))
-  }, [])
-
-  if (loading) {
-    return (
-      <SectionCard
-        className={className}
-        icon={<HeaderIcon><AnimatedGauge size={14} /></HeaderIcon>}
-        title="Team Capacity"
-      >
-        <LoadingRows />
-      </SectionCard>
-    )
-  }
-
-  if (!data) {
-    return (
-      <SectionCard
-        className={className}
-        icon={<HeaderIcon><AnimatedGauge size={14} /></HeaderIcon>}
-        title="Team Capacity"
-      >
-        <EmptyRows
-          title="No capacity data yet"
-          message="Add team members and allocate hours to see utilization here."
-        />
-      </SectionCard>
-    )
-  }
-
-  const utilizationPct = data.totalCapacity > 0
-    ? Math.round((data.totalAllocated / data.totalCapacity) * 100)
-    : 0
-
-  const barColor = utilizationPct > 90
-    ? 'var(--color-danger)'
-    : utilizationPct > 70
-      ? 'var(--color-warning)'
-      : 'var(--color-brand)'
-
-  return (
-    <div className={className} style={{
-      background: 'var(--color-bg)',
-      border: '1px solid var(--color-border-subtle)',
-      borderRadius: 'var(--radius-lg)',
-      overflow: 'hidden',
-    }}>
-      {/* Header */}
-      <div className="flex items-center justify-between" style={{
-        padding: 'var(--space-4) var(--space-5)',
-        borderBottom: '1px solid var(--color-border-subtle)',
-      }}>
-        <div className="flex items-center" style={{ gap: 'var(--space-3)' }}>
-          <HeaderIcon><AnimatedGauge size={14} /></HeaderIcon>
-          <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
-            Team Capacity
-          </h2>
-          <ProgressRing value={utilizationPct} size={40} strokeWidth={4} label="Team capacity utilization">
-            <span style={{ color: barColor }}>
-              {utilizationPct}%
-            </span>
-          </ProgressRing>
-        </div>
-        <Link href="/deals" className="view-link" style={{
-          fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)',
-        }}>
-          View pipeline <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
-        </Link>
-      </div>
-
-      {/* Utilization bar */}
-      <div style={{ padding: 'var(--space-4) var(--space-5) 0' }}>
-        <div className="overflow-hidden" style={{ height: '0.375rem', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-full)' }}>
-          <div style={{ height: '100%', width: `${Math.min(utilizationPct, 100)}%`, background: barColor, borderRadius: 'var(--radius-full)', transition: 'width 300ms ease' }} />
-        </div>
-      </div>
-
-      {/* Stats strip with dividers */}
-      <div className="grid grid-cols-3" style={{ padding: 'var(--space-4) 0', margin: '0 var(--space-5)', borderBottom: '1px solid var(--color-border-subtle)' }}>
-        {[
-          { label: 'Available', value: `${data.availableCapacity}h`, color: 'var(--color-text)' },
-          { label: 'Pipeline', value: `${data.pipelineImpact}h`, color: 'var(--color-warning)' },
-          { label: 'Forecast', value: `${data.forecastedCapacity}h`, color: data.forecastedCapacity < 0 ? 'var(--color-danger)' : 'var(--color-brand)' },
-        ].map((stat, i) => (
-          <div key={stat.label} className="text-center" style={{
-            borderRight: i < 2 ? '1px solid var(--color-border-subtle)' : 'none',
-          }}>
-            <p className="tabular-nums" style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: stat.color }}>
-              {stat.value}
-            </p>
-            <p style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
-              {stat.label}
-            </p>
-          </div>
-        ))}
-      </div>
-
-      {/* Per-member rows with divider lines */}
-      {data.teamMembers.length > 0 && (
-        <div>
-          {data.teamMembers.slice(0, 5).map((m, i) => {
-            const memberBarColor = m.utilization > 85 ? 'var(--color-danger)' : m.utilization >= 60 ? 'var(--color-warning)' : 'var(--color-brand)'
-            return (
-              <div key={m.id} style={{
-                padding: 'var(--space-3) var(--space-5)',
-                borderBottom: i < Math.min(data.teamMembers.length, 5) - 1 ? '1px solid var(--color-border-subtle)' : 'none',
-              }}>
-                <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-1-5)' }}>
-                  <span className="truncate" style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-text)' }}>
-                    {m.name}
-                  </span>
-                  <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
-                    <span className="tabular-nums" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
-                      {m.currentHoursAllocated}h / {m.weeklyCapacityHours}h
-                    </span>
-                    <span className="tabular-nums" style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: memberBarColor, minWidth: '2rem', textAlign: 'right' }}>
-                      {m.utilization}%
-                    </span>
-                  </div>
-                </div>
-                <div className="overflow-hidden" style={{ height: '0.25rem', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-full)' }}>
-                  <div style={{ height: '100%', width: `${Math.min(m.utilization, 100)}%`, background: memberBarColor, borderRadius: 'var(--radius-full)', transition: 'width 300ms ease' }} />
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-    </div>
-  )
-}
 
 // ─── Client Overview ──────────────────────────────────────────────────────────
 
@@ -959,72 +619,7 @@ function StatCard({
 
 // ─── Off-track engagements widget (delivery spine #148, Slice 5) ─────────────
 
-interface OffTrackEngagement {
-  orgId: string
-  orgName: string
-  status: DeliveryStatus
-  pctComplete: number
-  rowsDone: number
-  rowsTotal: number
-  offTrackCount: number
-}
 
-function OffTrackEngagementsWidget() {
-  const [items, setItems] = useState<OffTrackEngagement[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/engagements/off-track'))
-      .then(r => (r.ok ? r.json() as Promise<{ engagements?: OffTrackEngagement[] }> : { engagements: [] }))
-      .then(d => setItems(d.engagements ?? []))
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false))
-  }, [])
-
-  // Quiet until known, and hidden entirely when every engagement is on track
-  // (no clutter on a healthy overview).
-  if (loading || items.length === 0) return null
-
-  return (
-    <SectionCard
-      className="lg:col-span-12"
-      icon={<HeaderIcon tone="warning"><AnimatedClock size={14} /></HeaderIcon>}
-      title="Engagements off track"
-      action={{ label: 'View schedules', href: '/schedules' }}
-    >
-      {items.map((e, i) => (
-        <Link
-          key={e.orgId}
-          href={`/clients/${e.orgId}`}
-          className="flex items-center hover:bg-[var(--color-bg-secondary)]"
-          style={{
-            padding: 'var(--space-4) var(--space-5)',
-            borderBottom: i < items.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
-            gap: 'var(--space-3)',
-            textDecoration: 'none',
-            transition: 'background 140ms ease',
-          }}
-        >
-          <span
-            aria-hidden="true"
-            style={{ width: '0.625rem', height: '0.625rem', borderRadius: '50%', background: DELIVERY_STATUS_COLOR[e.status], flexShrink: 0 }}
-          />
-          <div className="flex-1" style={{ minWidth: 0 }}>
-            <p data-private style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {e.orgName}
-            </p>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
-              {e.rowsDone}/{e.rowsTotal} phases done · {e.offTrackCount} off track
-            </p>
-          </div>
-          <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: DELIVERY_STATUS_COLOR[e.status], flexShrink: 0 }}>
-            {DELIVERY_STATUS_LABEL[e.status]}
-          </span>
-        </Link>
-      ))}
-    </SectionCard>
-  )
-}
 
 function SectionCard({
   title, action, children, icon, className,
@@ -1203,149 +798,7 @@ function EmptyRows({
 
 // ─── Upcoming Calls Widget ───────────────────────────────────────────────────
 
-interface UpcomingCall {
-  id: string
-  title: string
-  scheduledAt: string
-  durationMinutes: number
-  meetingUrl: string | null
-  withName: string | null
-  withSubtitle: string | null
-  parentType: 'lead' | 'deal' | 'org' | 'request' | 'task' | null
-  parentHref: string | null
-  fromCalendar: boolean
-}
 
-function UpcomingCallsWidget({ className }: { className?: string }) {
-  const [calls, setCalls] = useState<UpcomingCall[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    // Reads from discovery_calls (polymorphic) not the legacy
-    // scheduled_calls table — that's why Google Calendar synced
-    // meetings now show up here.
-    fetch(apiPath('/api/admin/discovery-calls/upcoming?limit=5&includePast=1'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ calls: UpcomingCall[] }>
-      })
-      .then(data => setCalls(data.calls ?? []))
-      .catch(() => setCalls([]))
-      .finally(() => setLoading(false))
-  }, [])
-
-  if (!loading && calls.length === 0) {
-    return (
-      <SectionCard
-        className={className}
-        icon={<HeaderIcon><AnimatedCalendar size={14} /></HeaderIcon>}
-        title="Upcoming Calls"
-        action={{ label: 'Open leads', href: '/leads' }}
-      >
-        <EmptyRows title="No upcoming calls" message="Calls auto-sync from Google Calendar. Schedule one in Google Cal with a lead's email." />
-      </SectionCard>
-    )
-  }
-
-  return (
-    <div className={className}>
-      <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-3)' }}>
-        <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
-          <HeaderIcon><AnimatedCalendar size={14} /></HeaderIcon>
-          <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>Upcoming Calls</h2>
-        </div>
-        <Link
-          href="/leads"
-          className="view-link"
-          style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)' }}
-        >
-          View all <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
-        </Link>
-      </div>
-      <div className="flex flex-col" style={{ gap: 'var(--space-2)' }}>
-        {loading ? [0, 1, 2].map(n => (
-          <div key={n} className="flex items-center" style={{
-            padding: 'var(--space-3) var(--space-4)',
-            background: 'var(--color-bg)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 'var(--radius-md)',
-            gap: 'var(--space-3)',
-          }}>
-            <div className="tahi-shimmer" style={{ width: '2rem', height: '2rem', borderRadius: 'var(--radius-leaf-sm)', flexShrink: 0 }} />
-            <div className="flex-1" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <div className="tahi-shimmer" style={{ height: '0.75rem', width: '70%' }} />
-              <div className="tahi-shimmer" style={{ height: '0.625rem', width: '50%' }} />
-            </div>
-          </div>
-        )) : calls.map(call => {
-          const d = new Date(call.scheduledAt)
-          return (
-            <div
-              key={call.id}
-              className="flex items-center"
-              style={{
-                padding: 'var(--space-3) var(--space-4)',
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border-subtle)',
-                borderRadius: 'var(--radius-md)',
-                gap: 'var(--space-3)',
-                transition: 'border-color 150ms ease',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-subtle)' }}
-            >
-              <div
-                className="flex items-center justify-center flex-shrink-0"
-                style={{
-                  width: '2rem',
-                  height: '2rem',
-                  background: 'var(--color-brand-50)',
-                  color: 'var(--color-brand)',
-                  borderRadius: 'var(--radius-leaf-sm)',
-                }}
-              >
-                <Video size={14} aria-hidden="true" />
-              </div>
-              <div className="flex-1 min-w-0">
-                {call.parentHref ? (
-                  <Link
-                    href={call.parentHref}
-                    className="truncate hover:underline"
-                    style={{ display: 'block', fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}
-                  >
-                    <span data-private>{call.withName ?? call.title}</span>
-                  </Link>
-                ) : (
-                  <p className="truncate" style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--color-text)' }}>
-                    <span data-private>{call.withName ?? call.title}</span>
-                  </p>
-                )}
-                <p className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
-                  {call.withSubtitle ? <><span data-private>{call.withSubtitle}</span>{' \u00b7 '}</> : ''}
-                  {d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}
-                  {' at '}
-                  {d.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}
-                  {' '}({call.durationMinutes}min)
-                </p>
-              </div>
-              {call.meetingUrl && (
-                <a
-                  href={call.meetingUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center hover:underline flex-shrink-0"
-                  style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)', gap: 'var(--space-1)' }}
-                >
-                  Join <ExternalLink size={12} aria-hidden="true" />
-                </a>
-              )}
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
 
 // ─── Getting started ──────────────────────────────────────────────────────────
 
@@ -1762,730 +1215,40 @@ function ReviewOutreachBanner() {
 // closing this month. Reuses existing /api/admin/calls and /api/admin/deals
 // endpoints; no new APIs.
 
-interface FocusCall {
-  id: string
-  title: string
-  scheduledAt: string
-  durationMinutes: number
-  withName: string | null
-  withSubtitle: string | null
-  meetingUrl: string | null
-  parentHref: string | null
-}
 
-interface FocusDeal {
-  id: string
-  title: string
-  valueNzd: number | null
-  value: number | null
-  expectedCloseDate: string | null
-  orgName: string | null
-  stageName: string | null
-  stageIsClosedWon: number | null
-  stageIsClosedLost: number | null
-}
 
 // Tick once a minute so the live-now status + countdown stay accurate
 // without forcing a refresh. Returns a render counter; consumers compute
 // their own freshness from `Date.now()` on each tick.
-function useMinuteTicker() {
-  const [tick, setTick] = useState(0)
-  useEffect(() => {
-    const t = setInterval(() => setTick(v => v + 1), 30_000)
-    return () => clearInterval(t)
-  }, [])
-  return tick
-}
 
 // Compute live status for a scheduled call. The window opens 5 minutes
 // before the start (so the join button appears in time) and closes at
 // scheduledAt + durationMinutes.
-function callPhase(scheduledAt: string, durationMinutes: number): {
-  phase: 'live' | 'soon' | 'upcoming' | 'past'
-  minutesUntilStart: number
-} {
-  const now = Date.now()
-  const start = new Date(scheduledAt).getTime()
-  const end = start + durationMinutes * 60_000
-  const minutesUntilStart = Math.round((start - now) / 60_000)
-  if (now >= start && now <= end) return { phase: 'live', minutesUntilStart }
-  if (now < start && start - now <= 5 * 60_000) return { phase: 'soon', minutesUntilStart }
-  if (now > end) return { phase: 'past', minutesUntilStart }
-  return { phase: 'upcoming', minutesUntilStart }
-}
 
-function NextCallLiveBadge({ scheduledAt, durationMinutes }: { scheduledAt: string; durationMinutes: number }) {
-  useMinuteTicker()
-  const { phase, minutesUntilStart } = callPhase(scheduledAt, durationMinutes)
-  if (phase === 'upcoming' || phase === 'past') return null
-  const tone = phase === 'live' ? '#4ade80' : '#fbbf24'
-  const label = phase === 'live' ? 'Live now' : minutesUntilStart <= 0 ? 'Starting now' : `In ${minutesUntilStart}m`
-  return (
-    <span
-      className="inline-flex items-center"
-      style={{
-        gap: '0.3125rem',
-        padding: '0.125rem 0.5rem',
-        borderRadius: '999px',
-        background: 'rgba(255, 255, 255, 0.14)',
-        fontSize: '0.625rem',
-        fontWeight: 600,
-        letterSpacing: '0.04em',
-        color: 'white',
-        textTransform: 'uppercase',
-      }}
-    >
-      <span
-        style={{
-          width: '0.4375rem',
-          height: '0.4375rem',
-          borderRadius: '999px',
-          background: tone,
-          animation: phase === 'live' ? 'tahi-call-pulse 1.4s ease-in-out infinite' : undefined,
-          flexShrink: 0,
-        }}
-      />
-      {label}
-      <style>{`
-        @keyframes tahi-call-pulse {
-          0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55); }
-          50%      { opacity: 0.65; box-shadow: 0 0 0 0.375rem rgba(74, 222, 128, 0); }
-        }
-      `}</style>
-    </span>
-  )
-}
 
-function NextCallJoinButton({ meetingUrl, scheduledAt, durationMinutes }: {
-  meetingUrl: string
-  scheduledAt: string
-  durationMinutes: number
-}) {
-  useMinuteTicker()
-  const { phase } = callPhase(scheduledAt, durationMinutes)
-  // Brand-green pop when the call is live or about to start. Muted
-  // secondary look for plain-upcoming calls so the home page doesn't
-  // shout "Join now" for something three days away.
-  const live = phase === 'live' || phase === 'soon'
-  return (
-    <a
-      href={meetingUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center"
-      style={{
-        gap: '0.4375rem',
-        padding: '0.5rem 0.875rem',
-        fontSize: '0.8125rem',
-        fontWeight: 600,
-        borderRadius: 'var(--radius-leaf-sm)',
-        background: live ? '#4ade80' : 'rgba(255, 255, 255, 0.14)',
-        color: live ? '#0f1d0e' : 'white',
-        textDecoration: 'none',
-        transition: 'background 150ms ease, transform 150ms ease',
-        boxShadow: live ? '0 0 0 0 rgba(74, 222, 128, 0.55)' : 'none',
-        animation: phase === 'live' ? 'tahi-join-pulse 1.6s ease-in-out infinite' : undefined,
-      }}
-      onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)' }}
-      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)' }}
-    >
-      {live ? 'Join now' : 'Open meeting link'}
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M7 17L17 7M9 7h8v8" />
-      </svg>
-      <style>{`
-        @keyframes tahi-join-pulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55); }
-          50%      { box-shadow: 0 0 0 0.5rem rgba(74, 222, 128, 0); }
-        }
-      `}</style>
-    </a>
-  )
-}
 
-function TodayFocusStrip() {
-  const { features } = usePermissions()
-  const { format } = useDisplayCurrency()
-  const showCall = features['calls'] !== false
-  const showDeal = features['deals'] !== false
-  const [call, setCall] = useState<FocusCall | null>(null)
-  const [deal, setDeal] = useState<FocusDeal | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    if (!showCall && !showDeal) {
-      setLoading(false)
-      return
-    }
-    // Only fetch what the viewer is permitted to see.
-    const callsPromise = showCall
-      ? fetch(apiPath('/api/admin/discovery-calls/upcoming?limit=1&includePast=1'))
-          .then(r => (r.ok ? r.json() as Promise<{ calls: FocusCall[] }> : { calls: [] }))
-          .catch(() => ({ calls: [] as FocusCall[] }))
-      : Promise.resolve({ calls: [] as FocusCall[] })
-    const dealsPromise = showDeal
-      ? fetch(apiPath('/api/admin/deals?limit=100'))
-          .then(r => (r.ok ? r.json() as Promise<{ items: FocusDeal[] }> : { items: [] }))
-          .catch(() => ({ items: [] as FocusDeal[] }))
-      : Promise.resolve({ items: [] as FocusDeal[] })
-
-    Promise.all([callsPromise, dealsPromise])
-      .then(([callsData, dealsData]) => {
-        setCall(callsData.calls?.[0] ?? null)
-
-        // Highest-value open deal closing this month
-        const now = new Date()
-        const month = now.getMonth()
-        const year = now.getFullYear()
-        const closingThisMonth = (dealsData.items ?? []).filter(d => {
-          if (d.stageIsClosedWon || d.stageIsClosedLost) return false
-          if (!d.expectedCloseDate) return false
-          const close = new Date(d.expectedCloseDate)
-          return close.getMonth() === month && close.getFullYear() === year
-        })
-        closingThisMonth.sort(
-          (a, b) => (b.valueNzd ?? b.value ?? 0) - (a.valueNzd ?? a.value ?? 0),
-        )
-        setDeal(closingThisMonth[0] ?? null)
-      })
-      .finally(() => setLoading(false))
-  }, [showCall, showDeal])
-
-  // Both tiles gated off: the strip does not exist for this viewer.
-  if (!showCall && !showDeal) return null
-
-  // Nothing to show in any visible tile? Hide the strip, no placeholders.
-  if (!loading && !(showCall && call) && !(showDeal && deal)) return null
-
-  // Collapse to one full-width tile when only one half is visible.
-  const gridClass = showCall && showDeal ? 'grid grid-cols-1 md:grid-cols-2' : 'grid grid-cols-1'
-
-  if (loading) {
-    return (
-      <div className={gridClass} style={{ gap: 'var(--space-4)' }}>
-        {showCall && <div className="tahi-shimmer" style={{ minHeight: '8.5rem', borderRadius: 'var(--radius-leaf)' }} />}
-        {showDeal && <div className="tahi-shimmer" style={{ minHeight: '8.5rem', borderRadius: 'var(--radius-leaf)' }} />}
-      </div>
-    )
-  }
-
-  return (
-    <div className={gridClass} style={{ gap: 'var(--space-4)' }}>
-      {showCall && (
-        <FeatureCard variant="forest" padding="lg">
-          <FeatureCard.Eyebrow>
-            <span className="inline-flex items-center" style={{ gap: '0.5rem' }}>
-              Next call
-              {call && <NextCallLiveBadge scheduledAt={call.scheduledAt} durationMinutes={call.durationMinutes} />}
-            </span>
-          </FeatureCard.Eyebrow>
-          <FeatureCard.Title>
-            {call
-              ? (call.withName ? <>Next call with <span data-private>{call.withName}</span></> : <span data-private>{call.title}</span>)
-              : 'No calls scheduled'}
-          </FeatureCard.Title>
-          <FeatureCard.Description>
-            {call
-              ? <>{call.withSubtitle ? <><span data-private>{call.withSubtitle}</span>{' · '}</> : ''}{`${new Date(call.scheduledAt).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })} at ${new Date(call.scheduledAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })} (${call.durationMinutes}min)`}</>
-              : 'Schedule a call from the calls page when one comes up.'}
-          </FeatureCard.Description>
-          {call && call.meetingUrl && (
-            <FeatureCard.Footer>
-              <NextCallJoinButton
-                meetingUrl={call.meetingUrl}
-                scheduledAt={call.scheduledAt}
-                durationMinutes={call.durationMinutes}
-              />
-            </FeatureCard.Footer>
-          )}
-        </FeatureCard>
-      )}
-
-      {showDeal && (
-        <FeatureCard variant="lime" padding="lg">
-          <FeatureCard.Eyebrow>Closing this month</FeatureCard.Eyebrow>
-          <FeatureCard.Title>
-            {deal
-              ? <span data-private>{format(deal.valueNzd ?? deal.value ?? 0)}</span>
-              : 'Nothing closing yet'}
-          </FeatureCard.Title>
-          <FeatureCard.Description>
-            {deal
-              ? <><span data-private>{deal.title}</span>{deal.orgName ? <> · <span data-private>{deal.orgName}</span></> : ''}{deal.stageName ? ` · ${deal.stageName}` : ''}</>
-              : 'Set an expected close date on a deal to surface it here.'}
-          </FeatureCard.Description>
-        </FeatureCard>
-      )}
-    </div>
-  )
-}
 
 // ─── Pipeline Forecast Card (weighted by stage probability) ───────────
 
-interface ForecastByStage {
-  stageId: string
-  name: string
-  slug: string
-  probability: number
-  position: number
-  colour: string | null
-  isClosedWon: boolean
-  isClosedLost: boolean
-  dealCount: number
-  upfrontNzd: number
-  monthlyNzd: number
-  weightedUpfrontNzd: number
-  weightedMonthlyNzd: number
-}
 
-interface ForecastResponse {
-  totalDeals: number
-  unweightedUpfrontNzd: number
-  unweightedMonthlyNzd: number
-  weightedUpfrontNzd: number
-  weightedMonthlyNzd: number
-  byStage: ForecastByStage[]
-}
 
-function PipelineForecastCard({ className }: { className?: string }) {
-  const { format } = useDisplayCurrency()
-  const [data, setData] = useState<ForecastResponse | null>(null)
-  const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    fetch(apiPath('/api/admin/reports/pipeline-forecast'))
-      .then(r => r.ok ? r.json() as Promise<ForecastResponse> : null)
-      .then(d => setData(d))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false))
-  }, [])
-
-  const activeStages = data?.byStage.filter(s => !s.isClosedWon && !s.isClosedLost && s.dealCount > 0) ?? []
-  // Max weighted upfront for bar scaling
-  const maxWeighted = Math.max(1, ...activeStages.map(s => s.weightedUpfrontNzd + s.weightedMonthlyNzd * 6))
-
-  return (
-    <div className={className} style={{
-      padding: 'var(--space-6)',
-      background: 'var(--color-bg)',
-      border: '1px solid var(--color-border-subtle)',
-      borderRadius: 'var(--radius-lg)',
-    }}>
-      <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-4)' }}>
-        <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
-          <HeaderIcon><AnimatedTrendingUp size={14} /></HeaderIcon>
-          <div>
-            <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
-              Pipeline forecast
-            </h2>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)' }}>
-              Weighted by each stage&apos;s probability
-            </p>
-          </div>
-        </div>
-        <Link
-          href="/deals"
-          className="view-link"
-          style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)' }}
-        >
-          View pipeline <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
-        </Link>
-      </div>
-
-      {loading ? (
-        <div className="tahi-shimmer" style={{ height: '6rem' }} />
-      ) : !data || activeStages.length === 0 ? (
-        <EmptyRows title="No active deals" message="Add deals to the pipeline to see a weighted forecast." />
-      ) : (
-        <>
-          {/* Summary numbers — weighted vs unweighted */}
-          <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
-            <ForecastStat label="Weighted upfront" value={format(data.weightedUpfrontNzd)} sub={`of ${format(data.unweightedUpfrontNzd)}`} priv />
-            <ForecastStat label="Weighted MRR" value={format(data.weightedMonthlyNzd)} sub={`of ${format(data.unweightedMonthlyNzd)}`} priv />
-            <ForecastStat label="Active deals" value={String(activeStages.reduce((s, x) => s + x.dealCount, 0))} sub={`${data.totalDeals} total`} />
-            <ForecastStat label="12-mo expected" value={format(data.weightedUpfrontNzd + data.weightedMonthlyNzd * 12)} sub="upfront + 12× MRR" priv />
-          </div>
-
-          {/* Per-stage bars */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-            {activeStages.map(stage => {
-              const total = stage.weightedUpfrontNzd + stage.weightedMonthlyNzd * 6
-              const pct = Math.round((total / maxWeighted) * 100)
-              return (
-                <div key={stage.stageId}>
-                  <div className="flex items-center justify-between" style={{ fontSize: 'var(--text-xs)', marginBottom: 'var(--space-1)' }}>
-                    <span style={{ color: 'var(--color-text)', fontWeight: 500 }}>
-                      {stage.name}
-                      <span style={{ color: 'var(--color-text-subtle)', marginLeft: 'var(--space-2)' }}>
-                        {stage.dealCount} × {stage.probability}% probability
-                      </span>
-                    </span>
-                    <span data-private style={{ color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
-                      {format(stage.weightedUpfrontNzd)}
-                      {stage.weightedMonthlyNzd > 0 && (
-                        <span style={{ color: 'var(--color-text-subtle)' }}>
-                          {' + '}{format(stage.weightedMonthlyNzd)}/mo
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  <div style={{
-                    height: '0.375rem',
-                    background: 'var(--color-bg-tertiary)',
-                    borderRadius: '9999px',
-                    overflow: 'hidden',
-                  }}>
-                    <div style={{
-                      width: `${pct}%`,
-                      height: '100%',
-                      background: stage.colour ?? 'var(--color-brand)',
-                      borderRadius: '9999px',
-                      transition: 'width 400ms ease-out',
-                    }} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-function ForecastStat({ label, value, sub, priv, valueColor }: { label: string; value: string; sub: string; priv?: boolean; valueColor?: string }) {
-  return (
-    <div style={{
-      padding: 'var(--space-3)',
-      background: 'var(--color-bg-secondary)',
-      border: '1px solid var(--color-border-subtle)',
-      borderRadius: 'var(--radius-md)',
-    }}>
-      <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-        {label}
-      </p>
-      <p {...(priv ? { 'data-private': true } : {})} style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: valueColor ?? 'var(--color-text)', marginTop: 'var(--space-1)', fontVariantNumeric: 'tabular-nums' }}>
-        {value}
-      </p>
-      <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)' }}>
-        {sub}
-      </p>
-    </div>
-  )
-}
 
 // ─── Cash position (financial_reports) ───────────────────────────────────────
 
-interface BankBalancesResponse {
-  asOf: string | null
-  totalBalanceNzd: number
-  avgMonthlyBurnNzd: number
-  runwayMonths: number | null
-  lastSyncedAt: string | null
-  accounts: Array<{ accountName: string | null; balanceNzd: number; currency: string }>
-}
 
-function FinancialSnapshotCard({ className }: { className?: string }) {
-  const { format } = useDisplayCurrency()
-  const [data, setData] = useState<BankBalancesResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/reports/bank-balances'))
-      .then(r => (r.ok ? (r.json() as Promise<BankBalancesResponse>) : null))
-      .then(d => setData(d))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false))
-  }, [])
-
-  const runway = data?.runwayMonths ?? null
-  const runwayColor = runway === null
-    ? 'var(--color-text)'
-    : runway >= 6 ? 'var(--color-success)'
-    : runway >= 3 ? 'var(--color-warning)'
-    : 'var(--color-danger)'
-  const runwayLabel = runway === null
-    ? 'need burn data'
-    : runway >= 6 ? 'comfortable'
-    : runway >= 3 ? 'keep an eye on it'
-    : 'tight'
-
-  return (
-    <div className={className} style={{
-      padding: 'var(--space-6)',
-      background: 'var(--color-bg)',
-      border: '1px solid var(--color-border-subtle)',
-      borderRadius: 'var(--radius-lg)',
-    }}>
-      <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-4)' }}>
-        <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
-          <HeaderIcon><Wallet size={14} /></HeaderIcon>
-          <div>
-            <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
-              Cash position
-            </h2>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)' }}>
-              {data?.lastSyncedAt ? `Synced ${timeAgo(data.lastSyncedAt)}` : 'Live bank balance'}
-            </p>
-          </div>
-        </div>
-        <Link href="/financial-reports" className="view-link" style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)' }}>
-          View reports <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
-        </Link>
-      </div>
-
-      {loading ? (
-        <div className="tahi-shimmer" style={{ height: '6rem' }} />
-      ) : !data || (data.accounts.length === 0 && data.totalBalanceNzd === 0) ? (
-        <EmptyRows title="No bank data yet" message="Connect Xero to sync your bank balances and see runway." />
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-3" style={{ gap: 'var(--space-3)' }}>
-          <ForecastStat label="Total cash" value={format(data.totalBalanceNzd)} sub={`${data.accounts.length} account${data.accounts.length === 1 ? '' : 's'}`} priv />
-          <ForecastStat label="Runway" value={runway === null ? '—' : `${runway.toFixed(1)} mo`} sub={runwayLabel} valueColor={runwayColor} />
-          <ForecastStat label="Monthly burn" value={format(data.avgMonthlyBurnNzd)} sub="trailing 3-mo avg" priv />
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ─── Receivables / AR aging (invoices) ───────────────────────────────────────
 
-interface AgingBucketData { count: number; totalNzd: number }
-interface AgingResponse {
-  aging: { current: AgingBucketData; thirtyDays: AgingBucketData; sixtyDays: AgingBucketData; ninetyPlus: AgingBucketData }
-  summary: { totalOutstanding: number; invoiceCount: number; oldestDaysPastDue: number }
-}
 
-function ARAgingCard({ className }: { className?: string }) {
-  const { format } = useDisplayCurrency()
-  const [data, setData] = useState<AgingResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/reports/invoice-aging'))
-      .then(r => (r.ok ? (r.json() as Promise<AgingResponse>) : null))
-      .then(d => setData(d))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false))
-  }, [])
-
-  const buckets = data ? [
-    { label: 'Current', bucket: data.aging.current, color: 'var(--color-success)' },
-    { label: '31-60d', bucket: data.aging.thirtyDays, color: 'var(--color-warning)' },
-    { label: '61-90d', bucket: data.aging.sixtyDays, color: 'var(--color-warning)' },
-    { label: '90d+', bucket: data.aging.ninetyPlus, color: 'var(--color-danger)' },
-  ] : []
-  const maxTotal = Math.max(1, ...buckets.map(x => x.bucket.totalNzd))
-  const oldest = data?.summary.oldestDaysPastDue ?? 0
-  const oldestSevere = oldest > 60
-
-  return (
-    <div className={className} style={{
-      padding: 'var(--space-6)',
-      background: 'var(--color-bg)',
-      border: '1px solid var(--color-border-subtle)',
-      borderRadius: 'var(--radius-lg)',
-    }}>
-      <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-4)' }}>
-        <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
-          <HeaderIcon><Receipt size={14} /></HeaderIcon>
-          <div>
-            <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
-              Receivables
-            </h2>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)' }}>
-              Outstanding by age
-            </p>
-          </div>
-        </div>
-        <Link href="/invoices" className="view-link" style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-brand)' }}>
-          View invoices <ArrowRight size={12} aria-hidden="true" className="view-arrow" />
-        </Link>
-      </div>
-
-      {loading ? (
-        <div className="tahi-shimmer" style={{ height: '6rem' }} />
-      ) : !data || data.summary.invoiceCount === 0 ? (
-        <EmptyRows title="All clear" message="No outstanding invoices. Everything has been paid." />
-      ) : (
-        <>
-          <div className="flex items-baseline justify-between" style={{ marginBottom: 'var(--space-4)', gap: 'var(--space-3)' }}>
-            <div>
-              <p data-private style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
-                {format(data.summary.totalOutstanding)}
-              </p>
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-0-5)' }}>
-                {data.summary.invoiceCount} invoice{data.summary.invoiceCount === 1 ? '' : 's'} outstanding
-              </p>
-            </div>
-            {oldest > 0 && (
-              <span className="flex-shrink-0" style={{
-                padding: 'var(--space-1) var(--space-2)',
-                background: oldestSevere ? 'var(--color-danger-bg)' : 'var(--color-warning-bg)',
-                color: oldestSevere ? 'var(--color-danger)' : 'var(--color-warning)',
-                border: `1px solid ${oldestSevere ? 'var(--color-danger)' : 'var(--color-warning)'}`,
-                fontSize: 'var(--text-xs)',
-                fontWeight: 600,
-                borderRadius: 'var(--radius-full)',
-              }}>
-                {oldest}d overdue
-              </span>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-            {buckets.map(({ label, bucket, color }) => {
-              const pct = Math.round((bucket.totalNzd / maxTotal) * 100)
-              return (
-                <div key={label}>
-                  <div className="flex items-center justify-between" style={{ fontSize: 'var(--text-xs)', marginBottom: 'var(--space-1)' }}>
-                    <span style={{ color: 'var(--color-text-muted)', fontWeight: 500 }}>
-                      {label}
-                      <span style={{ color: 'var(--color-text-subtle)', marginLeft: 'var(--space-2)' }}>
-                        {bucket.count} invoice{bucket.count === 1 ? '' : 's'}
-                      </span>
-                    </span>
-                    <span data-private style={{ color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
-                      {format(bucket.totalNzd)}
-                    </span>
-                  </div>
-                  <div style={{ height: '0.375rem', background: 'var(--color-bg-tertiary)', borderRadius: '9999px', overflow: 'hidden' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: '9999px', transition: 'width 400ms ease-out' }} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
 
 // ─── Open tasks (tasks) ───────────────────────────────────────────────────────
 
-interface OverviewTask {
-  id: string
-  title: string
-  status: string
-  priority: string
-  dueDate: string | null
-  orgName: string | null
-  type: string
-  subtaskCount: number
-}
 
-const TASK_CLOSED = new Set(['done', 'completed', 'cancelled'])
 
-function priorityWeight(p: string): number {
-  switch (p) {
-    case 'urgent': return 3
-    case 'high': return 2
-    case 'standard': return 1
-    default: return 0
-  }
-}
 
-function taskDueState(due: string | null): { label: string; color: string } | null {
-  if (!due) return null
-  const d = new Date(due)
-  if (isNaN(d.getTime())) return null
-  const now = new Date()
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const dueDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-  const diffDays = Math.round((dueDay - startOfToday) / 86400000)
-  if (diffDays < 0) return { label: `${Math.abs(diffDays)}d overdue`, color: 'var(--color-danger)' }
-  if (diffDays === 0) return { label: 'Due today', color: 'var(--color-warning)' }
-  if (diffDays <= 7) return { label: `Due in ${diffDays}d`, color: 'var(--color-text-muted)' }
-  return { label: `Due ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`, color: 'var(--color-text-subtle)' }
-}
 
-function OpenTasksCard({ className }: { className?: string }) {
-  const [tasks, setTasks] = useState<OverviewTask[] | null>(null)
-  const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    fetch(apiPath('/api/admin/tasks'))
-      .then(r => (r.ok ? (r.json() as Promise<{ tasks: OverviewTask[] }>) : null))
-      .then(d => setTasks(d?.tasks ?? []))
-      .catch(() => setTasks([]))
-      .finally(() => setLoading(false))
-  }, [])
-
-  const open = (tasks ?? [])
-    .filter(t => !TASK_CLOSED.has(t.status))
-    .sort((a, b) => {
-      const ad = a.dueDate ? new Date(a.dueDate).getTime() : Infinity
-      const bd = b.dueDate ? new Date(b.dueDate).getTime() : Infinity
-      if (ad !== bd) return ad - bd
-      return priorityWeight(b.priority) - priorityWeight(a.priority)
-    })
-    .slice(0, 6)
-
-  return (
-    <SectionCard
-      className={className}
-      icon={<HeaderIcon><ListChecks size={14} /></HeaderIcon>}
-      title="Open Tasks"
-      action={{ label: 'View all', href: '/tasks' }}
-    >
-      {loading ? (
-        <div style={{ padding: 'var(--space-5)' }}>
-          <div className="tahi-shimmer" style={{ height: '4rem' }} />
-        </div>
-      ) : open.length === 0 ? (
-        <EmptyRows title="Nothing open" message="No open internal tasks. Inbox zero." action={{ label: 'Create a task', href: '/tasks?new=1' }} />
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 'var(--space-3)', padding: 'var(--space-5)' }}>
-          {open.map(t => <TaskChip key={t.id} task={t} />)}
-        </div>
-      )}
-    </SectionCard>
-  )
-}
-
-function TaskChip({ task }: { task: OverviewTask }) {
-  const dueState = taskDueState(task.dueDate)
-  const prColor = task.priority === 'urgent' || task.priority === 'high'
-    ? 'var(--color-danger)'
-    : task.priority === 'low' ? 'var(--color-text-subtle)'
-    : 'var(--color-brand)'
-  return (
-    <Link
-      href={`/tasks?task=${task.id}`}
-      className="group"
-      style={{
-        display: 'block',
-        padding: 'var(--space-3)',
-        background: 'var(--color-bg-secondary)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-md)',
-        textDecoration: 'none',
-        transition: 'border-color 150ms ease',
-      }}
-      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-border-strong)' }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-subtle)' }}
-    >
-      <div className="flex items-start" style={{ gap: 'var(--space-2)' }}>
-        <span aria-hidden="true" style={{ width: '0.5rem', height: '0.5rem', borderRadius: '9999px', background: prColor, flexShrink: 0, marginTop: '0.3125rem' }} />
-        <p data-private className="truncate" style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-text)', flex: 1, minWidth: 0 }}>
-          {task.title}
-        </p>
-      </div>
-      <div className="flex items-center justify-between" style={{ marginTop: 'var(--space-2)', paddingLeft: 'var(--space-4)', gap: 'var(--space-2)' }}>
-        <span data-private className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', minWidth: 0 }}>
-          {task.orgName ?? task.type.replace(/_/g, ' ')}
-        </span>
-        {dueState && (
-          <span className="flex-shrink-0" style={{ fontSize: 'var(--text-xs)', fontWeight: 500, color: dueState.color }}>
-            {dueState.label}
-          </span>
-        )}
-      </div>
-    </Link>
-  )
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
