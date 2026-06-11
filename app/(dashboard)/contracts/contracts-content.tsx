@@ -187,7 +187,7 @@ export function ContractsContent() {
       render: r => (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
           <FileSignature size={14} aria-hidden="true" style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
-          <span style={{
+          <span data-private style={{
             fontWeight: 600,
             color: 'var(--color-text)',
             overflow: 'hidden',
@@ -228,7 +228,7 @@ export function ContractsContent() {
           minWidth: 0,
         }}>
           <Building2 size={12} aria-hidden="true" style={{ flexShrink: 0 }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.orgName}</span>
+          <span data-private style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.orgName}</span>
         </div>
       ) : <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.75rem' }}>—</span>,
     },

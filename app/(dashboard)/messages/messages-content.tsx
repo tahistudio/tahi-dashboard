@@ -483,6 +483,7 @@ export function MessagesContent({ isAdmin: isAdminProp }: { isAdmin: boolean }) 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
                         <span
+                          data-private
                           className="text-sm truncate"
                           style={{
                             fontWeight: conv.unreadCount > 0 ? 600 : 500,
@@ -499,6 +500,7 @@ export function MessagesContent({ isAdmin: isAdminProp }: { isAdmin: boolean }) 
                       </div>
                       <div className="flex items-center justify-between mt-0.5">
                         <p
+                          data-private
                           className="text-xs truncate"
                           style={{ color: 'var(--color-text-muted)', maxWidth: '12rem', margin: 0 }}
                         >
@@ -567,13 +569,13 @@ export function MessagesContent({ isAdmin: isAdminProp }: { isAdmin: boolean }) 
                   >
                     <ArrowLeft className="w-4 h-4" />
                   </button>
-                  {getConversationDisplayName(activeConv)}
+                  <span data-private>{getConversationDisplayName(activeConv)}</span>
                 </span>
               }
               subtitle={
                 <>
                   {activeConv.participantCount} participant{activeConv.participantCount !== 1 ? 's' : ''}
-                  {activeConv.orgName ? ` · ${activeConv.orgName}` : ''}
+                  {activeConv.orgName ? <> · <span data-private>{activeConv.orgName}</span></> : ''}
                 </>
               }
               visibility={activeConv.visibility === 'internal' ? 'internal' : 'external'}
@@ -868,7 +870,7 @@ function NewConversationForm({
                           size="sm"
                           onRemove={() => removeParticipant(pid)}
                         >
-                          {opt?.label ?? pid}
+                          <span data-private>{opt?.label ?? pid}</span>
                         </Badge>
                       )
                     })}

@@ -502,6 +502,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
             </Link>
             <div style={{ minWidth: 0, flex: 1 }}>
               <input
+                data-private
                 type="text"
                 value={proposal.title}
                 onChange={e => setProposal(p => p ? { ...p, title: e.target.value } : p)}
@@ -1253,6 +1254,7 @@ function CoverEditor({
         </FieldGroup>
         <FieldGroup label="Title">
           <input
+            data-private
             type="text"
             value={proposal.title}
             onChange={e => setProposal(p => p ? { ...p, title: e.target.value } : p)}
@@ -1262,7 +1264,7 @@ function CoverEditor({
         </FieldGroup>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '0.875rem' }}>
           <FieldGroup label="Prepared for">
-            <input type="text" value={proposal.preparedFor ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedFor: e.target.value } : p)} onBlur={e => onPatch({ preparedFor: e.currentTarget.value || null })} style={metaInputStyle} />
+            <input data-private type="text" value={proposal.preparedFor ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedFor: e.target.value } : p)} onBlur={e => onPatch({ preparedFor: e.currentTarget.value || null })} style={metaInputStyle} />
           </FieldGroup>
           <FieldGroup label="Prepared by">
             <input type="text" value={proposal.preparedBy ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedBy: e.target.value } : p)} onBlur={e => onPatch({ preparedBy: e.currentTarget.value || null })} style={metaInputStyle} />
@@ -1368,7 +1370,7 @@ function BuilderRail({
       <RailSection title="Cover meta">
         <div style={{ display: 'grid', gap: '0.625rem' }}>
           <FieldGroup label="Prepared for">
-            <input type="text" value={proposal.preparedFor ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedFor: e.target.value } : p)} onBlur={e => onPatch({ preparedFor: e.currentTarget.value || null })} style={metaInputStyle} />
+            <input data-private type="text" value={proposal.preparedFor ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedFor: e.target.value } : p)} onBlur={e => onPatch({ preparedFor: e.currentTarget.value || null })} style={metaInputStyle} />
           </FieldGroup>
           <FieldGroup label="Prepared by">
             <input type="text" value={proposal.preparedBy ?? ''} onChange={e => setProposal(p => p ? { ...p, preparedBy: e.target.value } : p)} onBlur={e => onPatch({ preparedBy: e.currentTarget.value || null })} style={metaInputStyle} />
@@ -1438,12 +1440,12 @@ function DecisionsPanel({
               <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '0.5rem' }}>
                 <strong style={{ color: palette.color }}>{palette.label}</strong>
                 {variantName && <span style={{ color: 'var(--color-text-muted)' }}>· {variantName}</span>}
-                {a.acceptorName && <span style={{ color: 'var(--color-text-muted)' }}>· {a.acceptorName}</span>}
-                {a.acceptorEmail && <span style={{ color: 'var(--color-text-subtle)' }}>· {a.acceptorEmail}</span>}
+                {a.acceptorName && <span data-private style={{ color: 'var(--color-text-muted)' }}>· {a.acceptorName}</span>}
+                {a.acceptorEmail && <span data-private style={{ color: 'var(--color-text-subtle)' }}>· {a.acceptorEmail}</span>}
                 <span style={{ color: 'var(--color-text-subtle)', marginLeft: 'auto' }}>{new Date(a.acceptedAt).toLocaleString()}</span>
               </div>
               {a.comment && (
-                <p style={{ margin: '0.5rem 0 0 0', color: 'var(--color-text)', whiteSpace: 'pre-wrap' }}>
+                <p data-private style={{ margin: '0.5rem 0 0 0', color: 'var(--color-text)', whiteSpace: 'pre-wrap' }}>
                   {a.status === 'question' ? a.comment : `“${a.comment}”`}
                 </p>
               )}
@@ -1615,10 +1617,10 @@ function VariantEditor({ variant, onChange, onDelete, hideHeader = false }: {
             <input type="text" value={variant.tagline ?? ''} onChange={e => onChange({ tagline: e.target.value })} style={metaInputStyle} />
           </FieldGroup>
           <FieldGroup label="One-off amount">
-            <input type="number" value={variant.oneOffAmount} onChange={e => onChange({ oneOffAmount: parseInt(e.target.value, 10) || 0 })} style={metaInputStyle} />
+            <input data-private type="number" value={variant.oneOffAmount} onChange={e => onChange({ oneOffAmount: parseInt(e.target.value, 10) || 0 })} style={metaInputStyle} />
           </FieldGroup>
           <FieldGroup label="Monthly amount">
-            <input type="number" value={variant.monthlyAmount} onChange={e => onChange({ monthlyAmount: parseInt(e.target.value, 10) || 0 })} style={metaInputStyle} />
+            <input data-private type="number" value={variant.monthlyAmount} onChange={e => onChange({ monthlyAmount: parseInt(e.target.value, 10) || 0 })} style={metaInputStyle} />
           </FieldGroup>
           <FieldGroup label="Currency">
             <select value={variant.currency} onChange={e => onChange({ currency: e.target.value })} style={{ ...metaInputStyle, cursor: 'pointer' }}>
@@ -1663,7 +1665,7 @@ function VariantEditor({ variant, onChange, onDelete, hideHeader = false }: {
       <summary style={{ padding: '0.625rem 0.875rem', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between', listStyle: 'none' }}>
         <span>
           {variant.isFeatured ? <Star size={12} style={{ color: 'var(--color-brand)', marginRight: '0.25rem' }} /> : null}
-          {variant.name} · {variant.currency} {variant.oneOffAmount.toLocaleString()}{variant.monthlyAmount > 0 ? ` + ${variant.monthlyAmount.toLocaleString()}/mo` : ''}
+          <span data-private>{variant.name}</span> · <span data-private>{variant.currency} {variant.oneOffAmount.toLocaleString()}{variant.monthlyAmount > 0 ? ` + ${variant.monthlyAmount.toLocaleString()}/mo` : ''}</span>
         </span>
         <button onClick={(e) => { e.preventDefault(); onDelete() }} style={{ ...toolbarBtn, padding: '0.25rem 0.625rem' }}>
           <Trash2 size={12} />

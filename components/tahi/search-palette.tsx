@@ -477,6 +477,7 @@ function ResultRow({
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
+          data-private
           style={{
             fontSize: 'var(--text-sm)',
             fontWeight: 500,
@@ -490,6 +491,7 @@ function ResultRow({
         </div>
         {item.sub && (
           <div
+            data-private
             style={{
               fontSize: 'var(--text-xs)',
               color: 'var(--color-text-subtle)',

@@ -227,7 +227,7 @@ export function ProposalsContent() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
           <FileText size={14} aria-hidden="true" style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
           <div style={{ minWidth: 0 }}>
-            <div style={{
+            <div data-private style={{
               fontWeight: 600,
               color: 'var(--color-text)',
               overflow: 'hidden',
@@ -243,7 +243,7 @@ export function ProposalsContent() {
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}>
-                for {r.preparedFor}
+                for <span data-private>{r.preparedFor}</span>
               </div>
             )}
           </div>
@@ -289,7 +289,7 @@ export function ProposalsContent() {
             onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
           >
             <Building2 size={13} aria-hidden="true" style={{ flexShrink: 0 }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span data-private style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {r.orgName}
             </span>
           </Link>
@@ -322,7 +322,7 @@ export function ProposalsContent() {
             onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
           >
             <Target size={13} aria-hidden="true" style={{ flexShrink: 0 }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span data-private style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {r.dealTitle}
             </span>
           </Link>

@@ -617,6 +617,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
               </div>
             ) : (
               <h1
+                data-private
                 className="text-2xl font-bold tracking-tight flex-1 group"
                 style={{ color: 'var(--color-text)', margin: 0, lineHeight: 1.3, cursor: isAdmin ? 'pointer' : 'default' }}
                 onClick={() => {
@@ -648,7 +649,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
                 >
                   {getInitials(task.orgName)}
                 </div>
-                <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                <span data-private className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
                   {task.orgName}
                 </span>
               </div>
@@ -757,7 +758,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
                   </div>
                 </div>
               ) : task.description ? (
-                <p style={{ fontSize: '0.875rem', color: 'var(--color-text)', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                <p data-private style={{ fontSize: '0.875rem', color: 'var(--color-text)', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                   {task.description}
                 </p>
               ) : (
@@ -845,7 +846,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
                       ) : (
                         <Circle style={{ width: '1.125rem', height: '1.125rem', color: 'var(--color-text-subtle)', flexShrink: 0 }} />
                       )}
-                      <span style={{
+                      <span data-private style={{
                         fontSize: '0.875rem',
                         color: sub.completed ? 'var(--color-text-subtle)' : 'var(--color-text)',
                         textDecoration: sub.completed ? 'line-through' : 'none',
@@ -962,7 +963,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
                       onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-subtle)' }}
                     >
                       <GitBranch style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }} />
-                      <span style={{ fontSize: '0.875rem', color: 'var(--color-text)', flex: 1 }}>
+                      <span data-private style={{ fontSize: '0.875rem', color: 'var(--color-text)', flex: 1 }}>
                         {dep.dependsOnTitle ?? dep.dependsOnTaskId}
                       </span>
                       {dep.dependsOnStatus && <StatusPill status={dep.dependsOnStatus} />}
@@ -1026,7 +1027,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
                       }}
                     >
                       <div>
-                        <p style={{ fontSize: '0.875rem', color: 'var(--color-text)', margin: 0 }}>
+                        <p data-private style={{ fontSize: '0.875rem', color: 'var(--color-text)', margin: 0 }}>
                           {entry.description ?? 'Time entry'}
                         </p>
                         <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: '0.125rem 0 0' }}>
@@ -1282,7 +1283,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
               {/* Client */}
               {task.orgName && (
                 <DetailRow label="Client">
-                  <span>{task.orgName}</span>
+                  <span data-private>{task.orgName}</span>
                 </DetailRow>
               )}
 

@@ -714,6 +714,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         <div style={{ display: 'grid', gap: '0.625rem' }}>
           <FieldGroup label="Prepared for">
             <input
+              data-private
               type="text"
               value={schedule.preparedFor ?? ''}
               onChange={e => setSchedule(p => p ? { ...p, preparedFor: e.target.value } : p)}
@@ -786,6 +787,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
             </Link>
             <div style={{ minWidth: 0, flex: 1 }}>
               <input
+                data-private
                 type="text"
                 value={schedule.title}
                 onChange={e => setSchedule(p => p ? { ...p, title: e.target.value } : p)}
@@ -1006,6 +1008,7 @@ function CoverEditor({
         </FieldGroup>
         <FieldGroup label="Title">
           <input
+            data-private
             type="text"
             value={schedule.title}
             onChange={e => setSchedule(p => p ? { ...p, title: e.target.value } : p)}
@@ -1015,7 +1018,7 @@ function CoverEditor({
         </FieldGroup>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '0.875rem' }}>
           <FieldGroup label="Prepared for">
-            <input type="text" value={schedule.preparedFor ?? ''} onChange={e => setSchedule(p => p ? { ...p, preparedFor: e.target.value } : p)} onBlur={e => onPatch({ preparedFor: e.currentTarget.value || null })} style={metaInputStyle} />
+            <input data-private type="text" value={schedule.preparedFor ?? ''} onChange={e => setSchedule(p => p ? { ...p, preparedFor: e.target.value } : p)} onBlur={e => onPatch({ preparedFor: e.currentTarget.value || null })} style={metaInputStyle} />
           </FieldGroup>
           <FieldGroup label="Prepared by">
             <input type="text" value={schedule.preparedBy ?? ''} onChange={e => setSchedule(p => p ? { ...p, preparedBy: e.target.value } : p)} onBlur={e => onPatch({ preparedBy: e.currentTarget.value || null })} style={metaInputStyle} />
@@ -1551,7 +1554,7 @@ function LinkedWorkSection({ scheduleId, rowId, onChanged }: {
                   {w.kind === 'request'
                     ? <FileText size={11} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
                     : <CheckSquare size={11} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />}
-                  <span style={{ maxWidth: '14rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span data-private style={{ maxWidth: '14rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {w.title}
                   </span>
                   <span style={{ color: 'var(--color-text-subtle)' }}>
@@ -1685,6 +1688,7 @@ function RowEditor({
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))', gap: '0.75rem', marginBottom: '0.75rem' }}>
         <FieldGroup label="Label">
           <input
+            data-private
             type="text"
             value={draft.label}
             onChange={e => onChange({ ...draft, label: e.target.value })}

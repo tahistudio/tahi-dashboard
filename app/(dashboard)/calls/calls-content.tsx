@@ -190,7 +190,7 @@ export function CallsContent() {
         const meta = TYPE_META[r.meetingType ?? 'unclassified']
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem', minWidth: 0 }}>
-            <span style={{
+            <span data-private style={{
               fontWeight: 600,
               color: 'var(--color-text)',
               overflow: 'hidden',
@@ -236,17 +236,17 @@ export function CallsContent() {
       minWidth: '11rem',
       render: r => {
         if (r.leadId && r.leadName) return (
-          <Link href={`/leads/${r.leadId}`} className="truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text)', textDecoration: 'none', fontWeight: 500 }}>
+          <Link data-private href={`/leads/${r.leadId}`} className="truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text)', textDecoration: 'none', fontWeight: 500 }}>
             {r.leadName}
           </Link>
         )
         if (r.dealId && r.dealTitle) return (
-          <Link href={`/deals/${r.dealId}`} className="truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text)', textDecoration: 'none', fontWeight: 500 }}>
+          <Link data-private href={`/deals/${r.dealId}`} className="truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text)', textDecoration: 'none', fontWeight: 500 }}>
             {r.dealTitle}
           </Link>
         )
         if (r.orgId && r.orgName) return (
-          <Link href={`/clients/${r.orgId}`} className="truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text)', textDecoration: 'none', fontWeight: 500 }}>
+          <Link data-private href={`/clients/${r.orgId}`} className="truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text)', textDecoration: 'none', fontWeight: 500 }}>
             {r.orgName}
           </Link>
         )

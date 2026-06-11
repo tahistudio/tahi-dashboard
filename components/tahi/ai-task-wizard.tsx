@@ -885,6 +885,7 @@ function TaskCard({
       {/* Title + edit button */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
         <h4
+          data-private
           style={{
             flex: 1,
             fontSize: '0.875rem',
@@ -920,6 +921,7 @@ function TaskCard({
 
       {/* Description */}
       <p
+        data-private
         style={{
           fontSize: '0.8125rem',
           color: 'var(--color-text-muted)',

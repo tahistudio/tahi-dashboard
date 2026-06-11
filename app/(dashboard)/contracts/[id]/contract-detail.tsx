@@ -419,6 +419,7 @@ export function ContractDetail({ id }: { id: string }) {
           </Link>
           <div style={{ minWidth: 0, flex: 1 }}>
             <input
+              data-private
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
@@ -497,6 +498,7 @@ export function ContractDetail({ id }: { id: string }) {
                 </p>
                 {isLocked ? (
                   <div
+                    data-private
                     style={{
                       padding: '1rem 1.25rem',
                       background: 'var(--color-bg-tertiary)',
@@ -882,8 +884,8 @@ function SignerCard({
     }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>{signer.name}</div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>{signer.email}</div>
+          <div data-private style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>{signer.name}</div>
+          <div data-private style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>{signer.email}</div>
           <div style={{ fontSize: '0.6875rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-subtle)', fontWeight: 600, marginTop: '0.25rem' }}>
             {signer.role === 'tahi' ? 'Tahi Studio' : signer.role === 'client' ? 'Client' : signer.role}
           </div>
@@ -982,7 +984,7 @@ function ActivityPane({
   // Each event carries an icon, label, sub-line, and timestamp.
   type Event = {
     icon: React.ReactNode
-    title: string
+    title: React.ReactNode
     detail: string | null
     timestamp: string
     accent?: 'brand' | 'success' | 'info' | 'muted'
@@ -1011,7 +1013,7 @@ function ActivityPane({
     const signer = signers.find(s => s.id === sig.signerId)
     events.push({
       icon: <FileSignature size={13} />,
-      title: `${signer?.name ?? 'Signer'} signed`,
+      title: <><span data-private>{signer?.name ?? 'Signer'}</span> signed</>,
       detail: sig.country ? `From ${sig.country}` : null,
       timestamp: sig.signedAt,
       accent: 'success',
@@ -1091,7 +1093,7 @@ function ActivityPane({
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem' }}>
                     <div>
                       <div style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
-                        {signer?.name ?? 'Unknown signer'}
+                        <span data-private>{signer?.name ?? 'Unknown signer'}</span>
                         <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)', marginLeft: '0.5rem' }}>
                           · #{idx + 1} in chain
                         </span>

@@ -320,6 +320,7 @@ export function NotificationBell() {
                     )}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p
+                        data-private
                         style={{
                           fontSize: '0.8125rem',
                           fontWeight: n.read ? 400 : 600,
@@ -332,6 +333,7 @@ export function NotificationBell() {
                       </p>
                       {n.body && (
                         <p
+                          data-private
                           style={{
                             fontSize: '0.75rem',
                             color: 'var(--color-text-muted)',

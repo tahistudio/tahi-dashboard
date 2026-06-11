@@ -29,6 +29,7 @@ export function Breadcrumb({ items }: BreadcrumbProps) {
             )}
             {isLast || !item.href ? (
               <span
+                {...(isLast ? { 'data-private': '' } : {})}
                 className="font-medium truncate"
                 style={{
                   color: isLast ? 'var(--color-text)' : 'var(--color-text-subtle)',

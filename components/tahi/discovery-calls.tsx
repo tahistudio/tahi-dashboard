@@ -410,7 +410,7 @@ function CallRow({
         }}
       >
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>
+          <div data-private style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>
             {call.title}
           </div>
           <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
@@ -751,7 +751,7 @@ function SuggestionLine({ label, value }: { label: string; value: string }) {
   return (
     <li style={{ display: 'flex', gap: '0.5rem', fontSize: '0.75rem', lineHeight: 1.5 }}>
       <span style={{ width: '5.5rem', flexShrink: 0, color: 'var(--color-text-muted)', fontWeight: 500 }}>{label}</span>
-      <span style={{ flex: 1, color: 'var(--color-text)', wordBreak: 'break-word' }}>{value}</span>
+      <span data-private style={{ flex: 1, color: 'var(--color-text)', wordBreak: 'break-word' }}>{value}</span>
     </li>
   )
 }

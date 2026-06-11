@@ -34,6 +34,7 @@ export function Breadcrumbs({ items }: BreadcrumbsProps) {
               <ChevronRight size={11} style={{ color: 'var(--color-text-subtle)' }} />
               {isLast || !item.href ? (
                 <span
+                  {...(isLast ? { 'data-private': '' } : {})}
                   className="text-xs font-medium"
                   style={{ color: isLast ? 'var(--color-text)' : 'var(--color-text-subtle)' }}
                 >

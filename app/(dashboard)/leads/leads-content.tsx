@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
-  UserPlus, Plus, Clock, RefreshCw, Save, Trash2, ArrowUpRight,
+  Plus, Clock, RefreshCw, Save, Trash2, ArrowUpRight,
   Mail, Phone, Building2, Globe, Tag, User, Edit3,
   Sparkles, ExternalLink, ChevronDown, Upload,
 } from 'lucide-react'
@@ -506,12 +506,12 @@ export function LeadsContent() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
           <Avatar name={r.name} size="xs" />
           <div style={{ minWidth: 0 }}>
-            <div style={{
+            <div data-private style={{
               fontWeight: 600, color: 'var(--color-text)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>{r.name}</div>
             {(r.company || r.email) && (
-              <div style={{
+              <div data-private style={{
                 fontSize: '0.6875rem', color: 'var(--color-text-muted)',
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}>
@@ -625,7 +625,7 @@ export function LeadsContent() {
       sortValue: r => r.estimatedValue ?? 0,
       width: '7rem',
       render: r => r.estimatedValue ? (
-        <span style={{ fontSize: '0.75rem', color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
+        <span data-private style={{ fontSize: '0.75rem', color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
           {formatMoney(r.estimatedValue, r.currency)}
         </span>
       ) : <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.6875rem' }}>—</span>,
@@ -1095,24 +1095,24 @@ function LeadDetail({
         </Badge>
         {lead.estimatedValue ? (
           <Badge tone="brand" variant="soft" size="sm" dot={false}>
-            {formatMoney(lead.estimatedValue, lead.currency)}
+            <span data-private>{formatMoney(lead.estimatedValue, lead.currency)}</span>
           </Badge>
         ) : null}
         {lead.affiliateCode ? (
           <Badge tone="purple" variant="soft" size="sm" dot={false}>
             <Tag size={10} aria-hidden="true" style={{ marginRight: '0.25rem', display: 'inline' }} />
-            {lead.affiliateCode}
+            <span data-private>{lead.affiliateCode}</span>
           </Badge>
         ) : null}
       </div>
 
       <DetailGrid>
-        {lead.email && <DetailRow icon={<Mail size={12} />} label="Email" value={lead.email} />}
-        {lead.phone && <DetailRow icon={<Phone size={12} />} label="Phone" value={lead.phone} />}
-        {lead.company && <DetailRow icon={<Building2 size={12} />} label="Company" value={lead.company} />}
-        {lead.jobTitle && <DetailRow icon={<User size={12} />} label="Job title" value={lead.jobTitle} />}
-        {lead.website && <DetailRow icon={<Globe size={12} />} label="Website" value={lead.website} />}
-        {lead.sourceDetail && <DetailRow icon={<Tag size={12} />} label="Source detail" value={lead.sourceDetail} />}
+        {lead.email && <DetailRow icon={<Mail size={12} />} label="Email" value={<span data-private>{lead.email}</span>} />}
+        {lead.phone && <DetailRow icon={<Phone size={12} />} label="Phone" value={<span data-private>{lead.phone}</span>} />}
+        {lead.company && <DetailRow icon={<Building2 size={12} />} label="Company" value={<span data-private>{lead.company}</span>} />}
+        {lead.jobTitle && <DetailRow icon={<User size={12} />} label="Job title" value={<span data-private>{lead.jobTitle}</span>} />}
+        {lead.website && <DetailRow icon={<Globe size={12} />} label="Website" value={<span data-private>{lead.website}</span>} />}
+        {lead.sourceDetail && <DetailRow icon={<Tag size={12} />} label="Source detail" value={<span data-private>{lead.sourceDetail}</span>} />}
         {lead.ownerName && <DetailRow icon={<User size={12} />} label="Owner" value={lead.ownerName} />}
       </DetailGrid>
 
@@ -1131,7 +1131,7 @@ function LeadDetail({
       {lead.brief && (
         <div>
           <SectionLabel>Brief</SectionLabel>
-          <p style={{
+          <p data-private style={{
             margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text)',
             whiteSpace: 'pre-wrap', lineHeight: 1.55,
           }}>{lead.brief}</p>
@@ -1407,7 +1407,7 @@ function AiSection({
       </header>
 
       {hasEnrichment && lead.aiScoreReason && (
-        <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-muted)', fontStyle: 'italic', lineHeight: 1.5 }}>
+        <p data-private style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-muted)', fontStyle: 'italic', lineHeight: 1.5 }}>
           {lead.aiScoreReason}
         </p>
       )}
@@ -1432,7 +1432,7 @@ function AiSection({
                 <span style={{ width: '5.5rem', flexShrink: 0, color: 'var(--color-text-muted)', textTransform: 'capitalize', fontWeight: 500 }}>
                   {fieldLabel(field)}
                 </span>
-                <span style={{ flex: 1, color: 'var(--color-text)', wordBreak: 'break-word' }}>{value}</span>
+                <span data-private style={{ flex: 1, color: 'var(--color-text)', wordBreak: 'break-word' }}>{value}</span>
               </li>
             ))}
           </ul>
@@ -1673,7 +1673,7 @@ function BriefingSummary({ raw }: { raw: string }) {
 
   if (!parsed) {
     return (
-      <div style={{ fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+      <div data-private style={{ fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
         {raw}
       </div>
     )
@@ -1699,7 +1699,7 @@ function BriefingBlock({ label, body }: { label: string; body: string }) {
         color: 'var(--color-text-subtle)',
         marginBottom: '0.25rem',
       }}>{label}</div>
-      <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.55 }}>{body}</p>
+      <p data-private style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.55 }}>{body}</p>
     </div>
   )
 }
@@ -1782,7 +1782,7 @@ function SignalRow({ label, value, source }: { label: string; value: string; sou
     <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.75rem', lineHeight: 1.5, alignItems: 'flex-start' }}>
       <span style={{ width: '6rem', flexShrink: 0, color: 'var(--color-text-muted)', fontWeight: 500 }}>{label}</span>
       <span style={{ flex: 1, color: 'var(--color-text)' }}>
-        {value}
+        <span data-private>{value}</span>
         {source && (
           <>
             {' '}
@@ -2104,10 +2104,10 @@ function BulkImportPanel({ onDone }: { onDone: () => Promise<void> }) {
                     {preview.map((p, i) => (
                       <tr key={i} style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
                         <td style={previewTd}>{String((p as { rowIndex?: number }).rowIndex ?? i + 2)}</td>
-                        <td style={previewTd}>{String((p as { name?: string }).name ?? '')}</td>
-                        <td style={previewTd}>{String((p as { email?: string | null }).email ?? '')}</td>
-                        <td style={previewTd}>{String((p as { company?: string | null }).company ?? '')}</td>
-                        <td style={previewTd}>{String((p as { website?: string | null }).website ?? '')}</td>
+                        <td data-private style={previewTd}>{String((p as { name?: string }).name ?? '')}</td>
+                        <td data-private style={previewTd}>{String((p as { email?: string | null }).email ?? '')}</td>
+                        <td data-private style={previewTd}>{String((p as { company?: string | null }).company ?? '')}</td>
+                        <td data-private style={previewTd}>{String((p as { website?: string | null }).website ?? '')}</td>
                       </tr>
                     ))}
                   </tbody>

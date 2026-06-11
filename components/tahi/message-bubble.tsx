@@ -297,6 +297,7 @@ export function MessageBubble({
             {onAuthorClick ? (
               <button
                 type="button"
+                data-private
                 onClick={() => onAuthorClick(author)}
                 style={{
                   background: 'transparent',
@@ -312,7 +313,7 @@ export function MessageBubble({
                 {firstNameOf(author.name)}
               </button>
             ) : (
-              firstNameOf(author.name)
+              <span data-private>{firstNameOf(author.name)}</span>
             )}
             {isInternal && (
               <Tooltip
@@ -407,6 +408,7 @@ export function MessageBubble({
             />
           ) : bodyHtml ? (
             <div
+              data-private
               className={onMentionClick ? 'tahi-message-body tahi-message-body--mentions-clickable' : 'tahi-message-body'}
               dangerouslySetInnerHTML={{ __html: bodyHtml }}
               onClick={onMentionClick ? (e) => {

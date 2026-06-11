@@ -6,7 +6,7 @@ import {
   Calendar, Zap, AlertTriangle, X, Loader2,
   CheckCircle2, Circle, Link2, Clock,
   ChevronRight, ChevronDown, Trash2, GitBranch, Users,
-  Building2, Briefcase, Shield, Sparkles,
+  Briefcase, Shield, Sparkles,
   LayoutList, Columns3, CheckSquare, Square,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -750,7 +750,7 @@ function TaskRow({ task, isAdmin, isLast, teamMap, onSelect, isSelected, onToggl
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-1 min-w-0">
             {isBlocked && <BlockedIndicator />}
-            <span className="font-medium truncate" style={{ fontSize: '0.9375rem', color: 'var(--color-text)' }}>{task.title}</span>
+            <span data-private className="font-medium truncate" style={{ fontSize: '0.9375rem', color: 'var(--color-text)' }}>{task.title}</span>
           </div>
           <StatusPill status={task.status} />
         </div>
@@ -758,7 +758,7 @@ function TaskRow({ task, isAdmin, isLast, teamMap, onSelect, isSelected, onToggl
           {isAdmin && task.orgName && (
             <div className="flex items-center gap-1">
               <OrgAvatar name={task.orgName} />
-              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{task.orgName}</span>
+              <span data-private style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{task.orgName}</span>
             </div>
           )}
           <span
@@ -807,7 +807,7 @@ function TaskRow({ task, isAdmin, isLast, teamMap, onSelect, isSelected, onToggl
         {/* Title */}
         <div className="flex items-center gap-1.5 min-w-0">
           {isBlocked && <BlockedIndicator />}
-          <span className="font-medium truncate" style={{ fontSize: '0.875rem', color: 'var(--color-text)' }}>{task.title}</span>
+          <span data-private className="font-medium truncate" style={{ fontSize: '0.875rem', color: 'var(--color-text)' }}>{task.title}</span>
           {hasSubtasks && (
             <SubtaskProgress done={task.subtaskDone ?? 0} total={task.subtaskCount ?? 0} />
           )}
@@ -820,7 +820,7 @@ function TaskRow({ task, isAdmin, isLast, teamMap, onSelect, isSelected, onToggl
             {task.orgName ? (
               <>
                 <OrgAvatar name={task.orgName} />
-                <span className="truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>{task.orgName}</span>
+                <span data-private className="truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>{task.orgName}</span>
               </>
             ) : (
               <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>--</span>
@@ -1043,6 +1043,7 @@ function TaskKanbanCard({ task, teamMap }: { task: Task; teamMap: Map<string, Te
 
       {/* Title */}
       <p
+        data-private
         className="font-medium leading-snug line-clamp-2"
         style={{ fontSize: '0.875rem', color: 'var(--color-text)', marginBottom: '0.625rem' }}
       >
@@ -1092,7 +1093,7 @@ function TaskKanbanCard({ task, teamMap }: { task: Task; teamMap: Map<string, Te
           {task.orgName && (
             <>
               <OrgAvatar name={task.orgName} />
-              <span className="truncate" style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', maxWidth: '5.625rem' }}>
+              <span data-private className="truncate" style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', maxWidth: '5.625rem' }}>
                 {task.orgName}
               </span>
             </>
@@ -1610,7 +1611,7 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
           }}
         >
           <div style={{ minWidth: 0, flex: 1 }}>
-            <h2 id="task-detail-title" style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--color-text)', margin: 0, lineHeight: 1.4 }}>
+            <h2 data-private id="task-detail-title" style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--color-text)', margin: 0, lineHeight: 1.4 }}>
               {task.title}
             </h2>
             <div className="flex items-center gap-2 flex-wrap" style={{ marginTop: '0.375rem' }}>
@@ -1623,7 +1624,7 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
               {task.orgName && (
                 <div className="flex items-center gap-1">
                   <OrgAvatar name={task.orgName} />
-                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{task.orgName}</span>
+                  <span data-private style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{task.orgName}</span>
                 </div>
               )}
             </div>
@@ -1748,7 +1749,7 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
             {/* Description */}
             <DetailField label="Description">
               {task.description ? (
-                <p style={{ fontSize: '0.875rem', color: 'var(--color-text)', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                <p data-private style={{ fontSize: '0.875rem', color: 'var(--color-text)', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                   {task.description}
                 </p>
               ) : (
@@ -1791,7 +1792,7 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
                       ) : (
                         <Circle style={{ width: '1rem', height: '1rem', color: 'var(--color-text-subtle)', flexShrink: 0 }} />
                       )}
-                      <span style={{
+                      <span data-private style={{
                         fontSize: '0.8125rem',
                         color: sub.completed ? 'var(--color-text-subtle)' : 'var(--color-text)',
                         textDecoration: sub.completed ? 'line-through' : 'none',
@@ -1867,7 +1868,7 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
                       }}
                     >
                       <GitBranch style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }} />
-                      <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)', flex: 1 }}>
+                      <span data-private style={{ fontSize: '0.8125rem', color: 'var(--color-text)', flex: 1 }}>
                         {dep.dependsOnTitle ?? dep.dependsOnTaskId}
                       </span>
                       {dep.dependsOnStatus && <StatusPill status={dep.dependsOnStatus} />}
@@ -2385,7 +2386,7 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
                       }}
                     >
                       <Circle style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }} />
-                      <span style={{ fontSize: '0.8125rem', color: 'var(--color-text)', flex: 1 }}>{st}</span>
+                      <span data-private style={{ fontSize: '0.8125rem', color: 'var(--color-text)', flex: 1 }}>{st}</span>
                       <button
                         type="button"
                         onClick={() => removeSubtask(i)}

@@ -505,7 +505,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
       {/* Hero */}
       <header style={{ display: 'flex', alignItems: 'flex-start', gap: '0.875rem', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: '16rem' }}>
-          <h1 style={{
+          <h1 data-private style={{
             margin: 0,
             fontSize: '1.5rem',
             fontWeight: 700,
@@ -569,7 +569,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
               </span>
             ) : null}
             {lead.company && (
-              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+              <span data-private style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
                 {lead.company}
               </span>
             )}
@@ -678,7 +678,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
             <PageCard title="AI briefing">
               <ScoreHistorySparkline activities={activities} currentScore={lead.aiScore} />
               {lead.aiScoreReason && (
-                <p style={{
+                <p data-private style={{
                   margin: '0 0 0.625rem', fontSize: '0.8125rem',
                   color: 'var(--color-text-muted)', fontStyle: 'italic', lineHeight: 1.55,
                 }}>{lead.aiScoreReason}</p>
@@ -734,7 +734,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
                     color: 'var(--color-text-muted)',
                     lineHeight: 1.55,
                   }}>
-                    Generate a personalised first reply to {lead.email}. The draft uses lead context, AI briefing, and your past edits as tone examples.
+                    Generate a personalised first reply to <span data-private>{lead.email}</span>. The draft uses lead context, AI briefing, and your past edits as tone examples.
                   </p>
                   <div>
                     <TahiButton
@@ -760,6 +760,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
                       color: 'var(--color-text-subtle)',
                     }}>Subject</label>
                     <Input
+                      data-private
                       value={replySubjectEdit}
                       onChange={e => setReplySubjectEdit(e.target.value)}
                       placeholder="(no subject)"
@@ -774,6 +775,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
                       color: 'var(--color-text-subtle)',
                     }}>Body</label>
                     <textarea
+                      data-private
                       value={replyBodyEdit}
                       onChange={e => setReplyBodyEdit(e.target.value)}
                       rows={10}
@@ -945,9 +947,9 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
                         background: isSystem ? 'var(--color-brand)' : 'var(--color-text-subtle)',
                       }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{a.title}</div>
+                        <div data-private style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>{a.title}</div>
                         {a.description && (
-                          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
+                          <div data-private style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
                             {a.description}
                           </div>
                         )}
@@ -979,13 +981,13 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
             ) : (
               <DetailGrid>
                 {lead.email && <DetailRow icon={<Mail size={12} />} label="Email" value={
-                  <a href={`mailto:${lead.email}`} style={{ color: 'var(--color-text-active)', textDecoration: 'underline' }}>{lead.email}</a>
+                  <a data-private href={`mailto:${lead.email}`} style={{ color: 'var(--color-text-active)', textDecoration: 'underline' }}>{lead.email}</a>
                 } />}
-                {lead.phone && <DetailRow icon={<Phone size={12} />} label="Phone" value={lead.phone} />}
-                {lead.jobTitle && <DetailRow icon={<User size={12} />} label="Role" value={lead.jobTitle} />}
+                {lead.phone && <DetailRow icon={<Phone size={12} />} label="Phone" value={<span data-private>{lead.phone}</span>} />}
+                {lead.jobTitle && <DetailRow icon={<User size={12} />} label="Role" value={<span data-private>{lead.jobTitle}</span>} />}
                 {lead.linkedinPersonalUrl && (
                   <DetailRow icon={<Linkedin size={12} />} label="LinkedIn" value={
-                    <a href={normaliseUrl(lead.linkedinPersonalUrl)} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-text-active)', textDecoration: 'underline', wordBreak: 'break-all' }}>
+                    <a data-private href={normaliseUrl(lead.linkedinPersonalUrl)} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-text-active)', textDecoration: 'underline', wordBreak: 'break-all' }}>
                       Profile <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'baseline' }} />
                     </a>
                   } />
@@ -1014,34 +1016,34 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
               </EditGrid>
             ) : (
               <DetailGrid>
-                {lead.company && <DetailRow icon={<Building2 size={12} />} label="Name" value={lead.company} />}
+                {lead.company && <DetailRow icon={<Building2 size={12} />} label="Name" value={<span data-private>{lead.company}</span>} />}
                 {lead.website && (
                   <DetailRow icon={<Globe size={12} />} label="Website" value={
-                    <a href={normaliseUrl(lead.website)} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-text-active)', textDecoration: 'underline', wordBreak: 'break-all' }}>{lead.website}</a>
+                    <a data-private href={normaliseUrl(lead.website)} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-text-active)', textDecoration: 'underline', wordBreak: 'break-all' }}>{lead.website}</a>
                   } />
                 )}
                 {lead.linkedinUrl && (
                   <DetailRow icon={<Linkedin size={12} />} label="LinkedIn" value={
-                    <a href={normaliseUrl(lead.linkedinUrl)} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-text-active)', textDecoration: 'underline', wordBreak: 'break-all' }}>
+                    <a data-private href={normaliseUrl(lead.linkedinUrl)} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-text-active)', textDecoration: 'underline', wordBreak: 'break-all' }}>
                       Profile <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'baseline' }} />
                     </a>
                   } />
                 )}
                 {lead.cms && (
                   <DetailRow icon={<Globe size={12} />} label="CMS" value={
-                    <Badge tone="brand" variant="soft" size="sm" dot={false}>{lead.cms}</Badge>
+                    <Badge tone="brand" variant="soft" size="sm" dot={false}><span data-private>{lead.cms}</span></Badge>
                   } />
                 )}
-                {lead.industry && <DetailRow icon={<Tag size={12} />} label="Industry" value={lead.industry} />}
-                {lead.country && <DetailRow icon={<MapPin size={12} />} label="Country" value={lead.country} />}
-                {lead.leadType && <DetailRow icon={<Tag size={12} />} label="Type" value={lead.leadType} />}
-                {lead.employeeCount != null && <DetailRow icon={<Users size={12} />} label="Employees" value={lead.employeeCount.toLocaleString()} />}
-                {lead.revenueBand && <DetailRow icon={<DollarSign size={12} />} label="Revenue" value={lead.revenueBand} />}
-                {lead.yearFounded != null && <DetailRow icon={<Calendar size={12} />} label="Founded" value={String(lead.yearFounded)} />}
-                {lead.monthlyVisits != null && <DetailRow icon={<Eye size={12} />} label="Page views" value={`${lead.monthlyVisits.toLocaleString()}/mo`} />}
+                {lead.industry && <DetailRow icon={<Tag size={12} />} label="Industry" value={<span data-private>{lead.industry}</span>} />}
+                {lead.country && <DetailRow icon={<MapPin size={12} />} label="Country" value={<span data-private>{lead.country}</span>} />}
+                {lead.leadType && <DetailRow icon={<Tag size={12} />} label="Type" value={<span data-private>{lead.leadType}</span>} />}
+                {lead.employeeCount != null && <DetailRow icon={<Users size={12} />} label="Employees" value={<span data-private>{lead.employeeCount.toLocaleString()}</span>} />}
+                {lead.revenueBand && <DetailRow icon={<DollarSign size={12} />} label="Revenue" value={<span data-private>{lead.revenueBand}</span>} />}
+                {lead.yearFounded != null && <DetailRow icon={<Calendar size={12} />} label="Founded" value={<span data-private>{String(lead.yearFounded)}</span>} />}
+                {lead.monthlyVisits != null && <DetailRow icon={<Eye size={12} />} label="Page views" value={<span data-private>{`${lead.monthlyVisits.toLocaleString()}/mo`}</span>} />}
                 {techStack.length > 0 && (
                   <DetailRow icon={<Tag size={12} />} label="Tech" value={
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                    <div data-private style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
                       {techStack.map(t => (
                         <Badge key={t} tone="brand" variant="soft" size="sm" dot={false}>{t}</Badge>
                       ))}
@@ -1061,9 +1063,9 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
           {!editing && (
             <PageCard title="Source">
               <DetailGrid>
-                <DetailRow icon={<Tag size={12} />} label="Source" value={`${lead.source}${lead.sourceDetail ? ` · ${lead.sourceDetail}` : ''}`} />
+                <DetailRow icon={<Tag size={12} />} label="Source" value={lead.sourceDetail ? <span><span>{lead.source}</span> · <span data-private>{lead.sourceDetail}</span></span> : <span>{lead.source}</span>} />
                 {lead.estimatedValue != null && (
-                  <DetailRow icon={<DollarSign size={12} />} label="Estimate" value={`${lead.estimatedValue.toLocaleString()} ${lead.currency}`} />
+                  <DetailRow icon={<DollarSign size={12} />} label="Estimate" value={<span data-private>{`${lead.estimatedValue.toLocaleString()} ${lead.currency}`}</span>} />
                 )}
               </DetailGrid>
             </PageCard>
@@ -1094,7 +1096,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
           ) : (
             lead.brief && (
               <PageCard title="Brief">
-                <p style={{
+                <p data-private style={{
                   margin: 0,
                   fontSize: '0.8125rem',
                   color: 'var(--color-text)',
@@ -1303,7 +1305,7 @@ function BriefingBody({ raw }: { raw: string }) {
 
   if (!parsed) {
     return (
-      <div style={{ fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+      <div data-private style={{ fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
         {raw}
       </div>
     )
@@ -1321,7 +1323,7 @@ function BriefBlock({ label, body }: { label: string; body: string }) {
   return (
     <div>
       <SubLabel>{label}</SubLabel>
-      <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.55 }}>{body}</p>
+      <p data-private style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text)', lineHeight: 1.55 }}>{body}</p>
     </div>
   )
 }
@@ -1406,7 +1408,7 @@ function SignalsList({ signals }: { signals: Record<string, string | undefined> 
         <div key={label} style={{ display: 'flex', gap: '0.5rem', fontSize: '0.75rem', alignItems: 'flex-start' }}>
           <span style={{ width: '6rem', flexShrink: 0, color: 'var(--color-text-muted)', fontWeight: 500 }}>{label}</span>
           <span style={{ flex: 1, color: 'var(--color-text)' }}>
-            {value}
+            <span data-private>{value}</span>
             {source && (
               <>
                 {' '}

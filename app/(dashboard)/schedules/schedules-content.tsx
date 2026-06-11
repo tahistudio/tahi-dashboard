@@ -171,7 +171,7 @@ export function SchedulesContent() {
       minWidth: '18rem',
       render: r => (
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: '0.125rem' }}>
-          <span style={{
+          <span data-private style={{
             fontWeight: 600,
             color: 'var(--color-text)',
             overflow: 'hidden',
@@ -186,7 +186,7 @@ export function SchedulesContent() {
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}>
-              for {r.preparedFor}
+              for <span data-private>{r.preparedFor}</span>
             </span>
           )}
         </div>
@@ -223,7 +223,7 @@ export function SchedulesContent() {
           onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
         >
           <Building2 className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-          <span className="truncate" style={{ maxWidth: '14rem' }}>{r.orgName}</span>
+          <span data-private className="truncate" style={{ maxWidth: '14rem' }}>{r.orgName}</span>
         </Link>
       ) : <span style={{ color: 'var(--color-text-subtle)' }}>-</span>,
     },
@@ -247,7 +247,7 @@ export function SchedulesContent() {
           onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
         >
           <Target className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-          <span className="truncate" style={{ maxWidth: '14rem' }}>{r.dealTitle}</span>
+          <span data-private className="truncate" style={{ maxWidth: '14rem' }}>{r.dealTitle}</span>
         </Link>
       ) : <span style={{ color: 'var(--color-text-subtle)' }}>-</span>,
     },

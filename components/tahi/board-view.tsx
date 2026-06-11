@@ -630,7 +630,7 @@ function BoardTable({
                 />
               )}
               <div style={{ minWidth: 0 }}>
-                <div style={{
+                <div data-private style={{
                   fontSize: 'var(--text-sm)',
                   fontWeight: row.depth === 0 ? 600 : 500,
                   color: 'var(--color-text)',
@@ -1117,7 +1117,7 @@ function TimelineRow({
             flexShrink: 0,
           }}
         />
-        <span style={{
+        <span data-private style={{
           fontSize: '0.75rem',
           fontWeight: 500,
           color: 'var(--color-text)',
