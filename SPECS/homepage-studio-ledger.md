@@ -92,7 +92,19 @@ full-width with 44px targets, Today rail above the worklog.
 | receivables | the tide line |
 | closing_month | folds into the Pipeline month rail |
 
-## Open decisions (Liam to confirm; recommendations in **bold**)
+## Decisions (RESOLVED by Liam, 2026-06-11)
+
+1. **MRR** — Liam's call to me. Going bare-canvas display figure, but NOT minimalist: Liam
+   likes information density and "card behind other cards that can be sliders." So build a
+   reusable card-stack / slider primitive and use density-via-stacking in the rich zones
+   instead of cutting data. Hierarchy stays (masthead inversion); zones get richer, not bald.
+2. **Border-trace** — Needs You.
+3. **Greeting** — "Kia ora, Liam".
+4. **BOOKS** — always mounted, calm healthy states.
+5. **Data lift** — FALLBACK FIRST. No blocking migration. Edition Numbers + Two Clocks
+   degrade gracefully (worklog without numbers, calls NZT-only) and retrofit when fields land.
+
+## Original open decisions (for reference; recommendations in **bold**)
 
 1. **MRR presentation** — **bare canvas** (display type + sparkbar, green returns to pure
    signal) vs filled green band vs hybrid brand-50 wash. Build bare first; judge on the

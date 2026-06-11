@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import {
   Inbox, FileText,
-  Plus, Clock, UserPlus,
+  Plus,
   ArrowRight, AlertTriangle, RefreshCw, Video, ExternalLink,
   TrendingUp,
   Target, Scale, Timer,
@@ -13,17 +13,15 @@ import {
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { OnboardingChecklist, type OnboardingState } from '@/components/tahi/onboarding-checklist'
 import { BookingWidget } from '@/components/tahi/booking-widget'
-import { AIDailyBriefing } from '@/components/tahi/ai-briefing-card'
 import { FeatureCard } from '@/components/tahi/feature-card'
 import { Gate, usePermissions } from '@/components/tahi/permissions-context'
 import { Reveal } from '@/components/tahi/reveal'
-import { CountUp } from '@/components/tahi/count-up'
 import { ProgressRing } from '@/components/tahi/progress-ring'
 import {
-  AnimatedUsers, AnimatedInbox, AnimatedFileText, AnimatedBarChart,
+  AnimatedInbox,
   AnimatedTrendingUp, AnimatedClock, AnimatedCalendar, AnimatedGauge,
-  type AnimatedIconProps,
 } from '@/components/tahi/animated-icons'
+import { LedgerMasthead, type LedgerData } from '@/components/tahi/overview/ledger-masthead'
 import { apiPath } from '@/lib/api'
 import { DELIVERY_STATUS_COLOR, DELIVERY_STATUS_LABEL } from '@/components/tahi/gantt-grid'
 import type { DeliveryStatus } from '@/lib/delivery-status'
@@ -68,15 +66,6 @@ const CARD_FEATURES = [
   'calls', 'deals', 'overview', 'schedules', 'capacity', 'tasks',
 ] as const
 
-// Literal class maps so Tailwind compiles every variant (never build class
-// strings dynamically from data).
-const KPI_DESKTOP_COLS: Record<number, string> = {
-  1: 'lg:grid-cols-1',
-  2: 'lg:grid-cols-2',
-  3: 'lg:grid-cols-3',
-  4: 'lg:grid-cols-4',
-}
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface KPIs {
@@ -98,11 +87,6 @@ interface RecentRequest {
   updatedAt: string
   createdAt: string
   scopeFlagged: boolean
-}
-
-interface MonthlyRevenue {
-  month: string
-  total: number
 }
 
 // ─── Overview Switcher (handles impersonation) ───────────────────────────────
@@ -128,6 +112,7 @@ export function OverviewSwitcher({ userName, orgName }: { userName: string; orgN
 
 export function AdminOverview({ userName }: { userName: string }) {
   const { features } = usePermissions()
+  const [ledger, setLedger] = useState<LedgerData | null>(null)
   const [kpis, setKpis] = useState<KPIs | null>(null)
   const [recentRequests, setRecentRequests] = useState<RecentRequest[]>([])
   const [loading, setLoading] = useState(true)
@@ -145,9 +130,10 @@ export function AdminOverview({ userName }: { userName: string }) {
     fetch(apiPath('/api/admin/overview'))
       .then(r => {
         if (!r.ok) throw new Error('Failed to fetch overview')
-        return r.json() as Promise<{ kpis: KPIs; recentRequests: RecentRequest[]; monthlyRevenue?: MonthlyRevenue[] }>
+        return r.json() as Promise<LedgerData & { recentRequests: RecentRequest[] }>
       })
       .then(data => {
+        setLedger(data)
         setKpis(data.kpis)
         setRecentRequests(data.recentRequests)
       })
@@ -155,7 +141,6 @@ export function AdminOverview({ userName }: { userName: string }) {
       .finally(() => setLoading(false))
   }, [needsOverviewData])
 
-  const firstName = userName.split(' ')[0]
   const hasAnyCard = CARD_FEATURES.some(key => features[key] !== false)
 
   // Pairs share a bento row; when one half is gated off, the survivor takes
@@ -187,29 +172,10 @@ export function AdminOverview({ userName }: { userName: string }) {
         </div>
       )}
 
-      {/* Hero zone: greeting + quick actions + today's focus strip */}
+      {/* The Ledger Masthead: MRR bare on the canvas + vitals + the Studio Note.
+          Replaces the old greeting, the KPI bento strip and the AI briefing card. */}
       <Reveal id="overview-hero" className="flex flex-col" style={{ gap: 'var(--space-6)' }}>
-        <div className="flex items-start justify-between" style={{ gap: 'var(--space-4)' }}>
-          <div>
-            <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--color-text)' }}>
-              Welcome back{firstName ? `, ${firstName}` : ''}
-            </h1>
-            <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-              Here&apos;s what&apos;s happening at Tahi today.
-            </p>
-          </div>
-          <div className="hidden sm:flex items-center flex-shrink-0" style={{ gap: 'var(--space-2)' }}>
-            <Gate feature="requests">
-              <QuickBtn href="/requests?new=1" icon={<Plus size={14} aria-hidden="true" />} label="New Request" primary />
-            </Gate>
-            <Gate feature="clients">
-              <QuickBtn href="/clients?new=1" icon={<UserPlus size={14} aria-hidden="true" />} label="Add Client" />
-            </Gate>
-            <Gate feature="time">
-              <QuickBtn href="/time?new=1" icon={<Clock size={14} aria-hidden="true" />} label="Log Time" />
-            </Gate>
-          </div>
-        </div>
+        <LedgerMasthead userName={userName} data={ledger} loading={loading} />
 
         {/* Today's focus strip (next call + closing deal); self-gates per tile */}
         <TodayFocusStrip />
@@ -222,19 +188,9 @@ export function AdminOverview({ userName }: { userName: string }) {
           className="grid grid-cols-1 lg:grid-cols-12"
           style={{ gap: 'var(--space-6)', gridAutoFlow: 'dense' }}
         >
-          {/* KPI strip: per-cell permission registry, MRR hero tile */}
-          <KPIBentoStrip kpis={kpis} loading={loading} />
-
           {/* Engagements off track (delivery spine #148, Slice 5): alert priority */}
           <Gate feature="schedules">
             <OffTrackEngagementsWidget />
-          </Gate>
-
-          {/* AI Daily Briefing */}
-          <Gate feature="overview">
-            <div className="lg:col-span-12">
-              <AIDailyBriefing />
-            </div>
           </Gate>
 
           {/* Recent requests + upcoming calls */}
@@ -909,202 +865,6 @@ function OnboardingChecklistWrapper() {
   )
 }
 
-// ─── KPI Bento Strip (per-cell permission registry, MRR hero tile) ───────────
-
-interface KPICellDef {
-  key: string
-  /** Permission feature key; cell is dropped when features[feature] === false. */
-  feature: string
-  /** Hero cells get the filled brand treatment (Donezo lead-KPI reference). */
-  hero?: boolean
-  label: string
-  icon: React.ComponentType<AnimatedIconProps>
-  value: React.ReactNode
-  sub?: React.ReactNode
-  href: string
-  tone?: 'brand' | 'warning'
-}
-
-function KPIBentoStrip({ kpis, loading }: { kpis: KPIs | null; loading: boolean }) {
-  const { features } = usePermissions()
-  const { format } = useDisplayCurrency()
-  const outstanding = kpis?.outstandingInvoicesNzd ?? 0
-
-  // Registry of KPI cells, filtered by feature visibility below. No hooks run
-  // inside the loop. MRR leads the row as the filled hero tile (lead metric
-  // top-left per the Donezo reference); CountUp fires once per load on it.
-  const registry: KPICellDef[] = [
-    {
-      key: 'mrr',
-      feature: 'financial_reports',
-      hero: true,
-      label: 'MRR',
-      icon: AnimatedBarChart,
-      href: '/reports',
-      sub: 'recurring retainers',
-      value: (
-        <span data-private>
-          <CountUp value={kpis?.mrr ?? 0} format={n => format(Math.round(n))} />
-        </span>
-      ),
-    },
-    {
-      key: 'clients',
-      feature: 'clients',
-      label: 'Active Clients',
-      icon: AnimatedUsers,
-      href: '/clients',
-      sub: 'across all plans',
-      value: String(kpis?.activeClients ?? 0),
-    },
-    {
-      key: 'requests',
-      feature: 'requests',
-      label: 'Open Requests',
-      icon: AnimatedInbox,
-      href: '/requests',
-      sub: kpis ? `${kpis.inProgress} in progress` : undefined,
-      value: String(kpis?.openRequests ?? 0),
-    },
-    {
-      key: 'outstanding',
-      feature: 'invoices',
-      label: 'Outstanding',
-      icon: AnimatedFileText,
-      href: '/invoices',
-      sub: 'invoices',
-      tone: outstanding > 0 ? 'warning' : 'brand',
-      value: <span data-private>{format(outstanding)}</span>,
-    },
-  ]
-
-  const visible = registry.filter(cell => features[cell.feature] !== false)
-  if (visible.length === 0) return null
-
-  const desktopCols = KPI_DESKTOP_COLS[visible.length] ?? 'lg:grid-cols-4'
-  const mobileCols = visible.length === 1 ? 'grid-cols-1' : 'grid-cols-2'
-
-  return (
-    <div
-      data-tour="overview-kpis"
-      className={`lg:col-span-12 grid ${mobileCols} ${desktopCols}`}
-      style={{ gap: 'var(--space-4)' }}
-    >
-      {visible.map(cell => cell.hero
-        ? <HeroKPICard key={cell.key} cell={cell} loading={loading} />
-        : <LightKPICard key={cell.key} cell={cell} loading={loading} />)}
-    </div>
-  )
-}
-
-// The lead KPI: filled brand gradient, white text, clockwise border trace on
-// hover (the scarce signature; nothing else on this page uses it).
-function HeroKPICard({ cell, loading }: { cell: KPICellDef; loading: boolean }) {
-  const Icon = cell.icon
-  return (
-    <Link
-      href={cell.href}
-      className="tahi-border-trace block"
-      style={{
-        padding: 'var(--space-5)',
-        background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
-        borderRadius: 'var(--radius-lg)',
-        color: 'white',
-        textDecoration: 'none',
-      }}
-    >
-      <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
-        <div
-          className="flex items-center justify-center flex-shrink-0"
-          style={{
-            width: '2rem',
-            height: '2rem',
-            background: 'rgba(255, 255, 255, 0.16)',
-            color: 'white',
-            borderRadius: 'var(--radius-leaf-sm)',
-          }}
-        >
-          <Icon size={15} />
-        </div>
-        <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'rgba(255, 255, 255, 0.85)' }}>
-          {cell.label}
-        </span>
-      </div>
-      {loading ? (
-        <div className="tahi-shimmer" style={{ height: '1.75rem', width: '6rem' }} />
-      ) : (
-        <div className="tabular-nums" style={{ fontSize: 'var(--text-2xl)', fontWeight: 700, letterSpacing: '-0.01em', lineHeight: 1.2 }}>
-          {cell.value}
-        </div>
-      )}
-      {cell.sub && (
-        <div style={{ fontSize: 'var(--text-xs)', color: 'rgba(255, 255, 255, 0.75)', marginTop: 'var(--space-1)' }}>
-          {cell.sub}
-        </div>
-      )}
-    </Link>
-  )
-}
-
-function LightKPICard({ cell, loading }: { cell: KPICellDef; loading: boolean }) {
-  const Icon = cell.icon
-  const toneStyle = cell.tone === 'warning'
-    ? { bg: 'var(--color-warning-bg)', fg: 'var(--color-warning)' }
-    : { bg: 'var(--color-brand-50)', fg: 'var(--color-brand)' }
-  return (
-    <Link
-      href={cell.href}
-      className="block"
-      style={{
-        padding: 'var(--space-5)',
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-lg)',
-        textDecoration: 'none',
-        transition: 'border-color var(--dur-2) var(--ease-productive), background-color var(--dur-2) var(--ease-productive)',
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.borderColor = 'var(--color-border)'
-        e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
-        e.currentTarget.style.backgroundColor = 'var(--color-bg)'
-      }}
-    >
-      <div className="flex items-center" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
-        <div
-          className="flex items-center justify-center flex-shrink-0"
-          style={{
-            width: '2rem',
-            height: '2rem',
-            background: toneStyle.bg,
-            color: toneStyle.fg,
-            borderRadius: 'var(--radius-leaf-sm)',
-          }}
-        >
-          <Icon size={15} />
-        </div>
-        <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)' }}>
-          {cell.label}
-        </span>
-      </div>
-      {loading ? (
-        <div className="tahi-shimmer" style={{ height: '1.75rem', width: '4.5rem' }} />
-      ) : (
-        <div className="tabular-nums" style={{ fontSize: 'var(--text-2xl)', fontWeight: 700, color: 'var(--color-text)', letterSpacing: '-0.01em', lineHeight: 1.2 }}>
-          {cell.value}
-        </div>
-      )}
-      {cell.sub && (
-        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)' }}>
-          {cell.sub}
-        </div>
-      )}
-    </Link>
-  )
-}
-
 // ─── StatCard (used by client portal) ────────────────────────────────────────
 
 function StatCard({
@@ -1438,69 +1198,6 @@ function EmptyRows({
         </Link>
       )}
     </div>
-  )
-}
-
-// ─── Quick action buttons ─────────────────────────────────────────────────────
-
-function QuickBtn({
-  href, icon, label, primary,
-}: {
-  href: string
-  icon: React.ReactNode
-  label: string
-  primary?: boolean
-}) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center"
-      style={primary
-        ? {
-            padding: 'var(--space-2) var(--space-4)',
-            background: 'var(--color-brand)',
-            color: 'white',
-            border: '1px solid var(--color-brand)',
-            borderRadius: 'var(--radius-leaf-sm)',
-            textDecoration: 'none',
-            fontSize: 'var(--text-sm)',
-            fontWeight: 600,
-            gap: 'var(--space-1-5)',
-            transition: 'background-color var(--dur-2) var(--ease-productive)',
-          }
-        : {
-            padding: 'var(--space-2) var(--space-3)',
-            background: 'var(--color-bg)',
-            color: 'var(--color-text)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 'var(--radius-md)',
-            textDecoration: 'none',
-            fontSize: 'var(--text-sm)',
-            fontWeight: 500,
-            gap: 'var(--space-1-5)',
-            transition: 'border-color 150ms ease, background-color 150ms ease',
-          }
-      }
-      onMouseEnter={e => {
-        if (primary) {
-          e.currentTarget.style.background = 'var(--color-brand-dark)'
-        } else {
-          e.currentTarget.style.borderColor = 'var(--color-border)'
-          e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'
-        }
-      }}
-      onMouseLeave={e => {
-        if (primary) {
-          e.currentTarget.style.background = 'var(--color-brand)'
-        } else {
-          e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
-          e.currentTarget.style.backgroundColor = 'var(--color-bg)'
-        }
-      }}
-    >
-      {icon}
-      {label}
-    </Link>
   )
 }
 

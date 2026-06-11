@@ -1619,9 +1619,39 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   border-color: var(--color-brand-light);
 }
 
+/* ── Ledger masthead helpers (the Studio Ledger homepage) ── */
+.new-menu-item {
+  transition: background-color var(--dur-2) var(--ease-productive);
+}
+.new-menu-item:hover {
+  background: var(--color-bg-secondary);
+}
+.studio-note-link:hover {
+  text-decoration: underline;
+}
+.tahi-press {
+  transition: transform var(--dur-1) var(--ease-productive);
+}
+.tahi-press:active {
+  transform: scale(0.97);
+}
+/* Workshop Light: steady presence dot by default; pulses in the motion-safe zone. */
+.workshop-pulse {
+  opacity: 1;
+}
+
 /* ── Motion-safe zone (all animation lives here) ─────────── */
 
 @media (prefers-reduced-motion: no-preference) {
+
+  /* ── Workshop Light pulse (only while a timer is running) ─ */
+  @keyframes tahi-workshop-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.8); }
+  }
+  .workshop-pulse {
+    animation: tahi-workshop-pulse 2.2s var(--ease-productive) infinite;
+  }
 
   /* ── tahi-reveal-up keyframe ──────────────────────────── */
 
