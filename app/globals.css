@@ -332,6 +332,8 @@
   --ease-productive: cubic-bezier(0.2, 0, 0.38, 0.9);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Default cascade delay step for .tahi-stagger children. */
+  --stagger: 45ms;
 
   /* Layout */
   --container-max: 90rem;
@@ -1573,6 +1575,179 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .dark input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(0.7);
 }
+
+/* ============================================================
+   DELIGHT KIT
+   Slice 0b / Slice A motion primitives.
+   Inverted reduced-motion architecture: BASE styles are motionless.
+   Transforms, reveals, sweeps, and stagger live INSIDE
+   @media (prefers-reduced-motion: no-preference) so they never
+   run unless the user's OS has explicitly opted into motion.
+   Outside that block, define designed static fallbacks.
+   ============================================================ */
+
+/* ── Static fallbacks (always applied, motion-safe context adds on top) ── */
+
+/* .tahi-reveal: base is fully visible with no transform so the element
+   is immediately readable if motion is disabled or JS is slow. */
+.tahi-reveal {
+  opacity: 1;
+  transform: none;
+}
+
+/* .tahi-stagger: children are visible with no stagger delay by default. */
+.tahi-stagger > * {
+  opacity: 1;
+  transform: none;
+}
+
+/* .tahi-shimmer: static warm-neutral background. Designed placeholder,
+   not a grey rect. Matches --color-bg-tertiary which respects dark mode. */
+.tahi-shimmer {
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+/* .tahi-border-trace: plain border-color transition fallback for browsers
+   without @property support or when reduced motion is active. */
+.tahi-border-trace {
+  position: relative;
+  border: 1px solid var(--color-border-strong);
+  transition: border-color var(--dur-2) var(--ease-productive);
+}
+.tahi-border-trace:hover {
+  border-color: var(--color-brand-light);
+}
+
+/* ── Motion-safe zone (all animation lives here) ─────────── */
+
+@media (prefers-reduced-motion: no-preference) {
+
+  /* ── tahi-reveal-up keyframe ──────────────────────────── */
+
+  @keyframes tahi-reveal-up {
+    from {
+      opacity: 0;
+      transform: translateY(0.5rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* .tahi-reveal: single element fade-up entrance. */
+  .tahi-reveal {
+    animation: tahi-reveal-up var(--dur-4) var(--ease-out) both;
+  }
+
+  /* .tahi-stagger: cascading reveal for a parent container. Each direct
+     child gets the tahi-reveal-up animation with an incremental delay.
+     n=1..8 are explicit :nth-child rules; children beyond 8 inherit the
+     8th delay cap so the tail never runs longer than ~360ms. */
+  .tahi-stagger > * {
+    animation: tahi-reveal-up var(--dur-4) var(--ease-out) both;
+    animation-delay: calc(var(--stagger, 45ms) * 8);
+  }
+  .tahi-stagger > :nth-child(1)  { animation-delay: calc(var(--stagger, 45ms) * 1); }
+  .tahi-stagger > :nth-child(2)  { animation-delay: calc(var(--stagger, 45ms) * 2); }
+  .tahi-stagger > :nth-child(3)  { animation-delay: calc(var(--stagger, 45ms) * 3); }
+  .tahi-stagger > :nth-child(4)  { animation-delay: calc(var(--stagger, 45ms) * 4); }
+  .tahi-stagger > :nth-child(5)  { animation-delay: calc(var(--stagger, 45ms) * 5); }
+  .tahi-stagger > :nth-child(6)  { animation-delay: calc(var(--stagger, 45ms) * 6); }
+  .tahi-stagger > :nth-child(7)  { animation-delay: calc(var(--stagger, 45ms) * 7); }
+  .tahi-stagger > :nth-child(8)  { animation-delay: calc(var(--stagger, 45ms) * 8); }
+
+  /* ── tahi-shimmer keyframe ────────────────────────────── */
+
+  /* Shimmer highlight: a left-to-right brand-tinted wave across a skeleton
+     element. Background-position sweeps over a gradient that is mostly
+     transparent on both sides with a highlight band in the middle so the
+     base color shows through cleanly. The gradient is authored with rgba
+     so it works on any surface (light and dark). ~1.6s loop. */
+  @keyframes tahi-shimmer-sweep {
+    0%   { background-position: -200% center; }
+    100% { background-position: 200% center; }
+  }
+
+  .tahi-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--color-bg-tertiary) 0%,
+      color-mix(in srgb, var(--color-brand-lighter) 18%, var(--color-bg-tertiary)) 40%,
+      color-mix(in srgb, var(--color-brand-lighter) 28%, var(--color-bg-tertiary)) 50%,
+      color-mix(in srgb, var(--color-brand-lighter) 18%, var(--color-bg-tertiary)) 60%,
+      var(--color-bg-tertiary) 100%
+    );
+    background-size: 200% 100%;
+    animation: tahi-shimmer-sweep 1.6s linear infinite;
+  }
+
+  /* ── tahi-border-trace ────────────────────────────────── */
+
+  /* Clockwise brand-green border light-up on hover. Plays ONCE per hover
+     to completion (animation-fill-mode: forwards) per the play-to-
+     completion rule. Re-arms on next mouse-enter after the trace finishes
+     because the hover state is reset on mouse-leave and the animation
+     only fires when :hover is active.
+
+     Technique: a ::before pseudo-element positioned over the border area
+     uses a conic-gradient with a rotating angle (--trace-angle, a
+     registered CSS custom property so the browser can interpolate it).
+     The border-box clip masks it to the exact border path. On non-:hover
+     the angle is 0deg so the trace is invisible; :hover triggers 0deg ->
+     360deg over ~700ms. */
+
+  @property --trace-angle {
+    syntax: '<angle>';
+    inherits: false;
+    initial-value: 0deg;
+  }
+
+  .tahi-border-trace::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      transparent calc(360deg - var(--trace-angle)),
+      var(--color-brand-light) calc(360deg - var(--trace-angle)),
+      var(--color-brand-light) 360deg
+    );
+    /* Clip to the border band only (padding-box cuts out the interior). */
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+    /* Not animated by default: --trace-angle stays at initial 0deg. */
+    --trace-angle: 0deg;
+  }
+
+  @keyframes tahi-trace-clockwise {
+    from { --trace-angle: 0deg; }
+    to   { --trace-angle: 360deg; }
+  }
+
+  .tahi-border-trace:hover::before {
+    animation: tahi-trace-clockwise 700ms var(--ease-out) forwards;
+  }
+
+  /* Reset angle on leave so the trace re-arms for the next hover.
+     No transition here - an instant reset means the next hover always
+     starts from the top of the clock. */
+  .tahi-border-trace:not(:hover)::before {
+    --trace-angle: 0deg;
+  }
+
+} /* end @media (prefers-reduced-motion: no-preference) */
 
 @keyframes slideInRight {
   from {
