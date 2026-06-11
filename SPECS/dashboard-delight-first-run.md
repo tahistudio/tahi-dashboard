@@ -88,6 +88,28 @@ system.)
   identical card grids, big empty hero sections, Inter / Roboto, ~0.1-opacity
   shadows everywhere. (We already avoid these.)
 
+## Visual references (Liam-picked, 2026-06-11)
+
+Two Dribbble shots Liam loves : both clean / airy / rounded / subtle-border /
+calm-premium, aligned with our system. We borrow ideas, not pixels.
+
+**Fireart "Donezo" task dashboard** (green : near-identical to our palette):
+- The LEAD KPI card is filled SOLID brand-green with white text while the others
+  stay light : instant hierarchy / read-order. Adopt for the overview.
+- Big confident stat numbers + a tiny "increased from last month" caption.
+- Green data-viz: bar charts with rounded tops, a donut / gauge progress ring.
+- Dark-green accent cards (time-tracker, a sidebar promo) : our `FeatureCard`
+  "forest" variant already supports this.
+
+**Nixtio "Crextio" HR dashboard** (warm / cream, yellow accent : we keep greens):
+- A large, warm personal welcome ("Welcome in, {name}") : our first-run + greeting.
+- The premium ONBOARDING pattern : a dark card titled "Onboarding Task 2/8" with a
+  checklist + animated check circles + a progress count. Validates + sharpens our
+  onboarding moment (brand-dark green card, check-draw, X/N progress).
+- Circular progress rings (animated fill) for progress / capacity / time.
+- The interaction Liam called out: **stacked cards with depth you swipe away to
+  reveal the next** : a card-deck. We add a `CardStack` primitive.
+
 ## The reusable kit (built this slice, reused everywhere after)
 
 Existing foundation in `globals.css`: `--motion-quick 220ms / --motion-base 420ms
@@ -116,7 +138,19 @@ Existing foundation in `globals.css`: `--motion-quick 220ms / --motion-base 420m
 6. **`celebrate(type)`** (`components/tahi/celebrate.tsx`): a one-shot, portal'd
    leaf-sweep + sparkle overlay (~800ms, never confetti), fired imperatively on a
    completion. Respects reduced-motion (no-op or a single static check).
-7. (Deferred to slice B) sliding tab indicator + the broader icon micro-animation
+7. **`<CardStack>`** (`components/tahi/card-stack.tsx`): a deck of cards layered
+   with depth (each card behind is offset + scaled down + dimmed), where the top
+   card can be **swiped / dragged away** (controlled spring, not bounce) to reveal
+   the next, which rises forward. A dot / "x of n" affordance + keyboard support
+   (arrow keys / Enter) for a11y. Under reduced-motion or no fine pointer it
+   degrades to a plain stacked list (no swipe). Used for onboarding tasks,
+   reminders, and announcements. The more ambitious piece : if it risks the slice
+   it drops to slice B, but it is the interaction Liam specifically asked for.
+8. **`<ProgressRing>`** (`components/tahi/progress-ring.tsx`): an SVG circular
+   progress with an animated `stroke-dashoffset` fill + a `CountUp` % in the
+   centre. For onboarding progress, track capacity, and time. Brand-green stroke
+   on a faint track. Reduced-motion -> static at final value.
+9. (Deferred to slice B) sliding tab indicator + the broader icon micro-animation
    wiring : not needed for the first-run surfaces.
 
 ## Per-surface design
@@ -150,9 +184,12 @@ dismissible via localStorage. Elevate it into the "$50k onboarding" moment.
   personal greeting ("Welcome, {firstName}"), one calm sentence on what to expect,
   the **Loom embed** (`onboardingLoomUrl`) framed premium (leaf radius, not a bare
   iframe), and the checklist beneath. Reveal-staggers in.
-- **Checklist with craft:** each item gets a satisfying complete transition : the
-  `tahi-check-draw` check-circle, a smooth row settle, and an **animated progress**
-  indicator (count-up % or a filling leaf/bar) so progress feels earned.
+- **Checklist with craft (Crextio dark-card treatment):** present the checklist on
+  a brand-dark-green card titled with an **"X of N" progress** + a `ProgressRing`
+  (animated fill, count-up %), each item with the `tahi-check-draw` check-circle on
+  complete + a smooth row settle. Optionally render the steps as a `<CardStack>`
+  the client can **swipe through** (swipe-away a done step to reveal the next) :
+  the interaction Liam asked for, with a plain-list fallback under reduced-motion.
 - **Completion = the hero joy moment:** when the last item is checked (or onboarding
   flips complete), fire `celebrate('onboarding')` : the leaf sweep + a short warm
   line ("You're all set."). This is the reinforce-the-value beat. Then the card
@@ -167,9 +204,14 @@ feels alive + fast on arrival.
 
 - **Greeting with warmth:** time-of-day aware ("Good morning, {name}"), already
   partially present : keep it human, Reveal in first.
-- **KPI strip + stat tiles:** `CountUp` the numbers (money, counts) on load :
-  the premium "data earned" feel. `data-private` masking preserved (CountUp sits
-  inside the existing `data-private` element).
+- **KPI strip + stat tiles (Donezo treatment):** the single LEAD metric tile is
+  filled solid brand-green with white text (a `FeatureCard` "forest"/"lime"
+  variant); the rest stay light : instant hierarchy. Big confident numbers with a
+  small "vs last month" caption. `CountUp` every number on load (the "data earned"
+  feel); `data-private` masking preserved (CountUp sits inside the existing
+  `data-private` element). Charts: green bars with rounded tops / a donut gauge
+  via the existing Recharts theme : no restyle of data, just the green + rounded
+  treatment.
 - **Section + widget entrance:** the page's cards / widgets `Reveal`-stagger in on
   load (recent requests, pipeline summary, upcoming calls, off-track, track
   capacity), so the page assembles itself calmly rather than popping.
@@ -192,7 +234,8 @@ feels alive + fast on arrival.
 - `app/globals.css` : extend motion tokens + add the keyframes + shimmer/hover
   utilities + reduced-motion coverage for the new animations.
 - `components/tahi/reveal.tsx` (Reveal + `.tahi-stagger` helper), `count-up.tsx`,
-  `celebrate.tsx` (+ a tiny `useCelebrate` or imperative `celebrate()`).
+  `celebrate.tsx` (+ a tiny `useCelebrate` or imperative `celebrate()`),
+  `card-stack.tsx` (swipe deck), `progress-ring.tsx`.
 - `components/tahi/card.tsx` + `tahi-button.tsx` : confirm/standardise hover+press.
 - `app/(auth)/sign-in/.../page.tsx` + `sign-up/.../page.tsx` (+ a shared auth
   layout) : branded split + Clerk `appearance`.
