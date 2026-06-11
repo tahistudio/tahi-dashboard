@@ -248,10 +248,16 @@ export function CardDeck<T>({
                 position: isActive ? 'relative' : 'absolute',
                 inset: isActive ? undefined : 0,
                 zIndex: PEEK + 1 - depth,
+                // Opaque surface so the active card fully OCCLUDES the cards behind
+                // it (otherwise their text ghosts through). The peek cards carry a
+                // hairline edge + radius so they read as a real layered stack.
+                background: 'var(--color-bg)',
+                border: isActive ? undefined : '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-md)',
                 transform: isActive
                   ? `translateX(${dragDx}px)`
                   : `translateY(${depth * 0.5}rem) scale(${1 - depth * 0.035})`,
-                opacity: isActive ? 1 : 0.55 - (depth - 1) * 0.2,
+                opacity: isActive ? 1 : 0.6 - (depth - 1) * 0.22,
                 transformOrigin: 'top center',
                 pointerEvents: isActive ? 'auto' : 'none',
                 touchAction: 'pan-y',
