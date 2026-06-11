@@ -252,7 +252,7 @@ function QueueChip({ depth, low }: { depth: number; low: boolean }) {
           ? 'color-mix(in oklab, var(--color-warning) 16%, var(--color-bg))'
           : 'var(--color-bg-secondary)',
         color: low
-          ? 'color-mix(in oklab, var(--color-warning) 64%, var(--color-text))'
+          ? 'var(--color-due-soon-text)'
           : 'var(--color-text-muted)',
         fontSize: 'var(--text-2xs, 0.6875rem)',
         fontWeight: 600,

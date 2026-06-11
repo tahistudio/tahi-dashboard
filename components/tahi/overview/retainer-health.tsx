@@ -66,7 +66,7 @@ function healthTone(client: RetainerClient): HealthTone {
   if (status === 'red' || score >= 60) {
     return {
       color: 'var(--color-danger)',
-      textColor: 'color-mix(in oklab, var(--color-danger) 62%, var(--color-text))',
+      textColor: 'var(--color-danger)',
       track: 'var(--color-danger-bg)',
       verdict: 'at risk',
       pulse: true,
@@ -76,7 +76,7 @@ function healthTone(client: RetainerClient): HealthTone {
   if (status === 'amber' || score >= 35) {
     return {
       color: 'var(--color-warning)',
-      textColor: 'color-mix(in oklab, var(--color-warning) 62%, var(--color-text))',
+      textColor: 'var(--color-due-soon-text)',
       track: 'var(--color-warning-bg)',
       verdict: 'watch',
       pulse: false,
@@ -85,7 +85,7 @@ function healthTone(client: RetainerClient): HealthTone {
   // Green: healthy.
   return {
     color: 'var(--color-success)',
-    textColor: 'color-mix(in oklab, var(--color-success) 55%, var(--color-text))',
+    textColor: 'var(--color-on-track-text)',
     track: 'var(--color-success-bg)',
     verdict: 'healthy',
     pulse: false,

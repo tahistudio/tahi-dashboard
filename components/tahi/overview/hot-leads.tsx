@@ -60,7 +60,7 @@ function scoreBand(score: number): ScoreBand {
   if (score >= 80) {
     return {
       bg: 'color-mix(in oklab, var(--color-success) 16%, var(--color-bg))',
-      ink: 'color-mix(in oklab, var(--color-success) 62%, var(--color-text))',
+      ink: 'var(--color-on-track-text)',
       label: 'hot',
     }
   }
@@ -74,7 +74,7 @@ function scoreBand(score: number): ScoreBand {
   if (score >= 40) {
     return {
       bg: 'color-mix(in oklab, var(--color-warning) 16%, var(--color-bg))',
-      ink: 'color-mix(in oklab, var(--color-warning) 64%, var(--color-text))',
+      ink: 'var(--color-due-soon-text)',
       label: 'cool',
     }
   }

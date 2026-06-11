@@ -221,7 +221,7 @@ export function PipelineAhead({ className }: { className?: string }) {
               padding: '0.0625rem 0.4375rem',
               borderRadius: 'var(--radius-full)',
               background: 'color-mix(in oklab, var(--color-warning) 16%, var(--color-bg))',
-              color: 'color-mix(in oklab, var(--color-warning) 64%, var(--color-text))',
+              color: 'var(--color-due-soon-text)',
               fontSize: 'var(--text-2xs, 0.6875rem)',
               fontWeight: 600,
               whiteSpace: 'nowrap',

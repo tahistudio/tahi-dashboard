@@ -358,7 +358,7 @@ function FooterStat({
   highlight?: 'success'
 }) {
   const valueColor = highlight === 'success'
-    ? 'color-mix(in oklab, var(--color-success) 55%, var(--color-text))'
+    ? 'var(--color-on-track-text)'
     : 'var(--color-text)'
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
@@ -510,7 +510,7 @@ function ExpiryCountdown({ expiresAt }: { expiresAt: string | null }) {
         gap: 'var(--space-1)',
         fontSize: 'var(--text-2xs, 0.6875rem)',
         fontWeight: 600,
-        color: expiringSoon ? 'color-mix(in oklab, var(--color-warning) 62%, var(--color-text))' : 'var(--color-text-subtle)',
+        color: expiringSoon ? 'var(--color-due-soon-text)' : 'var(--color-text-subtle)',
       }}
     >
       {expiringSoon && (
