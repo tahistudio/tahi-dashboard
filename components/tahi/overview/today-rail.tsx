@@ -235,6 +235,7 @@ function CallCard({
         background: 'var(--color-bg)',
         border: '1px solid var(--color-border-subtle)',
         borderRadius: 'var(--radius-md)',
+        minHeight: '6.25rem',
       }}
     >
       <div

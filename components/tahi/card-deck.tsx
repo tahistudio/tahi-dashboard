@@ -247,6 +247,12 @@ export function CardDeck<T>({
               style={{
                 position: isActive ? 'relative' : 'absolute',
                 inset: isActive ? undefined : 0,
+                // The active card must fill the deck's minHeight so its opaque
+                // surface fully covers the peek cards. Without this, a card whose
+                // content is shorter than minHeight leaves a gap below it where the
+                // cards behind show through (the "stacked text bleed" bug). Peek
+                // cards already fill via inset:0.
+                minHeight: isActive ? minHeight : undefined,
                 zIndex: PEEK + 1 - depth,
                 // Opaque surface so the active card fully OCCLUDES the cards behind
                 // it (otherwise their text ghosts through). The peek cards carry a

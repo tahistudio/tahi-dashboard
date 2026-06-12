@@ -171,7 +171,7 @@ export function RetainerHealth({ className }: { className?: string }) {
         items={sorted}
         getKey={(c) => c.orgId}
         ariaLabel="Retainer clients by churn risk"
-        minHeight="9.5rem"
+        minHeight="8rem"
         autoplayMs={8000}
         accentColor="var(--domain-clients)"
         renderCard={(client) => <ClientCard client={client} format={format} />}
@@ -191,7 +191,19 @@ function ClientCard({
 }) {
   const tone = healthTone(client)
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', minWidth: 0 }}>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--space-4)',
+        padding: 'var(--space-4)',
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-md)',
+        minHeight: '8rem',
+        minWidth: 0,
+      }}
+    >
       <ChurnDial score={client.churnRiskScore} tone={tone} />
       <div style={{ minWidth: 0, flex: 1 }}>
         <div className="flex items-center" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
