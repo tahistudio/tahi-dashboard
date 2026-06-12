@@ -166,7 +166,10 @@ export function AdminOverview({ userName }: { userName: string }) {
   const clientsZoneVisible = features['clients'] !== false || features['contracts'] !== false
 
   return (
-    <div className="flex flex-col" style={{ gap: 'var(--space-6)', maxWidth: '68.75rem' }}>
+    <div
+      className="flex flex-col lg:pl-[var(--zone-rail)]"
+      style={{ gap: 'var(--space-6)', maxWidth: '71.25rem', ['--zone-rail' as string]: '2.5rem' }}
+    >
       {fetchError && (
         <div
           className="flex items-center"
@@ -195,77 +198,82 @@ export function AdminOverview({ userName }: { userName: string }) {
         <Reveal
           id="overview-grid"
           stagger
-          className="grid grid-cols-1 lg:grid-cols-12"
-          style={{ gap: 'var(--space-6)', gridAutoFlow: 'dense' }}
+          className="flex flex-col"
+          style={{ gap: 'var(--space-6)' }}
         >
-          {/* Needs You: the act-now queue. Owns the page's single border-trace. */}
-          <NeedsYou oldest={ledger?.arAging?.oldest ?? null} className="lg:col-span-12" />
-
-          {/* The Wire: cross-dashboard live ticker (the page's heartbeat) */}
-          <div className="lg:col-span-12"><TheWire /></div>
-
-          {/* Desk: timer + world clock, folded in high near the masthead clocks */}
-          <Gate feature="time">
-            <TimeTracker className="lg:col-span-5" />
-          </Gate>
-          <WorldClock className={timeVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
+          {/* Top band: act-now queue, the live wire, and the desk (timer + clocks).
+              Unlabelled (the always-on header of the cockpit); shares the left rail
+              so its cards line up with every zone below. */}
+          <div className="grid grid-cols-1 lg:grid-cols-12" style={{ gap: 'var(--space-6)', gridAutoFlow: 'dense' }}>
+            <NeedsYou oldest={ledger?.arAging?.oldest ?? null} className="lg:col-span-12" />
+            <div className="lg:col-span-12"><TheWire /></div>
+            <Gate feature="time">
+              <TimeTracker className="lg:col-span-5" />
+            </Gate>
+            <WorldClock className={timeVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
+          </div>
 
           {/* GROWTH zone: content engine + social cadence */}
-          {growthVisible && <ZoneLabel>Growth</ZoneLabel>}
-          <Gate feature="content_studio">
-            <ContentEngine className="lg:col-span-7" />
-          </Gate>
-          <Gate feature="social">
-            <SocialCadence className="lg:col-span-5" />
-          </Gate>
+          <Zone label="Growth" show={growthVisible}>
+            <Gate feature="content_studio">
+              <ContentEngine className="lg:col-span-7" />
+            </Gate>
+            <Gate feature="social">
+              <SocialCadence className="lg:col-span-5" />
+            </Gate>
+          </Zone>
 
           {/* WORK zone: the worklog + today's rail */}
-          {workVisible && <ZoneLabel>Work</ZoneLabel>}
-          <Gate feature="requests">
-            <InTheStudio data={recentRequests} loading={loading} className={callsVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
-          </Gate>
-          <Gate feature="calls">
-            <TodayRail className={requestsVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
-          </Gate>
+          <Zone label="Work" show={workVisible}>
+            <Gate feature="requests">
+              <InTheStudio data={recentRequests} loading={loading} className={callsVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
+            </Gate>
+            <Gate feature="calls">
+              <TodayRail className={requestsVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
+            </Gate>
+          </Zone>
 
           {/* AHEAD zone: pipeline + capacity + hot leads + proposals */}
-          {aheadVisible && <ZoneLabel>Ahead</ZoneLabel>}
-          <Gate feature="deals">
-            <PipelineAhead className={capacityVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
-          </Gate>
-          <Gate feature="capacity">
-            <StudioCapacity className={dealsVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
-          </Gate>
-          <Gate feature="leads">
-            <HotLeads className="lg:col-span-6" />
-          </Gate>
-          <Gate feature="proposals">
-            <ProposalsLive className="lg:col-span-6" />
-          </Gate>
+          <Zone label="Ahead" show={aheadVisible}>
+            <Gate feature="deals">
+              <PipelineAhead className={capacityVisible ? 'lg:col-span-7' : 'lg:col-span-12'} />
+            </Gate>
+            <Gate feature="capacity">
+              <StudioCapacity className={dealsVisible ? 'lg:col-span-5' : 'lg:col-span-12'} />
+            </Gate>
+            <Gate feature="leads">
+              <HotLeads className="lg:col-span-6" />
+            </Gate>
+            <Gate feature="proposals">
+              <ProposalsLive className="lg:col-span-6" />
+            </Gate>
+          </Zone>
 
           {/* CLIENTS zone: retainer health + contracts */}
-          {clientsZoneVisible && <ZoneLabel>Clients</ZoneLabel>}
-          <Gate feature="clients">
-            <RetainerHealth className="lg:col-span-7" />
-          </Gate>
-          <Gate feature="contracts">
-            <ContractsCard className="lg:col-span-5" />
-          </Gate>
+          <Zone label="Clients" show={clientsZoneVisible}>
+            <Gate feature="clients">
+              <RetainerHealth className="lg:col-span-7" />
+            </Gate>
+            <Gate feature="contracts">
+              <ContractsCard className="lg:col-span-5" />
+            </Gate>
+          </Zone>
 
           {/* BOOKS zone: take-home, cash + runway, forecast, receivables */}
-          {booksVisible && <ZoneLabel>Books</ZoneLabel>}
-          <Gate feature="financial_reports">
-            <TakeHomeGauges className="lg:col-span-5" />
-          </Gate>
-          <Gate feature="financial_reports">
-            <CashRunway cash={ledger?.cash ?? null} loading={loading} className="lg:col-span-7" />
-          </Gate>
-          <Gate feature="financial_reports">
-            <CashFlowRibbon className="lg:col-span-7" />
-          </Gate>
-          <Gate feature="invoices">
-            <ReceivablesTide arAging={ledger?.arAging ?? null} loading={loading} className="lg:col-span-5" />
-          </Gate>
+          <Zone label="Books" show={booksVisible}>
+            <Gate feature="financial_reports">
+              <TakeHomeGauges className="lg:col-span-5" />
+            </Gate>
+            <Gate feature="financial_reports">
+              <CashRunway cash={ledger?.cash ?? null} loading={loading} className="lg:col-span-7" />
+            </Gate>
+            <Gate feature="financial_reports">
+              <CashFlowRibbon className="lg:col-span-7" />
+            </Gate>
+            <Gate feature="invoices">
+              <ReceivablesTide arAging={ledger?.arAging ?? null} loading={loading} className="lg:col-span-5" />
+            </Gate>
+          </Zone>
 
           {!loading && kpis !== null && kpis.activeClients === 0 && (
             <Gate feature="clients">
@@ -280,15 +288,57 @@ export function AdminOverview({ userName }: { userName: string }) {
   )
 }
 
-// ─── Zone label (letterpress section divider in the bento) ───────────────────
+// ─── Zone (a labelled band of cards) ─────────────────────────────────────────
+//
+// The label stands VERTICALLY in the left rail (the dead gutter reserved by the
+// page's lg:pl-[--zone-rail]) on desktop, centred against the band so it reads
+// like an editorial section spine and never interrupts the card grid (every band
+// keeps the same gap + left edge). Below lg there is no rail, so it falls back to
+// a small horizontal label above the band. Decorative: the cards carry the
+// meaning, so the vertical label is aria-hidden and the <section> names the zone.
 
-function ZoneLabel({ children }: { children: React.ReactNode }) {
+function Zone({ label, show, children }: { label: string; show: boolean; children: React.ReactNode }) {
+  if (!show) return null
   return (
-    <div className="lg:col-span-12" style={{ marginTop: 'var(--space-4)' }}>
-      <span style={{ fontSize: 'var(--text-2xs, 0.6875rem)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--color-text-subtle)' }}>
+    <section aria-label={label} className="relative">
+      {/* Mobile / tablet: horizontal label above the band (no side rail there). */}
+      <div className="lg:hidden" style={{ marginBottom: 'var(--space-3)' }}>
+        <span style={{ fontSize: 'var(--text-2xs, 0.6875rem)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--color-text-subtle)' }}>
+          {label}
+        </span>
+      </div>
+      {/* Desktop: vertical label standing in the left rail, centred on the band. */}
+      <div
+        aria-hidden="true"
+        className="hidden lg:flex"
+        style={{
+          position: 'absolute',
+          top: 0,
+          bottom: 0,
+          left: 'calc(var(--zone-rail) * -1)',
+          width: 'var(--zone-rail)',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <span
+          style={{
+            writingMode: 'vertical-rl',
+            whiteSpace: 'nowrap',
+            fontSize: 'var(--text-sm)',
+            fontWeight: 700,
+            letterSpacing: '0.16em',
+            textTransform: 'uppercase',
+            color: 'var(--color-text-subtle)',
+          }}
+        >
+          {label}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-12" style={{ gap: 'var(--space-6)', gridAutoFlow: 'dense' }}>
         {children}
-      </span>
-    </div>
+      </div>
+    </section>
   )
 }
 
