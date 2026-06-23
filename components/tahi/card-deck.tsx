@@ -86,6 +86,15 @@ export function CardDeck<T>({
   // Deal-in entrance: apply the class for one mount, once, motion permitting.
   const [dealIn, setDealIn] = useState(false)
 
+  // Reduced-motion preference. Read in an effect, never during render, so the
+  // server and the first client render agree (both treat motion as allowed).
+  // window.matchMedia is client-only; reading it in the render body would
+  // mismatch hydration for users who have the preference set.
+  const [reduced, setReduced] = useState(false)
+  useEffect(() => {
+    setReduced(prefersReducedMotion())
+  }, [])
+
   // Clamp the active index if the items list shrinks.
   useEffect(() => {
     if (active > items.length - 1) setActive(Math.max(0, items.length - 1))
@@ -191,8 +200,6 @@ export function CardDeck<T>({
   }, [goManual])
 
   if (items.length === 0) return <>{emptyState ?? null}</>
-
-  const reduced = typeof window !== 'undefined' && prefersReducedMotion()
 
   return (
     <div

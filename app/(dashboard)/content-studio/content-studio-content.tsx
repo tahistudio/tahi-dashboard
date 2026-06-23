@@ -262,15 +262,15 @@ function shortUrl(url: string): string {
 
 export function ContentStudioContent() {
   const { showToast } = useToast()
-  // Initial tab honours ?tab=ideas etc so links from notifications land
-  // on the right tab. Falls back to 'health' when the param is missing
-  // or unknown.
-  const [activeTab, setActiveTab] = useState<TabId>(() => {
-    if (typeof window === 'undefined') return 'health'
+  // Honour ?tab=ideas etc so links from notifications land on the right tab.
+  // Read after mount (not in the initial state) so the server and the first
+  // client render both start on 'health'; reading window.location during the
+  // initial render would mismatch hydration whenever the URL carries ?tab=.
+  const [activeTab, setActiveTab] = useState<TabId>('health')
+  useEffect(() => {
     const param = new URLSearchParams(window.location.search).get('tab')
-    if (param && TABS.some(t => t.id === param)) return param as TabId
-    return 'health'
-  })
+    if (param && TABS.some(t => t.id === param)) setActiveTab(param as TabId)
+  }, [])
 
   return (
     <div style={{ padding: '1.25rem 0', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>

@@ -10,12 +10,14 @@
 
 import * as React from 'react'
 
-// Module-scoped counter so multiple instances on the same page each get a
-// unique gradient id (gradient defs are keyed globally in the document).
-let GRADIENT_ID_SEQ = 0
-function nextGradientId(prefix: string): string {
-  GRADIENT_ID_SEQ += 1
-  return `${prefix}-${GRADIENT_ID_SEQ}`
+// Stable, SSR-safe per-instance gradient id. React.useId() returns the same
+// value on the server render and on the client hydration for a given instance,
+// so the gradient id and its url(#id) reference always agree. A module-scoped
+// counter would diverge between the two runtimes and break hydration. The
+// colons React adds are stripped because they are awkward inside an svg
+// url(#...) fragment reference.
+function useGradientId(prefix: string): string {
+  return `${prefix}-${React.useId().replace(/[^a-zA-Z0-9]/g, '')}`
 }
 
 // ── The leaf glyph ─────────────────────────────────────────────────────
@@ -30,7 +32,7 @@ export function LeafGlyph({
   title?: string
   className?: string
 }) {
-  const id = React.useMemo(() => nextGradientId('tahi-leaf'), [])
+  const id = useGradientId('tahi-leaf')
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -172,7 +174,7 @@ export function TahiIconMark({
   title?: string
   className?: string
 }) {
-  const id = React.useMemo(() => nextGradientId('tahi-icon'), [])
+  const id = useGradientId('tahi-icon')
   const isOnDark = variant === 'on-dark'
   // Stroke colour for the "1". Uses CSS vars that flip per theme so the
   // mark stays legible whether it's sitting on cream (light) or forest
