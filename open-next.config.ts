@@ -12,10 +12,13 @@ const config: OpenNextConfig = {
     },
   },
   edgeExternals: ['node:crypto'],
-  // Webflow Cloud's OpenNext validator requires external: true.
-  // To work around the Clerk auth() middleware-detection issue, all server-side
-  // auth checks use lib/server-auth.ts which falls back to @clerk/backend
-  // direct cookie validation when the middleware headers aren't forwarded.
+  // @opennextjs/cloudflare REQUIRES middleware.external: true (its config
+  // validator rejects the build otherwise) — this is an OpenNext-on-Cloudflare
+  // requirement, not a Webflow one. Because middleware runs in a separate edge
+  // function, Clerk's auth() may not receive the middleware-injected headers,
+  // so all server-side auth goes through lib/server-auth.ts, which falls back
+  // to @clerk/backend direct cookie validation (authorizedParties must list
+  // every host the app is served from).
   middleware: {
     external: true,
     override: {

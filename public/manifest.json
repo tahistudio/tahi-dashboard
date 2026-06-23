@@ -2,8 +2,8 @@
   "name": "Tahi Dashboard",
   "short_name": "Tahi",
   "description": "Tahi Studio client portal and operations dashboard.",
-  "start_url": "/dashboard/overview",
-  "scope": "/dashboard/",
+  "start_url": "/overview",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#f5f7f5",
   "theme_color": "#5A824E",
@@ -11,13 +11,13 @@
   "categories": ["business", "productivity"],
   "icons": [
     {
-      "src": "/dashboard/favicon.png",
+      "src": "/favicon.png",
       "sizes": "any",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/dashboard/favicon.png",
+      "src": "/favicon.png",
       "sizes": "any",
       "type": "image/png",
       "purpose": "maskable"

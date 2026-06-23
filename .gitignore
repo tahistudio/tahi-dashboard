@@ -55,3 +55,16 @@ playwright/.cache/
 .vscode/
 .idea/
 .claude/
+.superpowers/
+
+# ShipStudio metadata
+.shipstudio/
+
+# design-sync (claude.ai/design) — build artifacts only.
+# Durable inputs ARE committed: design-sync.config.json, tsconfig.dssync.json,
+# .design-sync/{setup.mjs,compile-css.mjs,ds-entry.tsx,stubs/,docs/,groups/,previews/,overrides/,NOTES.md}
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/compiled.css

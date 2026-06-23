@@ -340,7 +340,7 @@ export function SchedulesContent() {
                 icon: <ExternalLink size={14} />,
                 onClick: () => {
                   if (typeof window !== 'undefined') {
-                    window.open(`/dashboard/p/schedule/${r.publicShareToken}`, '_blank', 'noopener,noreferrer')
+                    window.open(`/p/schedule/${r.publicShareToken}`, '_blank', 'noopener,noreferrer')
                   }
                 },
               })

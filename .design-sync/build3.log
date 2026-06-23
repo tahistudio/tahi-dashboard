@@ -1,0 +1,68 @@
+» tahi-dashboard@0.1.0 → ./ds-bundle (window.TahiDS)
+  react@19.2.4 has no UMD — bundling via esbuild
+[DETECT] searched C:\Users\Work\projects\tahi-dashboard (depth 4), found .storybook at [] → shape=package
+  source shape: package (from cfg.shape)
+  [DTS] parsed 0 .d.ts files from C:\Users\Work\projects\tahi-dashboard\lib
+  package: 46 components (46 src-matched)
+  bundle: 2605 KB
+  inlined npm packages: 69
+  (decorator auto-detect skipped — no .storybook/ dir found)
+  css: .design-sync\compiled.css (103 KB, copied)
+  exported PascalCase symbols: 0
+  components: 46
+  (excluded 0 enum/type/context/hook exports; 46 components)
+  guidelines: 1 file(s) → guidelines/
+  docs: 46/46 components matched (cfg.docsDir=docs)
+  (preview override: AnimatedBell)
+  (preview override: AnimatedCheckCircle)
+  (preview override: AnimatedEye)
+  (preview override: AnimatedHeart)
+  (preview override: AnimatedRefresh)
+  (preview override: AnimatedSearch)
+  (preview override: AnimatedSettings)
+  (preview override: AnimatedSparkles)
+  (preview override: AnimatedTrash)
+  (preview override: Avatar)
+  (preview override: Badge)
+  (preview override: BarChart)
+  (preview override: BoardView)
+  (preview override: CalendarHeatmap)
+  (preview override: Callout)
+  (preview override: Card)
+  (preview override: Composer)
+  (preview override: DataTable)
+  (preview override: DonutChart)
+  (preview override: FeatureCard)
+  (preview override: FileAttachmentList)
+  (preview override: FilterBar)
+  (preview override: FunnelChart)
+  (preview override: GanttChart)
+  (preview override: Gauge)
+  (preview override: Heatmap)
+  (preview override: KanbanBoard)
+  (preview override: KPICard)
+  (preview override: LeafGlyph)
+  (preview override: LeafIcon)
+  (preview override: LineChart)
+  (preview override: Menu)
+  (preview override: MessageBubble)
+  (preview override: MessageThread)
+  (preview override: MultiBarChart)
+  (preview override: ProgressBar)
+  (preview override: SlideOver)
+  (preview override: Sparkline)
+  (preview override: Stepper)
+  (preview override: TahiButton)
+  (preview override: TahiIconMark)
+  (preview override: TahiLink)
+  (preview override: TahiStudioWordmark)
+  (preview override: TahiWordmark)
+  (preview override: ToastProvider)
+  (preview override: Tooltip)
+  previews: 0 generated → .design-sync/.cache/previews/ (46 user-owned)
+  [DTS] 20/46 components
+  [DTS] 40/46 components
+  [DTS] 46/46 components
+  styles.css: 1 @import(s) (incl. _ds_bundle.css — component styles ship to designs via this closure)
+  _ds_sync.json: 46 render hash(es) (verification anchor)
+✓ wrote ./ds-bundle: _ds_bundle.js + styles.css + 46 component previews

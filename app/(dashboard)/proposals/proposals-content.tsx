@@ -421,7 +421,7 @@ export function ProposalsContent() {
                 label: 'Open public viewer',
                 icon: <ExternalLink size={14} />,
                 onClick: () => {
-                  window.open(`/dashboard/p/proposal/${r.publicShareToken}`, '_blank', 'noopener,noreferrer')
+                  window.open(`/p/proposal/${r.publicShareToken}`, '_blank', 'noopener,noreferrer')
                 },
               })
             }

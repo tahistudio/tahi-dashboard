@@ -115,7 +115,7 @@ export function defaultDataForType(type: SectionType): Record<string, unknown> {
       return {
         eyebrow: 'The team on your build',
         intro: 'Founder-led, end-to-end. Liam runs engineering, Staci runs design. No account managers, no handoffs.',
-        image: '/dashboard/proposals/founders-placeholder.jpg',
+        image: '/proposals/founders-placeholder.jpg',
         imagePosition: '50% 25%',
         people: [
           { name: 'Liam Miller', role: 'Engineering' },

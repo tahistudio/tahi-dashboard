@@ -358,7 +358,7 @@ export function ContractsContent() {
               actions.push({
                 label: 'Public viewer',
                 icon: <ExternalLink size={14} />,
-                onClick: () => window.open(`/dashboard/p/contract/${r.publicShareToken}`, '_blank', 'noreferrer'),
+                onClick: () => window.open(`/p/contract/${r.publicShareToken}`, '_blank', 'noreferrer'),
               })
             }
             actions.push({

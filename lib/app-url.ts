@@ -1,24 +1,20 @@
 /**
  * Resolve the deployed app's origin (no trailing slash, no /dashboard).
  *
- * `NEXT_PUBLIC_APP_URL` was historically set to include the /dashboard
- * basePath (e.g. `https://dashboard.tahistudio.com/dashboard`). When email
- * routes appended their own `/dashboard/p/...` path the URL would double
- * up to `/dashboard/dashboard/p/...` and signing links would 404. This
- * helper strips a trailing `/dashboard/?` so callers can confidently
- * append the basePath themselves.
+ * The app now serves at the domain root. NEXT_PUBLIC_APP_URL may historically
+ * have included a /dashboard basePath, so we defensively strip any trailing
+ * /dashboard to give callers a clean origin to build absolute URLs from.
  */
 export function appOrigin(): string {
-  const raw = process.env.NEXT_PUBLIC_APP_URL ?? 'https://dashboard.tahistudio.com'
+  const raw = process.env.NEXT_PUBLIC_APP_URL ?? 'https://portal.tahi.studio'
   return raw.replace(/\/+$/, '').replace(/\/dashboard$/, '')
 }
 
 /**
  * Build a fully-qualified URL into the public viewer / sign / portal pages.
- * Always returns an absolute URL prefixed with the basePath, regardless of
- * whether NEXT_PUBLIC_APP_URL was set with or without `/dashboard`.
+ * The app serves at the domain root, so no basePath is prefixed.
  */
 export function publicUrl(path: string): string {
   const trimmed = path.startsWith('/') ? path : `/${path}`
-  return `${appOrigin()}/dashboard${trimmed}`
+  return `${appOrigin()}${trimmed}`
 }

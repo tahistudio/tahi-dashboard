@@ -1,0 +1,15 @@
+  .ds-build-meta.json: 46 components (package)
+  _ds_bundle.js: 2619 KB, syntax OK
+  _ds_bundle.js header: window.TahiDS, 46 components, 69 inlined externals
+  _ds_sync.json: 46 render hash(es), anchor matches the bundle
+  _ds_sync.json render hashes match disk (46 recomputed)
+  styles.css: 1 @import(s), all resolve
+  _ds_bundle.css: 103 KB
+  tokens: 321 defined, 150 referenced (3 missing, below threshold)
+  components/: 46 previews, 46 .prompt.md
+  all .d.ts parse cleanly
+  window.TahiDS: 49 exports (46 fn + 0 compound)
+  render check: 46/46 previews render cleanly (screenshots in _screenshots/)
+  contact sheets: 3 sheet(s) → _screenshots/contact-sheet-1.png … contact-sheet-3.png
+
+✓ bundle is complete

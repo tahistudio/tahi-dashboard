@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
   // on both prod and local dev.
   const host = req.headers.get('host') ?? 'localhost'
   const proto = req.headers.get('x-forwarded-proto') ?? 'https'
-  const settingsUrl = (suffix: string) => `${proto}://${host}/dashboard/settings#google${suffix}`
+  const settingsUrl = (suffix: string) => `${proto}://${host}/settings#google${suffix}`
 
   if (oauthError) {
     return NextResponse.redirect(settingsUrl(`?error=${encodeURIComponent(oauthError)}`))
@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(settingsUrl('?error=missing_env'))
   }
 
-  const defaultRedirect = `${proto}://${host}/dashboard/api/admin/integrations/google/callback`
+  const defaultRedirect = `${proto}://${host}/api/admin/integrations/google/callback`
   const redirectUri = process.env.GOOGLE_REDIRECT_URI ?? defaultRedirect
 
   // 1. Exchange code → tokens

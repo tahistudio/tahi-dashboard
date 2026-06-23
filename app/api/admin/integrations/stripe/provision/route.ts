@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
     metadata: {
       orgId: body.orgId,
       planType: body.planType,
-      dashboardUrl: 'https://dashboard.tahi.studio',
+      dashboardUrl: 'https://portal.tahi.studio',
     },
   })
 

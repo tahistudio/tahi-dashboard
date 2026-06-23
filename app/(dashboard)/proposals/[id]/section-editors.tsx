@@ -151,7 +151,7 @@ function FoundersFields({ data, onChange }: FieldsProps) {
           <input
             value={image}
             onChange={e => set({ image: e.target.value })}
-            placeholder="/dashboard/proposals/founders-placeholder.jpg"
+            placeholder="/proposals/founders-placeholder.jpg"
             style={inputStyle}
           />
         </Field>

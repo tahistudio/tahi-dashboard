@@ -16,7 +16,7 @@
  * Required env vars (set in Webflow Cloud or wrangler):
  *   GOOGLE_CLIENT_ID
  *   GOOGLE_CLIENT_SECRET   (only used on callback)
- *   GOOGLE_REDIRECT_URI    (optional — defaults to host + /dashboard/api/admin/integrations/google/callback)
+ *   GOOGLE_REDIRECT_URI    (optional — defaults to host + /api/admin/integrations/google/callback)
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
   // Default redirect URI: same host + dashboard basePath.
   const host = req.headers.get('host') ?? 'localhost'
   const proto = req.headers.get('x-forwarded-proto') ?? 'https'
-  const defaultRedirect = `${proto}://${host}/dashboard/api/admin/integrations/google/callback`
+  const defaultRedirect = `${proto}://${host}/api/admin/integrations/google/callback`
   const redirectUri = process.env.GOOGLE_REDIRECT_URI ?? defaultRedirect
 
   const params = new URLSearchParams({

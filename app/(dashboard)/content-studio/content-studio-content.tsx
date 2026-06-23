@@ -1069,7 +1069,7 @@ function IdeasTab({ onToast }: IdeasTabProps) {
       onToast(`Round table started — pipeline at ${json.status}. Opening detail...`, 'success')
       // Navigate to the round-table detail page
       if (typeof window !== 'undefined' && json.draftId) {
-        window.location.href = `/dashboard/content-studio/drafts/${json.draftId}/round-table`
+        window.location.href = `/content-studio/drafts/${json.draftId}/round-table`
       }
     } catch (err) {
       onToast(err instanceof Error ? err.message : 'Failed', 'error')
@@ -3023,7 +3023,7 @@ function DraftCard({ draft, onOpen, onRetry, retrying }: DraftCardProps) {
           raw-body view is kept behind the small "Raw" button for quick peeks. */}
       <div style={{ display: 'flex', gap: '0.375rem', marginTop: 'auto', paddingTop: '0.375rem', flexWrap: 'wrap' }}>
         <a
-          href={`/dashboard/content-studio/drafts/${draft.id}/round-table`}
+          href={`/content-studio/drafts/${draft.id}/round-table`}
           style={{ textDecoration: 'none', flex: '1 1 auto' }}
           title="Open the article + reviewers + publish controls"
         >

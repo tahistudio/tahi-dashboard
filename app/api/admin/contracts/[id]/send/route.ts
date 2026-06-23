@@ -61,7 +61,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   // composes the URL using window.location.origin. Return token + signerIds.
   return NextResponse.json({
     token,
-    signers: signers.map(s => ({ ...s, signPath: `/dashboard/p/contract/${token}/sign/${s.id}` })),
+    signers: signers.map(s => ({ ...s, signPath: `/p/contract/${token}/sign/${s.id}` })),
   })
 }
 

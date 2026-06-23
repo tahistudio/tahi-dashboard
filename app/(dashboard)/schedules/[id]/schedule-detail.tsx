@@ -529,7 +529,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       const data = await res.json() as { token?: string }
       if (!res.ok || !data.token) throw new Error('Failed')
       setSchedule(prev => prev ? { ...prev, status: 'shared', publicShareToken: data.token! } : prev)
-      const url = `${window.location.origin}/dashboard/p/schedule/${data.token}`
+      const url = `${window.location.origin}/p/schedule/${data.token}`
       try {
         await navigator.clipboard.writeText(url)
         showToast('Public link copied to clipboard', 'success')
@@ -566,7 +566,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   }
 
   const publicUrl = schedule.publicShareToken
-    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/dashboard/p/schedule/${schedule.publicShareToken}`
+    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/p/schedule/${schedule.publicShareToken}`
     : null
 
   // Rail content — rendered inline on the right aside. Extracted into a

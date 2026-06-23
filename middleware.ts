@@ -1,11 +1,9 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 
-// Public routes : no auth needed.
-// Both /<route> and /dashboard/<route> are listed because Clerk's
-// createRouteMatcher behaviour with Next.js basePath has been inconsistent
-// across versions — the belt-and-braces guarantees a logged-out signer
-// hitting /dashboard/p/contract/<token> never gets bounced to /sign-in.
+// Public routes : no auth needed. The app serves at the domain root (no
+// basePath), so a logged-out signer hitting /p/contract/<token> is never
+// bounced to /sign-in.
 const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
@@ -37,19 +35,6 @@ const isPublicRoute = createRouteMatcher([
   // Pages live under /p/<resource>/<token>; their data APIs under /api/public.
   '/p/(.*)',
   '/api/public/(.*)',
-  // Same patterns including basePath, in case Clerk doesn't strip it.
-  '/dashboard/sign-in(.*)',
-  '/dashboard/sign-up(.*)',
-  '/dashboard/demo(.*)',
-  '/dashboard/api/webhooks/(.*)',
-  '/dashboard/api/case-study/(.*)',
-  '/dashboard/api/admin/docs/seed(.*)',
-  '/dashboard/api/admin/ai/briefing/cron(.*)',
-  '/dashboard/api/admin/integrations/google/callback(.*)',
-  '/dashboard/api/admin/integrations/xero/callback(.*)',
-  '/dashboard/api/admin/migrate/(.*)',
-  '/dashboard/p/(.*)',
-  '/dashboard/api/public/(.*)',
 ])
 
 // Admin-only routes : if a client hits these, redirect them to /requests
@@ -77,6 +62,16 @@ export default clerkMiddleware(async (auth, req) => {
   const authHeader = req.headers.get('authorization')
   if (authHeader?.startsWith('Bearer ') && req.nextUrl.pathname.startsWith('/api/')) {
     return NextResponse.next()
+  }
+
+  // Bare domain root: redirect to the right home at the edge. The page-level
+  // RSC redirect renders Next's 404 in the OpenNext external-middleware setup,
+  // so we resolve it here where NextResponse.redirect is reliable.
+  if (req.nextUrl.pathname === '/') {
+    const { userId } = await auth()
+    const url = req.nextUrl.clone()
+    url.pathname = userId ? '/overview' : '/sign-in'
+    return NextResponse.redirect(url)
   }
 
   // Require Clerk auth for everything else

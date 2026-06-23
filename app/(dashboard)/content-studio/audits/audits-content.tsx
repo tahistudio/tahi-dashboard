@@ -66,7 +66,7 @@ export function AuditsContent() {
       if (j.draftId) {
         // Open the audit's round-table page so Liam can watch the
         // reviewers run.
-        window.location.href = `/dashboard/content-studio/drafts/${j.draftId}/round-table`
+        window.location.href = `/content-studio/drafts/${j.draftId}/round-table`
       }
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to create audit')
@@ -81,7 +81,7 @@ export function AuditsContent() {
       header: 'Post',
       sortable: true,
       width: '28rem',
-      link: { href: r => `/dashboard/content-studio/drafts/${r.id}/round-table` },
+      link: { href: r => `/content-studio/drafts/${r.id}/round-table` },
       render: r => r.title ?? '(untitled)',
     },
     {

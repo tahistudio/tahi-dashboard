@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://dashboard.tahi.studio'
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://portal.tahi.studio'
 
   return NextResponse.json({
     triggers: [

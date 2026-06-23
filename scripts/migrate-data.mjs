@@ -23,8 +23,8 @@ import { dirname, join } from 'node:path'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const STATE_PATH = join(__dirname, '.migrate-state.json')
 
-const SOURCE = 'https://tahi-test-dashboard.webflow.io/dashboard'
-const DEST = 'https://tahi-dashboard.webflow.io/dashboard'
+const SOURCE = process.env.MIGRATE_SOURCE ?? 'https://tahi-test-dashboard.webflow.io/dashboard'
+const DEST = process.env.MIGRATE_DEST ?? 'https://tahi-dashboard.webflow.io/dashboard'
 const TOKEN = process.env.TAHI_API_TOKEN ?? 'tahi-mcp-dev-token-2026'
 
 const HEADERS = { Authorization: `Bearer ${TOKEN}` }
@@ -126,18 +126,50 @@ async function countR2(base) {
   return { count, size }
 }
 
-async function applySchema() {
-  console.log(`${c.bold}Schema sync starting${c.reset}`)
-  const src = await jget(SOURCE, '/api/admin/migrate/db-schema')
+async function dropDestTables() {
+  console.log(`${c.bold}Dropping all dest tables${c.reset}`)
+  const dst = await jget(DEST, '/api/admin/migrate/db-tables')
+  if (dst.tables.length === 0) {
+    console.log('  dest already empty')
+    return
+  }
+  const drops = dst.tables.map(t => `DROP TABLE IF EXISTS "${t.name}"`)
+  const DROP_BATCH = 20
+  let total = 0
+  for (let i = 0; i < drops.length; i += DROP_BATCH) {
+    const chunk = drops.slice(i, i + DROP_BATCH)
+    const result = await jpost(DEST, '/api/admin/migrate/db-exec', { statements: chunk })
+    total += result.ok
+    process.stdout.write(`\r  dropped ${total} / ${drops.length}`)
+  }
+  process.stdout.write('\n')
+  console.log(`${c.green}Drop complete${c.reset}`)
+}
+
+async function applySchema({ stripFk = false } = {}) {
+  console.log(`${c.bold}Schema sync starting${stripFk ? ' (FK stripped)' : ''}${c.reset}`)
+  const src = await jget(SOURCE, '/api/admin/migrate/db-schema', stripFk ? { stripFk: 1 } : {})
   console.log(`  pulled ${src.tableCount} tables + ${src.indexCount} indexes from source`)
-  const result = await jpost(DEST, '/api/admin/migrate/db-exec', { statements: src.statements })
-  console.log(`  applied to dest: ${result.ok}/${result.total} succeeded`)
-  if (result.failed > 0) {
-    console.log(`${c.red}  ${result.failed} failed:${c.reset}`)
-    for (const r of result.results ?? []) {
+
+  const SCHEMA_BATCH = 20
+  let okTotal = 0, failTotal = 0
+  const failures = []
+  for (let i = 0; i < src.statements.length; i += SCHEMA_BATCH) {
+    const chunk = src.statements.slice(i, i + SCHEMA_BATCH)
+    process.stdout.write(`\r  applying ${i + chunk.length} / ${src.statements.length}`)
+    const result = await jpost(DEST, '/api/admin/migrate/db-exec', { statements: chunk })
+    okTotal += result.ok
+    failTotal += result.failed
+    if (result.results) failures.push(...result.results)
+  }
+  process.stdout.write('\n')
+  console.log(`  applied to dest: ${okTotal}/${okTotal + failTotal} succeeded`)
+  if (failTotal > 0) {
+    console.log(`${c.red}  ${failTotal} failed:${c.reset}`)
+    for (const r of failures.slice(0, 20)) {
       console.log(`    - ${r.statement}...  ERR: ${r.error}`)
     }
-    throw new Error(`${result.failed} schema statements failed`)
+    throw new Error(`${failTotal} schema statements failed`)
   }
   console.log(`${c.green}Schema sync complete${c.reset}`)
 }
@@ -239,12 +271,17 @@ async function migrateR2() {
 const cmd = process.argv[2]
 try {
   if (cmd === 'status' || cmd === 'verify') await status()
-  else if (cmd === 'schema') await applySchema()
+  else if (cmd === 'schema') await applySchema({ stripFk: process.argv[3] === '--strip-fk' })
+  else if (cmd === 'drop-dest') await dropDestTables()
+  else if (cmd === 'reset-schema') {
+    await dropDestTables()
+    await applySchema({ stripFk: true })
+  }
   else if (cmd === 'db') await migrateDb()
   else if (cmd === 'r2') await migrateR2()
   else if (cmd === 'all') { await applySchema(); await migrateDb(); await migrateR2(); await status() }
   else {
-    console.log('Usage: node scripts/migrate-data.mjs <status|schema|db|r2|all|verify>')
+    console.log('Usage: node scripts/migrate-data.mjs <status|schema|reset-schema|drop-dest|db|r2|all|verify>')
     process.exit(1)
   }
 } catch (e) {

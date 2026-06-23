@@ -88,6 +88,9 @@ export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResul
     const authorizedParties = [
       process.env.NEXT_PUBLIC_APP_URL,
       'https://tahi-test-dashboard.webflow.io',
+      'https://tahi-dashboard-staging.business-ccd.workers.dev',
+      'https://staging.tahi.studio',
+      'https://portal.tahi.studio',
       'http://localhost:3000',
     ].filter(Boolean) as string[]
 
@@ -172,6 +175,9 @@ export async function getServerAuth(): Promise<RequestAuthResult> {
     const authorizedParties = [
       process.env.NEXT_PUBLIC_APP_URL,
       'https://tahi-test-dashboard.webflow.io',
+      'https://tahi-dashboard-staging.business-ccd.workers.dev',
+      'https://staging.tahi.studio',
+      'https://portal.tahi.studio',
       'http://localhost:3000',
     ].filter(Boolean) as string[]
 

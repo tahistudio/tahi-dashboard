@@ -379,7 +379,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
       const data = await res.json() as { token?: string }
       if (!res.ok || !data.token) throw new Error('Failed')
       setProposal(prev => prev ? { ...prev, status: 'shared', publicShareToken: data.token! } : prev)
-      const url = `${window.location.origin}/dashboard/p/proposal/${data.token}`
+      const url = `${window.location.origin}/p/proposal/${data.token}`
       try { await navigator.clipboard.writeText(url); showToast('Public link copied', 'success') }
       catch { showToast('Public link ready', 'success') }
     } catch {
@@ -443,7 +443,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
   }
 
   const publicUrl = proposal.publicShareToken
-    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/dashboard/p/proposal/${proposal.publicShareToken}`
+    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/p/proposal/${proposal.publicShareToken}`
     : null
 
   // Sorted sections drive the navigator order and slide numbering.

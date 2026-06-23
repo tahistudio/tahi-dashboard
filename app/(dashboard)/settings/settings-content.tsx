@@ -3096,16 +3096,16 @@ function BrandingSection({
   const [portalName, setPortalName] = useState('')
   const [primaryColor, setPrimaryColor] = useState('#5A824E')
   const [logoUrl, setLogoUrl] = useState('')
-  const [faviconLightUrl, setFaviconLightUrl] = useState('/dashboard/favicon.png')
-  const [faviconDarkUrl, setFaviconDarkUrl] = useState('/dashboard/favicon.png')
+  const [faviconLightUrl, setFaviconLightUrl] = useState('/favicon.png')
+  const [faviconDarkUrl, setFaviconDarkUrl] = useState('/favicon.png')
 
   // Sync from settings when loaded
   useEffect(() => {
     setPortalName(settings['portal_name'] ?? '')
     setPrimaryColor(settings['portal_primary_color'] ?? '#5A824E')
     setLogoUrl(settings['portal_logo_url'] ?? '')
-    setFaviconLightUrl(settings['favicon_light_url'] ?? '/dashboard/favicon.png')
-    setFaviconDarkUrl(settings['favicon_dark_url'] ?? '/dashboard/favicon.png')
+    setFaviconLightUrl(settings['favicon_light_url'] ?? '/favicon.png')
+    setFaviconDarkUrl(settings['favicon_dark_url'] ?? '/favicon.png')
   }, [settings])
 
   return (
@@ -3271,7 +3271,7 @@ function BrandingSection({
               type="url"
               value={faviconLightUrl}
               onChange={e => setFaviconLightUrl(e.target.value)}
-              placeholder="/dashboard/favicon.png"
+              placeholder="/favicon.png"
               style={{ flex: 1 }}
             />
             <TahiButton
@@ -3311,7 +3311,7 @@ function BrandingSection({
               type="url"
               value={faviconDarkUrl}
               onChange={e => setFaviconDarkUrl(e.target.value)}
-              placeholder="/dashboard/favicon.png"
+              placeholder="/favicon.png"
               style={{ flex: 1 }}
             />
             <TahiButton
@@ -3523,7 +3523,7 @@ function AiCostSection() {
                       }}
                     >
                       <a
-                        href={`/dashboard/leads/${l.id}`}
+                        href={`/leads/${l.id}`}
                         className="text-sm text-[var(--color-text)] truncate hover:underline"
                       >
                         {l.name}
@@ -3681,7 +3681,7 @@ function AiContextDocsSection({
                 </select>
                 {currentDoc && (
                   <a
-                    href={`/dashboard/docs/${currentDoc.slug}`}
+                    href={`/docs/${currentDoc.slug}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs text-[var(--color-brand)] underline hover:no-underline"

@@ -201,7 +201,7 @@ export function ContractDetail({ id }: { id: string }) {
       if (data.contract.publicShareToken) {
         const links: Record<string, string> = {}
         for (const s of data.signers ?? []) {
-          links[s.id] = `${window.location.origin}/dashboard/p/contract/${data.contract.publicShareToken}/sign/${s.id}`
+          links[s.id] = `${window.location.origin}/p/contract/${data.contract.publicShareToken}/sign/${s.id}`
         }
         setSignerLinks(links)
       } else {
@@ -399,7 +399,7 @@ export function ContractDetail({ id }: { id: string }) {
   const signedCount = sortedSigners.filter(s => s.status === 'signed').length
   const palette = STATUS_PALETTE[contract.status]
   const publicUrl = contract.publicShareToken
-    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/dashboard/p/contract/${contract.publicShareToken}`
+    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/p/contract/${contract.publicShareToken}`
     : null
 
   // ── Render ───────────────────────────────────────────────────────────

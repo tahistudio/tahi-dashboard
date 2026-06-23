@@ -986,7 +986,7 @@ function BrandMark({ size = 'md', dark = false }: { size?: 'sm' | 'md'; dark?: b
     <div className="inline-flex items-center" style={{ gap: '0.5rem' }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src="/dashboard/favicon.png"
+        src="/favicon.png"
         alt=""
         aria-hidden="true"
         style={{ width: dim, height: dim, display: 'block', flexShrink: 0 }}

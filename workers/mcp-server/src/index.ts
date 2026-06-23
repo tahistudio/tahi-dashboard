@@ -13,8 +13,8 @@ interface Env {
   OAUTH_CLIENT_SECRET: string
 }
 
-const DASHBOARD_URL =
-  'https://fdd08ec9-43a5-4c62-aa6d-309da23e3d0f.wf-app-prod.cosmic.webflow.services/dashboard'
+// Direct Cloudflare production (Oceania). Root path, no /dashboard basePath.
+const DASHBOARD_URL = 'https://portal.tahi.studio'
 
 // ---------------------------------------------------------------------------
 // CORS
