@@ -38,6 +38,24 @@ export interface RequestAuthResult {
   sessionId: string | null
 }
 
+// --- Dev-only Ship Studio preview auto-auth ---------------------------------
+// The Ship Studio design wrapper loads the LOCAL dev server but can't complete
+// Clerk's browser sign-in. Middleware tags wrapper requests (?shipstudio=1 /
+// headless Chrome) with the x-ship-studio header + tahi-ship-studio cookie. In
+// DEVELOPMENT ONLY we treat those as the Tahi admin so the dashboard renders.
+// HARD-GATED to NODE_ENV !== 'production': Next inlines NODE_ENV at build time,
+// so this branch is dead-code-eliminated from the production Cloudflare bundle
+// and can never run on a deployed environment.
+const SHIP_STUDIO_USER_ID = 'user_3BUxI1ofUJFOqt6AujKPVjfE7wN'
+
+function shipStudioIdentity(): RequestAuthResult {
+  return {
+    userId: SHIP_STUDIO_USER_ID,
+    orgId: process.env.NEXT_PUBLIC_TAHI_ORG_ID ?? null,
+    sessionId: 'ship-studio-preview',
+  }
+}
+
 let _clerk: ReturnType<typeof createClerkClient> | null = null
 function getClerkClient() {
   if (!_clerk) {
@@ -55,6 +73,19 @@ function getClerkClient() {
  * were not forwarded from the edge middleware worker.
  */
 export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResult> {
+  // Dev-only Ship Studio preview bypass (see note above; prod build strips this).
+  if (process.env.NODE_ENV !== 'production') {
+    const ua = req.headers.get('user-agent') ?? ''
+    if (
+      req.headers.get('x-ship-studio') === '1' ||
+      req.cookies.get('tahi-ship-studio')?.value === '1' ||
+      ua.includes('HeadlessChrome') ||
+      ua.includes('Edg/')
+    ) {
+      return shipStudioIdentity()
+    }
+  }
+
   // API key auth: for MCP server and service-to-service calls
   const authHeader = req.headers.get('authorization')
   if (authHeader?.startsWith('Bearer ') && process.env.TAHI_API_TOKEN) {
@@ -141,6 +172,21 @@ export async function getPortalAuth(
  * can validate the session JWT directly : no middleware signal needed.
  */
 export async function getServerAuth(): Promise<RequestAuthResult> {
+  // Dev-only Ship Studio preview bypass (see note above; prod build strips this).
+  if (process.env.NODE_ENV !== 'production') {
+    const hdrs = await headers()
+    const cookieStore = await cookies()
+    const ua = hdrs.get('user-agent') ?? ''
+    if (
+      hdrs.get('x-ship-studio') === '1' ||
+      cookieStore.get('tahi-ship-studio')?.value === '1' ||
+      ua.includes('HeadlessChrome') ||
+      ua.includes('Edg/')
+    ) {
+      return shipStudioIdentity()
+    }
+  }
+
   // Fast path: try the standard auth() : works when middleware headers ARE forwarded
   try {
     const a = await auth()

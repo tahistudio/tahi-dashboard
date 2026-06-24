@@ -30,6 +30,10 @@ yarn-error.log*
 # OpenNext / Cloudflare build output
 .open-next/
 
+# Wrangler local state (miniflare D1/R2/KV). Local dev data only — and may hold
+# a snapshot of real client data — so NEVER commit it.
+.wrangler/
+
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts

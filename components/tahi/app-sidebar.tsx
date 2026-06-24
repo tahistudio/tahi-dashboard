@@ -252,8 +252,17 @@ export function AppSidebar({ isAdmin, features }: { isAdmin: boolean; features?:
     && impersonatedAccessRules.length > 0
     && impersonatedAccessRules.every(r => r.role === 'viewer')
 
+  // Defer the client-only Clerk email read until after mount. In this OpenNext
+  // setup the server has no Clerk session, so useUser() yields no email server
+  // side; reading it during the initial client render would surface the
+  // email-gated nav items (e.g. Sitemap) that the server omitted, a hydration
+  // mismatch that forces React to re-render the sidebar and desyncs the brand
+  // glyph's useId. Holding userEmail null until mounted keeps the first client
+  // render identical to the server; the gated items appear right after.
+  const [mounted, setMounted] = React.useState(false)
+  React.useEffect(() => { setMounted(true) }, [])
   const { user } = useUser()
-  const userEmail = user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? null
+  const userEmail = mounted ? (user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? null) : null
   const { canManagePermissions } = usePermissions()
 
   const sourceNav = showAsAdmin ? ADMIN_NAV : CLIENT_NAV

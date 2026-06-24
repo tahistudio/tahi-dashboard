@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next'
+import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare'
 
 const nextConfig: NextConfig = {
   // The app serves at the domain root (e.g. portal.tahi.studio). No basePath.
@@ -69,3 +70,9 @@ const nextConfig: NextConfig = {
 }
 
 export default nextConfig
+
+// Wire Cloudflare bindings (D1 `DB`, R2 `STORAGE`) into `next dev` so local
+// development can actually reach the database. This is a no-op in production
+// builds. Without it, getCloudflareContext() has no bindings and every db()
+// call throws, which is why local dev shows empty data.
+initOpenNextCloudflareForDev()

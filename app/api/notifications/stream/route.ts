@@ -20,17 +20,40 @@ export async function GET(req: NextRequest) {
 
   const encoder = new TextEncoder()
   let lastCheckedAt = new Date().toISOString()
+  let interval: ReturnType<typeof setInterval> | undefined
+  let keepAlive: ReturnType<typeof setInterval> | undefined
+  let closed = false
+
+  // Tear the polling timers down the moment the client goes away (reload,
+  // navigate, EventSource.close). Without this the intervals LEAK: each
+  // reconnect leaves an orphaned 5s D1-polling loop running forever, and they
+  // pile up across reloads until the dev server is starved. req.signal fires on
+  // client disconnect; cancel() covers teardown initiated by the stream itself.
+  const cleanup = () => {
+    if (closed) return
+    closed = true
+    if (interval) clearInterval(interval)
+    if (keepAlive) clearInterval(keepAlive)
+  }
+  req.signal.addEventListener('abort', cleanup)
 
   const stream = new ReadableStream({
     start(controller) {
-      // Send initial heartbeat
-      const heartbeat = encoder.encode(
-        `data: ${JSON.stringify({ type: 'connected', userId })}\n\n`
-      )
-      controller.enqueue(heartbeat)
+      const safeEnqueue = (chunk: Uint8Array) => {
+        if (closed) return
+        try {
+          controller.enqueue(chunk)
+        } catch {
+          cleanup()
+        }
+      }
+
+      // Initial heartbeat
+      safeEnqueue(encoder.encode(`data: ${JSON.stringify({ type: 'connected', userId })}\n\n`))
 
       // Poll for new notifications every 5 seconds and push them
-      const interval = setInterval(async () => {
+      interval = setInterval(async () => {
+        if (closed) return
         try {
           const database = await db()
           const newNotifications = await database
@@ -45,6 +68,8 @@ export async function GET(req: NextRequest) {
             .orderBy(desc(schema.notifications.createdAt))
             .limit(10)
 
+          if (closed) return
+
           // Filter to only truly new ones since last check
           const fresh = newNotifications.filter(
             n => n.createdAt > lastCheckedAt
@@ -53,29 +78,28 @@ export async function GET(req: NextRequest) {
           if (fresh.length > 0) {
             lastCheckedAt = new Date().toISOString()
             for (const notification of fresh) {
-              const event = encoder.encode(
-                `data: ${JSON.stringify({ type: 'notification', notification })}\n\n`
+              safeEnqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({ type: 'notification', notification })}\n\n`
+                )
               )
-              controller.enqueue(event)
             }
           }
 
           // Send keep-alive ping
-          controller.enqueue(encoder.encode(': ping\n\n'))
+          safeEnqueue(encoder.encode(': ping\n\n'))
         } catch {
-          clearInterval(interval)
+          cleanup()
         }
       }, 5000)
 
       // Keep-alive ping every 30 seconds (backup)
-      const keepAlive = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(': ping\n\n'))
-        } catch {
-          clearInterval(keepAlive)
-          clearInterval(interval)
-        }
+      keepAlive = setInterval(() => {
+        safeEnqueue(encoder.encode(': ping\n\n'))
       }, 30000)
+    },
+    cancel() {
+      cleanup()
     },
   })
 

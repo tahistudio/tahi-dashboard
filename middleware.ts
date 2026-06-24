@@ -54,6 +54,39 @@ const isClientOnlyRoute = createRouteMatcher([
 ])
 
 export default clerkMiddleware(async (auth, req) => {
+  // Dev-only: auto-auth the Ship Studio preview wrapper, which loads the local
+  // dev server but can't complete Clerk's browser sign-in. The wrapper marks
+  // its page loads with ?shipstudio=1 and/or runs headless Chrome; we persist
+  // that to a cookie and inject x-ship-studio so the server auth helpers see it
+  // on the same request, then let it through without auth.protect(). HARD-GATED
+  // to development: Next inlines NODE_ENV at build time, so this whole block is
+  // dead-code-eliminated from the production Cloudflare bundle and can never run
+  // on a deployed environment.
+  if (process.env.NODE_ENV !== 'production') {
+    const ua = req.headers.get('user-agent') ?? ''
+    const isStudio =
+      req.nextUrl.searchParams.get('shipstudio') === '1' ||
+      req.cookies.get('tahi-ship-studio')?.value === '1' ||
+      ua.includes('HeadlessChrome') ||
+      ua.includes('Edg/')
+    if (isStudio) {
+      const headers = new Headers(req.headers)
+      headers.set('x-ship-studio', '1')
+      // Bare root → send the wrapper straight to the dashboard. The cloned URL
+      // keeps ?shipstudio=1 so the redirect target is still recognised.
+      if (req.nextUrl.pathname === '/') {
+        const url = req.nextUrl.clone()
+        url.pathname = '/overview'
+        const redir = NextResponse.redirect(url)
+        redir.cookies.set('tahi-ship-studio', '1', { path: '/', sameSite: 'lax' })
+        return redir
+      }
+      const res = NextResponse.next({ request: { headers } })
+      res.cookies.set('tahi-ship-studio', '1', { path: '/', sameSite: 'lax' })
+      return res
+    }
+  }
+
   // Allow public routes without auth
   if (isPublicRoute(req)) return NextResponse.next()
 
