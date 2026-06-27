@@ -1,5 +1,5 @@
 import { ClerkSignIn } from '@/components/tahi/clerk-mount'
-import { AuthShell, tahiClerkAppearance } from '@/components/tahi/auth-shell'
+import { AuthShell, tahiClerkAppearance, TAHI_TRUST_AVATARS } from '@/components/tahi/auth-shell'
 
 export const metadata = {
   title: 'Sign in - Tahi Studio',
@@ -19,6 +19,7 @@ export default function SignInPage() {
         name: 'Evan Kwan',
         role: 'Marketing Manager, Physitrack',
       }}
+      trust={{ avatars: TAHI_TRUST_AVATARS, line: 'Trusted by some of the biggest companies.' }}
       footerPrompt="Don't have an account?"
       footerLinkLabel="Sign up"
       footerLinkHref="/sign-up"

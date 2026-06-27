@@ -88,7 +88,11 @@ export function TeamWelcomeContent({
   redirectTo: string
 }) {
   const router = useRouter()
-  const onComplete = () => router.push(redirectTo)
+  const onComplete = () => {
+    // Best-effort: mark onboarding done so re-entry skips to the dashboard.
+    fetch('/api/onboarding/complete', { method: 'POST' }).catch(() => {})
+    router.push(redirectTo)
+  }
   const [idx, setIdx] = React.useState(0)
   const [dir, setDir] = React.useState(1)
   const [photo, setPhoto] = React.useState<string | null>(null)

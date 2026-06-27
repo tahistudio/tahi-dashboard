@@ -25,17 +25,20 @@ export default async function WelcomePage({
 
   const team = resolveTeamEntry(params)
 
-  // Identity: prefer the link, fall back to the signed-in Clerk user.
+  // Identity: prefer the link, fall back to the signed-in Clerk user. Also skip
+  // the welcome if onboarding is already complete. (redirect() is called outside
+  // the try so its NEXT_REDIRECT is not swallowed by the catch.)
   let first = team.firstName ?? ''
-  if (!first && userId) {
-    try {
-      const clerk = await clerkClient()
-      const user = await clerk.users.getUser(userId)
-      first = (user.firstName ?? '').trim()
-    } catch {
-      // non-fatal
-    }
+  let onboardingComplete = false
+  try {
+    const clerk = await clerkClient()
+    const user = await clerk.users.getUser(userId)
+    onboardingComplete = !!user.publicMetadata?.onboardingComplete
+    if (!first) first = (user.firstName ?? '').trim()
+  } catch {
+    // non-fatal
   }
+  if (onboardingComplete) redirect('/overview')
   first = first || 'there'
   const initials = first.slice(0, 2).toUpperCase()
 
@@ -49,7 +52,7 @@ export default async function WelcomePage({
     startShort: 'day one',
     gear: 'MacBook Pro 16',
   }
-  const buddy: TeamBuddy = { first: 'Liam', name: 'Liam Miller', initials: 'LM' }
+  const buddy: TeamBuddy = { first: 'Liam', name: 'Liam Miller', initials: 'LM', img: '/liam-profile.jpg' }
 
   return <TeamWelcomeContent hire={hire} buddy={buddy} redirectTo="/overview" />
 }

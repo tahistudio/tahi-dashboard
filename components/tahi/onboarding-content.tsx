@@ -215,7 +215,11 @@ export function OnboardingContent({
   redirectTo: string
 }) {
   const router = useRouter()
-  const onComplete = () => router.push(redirectTo)
+  const onComplete = () => {
+    // Best-effort: mark onboarding done so re-entry skips to the dashboard.
+    fetch('/api/onboarding/complete', { method: 'POST' }).catch(() => {})
+    router.push(redirectTo)
+  }
   const contact = {
     name: entry.contactName ?? 'there',
     email: entry.contactEmail ?? '',
@@ -271,8 +275,6 @@ export function OnboardingContent({
 
   const money = (n: number) => '$' + n.toLocaleString('en-US')
   const planObj = PLANS.find(p => p.id === plan)!
-  const monthly = planObj.base + (addon ? planObj.track : 0)
-  const amount = money(monthly)
 
   let title = '', sub = '', primary: string | null = 'Continue', onPrimary = next
   let body: React.ReactNode = null, skip: string | null = null, wide = false, footer = true
@@ -284,14 +286,14 @@ export function OnboardingContent({
         <div className="ob-success" style={{ padding: '8px 0' }}>
           <div className="ring"><Check size={28} /></div>
           <h2>Thanks, we&apos;re on it.</h2>
-          <p>We&apos;ll shape a proposal and email it to {contact.email || 'you'} within two working days. {lead.first} may reach out to learn more.</p>
+          <p>We&apos;ll reach out to {contact.email || 'you'} within two working days to learn more, and find a time for a quick call to scope it together.</p>
         </div>
       )
     } else if (selfView === 'proposal') {
       body = (
         <>
           <h1 className="ob-h1">Tell us about the project.</h1>
-          <p className="ob-sub">A few details and we&apos;ll come back with a proposal scoped to you. No commitment.</p>
+          <p className="ob-sub">A few details so we come prepared. We&apos;ll reach out to learn more and set up a quick call. No commitment.</p>
           <div className="ob-identity"><span className="ob-identity-av">{contact.initials}</span><span className="ob-identity-t"><b>{contact.name}</b><small>{contact.email}</small></span><span className="ob-identity-tag">From your sign-up</span></div>
           <div className="ob-row2 ob-field"><div><label className="ob-label">Company name</label><input className="ob-input" placeholder="Company name" /></div><div><label className="ob-label">Website <span style={{ color: '#9b9a94' }}>(if you have one)</span></label><input className="ob-input" placeholder="yourcompany.com" /></div></div>
           <div className="ob-field"><label className="ob-label">What are you after?</label><textarea className="ob-textarea" placeholder="A new site, a rebrand, a product surface. A sentence or two is enough." /></div>
@@ -299,7 +301,7 @@ export function OnboardingContent({
             <div><label className="ob-label">Rough budget</label><select className="ob-select" defaultValue="Not sure yet">{BUDGETS.map(b => <option key={b} value={b}>{b}</option>)}</select></div>
             <div><label className="ob-label">You&apos;re after</label><select className="ob-select" defaultValue="Both design and development">{DISCIPLINES.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
           </div>
-          <div className="ob-footer"><button className="ob-back" onClick={() => goSelf('choose', -1)}>Back</button><button className="ob-next" onClick={() => goSelf('done', 1)}>Send and get a proposal</button></div>
+          <div className="ob-footer"><button className="ob-back" onClick={() => goSelf('choose', -1)}>Back</button><button className="ob-next" onClick={() => goSelf('done', 1)}>Send and we&apos;ll be in touch</button></div>
         </>
       )
     } else {
@@ -315,7 +317,7 @@ export function OnboardingContent({
             </button>
             <button className="ob-fd-opt" onClick={() => goSelf('proposal', 1)}>
               <span className="ob-fd-ic"><I size={20}><><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M9 13h6M9 17h4" /></></I></span>
-              <span className="ob-fd-t"><b>A one-off project</b><small>Bespoke work, scoped to you. Tell us about it and we&apos;ll send a proposal.</small></span>
+              <span className="ob-fd-t"><b>A one-off project</b><small>Bespoke work, scoped to you. Tell us about it and we&apos;ll set up a call to scope it.</small></span>
               <span className="ob-fd-go"><I size={17}><path d="M5 12h14M13 6l6 6-6 6" /></I></span>
             </button>
           </div>
@@ -396,16 +398,17 @@ export function OnboardingContent({
         plan={planObj.id as 'maintain' | 'scale'}
         addon={addon}
         planName={planObj.name}
-        baseLabel={money(planObj.base)}
-        trackLabel={money(planObj.track)}
-        totalLabel={amount}
+        baseUsd={planObj.base * 100}
+        trackUsd={planObj.track * 100}
         onPaid={next}
         onInvoiced={next}
         onBack={back}
       />
     )
   } else if (stepId === 'details') {
-    const askCompany = engagement === 'retainer' && entry.entry === 'selfserve'
+    // Only ask for a workspace name when we don't already have one (a brand-new
+    // self-serve client). Invited / existing clients already have a named org.
+    const askCompany = !entry.companyName
     title = 'A couple of details and you&apos;re set.'.replace('&apos;', "'")
     sub = `Signed in as ${contact.name}. ${askCompany ? 'Just your workspace, role and timezone.' : 'Just your role and timezone, ten seconds.'}`
     body = (
@@ -476,7 +479,7 @@ export function OnboardingContent({
             <SceneShell>
               <ScenePill>Welcome to Tahi</ScenePill>
               <h2 className="ta-headline">Ongoing or one-off, shaped around you.</h2>
-              <Ledger steps={[{ id: 'a', label: 'Retainers start in minutes' }, { id: 'b', label: 'Projects get a scoped proposal' }, { id: 'c', label: 'Then your studio opens' }]} idx={0} staticList />
+              <Ledger steps={[{ id: 'a', label: 'Retainers start in minutes' }, { id: 'b', label: 'Projects start with a quick call' }, { id: 'c', label: 'Then your studio opens' }]} idx={0} staticList />
               <LeadCard lead={lead} note="He'll look after you either way." />
             </SceneShell>
           ) : (

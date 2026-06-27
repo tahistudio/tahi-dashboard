@@ -38,6 +38,10 @@ export default function RootLayout({
 }) {
   return (
     <ClerkProvider
+      signInUrl="/sign-in"
+      signUpUrl="/sign-up"
+      signInFallbackRedirectUrl="/overview"
+      signUpFallbackRedirectUrl="/onboarding"
       localization={{
         signUp: {
           start: {

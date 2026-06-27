@@ -26,10 +26,6 @@ const isPublicRoute = createRouteMatcher([
   // protected, so the user has to be signed in to actually see results.
   '/api/admin/integrations/google/callback(.*)',
   '/api/admin/integrations/xero/callback(.*)',
-  // TEMP: env-var dump endpoint for tahi-test-dashboard -> tahi-dashboard migration.
-  // Bearer-token gated inside the route; bypass Clerk so the bearer header is
-  // not parsed as a Clerk JWT. Delete this entry along with the route.
-  '/api/admin/migrate/(.*)',
   // Public-share routes for schedules / proposals / contracts. Token-based
   // access — the route handler validates the token before returning data.
   // Pages live under /p/<resource>/<token>; their data APIs under /api/public.
@@ -113,6 +109,21 @@ export default clerkMiddleware(async (auth, req) => {
   const { orgId } = await auth()
   const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
   const isAdmin = tahiOrgId && orgId === tahiOrgId
+
+  // Approved-client gate. A signed-in user with NO active org is a lead (e.g.
+  // someone who just signed up or submitted a project enquiry), not a
+  // provisioned client or teammate. Confine them to the onboarding flow; never
+  // let them reach the dashboard shell. Admins/teammates live in the Tahi org
+  // and clients have their own org, so both carry an orgId. Page routes only —
+  // API routes self-guard (portal routes already 403 a null/Tahi org), and the
+  // onboarding/welcome flow must stay reachable for a no-org lead.
+  const path = req.nextUrl.pathname
+  const inOnboarding = path.startsWith('/onboarding') || path.startsWith('/welcome')
+  if (!orgId && !inOnboarding && !path.startsWith('/api/')) {
+    const url = req.nextUrl.clone()
+    url.pathname = '/onboarding'
+    return NextResponse.redirect(url)
+  }
 
   // Client hitting an admin-only route → send to /requests
   // Use req.nextUrl.clone() so Next.js adds the basePath (/dashboard) automatically

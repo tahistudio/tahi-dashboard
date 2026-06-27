@@ -489,6 +489,7 @@ export const ONBOARDING_CSS = `
 .ob-auto svg{ color:var(--ob-brand); }
 
 /* ---- summary rows ---- */
+.ob-ccy{ margin-bottom:14px; }
 .ob-summary{ border:1px solid var(--ob-border-strong); border-radius:.625rem; padding:16px 18px; }
 .ob-srow{ display:flex; justify-content:space-between; align-items:baseline; font-size:14px; color:var(--ob-muted); padding:5px 0; }
 .ob-srow b{ color:var(--ob-text); font-variant-numeric:tabular-nums; }

@@ -5,7 +5,7 @@ import type Stripe from 'stripe'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
-import { getStripe, STRIPE_PLANS, isPlanId } from '@/lib/stripe-plans'
+import { getStripe, STRIPE_PLANS, isPlanId, isPresentmentCurrency } from '@/lib/stripe-plans'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,12 +24,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const body = (await req.json()) as { plan?: string; addon?: boolean }
+  const body = (await req.json()) as { plan?: string; addon?: boolean; currency?: string }
   if (!body.plan || !isPlanId(body.plan)) {
     return NextResponse.json({ error: 'Valid plan is required' }, { status: 400 })
   }
   const planCfg = STRIPE_PLANS[body.plan]
   const addon = !!body.addon
+  // Presentment currency: the price carries currency_options for each, so the
+  // subscription is created directly in the chosen currency. Default USD.
+  const currency = body.currency && isPresentmentCurrency(body.currency) ? body.currency : 'usd'
 
   const stripe = getStripe()
   if (!stripe) {
@@ -92,9 +95,11 @@ export async function POST(req: NextRequest) {
   }
 
   // Create the incomplete subscription and pull the first-payment client secret.
+  // `currency` selects the matching currency_option on each price.
   const subscription = await stripe.subscriptions.create({
     customer: customerId,
     items,
+    currency,
     payment_behavior: 'default_incomplete',
     payment_settings: { save_default_payment_method: 'on_subscription' },
     expand: ['latest_invoice.payment_intent'],

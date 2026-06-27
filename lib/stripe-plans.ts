@@ -14,7 +14,54 @@ import Stripe from 'stripe'
  * components/tahi/onboarding-content.tsx.
  */
 
-export const STRIPE_CURRENCY = 'nzd'
+// Matches the existing Tahi Stripe account, which operates in USD. USD is the
+// base/settlement currency; clients can pay in a presentment currency below.
+export const STRIPE_CURRENCY = 'usd'
+
+/**
+ * Presentment currencies a client can choose at checkout. USD is the base; the
+ * others are attached to each price as Stripe `currency_options`, so the inline
+ * PaymentElement charges in the chosen currency (no hosted Checkout needed).
+ *
+ * The amounts are an FX snapshot (open.er-api.com, USD base) derived from the
+ * USD price via `presentmentAmount()`. They are static once written to Stripe;
+ * re-run setup-plans to refresh when rates drift. (True per-customer live
+ * conversion would require Stripe Adaptive Pricing, which is Checkout-only.)
+ */
+export const PRESENTMENT_CURRENCIES = ['usd', 'nzd', 'aud', 'gbp', 'eur', 'cad'] as const
+export type PresentmentCurrency = (typeof PRESENTMENT_CURRENCIES)[number]
+
+// FX snapshot, USD base (captured 2026-06-28).
+export const FX_USD: Record<PresentmentCurrency, number> = {
+  usd: 1,
+  nzd: 1.772247,
+  aud: 1.449609,
+  gbp: 0.757313,
+  eur: 0.877826,
+  cad: 1.418887,
+}
+
+export function isPresentmentCurrency(v: string): v is PresentmentCurrency {
+  return (PRESENTMENT_CURRENCIES as readonly string[]).includes(v)
+}
+
+/** Convert a USD minor-unit amount to another currency's minor units, rounded
+ *  to a whole major unit (no cents) for clean pricing. */
+export function presentmentAmount(usdMinor: number, currency: PresentmentCurrency): number {
+  if (currency === 'usd') return usdMinor
+  const major = Math.round((usdMinor / 100) * FX_USD[currency])
+  return major * 100
+}
+
+/** The `currency_options` map for a USD base price, for every non-USD currency. */
+export function currencyOptionsFor(usdMinor: number): Record<string, { unit_amount: number }> {
+  const out: Record<string, { unit_amount: number }> = {}
+  for (const c of PRESENTMENT_CURRENCIES) {
+    if (c === 'usd') continue
+    out[c] = { unit_amount: presentmentAmount(usdMinor, c) }
+  }
+  return out
+}
 
 export type PlanId = 'maintain' | 'scale'
 

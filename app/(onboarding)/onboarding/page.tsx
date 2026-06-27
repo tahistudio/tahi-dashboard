@@ -25,20 +25,23 @@ export default async function OnboardingPage({
 
   const entry = resolveClientEntry(params)
 
-  // Identity prefill: prefer the link, fall back to the signed-in Clerk user.
-  if ((!entry.contactName || !entry.contactEmail) && userId) {
-    try {
-      const clerk = await clerkClient()
-      const user = await clerk.users.getUser(userId)
-      entry.contactName = entry.contactName ?? (`${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || undefined)
-      entry.contactEmail = entry.contactEmail ?? user.emailAddresses[0]?.emailAddress
-    } catch {
-      // non-fatal
-    }
+  // Fetch the Clerk user once: skip onboarding if already completed, and
+  // prefill identity when the link did not carry it. (redirect() is called
+  // outside the try so its NEXT_REDIRECT is not swallowed by the catch.)
+  let onboardingComplete = false
+  try {
+    const clerk = await clerkClient()
+    const user = await clerk.users.getUser(userId)
+    onboardingComplete = !!user.publicMetadata?.onboardingComplete
+    entry.contactName = entry.contactName ?? (`${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || undefined)
+    entry.contactEmail = entry.contactEmail ?? user.emailAddresses[0]?.emailAddress
+  } catch {
+    // non-fatal: render onboarding without prefill
   }
+  if (onboardingComplete) redirect('/overview')
 
   // SEAM: the studio lead is the assigned PM for this client; default to Liam.
-  const lead: OnboardingLead = { name: 'Liam Miller', first: 'Liam', role: 'Your studio lead', initials: 'LM' }
+  const lead: OnboardingLead = { name: 'Liam Miller', first: 'Liam', role: 'Your studio lead', initials: 'LM', img: '/liam-profile.jpg' }
 
   return <OnboardingContent entry={entry} lead={lead} redirectTo="/overview" />
 }

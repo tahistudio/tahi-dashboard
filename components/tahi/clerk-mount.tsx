@@ -30,11 +30,13 @@ export function ClerkSignIn({ appearance }: ClerkMountProps) {
   }, [clerk.loaded])
 
   useEffect(() => {
-    if (!ready || !ref.current) return
-    clerk.mountSignIn(ref.current, { appearance })
-    return () => {
-      if (ref.current) clerk.unmountSignIn(ref.current)
-    }
+    const node = ref.current
+    if (!ready || !node) return
+    // Explicit path routing so the multi-step flow (e.g. email-code verify)
+    // navigates within the [[...sign-in]] catch-all instead of falling through
+    // to the default redirect (which the middleware bounces to /sign-in).
+    clerk.mountSignIn(node, { appearance, routing: 'path', path: '/sign-in' })
+    return () => clerk.unmountSignIn(node)
   }, [ready]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!ready) {
@@ -64,11 +66,13 @@ export function ClerkSignUp({ appearance }: ClerkMountProps) {
   }, [clerk.loaded])
 
   useEffect(() => {
-    if (!ready || !ref.current) return
-    clerk.mountSignUp(ref.current, { appearance })
-    return () => {
-      if (ref.current) clerk.unmountSignUp(ref.current)
-    }
+    const node = ref.current
+    if (!ready || !node) return
+    // Explicit path routing so the email-code verification step renders on
+    // /sign-up/verify-email-address instead of redirecting to the default URL
+    // (which lands an unverified, session-less user back on /sign-in).
+    clerk.mountSignUp(node, { appearance, routing: 'path', path: '/sign-up' })
+    return () => clerk.unmountSignUp(node)
   }, [ready]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!ready) {

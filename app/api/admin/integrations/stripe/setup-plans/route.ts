@@ -1,7 +1,7 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import type Stripe from 'stripe'
-import { getStripe, STRIPE_PLANS, STRIPE_CURRENCY, allLookupKeys, type PlanConfig } from '@/lib/stripe-plans'
+import { getStripe, STRIPE_PLANS, STRIPE_CURRENCY, allLookupKeys, currencyOptionsFor, type PlanConfig } from '@/lib/stripe-plans'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,11 +33,16 @@ async function ensurePrice(
   amount: number,
 ): Promise<{ lookupKey: string; priceId: string; created: boolean }> {
   const existing = await findPriceByLookup(stripe, lookupKey)
-  if (existing) return { lookupKey, priceId: existing.id, created: false }
+  if (existing) {
+    // Keep the presentment currency_options in sync (FX may have been refreshed).
+    await stripe.prices.update(existing.id, { currency_options: currencyOptionsFor(amount) })
+    return { lookupKey, priceId: existing.id, created: false }
+  }
   const price = await stripe.prices.create({
     product: productId,
     unit_amount: amount,
     currency: STRIPE_CURRENCY,
+    currency_options: currencyOptionsFor(amount),
     recurring: { interval: 'month' },
     lookup_key: lookupKey,
     metadata: { tahi_lookup: lookupKey },
