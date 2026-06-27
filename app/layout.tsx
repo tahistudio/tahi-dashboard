@@ -37,7 +37,26 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      localization={{
+        signUp: {
+          start: {
+            title: 'Create your workspace',
+            subtitle: 'Takes about a minute.',
+          },
+          emailCode: {
+            title: 'Check your email',
+            subtitle: 'Enter the 6-digit code we just sent you.',
+          },
+        },
+        signIn: {
+          start: {
+            title: 'Welcome back',
+            subtitle: 'Sign in to pick up where you left off.',
+          },
+        },
+      }}
+    >
       <html lang="en" suppressHydrationWarning>
         <head>
           <meta name="apple-mobile-web-app-capable" content="yes" />

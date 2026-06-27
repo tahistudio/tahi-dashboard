@@ -56,10 +56,7 @@ interface AuthShellProps {
   /** Vertically centre the scene content (sign-in) instead of
    *  space-between (sign-up). */
   centeredScene?: boolean
-  /** Card heading + subhead (rendered above the Clerk widget). */
-  cardTitle: string
-  cardSubtitle: string
-  /** Reassurance line under the form ("No card required." etc). */
+  /** Reassurance line under the form. */
   helperText?: string
   /** Render the Terms / Privacy legal line (sign-up). */
   showLegal?: boolean
@@ -78,8 +75,6 @@ export function AuthShell({
   testimonial,
   trust,
   centeredScene = false,
-  cardTitle,
-  cardSubtitle,
   helperText,
   showLegal = false,
   footerPrompt,
@@ -149,9 +144,8 @@ export function AuthShell({
       {/* ── Form column ─────────────────────────────────────────────── */}
       <main className="tahi-auth-form">
         <section className="tahi-auth-card ta-card-enter">
-          <h1 className="ta-card-title">{cardTitle}</h1>
-          <p className="ta-card-sub">{cardSubtitle}</p>
-
+          {/* Card heading is Clerk-owned per step (sign-up / verify / sign-in),
+              with wording set via ClerkProvider localization in app/layout.tsx. */}
           {children}
 
           {helperText && <p className="ta-helper">{helperText}</p>}
@@ -263,7 +257,7 @@ const AUTH_CSS = `
 
 /* ---- form column + card ---- */
 .tahi-auth-form{ display:flex; align-items:center; justify-content:center; padding:40px; }
-.tahi-auth-card{ width:100%; max-width:440px; margin:0 auto; background:#fff; border-radius:0 1.5rem 0 1.5rem; box-shadow:0 24px 48px -24px rgba(26,25,20,0.18); padding:40px;
+.tahi-auth-card{ position:relative; z-index:3; width:100%; max-width:440px; margin:0 auto; background:#fff; border-radius:0 1.5rem 0 1.5rem; box-shadow:0 24px 48px -24px rgba(26,25,20,0.18); padding:40px;
   /* theme-pin: the card stays light even if .dark is set on <html> */
   --color-text:#121A0F; --color-text-muted:#5D5B55; --color-text-subtle:#63615B;
   --color-bg:#ffffff; --color-bg-secondary:#F4F3EF;
@@ -287,15 +281,22 @@ const AUTH_CSS = `
 /* ---- Clerk widget, themed via stable cl-* classes (robust regardless of
    whether the appearance Tailwind classes get generated). Scoped to the
    card so it inherits the pinned light tokens and can't leak elsewhere. ---- */
-.tahi-auth-card .cl-rootBox{ width:100%; }
+/* overflow:visible on every Clerk wrapper: Clerk's defaults set overflow:hidden,
+   which clips the Google button's top corners (and any focus ring) against the
+   rounded card edge. */
+.tahi-auth-card .cl-rootBox{ width:100%; overflow:visible; }
 .tahi-auth-card .cl-cardBox,
-.tahi-auth-card .cl-card{ width:100%; max-width:100%; margin:0; padding:0; border:0; background:transparent; box-shadow:none; gap:16px; }
-.tahi-auth-card .cl-header,
+.tahi-auth-card .cl-card{ width:100%; max-width:100%; margin:0; padding:0; border:0; background:transparent; box-shadow:none; overflow:visible; gap:16px; }
 .tahi-auth-card .cl-footer{ display:none; }
-.tahi-auth-card .cl-main{ width:100%; gap:16px; }
+/* Clerk owns the per-step heading (wording via localization). Style it to
+   match the card. */
+.tahi-auth-card .cl-header{ display:flex; flex-direction:column; gap:6px; text-align:left; margin:0 0 8px; }
+.tahi-auth-card .cl-headerTitle{ font:600 21px 'Manrope',sans-serif; letter-spacing:-0.01em; color:#121A0F; }
+.tahi-auth-card .cl-headerSubtitle{ font:400 14px 'Manrope',sans-serif; color:#5D5B55; line-height:1.5; }
+.tahi-auth-card .cl-main{ width:100%; gap:16px; overflow:visible; }
 
-.tahi-auth-card .cl-socialButtons{ width:100%; gap:10px; }
-.tahi-auth-card .cl-socialButtonsBlockButton{ width:100%; height:48px; display:flex; align-items:center; justify-content:center; gap:10px; border:1px solid rgba(26,25,20,0.16); border-radius:.5rem; background:#fff; color:#121A0F; font:600 15px 'Manrope',sans-serif; text-transform:none; box-shadow:none; transition:background .15s, box-shadow .15s; }
+.tahi-auth-card .cl-socialButtons{ width:100%; gap:10px; overflow:visible; }
+.tahi-auth-card .cl-socialButtonsBlockButton{ width:100%; min-height:48px; overflow:visible; display:flex; align-items:center; justify-content:center; gap:10px; border:1px solid rgba(26,25,20,0.16); border-radius:.5rem; background:#fff; color:#121A0F; font:600 15px 'Manrope',sans-serif; text-transform:none; box-shadow:none; transition:background .15s, box-shadow .15s; }
 .tahi-auth-card .cl-socialButtonsBlockButton:hover{ background:#F4F3EF; box-shadow:0 1px 3px rgba(26,25,20,0.1); }
 .tahi-auth-card .cl-socialButtonsBlockButtonText{ font:600 15px 'Manrope',sans-serif; color:#121A0F; }
 
@@ -368,11 +369,10 @@ export const tahiClerkAppearance = {
   },
   elements: {
     // The full visual theming lives in the scoped `.cl-*` CSS in this file
-    // (more reliable than Tailwind classes injected into Clerk). These few
-    // keys just hide Clerk's own header/footer so our card owns the chrome.
-    header: 'hidden',
-    headerTitle: 'hidden',
-    headerSubtitle: 'hidden',
+    // (more reliable than Tailwind classes injected into Clerk). Clerk owns
+    // the per-step heading (sign-up / verify / sign-in); the wording comes
+    // from ClerkProvider localization in app/layout.tsx. We only hide Clerk's
+    // footer so our own switch link owns that row.
     footer: 'hidden',
   },
 } as const

@@ -9,9 +9,9 @@ export const metadata = {
 export default function SignUpPage() {
   return (
     <AuthShell
-      pill="The studio workspace"
-      headline="Welcome to your Tahi Studio dashboard."
-      sub="Brief your studio, track delivery, and receive every file and invoice - all in one place."
+      pill="Your workspace"
+      headline="Your project, start to finish, in one place."
+      sub="From the first brief to the final invoice, you can always see where things stand."
       testimonial={{
         quote: 'Calm, sharp, and exactly the kind of partner we hoped for. Everything in one place, nothing dropped.',
         initials: 'MK',
@@ -19,9 +19,6 @@ export default function SignUpPage() {
         role: 'Founder, Kōwhai Studio',
       }}
       trust={{ avatars: TAHI_TRUST_AVATARS, line: 'Trusted by independent studios.' }}
-      cardTitle="Create your workspace"
-      cardSubtitle="Takes about a minute."
-      helperText="No card required. Your data stays private to your studio."
       showLegal
       footerPrompt="Already have an account?"
       footerLinkLabel="Sign in"
